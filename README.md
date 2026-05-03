@@ -11,13 +11,22 @@ Current example:
 ```text
 ai-skills-templates/
 ├── README.md
-└── portfolio/
+├── portfolio/
+│   ├── README.md
+│   └── knowledge-index-updater/
+│       ├── README.md
+│       ├── SKILL.md
+│       └── agents/
+│           └── openai.yaml
+└── development/
     ├── README.md
-    └── knowledge-index-updater/
+    └── windows-localhost-workflows/
         ├── README.md
         ├── SKILL.md
-        └── agents/
-            └── openai.yaml
+        ├── agents/
+        │   └── openai.yaml
+        └── references/
+            └── known-repos.md
 ```
 
 Example with more categories:
@@ -32,6 +41,15 @@ ai-skills-templates/
 │       ├── SKILL.md
 │       └── agents/
 │           └── openai.yaml
+├── development/
+│   ├── README.md
+│   └── windows-localhost-workflows/
+│       ├── README.md
+│       ├── SKILL.md
+│       ├── agents/
+│       │   └── openai.yaml
+│       └── references/
+│           └── known-repos.md
 ├── finance/
 │   ├── README.md
 │   └── example-finance-skill/
@@ -70,6 +88,7 @@ Think of it like a tiny SOP for ChatGPT, Codex, Claude, Claude Code, or another 
 | `SKILL.md` | Yes | The actual skill entrypoint. This is the main instruction file. |
 | `README.md` | Recommended | Explains the skill for humans and agents browsing the repo. |
 | `agents/openai.yaml` | Recommended for ChatGPT | ChatGPT/OpenAI metadata such as display name, short description, and UI colour. It is not the skill logic. |
+| `references/` | Optional | Supporting notes that the skill can load when relevant. |
 
 Do not add `claude.md` by default. Claude and Claude Code use the same `SKILL.md` folder. Put Claude usage notes in `README.md` only if needed.
 
@@ -124,7 +143,7 @@ Simple version:
 Example:
 
 ```text
-Use the knowledge index updater skill to update my Notion Knowledge Index.
+Use the windows localhost workflows skill to start my dev server.
 ```
 
 ## How to install a skill in Claude
@@ -163,7 +182,7 @@ Simple version:
 Example:
 
 ```text
-Use the knowledge index updater skill to update my Notion Knowledge Index.
+Use the windows localhost workflows skill to troubleshoot localhost on Windows.
 ```
 
 ## How to add a new skill to this repo
@@ -191,6 +210,7 @@ finance/my-new-finance-skill/
 | Category | Purpose |
 |---|---|
 | `portfolio` | Skills for portfolio pages, knowledge indexes, personal docs, and public/project references. |
+| `development` | Skills for coding workflows, localhost setup, debugging, and dev environment operations. |
 
 ## Example future categories
 
