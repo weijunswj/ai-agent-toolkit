@@ -4,6 +4,19 @@ This skill maintains a clean Notion Knowledge Index backed by Notion pages and G
 
 This README is written for an AI agent. Read it before using the skill.
 
+## Supported platforms
+
+This skill should support these platforms by default:
+
+| Platform | Support notes |
+|---|---|
+| ChatGPT | Use `SKILL.md` and `agents/openai.yaml`. Requires Notion, GitHub, and automation connectors for full workflow. |
+| Codex | Use the same skill folder inside the project skills location. Requires repo/tool access to Notion/GitHub workflows if available. |
+| Claude | Use the same `SKILL.md` folder if Claude Skills are enabled. Skip Claude-specific setup if the account/workspace does not expose Skills. |
+| Claude Code | Copy the skill folder into `~/.claude/skills/` for personal use or `.claude/skills/` for project use. |
+
+If a platform cannot access Notion, GitHub, or scheduled tasks, explain the limitation and still provide a manual update plan.
+
 ## What this skill is for
 
 Use this skill when the user wants to:
