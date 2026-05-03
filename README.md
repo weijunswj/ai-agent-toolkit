@@ -6,6 +6,8 @@ Each skill lives in a category folder. The category describes what the skill is 
 
 ## Folder layout
 
+Current example:
+
 ```text
 ai-skills-templates/
 ├── README.md
@@ -17,6 +19,36 @@ ai-skills-templates/
         └── agents/
             └── openai.yaml
 ```
+
+Example with more categories:
+
+```text
+ai-skills-templates/
+├── README.md
+├── portfolio/
+│   ├── README.md
+│   └── knowledge-index-updater/
+│       ├── README.md
+│       ├── SKILL.md
+│       └── agents/
+│           └── openai.yaml
+├── finance/
+│   ├── README.md
+│   └── example-finance-skill/
+│       ├── README.md
+│       ├── SKILL.md
+│       └── agents/
+│           └── openai.yaml
+└── writing/
+    ├── README.md
+    └── example-writing-skill/
+        ├── README.md
+        ├── SKILL.md
+        └── agents/
+            └── openai.yaml
+```
+
+The `finance/` and `writing/` folders above are examples only. Add them when there is a real skill for that category.
 
 ## What is a skill?
 
@@ -73,15 +105,16 @@ Use the knowledge index updater skill to update my Notion Knowledge Index.
 ## How to add a new skill to this repo
 
 1. Pick a category folder.
-2. Create a folder for the skill.
-3. Add the skill files.
-4. Add a `README.md` inside the skill folder.
-5. Keep the README simple enough for an AI agent to understand quickly.
+2. Create the category folder if it does not exist yet.
+3. Create a folder for the skill.
+4. Add the skill files.
+5. Add a `README.md` inside the skill folder.
+6. Keep the README simple enough for an AI agent to understand quickly.
 
 Example:
 
 ```text
-portfolio/my-new-skill/
+finance/my-new-finance-skill/
 ├── README.md
 ├── SKILL.md
 └── agents/
@@ -93,6 +126,17 @@ portfolio/my-new-skill/
 | Category | Purpose |
 |---|---|
 | `portfolio` | Skills for portfolio pages, knowledge indexes, personal docs, and public/project references. |
+
+## Example future categories
+
+| Category | Purpose |
+|---|---|
+| `finance` | Skills for investing notes, trading workflows, portfolio tracking, and financial summaries. |
+| `writing` | Skills for reusable writing workflows, editing, style guides, and content drafts. |
+| `automation` | Skills for tool workflows, scheduled checks, scripts, and repeatable ops tasks. |
+| `research` | Skills for source review, literature notes, competitive research, and structured summaries. |
+
+Only create a category when there is at least one real skill to put inside it.
 
 ## Rules for this repo
 
