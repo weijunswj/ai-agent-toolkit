@@ -17,8 +17,7 @@ ai-skills-templates/
         ├── README.md
         ├── SKILL.md
         └── agents/
-            ├── openai.yaml
-            └── claude.md
+            └── openai.yaml
 ```
 
 Example with more categories:
@@ -32,24 +31,21 @@ ai-skills-templates/
 │       ├── README.md
 │       ├── SKILL.md
 │       └── agents/
-│           ├── openai.yaml
-│           └── claude.md
+│           └── openai.yaml
 ├── finance/
 │   ├── README.md
 │   └── example-finance-skill/
 │       ├── README.md
 │       ├── SKILL.md
 │       └── agents/
-│           ├── openai.yaml
-│           └── claude.md
+│           └── openai.yaml
 └── writing/
     ├── README.md
     └── example-writing-skill/
         ├── README.md
         ├── SKILL.md
         └── agents/
-            ├── openai.yaml
-            └── claude.md
+            └── openai.yaml
 ```
 
 The `finance/` and `writing/` folders above are examples only. Add them when there is a real skill for that category.
@@ -66,6 +62,16 @@ It tells the agent:
 4. What output format to return.
 
 Think of it like a tiny SOP for ChatGPT, Codex, Claude, Claude Code, or another agent.
+
+## What are the important files?
+
+| File | Needed? | Purpose |
+|---|---:|---|
+| `SKILL.md` | Yes | The actual skill entrypoint. This is the main instruction file. |
+| `README.md` | Recommended | Explains the skill for humans and agents browsing the repo. |
+| `agents/openai.yaml` | Recommended for ChatGPT | ChatGPT/OpenAI metadata such as display name, short description, and UI colour. It is not the skill logic. |
+
+Do not add `claude.md` by default. Claude and Claude Code use the same `SKILL.md` folder. Put Claude usage notes in `README.md` only if needed.
 
 ## Default platform support
 
@@ -128,7 +134,7 @@ Simple version:
 1. Open Claude.
 2. Go to settings for Skills if available.
 3. Add or upload the skill folder.
-4. Make sure code execution is enabled when the skill needs files, scripts, or tool-like behaviour.
+4. Make sure the skill includes `SKILL.md`.
 5. Test it with a matching request.
 
 If Claude Skills are not visible, the account, workspace, or plan may not support custom Skills yet.
@@ -167,9 +173,7 @@ Use the knowledge index updater skill to update my Notion Knowledge Index.
 3. Create a folder for the skill.
 4. Add the skill files.
 5. Add a `README.md` inside the skill folder.
-6. Add platform notes under `agents/`:
-   - `agents/openai.yaml` for ChatGPT/OpenAI metadata.
-   - `agents/claude.md` for Claude and Claude Code notes.
+6. Add `agents/openai.yaml` when the skill should install nicely in ChatGPT/OpenAI.
 7. Keep the README simple enough for an AI agent to understand quickly.
 
 Example:
@@ -179,8 +183,7 @@ finance/my-new-finance-skill/
 ├── README.md
 ├── SKILL.md
 └── agents/
-    ├── openai.yaml
-    └── claude.md
+    └── openai.yaml
 ```
 
 ## Current categories
