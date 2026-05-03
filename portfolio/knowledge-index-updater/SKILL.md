@@ -1,6 +1,6 @@
 ---
 name: knowledge-index-updater
-description: update, clean, and maintain a personal notion knowledge index that consolidates notion pages, github repositories, guides, references, and portfolio items. use when the user asks to create or update a one-stop shop, merge notion and github duplicates, use notion key and github key url columns as clickable identity fields, categorise entries, generate short descriptions, create the default grouped category view, schedule daily checks, or mark missing/stale knowledge items without deleting them.
+description: update, clean, and maintain a personal notion knowledge index that consolidates notion pages, github repositories, guides, references, and portfolio items. use when the user asks to create or update a one-stop shop, merge notion and github duplicates, use notion key and github key url columns as clickable identity fields, categorise entries, generate short descriptions, create the default grouped category view, schedule daily checks, or mark missing/stale knowledge items without deleting them. supports chatgpt, codex, claude, and claude code where those platforms expose compatible skill loading and required connectors.
 ---
 
 # Knowledge Index Updater
@@ -8,6 +8,19 @@ description: update, clean, and maintain a personal notion knowledge index that 
 ## Overview
 
 Maintain a simple Notion Knowledge Index backed by Notion and GitHub. The index must stay lightweight: one canonical row per real project, guide, reference, repo, or portfolio item. Use URL/key fields as the identity of a row so repeated runs update existing rows instead of creating duplicates.
+
+## Platform Support
+
+Support these platforms by default where possible:
+
+- ChatGPT: use `SKILL.md` and `agents/openai.yaml`.
+- Codex: use the same skill folder inside the expected project skills location.
+- Claude: use this skill if Claude Skills are available in the account or workspace.
+- Claude Code: copy the skill folder into `~/.claude/skills/` for personal use or `.claude/skills/` for project use.
+
+If a platform cannot access Notion, GitHub, or scheduled tasks, explain the limitation and provide manual update steps instead of claiming the update was completed.
+
+For Claude-specific notes, see `agents/claude.md`.
 
 ## Core Principles
 
