@@ -1,6 +1,6 @@
 # n8n Sanitizer Templates
 
-This folder contains sanitizer helper templates migrated from `weijunswj/n8n-workflow-templates`.
+This folder contains reusable sanitizer helper templates for n8n workflow JSON.
 
 The sanitizer turns raw n8n workflow exports into reviewed template candidates by stripping live-only metadata, credentials, webhook IDs, pinned data, and likely live IDs.
 

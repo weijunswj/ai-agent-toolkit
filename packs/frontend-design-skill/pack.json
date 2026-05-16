@@ -5,7 +5,7 @@
   "status": "ready",
   "risk_level": "low",
   "source_refs": [
-    "weijunswj/ai-agent-toolkit:skills/design/ui-ux-secure-frontend-design",
+    "skills/design/ui-ux-secure-frontend-design/",
     "nextlevelbuilder/ui-ux-pro-max-skill:inspiration-only"
   ],
   "suitable_for": [

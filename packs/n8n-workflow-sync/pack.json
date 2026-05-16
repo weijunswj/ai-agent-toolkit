@@ -5,8 +5,10 @@
   "status": "ready",
   "risk_level": "high",
   "source_refs": [
-    "weijunswj/ai-cicd-installer",
-    "weijunswj/n8n-workflow-templates"
+    "skills/automation/n8n-workflow-sync/",
+    "guides/n8n/workflow-sync.md",
+    "templates/n8n/sync-helpers/",
+    "templates/n8n/sanitizer/"
   ],
   "suitable_for": [
     "n8n workflow repositories",

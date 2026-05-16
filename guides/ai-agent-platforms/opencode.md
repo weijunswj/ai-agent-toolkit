@@ -4,8 +4,8 @@ OpenCode can consume this toolkit through `AGENTS.md`, MCP config, and copied sk
 
 ## Recommended Setup
 
-1. Use `templates/agent-rules/AGENTS.md` for shared agent behavior.
-2. Use `templates/mcp-configs/opencode-mcp-config.md` for n8n docs and approval-gated live n8n access.
+1. Use [AGENTS.md](../../templates/agent-rules/AGENTS.md) for shared agent behavior.
+2. Use [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md) for n8n docs and approval-gated live n8n access.
 3. Keep live MCP URL and token values environment-backed.
 
 ## Safety

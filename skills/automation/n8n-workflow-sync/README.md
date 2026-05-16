@@ -25,6 +25,6 @@ The related helper templates may write ignored `.n8n-local/**` and `.tmp/**` in 
 
 ## Related Toolkit Templates
 
-- `templates/n8n/sync-helpers/`
-- `templates/n8n/sanitizer/`
-- `templates/n8n/workflow-policy/`
+- [n8n sync helpers](../../../templates/n8n/sync-helpers/)
+- [n8n sanitizer](../../../templates/n8n/sanitizer/)
+- [n8n workflow policy](../../../templates/n8n/workflow-policy/)

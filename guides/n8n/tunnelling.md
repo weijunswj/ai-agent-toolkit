@@ -1,7 +1,5 @@
 # Tunnelling
 
-Source-derived from `weijunswj/codex-n8n-local-setup` file `3. tunneling guide.md`.
-
 Use tunnelling only for local development when an external service must call local n8n.
 
 ## When To Use

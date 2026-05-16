@@ -1,7 +1,5 @@
 # Docker Compose Plus ngrok
 
-Source-derived from `weijunswj/codex-n8n-local-setup` file `3a. docker compose + ngrok.md`.
-
 This pattern is for local development only. It combines Docker Compose management with a temporary ngrok public URL.
 
 ## Use When

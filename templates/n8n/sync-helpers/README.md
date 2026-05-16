@@ -1,6 +1,6 @@
 # n8n Sync Helpers
 
-This folder contains review-required helper templates migrated from `weijunswj/ai-cicd-installer`.
+This folder contains review-required helper templates for n8n workflow sync.
 
 They are meant to be copied into a consumer repository that intentionally owns n8n workflow JSON under `n8n-workflows/`.
 

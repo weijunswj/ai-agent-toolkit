@@ -1,7 +1,5 @@
 # Workflow Sync
 
-Source-derived from `weijunswj/ai-cicd-installer` n8n helper scripts and `weijunswj/n8n-workflow-templates` sanitizer docs.
-
 ## Goal
 
 Keep repo workflow templates reusable while avoiding live-only state, credentials, credential bindings, and accidental product data.
@@ -26,6 +24,6 @@ Never run live import/export in CI, and never commit `.tmp/**`, `.n8n-local/**`,
 
 ## Toolkit Templates
 
-Use `templates/n8n/sync-helpers/` as review-required template assets. Copy them into a consumer repo only after reviewing the target workflow policy.
+Use [n8n sync helpers](../../templates/n8n/sync-helpers/) as review-required template assets. Copy them into a consumer repo only after reviewing the target workflow policy.
 
 Do not run those helper scripts from this toolkit repo.

@@ -15,18 +15,18 @@ For Codex or Claude Code, copy the whole skill folder into that tool's supported
 
 Templates are source material. Review them before copying into a consumer repo.
 
-- `templates/agent-rules/` contains generated `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` outputs.
-- `templates/mcp-configs/` contains MCP setup examples.
-- `templates/n8n/` contains n8n helper-template sources and sanitizer tooling.
-- `templates/cicd/` contains CI/CD installer prompts and status templates.
+- [Agent rule templates](../templates/agent-rules/) contain generated `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` outputs.
+- [MCP config templates](../templates/mcp-configs/) contain MCP setup examples.
+- [n8n templates](../templates/n8n/) contain n8n helper-template sources and sanitizer tooling.
+- [CI/CD templates](../templates/cicd/) contain CI/CD installer prompts and status templates.
 
-Generated template outputs are intentional. `scripts/build-agent-rule-templates.ps1` and `scripts/- build-agent-rule-templates.cmd` regenerate only the three agent-rule files under `templates/agent-rules/`.
+Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/-%20build-agent-rule-templates.cmd) regenerate only the three agent-rule files under [agent-rule templates](../templates/agent-rules/).
 
 n8n helper templates may write scoped local outputs after they are copied into a reviewed consumer repo: `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders. Keep those local folders ignored.
 
 ## Use Packs
 
-Packs are manifest-defined bundles under `packs/*/pack.json`. They are designed for future approval-gated installation.
+Packs are manifest-defined bundles under [packs](../packs/). They are designed for future approval-gated installation.
 
 Until the installer MCP exists, use packs as review checklists:
 
@@ -39,9 +39,9 @@ Until the installer MCP exists, use packs as review checklists:
 
 Use:
 
-- `guides/ai-agent-platforms/codex.md`
-- `templates/agent-rules/AGENTS.md`
-- `templates/mcp-configs/codex-mcp-config.md`
+- [Codex guide](../guides/ai-agent-platforms/codex.md)
+- [Codex agent rules](../templates/agent-rules/AGENTS.md)
+- [Codex MCP config](../templates/mcp-configs/codex-mcp-config.md)
 
 Keep live n8n tokens in user environment variables, not repo files.
 
@@ -49,9 +49,9 @@ Keep live n8n tokens in user environment variables, not repo files.
 
 Use:
 
-- `guides/ai-agent-platforms/claude-code.md`
-- `templates/agent-rules/CLAUDE.md`
-- `templates/mcp-configs/claude-mcp-config.md`
+- [Claude Code guide](../guides/ai-agent-platforms/claude-code.md)
+- [Claude Code agent rules](../templates/agent-rules/CLAUDE.md)
+- [Claude Code MCP config](../templates/mcp-configs/claude-mcp-config.md)
 
 Use user-scoped MCP config unless a project intentionally needs project-scoped config.
 

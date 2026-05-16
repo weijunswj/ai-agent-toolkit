@@ -10,6 +10,7 @@ It is not a product repo. Product repos stay separate and consume generated pack
 - Agent setup guides in `guides/`.
 - Copy-safe templates in `templates/`.
 - Approval-gated install pack manifests in `packs/`.
+- Optional local-only tools in `tools/`.
 - JSON discovery registries in `registry/`.
 - Future MCP design specs in `mcp/`.
 - Safety, migration, and source-of-truth docs in `docs/`.
@@ -28,22 +29,23 @@ It is not a product repo. Product repos stay separate and consume generated pack
 
 | Area | Purpose |
 | --- | --- |
-| `skills/` | Portable instruction packs for AI agents. |
-| `guides/` | Human-readable setup and workflow guides. |
-| `templates/` | Copy-paste or installable template sources. |
-| `packs/` | Manifest-based install bundles. |
-| `registry/` | JSON source of truth for discovery. |
-| `mcp/` | Future read-only registry MCP and approval-gated installer MCP specs. |
-| `docs/` | Operating policy and migration documentation. |
+| [skills/](skills/) | Portable instruction packs for AI agents. |
+| [guides/](guides/) | Human-readable setup and workflow guides. |
+| [templates/](templates/) | Copy-paste or installable template sources. |
+| [packs/](packs/) | Manifest-based install bundles. |
+| [tools/](tools/) | Optional local-only tooling. |
+| [registry/](registry/) | JSON source of truth for discovery. |
+| [mcp/](mcp/) | Future read-only registry MCP and approval-gated installer MCP specs. |
+| [docs/](docs/) | Operating policy and migration documentation. |
 
 ## Skills
 
 Current reusable skills include:
 
-- `skills/design/ui-ux-secure-frontend-design/`
-- `skills/development/windows-localhost-workflows/`
-- `skills/automation/n8n-workflow-sync/`
-- `skills/portfolio/knowledge-index-updater/`
+- [Secure UI/UX Frontend Design](skills/design/ui-ux-secure-frontend-design/)
+- [Windows Localhost Workflows](skills/development/windows-localhost-workflows/)
+- [n8n Workflow Sync](skills/automation/n8n-workflow-sync/)
+- [Knowledge Index Updater](skills/portfolio/knowledge-index-updater/)
 
 Each skill has a `SKILL.md` entrypoint and a `README.md`. Optional `agents/openai.yaml`, `references/`, and `examples/` folders may be present.
 
@@ -53,7 +55,11 @@ Each skill has a `SKILL.md` entrypoint and a `README.md`. Optional `agents/opena
 - Use `templates/` when a consumer repo needs reusable text, config, or helper-template sources.
 - Use `packs/` when a future installer should preview an approval-gated bundle before writing anything.
 
-Some template assets intentionally write scoped outputs when run in a reviewed context. The agent-rule generator writes only `templates/agent-rules/AGENTS.md`, `templates/agent-rules/CLAUDE.md`, and `templates/agent-rules/GEMINI.md`. n8n helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders when copied into a consumer repo and run manually.
+Some template assets intentionally write scoped outputs when run in a reviewed context. The agent-rule generator writes only [AGENTS.md](templates/agent-rules/AGENTS.md), [CLAUDE.md](templates/agent-rules/CLAUDE.md), and [GEMINI.md](templates/agent-rules/GEMINI.md). n8n helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders when copied into a consumer repo and run manually.
+
+## Optional Tools
+
+- [Design System Generator](tools/design-system-generator/) searches local CSV data only and stays outside instruction-only skills.
 
 ## MCP Registry Direction
 

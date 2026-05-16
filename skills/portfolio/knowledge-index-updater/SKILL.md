@@ -147,11 +147,11 @@ For every candidate, derive keys:
 
 Examples:
 
-- `Codex + n8n Local Setup Guide` + `weijunswj/codex-n8n-local-setup` → `canonical key = codex-n8n-local-setup`.
-- `AI CI/CD Installer — Universal GitHub Actions Setup Prompt` + `weijunswj/ai-cicd-installer` → `canonical key = ai-cicd-installer`.
-- `Spotify Playlist Deduplicator Agent` + `weijunswj/spotify-playlist-deduplicator-agent` → `canonical key = spotify-playlist-deduplicator-agent`.
-- `PhoenixSig — Public Strategy Dashboard...` + `weijunswj/TQQQ-PhoenixSig` → `canonical key = phoenixsig`.
-- `TQQQ Covered Call Daily Reminder` + `weijunswj/tqqq-covered-call` → `canonical key = tqqq-covered-call`.
+- `Local n8n Setup Guide` + `example-org/local-n8n-setup` -> `canonical key = local-n8n-setup`.
+- `Secure CI/CD Installer Prompt` + `example-org/secure-cicd-installer` -> `canonical key = secure-cicd-installer`.
+- `Playlist Deduplicator Agent` + `example-org/playlist-deduplicator-agent` -> `canonical key = playlist-deduplicator-agent`.
+- `Public Strategy Dashboard` + `example-org/public-strategy-dashboard` -> `canonical key = public-strategy-dashboard`.
+- `Daily Reminder Tool` + `example-org/daily-reminder-tool` -> `canonical key = daily-reminder-tool`.
 
 ### 4. Match before creating rows
 

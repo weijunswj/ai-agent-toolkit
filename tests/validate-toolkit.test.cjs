@@ -75,6 +75,30 @@ test('instruction-only design skill contains no executable files', () => {
   assert.equal(files.some((file) => /\.(ps1|cmd|bat|cjs|js|mjs|ts|tsx|py|sh|exe)$/i.test(file)), false);
 });
 
+test('validator allows local-only Python design generator tooling under tools', () => {
+  const cwd = tempCopy();
+  const toolRoot = path.join(cwd, 'tools', 'design-system-generator');
+  fs.mkdirSync(path.join(toolRoot, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(toolRoot, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(toolRoot, 'README.md'), '# Local design generator\n');
+  fs.writeFileSync(path.join(toolRoot, 'LICENSE-THIRD-PARTY-NOTES.md'), '# Third-party notes\n');
+  fs.writeFileSync(path.join(toolRoot, 'scripts', 'core.py'), 'import csv\n');
+  fs.writeFileSync(path.join(toolRoot, 'scripts', 'design_system.py'), 'from core import search\n');
+  fs.writeFileSync(path.join(toolRoot, 'data', 'styles.csv'), 'Style Category,Keywords\nMinimal,clean\n');
+  const result = runValidate(cwd);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('validator rejects network, shell, and package-install strings in design generator scripts', () => {
+  const cwd = tempCopy();
+  const scriptDir = path.join(cwd, 'tools', 'design-system-generator', 'scripts');
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.writeFileSync(path.join(scriptDir, 'core.py'), 'import requests\n');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Design generator script contains forbidden local-only token/);
+});
+
 test('validator rejects stale registry YAML references in temp docs', () => {
   const cwd = tempCopy();
   fs.writeFileSync(path.join(cwd, 'docs', 'bad.md'), `Use ${'registry/*.' + 'yaml'} here.\n`);

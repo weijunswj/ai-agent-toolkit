@@ -10,6 +10,7 @@ This repo owns reusable AI-agent toolkit assets.
 - MCP config templates.
 - n8n helper-template sources.
 - CI/CD installer guides and templates.
+- Optional local-only tools.
 - Pack manifests.
 - Registry metadata.
 - MCP design specs.
@@ -34,8 +35,8 @@ The JSON registries under `registry/` are the source of truth for toolkit discov
 
 ## Packs
 
-Pack manifests under `packs/*/pack.json` are the source of truth for installable bundles.
+Pack manifests under [packs](../packs/) are the source of truth for installable bundles.
 
-## Source Repos
+## Migration Sources
 
-Source repos are migration and update inputs. They are not runtime dependencies. Use source repo names and source-relative paths when documenting migrated material.
+The toolkit is now the canonical source of truth. Temporary migration audit notes live in [Migration Sources](MIGRATION-SOURCES.md); permanent docs should link to toolkit-owned paths or third-party attribution notes.

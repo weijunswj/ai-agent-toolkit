@@ -4,10 +4,10 @@ These guides are reusable, product-neutral n8n operating notes.
 
 | Guide | Purpose |
 | --- | --- |
-| `local-setup.md` | Local Docker n8n and MCP setup. |
-| `upgrading.md` | Safe update patterns. |
-| `tunnelling.md` | Temporary local webhook tunnels. |
-| `docker-compose-ngrok.md` | Local Compose plus ngrok pattern. |
-| `vps-hosting.md` | Always-on public hosting choices. |
-| `workflow-sync.md` | Repo/live workflow sync hygiene. |
-| `credential-safety.md` | Credential and binding safety. |
+| [Local setup](local-setup.md) | Local Docker n8n and MCP setup. |
+| [Upgrading](upgrading.md) | Safe update patterns. |
+| [Tunnelling](tunnelling.md) | Temporary local webhook tunnels. |
+| [Docker Compose plus ngrok](docker-compose-ngrok.md) | Local Compose plus ngrok pattern. |
+| [VPS hosting](vps-hosting.md) | Always-on public hosting choices. |
+| [Workflow sync](workflow-sync.md) | Repo/live workflow sync hygiene. |
+| [Credential safety](credential-safety.md) | Credential and binding safety. |

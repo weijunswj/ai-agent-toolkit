@@ -34,7 +34,7 @@ Never commit or install:
 
 Scoped writes are allowed only when the relevant template or helper is being run intentionally:
 
-- `scripts/build-agent-rule-templates.ps1` may regenerate only `templates/agent-rules/AGENTS.md`, `templates/agent-rules/CLAUDE.md`, and `templates/agent-rules/GEMINI.md`.
+- [Agent-rule generator](../scripts/build-agent-rule-templates.ps1) may regenerate only [AGENTS.md](../templates/agent-rules/AGENTS.md), [CLAUDE.md](../templates/agent-rules/CLAUDE.md), and [GEMINI.md](../templates/agent-rules/GEMINI.md).
 - n8n sanitizer templates may write ignored `.to-sanitise/**` and `.sanitised/**` staging folders.
 - n8n sync helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, and ignored `.n8n-local/**` in a consumer repo after review.
 
@@ -50,7 +50,7 @@ Product repos own product code, product workflows, product config, and customer 
 
 ## Handling Uncertainty
 
-If a source is inaccessible, document it in `docs/MIGRATION-SOURCES.md`. Do not claim migration from a source that was not inspected.
+If a migration source is inaccessible during a temporary audit, document it in [Migration Sources](MIGRATION-SOURCES.md). Do not claim migration from a source that was not inspected.
 
 ## Final Report Style
 

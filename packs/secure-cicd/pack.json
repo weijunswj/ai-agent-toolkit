@@ -5,7 +5,8 @@
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [
-    "weijunswj/ai-cicd-installer"
+    "guides/cicd/secure-cicd-installer.md",
+    "templates/cicd/secure-cicd-prompt.md"
   ],
   "suitable_for": [
     "GitHub repositories",
