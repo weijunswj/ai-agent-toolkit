@@ -43,6 +43,11 @@ Keep this file until validation passes and the user explicitly approves final cl
 - [x] Tests created.
 - [x] CI/CD workflows created.
 - [x] Safe update policy created.
+- [x] Scoped generator/helper write policy restored.
+- [x] Agent-rule CMD wrapper added.
+- [x] n8n sync helper templates migrated.
+- [x] n8n sanitizer relocated paths repaired.
+- [x] n8n helper dry-run/smoke tests added.
 
 ## Format And Safety
 
@@ -51,7 +56,8 @@ Keep this file until validation passes and the user explicitly approves final cl
 - [x] No registry YAML target references.
 - [x] No pack YAML manifests.
 - [x] `.gitignore` blocks unsafe local files and generated artifacts.
-- [x] No credentials, credential exports, credential bindings, `.env`, `.n8n-local/`, `.tmp/`, private keys, or live import/export files added.
+- [x] No credentials, credential exports, `.env`, committed `.n8n-local/`, committed `.tmp/`, private keys, or live import/export files added.
+- [x] Scoped helper writes documented for ignored `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, and `.sanitised/**`.
 - [x] Generated package artifacts are not committed.
 
 ## Final Validation

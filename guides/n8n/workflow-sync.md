@@ -16,6 +16,14 @@ Keep repo workflow templates reusable while avoiding live-only state, credential
 6. Prepare live import payloads in ignored `.tmp/`.
 7. Run live import only after explicit confirmation in the consumer repo.
 
+The helper templates intentionally support scoped writes in consumer repos:
+
+- `n8n-workflows/*.json` for reviewed workflow source updates.
+- `.tmp/**` for transient export/import payloads.
+- `.n8n-local/**` for local credential-binding metadata.
+
+Never run live import/export in CI, and never commit `.tmp/**`, `.n8n-local/**`, live export/import files, or credential binding files.
+
 ## Toolkit Templates
 
 Use `templates/n8n/sync-helpers/` as review-required template assets. Copy them into a consumer repo only after reviewing the target workflow policy.

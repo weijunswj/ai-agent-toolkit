@@ -8,6 +8,10 @@ const root = process.cwd();
 
 function classify(filePath) {
   const lower = String(filePath || '').toLowerCase();
+  const isN8nHelperTemplate =
+    lower.startsWith('templates/n8n/') &&
+    (lower.endsWith('.md') || lower.endsWith('.ps1') || lower.endsWith('.cmd') || lower.endsWith('.cjs') || lower.endsWith('.js'));
+  if (isN8nHelperTemplate) return 'manual';
   if (
     lower.includes('.env') ||
     lower.includes('credential') ||

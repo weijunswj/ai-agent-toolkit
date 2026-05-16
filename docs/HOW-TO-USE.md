@@ -20,6 +20,10 @@ Templates are source material. Review them before copying into a consumer repo.
 - `templates/n8n/` contains n8n helper-template sources and sanitizer tooling.
 - `templates/cicd/` contains CI/CD installer prompts and status templates.
 
+Generated template outputs are intentional. `scripts/build-agent-rule-templates.ps1` and `scripts/- build-agent-rule-templates.cmd` regenerate only the three agent-rule files under `templates/agent-rules/`.
+
+n8n helper templates may write scoped local outputs after they are copied into a reviewed consumer repo: `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders. Keep those local folders ignored.
+
 ## Use Packs
 
 Packs are manifest-defined bundles under `packs/*/pack.json`. They are designed for future approval-gated installation.
@@ -69,4 +73,5 @@ If a target AI platform does not support MCP, use the JSON registries and docs m
 - Do not copy live n8n exports into this toolkit.
 - Do not install pack files without reviewing the target writes.
 - Do not run live import/export helpers from this toolkit repo.
+- Do not run live n8n import/export helpers in CI.
 - Do not auto-merge or auto-apply upstream updates.

@@ -17,14 +17,33 @@ if (-not $PSScriptRoot) {
   throw "This script must be run from a .ps1 file."
 }
 
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+function Resolve-RepoRootFromScript {
+  $current = (Resolve-Path $PSScriptRoot).Path
+  while ($true) {
+    if (
+      (Test-Path -LiteralPath (Join-Path $current ".git")) -or
+      (Test-Path -LiteralPath (Join-Path $current ".gitignore")) -or
+      (Test-Path -LiteralPath (Join-Path $current "n8n-workflows"))
+    ) {
+      return $current
+    }
+
+    $parent = Split-Path -Parent $current
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
+      return (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+    }
+    $current = $parent
+  }
+}
+
+$RepoRoot = Resolve-RepoRootFromScript
 Set-Location $RepoRoot
 
 $InputDir = ".to-sanitise"
 $OutputDir = ".sanitised"
 $InputDirFull = Join-Path $RepoRoot $InputDir
 $OutputDirFull = Join-Path $RepoRoot $OutputDir
-$StripperScript = Join-Path $RepoRoot "scripts\prepare-n8n-template.js"
+$StripperScript = Join-Path $PSScriptRoot "prepare-n8n-template.js"
 
 function Write-Section($Title) {
   Write-Host ""
@@ -48,7 +67,7 @@ function Get-OutputFileName($InputFile) {
 }
 
 Write-Section "n8n template sanitiser"
-Write-Host ("Run from   : scripts\sanitise-n8n-template.cmd")
+Write-Host ("Script dir : {0}" -f $PSScriptRoot)
 Write-Host ("Input dir  : {0}" -f $InputDir)
 Write-Host ("Output dir : {0}" -f $OutputDir)
 Write-Host ("Mode       : {0}" -f ($(if ($DryRun) { "Dry run" } else { "Overwrite sanitised templates" })))
@@ -104,7 +123,7 @@ foreach ($workflowFile in $workflowFiles) {
   }
 
   $nodeArgs = @(
-    "scripts/prepare-n8n-template.js",
+    $StripperScript,
     $workflowFile.FullName,
     $outputFile
   )

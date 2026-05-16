@@ -28,6 +28,7 @@ const expectedFiles = [
   'registry/source-repos.registry.json',
   'registry/consumers.registry.json',
   'scripts/build-agent-rule-templates.ps1',
+  'scripts/- build-agent-rule-templates.cmd',
   'scripts/validate-toolkit.cjs',
   'scripts/package-skills.cjs',
   'scripts/package-packs.cjs',
@@ -346,10 +347,20 @@ function validateWorkflows(errors) {
   const workflowFiles = listFiles().filter((entry) => entry.relPath.startsWith('.github/workflows/') && /\.ya?ml$/i.test(entry.relPath));
   for (const entry of workflowFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
+    const isGeneratedTemplateWorkflow = entry.relPath.endsWith('build-agent-rule-templates.yml');
     if (!/^permissions:\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
-    if (/contents:\s*write/i.test(text)) fail(errors, `${entry.relPath} uses contents: write`);
+    if (/contents:\s*write/i.test(text) && !isGeneratedTemplateWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
     if (/pull-requests:\s*write/i.test(text)) fail(errors, `${entry.relPath} uses pull-requests: write`);
-    if (/git\s+commit|git\s+push|auto-merge|gh\s+pr\s+merge/i.test(text)) fail(errors, `${entry.relPath} contains forbidden commit/push/merge behavior`);
+    if (/auto-merge|gh\s+pr\s+merge/i.test(text)) fail(errors, `${entry.relPath} contains forbidden merge behavior`);
+    if (/git\s+commit|git\s+push/i.test(text) && !isGeneratedTemplateWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
+    if (isGeneratedTemplateWorkflow && /git\s+commit|git\s+push/i.test(text)) {
+      const allowedAdd = 'git add templates/agent-rules/AGENTS.md templates/agent-rules/CLAUDE.md templates/agent-rules/GEMINI.md';
+      if (!text.includes(allowedAdd)) fail(errors, `${entry.relPath} auto-commit is not scoped to generated agent rule templates`);
+      if (!/github\.event_name == 'pull_request'/.test(text) || !/head\.repo\.full_name == github\.repository/.test(text)) {
+        fail(errors, `${entry.relPath} auto-commit must be limited to same-repo pull request branches`);
+      }
+      if (!/head\.ref != 'main'/.test(text)) fail(errors, `${entry.relPath} auto-commit must not run on main`);
+    }
     if (entry.relPath.endsWith('safe-source-update.yml') && !/issues:\s*write/i.test(text)) {
       fail(errors, `${entry.relPath} should use issues: write for issue summaries`);
     }

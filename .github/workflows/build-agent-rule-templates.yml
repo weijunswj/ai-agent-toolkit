@@ -5,6 +5,7 @@ on:
     paths:
       - templates/agent-rules/partials/**
       - scripts/build-agent-rule-templates.ps1
+      - scripts/- build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
   push:
     branches:
@@ -12,17 +13,26 @@ on:
     paths:
       - templates/agent-rules/partials/**
       - scripts/build-agent-rule-templates.ps1
+      - scripts/- build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-agent-rules:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout same-repo PR branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: true
+
+      - name: Checkout read-only
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -31,5 +41,18 @@ jobs:
         shell: pwsh
         run: ./scripts/build-agent-rule-templates.ps1
 
-      - name: Fail if generated files are stale
+      - name: Auto-commit generated templates on same-repo PR branches
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref != 'main'
+        run: |
+          git add templates/agent-rules/AGENTS.md templates/agent-rules/CLAUDE.md templates/agent-rules/GEMINI.md
+          if git diff --cached --quiet; then
+            echo "Generated agent rule templates are current."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "Regenerate agent rule templates"
+            git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          fi
+
+      - name: Verify generated files are current
         run: git diff --exit-code -- templates/agent-rules/AGENTS.md templates/agent-rules/CLAUDE.md templates/agent-rules/GEMINI.md

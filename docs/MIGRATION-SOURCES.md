@@ -64,6 +64,8 @@ Migrated:
 - Agent-rule partials into `templates/agent-rules/partials/`.
 - MCP config templates into `templates/mcp-configs/`.
 - Deterministic agent-rule generator into `scripts/build-agent-rule-templates.ps1`.
+- CMD generator wrapper into `scripts/- build-agent-rule-templates.cmd`.
+- Scoped generated-template CI behavior into `.github/workflows/build-agent-rule-templates.yml`.
 
 Intentionally not migrated:
 
@@ -74,7 +76,7 @@ Intentionally not migrated:
 Skipped for safety:
 
 - `scripts/windows/start-n8n-ngrok.bat` was not copied as a runtime launcher.
-- `.github/workflows/build-templates.yml` was not copied directly because it used write permissions, auto-commit, and push.
+- `.github/workflows/build-templates.yml` was not copied directly. Its behavior was replaced with a scoped workflow that may auto-commit only generated agent-rule outputs on same-repo PR branches and never on `main`.
 
 Remaining:
 
@@ -99,16 +101,17 @@ Migrated:
 - n8n helper-template scripts into `templates/n8n/sync-helpers/`.
 - Credential migration-map example into `templates/n8n/workflow-policy/`.
 - Test concepts into toolkit tests.
+- Reusable n8n helper tests into `tests/n8n-helper-scripts.test.cjs`.
 
 Intentionally not migrated:
 
 - Product-specific CI/CD generation promises.
 - Direct deployment enablement.
-- Commit, push, PR, and merge automation.
+- Broad commit, push, PR, and merge automation outside generated-template parity.
 
 Skipped for safety:
 
-- Helper scripts are stored only as review-required template assets.
+- Helper scripts are stored only as review-required template assets. They may write scoped local outputs in consumer repos after review.
 - No live import/export commands were run.
 
 Remaining:
@@ -132,6 +135,7 @@ Migrated:
 - Sanitizer workflow and staging-folder rules into `templates/n8n/README.md`.
 - Sanitizer scripts into `templates/n8n/sanitizer/`.
 - Template hygiene guidance into the n8n workflow sync skill references.
+- Dry-run and sanitizer smoke test coverage into `tests/n8n-helper-scripts.test.cjs`.
 
 Intentionally not migrated:
 

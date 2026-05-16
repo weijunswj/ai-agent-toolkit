@@ -7,12 +7,13 @@ Cleanup must preserve auditability and avoid deleting useful migration context t
 Temporary scratch files are allowed only outside committed toolkit content or in ignored paths. The repo ignores:
 
 - `.tmp/`
+- `.n8n-local/`
 - `.to-sanitise/`
 - `.sanitised/`
 - `.n8n-workflow-backups/`
 - `_dist/`
 
-Do not commit files from those folders.
+Do not commit files from those folders. They are allowed only as local staging/output folders for reviewed helper runs.
 
 ## Must Never Be Committed
 

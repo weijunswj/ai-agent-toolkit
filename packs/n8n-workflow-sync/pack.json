@@ -22,14 +22,19 @@
     "templates/n8n/workflow-policy/"
   ],
   "writes_allowed": [
-    "consumer repo template/helper paths approved by the user"
+    "consumer repo template/helper paths approved by the user",
+    "n8n-workflows/*.json after review in a consumer repo",
+    ".tmp/** as ignored transient helper output",
+    ".n8n-local/** as ignored local credential-binding metadata",
+    ".to-sanitise/** as ignored sanitizer input staging",
+    ".sanitised/** as ignored sanitizer output staging"
   ],
   "writes_denied": [
     ".env*",
-    ".n8n-local/**",
-    ".tmp/**",
-    ".to-sanitise/**",
-    ".sanitised/**",
+    "committed .n8n-local/**",
+    "committed .tmp/**",
+    "committed .to-sanitise/**",
+    "committed .sanitised/**",
     "node_modules/**",
     "dist/**",
     "_dist/**",
@@ -46,7 +51,7 @@
   "requires_approval": true,
   "run_commands": false,
   "notes": [
-    "Live n8n import/export is never run by this pack.",
+    "Live n8n import/export is never run by this pack or by CI.",
     "Helper scripts are review-required templates, not trusted runtime code."
   ]
 }

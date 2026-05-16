@@ -23,6 +23,7 @@ Product repos own:
 - Product configs.
 - Customer data.
 - Live n8n workflow exports.
+- Local helper outputs such as `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, and `.sanitised/**`.
 - Production deployment settings.
 
 Do not move product-owned assets into this toolkit.

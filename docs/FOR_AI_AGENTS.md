@@ -24,20 +24,25 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 
 Do not install anything silently. Preview target writes, explain the source files, and preserve product repo ownership.
 
-Never write:
+Never commit or install:
 
 - `.env` or `.env.*` except safe `.env.example`.
-- `.n8n-local/` or `.tmp/`.
 - Credential exports or credential bindings.
 - Private keys.
 - Product/customer workflow JSON.
 - Generated package artifacts.
 
+Scoped writes are allowed only when the relevant template or helper is being run intentionally:
+
+- `scripts/build-agent-rule-templates.ps1` may regenerate only `templates/agent-rules/AGENTS.md`, `templates/agent-rules/CLAUDE.md`, and `templates/agent-rules/GEMINI.md`.
+- n8n sanitizer templates may write ignored `.to-sanitise/**` and `.sanitised/**` staging folders.
+- n8n sync helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, and ignored `.n8n-local/**` in a consumer repo after review.
+
 ## n8n Template Safety
 
 Treat n8n workflow JSON as high risk. Prefer policy docs, sanitizer scripts, and helper templates. If a workflow JSON file is ever added, it must be generic, inactive, credential-free, and validated.
 
-Do not run live n8n actions from this repo unless explicitly requested and confirmed.
+Do not run live n8n actions from this toolkit repo. In consumer repos, live n8n import/export requires explicit confirmation and must never run in CI.
 
 ## Product-Code Exclusion
 

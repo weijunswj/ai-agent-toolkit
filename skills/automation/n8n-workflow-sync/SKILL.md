@@ -25,7 +25,8 @@ Use this instruction-only skill when the user wants to plan, review, or document
 ## Rules
 
 - Do not run live n8n import/export unless the user explicitly asks and confirms the target.
-- Do not copy credential exports, credential binding files, live import/export files, `.n8n-local/`, or `.tmp/`.
+- Do not copy credential exports, committed credential binding files, live import/export files, committed `.n8n-local/`, or committed `.tmp/`.
+- Allow ignored `.n8n-local/**` and `.tmp/**` only as local helper output in reviewed consumer repos.
 - Keep reusable workflow templates inactive.
 - Strip live-only fields and credential references before committing workflow templates.
 - Prefer generic, product-neutral templates and helper policies over customer workflow JSON.

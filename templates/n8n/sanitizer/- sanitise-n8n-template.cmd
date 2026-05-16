@@ -1,9 +1,8 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0.."
 
 :run_sanitise
-powershell -ExecutionPolicy Bypass -File scripts\sanitise-n8n-template.ps1 %*
+powershell -ExecutionPolicy Bypass -File "%~dp0sanitise-n8n-template.ps1" %*
 set "LAST_EXIT=%ERRORLEVEL%"
 
 echo.

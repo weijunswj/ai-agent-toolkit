@@ -19,10 +19,10 @@ It is not a product repo. Product repos stay separate and consume generated pack
 - Product app code.
 - Customer workflow JSON.
 - Live n8n exports or imports.
-- Credentials, credential bindings, private keys, `.env`, `.n8n-local/`, or `.tmp/`.
+- Credentials, private keys, `.env`, committed `.n8n-local/`, committed `.tmp/`, or committed local staging folders.
 - Generated ZIP/TGZ/package outputs.
 - Trading app code or business-specific configs.
-- Automation that auto-commits, auto-merges, or silently applies upstream updates.
+- Automation that auto-merges, silently applies upstream updates, or commits outside tightly scoped generated-template outputs.
 
 ## How The Repo Is Organized
 
@@ -53,11 +53,13 @@ Each skill has a `SKILL.md` entrypoint and a `README.md`. Optional `agents/opena
 - Use `templates/` when a consumer repo needs reusable text, config, or helper-template sources.
 - Use `packs/` when a future installer should preview an approval-gated bundle before writing anything.
 
+Some template assets intentionally write scoped outputs when run in a reviewed context. The agent-rule generator writes only `templates/agent-rules/AGENTS.md`, `templates/agent-rules/CLAUDE.md`, and `templates/agent-rules/GEMINI.md`. n8n helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders when copied into a consumer repo and run manually.
+
 ## MCP Registry Direction
 
 The registry MCP is future-facing and read-only. It will expose trusted registry metadata for discovery and routing. It will not run shell commands or write files.
 
-The installer MCP is future-facing and approval-gated. It will install pack-defined files only after previewing changes. It will not auto-apply upstream updates or mutate product repos destructively.
+The installer MCP is future-facing and approval-gated. It is design-only until an actual MCP server is implemented. It will install pack-defined files only after previewing changes. It will not auto-apply upstream updates or mutate product repos destructively.
 
 ## Safe Source Updates
 

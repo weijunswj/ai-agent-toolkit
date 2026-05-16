@@ -45,7 +45,7 @@ const URL_RE = /^https?:\/\//i;
 const LONG_ID_RE = /^[0-9A-Za-z_-]{28,}$/;
 
 function usage(exitCode = 1) {
-  console.error(`Usage: node scripts/prepare-n8n-template.js <input.json> <output.template.json> [--preserve-unicode] [--allow-empty]`);
+  console.error(`Usage: node templates/n8n/sanitizer/prepare-n8n-template.js <input.json> <output.template.json> [--preserve-unicode] [--allow-empty]`);
   process.exit(exitCode);
 }
 

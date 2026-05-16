@@ -18,6 +18,8 @@ Use this flow in a consumer repo, not from the toolkit repo.
 4. Restore live webhook IDs only for existing live workflows with unique node matches.
 5. Import only after explicit confirmation of target instance and workflow set.
 
+Do not run live import/export in CI. Keep `.tmp/**` and `.n8n-local/**` ignored and local.
+
 ## Stop Conditions
 
 - Ambiguous workflow match.

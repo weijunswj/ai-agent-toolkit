@@ -14,6 +14,8 @@ Source-derived from `weijunswj/codex-n8n-local-setup` n8n MCP rules and `weijuns
 
 Credential binding metadata can be useful during repo/live sync, but it must stay local and ignored. Use `.n8n-local/` in a consumer repo and never commit it.
 
+The sync helpers may write `.n8n-local/**` during reviewed local runs so imports can restore credential references without committing credential values. Treat those files as local machine state.
+
 ## Templates
 
 Use obvious placeholders only, such as `SERVICE_URL` or `ALERT_EMAIL`. Do not use realistic fake secrets.

@@ -31,12 +31,13 @@ function validatePack(filePath) {
   for (const installPath of pack.installs || []) {
     if (!fs.existsSync(path.join(root, installPath))) throw new Error(`${rel} references missing install path: ${installPath}`);
   }
-  return { id: pack.id, path: rel, installs: pack.installs };
+  return { ...pack, path: rel };
 }
 
 function copyDeclared(pack, outDir) {
   const packOut = path.join(outDir, pack.id);
   fs.mkdirSync(packOut, { recursive: true });
+  fs.writeFileSync(path.join(packOut, 'pack.json'), JSON.stringify(pack, null, 2) + '\n');
   fs.writeFileSync(path.join(packOut, 'install-plan.json'), JSON.stringify(pack, null, 2) + '\n');
 }
 

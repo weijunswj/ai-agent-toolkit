@@ -10,6 +10,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..');
 const validateScript = path.join(repoRoot, 'scripts', 'validate-toolkit.cjs');
 const validator = require(validateScript);
+const safeSourceUpdate = require(path.join(repoRoot, 'scripts', 'safe-source-update.cjs'));
 
 function tempCopy() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-validate-'));
@@ -110,4 +111,10 @@ test('validator rejects obvious secret-looking strings', () => {
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /possible secret/);
+});
+
+test('safe-source-update classifies n8n helper templates as manual and workflow JSON as blocked', () => {
+  assert.equal(safeSourceUpdate.classify('templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs'), 'manual');
+  assert.equal(safeSourceUpdate.classify('templates/n8n/sanitizer/sanitise-n8n-template.ps1'), 'manual');
+  assert.equal(safeSourceUpdate.classify('n8n-workflows/customer-workflow.json'), 'blocked');
 });

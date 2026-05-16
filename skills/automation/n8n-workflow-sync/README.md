@@ -16,10 +16,12 @@ It is generic, credential-free, and product-neutral.
 
 - Live workflow JSON from product repos.
 - Credential exports.
-- Credential binding files.
-- `.env`, `.n8n-local/`, or `.tmp/`.
+- Committed credential binding files.
+- `.env`, committed `.n8n-local/`, or committed `.tmp/`.
 - Product-specific node names or customer data.
 - Runtime scripts inside the skill folder.
+
+The related helper templates may write ignored `.n8n-local/**` and `.tmp/**` in a reviewed consumer repo. Those local outputs must never be committed.
 
 ## Related Toolkit Templates
 
