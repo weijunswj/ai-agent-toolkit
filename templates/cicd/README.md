@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit project exports. Do not edit directly.
+Project: cicd.secure-installer
+Source: projects/cicd/secure-installer/exports/templates/cicd/README.md
+Update the source project export and run the sync/check workflow.
+-->
 # CI/CD Templates
 
 Reusable secure CI/CD source materials.

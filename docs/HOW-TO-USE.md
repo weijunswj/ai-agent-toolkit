@@ -1,6 +1,28 @@
 # How To Use
 
-This repo is a reusable toolkit for AI-agent work. It gives humans and agents a stable place to find skills, guides, templates, packs, and registry metadata.
+This repo is a reusable toolkit for AI-agent work. It gives humans and agents a stable place to find project modules, skills, guides, templates, packs, optional tools, and registry metadata.
+
+## Use Project Modules
+
+Use [projects/](../projects/) when you need the preserved source context behind a root-level surface.
+
+- `main/` keeps actual project files.
+- `exports/` keeps curated sources for generated root-level outputs.
+- `_generated/` is preview-only and not source of truth.
+
+Start with:
+
+- [Local n8n Setup](../projects/n8n/local-setup/)
+- [n8n Workflow Templates](../projects/n8n/workflow-templates/)
+- [Secure CI/CD Installer](../projects/cicd/secure-installer/)
+- [UI/UX Pro Max Design](../projects/design/ui-ux-pro-max/)
+
+To sync generated root-level surfaces:
+
+```powershell
+node scripts/sync-toolkit-projects.cjs --write
+node scripts/sync-toolkit-projects.cjs --check
+```
 
 ## Use Skills Manually
 
@@ -10,6 +32,8 @@ This repo is a reusable toolkit for AI-agent work. It gives humans and agents a 
 4. Include `agents/openai.yaml` when the platform supports OpenAI skill metadata.
 
 For Codex or Claude Code, copy the whole skill folder into that tool's supported skills folder.
+
+Project-owned `SKILL.md` files are generated from `projects/**/exports/skills/*.md`. Update the project export first, then run the sync workflow.
 
 ## Use Templates Manually
 
@@ -42,6 +66,7 @@ Use:
 - [Codex guide](../guides/ai-agent-platforms/codex.md)
 - [Codex agent rules](../templates/agent-rules/AGENTS.md)
 - [Codex MCP config](../templates/mcp-configs/codex-mcp-config.md)
+- [Local n8n setup source module](../projects/n8n/local-setup/)
 
 Keep live n8n tokens in user environment variables, not repo files.
 
@@ -52,6 +77,7 @@ Use:
 - [Claude Code guide](../guides/ai-agent-platforms/claude-code.md)
 - [Claude Code agent rules](../templates/agent-rules/CLAUDE.md)
 - [Claude Code MCP config](../templates/mcp-configs/claude-mcp-config.md)
+- [Claude Code source guide](../projects/n8n/local-setup/main/5.%20extra%20-%20claude%20code%20integration.md)
 
 Use user-scoped MCP config unless a project intentionally needs project-scoped config.
 
@@ -67,6 +93,10 @@ The MCP registry is design-only in v1. Once built, use it for read-only discover
 
 If a target AI platform does not support MCP, use the JSON registries and docs manually.
 
+## Optional Design Tool
+
+Use [tools/design-system-generator/](../tools/design-system-generator/) for local-only CSV-backed design-system recommendations. It does not require internet access and is separate from the instruction-only [design skill](../skills/design/ui-ux-secure-frontend-design/).
+
 ## What Not To Do
 
 - Do not paste real secrets into repo files.
@@ -75,3 +105,4 @@ If a target AI platform does not support MCP, use the JSON registries and docs m
 - Do not run live import/export helpers from this toolkit repo.
 - Do not run live n8n import/export helpers in CI.
 - Do not auto-merge or auto-apply upstream updates.
+- Do not edit generated root-level project outputs directly; update the project export and run sync/check.

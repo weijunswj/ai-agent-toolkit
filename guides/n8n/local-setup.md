@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit project exports. Do not edit directly.
+Project: n8n.local-setup
+Source: projects/n8n/local-setup/exports/guides/local-setup.md
+Update the source project export and run the sync/check workflow.
+-->
 # Local n8n Setup
 
 ## Goal

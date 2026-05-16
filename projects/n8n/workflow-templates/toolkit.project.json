@@ -1,0 +1,70 @@
+{
+  "id": "n8n.workflow-templates",
+  "category": "n8n",
+  "name": "workflow-templates",
+  "title": "n8n Workflow Templates",
+  "module_path": "projects/n8n/workflow-templates",
+  "main_path": "projects/n8n/workflow-templates/main",
+  "exports_path": "projects/n8n/workflow-templates/exports",
+  "outputs": [
+    {
+      "kind": "skill",
+      "source": "exports/skills/n8n-workflow-sync.md",
+      "output": "skills/automation/n8n-workflow-sync/SKILL.md"
+    },
+    {
+      "kind": "mcp",
+      "source": "exports/mcp/n8n-workflow-templates.md",
+      "output": "mcp/projects/n8n-workflow-templates.md"
+    },
+    {
+      "kind": "guide",
+      "source": "exports/guides/workflow-sync.md",
+      "output": "guides/n8n/workflow-sync.md"
+    },
+    {
+      "kind": "template",
+      "source": "exports/templates/n8n/sanitizer/README.md",
+      "output": "templates/n8n/sanitizer/README.md"
+    },
+    {
+      "kind": "template",
+      "source": "exports/templates/n8n/workflow-policy/README.md",
+      "output": "templates/n8n/workflow-policy/README.md"
+    },
+    {
+      "kind": "pack",
+      "source": "exports/packs/n8n-workflow-sync/pack.json",
+      "output": "packs/n8n-workflow-sync/pack.json",
+      "notice": false
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/automation/n8n-workflow-sync/SKILL.md",
+      "mcp/projects/n8n-workflow-templates.md",
+      "guides/n8n/workflow-sync.md",
+      "templates/n8n/sanitizer/README.md",
+      "templates/n8n/workflow-policy/README.md",
+      "packs/n8n-workflow-sync/pack.json",
+      "registry/projects.registry.json"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false
+}

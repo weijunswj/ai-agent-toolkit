@@ -15,7 +15,7 @@ function Read-Partial($Name) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "Missing partial: $path"
   }
-  return (Get-Content -LiteralPath $path -Raw).TrimEnd()
+  return ((Get-Content -LiteralPath $path -Raw) -replace "`r`n", "`n").TrimEnd()
 }
 
 function New-GeneratedNotice {
@@ -45,17 +45,14 @@ function Write-GeneratedTemplate {
   $bodyParts = @(
     "# $Title",
     "",
-    "Use this generated template for $Audience.",
-    "",
-    '```md'
+    "Use this generated template for $Audience."
   )
 
   foreach ($partial in $PartialFiles) {
-    $bodyParts += Read-Partial $partial
     $bodyParts += ""
+    $bodyParts += Read-Partial $partial
   }
 
-  $bodyParts += '```'
   $content = (New-GeneratedNotice) + (($bodyParts -join "`n").TrimEnd()) + "`n"
   $target = Join-Path $TemplatesDir $FileName
   $utf8NoBom = [System.Text.UTF8Encoding]::new($false)

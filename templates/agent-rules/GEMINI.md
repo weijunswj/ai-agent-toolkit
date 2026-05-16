@@ -14,7 +14,6 @@ Then regenerate with:
 
 Use this generated template for Antigravity or Gemini CLI.
 
-```md
 # AI coding agent execution preferences
 
 ## Core role
@@ -656,5 +655,3 @@ Use secure CI/CD materials for GitHub Actions setup, CI security gates, safe dep
 ## Safety
 
 Do not use a skill as permission to mutate live systems, write secrets, run live n8n actions, or install templates without review.
-
-```

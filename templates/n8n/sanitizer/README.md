@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit project exports. Do not edit directly.
+Project: n8n.workflow-templates
+Source: projects/n8n/workflow-templates/exports/templates/n8n/sanitizer/README.md
+Update the source project export and run the sync/check workflow.
+-->
 # n8n Sanitizer Templates
 
 This folder contains reusable sanitizer helper templates for n8n workflow JSON.

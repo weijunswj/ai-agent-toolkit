@@ -1,0 +1,19 @@
+{
+  "id": "cicd.secure-installer",
+  "title": "Secure CI/CD Installer",
+  "category": "cicd",
+  "module_path": "projects/cicd/secure-installer/",
+  "main_path": "projects/cicd/secure-installer/main/",
+  "exports_path": "projects/cicd/secure-installer/exports/",
+  "root_surfaces": [
+    "skills/cicd/secure-cicd-installer/",
+    "guides/cicd/secure-cicd-installer.md",
+    "templates/cicd/",
+    "packs/secure-cicd/pack.json",
+    "mcp/projects/secure-cicd-installer.md"
+  ],
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false
+}

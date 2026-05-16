@@ -28,4 +28,6 @@ scripts\- build-agent-rule-templates.cmd
 
 Generated outputs must stay deterministic. Do not edit them directly.
 
+Generated outputs are normal Markdown files. They are not wrapped in a single giant code fence, because the n8n rules contain their own fenced examples.
+
 The generated-template CI workflow may auto-commit only these three generated files back to a same-repo pull request branch. It must not auto-commit on `main` or touch unrelated files.

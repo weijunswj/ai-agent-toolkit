@@ -42,6 +42,8 @@ test('JSON registries parse in the current repo', () => {
     'guides.registry.json',
     'templates.registry.json',
     'packs.registry.json',
+    'projects.registry.json',
+    'tools.registry.json',
     'source-repos.registry.json',
     'consumers.registry.json'
   ]) {
@@ -54,7 +56,20 @@ test('skill discovery includes migrated skills', () => {
   assert.ok(skills.includes('skills/design/ui-ux-secure-frontend-design'));
   assert.ok(skills.includes('skills/development/windows-localhost-workflows'));
   assert.ok(skills.includes('skills/automation/n8n-workflow-sync'));
+  assert.ok(skills.includes('skills/automation/n8n-local-setup'));
+  assert.ok(skills.includes('skills/cicd/secure-cicd-installer'));
   assert.ok(skills.includes('skills/portfolio/knowledge-index-updater'));
+});
+
+test('project registry includes the initial project modules', () => {
+  const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'registry', 'projects.registry.json'), 'utf8'));
+  const ids = registry.map((entry) => entry.id).sort();
+  assert.deepEqual(ids, [
+    'cicd.secure-installer',
+    'design.ui-ux-pro-max',
+    'n8n.local-setup',
+    'n8n.workflow-templates'
+  ]);
 });
 
 test('design skill front matter and OpenAI metadata are approved', () => {
@@ -77,14 +92,8 @@ test('instruction-only design skill contains no executable files', () => {
 
 test('validator allows local-only Python design generator tooling under tools', () => {
   const cwd = tempCopy();
-  const toolRoot = path.join(cwd, 'tools', 'design-system-generator');
-  fs.mkdirSync(path.join(toolRoot, 'scripts'), { recursive: true });
-  fs.mkdirSync(path.join(toolRoot, 'data'), { recursive: true });
-  fs.writeFileSync(path.join(toolRoot, 'README.md'), '# Local design generator\n');
-  fs.writeFileSync(path.join(toolRoot, 'LICENSE-THIRD-PARTY-NOTES.md'), '# Third-party notes\n');
-  fs.writeFileSync(path.join(toolRoot, 'scripts', 'core.py'), 'import csv\n');
-  fs.writeFileSync(path.join(toolRoot, 'scripts', 'design_system.py'), 'from core import search\n');
-  fs.writeFileSync(path.join(toolRoot, 'data', 'styles.csv'), 'Style Category,Keywords\nMinimal,clean\n');
+  const testFile = path.join(cwd, 'tools', 'design-system-generator', 'tests', 'extra_allowed.py');
+  fs.writeFileSync(testFile, 'VALUE = 1\n');
   const result = runValidate(cwd);
   assert.equal(result.status, 0, result.stderr);
 });
@@ -97,6 +106,15 @@ test('validator rejects network, shell, and package-install strings in design ge
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Design generator script contains forbidden local-only token/);
+});
+
+test('generated agent-rule templates are normal Markdown, not one giant fenced block', () => {
+  for (const file of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
+    const text = fs.readFileSync(path.join(repoRoot, 'templates', 'agent-rules', file), 'utf8');
+    assert.doesNotMatch(text, /Use this generated template[^\n]*\n\n```md\n# AI coding agent execution preferences/);
+    assert.match(text, /\n# AI coding agent execution preferences\n/);
+    assert.match(text, /\n```md\n# SECTION NAME\n/);
+  }
 });
 
 test('validator rejects stale registry YAML references in temp docs', () => {

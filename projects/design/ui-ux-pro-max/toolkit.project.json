@@ -1,0 +1,73 @@
+{
+  "id": "design.ui-ux-pro-max",
+  "category": "design",
+  "name": "ui-ux-pro-max",
+  "title": "UI/UX Pro Max Design",
+  "module_path": "projects/design/ui-ux-pro-max",
+  "main_path": "projects/design/ui-ux-pro-max/main",
+  "exports_path": "projects/design/ui-ux-pro-max/exports",
+  "outputs": [
+    {
+      "kind": "skill",
+      "source": "exports/skills/ui-ux-secure-frontend-design.md",
+      "output": "skills/design/ui-ux-secure-frontend-design/SKILL.md"
+    },
+    {
+      "kind": "mcp",
+      "source": "exports/mcp/ui-ux-pro-max.md",
+      "output": "mcp/projects/ui-ux-pro-max.md"
+    },
+    {
+      "kind": "guide",
+      "source": "exports/guides/design/ui-ux-pro-max.md",
+      "output": "guides/design/ui-ux-pro-max.md"
+    },
+    {
+      "kind": "tool",
+      "source": "exports/tools/design-system-generator-README.md",
+      "output": "tools/design-system-generator/README.md"
+    },
+    {
+      "kind": "tool",
+      "source": "exports/tools/design-system-generator-LICENSE-THIRD-PARTY-NOTES.md",
+      "output": "tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "notice": false
+    },
+    {
+      "kind": "pack",
+      "source": "exports/packs/design-system-generator/pack.json",
+      "output": "packs/design-system-generator/pack.json",
+      "notice": false
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/design/ui-ux-secure-frontend-design/SKILL.md",
+      "mcp/projects/ui-ux-pro-max.md",
+      "guides/design/ui-ux-pro-max.md",
+      "tools/design-system-generator/README.md",
+      "tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "packs/design-system-generator/pack.json",
+      "registry/projects.registry.json",
+      "tools/design-system-generator/output/**"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "arbitrary-output-paths/**",
+      "user-home/**",
+      "system-paths/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false
+}

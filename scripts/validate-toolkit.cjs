@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const projectSync = require('./sync-toolkit-projects.cjs');
 
 const root = process.cwd();
 const registryYamlText = 'registry/*.' + 'yaml';
@@ -21,39 +22,83 @@ const expectedFiles = [
   'docs/MIGRATION-SOURCES.md',
   'docs/CLEANUP-POLICY.md',
   'docs/THIRD-PARTY-SOURCE-NOTES.md',
+  'docs/PROJECT-MODULE-STANDARD.md',
+  'docs/WRITE-SAFETY-MODEL.md',
+  'docs/PROJECT-REHAUL-CHECKLIST.md',
   'tools/design-system-generator/README.md',
   'tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
   'tools/design-system-generator/scripts/core.py',
   'tools/design-system-generator/scripts/design_system.py',
+  'tools/design-system-generator/data/app-interface.csv',
+  'tools/design-system-generator/data/charts.csv',
   'tools/design-system-generator/data/products.csv',
   'tools/design-system-generator/data/styles.csv',
   'tools/design-system-generator/data/colors.csv',
+  'tools/design-system-generator/data/google-fonts.csv',
+  'tools/design-system-generator/data/icons.csv',
   'tools/design-system-generator/data/landing.csv',
+  'tools/design-system-generator/data/react-performance.csv',
   'tools/design-system-generator/data/typography.csv',
   'tools/design-system-generator/data/ui-reasoning.csv',
+  'tools/design-system-generator/data/ux-guidelines.csv',
+  'tools/design-system-generator/data/stacks/react.csv',
+  'tools/design-system-generator/data/stacks/nextjs.csv',
+  'tools/design-system-generator/data/stacks/vue.csv',
+  'tools/design-system-generator/data/stacks/svelte.csv',
+  'tools/design-system-generator/data/stacks/astro.csv',
+  'tools/design-system-generator/data/stacks/swiftui.csv',
+  'tools/design-system-generator/data/stacks/react-native.csv',
+  'tools/design-system-generator/data/stacks/flutter.csv',
+  'tools/design-system-generator/data/stacks/nuxtjs.csv',
+  'tools/design-system-generator/data/stacks/nuxt-ui.csv',
+  'tools/design-system-generator/data/stacks/html-tailwind.csv',
+  'tools/design-system-generator/data/stacks/shadcn.csv',
+  'tools/design-system-generator/data/stacks/jetpack-compose.csv',
+  'tools/design-system-generator/data/stacks/threejs.csv',
+  'tools/design-system-generator/data/stacks/angular.csv',
+  'tools/design-system-generator/data/stacks/laravel.csv',
   'tools/design-system-generator/tests/test_local_only.py',
   'registry/skills.registry.json',
   'registry/guides.registry.json',
   'registry/templates.registry.json',
   'registry/packs.registry.json',
+  'registry/projects.registry.json',
+  'registry/tools.registry.json',
   'registry/source-repos.registry.json',
   'registry/consumers.registry.json',
   'scripts/build-agent-rule-templates.ps1',
   'scripts/- build-agent-rule-templates.cmd',
   'scripts/validate-toolkit.cjs',
+  'scripts/sync-toolkit-projects.cjs',
   'scripts/package-skills.cjs',
   'scripts/package-packs.cjs',
   'scripts/safe-source-update.cjs'
 ];
 
 const expectedDirs = [
+  'projects',
+  'projects/n8n/local-setup',
+  'projects/n8n/local-setup/main',
+  'projects/n8n/local-setup/exports',
+  'projects/n8n/workflow-templates',
+  'projects/n8n/workflow-templates/main',
+  'projects/n8n/workflow-templates/exports',
+  'projects/cicd/secure-installer',
+  'projects/cicd/secure-installer/main',
+  'projects/cicd/secure-installer/exports',
+  'projects/design/ui-ux-pro-max',
+  'projects/design/ui-ux-pro-max/main',
+  'projects/design/ui-ux-pro-max/exports',
   'skills/design/ui-ux-secure-frontend-design',
   'skills/development/windows-localhost-workflows',
   'skills/automation/n8n-workflow-sync',
+  'skills/automation/n8n-local-setup',
+  'skills/cicd/secure-cicd-installer',
   'guides/ai-agent-platforms',
   'guides/mcp',
   'guides/n8n',
   'guides/cicd',
+  'guides/design',
   'templates/agent-rules',
   'templates/mcp-configs',
   'templates/n8n/sync-helpers',
@@ -62,6 +107,7 @@ const expectedDirs = [
   'tools/design-system-generator',
   'tools/design-system-generator/scripts',
   'tools/design-system-generator/data',
+  'tools/design-system-generator/data/stacks',
   'tools/design-system-generator/tests',
   'packs/frontend-design-skill',
   'packs/design-system-generator',
@@ -71,6 +117,7 @@ const expectedDirs = [
   'packs/n8n-workflow-sync',
   'mcp/registry-mcp',
   'mcp/installer-mcp',
+  'mcp/projects',
   '.github/workflows'
 ];
 
@@ -79,6 +126,8 @@ const registryFiles = [
   'registry/guides.registry.json',
   'registry/templates.registry.json',
   'registry/packs.registry.json',
+  'registry/projects.registry.json',
+  'registry/tools.registry.json',
   'registry/source-repos.registry.json',
   'registry/consumers.registry.json'
 ];
@@ -89,6 +138,7 @@ const staleReferenceRoots = [
   'guides',
   'templates',
   'packs',
+  'skills',
   'MIGRATION_CHECKLIST.md',
   'tests',
   'scripts'
@@ -202,8 +252,9 @@ function validateForbiddenFiles(errors) {
     if (name === '.env' || (name.startsWith('.env.') && name !== '.env.example')) fail(errors, `Forbidden env file: ${rel}`);
     if (lower.endsWith('.zip') || lower.endsWith('.tgz')) fail(errors, `Generated package artifact present: ${rel}`);
     if (lower.endsWith('.live-export.json') || lower.endsWith('.live-import.json')) fail(errors, `Live n8n import/export file present: ${rel}`);
-    if (lower.endsWith('.credentials.json') || lower.endsWith('.credential.json') || lower.endsWith('.credential.json')) fail(errors, `Credential file present: ${rel}`);
-    if (/credential.*\.json$/i.test(name) && !lower.endsWith('package.json')) fail(errors, `Credential-looking JSON file present: ${rel}`);
+    const safeExampleJson = lower.endsWith('.example.json') || lower.endsWith('-example.json');
+    if (!safeExampleJson && (lower.endsWith('.credentials.json') || lower.endsWith('.credential.json') || lower.endsWith('.credential.json'))) fail(errors, `Credential file present: ${rel}`);
+    if (!safeExampleJson && /credential.*\.json$/i.test(name) && !lower.endsWith('package.json')) fail(errors, `Credential-looking JSON file present: ${rel}`);
     if (/binding.*\.json$/i.test(name)) fail(errors, `Credential binding-looking JSON file present: ${rel}`);
     if (['.pem', '.key', '.p12', '.pfx'].some((ext) => lower.endsWith(ext))) fail(errors, `Private key/certificate file present: ${rel}`);
     if (name === 'id_rsa' || name === 'id_ed25519') fail(errors, `Private SSH key present: ${rel}`);
@@ -226,6 +277,10 @@ function validateJsonRegistries(errors) {
       const paths = [];
       if (entry.path) paths.push(entry.path);
       if (entry.pack_json) paths.push(entry.pack_json);
+      if (entry.module_path) paths.push(entry.module_path);
+      if (entry.main_path) paths.push(entry.main_path);
+      if (entry.exports_path) paths.push(entry.exports_path);
+      if (Array.isArray(entry.root_surfaces)) paths.push(...entry.root_surfaces);
       for (const rel of paths) {
         if (!existsRel(rel)) fail(errors, `${relPath} references missing path: ${rel}`);
       }
@@ -348,8 +403,13 @@ function validateExecutables(errors) {
     const rel = entry.relPath;
     const ext = path.extname(rel).toLowerCase();
     if (!executableExtensions.has(ext)) continue;
+    const isProjectMainSource = /^projects\/[^/]+\/[^/]+\/main\//.test(rel);
+    if (isProjectMainSource) continue;
     if (ext === '.py') {
-      const allowedPython = rel.startsWith('tools/design-system-generator/') || rel.startsWith('tests/');
+      const allowedPython =
+        rel.startsWith('tools/design-system-generator/scripts/') ||
+        rel.startsWith('tools/design-system-generator/tests/') ||
+        rel.startsWith('tests/');
       if (!allowedPython) fail(errors, `Python file outside approved locations: ${rel}`);
     }
     const allowed = allowedExecutablePrefixes.some((prefix) => rel.startsWith(prefix));
@@ -359,6 +419,45 @@ function validateExecutables(errors) {
 }
 
 function validateDesignGeneratorLocalOnly(errors) {
+  const requiredData = [
+    'styles.csv',
+    'colors.csv',
+    'charts.csv',
+    'landing.csv',
+    'products.csv',
+    'ux-guidelines.csv',
+    'typography.csv',
+    'icons.csv',
+    'react-performance.csv',
+    'app-interface.csv',
+    'google-fonts.csv',
+    'ui-reasoning.csv'
+  ];
+  const requiredStacks = [
+    'react.csv',
+    'nextjs.csv',
+    'vue.csv',
+    'svelte.csv',
+    'astro.csv',
+    'swiftui.csv',
+    'react-native.csv',
+    'flutter.csv',
+    'nuxtjs.csv',
+    'nuxt-ui.csv',
+    'html-tailwind.csv',
+    'shadcn.csv',
+    'jetpack-compose.csv',
+    'threejs.csv',
+    'angular.csv',
+    'laravel.csv'
+  ];
+  for (const file of requiredData) {
+    if (!existsRel(`tools/design-system-generator/data/${file}`)) fail(errors, `Missing design generator data file: ${file}`);
+  }
+  for (const file of requiredStacks) {
+    if (!existsRel(`tools/design-system-generator/data/stacks/${file}`)) fail(errors, `Missing design generator stack data file: ${file}`);
+  }
+
   const scriptFiles = listFiles().filter((entry) =>
     entry.relPath.startsWith('tools/design-system-generator/scripts/') && entry.relPath.endsWith('.py')
   );
@@ -371,6 +470,16 @@ function validateDesignGeneratorLocalOnly(errors) {
       }
     }
   }
+
+  const licenseNotes = readText('tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md');
+  if (!licenseNotes.includes('nextlevelbuilder/ui-ux-pro-max-skill') || !licenseNotes.includes('MIT')) {
+    fail(errors, 'Design generator third-party licence notes must mention upstream project and MIT licence');
+  }
+}
+
+function validateProjectModules(errors) {
+  const result = projectSync.validateAndSync();
+  for (const error of result.errors) fail(errors, error);
 }
 
 function validateStaleReferences(errors) {
@@ -383,6 +492,9 @@ function validateStaleReferences(errors) {
       fail(errors, `Stale registry YAML reference found in ${entry.relPath}`);
     }
     if (text.includes(packYamlText)) fail(errors, `Stale pack YAML reference found in ${entry.relPath}`);
+    for (const token of ['known-' + 'repos', 'Known Repo ' + 'Patterns', 'ian-trending-' + 'system']) {
+      if (text.includes(token)) fail(errors, `Stale project-specific reference "${token}" found in ${entry.relPath}`);
+    }
   }
 }
 
@@ -437,6 +549,7 @@ function runValidation() {
   validateSkills(errors);
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
+  validateProjectModules(errors);
   validateStaleReferences(errors);
   validateSecretStrings(errors);
   validateWorkflows(errors);

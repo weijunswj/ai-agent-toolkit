@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit project exports. Do not edit directly.
+Project: n8n.workflow-templates
+Source: projects/n8n/workflow-templates/exports/templates/n8n/workflow-policy/README.md
+Update the source project export and run the sync/check workflow.
+-->
 # Workflow Policy Templates
 
 This folder documents policy inputs for reusable n8n workflow validation and sync.

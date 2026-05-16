@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit project exports. Do not edit directly.
+Project: n8n.workflow-templates
+Source: projects/n8n/workflow-templates/exports/guides/workflow-sync.md
+Update the source project export and run the sync/check workflow.
+-->
 # Workflow Sync
 
 ## Goal

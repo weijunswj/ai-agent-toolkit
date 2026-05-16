@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit project exports. Do not edit directly.
+Project: cicd.secure-installer
+Source: projects/cicd/secure-installer/exports/guides/secure-cicd-installer.md
+Update the source project export and run the sync/check workflow.
+-->
 # Secure CI/CD Installer
 
 ## Goal

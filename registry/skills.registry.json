@@ -36,6 +36,30 @@
     "source_refs": ["skills/automation/n8n-workflow-sync/", "templates/n8n/"]
   },
   {
+    "id": "n8n-local-setup",
+    "title": "n8n Local Setup",
+    "category": "automation",
+    "path": "skills/automation/n8n-local-setup/",
+    "purpose": "Safe local n8n setup, MCP config routing, tunneling choices, and platform-specific agent rule setup.",
+    "supported_platforms": ["ChatGPT", "Codex", "Claude", "Claude Code"],
+    "auto_use_triggers": ["local n8n setup", "n8n MCP config", "Codex n8n", "Claude Code n8n"],
+    "risk_level": "high",
+    "instruction_only": true,
+    "source_refs": ["projects/n8n/local-setup/exports/skills/n8n-local-setup.md"]
+  },
+  {
+    "id": "secure-cicd-installer",
+    "title": "Secure CI/CD Installer",
+    "category": "cicd",
+    "path": "skills/cicd/secure-cicd-installer/",
+    "purpose": "Approval-gated secure CI/CD installer planning, template review, and safe status tracking.",
+    "supported_platforms": ["ChatGPT", "Codex", "Claude", "Claude Code"],
+    "auto_use_triggers": ["secure ci", "github actions", "ci/cd installer", "deployment safety"],
+    "risk_level": "high",
+    "instruction_only": true,
+    "source_refs": ["projects/cicd/secure-installer/exports/skills/secure-cicd-installer.md"]
+  },
+  {
     "id": "knowledge-index-updater",
     "title": "Knowledge Index Updater",
     "category": "portfolio",
