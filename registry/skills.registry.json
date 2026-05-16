@@ -1,0 +1,50 @@
+[
+  {
+    "id": "ui-ux-secure-frontend-design",
+    "title": "Secure UI/UX Frontend Design",
+    "category": "design",
+    "path": "skills/design/ui-ux-secure-frontend-design/",
+    "purpose": "Security-first frontend UI/UX design, review, accessibility, responsive polish, and privacy-safe UX.",
+    "supported_platforms": ["ChatGPT", "Codex", "Claude", "Claude Code"],
+    "auto_use_triggers": ["frontend design", "landing page", "dashboard", "form", "accessibility", "UI review"],
+    "risk_level": "low",
+    "instruction_only": true,
+    "source_refs": ["weijunswj/ai-agent-toolkit", "nextlevelbuilder/ui-ux-pro-max-skill:inspiration-only"]
+  },
+  {
+    "id": "windows-localhost-workflows",
+    "title": "Windows Localhost Workflows",
+    "category": "development",
+    "path": "skills/development/windows-localhost-workflows/",
+    "purpose": "Start, relaunch, verify, and troubleshoot localhost development workflows on Windows.",
+    "supported_platforms": ["ChatGPT", "Codex", "Claude", "Claude Code"],
+    "auto_use_triggers": ["localhost", "dev server", "Windows", "port conflict", "PowerShell"],
+    "risk_level": "medium",
+    "instruction_only": true,
+    "source_refs": ["weijunswj/ai-agent-toolkit"]
+  },
+  {
+    "id": "n8n-workflow-sync",
+    "title": "n8n Workflow Sync",
+    "category": "automation",
+    "path": "skills/automation/n8n-workflow-sync/",
+    "purpose": "Credential-safe n8n workflow sync, import/export review, and template hygiene.",
+    "supported_platforms": ["ChatGPT", "Codex", "Claude", "Claude Code"],
+    "auto_use_triggers": ["n8n workflow sync", "workflow export", "workflow import", "credential binding", "workflow template"],
+    "risk_level": "high",
+    "instruction_only": true,
+    "source_refs": ["weijunswj/ai-cicd-installer", "weijunswj/n8n-workflow-templates"]
+  },
+  {
+    "id": "knowledge-index-updater",
+    "title": "Knowledge Index Updater",
+    "category": "portfolio",
+    "path": "skills/portfolio/knowledge-index-updater/",
+    "purpose": "Maintain a personal Notion knowledge index for pages, repos, guides, references, and portfolio items.",
+    "supported_platforms": ["ChatGPT", "Codex", "Claude", "Claude Code"],
+    "auto_use_triggers": ["knowledge index", "Notion index", "portfolio index", "GitHub repo index"],
+    "risk_level": "medium",
+    "instruction_only": true,
+    "source_refs": ["weijunswj/ai-agent-toolkit"]
+  }
+]

@@ -1,0 +1,47 @@
+{
+  "id": "codex-n8n-local",
+  "title": "Codex n8n Local",
+  "description": "Codex agent rules and n8n local MCP setup materials.",
+  "status": "ready",
+  "risk_level": "medium",
+  "source_refs": [
+    "weijunswj/codex-n8n-local-setup"
+  ],
+  "suitable_for": [
+    "Codex",
+    "local n8n development"
+  ],
+  "installs": [
+    "guides/ai-agent-platforms/codex.md",
+    "guides/n8n/local-setup.md",
+    "guides/n8n/upgrading.md",
+    "guides/n8n/tunnelling.md",
+    "templates/agent-rules/AGENTS.md",
+    "templates/mcp-configs/codex-mcp-config.md"
+  ],
+  "writes_allowed": [
+    "user-approved Codex rules/config locations",
+    "consumer repo documentation paths selected by the user"
+  ],
+  "writes_denied": [
+    ".env*",
+    ".n8n-local/**",
+    ".tmp/**",
+    "node_modules/**",
+    "dist/**",
+    "_dist/**",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*credential*",
+    "*.zip",
+    "*.tgz"
+  ],
+  "requires_approval": true,
+  "run_commands": false,
+  "notes": [
+    "Do not paste real n8n tokens into config files.",
+    "Live n8n actions require separate explicit confirmation."
+  ]
+}
