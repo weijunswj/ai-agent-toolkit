@@ -1,0 +1,11 @@
+interface:
+  display_name: Secure UI/UX Frontend Design
+  short_description: Design and review polished, privacy-safe web frontends.
+  primary_color: '#7C3AED'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: true
