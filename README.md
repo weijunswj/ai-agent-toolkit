@@ -211,6 +211,7 @@ finance/my-new-finance-skill/
 |---|---|
 | `portfolio` | Skills for portfolio pages, knowledge indexes, personal docs, and public/project references. |
 | `development` | Skills for coding workflows, localhost setup, debugging, and dev environment operations. |
+| `design` | Skills for frontend UI/UX, design systems, accessibility, responsive layouts, visual QA, and implementation review. |
 
 ## Example future categories
 
