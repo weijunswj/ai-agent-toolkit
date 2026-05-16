@@ -1,0 +1,39 @@
+name: Build MCP docs
+
+on:
+  pull_request:
+    paths:
+      - mcp/**
+      - registry/**
+      - .github/workflows/build-mcp.yml
+  push:
+    branches:
+      - main
+    paths:
+      - mcp/**
+      - registry/**
+      - .github/workflows/build-mcp.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-mcp-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate design-only MCP docs
+        run: node scripts/validate-toolkit.cjs
+
+      - name: Note design-only status
+        run: echo "MCP server implementation is design-only in v1; no server build is expected."

@@ -1,0 +1,37 @@
+[
+  {
+    "id": "ai-agent-toolkit",
+    "source": "weijunswj/ai-agent-toolkit",
+    "role": "current canonical repo",
+    "last_reviewed": "2026-05-16",
+    "status": "migrated"
+  },
+  {
+    "id": "codex-n8n-local-setup",
+    "source": "weijunswj/codex-n8n-local-setup",
+    "role": "internal reusable source",
+    "last_reviewed": "2026-05-16",
+    "status": "inspected and partially migrated"
+  },
+  {
+    "id": "ai-cicd-installer",
+    "source": "weijunswj/ai-cicd-installer",
+    "role": "internal reusable source",
+    "last_reviewed": "2026-05-16",
+    "status": "inspected and partially migrated"
+  },
+  {
+    "id": "n8n-workflow-templates",
+    "source": "weijunswj/n8n-workflow-templates",
+    "role": "internal reusable source",
+    "last_reviewed": "2026-05-16",
+    "status": "inspected and partially migrated"
+  },
+  {
+    "id": "ui-ux-pro-max-skill",
+    "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+    "role": "external inspiration only",
+    "last_reviewed": "2026-05-16",
+    "status": "inspiration only"
+  }
+]

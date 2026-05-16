@@ -1,0 +1,7 @@
+interface:
+  display_name: "n8n Workflow Sync"
+  short_description: "Plan credential-safe n8n workflow sync and template hygiene."
+  brand_color: "#0EA5E9"
+
+policy:
+  allow_implicit_invocation: true

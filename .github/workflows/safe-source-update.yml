@@ -1,0 +1,45 @@
+name: Safe source update summary
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate advisory summary
+        env:
+          HAS_SOURCE_TOKEN: ${{ secrets.TOOLKIT_SOURCE_REPO_TOKEN != '' }}
+        run: |
+          mkdir -p safe-source-update
+          node scripts/safe-source-update.cjs --source "configured toolkit sources" --out safe-source-update/summary.md README.md docs/SAFE-UPDATES.md templates/cicd/safe-source-update-policy.md
+          {
+            echo ""
+            echo "Private source repos are skipped unless TOOLKIT_SOURCE_REPO_TOKEN exists."
+            if [ "$HAS_SOURCE_TOKEN" = "true" ]; then
+              echo "A source repo token is configured. Token value was not printed."
+            else
+              echo "No source repo token is configured, so private source inspection is skipped."
+            fi
+          } >> safe-source-update/summary.md
+
+      - name: Create issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "Safe source update summary" --body-file safe-source-update/summary.md

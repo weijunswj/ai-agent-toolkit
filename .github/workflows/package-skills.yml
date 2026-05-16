@@ -1,0 +1,48 @@
+name: Package skills
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check packaging inputs
+        run: node scripts/package-skills.cjs --check
+
+      - name: Build skill artifacts
+        if: github.event_name != 'pull_request'
+        run: node scripts/package-skills.cjs
+
+      - name: Generate checksums
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse _dist | Where-Object { -not $_.PSIsContainer } | ForEach-Object {
+            $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName
+            "$($hash.Hash)  $($_.FullName.Replace((Get-Location).Path + [IO.Path]::DirectorySeparatorChar, ''))"
+          } | Set-Content -LiteralPath _dist/skills-checksums.txt
+
+      - name: Upload skill artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-artifacts
+          path: _dist/

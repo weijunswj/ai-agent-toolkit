@@ -1,0 +1,46 @@
+{
+  "id": "claude-code-n8n-local",
+  "title": "Claude Code n8n Local",
+  "description": "Claude Code rules and n8n local MCP setup materials.",
+  "status": "ready",
+  "risk_level": "medium",
+  "source_refs": [
+    "weijunswj/codex-n8n-local-setup"
+  ],
+  "suitable_for": [
+    "Claude Code",
+    "local n8n development"
+  ],
+  "installs": [
+    "guides/ai-agent-platforms/claude-code.md",
+    "guides/n8n/local-setup.md",
+    "guides/n8n/upgrading.md",
+    "templates/agent-rules/CLAUDE.md",
+    "templates/mcp-configs/claude-mcp-config.md"
+  ],
+  "writes_allowed": [
+    "user-approved Claude Code rules/config locations",
+    "consumer repo documentation paths selected by the user"
+  ],
+  "writes_denied": [
+    ".env*",
+    ".n8n-local/**",
+    ".tmp/**",
+    "node_modules/**",
+    "dist/**",
+    "_dist/**",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*credential*",
+    "*.zip",
+    "*.tgz"
+  ],
+  "requires_approval": true,
+  "run_commands": false,
+  "notes": [
+    "Use user-scoped MCP config unless a project explicitly needs project scope.",
+    "Live n8n actions require separate explicit confirmation."
+  ]
+}

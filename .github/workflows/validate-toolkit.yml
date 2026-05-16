@@ -1,0 +1,37 @@
+name: Validate toolkit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check validator syntax
+        run: node --check scripts/validate-toolkit.cjs
+
+      - name: Validate toolkit
+        run: node scripts/validate-toolkit.cjs
+
+      - name: Run tests
+        run: node --test tests/*.test.cjs
+
+      - name: Check whitespace
+        run: git diff --check
