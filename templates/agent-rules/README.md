@@ -8,11 +8,13 @@ Generated files:
 - `CLAUDE.md`
 - `GEMINI.md`
 
-Source partials:
+Source partials live in the local n8n setup project exports:
 
-- `partials/ai-coding-agent-execution.md`
-- `partials/n8n-mcp-rules.md`
-- `partials/skill-routing-rules.md`
+- [projects/n8n/local-setup/exports/templates/agent-rules/partials/ai-coding-agent-execution.md](../../projects/n8n/local-setup/exports/templates/agent-rules/partials/ai-coding-agent-execution.md)
+- [projects/n8n/local-setup/exports/templates/agent-rules/partials/n8n-mcp-rules.md](../../projects/n8n/local-setup/exports/templates/agent-rules/partials/n8n-mcp-rules.md)
+- [projects/n8n/local-setup/exports/templates/agent-rules/partials/skill-routing-rules.md](../../projects/n8n/local-setup/exports/templates/agent-rules/partials/skill-routing-rules.md)
+
+The preserved original project templates remain under [projects/n8n/local-setup/main/templates/](../../projects/n8n/local-setup/main/templates/). They are archival source, not the root template generation source.
 
 Regenerate with:
 

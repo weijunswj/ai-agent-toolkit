@@ -23,6 +23,27 @@
       "output": "guides/n8n/local-setup.md"
     },
     {
+      "kind": "agent-rule-template",
+      "source": "exports/templates/agent-rules/partials",
+      "output": "templates/agent-rules/AGENTS.md",
+      "title": "AGENTS.md AI Coding Agent Rules",
+      "audience": "Codex or OpenCode"
+    },
+    {
+      "kind": "agent-rule-template",
+      "source": "exports/templates/agent-rules/partials",
+      "output": "templates/agent-rules/CLAUDE.md",
+      "title": "CLAUDE.md AI Coding Agent Rules",
+      "audience": "Claude Code"
+    },
+    {
+      "kind": "agent-rule-template",
+      "source": "exports/templates/agent-rules/partials",
+      "output": "templates/agent-rules/GEMINI.md",
+      "title": "GEMINI.md AI Coding Agent Rules",
+      "audience": "Antigravity or Gemini CLI"
+    },
+    {
       "kind": "pack",
       "source": "exports/packs/codex-n8n-local/pack.json",
       "output": "packs/codex-n8n-local/pack.json",
@@ -34,6 +55,9 @@
       "skills/automation/n8n-local-setup/SKILL.md",
       "mcp/projects/n8n-local-setup.md",
       "guides/n8n/local-setup.md",
+      "templates/agent-rules/AGENTS.md",
+      "templates/agent-rules/CLAUDE.md",
+      "templates/agent-rules/GEMINI.md",
       "packs/codex-n8n-local/pack.json",
       "registry/projects.registry.json"
     ],

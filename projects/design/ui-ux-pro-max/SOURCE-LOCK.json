@@ -1,0 +1,219 @@
+{
+  "source_repo": "nextlevelbuilder/ui-ux-pro-max-skill",
+  "source_ref": "main",
+  "source_commit": "b7e3af80f6e331f6fb456667b82b12cade7c9d35",
+  "files": [
+    {
+      "mode": "excluded",
+      "source_path": "package.json",
+      "notes": "Excluded from the toolkit local-only subset."
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/app-interface.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/app-interface.csv",
+      "source_blob_sha": "28278d29b2aa005beb8a0566c64bcf84490d5e6c"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/charts.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/charts.csv",
+      "source_blob_sha": "c27b726c1162aa79d93f46ef039523666be44187"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/colors.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/colors.csv",
+      "source_blob_sha": "7b2b0672037001ef08f1686f3d1f1c87e14a71c1"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/google-fonts.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/google-fonts.csv",
+      "source_blob_sha": "45ece9ea26e9df5405b987270067cb88dab79f67"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/icons.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/icons.csv",
+      "source_blob_sha": "6e5c245cef2014e05987aa1360ae80f75bbb1adc"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/landing.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/landing.csv",
+      "source_blob_sha": "f64101ec49882e68b0555da56e328187fd2f9a8c"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/products.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/products.csv",
+      "source_blob_sha": "17826b856edc5e26b6244d06e48e481f74418810"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/react-performance.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/react-performance.csv",
+      "source_blob_sha": "7d7e3f5d7fcf8ba9a224985abdf33a9fd69fdaf3"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/angular.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/angular.csv",
+      "source_blob_sha": "a29004540d42fe6bf9e1426d51f1b032fc005139"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/astro.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/astro.csv",
+      "source_blob_sha": "fda333d8e6cdd307919ceeed8f85d832885b05f2"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/flutter.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/flutter.csv",
+      "source_blob_sha": "2e32c6a29bf8e4ceeb61e92e33193adbe1219a75"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/html-tailwind.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/html-tailwind.csv",
+      "source_blob_sha": "0efe300f3c0d0fd2de3e07c90b38c08b44b5bbeb"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/jetpack-compose.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/jetpack-compose.csv",
+      "source_blob_sha": "039553320ba6ab3d0ef6ea4f426c47c4b8296686"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/laravel.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/laravel.csv",
+      "source_blob_sha": "99890000a1ab5f28d05abf72e1ec3a98019c6429"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/nextjs.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/nextjs.csv",
+      "source_blob_sha": "6e9bea577c8c9294113d741b3f8dd3e6b1770b1c"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/nuxt-ui.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/nuxt-ui.csv",
+      "source_blob_sha": "d35728bd1553cf5febca4724e162422ed84a23a0"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/nuxtjs.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/nuxtjs.csv",
+      "source_blob_sha": "1f1ec3555b04a093f7cf8a44b7a247cb175073cd"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/react-native.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/react-native.csv",
+      "source_blob_sha": "209e893c3b2441813add061270009d9b6fe3e512"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/react.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/react.csv",
+      "source_blob_sha": "ff08ee203acc0ea69a2444c8420e5a80dd07a0e2"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/shadcn.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/shadcn.csv",
+      "source_blob_sha": "61aeaa24ddaf4b7ad2c6b1eb7f5a31da9c88ae83"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/svelte.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/svelte.csv",
+      "source_blob_sha": "1c6b4562d5d1c4ca98ad70959367ffcd68df5611"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/swiftui.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/swiftui.csv",
+      "source_blob_sha": "e20f9f90e11d61b92ce39b05a672f2a660aa48ec"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/threejs.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/threejs.csv",
+      "source_blob_sha": "f4e759b54151f3c2ed0c22ab8570217bbaea6407"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/stacks/vue.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/stacks/vue.csv",
+      "source_blob_sha": "77cb4b06fd179153ec5a8d11e2b35f8f79522183"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/styles.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/styles.csv",
+      "source_blob_sha": "8bacc703fadb0165b0a2b746ca78c80513e0d5b0"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/typography.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/typography.csv",
+      "source_blob_sha": "39c85cb9a788e6d1b23747c572796f7abadfec30"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/ui-reasoning.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/ui-reasoning.csv",
+      "source_blob_sha": "8b6ca2fb256e13ff2a0a9dd150f34e1bc2ec8e25"
+    },
+    {
+      "mode": "exact",
+      "source_path": "src/ui-ux-pro-max/data/ux-guidelines.csv",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/data/ux-guidelines.csv",
+      "source_blob_sha": "e347aeda7401aac08879a7b11c3907782c7bcadb"
+    },
+    {
+      "mode": "adapted",
+      "source_path": "src/ui-ux-pro-max/scripts/core.py",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/scripts/core.py",
+      "source_blob_sha": "b613844e8461aaaeb6b8efaca69f33f4a0757e1c",
+      "notes": "Adapted for toolkit local-only safety boundaries and root tool data layout."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "src/ui-ux-pro-max/scripts/design_system.py",
+      "project_path": "projects/design/ui-ux-pro-max/main/src/ui-ux-pro-max/scripts/design_system.py",
+      "source_blob_sha": "512a808c4ed44d2ddc5f583b40bba3e78e3afb46",
+      "notes": "Adapted for toolkit local-only safety boundaries and root tool data layout."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "pyproject.toml",
+      "notes": "Excluded from the toolkit local-only subset."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "README.md",
+      "notes": "Excluded from the toolkit local-only subset."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "src/ui-ux-pro-max/data/_sync_all.py",
+      "notes": "Excluded from the toolkit local-only subset."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "src/ui-ux-pro-max/data/design.csv",
+      "notes": "Excluded from the toolkit local-only subset."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "src/ui-ux-pro-max/data/draft.csv",
+      "notes": "Excluded from the toolkit local-only subset."
+    }
+  ]
+}

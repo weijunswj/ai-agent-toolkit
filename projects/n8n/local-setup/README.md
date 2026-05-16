@@ -14,6 +14,8 @@ Root-level consumer surfaces remain under [skills/](../../../skills/), [guides/]
 
 The `main/` folder preserves the local setup README, numbered setup guides, platform integration guides, templates, and safe helper scripts from the local n8n setup source project. The root-level guides are shorter consumer surfaces and should link back here when exact source context matters.
 
+`main/templates/**` is preserved original project source. Curated toolkit template sources live under [exports/templates/](exports/templates/), including the partials used to generate root [templates/agent-rules/](../../../templates/agent-rules/) files.
+
 ## Safety
 
 This module does not authorize live n8n import/export, credential changes, or production workflow mutation. Live actions require explicit confirmation and must not run in CI.

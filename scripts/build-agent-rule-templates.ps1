@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $TemplatesDir = Join-Path $RepoRoot 'templates\agent-rules'
-$PartialsDir = Join-Path $TemplatesDir 'partials'
+$PartialsDir = Join-Path $RepoRoot 'projects\n8n\local-setup\exports\templates\agent-rules\partials'
 
 $PartialFiles = @(
   'ai-coding-agent-execution.md',
@@ -19,7 +19,7 @@ function Read-Partial($Name) {
 }
 
 function New-GeneratedNotice {
-  $sources = ($PartialFiles | ForEach-Object { "- templates/agent-rules/partials/$_" }) -join "`n"
+  $sources = ($PartialFiles | ForEach-Object { "- projects/n8n/local-setup/exports/templates/agent-rules/partials/$_" }) -join "`n"
   return @"
 <!--
 GENERATED FILE. DO NOT EDIT DIRECTLY.

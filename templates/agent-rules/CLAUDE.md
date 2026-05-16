@@ -2,9 +2,9 @@
 GENERATED FILE. DO NOT EDIT DIRECTLY.
 
 Edit these source files instead:
-- templates/agent-rules/partials/ai-coding-agent-execution.md
-- templates/agent-rules/partials/n8n-mcp-rules.md
-- templates/agent-rules/partials/skill-routing-rules.md
+- projects/n8n/local-setup/exports/templates/agent-rules/partials/ai-coding-agent-execution.md
+- projects/n8n/local-setup/exports/templates/agent-rules/partials/n8n-mcp-rules.md
+- projects/n8n/local-setup/exports/templates/agent-rules/partials/skill-routing-rules.md
 
 Then regenerate with:
 - scripts/build-agent-rule-templates.ps1

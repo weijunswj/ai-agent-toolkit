@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const projectSync = require('./sync-toolkit-projects.cjs');
 
 const root = process.cwd();
@@ -66,10 +67,17 @@ const expectedFiles = [
   'registry/tools.registry.json',
   'registry/source-repos.registry.json',
   'registry/consumers.registry.json',
+  'projects/n8n/local-setup/SOURCE-LOCK.json',
+  'projects/n8n/local-setup/exports/templates/README.md',
+  'projects/n8n/workflow-templates/SOURCE-LOCK.json',
+  'projects/cicd/secure-installer/SOURCE-LOCK.json',
+  'projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
+  'projects/design/ui-ux-pro-max/exports/templates/README.md',
   'scripts/build-agent-rule-templates.ps1',
   'scripts/- build-agent-rule-templates.cmd',
   'scripts/validate-toolkit.cjs',
   'scripts/sync-toolkit-projects.cjs',
+  'scripts/audit-project-source-locks.cjs',
   'scripts/package-skills.cjs',
   'scripts/package-packs.cjs',
   'scripts/safe-source-update.cjs'
@@ -482,6 +490,18 @@ function validateProjectModules(errors) {
   for (const error of result.errors) fail(errors, error);
 }
 
+function validateSourceLocks(errors) {
+  const result = sourceLockAudit.auditSourceLocks();
+  for (const error of result.errors) fail(errors, error);
+}
+
+function validateAgentRuleSources(errors) {
+  const rootPartialFiles = listFiles().filter((entry) => entry.relPath.startsWith('templates/agent-rules/partials/'));
+  for (const entry of rootPartialFiles) {
+    fail(errors, `Root agent-rule partial is an unmanaged duplicate: ${entry.relPath}`);
+  }
+}
+
 function validateStaleReferences(errors) {
   const roots = new Set(staleReferenceRoots);
   for (const entry of listFiles()) {
@@ -550,6 +570,8 @@ function runValidation() {
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
   validateProjectModules(errors);
+  validateSourceLocks(errors);
+  validateAgentRuleSources(errors);
   validateStaleReferences(errors);
   validateSecretStrings(errors);
   validateWorkflows(errors);

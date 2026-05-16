@@ -9,6 +9,8 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
 const validateScript = path.join(repoRoot, 'scripts', 'validate-toolkit.cjs');
+const syncScript = path.join(repoRoot, 'scripts', 'sync-toolkit-projects.cjs');
+const auditScript = path.join(repoRoot, 'scripts', 'audit-project-source-locks.cjs');
 const validator = require(validateScript);
 const safeSourceUpdate = require(path.join(repoRoot, 'scripts', 'safe-source-update.cjs'));
 
@@ -112,9 +114,40 @@ test('generated agent-rule templates are normal Markdown, not one giant fenced b
   for (const file of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
     const text = fs.readFileSync(path.join(repoRoot, 'templates', 'agent-rules', file), 'utf8');
     assert.doesNotMatch(text, /Use this generated template[^\n]*\n\n```md\n# AI coding agent execution preferences/);
+    assert.match(text, /projects\/n8n\/local-setup\/exports\/templates\/agent-rules\/partials/);
+    assert.doesNotMatch(text, /^- templates\/agent-rules\/partials/m);
     assert.match(text, /\n# AI coding agent execution preferences\n/);
     assert.match(text, /\n```md\n# SECTION NAME\n/);
   }
+});
+
+test('root agent-rule partials do not exist as unmanaged duplicates', () => {
+  const partialsDir = path.join(repoRoot, 'templates', 'agent-rules', 'partials');
+  const files = fs.existsSync(partialsDir)
+    ? fs.readdirSync(partialsDir, { recursive: true }).filter((entry) => fs.statSync(path.join(partialsDir, entry)).isFile())
+    : [];
+  assert.deepEqual(files, []);
+});
+
+test('changing project export partials makes generated agent rules stale', () => {
+  const cwd = tempCopy();
+  const partial = path.join(cwd, 'projects', 'n8n', 'local-setup', 'exports', 'templates', 'agent-rules', 'partials', 'skill-routing-rules.md');
+  fs.appendFileSync(partial, '\n\n<!-- drift test -->\n');
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: templates\/agent-rules\/AGENTS\.md/);
+});
+
+test('source-lock audit passes and catches exact-copy drift', () => {
+  let result = spawnSync(process.execPath, [auditScript], { cwd: repoRoot, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+
+  const cwd = tempCopy();
+  const copiedFile = path.join(cwd, 'projects', 'n8n', 'workflow-templates', 'main', 'README.md');
+  fs.appendFileSync(copiedFile, '\nDrift test\n');
+  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /exact-copy drift/);
 });
 
 test('validator rejects stale registry YAML references in temp docs', () => {

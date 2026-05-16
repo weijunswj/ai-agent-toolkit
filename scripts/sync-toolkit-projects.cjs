@@ -20,6 +20,11 @@ const forbiddenNames = new Set([
   'coverage'
 ]);
 const forbiddenDeniedPolicy = ['.env*', '**/*credential*', '**/*.key', '**/*.pem'];
+const agentRulePartialFiles = [
+  'ai-coding-agent-execution.md',
+  'n8n-mcp-rules.md',
+  'skill-routing-rules.md'
+];
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -158,6 +163,12 @@ function validateProjectShape(errors, relPath) {
       continue;
     }
     if (!fs.existsSync(resolveRel(sourceRel))) fail(errors, `${project.id} missing declared export: ${sourceRel}`);
+    if (output.kind === 'agent-rule-template') {
+      if (!output.title || !output.audience) fail(errors, `${project.id} agent-rule-template output requires title and audience: ${output.output}`);
+      for (const partial of agentRulePartialFiles) {
+        if (!fs.existsSync(resolveRel(`${sourceRel}/${partial}`))) fail(errors, `${project.id} missing agent-rule partial: ${sourceRel}/${partial}`);
+      }
+    }
     if (!isApprovedOutputPath(output.output)) fail(errors, `${project.id} output path is not an approved root surface: ${output.output}`);
     if (!allowedWrites.has(output.output)) fail(errors, `${project.id} output is not declared in writes.allowed: ${output.output}`);
   }
@@ -177,6 +188,22 @@ function generatedNotice(project, sourceRel) {
   ].join('\n');
 }
 
+function generatedAgentRuleNotice(sourceRel) {
+  const sources = agentRulePartialFiles.map((file) => `- ${sourceRel}/${file}`).join('\n');
+  return [
+    '<!--',
+    'GENERATED FILE. DO NOT EDIT DIRECTLY.',
+    '',
+    'Edit these source files instead:',
+    sources,
+    '',
+    'Then regenerate with:',
+    '- scripts/build-agent-rule-templates.ps1',
+    '-->',
+    ''
+  ].join('\n') + '\n';
+}
+
 function addMarkdownNotice(text, project, sourceRel) {
   const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const notice = generatedNotice(project, sourceRel);
@@ -191,11 +218,26 @@ function addMarkdownNotice(text, project, sourceRel) {
 
 function expectedOutput(project, output) {
   const sourceRel = assertInsideExport(project, output.source);
+  if (output.kind === 'agent-rule-template') return expectedAgentRuleTemplate(output, sourceRel);
   const ext = path.extname(output.output).toLowerCase();
   const raw = readText(sourceRel);
   if (ext === '.md' && output.notice !== false) return addMarkdownNotice(raw, project, sourceRel);
   if (ext === '.json') return JSON.stringify(JSON.parse(raw), null, 2) + '\n';
   return raw.trimEnd() + '\n';
+}
+
+function expectedAgentRuleTemplate(output, sourceRel) {
+  const bodyParts = [
+    `# ${output.title}`,
+    '',
+    `Use this generated template for ${output.audience}.`
+  ];
+  for (const partial of agentRulePartialFiles) {
+    const partialPath = `${sourceRel}/${partial}`;
+    bodyParts.push('');
+    bodyParts.push(readText(partialPath).trimEnd());
+  }
+  return generatedAgentRuleNotice(sourceRel) + bodyParts.join('\n').trimEnd() + '\n';
 }
 
 function registryEntries(projects) {

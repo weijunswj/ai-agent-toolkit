@@ -18,6 +18,7 @@
 
 - `exports/skills/n8n-local-setup.md`
 - `exports/mcp/n8n-local-setup.md`
+- `exports/templates/agent-rules/partials/*.md`
 - `exports/guides/local-setup.md`
 - `exports/packs/codex-n8n-local/pack.json`
 - `exports/registry/project.json`

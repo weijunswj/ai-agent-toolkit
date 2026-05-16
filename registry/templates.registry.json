@@ -1,7 +1,6 @@
 [
   {"id": "templates-index", "title": "Templates", "path": "templates/README.md"},
   {"id": "agent-rules", "title": "Agent Rule Templates", "path": "templates/agent-rules/"},
-  {"id": "agent-rules-partials", "title": "Agent Rule Partials", "path": "templates/agent-rules/partials/"},
   {"id": "mcp-configs", "title": "MCP Config Templates", "path": "templates/mcp-configs/"},
   {"id": "n8n-templates", "title": "n8n Templates", "path": "templates/n8n/"},
   {"id": "n8n-sync-helpers", "title": "n8n Sync Helpers", "path": "templates/n8n/sync-helpers/"},

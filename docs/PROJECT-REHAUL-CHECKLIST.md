@@ -14,6 +14,8 @@ Use this checklist when reviewing the project-module architecture.
 - [ ] Root [skills/](../skills/), [mcp/](../mcp/), [templates/](../templates/), [packs/](../packs/), [tools/](../tools/), [registry/](../registry/), and [guides/](../guides/) remain obvious.
 - [ ] Skills and MCP docs are generated from explicit exports, not summarised from arbitrary `main/` files.
 - [ ] Generated Markdown outputs include a generated-source notice.
+- [ ] Root agent-rule templates are generated from project export partials, and unmanaged root partial duplicates do not exist.
+- [ ] `SOURCE-LOCK.json` files pass the source-lock audit.
 
 ## Safety
 
@@ -36,6 +38,7 @@ Run:
 
 ```powershell
 node scripts/sync-toolkit-projects.cjs --check
+node scripts/audit-project-source-locks.cjs
 node scripts/validate-toolkit.cjs
 node --test tests/*.test.cjs
 node scripts/package-skills.cjs --check

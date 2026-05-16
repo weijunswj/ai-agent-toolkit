@@ -1,0 +1,133 @@
+{
+  "source_repo": "weijunswj/codex-n8n-local-setup",
+  "source_ref": "main",
+  "source_commit": "04a1a5d9dbd5411ca89cee5840e238c3c8654a55",
+  "files": [
+    {
+      "mode": "exact",
+      "source_path": "1. local setup.md",
+      "project_path": "projects/n8n/local-setup/main/1. local setup.md",
+      "source_blob_sha": "21fc8896290d5026e7ee6d6e0eb8dc9ac7b86453"
+    },
+    {
+      "mode": "exact",
+      "source_path": "2. upgrading.md",
+      "project_path": "projects/n8n/local-setup/main/2. upgrading.md",
+      "source_blob_sha": "a155cef59f93e9b31104ac91289490665ef32e47"
+    },
+    {
+      "mode": "exact",
+      "source_path": "3. tunneling guide.md",
+      "project_path": "projects/n8n/local-setup/main/3. tunneling guide.md",
+      "source_blob_sha": "3c3b252811c024803123c44459ff9f6c23c4cc24"
+    },
+    {
+      "mode": "exact",
+      "source_path": "3a. docker compose + ngrok.md",
+      "project_path": "projects/n8n/local-setup/main/3a. docker compose + ngrok.md",
+      "source_blob_sha": "e0819653c14f2a05819fecd1ea113f949194c223"
+    },
+    {
+      "mode": "exact",
+      "source_path": "4. vps hosting.md",
+      "project_path": "projects/n8n/local-setup/main/4. vps hosting.md",
+      "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2"
+    },
+    {
+      "mode": "exact",
+      "source_path": "5. extra - claude code integration.md",
+      "project_path": "projects/n8n/local-setup/main/5. extra - claude code integration.md",
+      "source_blob_sha": "14be7374a3aec75047a3aa9c26f6c8d503213eac"
+    },
+    {
+      "mode": "exact",
+      "source_path": "6. extra - opencode integration.md",
+      "project_path": "projects/n8n/local-setup/main/6. extra - opencode integration.md",
+      "source_blob_sha": "405c3c99570139146b490ea05c1be5653ac01a7f"
+    },
+    {
+      "mode": "exact",
+      "source_path": "7. extra - antigravity integration.md",
+      "project_path": "projects/n8n/local-setup/main/7. extra - antigravity integration.md",
+      "source_blob_sha": "caf052593cf9da3999d281486e24dde953b7eb3f"
+    },
+    {
+      "mode": "exact",
+      "source_path": "README.md",
+      "project_path": "projects/n8n/local-setup/main/README.md",
+      "source_blob_sha": "54e708cb93c4056be2dddfc425da7b548528b8bd"
+    },
+    {
+      "mode": "exact",
+      "source_path": "scripts/- build-templates.cmd",
+      "project_path": "projects/n8n/local-setup/main/scripts/- build-templates.cmd",
+      "source_blob_sha": "9cfed9002678d4b1e868f98ce2b3c0eb23887e70"
+    },
+    {
+      "mode": "exact",
+      "source_path": "scripts/build-templates.ps1",
+      "project_path": "projects/n8n/local-setup/main/scripts/build-templates.ps1",
+      "source_blob_sha": "2e393ef5040915e3db4a576f3987eab70c15e690"
+    },
+    {
+      "mode": "exact",
+      "source_path": "scripts/windows/start-n8n-ngrok.bat",
+      "project_path": "projects/n8n/local-setup/main/scripts/windows/start-n8n-ngrok.bat",
+      "source_blob_sha": "2f3b40bdcf4e3cd9e54dce86e33b85653fb51c4a"
+    },
+    {
+      "mode": "exact",
+      "source_path": "templates/AGENTS.md",
+      "project_path": "projects/n8n/local-setup/main/templates/AGENTS.md",
+      "source_blob_sha": "de51a356c39d61aa6ce5456a369e32d364d7b3cd"
+    },
+    {
+      "mode": "exact",
+      "source_path": "templates/antigravity-mcp-config.md",
+      "project_path": "projects/n8n/local-setup/main/templates/antigravity-mcp-config.md",
+      "source_blob_sha": "e366f703f5f8de45f3715628cec0a4c195fee274"
+    },
+    {
+      "mode": "exact",
+      "source_path": "templates/claude-mcp-config.md",
+      "project_path": "projects/n8n/local-setup/main/templates/claude-mcp-config.md",
+      "source_blob_sha": "1d050c7f8430aad5a2b09c476ec955cbdb5b765d"
+    },
+    {
+      "mode": "exact",
+      "source_path": "templates/CLAUDE.md",
+      "project_path": "projects/n8n/local-setup/main/templates/CLAUDE.md",
+      "source_blob_sha": "854c24eedfb580fd8cf0f946642067dfabc5c5dc"
+    },
+    {
+      "mode": "exact",
+      "source_path": "templates/codex-mcp-config.md",
+      "project_path": "projects/n8n/local-setup/main/templates/codex-mcp-config.md",
+      "source_blob_sha": "66015cf2c0c9cdf01ad5fe5daa2b5656a2ba57c6"
+    },
+    {
+      "mode": "exact",
+      "source_path": "templates/GEMINI.md",
+      "project_path": "projects/n8n/local-setup/main/templates/GEMINI.md",
+      "source_blob_sha": "306ec26cd0ede85f0e0bcd1b0e4b559466911711"
+    },
+    {
+      "mode": "exact",
+      "source_path": "templates/opencode-mcp-config.md",
+      "project_path": "projects/n8n/local-setup/main/templates/opencode-mcp-config.md",
+      "source_blob_sha": "31502fdc926cc1c4c9343945afd4dd477d1f7278"
+    },
+    {
+      "mode": "exact",
+      "source_path": "templates/partials/ai-coding-agent-execution.md",
+      "project_path": "projects/n8n/local-setup/main/templates/partials/ai-coding-agent-execution.md",
+      "source_blob_sha": "33361f156446e64eb501c5fbc769e5ccab478236"
+    },
+    {
+      "mode": "exact",
+      "source_path": "templates/partials/n8n-mcp-rules.md",
+      "project_path": "projects/n8n/local-setup/main/templates/partials/n8n-mcp-rules.md",
+      "source_blob_sha": "ed961cd1b9a5ff25b7a077d98fa32f0e8b790e72"
+    }
+  ]
+}
