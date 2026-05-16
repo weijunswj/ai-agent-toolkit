@@ -5,7 +5,10 @@
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [
-    "weijunswj/codex-n8n-local-setup"
+    "guides/ai-agent-platforms/codex.md",
+    "guides/n8n/local-setup.md",
+    "templates/agent-rules/AGENTS.md",
+    "templates/mcp-configs/codex-mcp-config.md"
   ],
   "suitable_for": [
     "Codex",

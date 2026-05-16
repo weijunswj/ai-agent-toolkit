@@ -28,7 +28,7 @@ test('every pack has valid pack manifest and existing install paths', () => {
     .filter((entry) => entry.isDirectory())
     .map((entry) => path.join(packsRoot, entry.name, 'pack.json'))
     .filter((file) => fs.existsSync(file));
-  assert.equal(packFiles.length, 5);
+  assert.equal(packFiles.length, 6);
   for (const file of packFiles) {
     const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(pack.requires_approval, true);

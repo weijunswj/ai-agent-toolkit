@@ -1,7 +1,5 @@
 # Credential Safety
 
-Source-derived from `weijunswj/codex-n8n-local-setup` n8n MCP rules and `weijunswj/ai-cicd-installer` n8n helper scripts.
-
 ## Rules
 
 - Never store real credential values in workflow JSON.

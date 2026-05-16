@@ -4,8 +4,8 @@ Antigravity and Gemini-style tools can consume this toolkit through `GEMINI.md` 
 
 ## Recommended Setup
 
-1. Use `templates/agent-rules/GEMINI.md` for shared agent behavior.
-2. Use `templates/mcp-configs/antigravity-mcp-config.md` when configuring n8n MCP access.
+1. Use [GEMINI.md](../../templates/agent-rules/GEMINI.md) for shared agent behavior.
+2. Use [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md) when configuring n8n MCP access.
 3. Restart the client after changing rules, MCP config, or user environment variables.
 
 ## Safety

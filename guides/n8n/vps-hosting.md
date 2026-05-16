@@ -1,7 +1,5 @@
 # VPS Hosting
 
-Source-derived from `weijunswj/codex-n8n-local-setup` file `4. vps hosting.md`.
-
 Use VPS hosting when n8n needs a stable public URL and real uptime.
 
 ## Common Options

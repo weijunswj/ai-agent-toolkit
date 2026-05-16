@@ -5,8 +5,8 @@ Codex can consume this toolkit through skills, `AGENTS.md`, and MCP config templ
 ## Recommended Setup
 
 1. Copy useful skills from `skills/` into your Codex-supported skills location.
-2. Copy `templates/agent-rules/AGENTS.md` into the Codex rules location used by your environment.
-3. Use `templates/mcp-configs/codex-mcp-config.md` when connecting Codex to n8n documentation and a live n8n MCP endpoint.
+2. Copy [AGENTS.md](../../templates/agent-rules/AGENTS.md) into the Codex rules location used by your environment.
+3. Use [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md) when connecting Codex to n8n documentation and a live n8n MCP endpoint.
 4. Restart Codex after changing MCP config, agent rules, or user environment variables.
 
 ## n8n MCP Notes

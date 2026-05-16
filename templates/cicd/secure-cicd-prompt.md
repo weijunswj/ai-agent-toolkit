@@ -1,7 +1,5 @@
 # Secure CI/CD Installer Prompt
 
-Source-derived from `weijunswj/ai-cicd-installer` `README.md`.
-
 ```text
 You are my AI coding agent. Set up a security-first CI/CD plan for this repository.
 

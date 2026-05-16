@@ -10,6 +10,8 @@ _dist/
 dist/
 node_modules/
 coverage/
+__pycache__/
+*.pyc
 *.zip
 *.tgz
 *.live-export.json

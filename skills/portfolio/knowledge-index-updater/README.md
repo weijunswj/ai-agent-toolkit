@@ -126,11 +126,11 @@ Use one row for these pairs:
 
 | Notion page | GitHub repo | Canonical row |
 |---|---|---|
-| Codex + n8n Local Setup Guide | weijunswj/codex-n8n-local-setup | Codex + n8n Local Setup |
-| AI CI/CD Installer guide | weijunswj/ai-cicd-installer | AI CI/CD Installer |
-| Spotify Playlist Deduplicator Agent | weijunswj/spotify-playlist-deduplicator-agent | Spotify Playlist Deduplicator Agent |
-| PhoenixSig page | weijunswj/TQQQ-PhoenixSig | PhoenixSig |
-| TQQQ Covered Call Daily Reminder | weijunswj/tqqq-covered-call | TQQQ Covered Call |
+| Local n8n Setup Guide | example-org/local-n8n-setup | Local n8n Setup |
+| Secure CI/CD Installer guide | example-org/secure-cicd-installer | Secure CI/CD Installer |
+| Playlist Deduplicator Agent | example-org/playlist-deduplicator-agent | Playlist Deduplicator Agent |
+| Public Strategy Dashboard | example-org/public-strategy-dashboard | Public Strategy Dashboard |
+| Daily Reminder Tool | example-org/daily-reminder-tool | Daily Reminder Tool |
 
 ## Status rules
 

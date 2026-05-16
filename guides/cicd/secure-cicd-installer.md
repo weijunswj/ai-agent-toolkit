@@ -1,7 +1,5 @@
 # Secure CI/CD Installer
 
-Source-derived from `weijunswj/ai-cicd-installer` `README.md`.
-
 ## Goal
 
 Help an AI coding agent create a security-first CI/CD setup in a consumer repo while keeping the user in control of commits, pushes, PRs, deployment, and secrets.
@@ -22,7 +20,7 @@ Run security checks before lint, tests, build, package, or deploy. Deployment sh
 
 ## Toolkit Materials
 
-- `templates/cicd/secure-cicd-prompt.md`
-- `templates/cicd/CURRENT_CICD_STATUS.template.md`
-- `templates/cicd/safe-source-update-policy.md`
-- `packs/secure-cicd/pack.json`
+- [Secure CI/CD prompt](../../templates/cicd/secure-cicd-prompt.md)
+- [Current CI/CD status template](../../templates/cicd/CURRENT_CICD_STATUS.template.md)
+- [Safe source update policy](../../templates/cicd/safe-source-update-policy.md)
+- [Secure CI/CD pack](../../packs/secure-cicd/pack.json)

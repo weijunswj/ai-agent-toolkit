@@ -21,6 +21,17 @@ const expectedFiles = [
   'docs/MIGRATION-SOURCES.md',
   'docs/CLEANUP-POLICY.md',
   'docs/THIRD-PARTY-SOURCE-NOTES.md',
+  'tools/design-system-generator/README.md',
+  'tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
+  'tools/design-system-generator/scripts/core.py',
+  'tools/design-system-generator/scripts/design_system.py',
+  'tools/design-system-generator/data/products.csv',
+  'tools/design-system-generator/data/styles.csv',
+  'tools/design-system-generator/data/colors.csv',
+  'tools/design-system-generator/data/landing.csv',
+  'tools/design-system-generator/data/typography.csv',
+  'tools/design-system-generator/data/ui-reasoning.csv',
+  'tools/design-system-generator/tests/test_local_only.py',
   'registry/skills.registry.json',
   'registry/guides.registry.json',
   'registry/templates.registry.json',
@@ -48,7 +59,12 @@ const expectedDirs = [
   'templates/n8n/sync-helpers',
   'templates/n8n/sanitizer',
   'templates/n8n/workflow-policy',
+  'tools/design-system-generator',
+  'tools/design-system-generator/scripts',
+  'tools/design-system-generator/data',
+  'tools/design-system-generator/tests',
   'packs/frontend-design-skill',
+  'packs/design-system-generator',
   'packs/codex-n8n-local',
   'packs/claude-code-n8n-local',
   'packs/secure-cicd',
@@ -82,6 +98,8 @@ const allowedExecutablePrefixes = [
   'scripts/',
   'tests/',
   '.github/workflows/',
+  'tools/design-system-generator/scripts/',
+  'tools/design-system-generator/tests/',
   'templates/n8n/sync-helpers/',
   'templates/n8n/sanitizer/'
 ];
@@ -89,6 +107,21 @@ const allowedExecutablePrefixes = [
 const executableExtensions = new Set([
   '.ps1', '.cmd', '.bat', '.cjs', '.mjs', '.js', '.ts', '.tsx', '.py', '.sh', '.exe', '.dll'
 ]);
+
+const designGeneratorForbiddenTokens = [
+  'requests',
+  'urllib',
+  'httpx',
+  'aiohttp',
+  'socket',
+  'subprocess',
+  'os.system',
+  'webbrowser',
+  'curl',
+  'wget',
+  'npm install',
+  'pip install'
+];
 
 const secretPatterns = [
   { label: 'OpenAI-style API key', regex: /sk-[A-Za-z0-9_-]{20,}/ },
@@ -120,7 +153,7 @@ function readJson(relPath) {
 }
 
 function isIgnoredWalkDir(name) {
-  return name === '.git';
+  return name === '.git' || name === '__pycache__';
 }
 
 function walk(dir = root, entries = []) {
@@ -315,9 +348,28 @@ function validateExecutables(errors) {
     const rel = entry.relPath;
     const ext = path.extname(rel).toLowerCase();
     if (!executableExtensions.has(ext)) continue;
+    if (ext === '.py') {
+      const allowedPython = rel.startsWith('tools/design-system-generator/') || rel.startsWith('tests/');
+      if (!allowedPython) fail(errors, `Python file outside approved locations: ${rel}`);
+    }
     const allowed = allowedExecutablePrefixes.some((prefix) => rel.startsWith(prefix));
     if (!allowed) fail(errors, `Executable file outside approved locations: ${rel}`);
     if (rel.startsWith('skills/')) fail(errors, `Instruction-only skill contains executable file: ${rel}`);
+  }
+}
+
+function validateDesignGeneratorLocalOnly(errors) {
+  const scriptFiles = listFiles().filter((entry) =>
+    entry.relPath.startsWith('tools/design-system-generator/scripts/') && entry.relPath.endsWith('.py')
+  );
+
+  for (const entry of scriptFiles) {
+    const text = fs.readFileSync(entry.fullPath, 'utf8').toLowerCase();
+    for (const token of designGeneratorForbiddenTokens) {
+      if (text.includes(token)) {
+        fail(errors, `Design generator script contains forbidden local-only token "${token}": ${entry.relPath}`);
+      }
+    }
   }
 }
 
@@ -384,6 +436,7 @@ function runValidation() {
   validatePacks(errors);
   validateSkills(errors);
   validateExecutables(errors);
+  validateDesignGeneratorLocalOnly(errors);
   validateStaleReferences(errors);
   validateSecretStrings(errors);
   validateWorkflows(errors);
@@ -406,6 +459,7 @@ module.exports = {
   runValidation,
   skillDirs,
   validateForbiddenFiles,
+  validateDesignGeneratorLocalOnly,
   validateStaleReferences,
   validateSecretStrings
 };

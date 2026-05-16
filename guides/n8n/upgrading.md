@@ -1,7 +1,5 @@
 # Upgrading n8n
 
-Source-derived from `weijunswj/codex-n8n-local-setup` file `2. upgrading.md`.
-
 ## Before Updating
 
 1. Back up workflows or take a snapshot.

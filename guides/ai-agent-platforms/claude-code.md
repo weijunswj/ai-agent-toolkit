@@ -5,8 +5,8 @@ Claude Code can consume this toolkit through skills, `CLAUDE.md`, and user-scope
 ## Recommended Setup
 
 1. Copy useful skill folders from `skills/` into a Claude Code skills location.
-2. Copy `templates/agent-rules/CLAUDE.md` into the Claude Code memory/rules location used by your setup.
-3. Use `templates/mcp-configs/claude-mcp-config.md` for user-scoped n8n MCP commands.
+2. Copy [CLAUDE.md](../../templates/agent-rules/CLAUDE.md) into the Claude Code memory/rules location used by your setup.
+3. Use [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md) for user-scoped n8n MCP commands.
 4. Restart Claude Code after changing rules, MCP config, or user environment variables.
 
 ## Scope

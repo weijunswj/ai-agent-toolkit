@@ -17,4 +17,4 @@ For n8n, use two separate concepts:
 - `n8n_docs`: docs/search/validation helper.
 - `n8n_live`: live instance access, approval-gated and used only on request.
 
-See `templates/mcp-configs/` for platform-specific examples.
+See [MCP config templates](../../templates/mcp-configs/) for platform-specific examples.
