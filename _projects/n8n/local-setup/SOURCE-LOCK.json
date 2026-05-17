@@ -2,6 +2,10 @@
   "source_repo": "weijunswj/codex-n8n-local-setup",
   "source_ref": "main",
   "source_commit": "04a1a5d9dbd5411ca89cee5840e238c3c8654a55",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
   "files": [
     {
       "mode": "exact",

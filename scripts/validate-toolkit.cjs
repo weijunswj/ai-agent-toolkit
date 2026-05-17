@@ -16,6 +16,7 @@ const expectedFiles = [
   'MIGRATION_CHECKLIST.md',
   'package.json',
   '.gitignore',
+  '.gitattributes',
   'docs/HOW-TO-USE.md',
   'docs/FOR_AI_AGENTS.md',
   'docs/SAFE-UPDATES.md',
@@ -81,7 +82,8 @@ const expectedFiles = [
   'scripts/package-skills.cjs',
   'scripts/package-packs.cjs',
   'scripts/safe-source-update.cjs',
-  '.github/workflows/source-watch-pr.yml'
+  '.github/workflows/source-watch-pr.yml',
+  '.github/workflows/validate.yml'
 ];
 
 const expectedDirs = [

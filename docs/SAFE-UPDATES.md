@@ -1,10 +1,21 @@
 # Safe Updates
 
-Safe source updates are PR-based. They should detect upstream changes deterministically, copy only allowlisted files into `_projects/**/_main/`, update source locks, run local validation, and open a draft PR for review.
+Safe source updates are intended to become PR-based, but the current PR #4 implementation is read-only advisory planning. The current source-watch workflow renders a plan from SOURCE-LOCK metadata; it does not fetch upstream commits, copy files, update SOURCE-LOCK.json, create branches, or create PRs.
+
+A future updater should detect upstream changes deterministically, copy only allowlisted files into `_projects/**/_main/`, update source locks, run local validation, and open a draft PR for review.
 
 This policy does not block intentional, scoped generator/helper writes. It blocks unsafe writes and silent upstream application.
 
 ## Update Flow
+
+Current PR #4 advisory flow:
+
+1. Read `_projects/**/SOURCE-LOCK.json`.
+2. Separate active update candidates from archived migration sources.
+3. Render a source-watch plan.
+4. Run source-lock audit and project sync checks.
+
+Future PR updater flow:
 
 1. Detect source changes deterministically.
 2. Compare in quarantine.
@@ -12,6 +23,14 @@ This policy does not block intentional, scoped generator/helper writes. It block
 4. Generate a review summary.
 5. Open a draft PR when allowlisted files changed and validation passes.
 6. Request human review before merge.
+
+Retired internal migration sources use `source_update_policy: "none"` and are not watched:
+
+- `weijunswj/codex-n8n-local-setup`
+- `weijunswj/ai-cicd-installer`
+- `weijunswj/n8n-workflow-templates`
+
+Their copied `_projects/**/_main/` files are canonical after migration. SOURCE-LOCK hashes remain local provenance and exact-byte drift checks.
 
 ## Classifications
 

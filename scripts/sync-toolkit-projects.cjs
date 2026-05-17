@@ -183,6 +183,9 @@ function validateProjectShape(errors, relPath) {
     } else if (!output.source) {
       fail(errors, `${project.id} ${output.kind} output requires source: ${output.output}`);
     }
+    if (output.kind === 'curated' && output.source && !slash(path.normalize(output.source)).startsWith('curated_output_for_ai/')) {
+      fail(errors, `${project.id} curated output source must start with curated_output_for_ai/: ${output.output}`);
+    }
   }
 
   return project;

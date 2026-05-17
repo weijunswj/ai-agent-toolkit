@@ -1,4 +1,4 @@
-name: Source Watch PR Plan
+name: Source Watch Plan
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Render source update plan
+      - name: Render advisory source update plan
         run: node scripts/watch-project-sources.cjs >> "$GITHUB_STEP_SUMMARY"
 
       - name: Validate source locks

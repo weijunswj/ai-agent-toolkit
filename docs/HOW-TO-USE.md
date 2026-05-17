@@ -24,6 +24,14 @@ node scripts/sync-toolkit-projects.cjs --write
 node scripts/sync-toolkit-projects.cjs --check
 ```
 
+To inspect source update status:
+
+```powershell
+node scripts/watch-project-sources.cjs
+```
+
+This is an advisory plan only. Retired internal migration sources are archived provenance, not active update targets. Third-party active sources require manual review.
+
 ## Use Skills Manually
 
 1. Open the skill folder under `skills/`.

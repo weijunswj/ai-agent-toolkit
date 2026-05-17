@@ -56,20 +56,30 @@ function parseArgs(argv) {
   return result;
 }
 
-function riskForRepo(sourceRepo) {
-  if (sourceRepo === 'nextlevelbuilder/ui-ux-pro-max-skill') return 'third-party';
-  return sourceRepo?.startsWith('weijunswj/') ? 'own-repo' : 'manual-review';
+function isArchivedMigrationSource(lock) {
+  return lock.source_update_policy === 'none' || lock.source_lifecycle === 'retired_after_migration';
+}
+
+function riskForActiveSource(lock) {
+  if (lock.source_role === 'third_party_attribution_source' || lock.source_repo === 'nextlevelbuilder/ui-ux-pro-max-skill') {
+    return 'third-party';
+  }
+  return lock.source_repo?.startsWith('weijunswj/') ? 'own-repo' : 'manual-review';
 }
 
 function planEntry(lockFile) {
   const projectPath = lockFile.relPath.replace(/\/SOURCE-LOCK\.json$/, '');
   const lock = lockFile.lock;
-  const risk = riskForRepo(lock.source_repo);
+  const risk = riskForActiveSource(lock);
   return {
     project_path: projectPath,
     source_repo: lock.source_repo,
     source_ref: lock.source_ref,
     locked_commit: lock.source_commit,
+    source_lifecycle: lock.source_lifecycle,
+    source_role: lock.source_role,
+    update_policy: lock.source_update_policy,
+    public_attribution_required: lock.public_attribution_required,
     risk,
     labels: risk === 'third-party' ? ['source-update', 'third-party-review'] : ['source-update'],
     reviewer: risk === 'third-party' ? 'weijunswj' : null,
@@ -82,27 +92,60 @@ function planEntry(lockFile) {
     ],
     notes: risk === 'third-party'
       ? 'Draft PR only. Request weijunswj review, mention @weijunswj, and manually review scripts before merge.'
-      : 'Direct PR update is allowed when allowlist and validation pass. Never auto-merge.'
+      : 'Future deterministic PR update may be allowed when allowlist and validation pass. Never auto-merge.'
   };
 }
 
-function renderMarkdown(entries) {
+function archivedEntry(lockFile) {
+  const projectPath = lockFile.relPath.replace(/\/SOURCE-LOCK\.json$/, '');
+  const lock = lockFile.lock;
+  return {
+    project_path: projectPath,
+    source_repo: lock.source_repo,
+    source_ref: lock.source_ref,
+    locked_commit: lock.source_commit,
+    source_lifecycle: lock.source_lifecycle,
+    source_role: lock.source_role,
+    update_policy: lock.source_update_policy,
+    public_attribution_required: lock.public_attribution_required,
+    notes: 'Historical migration provenance only. Do not fetch, watch, or update this source repo after migration.'
+  };
+}
+
+function buildPlan(lockFiles = discoverLocks()) {
+  const active = [];
+  const archived = [];
+  for (const lockFile of lockFiles) {
+    if (isArchivedMigrationSource(lockFile.lock)) archived.push(archivedEntry(lockFile));
+    else active.push(planEntry(lockFile));
+  }
+  return {
+    active_update_candidates: active,
+    archived_migration_sources: archived
+  };
+}
+
+function renderMarkdown(plan) {
+  const active = Array.isArray(plan) ? plan : plan.active_update_candidates;
+  const archived = Array.isArray(plan) ? [] : plan.archived_migration_sources;
   return [
-    '# Project Source Watch PR Plan',
+    '# Project Source Watch Plan',
     '',
-    'This deterministic plan is advisory until a source update runner copies allowlisted upstream files.',
-    'Normal local validation does not use network, execute upstream code, install packages, or run live n8n actions.',
+    'This deterministic plan is advisory. It does not fetch upstream commits, copy files, update SOURCE-LOCK.json, create branches, or create PRs.',
+    'A future PR updater may use this plan as input, but normal local validation does not use network, execute upstream code, install packages, or run live n8n actions.',
     '',
-    'GitHub Actions may use this plan to open draft source update PRs. It must never auto-merge.',
+    'Retired internal migration sources are archived provenance and are not active update candidates.',
     '',
-    '## Projects',
+    '## Active Update Candidates',
     '',
-    ...entries.flatMap((entry) => [
+    ...(active.length ? active.flatMap((entry) => [
       `### ${entry.project_path}`,
       '',
       `- Source repo: ${entry.source_repo}`,
       `- Source ref: ${entry.source_ref}`,
       `- Locked commit: ${entry.locked_commit}`,
+      `- Lifecycle: ${entry.source_lifecycle}`,
+      `- Update policy: ${entry.update_policy}`,
       `- Risk: ${entry.risk}`,
       `- Labels: ${entry.labels.join(', ')}`,
       entry.reviewer ? `- Reviewer: ${entry.reviewer}` : '- Reviewer: project maintainer',
@@ -115,14 +158,29 @@ function renderMarkdown(entries) {
       '',
       entry.notes,
       ''
-    ])
+    ]) : ['No active update candidates.', '']),
+    '## Archived Migration Sources',
+    '',
+    ...(archived.length ? archived.flatMap((entry) => [
+      `### ${entry.project_path}`,
+      '',
+      `- Source repo: ${entry.source_repo}`,
+      `- Source ref: ${entry.source_ref}`,
+      `- Locked commit: ${entry.locked_commit}`,
+      `- Lifecycle: ${entry.source_lifecycle}`,
+      `- Update policy: ${entry.update_policy}`,
+      `- Public attribution required: ${entry.public_attribution_required}`,
+      '',
+      entry.notes,
+      ''
+    ]) : ['None.', ''])
   ].join('\n');
 }
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const entries = discoverLocks().map(planEntry);
-  const output = args.json ? `${JSON.stringify(entries, null, 2)}\n` : renderMarkdown(entries);
+  const plan = buildPlan();
+  const output = args.json ? `${JSON.stringify(plan, null, 2)}\n` : renderMarkdown(plan);
   if (args.out) {
     const outPath = path.resolve(root, args.out);
     const rel = path.relative(root, outPath);
@@ -140,7 +198,10 @@ if (require.main === module) main();
 
 module.exports = {
   allowlists,
+  archivedEntry,
+  buildPlan,
   discoverLocks,
+  isArchivedMigrationSource,
   planEntry,
   renderMarkdown
 };

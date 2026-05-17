@@ -2,6 +2,10 @@
   "source_repo": "nextlevelbuilder/ui-ux-pro-max-skill",
   "source_ref": "main",
   "source_commit": "b7e3af80f6e331f6fb456667b82b12cade7c9d35",
+  "source_lifecycle": "active",
+  "source_role": "third_party_attribution_source",
+  "source_update_policy": "manual_review_required",
+  "public_attribution_required": true,
   "files": [
     {
       "mode": "excluded",

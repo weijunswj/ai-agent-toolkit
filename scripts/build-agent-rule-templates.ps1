@@ -32,17 +32,18 @@ function Read-Partial($Source) {
 }
 
 function New-GeneratedNotice {
-  $sources = ($PartialSources | ForEach-Object { "Source: $($_.Rel)" }) -join "`n"
-  return @"
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-$sources
-Update the project source and run sync.
--->
-
-
-"@
+  $notice = @(
+    '<!--',
+    'Generated from toolkit project source. Do not edit directly.',
+    'Project: n8n.local-setup'
+  )
+  foreach ($source in $PartialSources) {
+    $notice += "Source: $($source.Rel)"
+  }
+  $notice += 'Update the project source and run sync.'
+  $notice += '-->'
+  $notice += ''
+  return ($notice -join "`n")
 }
 
 function Write-GeneratedTemplate {

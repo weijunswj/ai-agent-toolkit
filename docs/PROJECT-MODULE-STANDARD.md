@@ -56,6 +56,15 @@ The sync script never uses AI, never summarises, never executes project scripts,
 
 Each project module has a `SOURCE-LOCK.json` file. Exact-copy entries pin the expected Git blob SHA for preserved files. Adapted or excluded entries must say so explicitly with notes. Root helper/tool surfaces may also be listed with `root_surface_path` when they intentionally mirror or adapt upstream material.
 
+Each lock also declares source lifecycle metadata:
+
+- `source_lifecycle`: `active` or `retired_after_migration`.
+- `source_role`: `migration_provenance_only` or `third_party_attribution_source`.
+- `source_update_policy`: `none` or `manual_review_required`.
+- `public_attribution_required`: boolean.
+
+Retired internal migration sources keep exact-byte provenance but are not watched as active upstreams. Active third-party attribution sources require manual review and public attribution.
+
 Run the local audit without network access:
 
 ```powershell

@@ -6,7 +6,6 @@ Source: _projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md
 Source: templates/agent-rules/partials/skill-routing-rules.md
 Update the project source and run sync.
 -->
-
 # AGENTS.md AI Coding Agent Rules
 
 Use this generated template for Codex or OpenCode.

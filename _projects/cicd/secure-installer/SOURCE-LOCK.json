@@ -2,6 +2,10 @@
   "source_repo": "weijunswj/ai-cicd-installer",
   "source_ref": "main",
   "source_commit": "04d903d9580b3ce98168d112e921ef538bbc6053",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
   "files": [
     {
       "mode": "exact",

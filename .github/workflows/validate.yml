@@ -1,0 +1,40 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run validation
+        run: |
+          node scripts/sync-toolkit-projects.cjs --check
+          node scripts/audit-project-source-locks.cjs
+          node scripts/validate-toolkit.cjs
+          node --test tests/*.test.cjs
+          node scripts/package-skills.cjs --check
+          node scripts/package-packs.cjs --check
+          python -m unittest discover -s tools/design-system-generator/tests
+          git diff --check

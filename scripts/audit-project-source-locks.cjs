@@ -6,6 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = process.cwd();
+const allowedSourceLifecycles = new Set(['active', 'retired_after_migration']);
+const allowedSourceRoles = new Set(['migration_provenance_only', 'third_party_attribution_source']);
+const allowedSourceUpdatePolicies = new Set(['none', 'manual_review_required']);
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -46,10 +49,54 @@ function discoverLockFiles() {
     .sort();
 }
 
+function validateLifecycleMetadata(lock, relPath, errors) {
+  for (const key of ['source_lifecycle', 'source_role', 'source_update_policy', 'public_attribution_required']) {
+    if (!(key in lock)) errors.push(`${relPath} missing ${key}`);
+  }
+
+  if ('source_lifecycle' in lock && !allowedSourceLifecycles.has(lock.source_lifecycle)) {
+    errors.push(`${relPath} unknown source_lifecycle "${lock.source_lifecycle}"`);
+  }
+  if ('source_role' in lock && !allowedSourceRoles.has(lock.source_role)) {
+    errors.push(`${relPath} unknown source_role "${lock.source_role}"`);
+  }
+  if ('source_update_policy' in lock && !allowedSourceUpdatePolicies.has(lock.source_update_policy)) {
+    errors.push(`${relPath} unknown source_update_policy "${lock.source_update_policy}"`);
+  }
+  if ('public_attribution_required' in lock && typeof lock.public_attribution_required !== 'boolean') {
+    errors.push(`${relPath} public_attribution_required must be boolean`);
+  }
+
+  if (lock.source_lifecycle === 'retired_after_migration') {
+    if (lock.source_role !== 'migration_provenance_only') {
+      errors.push(`${relPath} retired migration source must use source_role migration_provenance_only`);
+    }
+    if (lock.source_update_policy !== 'none') {
+      errors.push(`${relPath} retired migration source must use source_update_policy none`);
+    }
+    if (lock.public_attribution_required !== false) {
+      errors.push(`${relPath} retired migration source must set public_attribution_required false`);
+    }
+  }
+
+  if (lock.source_role === 'third_party_attribution_source') {
+    if (lock.source_lifecycle !== 'active') {
+      errors.push(`${relPath} third-party attribution source must use source_lifecycle active`);
+    }
+    if (lock.source_update_policy !== 'manual_review_required') {
+      errors.push(`${relPath} third-party attribution source must use source_update_policy manual_review_required`);
+    }
+    if (lock.public_attribution_required !== true) {
+      errors.push(`${relPath} third-party attribution source must set public_attribution_required true`);
+    }
+  }
+}
+
 function validateLock(lock, relPath, errors) {
   for (const key of ['source_repo', 'source_ref', 'source_commit', 'files']) {
     if (!(key in lock)) errors.push(`${relPath} missing ${key}`);
   }
+  validateLifecycleMetadata(lock, relPath, errors);
   if (!Array.isArray(lock.files)) {
     errors.push(`${relPath} files must be an array`);
     return;
@@ -119,5 +166,6 @@ module.exports = {
   auditSourceLocks,
   discoverLockFiles,
   gitBlobSha,
-  hashFile
+  hashFile,
+  validateLifecycleMetadata
 };

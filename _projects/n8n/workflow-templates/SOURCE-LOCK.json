@@ -2,6 +2,10 @@
   "source_repo": "weijunswj/n8n-workflow-templates",
   "source_ref": "main",
   "source_commit": "0dbb1447539c66abea0208352104fca39f2a7765",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
   "files": [
     {
       "mode": "exact",

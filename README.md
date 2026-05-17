@@ -102,7 +102,9 @@ The installer MCP is future-facing and approval-gated. It is design-only until a
 
 ## Safe Source Updates
 
-Project modules are source-of-truth inputs. Safe source updates start in `_projects/**/_main/`, then declared recipes or linked root surfaces are reviewed through the sync/check workflow. AI may draft root skills, MCP docs, or curated output, but deterministic scripts publish and check declared outputs. ChatGPT scheduled review is advisory only.
+Project modules are source-of-truth inputs. Current source-watch automation is advisory and read-only: it renders active update candidates and archived migration sources from SOURCE-LOCK metadata, but it does not fetch upstream commits, copy files, update locks, create branches, or create PRs.
+
+Future safe source updates should start in `_projects/**/_main/`, then declared recipes or linked root surfaces are reviewed through the sync/check workflow. Retired internal migration repos are provenance-only and are not active watch targets. AI may draft root skills, MCP docs, or curated output, but deterministic scripts publish and check declared outputs. ChatGPT scheduled review is advisory only.
 
 ## Start Here
 
@@ -127,4 +129,6 @@ node scripts/audit-project-source-locks.cjs
 node --test tests/*.test.cjs
 node scripts/package-skills.cjs --check
 node scripts/package-packs.cjs --check
+python -m unittest discover -s tools/design-system-generator/tests
+git diff --check
 ```
