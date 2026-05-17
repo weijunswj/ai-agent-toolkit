@@ -25,11 +25,11 @@ jobs:
           node-version: 22
 
       - name: Check packaging inputs
-        run: node scripts/package-skills.cjs --check
+        run: node repo/scripts/package-skills.cjs --check
 
       - name: Build skill artifacts
         if: github.event_name != 'pull_request'
-        run: node scripts/package-skills.cjs
+        run: node repo/scripts/package-skills.cjs
 
       - name: Generate checksums
         if: github.event_name != 'pull_request'

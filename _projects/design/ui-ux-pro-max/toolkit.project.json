@@ -8,66 +8,66 @@
   "outputs": [
     {
       "kind": "linked",
-      "output": "skills/design/ui-ux-secure-frontend-design/SKILL.md",
-      "notes": "Published skill maintained at root. Review when _main/ changes."
+      "output": "for_ai/skills/design/ui-ux-secure-frontend-design/SKILL.md",
+      "notes": "Published skill maintained under for_ai. Review when _main/ changes."
     },
     {
       "kind": "linked",
-      "output": "mcp/projects/ui-ux-pro-max.md",
-      "notes": "Published MCP doc maintained at root. Review when _main/ changes."
+      "output": "for_ai/mcp/projects/ui-ux-pro-max.md",
+      "notes": "Published MCP doc maintained under for_ai. Review when _main/ changes."
     },
     {
       "kind": "linked",
-      "output": "guides/design/ui-ux-pro-max.md",
-      "notes": "Canonical root guide maintained at root. Review when _main/ changes."
+      "output": "for_ai/playbooks/design/ui-ux-pro-max.md",
+      "notes": "AI/operator playbook maintained under for_ai. Review when _main/ changes."
     },
     {
       "kind": "linked",
-      "output": "tools/design-system-generator/README.md",
-      "notes": "Root tool README maintained at root with toolkit safety context."
+      "output": "for_ai/tools/design-system-generator/README.md",
+      "notes": "AI-facing tool README maintained under for_ai with toolkit safety context."
     },
     {
       "kind": "linked",
-      "output": "tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
-      "notes": "Root third-party attribution maintained at root."
+      "output": "for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "notes": "AI-facing third-party attribution maintained under for_ai."
     },
     {
       "kind": "copy",
       "source": "_main/src/ui-ux-pro-max/scripts/core.py",
-      "output": "tools/design-system-generator/scripts/core.py",
+      "output": "for_ai/tools/design-system-generator/scripts/core.py",
       "notice": false
     },
     {
       "kind": "copy",
       "source": "_main/src/ui-ux-pro-max/scripts/design_system.py",
-      "output": "tools/design-system-generator/scripts/design_system.py",
+      "output": "for_ai/tools/design-system-generator/scripts/design_system.py",
       "notice": false
     },
     {
       "kind": "copy",
       "source": "_main/src/ui-ux-pro-max/data",
-      "output": "tools/design-system-generator/data",
+      "output": "for_ai/tools/design-system-generator/data",
       "notice": false
     },
     {
       "kind": "linked",
-      "output": "packs/design-system-generator/pack.json",
-      "notes": "Published pack maintained at root."
+      "output": "for_ai/packs/design-system-generator/pack.json",
+      "notes": "Published pack maintained under for_ai."
     }
   ],
   "writes": {
     "allowed": [
-      "skills/design/ui-ux-secure-frontend-design/SKILL.md",
-      "mcp/projects/ui-ux-pro-max.md",
-      "guides/design/ui-ux-pro-max.md",
-      "tools/design-system-generator/README.md",
-      "tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
-      "tools/design-system-generator/scripts/core.py",
-      "tools/design-system-generator/scripts/design_system.py",
-      "tools/design-system-generator/data",
-      "packs/design-system-generator/pack.json",
-      "registry/projects.registry.json",
-      "tools/design-system-generator/output/**"
+      "for_ai/skills/design/ui-ux-secure-frontend-design/SKILL.md",
+      "for_ai/mcp/projects/ui-ux-pro-max.md",
+      "for_ai/playbooks/design/ui-ux-pro-max.md",
+      "for_ai/tools/design-system-generator/README.md",
+      "for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "for_ai/tools/design-system-generator/scripts/core.py",
+      "for_ai/tools/design-system-generator/scripts/design_system.py",
+      "for_ai/tools/design-system-generator/data",
+      "for_ai/packs/design-system-generator/pack.json",
+      "for_ai/registry/projects.registry.json",
+      "for_ai/tools/design-system-generator/output/**"
     ],
     "denied": [
       ".env*",

@@ -1,0 +1,90 @@
+[
+  {
+    "id": "cicd.secure-installer",
+    "category": "cicd",
+    "name": "secure-installer",
+    "title": "Secure CI/CD Installer",
+    "module_path": "_projects/cicd/secure-installer",
+    "main_path": "_projects/cicd/secure-installer/_main",
+    "root_surfaces": [
+      "for_ai/mcp/projects/secure-cicd-installer.md",
+      "for_ai/packs/secure-cicd/pack.json",
+      "for_ai/playbooks/cicd/secure-cicd-installer.md",
+      "for_ai/skills/cicd/secure-cicd-installer/SKILL.md",
+      "for_ai/templates/cicd/README.md",
+      "for_ai/templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
+      "for_ai/templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
+      "for_ai/templates/n8n/sync-helpers/README.md",
+      "for_ai/templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "for_ai/templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "for_ai/templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "for_ai/templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "for_ai/templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
+      "for_ai/templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
+      "for_ai/templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
+      "for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs"
+    ]
+  },
+  {
+    "id": "design.ui-ux-pro-max",
+    "category": "design",
+    "name": "ui-ux-pro-max",
+    "title": "UI/UX Pro Max Design",
+    "module_path": "_projects/design/ui-ux-pro-max",
+    "main_path": "_projects/design/ui-ux-pro-max/_main",
+    "root_surfaces": [
+      "for_ai/mcp/projects/ui-ux-pro-max.md",
+      "for_ai/packs/design-system-generator/pack.json",
+      "for_ai/playbooks/design/ui-ux-pro-max.md",
+      "for_ai/skills/design/ui-ux-secure-frontend-design/SKILL.md",
+      "for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "for_ai/tools/design-system-generator/README.md",
+      "for_ai/tools/design-system-generator/data",
+      "for_ai/tools/design-system-generator/scripts/core.py",
+      "for_ai/tools/design-system-generator/scripts/design_system.py"
+    ]
+  },
+  {
+    "id": "n8n.local-setup",
+    "category": "n8n",
+    "name": "local-setup",
+    "title": "Local n8n Setup",
+    "module_path": "_projects/n8n/local-setup",
+    "main_path": "_projects/n8n/local-setup/_main",
+    "root_surfaces": [
+      "for_ai/mcp/projects/n8n-local-setup.md",
+      "for_ai/packs/claude-code-n8n-local/pack.json",
+      "for_ai/packs/codex-n8n-local/pack.json",
+      "for_ai/playbooks/n8n/local-setup.md",
+      "for_ai/skills/automation/n8n-local-setup/SKILL.md",
+      "for_ai/templates/agent-rules/AGENTS.md",
+      "for_ai/templates/agent-rules/CLAUDE.md",
+      "for_ai/templates/agent-rules/GEMINI.md",
+      "for_ai/templates/agent-rules/partials/skill-routing-rules.md",
+      "for_ai/templates/mcp-configs/README.md",
+      "for_ai/templates/mcp-configs/antigravity-mcp-config.md",
+      "for_ai/templates/mcp-configs/claude-mcp-config.md",
+      "for_ai/templates/mcp-configs/codex-mcp-config.md",
+      "for_ai/templates/mcp-configs/opencode-mcp-config.md"
+    ]
+  },
+  {
+    "id": "n8n.workflow-templates",
+    "category": "n8n",
+    "name": "workflow-templates",
+    "title": "n8n Workflow Templates",
+    "module_path": "_projects/n8n/workflow-templates",
+    "main_path": "_projects/n8n/workflow-templates/_main",
+    "root_surfaces": [
+      "for_ai/mcp/projects/n8n-workflow-templates.md",
+      "for_ai/packs/n8n-workflow-sync/pack.json",
+      "for_ai/playbooks/n8n/workflow-sync.md",
+      "for_ai/skills/automation/n8n-workflow-sync/SKILL.md",
+      "for_ai/templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
+      "for_ai/templates/n8n/sanitizer/README.md",
+      "for_ai/templates/n8n/sanitizer/prepare-n8n-template.js",
+      "for_ai/templates/n8n/sanitizer/sanitise-n8n-template.ps1",
+      "for_ai/templates/n8n/workflow-policy/README.md"
+    ]
+  }
+]

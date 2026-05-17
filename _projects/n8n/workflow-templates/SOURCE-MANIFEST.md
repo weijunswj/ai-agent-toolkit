@@ -6,10 +6,10 @@
 - `scripts/**`
 - `templates/**`
 
-## Root Surfaces
+## AI-Facing Surfaces
 
-- Root skill, MCP doc, guide, sanitizer docs, workflow policy, and pack are directly maintained and declared as `linked`.
-- Toolkit-adapted root sanitizer scripts are linked and source-locked.
+- AI-facing skill, MCP doc, playbook, sanitizer docs, workflow policy, and pack are directly maintained and declared as `linked`.
+- Toolkit-adapted AI-facing sanitizer scripts are linked and source-locked.
 
 ## Excluded
 

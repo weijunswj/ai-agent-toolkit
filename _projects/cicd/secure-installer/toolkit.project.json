@@ -8,105 +8,105 @@
   "outputs": [
     {
       "kind": "linked",
-      "output": "skills/cicd/secure-cicd-installer/SKILL.md",
-      "notes": "Published skill maintained at root. Review when _main/ changes."
+      "output": "for_ai/skills/cicd/secure-cicd-installer/SKILL.md",
+      "notes": "Published skill maintained under for_ai. Review when _main/ changes."
     },
     {
       "kind": "linked",
-      "output": "mcp/projects/secure-cicd-installer.md",
-      "notes": "Published MCP doc maintained at root. Review when _main/ changes."
+      "output": "for_ai/mcp/projects/secure-cicd-installer.md",
+      "notes": "Published MCP doc maintained under for_ai. Review when _main/ changes."
     },
     {
       "kind": "linked",
-      "output": "guides/cicd/secure-cicd-installer.md",
-      "notes": "Canonical root guide maintained at root. Review when _main/ changes."
+      "output": "for_ai/playbooks/cicd/secure-cicd-installer.md",
+      "notes": "AI/operator playbook maintained under for_ai. Review when _main/ changes."
     },
     {
       "kind": "linked",
-      "output": "templates/cicd/README.md",
-      "notes": "Root template index maintained at root."
+      "output": "for_ai/templates/cicd/README.md",
+      "notes": "AI-facing template index maintained under for_ai."
     },
     {
       "kind": "linked",
-      "output": "packs/secure-cicd/pack.json",
-      "notes": "Published pack maintained at root."
+      "output": "for_ai/packs/secure-cicd/pack.json",
+      "notes": "Published pack maintained under for_ai."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
-      "notes": "Root helper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
-      "notes": "Root helper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
-      "notes": "Root helper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
-      "notes": "Root helper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
-      "notes": "Root helper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
-      "notes": "Root helper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
-      "notes": "Root helper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
-      "notes": "Root helper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
-      "notes": "Root helper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
       "kind": "copy",
       "source": "_main/templates/n8n/validate-n8n-workflows.cjs",
-      "output": "templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
+      "output": "for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
       "notice": false
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sync-helpers/README.md",
-      "notes": "Root helper documentation maintained at root."
+      "output": "for_ai/templates/n8n/sync-helpers/README.md",
+      "notes": "AI-facing helper documentation maintained under for_ai."
     }
   ],
   "writes": {
     "allowed": [
-      "skills/cicd/secure-cicd-installer/SKILL.md",
-      "mcp/projects/secure-cicd-installer.md",
-      "guides/cicd/secure-cicd-installer.md",
-      "templates/cicd/README.md",
-      "packs/secure-cicd/pack.json",
-      "templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
-      "templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
-      "templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
-      "templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
-      "templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
-      "templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
-      "templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
-      "templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
-      "templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
-      "templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
-      "templates/n8n/sync-helpers/README.md",
-      "registry/projects.registry.json"
+      "for_ai/skills/cicd/secure-cicd-installer/SKILL.md",
+      "for_ai/mcp/projects/secure-cicd-installer.md",
+      "for_ai/playbooks/cicd/secure-cicd-installer.md",
+      "for_ai/templates/cicd/README.md",
+      "for_ai/packs/secure-cicd/pack.json",
+      "for_ai/templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
+      "for_ai/templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
+      "for_ai/templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "for_ai/templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "for_ai/templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "for_ai/templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "for_ai/templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
+      "for_ai/templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
+      "for_ai/templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
+      "for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
+      "for_ai/templates/n8n/sync-helpers/README.md",
+      "for_ai/registry/projects.registry.json"
     ],
     "denied": [
       ".env*",

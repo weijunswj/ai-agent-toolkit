@@ -3,17 +3,17 @@ name: Build agent rule templates
 on:
   pull_request:
     paths:
-      - templates/agent-rules/partials/**
-      - scripts/build-agent-rule-templates.ps1
-      - scripts/- build-agent-rule-templates.cmd
+      - for_ai/templates/agent-rules/partials/**
+      - repo/scripts/build-agent-rule-templates.ps1
+      - repo/scripts/- build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
   push:
     branches:
       - main
     paths:
-      - templates/agent-rules/partials/**
-      - scripts/build-agent-rule-templates.ps1
-      - scripts/- build-agent-rule-templates.cmd
+      - for_ai/templates/agent-rules/partials/**
+      - repo/scripts/build-agent-rule-templates.ps1
+      - repo/scripts/- build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
   workflow_dispatch:
 
@@ -39,12 +39,12 @@ jobs:
 
       - name: Regenerate templates
         shell: pwsh
-        run: ./scripts/build-agent-rule-templates.ps1
+        run: ./repo/scripts/build-agent-rule-templates.ps1
 
       - name: Auto-commit generated templates on same-repo PR branches
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref != 'main'
         run: |
-          git add templates/agent-rules/AGENTS.md templates/agent-rules/CLAUDE.md templates/agent-rules/GEMINI.md
+          git add for_ai/templates/agent-rules/AGENTS.md for_ai/templates/agent-rules/CLAUDE.md for_ai/templates/agent-rules/GEMINI.md
           if git diff --cached --quiet; then
             echo "Generated agent rule templates are current."
           else
@@ -55,4 +55,4 @@ jobs:
           fi
 
       - name: Verify generated files are current
-        run: git diff --exit-code -- templates/agent-rules/AGENTS.md templates/agent-rules/CLAUDE.md templates/agent-rules/GEMINI.md
+        run: git diff --exit-code -- for_ai/templates/agent-rules/AGENTS.md for_ai/templates/agent-rules/CLAUDE.md for_ai/templates/agent-rules/GEMINI.md

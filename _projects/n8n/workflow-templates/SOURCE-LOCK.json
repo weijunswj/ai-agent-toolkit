@@ -34,23 +34,23 @@
     {
       "mode": "adapted",
       "source_path": "scripts/- sanitise-n8n-template.cmd",
-      "root_surface_path": "templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
+      "root_surface_path": "for_ai/templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
       "source_blob_sha": "0ed27a6b98c45ae3695e662ded246c1a8739a974",
-      "notes": "Root sanitizer wrapper keeps toolkit-relative command paths."
+      "notes": "AI-facing sanitizer wrapper keeps toolkit-relative command paths."
     },
     {
       "mode": "adapted",
       "source_path": "scripts/prepare-n8n-template.js",
-      "root_surface_path": "templates/n8n/sanitizer/prepare-n8n-template.js",
+      "root_surface_path": "for_ai/templates/n8n/sanitizer/prepare-n8n-template.js",
       "source_blob_sha": "caf48c9bab0ebb7945e3b783e572422f84672c2c",
-      "notes": "Root sanitizer script keeps toolkit-relative usage text."
+      "notes": "AI-facing sanitizer script keeps toolkit-relative usage text."
     },
     {
       "mode": "adapted",
       "source_path": "scripts/sanitise-n8n-template.ps1",
-      "root_surface_path": "templates/n8n/sanitizer/sanitise-n8n-template.ps1",
+      "root_surface_path": "for_ai/templates/n8n/sanitizer/sanitise-n8n-template.ps1",
       "source_blob_sha": "725541965ed49dabc04d4c2af93bff1b9e141384",
-      "notes": "Root sanitizer wrapper keeps toolkit-relative command paths."
+      "notes": "AI-facing sanitizer wrapper keeps toolkit-relative command paths."
     },
     {
       "mode": "exact",

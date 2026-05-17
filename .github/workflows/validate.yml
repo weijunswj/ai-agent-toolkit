@@ -30,11 +30,11 @@ jobs:
 
       - name: Run validation
         run: |
-          node scripts/sync-toolkit-projects.cjs --check
-          node scripts/audit-project-source-locks.cjs
-          node scripts/validate-toolkit.cjs
-          node --test tests/*.test.cjs
-          node scripts/package-skills.cjs --check
-          node scripts/package-packs.cjs --check
-          python -m unittest discover -s tools/design-system-generator/tests
+          node repo/scripts/sync-toolkit-projects.cjs --check
+          node repo/scripts/audit-project-source-locks.cjs
+          node repo/scripts/validate-toolkit.cjs
+          node --test repo/tests/*.test.cjs
+          node repo/scripts/package-skills.cjs --check
+          node repo/scripts/package-packs.cjs --check
+          python -m unittest discover -s for_ai/tools/design-system-generator/tests
           git diff --check

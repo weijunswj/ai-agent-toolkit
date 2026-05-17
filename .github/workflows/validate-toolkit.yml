@@ -25,13 +25,13 @@ jobs:
           node-version: 22
 
       - name: Check validator syntax
-        run: node --check scripts/validate-toolkit.cjs
+        run: node --check repo/scripts/validate-toolkit.cjs
 
       - name: Validate toolkit
-        run: node scripts/validate-toolkit.cjs
+        run: node repo/scripts/validate-toolkit.cjs
 
       - name: Run tests
-        run: node --test tests/*.test.cjs
+        run: node --test repo/tests/*.test.cjs
 
       - name: Check whitespace
         run: git diff --check
