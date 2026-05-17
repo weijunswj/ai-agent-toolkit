@@ -12,6 +12,7 @@ param(
   [switch]$AllowMissingCredentialBindings,
   [switch]$SkipCredentialBindingRefresh,
   [switch]$RestartContainerAfterImport,
+  [switch]$ForceImport,
   [switch]$DryRun
 )
 
@@ -32,7 +33,26 @@ if (-not [string]::IsNullOrWhiteSpace($ProjectId) -and -not [string]::IsNullOrWh
   throw "ProjectId and UserId cannot both be set. Choose one import target."
 }
 
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+function Resolve-RepoRootFromScript {
+  $current = (Resolve-Path $PSScriptRoot).Path
+  while ($true) {
+    if (
+      (Test-Path -LiteralPath (Join-Path $current ".git")) -or
+      (Test-Path -LiteralPath (Join-Path $current "n8n-workflows"))
+    ) {
+      return $current
+    }
+
+    $parent = Split-Path -Parent $current
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
+      return (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+    }
+    $current = $parent
+  }
+}
+
+$HelperScriptDir = (Resolve-Path $PSScriptRoot).Path
+$RepoRoot = Resolve-RepoRootFromScript
 Set-Location $RepoRoot
 
 function Write-Section($Title) {
@@ -54,6 +74,9 @@ function Invoke-CapturedCommand($Command, [string[]]$Arguments) {
   $process.StartInfo.RedirectStandardError = $true
   $process.StartInfo.UseShellExecute = $false
   $process.StartInfo.CreateNoWindow = $true
+  if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
+    $process.StartInfo.WorkingDirectory = $RepoRoot
+  }
   $process.StartInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
   $process.StartInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
 
@@ -88,6 +111,126 @@ function Get-DisplayPath($Path) {
   }
 
   return $resolvedPath
+}
+
+function Resolve-ProjectWorkflowHookScripts {
+  $candidates = New-Object System.Collections.Generic.List[object]
+
+  function Add-HookScriptCandidate([string]$HookPath, [bool]$Required) {
+    if ([string]::IsNullOrWhiteSpace($HookPath)) {
+      return
+    }
+
+    if ([System.IO.Path]::IsPathRooted($HookPath)) {
+      $fullPath = [System.IO.Path]::GetFullPath($HookPath)
+    } else {
+      $fullPath = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $HookPath))
+    }
+
+    $candidates.Add([PSCustomObject]@{
+      Path = $fullPath
+      Required = $Required
+    })
+  }
+
+  # Generic import extension point:
+  # keep this script project-agnostic. If a target repo needs import/export
+  # cleanup, repair, or normalisation, add scripts\n8n-workflow-hooks.* in that
+  # repo instead of hardcoding workflow-specific rules here.
+  if (-not [string]::IsNullOrWhiteSpace($env:N8N_WORKFLOW_HOOK_SCRIPT)) {
+    foreach ($hookPath in @($env:N8N_WORKFLOW_HOOK_SCRIPT -split ';')) {
+      Add-HookScriptCandidate $hookPath $true
+    }
+  }
+
+  foreach ($relativePath in @(
+    "scripts\n8n-workflow-hooks.cjs",
+    "scripts\n8n-workflow-hooks.js",
+    "scripts\n8n-workflow-hooks.ps1",
+    ".n8n-local\n8n-workflow-hooks.cjs",
+    ".n8n-local\n8n-workflow-hooks.js",
+    ".n8n-local\n8n-workflow-hooks.ps1",
+    ".n8n-workflow-hooks.cjs",
+    ".n8n-workflow-hooks.js",
+    ".n8n-workflow-hooks.ps1"
+  )) {
+    Add-HookScriptCandidate $relativePath $false
+  }
+
+  $seen = @{}
+  $existingScripts = @()
+  foreach ($candidate in $candidates) {
+    $script = $candidate.Path
+    if ($seen.ContainsKey($script)) {
+      continue
+    }
+    $seen[$script] = $true
+    if (Test-Path -LiteralPath $script -PathType Leaf) {
+      $existingScripts += $script
+    } elseif ($candidate.Required) {
+      throw "Configured n8n workflow hook script not found: $(Get-DisplayPath $script)"
+    }
+  }
+
+  return $existingScripts
+}
+
+function Resolve-PowerShellHookCommand {
+  $currentProcessPath = [System.Diagnostics.Process]::GetCurrentProcess().Path
+  if (-not [string]::IsNullOrWhiteSpace($currentProcessPath) -and (Test-Path -LiteralPath $currentProcessPath -PathType Leaf)) {
+    return $currentProcessPath
+  }
+
+  foreach ($candidate in @("pwsh", "powershell")) {
+    $commandInfo = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($commandInfo -and -not [string]::IsNullOrWhiteSpace($commandInfo.Source)) {
+      return $commandInfo.Source
+    }
+  }
+
+  throw "Could not find a PowerShell host to run .ps1 n8n workflow hook scripts. Install pwsh or powershell."
+}
+
+function Invoke-ProjectWorkflowHook($HookName, [hashtable]$Context) {
+  $hookScripts = @(Resolve-ProjectWorkflowHookScripts)
+  if ($hookScripts.Count -eq 0) {
+    return
+  }
+
+  $hookArgs = @($HookName, "--repo-root", $RepoRoot)
+  foreach ($key in @($Context.Keys | Sort-Object)) {
+    $value = $Context[$key]
+    if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
+      continue
+    }
+    $hookArgs += "--$key"
+    $hookArgs += [string]$value
+  }
+
+  foreach ($hookScript in $hookScripts) {
+    $extension = [System.IO.Path]::GetExtension($hookScript).ToLowerInvariant()
+    if ($extension -eq ".cjs" -or $extension -eq ".js") {
+      $command = "node"
+      $arguments = @($hookScript) + $hookArgs
+    } elseif ($extension -eq ".ps1") {
+      $command = Resolve-PowerShellHookCommand
+      $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $hookScript) + $hookArgs
+    } elseif ($extension -eq ".cmd" -or $extension -eq ".bat") {
+      $command = $hookScript
+      $arguments = $hookArgs
+    } else {
+      throw "Unsupported n8n workflow hook extension '$extension' for $hookScript. Use .cjs, .js, .ps1, .cmd, or .bat."
+    }
+
+    Write-Step "HOOK" "$HookName -> $(Get-DisplayPath $hookScript)"
+    $hookResult = Invoke-CapturedCommand $command $arguments
+    if ($hookResult.Output.Count -gt 0) {
+      Write-Host ($hookResult.Output -join "`n")
+    }
+    if ($hookResult.ExitCode -ne 0) {
+      throw "Project n8n workflow hook '$HookName' failed: $hookScript"
+    }
+  }
 }
 
 function Initialize-RunDirectory($Path) {
@@ -317,7 +460,7 @@ function Export-CredentialBindingsOnly($WorkflowFiles, $LiveWorkflows) {
     Write-Step "EXPORT" "$($workflowFile.Name) exported for credential binding refresh."
   }
 
-  $syncResult = Invoke-CapturedCommand "node" @("scripts/sync-n8n-live-exports.cjs", $CredentialExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--credentials-only", "--allow-missing-exports")
+  $syncResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $CredentialExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--credentials-only", "--allow-missing-exports")
   if ($syncResult.ExitCode -ne 0) {
     Write-Step "FAIL" "Could not save refreshed credential bindings."
     Write-Host ($syncResult.Output -join "`n")
@@ -457,7 +600,7 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
     }
 
     if ($workflowStatus -eq "ExistingById" -or $workflowStatus -eq "ExistingByName" -or $workflowStatus -eq "ExistingArchivedById") {
-      $comparisonResult = Invoke-CapturedCommand "node" @("scripts/should-import-n8n-workflow.cjs", $workflowFile.FullName, $liveCompareFile)
+      $comparisonResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "should-import-n8n-workflow.cjs"), $workflowFile.FullName, $liveCompareFile)
       if ($comparisonResult.ExitCode -ne 0) {
         throw "Failed to compare repo workflow with live workflow for $($workflowFile.FullName).`n$($comparisonResult.Output -join "`n")"
       }
@@ -466,7 +609,7 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
         $hasBodyChanges = $false
       }
 
-      $credentialDriftResult = Invoke-CapturedCommand "node" @("scripts/compare-n8n-workflow-credentials.cjs", $workflowFile.FullName, $liveCompareFile, $BindingsFilePath)
+      $credentialDriftResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "compare-n8n-workflow-credentials.cjs"), $workflowFile.FullName, $liveCompareFile, $BindingsFilePath)
       if ($credentialDriftResult.ExitCode -ne 0) {
         throw "Failed to compare live credentials for $($workflowFile.FullName).`n$($credentialDriftResult.Output -join "`n")"
       }
@@ -485,7 +628,11 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
         Write-Step "CRED" "$($workflowFile.Name) has credential binding changes; it will be imported."
       }
 
-      if (-not $hasBodyChanges -and $credentialDriftStatus -ne "DIFF") {
+      if (-not $hasBodyChanges -and $credentialDriftStatus -ne "DIFF" -and $ForceImport) {
+        Write-Step "FORCE" "$($workflowFile.Name) has no meaningful workflow or credential changes, but ForceImport is set."
+      }
+
+      if (-not $hasBodyChanges -and $credentialDriftStatus -ne "DIFF" -and -not $ForceImport) {
         Write-Step "SKIP" "$($workflowFile.Name) has no meaningful workflow or credential changes."
         $skippedCount += 1
         $shouldImport = $false
@@ -515,7 +662,7 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
     }
 
     $prepareArgs = @(
-      "scripts/prepare-n8n-live-import.cjs",
+      (Join-Path $HelperScriptDir "prepare-n8n-live-import.cjs"),
       $workflowFile.FullName,
       $BindingsFilePath,
       $preparedFile
@@ -583,7 +730,7 @@ function Write-BlockedSummary($PreflightResult) {
 
   Write-Section "Next Action Steps"
   Write-Host "1. Confirm Docker and the n8n container are reachable."
-  Write-Host "2. Run scripts\export-n8n-workflows-live.ps1 if you want to refresh repo JSON and credential bindings together."
+  Write-Host "2. Run this helper folder's export-n8n-workflows-live.ps1 if you want to refresh repo JSON and credential bindings together."
   Write-Host "3. Use -AllowMissingCredentialBindings only if you intentionally want changed workflows imported without restored credentials."
   Write-Host "4. Deleting archived workflows is not supported by these CLI helper scripts yet."
 }
@@ -625,16 +772,27 @@ Write-Host ("Archived by name : {0}" -f $ArchivedByNameMode)
 Write-Host ("ProjectId        : {0}" -f ($(if ([string]::IsNullOrWhiteSpace($ProjectId)) { "(not set)" } else { $ProjectId })))
 Write-Host ("UserId           : {0}" -f ($(if ([string]::IsNullOrWhiteSpace($UserId)) { "(not set)" } else { $UserId })))
 Write-Host ("Restart warning  : {0}" -f ($(if ($RestartContainerAfterImport) { "Restart container after successful import when needed" } else { "Warn only" })))
+Write-Host ("Force import     : {0}" -f ($(if ($ForceImport) { "Yes" } else { "No" })))
 
 $bindingsFileExists = Test-Path -Path $BindingsFilePath -PathType Leaf
 if (-not $bindingsFileExists) {
   Write-Step "WARN" "Credential bindings file is missing. Existing live credentials cannot be restored unless live workflows are exportable first."
 }
 
+Invoke-ProjectWorkflowHook "before-import-validation" @{
+  "archived-by-name-mode" = $ArchivedByNameMode
+  "bindings-file" = $BindingsFilePath
+  "container" = $Container
+  "dry-run" = [string]([bool]$DryRun)
+  "force-import" = [string]([bool]$ForceImport)
+  "prepared-dir" = $PreparedDirPath
+  "workflow-dir" = $WorkflowDirPath
+}
+
 $workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath
 
 Write-Section "Workflow JSON Validation"
-$validationResult = Invoke-CapturedCommand "node" @("scripts/validate-n8n-workflows.cjs", $WorkflowDirPath)
+$validationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"), $WorkflowDirPath)
 if ($validationResult.ExitCode -ne 0) {
   throw "Workflow JSON validation failed before live import.`n$($validationResult.Output -join "`n")"
 }
@@ -691,6 +849,16 @@ if ($DryRun) {
   }
   Write-Host "Deleting archived workflows is not supported by these CLI helper scripts yet."
   exit 0
+}
+
+Invoke-ProjectWorkflowHook "before-live-import" @{
+  "archived-by-name-mode" = $ArchivedByNameMode
+  "bindings-file" = $BindingsFilePath
+  "container" = $Container
+  "dry-run" = [string]([bool]$DryRun)
+  "force-import" = [string]([bool]$ForceImport)
+  "prepared-dir" = $PreparedDirPath
+  "workflow-dir" = $WorkflowDirPath
 }
 
 Write-Section "Import"
