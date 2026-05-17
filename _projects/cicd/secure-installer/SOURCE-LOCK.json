@@ -9,7 +9,7 @@
   "files": [
     {
       "mode": "exact",
-      "source_path": "docs/n8n/n8n-credential-migration-map.example.json",
+      "source_path": "repo/docs/n8n/n8n-credential-migration-map.example.json",
       "project_path": "_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json",
       "source_blob_sha": "633437a227a6604872d7bfcd11400b4acf79cffc"
     },
@@ -21,136 +21,136 @@
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/- export-n8n-workflows-live.cmd",
+      "source_path": "for_ai/templates/n8n/- export-n8n-workflows-live.cmd",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/- export-n8n-workflows-live.cmd",
       "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66"
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/- import-n8n-workflows-live.cmd",
+      "source_path": "for_ai/templates/n8n/- import-n8n-workflows-live.cmd",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/- import-n8n-workflows-live.cmd",
       "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898"
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/compare-n8n-workflow-credentials.cjs",
+      "source_path": "for_ai/templates/n8n/compare-n8n-workflow-credentials.cjs",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/compare-n8n-workflow-credentials.cjs",
       "source_blob_sha": "e08a2877950c780602d0aa95c3fd18f895d66ed5"
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/export-n8n-workflows-live.ps1",
+      "source_path": "for_ai/templates/n8n/export-n8n-workflows-live.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/export-n8n-workflows-live.ps1",
       "source_blob_sha": "7cef2a3aaa3a60f66fe4ee6c83055c459be56f65"
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/import-n8n-workflows-live.ps1",
+      "source_path": "for_ai/templates/n8n/import-n8n-workflows-live.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/import-n8n-workflows-live.ps1",
       "source_blob_sha": "7c124a2e2b7598bcbab3d75524ea0377008589b0"
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/n8n-workflow-sync-menu.ps1",
+      "source_path": "for_ai/templates/n8n/n8n-workflow-sync-menu.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/n8n-workflow-sync-menu.ps1",
       "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a"
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/prepare-n8n-live-import.cjs",
+      "source_path": "for_ai/templates/n8n/prepare-n8n-live-import.cjs",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/prepare-n8n-live-import.cjs",
       "source_blob_sha": "993af3fa2d0109a3c0f96557c4a546f0051b375c"
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/should-import-n8n-workflow.cjs",
+      "source_path": "for_ai/templates/n8n/should-import-n8n-workflow.cjs",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/should-import-n8n-workflow.cjs",
       "source_blob_sha": "133ad09249778e1a76ec6a6856da6a6c9f3432b1"
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/sync-n8n-live-exports.cjs",
+      "source_path": "for_ai/templates/n8n/sync-n8n-live-exports.cjs",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/sync-n8n-live-exports.cjs",
       "source_blob_sha": "e1203399a67cdbee3c07657bffddeb886b6b3c43"
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/validate-n8n-workflows.cjs",
+      "source_path": "for_ai/templates/n8n/validate-n8n-workflows.cjs",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/validate-n8n-workflows.cjs",
       "source_blob_sha": "0447740b535b9babf88babd6c9ff2e508d9fa9be"
     },
     {
       "mode": "adapted",
-      "source_path": "templates/n8n/- export-n8n-workflows-live.cmd",
-      "root_surface_path": "templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
+      "source_path": "for_ai/templates/n8n/- export-n8n-workflows-live.cmd",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
       "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66",
-      "notes": "Root helper keeps toolkit-relative command paths."
+      "notes": "AI-facing helper keeps toolkit-relative command paths."
     },
     {
       "mode": "adapted",
-      "source_path": "templates/n8n/- import-n8n-workflows-live.cmd",
-      "root_surface_path": "templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
+      "source_path": "for_ai/templates/n8n/- import-n8n-workflows-live.cmd",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
       "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898",
-      "notes": "Root helper keeps toolkit-relative command paths."
+      "notes": "AI-facing helper keeps toolkit-relative command paths."
     },
     {
       "mode": "adapted",
-      "source_path": "templates/n8n/compare-n8n-workflow-credentials.cjs",
-      "root_surface_path": "templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "source_path": "for_ai/templates/n8n/compare-n8n-workflow-credentials.cjs",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
       "source_blob_sha": "e08a2877950c780602d0aa95c3fd18f895d66ed5",
-      "notes": "Root helper keeps toolkit-relative usage text."
+      "notes": "AI-facing helper keeps toolkit-relative usage text."
     },
     {
       "mode": "adapted",
-      "source_path": "templates/n8n/export-n8n-workflows-live.ps1",
-      "root_surface_path": "templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "source_path": "for_ai/templates/n8n/export-n8n-workflows-live.ps1",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
       "source_blob_sha": "7cef2a3aaa3a60f66fe4ee6c83055c459be56f65",
-      "notes": "Root helper keeps toolkit-relative command paths."
+      "notes": "AI-facing helper keeps toolkit-relative command paths."
     },
     {
       "mode": "adapted",
-      "source_path": "templates/n8n/import-n8n-workflows-live.ps1",
-      "root_surface_path": "templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "source_path": "for_ai/templates/n8n/import-n8n-workflows-live.ps1",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
       "source_blob_sha": "7c124a2e2b7598bcbab3d75524ea0377008589b0",
-      "notes": "Root helper keeps toolkit-relative command paths."
+      "notes": "AI-facing helper keeps toolkit-relative command paths."
     },
     {
       "mode": "adapted",
-      "source_path": "templates/n8n/n8n-workflow-sync-menu.ps1",
-      "root_surface_path": "templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "source_path": "for_ai/templates/n8n/n8n-workflow-sync-menu.ps1",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
       "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a",
-      "notes": "Root helper keeps toolkit-relative command paths."
+      "notes": "AI-facing helper keeps toolkit-relative command paths."
     },
     {
       "mode": "adapted",
-      "source_path": "templates/n8n/prepare-n8n-live-import.cjs",
-      "root_surface_path": "templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
+      "source_path": "for_ai/templates/n8n/prepare-n8n-live-import.cjs",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
       "source_blob_sha": "993af3fa2d0109a3c0f96557c4a546f0051b375c",
-      "notes": "Root helper keeps toolkit-relative usage text."
+      "notes": "AI-facing helper keeps toolkit-relative usage text."
     },
     {
       "mode": "adapted",
-      "source_path": "templates/n8n/should-import-n8n-workflow.cjs",
-      "root_surface_path": "templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
+      "source_path": "for_ai/templates/n8n/should-import-n8n-workflow.cjs",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
       "source_blob_sha": "133ad09249778e1a76ec6a6856da6a6c9f3432b1",
-      "notes": "Root helper keeps toolkit-relative usage text."
+      "notes": "AI-facing helper keeps toolkit-relative usage text."
     },
     {
       "mode": "adapted",
-      "source_path": "templates/n8n/sync-n8n-live-exports.cjs",
-      "root_surface_path": "templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
+      "source_path": "for_ai/templates/n8n/sync-n8n-live-exports.cjs",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
       "source_blob_sha": "e1203399a67cdbee3c07657bffddeb886b6b3c43",
-      "notes": "Root helper keeps toolkit-relative usage text."
+      "notes": "AI-facing helper keeps toolkit-relative usage text."
     },
     {
       "mode": "exact",
-      "source_path": "templates/n8n/validate-n8n-workflows.cjs",
-      "root_surface_path": "templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
+      "source_path": "for_ai/templates/n8n/validate-n8n-workflows.cjs",
+      "root_surface_path": "for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
       "source_blob_sha": "0447740b535b9babf88babd6c9ff2e508d9fa9be"
     },
     {
       "mode": "exact",
-      "source_path": "tests/n8n-helper-scripts.test.js",
+      "source_path": "repo/tests/n8n-helper-scripts.test.js",
       "project_path": "_projects/cicd/secure-installer/_main/tests/n8n-helper-scripts.test.js",
       "source_blob_sha": "08bd2a4f8ee204e7e51c9d1e1aacec9b7d045f8e"
     }

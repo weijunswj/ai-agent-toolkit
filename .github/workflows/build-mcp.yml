@@ -3,15 +3,15 @@ name: Build MCP docs
 on:
   pull_request:
     paths:
-      - mcp/**
-      - registry/**
+      - for_ai/mcp/**
+      - for_ai/registry/**
       - .github/workflows/build-mcp.yml
   push:
     branches:
       - main
     paths:
-      - mcp/**
-      - registry/**
+      - for_ai/mcp/**
+      - for_ai/registry/**
       - .github/workflows/build-mcp.yml
   workflow_dispatch:
 
@@ -33,7 +33,7 @@ jobs:
           node-version: 22
 
       - name: Validate design-only MCP docs
-        run: node scripts/validate-toolkit.cjs
+        run: node repo/scripts/validate-toolkit.cjs
 
       - name: Note design-only status
         run: echo "MCP server implementation is design-only in v1; no server build is expected."

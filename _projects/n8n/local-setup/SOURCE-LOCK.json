@@ -63,73 +63,73 @@
     },
     {
       "mode": "exact",
-      "source_path": "scripts/- build-templates.cmd",
+      "source_path": "repo/scripts/- build-templates.cmd",
       "project_path": "_projects/n8n/local-setup/_main/scripts/- build-templates.cmd",
       "source_blob_sha": "9cfed9002678d4b1e868f98ce2b3c0eb23887e70"
     },
     {
       "mode": "exact",
-      "source_path": "scripts/build-templates.ps1",
+      "source_path": "repo/scripts/build-templates.ps1",
       "project_path": "_projects/n8n/local-setup/_main/scripts/build-templates.ps1",
       "source_blob_sha": "2e393ef5040915e3db4a576f3987eab70c15e690"
     },
     {
       "mode": "exact",
-      "source_path": "scripts/windows/start-n8n-ngrok.bat",
+      "source_path": "repo/scripts/windows/start-n8n-ngrok.bat",
       "project_path": "_projects/n8n/local-setup/_main/scripts/windows/start-n8n-ngrok.bat",
       "source_blob_sha": "2f3b40bdcf4e3cd9e54dce86e33b85653fb51c4a"
     },
     {
       "mode": "exact",
-      "source_path": "templates/AGENTS.md",
+      "source_path": "for_ai/templates/AGENTS.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/AGENTS.md",
       "source_blob_sha": "de51a356c39d61aa6ce5456a369e32d364d7b3cd"
     },
     {
       "mode": "exact",
-      "source_path": "templates/antigravity-mcp-config.md",
+      "source_path": "for_ai/templates/antigravity-mcp-config.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/antigravity-mcp-config.md",
       "source_blob_sha": "e366f703f5f8de45f3715628cec0a4c195fee274"
     },
     {
       "mode": "exact",
-      "source_path": "templates/claude-mcp-config.md",
+      "source_path": "for_ai/templates/claude-mcp-config.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/claude-mcp-config.md",
       "source_blob_sha": "1d050c7f8430aad5a2b09c476ec955cbdb5b765d"
     },
     {
       "mode": "exact",
-      "source_path": "templates/CLAUDE.md",
+      "source_path": "for_ai/templates/CLAUDE.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/CLAUDE.md",
       "source_blob_sha": "854c24eedfb580fd8cf0f946642067dfabc5c5dc"
     },
     {
       "mode": "exact",
-      "source_path": "templates/codex-mcp-config.md",
+      "source_path": "for_ai/templates/codex-mcp-config.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/codex-mcp-config.md",
       "source_blob_sha": "66015cf2c0c9cdf01ad5fe5daa2b5656a2ba57c6"
     },
     {
       "mode": "exact",
-      "source_path": "templates/GEMINI.md",
+      "source_path": "for_ai/templates/GEMINI.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/GEMINI.md",
       "source_blob_sha": "306ec26cd0ede85f0e0bcd1b0e4b559466911711"
     },
     {
       "mode": "exact",
-      "source_path": "templates/opencode-mcp-config.md",
+      "source_path": "for_ai/templates/opencode-mcp-config.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/opencode-mcp-config.md",
       "source_blob_sha": "31502fdc926cc1c4c9343945afd4dd477d1f7278"
     },
     {
       "mode": "exact",
-      "source_path": "templates/partials/ai-coding-agent-execution.md",
+      "source_path": "for_ai/templates/partials/ai-coding-agent-execution.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md",
       "source_blob_sha": "33361f156446e64eb501c5fbc769e5ccab478236"
     },
     {
       "mode": "exact",
-      "source_path": "templates/partials/n8n-mcp-rules.md",
+      "source_path": "for_ai/templates/partials/n8n-mcp-rules.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md",
       "source_blob_sha": "ed961cd1b9a5ff25b7a077d98fa32f0e8b790e72"
     }

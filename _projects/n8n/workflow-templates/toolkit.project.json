@@ -8,62 +8,62 @@
   "outputs": [
     {
       "kind": "linked",
-      "output": "skills/automation/n8n-workflow-sync/SKILL.md",
-      "notes": "Published skill maintained at root. Review when _main/ changes."
+      "output": "for_ai/skills/automation/n8n-workflow-sync/SKILL.md",
+      "notes": "Published skill maintained under for_ai. Review when _main/ changes."
     },
     {
       "kind": "linked",
-      "output": "mcp/projects/n8n-workflow-templates.md",
-      "notes": "Published MCP doc maintained at root. Review when _main/ changes."
+      "output": "for_ai/mcp/projects/n8n-workflow-templates.md",
+      "notes": "Published MCP doc maintained under for_ai. Review when _main/ changes."
     },
     {
       "kind": "linked",
-      "output": "guides/n8n/workflow-sync.md",
-      "notes": "Canonical root guide maintained at root. Review when _main/ changes."
+      "output": "for_ai/playbooks/n8n/workflow-sync.md",
+      "notes": "AI/operator playbook maintained under for_ai. Review when _main/ changes."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sanitizer/README.md",
-      "notes": "Root sanitizer documentation maintained at root."
+      "output": "for_ai/templates/n8n/sanitizer/README.md",
+      "notes": "AI-facing sanitizer documentation maintained under for_ai."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
-      "notes": "Root sanitizer wrapper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
+      "notes": "AI-facing sanitizer wrapper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sanitizer/prepare-n8n-template.js",
-      "notes": "Root sanitizer script is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sanitizer/prepare-n8n-template.js",
+      "notes": "AI-facing sanitizer script is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/sanitizer/sanitise-n8n-template.ps1",
-      "notes": "Root sanitizer wrapper is toolkit-adapted and source-locked."
+      "output": "for_ai/templates/n8n/sanitizer/sanitise-n8n-template.ps1",
+      "notes": "AI-facing sanitizer wrapper is toolkit-adapted and source-locked."
     },
     {
       "kind": "linked",
-      "output": "templates/n8n/workflow-policy/README.md",
-      "notes": "Root workflow policy maintained at root."
+      "output": "for_ai/templates/n8n/workflow-policy/README.md",
+      "notes": "AI-facing workflow policy maintained under for_ai."
     },
     {
       "kind": "linked",
-      "output": "packs/n8n-workflow-sync/pack.json",
-      "notes": "Published pack maintained at root."
+      "output": "for_ai/packs/n8n-workflow-sync/pack.json",
+      "notes": "Published pack maintained under for_ai."
     }
   ],
   "writes": {
     "allowed": [
-      "skills/automation/n8n-workflow-sync/SKILL.md",
-      "mcp/projects/n8n-workflow-templates.md",
-      "guides/n8n/workflow-sync.md",
-      "templates/n8n/sanitizer/README.md",
-      "templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
-      "templates/n8n/sanitizer/prepare-n8n-template.js",
-      "templates/n8n/sanitizer/sanitise-n8n-template.ps1",
-      "templates/n8n/workflow-policy/README.md",
-      "packs/n8n-workflow-sync/pack.json",
-      "registry/projects.registry.json"
+      "for_ai/skills/automation/n8n-workflow-sync/SKILL.md",
+      "for_ai/mcp/projects/n8n-workflow-templates.md",
+      "for_ai/playbooks/n8n/workflow-sync.md",
+      "for_ai/templates/n8n/sanitizer/README.md",
+      "for_ai/templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
+      "for_ai/templates/n8n/sanitizer/prepare-n8n-template.js",
+      "for_ai/templates/n8n/sanitizer/sanitise-n8n-template.ps1",
+      "for_ai/templates/n8n/workflow-policy/README.md",
+      "for_ai/packs/n8n-workflow-sync/pack.json",
+      "for_ai/registry/projects.registry.json"
     ],
     "denied": [
       ".env*",

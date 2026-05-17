@@ -28,7 +28,7 @@ jobs:
           HAS_SOURCE_TOKEN: ${{ secrets.TOOLKIT_SOURCE_REPO_TOKEN != '' }}
         run: |
           mkdir -p safe-source-update
-          node scripts/safe-source-update.cjs --source "configured toolkit sources" --out safe-source-update/summary.md README.md docs/SAFE-UPDATES.md templates/cicd/safe-source-update-policy.md
+          node repo/scripts/safe-source-update.cjs --source "configured toolkit sources" --out safe-source-update/summary.md README.md repo/docs/SAFE-UPDATES.md for_ai/templates/cicd/safe-source-update-policy.md
           {
             echo ""
             echo "Private source repos are skipped unless TOOLKIT_SOURCE_REPO_TOKEN exists."

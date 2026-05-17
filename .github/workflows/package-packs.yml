@@ -25,11 +25,11 @@ jobs:
           node-version: 22
 
       - name: Check pack inputs
-        run: node scripts/package-packs.cjs --check
+        run: node repo/scripts/package-packs.cjs --check
 
       - name: Build pack artifacts
         if: github.event_name != 'pull_request'
-        run: node scripts/package-packs.cjs
+        run: node repo/scripts/package-packs.cjs
 
       - name: Generate checksums
         if: github.event_name != 'pull_request'

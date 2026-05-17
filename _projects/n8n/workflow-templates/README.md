@@ -1,12 +1,7 @@
-# n8n Workflow Templates Project Module
+# n8n Workflow Templates
 
-This project module preserves the n8n workflow-template source material and declares the root toolkit surfaces for safe workflow sync, sanitizer helpers, and workflow policy.
+Canonical source docs, scripts, and template workflow files live in [_main/](_main/).
 
-## Layout
+This module is preserved migration provenance from `weijunswj/n8n-workflow-templates`. Source-watch is advisory/read-only, and retired internal sources are not active update targets.
 
-- [_main/](_main/) keeps the actual README, scripts, and template workflow files.
-- No curated or generated preview folder is used for this module.
-
-## Safety
-
-The source scripts in `_main/` are archived source material. They are not executed by the toolkit sync workflow just because they exist. Live n8n import/export remains explicit-confirmation only and never runs in CI.
+Live n8n import/export and credential binding work must stay explicit-confirmation only and outside CI.
