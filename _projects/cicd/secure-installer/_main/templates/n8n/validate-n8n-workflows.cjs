@@ -176,6 +176,97 @@ function createPolicyHelpers(policy) {
   };
 }
 
+function hasConnection(workflow, sourceName, outputIndex, targetName) {
+  const output = workflow.connections?.[sourceName]?.main?.[outputIndex];
+  return Array.isArray(output) && output.some((connection) => connection.node === targetName);
+}
+
+function findWorkflowNode(workflow, nodeName) {
+  return (workflow.nodes || []).find((node) => node.name === nodeName);
+}
+
+// Generic validator extension point:
+// keep this file project-agnostic. If a target repo needs custom workflow
+// validators, add one of these rule files in that repo instead of hardcoding
+// workflow names, node names, or sheet-specific checks here. The rule file may
+// export a function directly or export validateWorkflow(context).
+const DEFAULT_VALIDATION_RULE_FILES = [
+  'scripts/n8n-workflow-validation-rules.cjs',
+  'scripts/n8n-workflow-validation-rules.js',
+  '.n8n-local/n8n-workflow-validation-rules.cjs',
+  '.n8n-local/n8n-workflow-validation-rules.js',
+  '.n8n-workflow-validation-rules.cjs',
+  '.n8n-workflow-validation-rules.js',
+];
+
+function validationRulePathCandidates(root) {
+  const configured = String(process.env.N8N_WORKFLOW_VALIDATION_RULES || '')
+    .split(/[;,]/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => (path.isAbsolute(value) ? value : path.join(root, value)));
+
+  const defaults = DEFAULT_VALIDATION_RULE_FILES.map((file) => path.join(root, file));
+  return [...new Set([...configured, ...defaults])];
+}
+
+function ruleFunctionFromModule(moduleExports, rulePath) {
+  if (typeof moduleExports === 'function') {
+    return moduleExports;
+  }
+
+  if (moduleExports && typeof moduleExports.validateWorkflow === 'function') {
+    return moduleExports.validateWorkflow;
+  }
+
+  throw new Error(`${path.relative(process.cwd(), rulePath) || rulePath} must export a function or validateWorkflow(context).`);
+}
+
+function loadProjectValidationRules(root) {
+  const rules = [];
+
+  for (const rulePath of validationRulePathCandidates(root)) {
+    if (!fs.existsSync(rulePath)) {
+      continue;
+    }
+
+    try {
+      const moduleExports = require(rulePath);
+      rules.push({
+        filePath: rulePath,
+        validateWorkflow: ruleFunctionFromModule(moduleExports, rulePath),
+      });
+    } catch (error) {
+      fail(`Could not load n8n workflow validation rule ${path.relative(root, rulePath) || rulePath}: ${error.message}`);
+    }
+  }
+
+  return rules;
+}
+
+function runProjectValidationRules(rules, context) {
+  const utils = {
+    walk,
+    trailString,
+    hasConnection,
+    findWorkflowNode,
+  };
+
+  for (const rule of rules) {
+    try {
+      rule.validateWorkflow({
+        ...context,
+        fail,
+        warn,
+        utils,
+      });
+    } catch (error) {
+      const ruleName = path.relative(context.root, rule.filePath) || rule.filePath;
+      fail(`${context.relative} failed n8n workflow validation rule ${ruleName}: ${error.message}`);
+    }
+  }
+}
+
 const root = process.cwd();
 const parsedArgs = parseArgs(process.argv.slice(2));
 const messages = [];
@@ -201,6 +292,7 @@ try {
 }
 
 const helpers = createPolicyHelpers(policy);
+const projectValidationRules = loadProjectValidationRules(root);
 let resolvedWorkflowDir;
 try {
   resolvedWorkflowDir = resolveWorkflowDir(root, parsedArgs.workflowDirArg);
@@ -215,6 +307,10 @@ const { workflowDir, workflowDirName } = resolvedWorkflowDir;
 
 if (policy.policyPath) {
   messages.push(`Using policy ${path.relative(root, policy.policyPath) || policy.policyPath}.`);
+}
+
+for (const rule of projectValidationRules) {
+  messages.push(`Using validation rule ${path.relative(root, rule.filePath) || rule.filePath}.`);
 }
 
 if (!fs.existsSync(workflowDir)) {
@@ -340,6 +436,17 @@ for (const filePath of files) {
       }
     });
   }
+
+  runProjectValidationRules(projectValidationRules, {
+    workflow,
+    relative,
+    text,
+    root,
+    workflowDir,
+    workflowDirName,
+    policy,
+    helpers,
+  });
 
   console.log(`Checked ${relative}: ${workflow.nodes?.length ?? 0} node(s).`);
 }

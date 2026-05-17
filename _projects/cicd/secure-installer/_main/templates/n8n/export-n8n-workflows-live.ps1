@@ -19,7 +19,27 @@ if (-not $PSScriptRoot) {
   throw "This script must be run from a .ps1 file."
 }
 
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+function Resolve-RepoRootFromScript {
+  $current = (Resolve-Path $PSScriptRoot).Path
+  while ($true) {
+    if (
+      (Test-Path -LiteralPath (Join-Path $current ".git")) -or
+      (Test-Path -LiteralPath (Join-Path $current ".gitignore")) -or
+      (Test-Path -LiteralPath (Join-Path $current "n8n-workflows"))
+    ) {
+      return $current
+    }
+
+    $parent = Split-Path -Parent $current
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
+      return (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+    }
+    $current = $parent
+  }
+}
+
+$HelperScriptDir = (Resolve-Path $PSScriptRoot).Path
+$RepoRoot = Resolve-RepoRootFromScript
 Set-Location $RepoRoot
 
 function Write-Section($Title) {
@@ -80,10 +100,13 @@ function Get-DisplayPath($Path) {
   return $resolvedPath
 }
 
-
 function Resolve-ProjectWorkflowHookScripts {
   $scripts = New-Object System.Collections.Generic.List[string]
 
+  # Generic export extension point:
+  # keep this script project-agnostic. If a target repo needs import/export
+  # cleanup, repair, or normalisation, add scripts\n8n-workflow-hooks.* in that
+  # repo instead of hardcoding workflow-specific rules here.
   if (-not [string]::IsNullOrWhiteSpace($env:N8N_WORKFLOW_HOOK_SCRIPT)) {
     foreach ($hookPath in @($env:N8N_WORKFLOW_HOOK_SCRIPT -split ';')) {
       if ([string]::IsNullOrWhiteSpace($hookPath)) {
@@ -481,12 +504,13 @@ if ($Mode -eq "RepoTrackedOnly") {
   Invoke-ProjectWorkflowHook "before-export-sync" @{
     "bindings-file" = $BindingsFilePath
     "container" = $Container
+    "dry-run" = [string]([bool]$DryRun)
     "export-dir" = $ExportDirPath
     "mode" = $Mode
     "workflow-dir" = $WorkflowDirPath
   }
 
-  $syncArgs = @("scripts/sync-n8n-live-exports.cjs", $ExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--sync-exported-only")
+  $syncArgs = @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $ExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--sync-exported-only")
   if ($PreserveTags) {
     $syncArgs += "--preserve-tags"
   }
@@ -500,6 +524,7 @@ if ($Mode -eq "RepoTrackedOnly") {
   Invoke-ProjectWorkflowHook "after-export-sync" @{
     "bindings-file" = $BindingsFilePath
     "container" = $Container
+    "dry-run" = [string]([bool]$DryRun)
     "export-dir" = $ExportDirPath
     "mode" = $Mode
     "workflow-dir" = $WorkflowDirPath
@@ -607,12 +632,13 @@ foreach ($planned in $plannedAllLive) {
 Invoke-ProjectWorkflowHook "before-export-sync" @{
   "bindings-file" = $BindingsFilePath
   "container" = $Container
+  "dry-run" = [string]([bool]$DryRun)
   "export-dir" = $ExportDirPath
   "mode" = $Mode
   "workflow-dir" = $WorkflowDirPath
 }
 
-$syncAllArgs = @("scripts/sync-n8n-live-exports.cjs", $ExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--create-missing-workflows", "--sync-exported-only")
+$syncAllArgs = @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $ExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--create-missing-workflows", "--sync-exported-only")
 if ($PreserveTags) {
   $syncAllArgs += "--preserve-tags"
 }
@@ -626,6 +652,7 @@ Write-Host ($syncAllResult.Output -join "`n")
 Invoke-ProjectWorkflowHook "after-export-sync" @{
   "bindings-file" = $BindingsFilePath
   "container" = $Container
+  "dry-run" = [string]([bool]$DryRun)
   "export-dir" = $ExportDirPath
   "mode" = $Mode
   "workflow-dir" = $WorkflowDirPath

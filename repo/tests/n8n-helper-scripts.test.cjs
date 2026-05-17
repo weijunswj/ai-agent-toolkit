@@ -10,7 +10,9 @@ const { comparableWorkflow } = require(path.join(repoRoot, 'for_ai', 'templates'
 const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sync-helpers', 'prepare-n8n-live-import.cjs'));
 
 const scriptDir = path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sync-helpers');
+const sourceScriptDir = path.join(repoRoot, '_projects', 'cicd', 'secure-installer', '_main', 'templates', 'n8n');
 const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
+const sourceValidateScript = path.join(sourceScriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
 const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');
 const sanitizerScript = path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sanitizer', 'prepare-n8n-template.js');
@@ -201,6 +203,27 @@ test('validate-n8n-workflows.cjs has no SpaceKoncept-specific placeholder requir
   const result = runNode(validateScript, [], { cwd });
 
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('source validate-n8n-workflows.cjs loads repo-specific validation rules', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'generic.json'), safeWorkflow());
+  fs.mkdirSync(path.join(cwd, 'scripts'), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, 'scripts', 'n8n-workflow-validation-rules.cjs'),
+    [
+      'module.exports.validateWorkflow = function validateWorkflow(context) {',
+      "  context.fail(`${context.relative} custom rule failed`);",
+      '};',
+      '',
+    ].join('\n')
+  );
+
+  const result = runNode(sourceValidateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /custom rule failed/);
+  assert.match(result.stdout, /Using validation rule scripts[\\/]n8n-workflow-validation-rules\.cjs/);
 });
 
 test('sync-n8n-live-exports.cjs strips live-only fields, credentials, and tags by default', () => {
