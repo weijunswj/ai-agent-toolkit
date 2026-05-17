@@ -1,8 +1,15 @@
 <!--
-AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: n8n.local-setup
-Review the related _projects/**/_main source when updating.
+Source: _projects/n8n/local-setup/curated_output_for_ai/playbooks/local-setup.md
+Update the curated output and run sync.
 -->
+<!--
+Curated AI-facing source.
+Project: n8n.local-setup
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # Local n8n Setup
 
 ## Goal

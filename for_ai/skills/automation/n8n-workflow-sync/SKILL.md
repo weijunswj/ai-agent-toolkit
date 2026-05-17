@@ -4,10 +4,17 @@ description: Generic n8n workflow sync and template hygiene skill for safely mov
 ---
 
 <!--
-AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: n8n.workflow-templates
-Review the related _projects/**/_main source when updating.
+Source: _projects/n8n/workflow-templates/curated_output_for_ai/skills/n8n-workflow-sync/SKILL.md
+Update the curated output and run sync.
 -->
+<!--
+Curated AI-facing source.
+Project: n8n.workflow-templates
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # n8n Workflow Sync
 
 Use this instruction-only skill when the user wants to plan, review, or document safe n8n workflow sync between a live n8n instance and a repository.

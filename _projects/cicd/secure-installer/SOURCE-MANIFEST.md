@@ -9,7 +9,7 @@
 
 ## AI-Facing Surfaces
 
-- AI-facing skill, MCP doc, playbook, template docs, and pack are directly maintained and declared as `linked`.
+- AI-facing skill, MCP doc, playbook, template docs, and pack are generated from `curated_output_for_ai/`.
 - `for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs` is copied from `_main/templates/n8n/`.
 - Toolkit-adapted AI-facing n8n sync helpers are linked and source-locked.
 

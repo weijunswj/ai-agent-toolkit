@@ -10,6 +10,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const validateScript = path.join(repoRoot, 'repo', 'scripts', 'validate-toolkit.cjs');
 const syncScript = path.join(repoRoot, 'repo', 'scripts', 'sync-toolkit-projects.cjs');
+const contractScript = path.join(repoRoot, 'repo', 'scripts', 'sync-repo-doc-contract.cjs');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs');
 const validator = require(validateScript);
 const safeSourceUpdate = require(path.join(repoRoot, 'repo', 'scripts', 'safe-source-update.cjs'));
@@ -45,6 +46,31 @@ function readJsonFile(filePath) {
 
 function writeJsonFile(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function readTextFile(filePath) {
+  return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+}
+
+function manifestsById() {
+  return new Map(validator.projectManifests().map((manifest) => [manifest.id, manifest]));
+}
+
+function manifestOutput(manifest, outputPath) {
+  return (manifest.outputs || []).find((output) => output.output === outputPath);
+}
+
+function contractBlock(text) {
+  const begin = '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->';
+  const end = '<!-- END SOURCE-OF-TRUTH-CONTRACT -->';
+  const beginMatches = text.match(new RegExp(begin, 'g')) || [];
+  const endMatches = text.match(new RegExp(end, 'g')) || [];
+  assert.equal(beginMatches.length, 1, 'begin marker count');
+  assert.equal(endMatches.length, 1, 'end marker count');
+  const start = text.indexOf(begin);
+  const finish = text.indexOf(end);
+  assert.ok(start < finish, 'contract markers are ordered');
+  return text.slice(start + begin.length, finish).trim();
 }
 
 test('JSON registries parse in the current repo', () => {
@@ -92,6 +118,43 @@ test('validator expects durable retired source provenance doc instead of migrati
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Missing expected file: repo\/docs\/RETIRED-SOURCE-PROVENANCE\.md/);
+});
+
+test('source-of-truth contract is synced into main entry points', () => {
+  const partial = readTextFile(path.join(repoRoot, 'repo', 'docs', 'partials', 'source-of-truth-contract.md')).trim();
+  for (const rel of ['README.md', 'AGENTS.md', 'for_ai/README.md']) {
+    const text = readTextFile(path.join(repoRoot, rel));
+    assert.equal(contractBlock(text), partial, rel);
+  }
+});
+
+test('source-of-truth contract sync script passes and catches drift', () => {
+  let result = spawnSync(process.execPath, [contractScript, '--check'], { cwd: repoRoot, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+
+  const cwd = tempCopy();
+  fs.writeFileSync(
+    path.join(cwd, 'for_ai', 'README.md'),
+    readTextFile(path.join(cwd, 'for_ai', 'README.md')).replace('published AI-facing surface for skills', 'published AI-facing layer for skills')
+  );
+  result = spawnSync(process.execPath, [contractScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale source-of-truth contract block: for_ai\/README\.md/);
+});
+
+test('AGENTS.md gives future agents unambiguous source routing rules', () => {
+  const text = readTextFile(path.join(repoRoot, 'AGENTS.md'));
+  assert.match(text, /curated_output_for_ai/);
+  assert.match(text, /toolkit\.project\.json/);
+  assert.match(text, /Do not edit generated `for_ai\/` outputs directly/);
+  assert.match(text, /Do not generate curated files automatically from `_main`/);
+});
+
+test('validation workflow checks source-of-truth contract drift read-only', () => {
+  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'validate.yml'));
+  assert.match(workflow, /node repo\/scripts\/sync-repo-doc-contract\.cjs --check/);
+  assert.doesNotMatch(workflow, /sync-repo-doc-contract\.cjs --write/);
+  assert.match(workflow, /^permissions:\n  contents: read$/m);
 });
 
 test('project modules use _projects/_main with no mandatory exports tree', () => {
@@ -192,11 +255,14 @@ test('validator rejects broken relative links in non-_main Markdown files', () =
   assert.match(result.stderr, /for_ai\/mcp\/projects\/n8n-local-setup\.md links to missing path: for_ai\/mcp\/projects\/DOES-NOT-EXIST\.md/);
 });
 
-test('Markdown link validation ignores _projects _main files', () => {
+test('Markdown link validation ignores _projects source files', () => {
   const cwd = tempCopy();
   const ignoredDir = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main');
   fs.mkdirSync(ignoredDir, { recursive: true });
   fs.writeFileSync(path.join(ignoredDir, 'IGNORED.md'), '[Ignored missing target](missing.md)\n');
+  const curatedDir = path.join(cwd, '_projects', 'n8n', 'local-setup', 'curated_output_for_ai');
+  fs.mkdirSync(curatedDir, { recursive: true });
+  fs.writeFileSync(path.join(curatedDir, 'OUTPUT_RELATIVE.md'), '[Output-relative target](missing-output.md)\n');
   const result = runValidate(cwd);
   assert.equal(result.status, 0, result.stderr);
 });
@@ -227,25 +293,126 @@ test('changing declared _main MCP config source makes root MCP config stale', ()
   assert.match(result.stderr, /Stale generated output: for_ai\/templates\/mcp-configs\/codex-mcp-config\.md/);
 });
 
-test('root skills are linked and not duplicated under curated output by default', () => {
-  const curatedSkillCopies = fs.existsSync(path.join(repoRoot, '_projects'))
-    ? fs.readdirSync(path.join(repoRoot, '_projects'), { recursive: true })
-        .map((entry) => String(entry).replace(/\\/g, '/'))
-        .filter((entry) => entry.includes('curated_output_for_ai/skills/'))
-    : [];
-  assert.deepEqual(curatedSkillCopies, []);
+test('internal AI-facing surfaces are generated from curated project output', () => {
+  const manifests = manifestsById();
+  const expectedMarkdown = [
+    ['n8n.local-setup', 'for_ai/skills/automation/n8n-local-setup/SKILL.md', 'curated_output_for_ai/skills/n8n-local-setup/SKILL.md'],
+    ['n8n.local-setup', 'for_ai/skills/automation/n8n-local-setup/README.md', 'curated_output_for_ai/skills/n8n-local-setup/README.md'],
+    ['n8n.local-setup', 'for_ai/mcp/projects/n8n-local-setup.md', 'curated_output_for_ai/mcp/n8n-local-setup.md'],
+    ['n8n.local-setup', 'for_ai/playbooks/n8n/local-setup.md', 'curated_output_for_ai/playbooks/local-setup.md'],
+    ['n8n.local-setup', 'for_ai/templates/mcp-configs/README.md', 'curated_output_for_ai/templates/mcp-configs/README.md'],
+    ['n8n.workflow-templates', 'for_ai/skills/automation/n8n-workflow-sync/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-sync/SKILL.md'],
+    ['n8n.workflow-templates', 'for_ai/skills/automation/n8n-workflow-sync/README.md', 'curated_output_for_ai/skills/n8n-workflow-sync/README.md'],
+    ['n8n.workflow-templates', 'for_ai/mcp/projects/n8n-workflow-templates.md', 'curated_output_for_ai/mcp/n8n-workflow-templates.md'],
+    ['n8n.workflow-templates', 'for_ai/playbooks/n8n/workflow-sync.md', 'curated_output_for_ai/playbooks/workflow-sync.md'],
+    ['n8n.workflow-templates', 'for_ai/templates/n8n/sanitizer/README.md', 'curated_output_for_ai/templates/n8n/sanitizer/README.md'],
+    ['n8n.workflow-templates', 'for_ai/templates/n8n/workflow-policy/README.md', 'curated_output_for_ai/templates/n8n/workflow-policy/README.md'],
+    ['cicd.secure-installer', 'for_ai/skills/cicd/secure-cicd-installer/SKILL.md', 'curated_output_for_ai/skills/secure-cicd-installer/SKILL.md'],
+    ['cicd.secure-installer', 'for_ai/skills/cicd/secure-cicd-installer/README.md', 'curated_output_for_ai/skills/secure-cicd-installer/README.md'],
+    ['cicd.secure-installer', 'for_ai/mcp/projects/secure-cicd-installer.md', 'curated_output_for_ai/mcp/secure-cicd-installer.md'],
+    ['cicd.secure-installer', 'for_ai/playbooks/cicd/secure-cicd-installer.md', 'curated_output_for_ai/playbooks/secure-cicd-installer.md'],
+    ['cicd.secure-installer', 'for_ai/templates/cicd/README.md', 'curated_output_for_ai/templates/cicd/README.md'],
+    ['cicd.secure-installer', 'for_ai/templates/n8n/sync-helpers/README.md', 'curated_output_for_ai/templates/n8n/sync-helpers/README.md']
+  ];
+  const expectedJson = [
+    ['n8n.local-setup', 'for_ai/packs/codex-n8n-local/pack.json', 'curated_output_for_ai/packs/codex-n8n-local/pack.json'],
+    ['n8n.local-setup', 'for_ai/packs/claude-code-n8n-local/pack.json', 'curated_output_for_ai/packs/claude-code-n8n-local/pack.json'],
+    ['n8n.workflow-templates', 'for_ai/packs/n8n-workflow-sync/pack.json', 'curated_output_for_ai/packs/n8n-workflow-sync/pack.json'],
+    ['cicd.secure-installer', 'for_ai/packs/secure-cicd/pack.json', 'curated_output_for_ai/packs/secure-cicd/pack.json']
+  ];
 
-  const manifests = validator.projectManifests();
-  const linkedOutputs = new Set();
-  for (const manifest of manifests) {
-    for (const output of manifest.outputs || []) {
-      if (output.kind === 'linked') linkedOutputs.add(output.output);
+  for (const [projectId, outputPath, source] of expectedMarkdown) {
+    const output = manifestOutput(manifests.get(projectId), outputPath);
+    assert.equal(output?.kind, 'curated', outputPath);
+    assert.equal(output?.source, source, outputPath);
+  }
+  for (const [projectId, outputPath, source] of expectedJson) {
+    const output = manifestOutput(manifests.get(projectId), outputPath);
+    assert.equal(output?.kind, 'json', outputPath);
+    assert.equal(output?.source, source, outputPath);
+  }
+
+  for (const projectId of ['n8n.local-setup', 'n8n.workflow-templates', 'cicd.secure-installer']) {
+    for (const output of manifests.get(projectId).outputs || []) {
+      if (output.kind !== 'linked') continue;
+      assert.match(output.notes || '', /(source-locked|Toolkit-only)/, output.output);
     }
   }
-  assert.equal(linkedOutputs.has('for_ai/skills/automation/n8n-local-setup/SKILL.md'), true);
-  assert.equal(linkedOutputs.has('for_ai/skills/automation/n8n-workflow-sync/SKILL.md'), true);
-  assert.equal(linkedOutputs.has('for_ai/skills/cicd/secure-cicd-installer/SKILL.md'), true);
-  assert.equal(linkedOutputs.has('for_ai/skills/design/ui-ux-secure-frontend-design/SKILL.md'), true);
+});
+
+test('curated Markdown outputs carry curated-source notices', () => {
+  for (const [outputPath, sourcePath] of [
+    [
+      'for_ai/skills/automation/n8n-local-setup/SKILL.md',
+      '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/SKILL.md'
+    ],
+    [
+      'for_ai/skills/automation/n8n-local-setup/README.md',
+      '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md'
+    ],
+    [
+      'for_ai/templates/n8n/sync-helpers/README.md',
+      '_projects/cicd/secure-installer/curated_output_for_ai/templates/n8n/sync-helpers/README.md'
+    ]
+  ]) {
+    const text = fs.readFileSync(path.join(repoRoot, outputPath), 'utf8').replace(/\r\n/g, '\n');
+    assert.match(text, /Generated from toolkit curated output for AI\. Do not edit directly\./, outputPath);
+    assert.match(text, new RegExp(`Source: ${sourcePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), outputPath);
+    assert.match(text, /Update the curated output and run sync\./, outputPath);
+  }
+});
+
+test('changing curated skill README source makes generated skill README stale', () => {
+  const cwd = tempCopy();
+  const source = path.join(
+    cwd,
+    '_projects',
+    'n8n',
+    'local-setup',
+    'curated_output_for_ai',
+    'skills',
+    'n8n-local-setup',
+    'README.md'
+  );
+  fs.appendFileSync(source, '\n\n<!-- drift test -->\n');
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: for_ai\/skills\/automation\/n8n-local-setup\/README\.md/);
+});
+
+test('curated JSON pack outputs match deterministic source formatting', () => {
+  for (const [sourcePath, outputPath] of [
+    [
+      '_projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/pack.json',
+      'for_ai/packs/codex-n8n-local/pack.json'
+    ],
+    [
+      '_projects/n8n/workflow-templates/curated_output_for_ai/packs/n8n-workflow-sync/pack.json',
+      'for_ai/packs/n8n-workflow-sync/pack.json'
+    ],
+    [
+      '_projects/cicd/secure-installer/curated_output_for_ai/packs/secure-cicd/pack.json',
+      'for_ai/packs/secure-cicd/pack.json'
+    ]
+  ]) {
+    const expected = `${JSON.stringify(readJsonFile(path.join(repoRoot, sourcePath)), null, 2)}\n`;
+    assert.equal(fs.readFileSync(path.join(repoRoot, outputPath), 'utf8'), expected, outputPath);
+  }
+});
+
+test('third-party UI UX project remains a linked special case', () => {
+  const manifests = manifestsById();
+  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'curated_output_for_ai')), false);
+  for (const outputPath of [
+    'for_ai/skills/design/ui-ux-secure-frontend-design/SKILL.md',
+    'for_ai/mcp/projects/ui-ux-pro-max.md',
+    'for_ai/playbooks/design/ui-ux-pro-max.md',
+    'for_ai/tools/design-system-generator/README.md',
+    'for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
+    'for_ai/packs/design-system-generator/pack.json'
+  ]) {
+    assert.equal(manifestOutput(manifests.get('design.ui-ux-pro-max'), outputPath)?.kind, 'linked', outputPath);
+  }
 });
 
 test('project modules require README, manifest, lock, toolkit metadata, and _main only', () => {
@@ -460,6 +627,27 @@ test('curated recipes must source from curated_output_for_ai', () => {
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /curated output source must start with curated_output_for_ai\//);
+});
+
+test('internal curated Markdown files carry the curated review note', () => {
+  const required = [
+    'Curated AI-facing source.',
+    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.'
+  ];
+  for (const projectDir of [
+    '_projects/n8n/local-setup/curated_output_for_ai',
+    '_projects/n8n/workflow-templates/curated_output_for_ai',
+    '_projects/cicd/secure-installer/curated_output_for_ai'
+  ]) {
+    const files = fs.readdirSync(path.join(repoRoot, projectDir), { recursive: true })
+      .map((entry) => String(entry).replace(/\\/g, '/'))
+      .filter((entry) => entry.endsWith('.md'));
+    assert.ok(files.length > 0, projectDir);
+    for (const file of files) {
+      const text = readTextFile(path.join(repoRoot, projectDir, file));
+      for (const needle of required) assert.ok(text.includes(needle), `${projectDir}/${file}`);
+    }
+  }
 });
 
 test('validator rejects stale mandatory exports architecture wording in permanent docs', () => {

@@ -2,6 +2,26 @@
 
 Reusable AI-agent skills, templates, packs, registries, MCP design notes, and local-only tools.
 
+<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->
+## Source-of-Truth Contract
+
+This repo has a source layer and a published layer.
+
+- `_projects/**/_main/` preserves full source material and original docs. Do not casually rewrite preserved source.
+- `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source material. Curated files may be AI-assisted, but they are source files and must be reviewed before publishing.
+- `_projects/**/toolkit.project.json` is the routing contract. It declares which `_main/` or `curated_output_for_ai/` files publish to which `for_ai/` outputs.
+- `for_ai/` is the published AI-facing surface for skills, MCP notes, templates, packs, registries, tools, and playbooks.
+- Generated `for_ai/` files must not be edited directly. Update the matching `_projects` source or curated file, then run sync.
+- `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
+- Publish declared outputs with:
+  `node repo/scripts/sync-toolkit-projects.cjs --write`
+- Check generated freshness with:
+  `node repo/scripts/sync-toolkit-projects.cjs --check`
+- CI currently checks generated freshness, but it must not invent curated content from `_main/`.
+- Auto-sync writeback is disabled by default. A future dedicated workflow may write generated outputs only to same-repo PR branches with explicit guardrails.
+- Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
+<!-- END SOURCE-OF-TRUTH-CONTRACT -->
+
 ## How Humans Should Use This Repo
 
 Start here if you are browsing or copying things manually:
@@ -11,7 +31,7 @@ Start here if you are browsing or copying things manually:
 3. Use [for_ai/packs/](for_ai/packs/) as checklists before copying multiple files. Packs are approval-gated manifests, not automatic installers in v1.
 4. Use [repo/](repo/) only for maintaining this toolkit: validation scripts, tests, policy docs, provenance notes, and CI support.
 
-The [for_ai/](for_ai/) tree is the published AI-facing layer. Humans can review it, but it is not the primary manual documentation layer. In particular:
+The [for_ai/](for_ai/) tree is the published AI-facing layer. Humans can review it, but it is not the primary manual documentation layer. Many internal `for_ai/` files are generated from project-owned `_main/` or `curated_output_for_ai/` sources; update the project source and run sync instead of editing generated outputs directly. In particular:
 
 - [for_ai/skills/](for_ai/skills/) contains portable instruction packs for AI agents.
 - [for_ai/mcp/](for_ai/mcp/) contains future-facing MCP design documents. No MCP server implementation is shipped in v1.
@@ -40,8 +60,8 @@ For humans who want to use the MCP material manually:
 
 | Path | Purpose |
 | --- | --- |
-| [_projects/](_projects/) | Canonical preserved source library. Humans should use `_projects/**/_main/` for full source docs and original guides. |
-| [for_ai/](for_ai/) | AI-facing published assets: skills, MCP notes, templates, packs, registries, tools, and operator playbooks. |
+| [_projects/](_projects/) | Canonical project-owned source layer. Humans should use `_projects/**/_main/` for preserved full source docs and `curated_output_for_ai/` for reviewed AI-facing source material. |
+| [for_ai/](for_ai/) | AI-facing published assets: skills, MCP notes, templates, packs, registries, tools, and operator playbooks. Generated files include source notices. |
 | [repo/](repo/) | Repo maintenance assets: validation scripts, tests, policy docs, provenance notes, and CI support. |
 
 Root stays intentionally small: `README.md`, `AGENTS.md`, `package.json`, `.gitignore`, `.gitattributes`, `.github/`, `_projects/`, `for_ai/`, and `repo/`.
@@ -55,6 +75,14 @@ _projects/<category>/<project>/_main/
 ```
 
 Each project module also carries `toolkit.project.json`, `SOURCE-MANIFEST.md`, `SOURCE-LOCK.json`, and a tiny landing `README.md`. Those landing cards point to `_main/` and do not replace the preserved source docs.
+
+Internal modules may also keep reviewed AI-facing source material in:
+
+```text
+_projects/<category>/<project>/curated_output_for_ai/
+```
+
+When `_main/` or `curated_output_for_ai/` changes, regenerate published outputs with `node repo/scripts/sync-toolkit-projects.cjs --write`.
 
 Current project modules:
 
@@ -92,6 +120,7 @@ Retired internal source repos remain provenance-only; see [Retired Source Proven
 ## Validation
 
 ```powershell
+node repo/scripts/sync-repo-doc-contract.cjs --check
 node repo/scripts/sync-toolkit-projects.cjs --check
 node repo/scripts/audit-project-source-locks.cjs
 node repo/scripts/validate-toolkit.cjs

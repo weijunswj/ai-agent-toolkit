@@ -1,8 +1,15 @@
 <!--
-AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: cicd.secure-installer
-Review the related _projects/**/_main source when updating.
+Source: _projects/cicd/secure-installer/curated_output_for_ai/mcp/secure-cicd-installer.md
+Update the curated output and run sync.
 -->
+<!--
+Curated AI-facing source.
+Project: cicd.secure-installer
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # MCP Project Spec: Secure CI/CD Installer
 
 Project identity: `cicd.secure-installer`

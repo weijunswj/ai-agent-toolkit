@@ -4,10 +4,17 @@ description: Instruction-only guidance for reviewing, planning, and applying sec
 ---
 
 <!--
-AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: cicd.secure-installer
-Review the related _projects/**/_main source when updating.
+Source: _projects/cicd/secure-installer/curated_output_for_ai/skills/secure-cicd-installer/SKILL.md
+Update the curated output and run sync.
 -->
+<!--
+Curated AI-facing source.
+Project: cicd.secure-installer
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # Secure CI/CD Installer
 
 Use this skill when a user asks for secure CI/CD setup, GitHub Actions hardening, installer prompt/status templates, or safe rollout planning based on this toolkit's CI/CD project module.

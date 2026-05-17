@@ -6,8 +6,8 @@ This repo is a reusable toolkit for AI-agent work. It gives humans and agents a 
 
 Use [_projects/](../../_projects/) when you need the preserved source context behind an AI-facing surface.
 
-- `_main/` keeps actual project files and is the source of truth.
-- `curated_output_for_ai/` is optional and only for reviewed transformations.
+- `_main/` keeps preserved project files, full docs, and provenance source.
+- `curated_output_for_ai/` keeps reviewed AI-facing source material that sync recipes publish into `for_ai/`.
 - `_generated/` is preview-only and not source of truth.
 
 Start with:
@@ -20,6 +20,8 @@ Start with:
 To sync generated AI-facing surfaces:
 
 ```powershell
+node repo/scripts/sync-repo-doc-contract.cjs --write
+node repo/scripts/sync-repo-doc-contract.cjs --check
 node repo/scripts/sync-toolkit-projects.cjs --write
 node repo/scripts/sync-toolkit-projects.cjs --check
 ```
@@ -41,11 +43,11 @@ This is an advisory plan only. Retired internal sources are provenance-only, not
 
 For Codex or Claude Code, copy the whole skill folder into that tool's supported skills folder.
 
-`for_ai/skills/**/SKILL.md` files are published toolkit surfaces. If a skill is directly maintained, update it under `for_ai/` and keep the related project manifest `linked` output current. If a skill becomes generated later, declare the source recipe before syncing.
+`for_ai/skills/**/SKILL.md` files are published toolkit surfaces. If a generated notice is present, update the source path named in that notice and run `node repo/scripts/sync-toolkit-projects.cjs --write`. Directly maintained `linked` skills should be rare and justified in the related project manifest.
 
 ## Use Templates Manually
 
-Templates are source material. Review them before copying into a consumer repo.
+Templates are published material. Review them before copying into a consumer repo, and follow generated notices back to `_main/` or `curated_output_for_ai/` when editing toolkit-owned sources.
 
 - [Agent rule templates](../../for_ai/templates/agent-rules/) contain generated `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` outputs.
 - [MCP config templates](../../for_ai/templates/mcp-configs/) contain MCP setup examples.
@@ -113,4 +115,4 @@ Use [for_ai/tools/design-system-generator/](../../for_ai/tools/design-system-gen
 - Do not run live import/export helpers from this toolkit repo.
 - Do not run live n8n import/export helpers in CI.
 - Do not auto-merge or auto-apply upstream updates.
-- Do not edit generated AI-facing project outputs directly; update `_main/` or curated source and run sync/check.
+- Do not edit generated AI-facing project outputs directly; update `_main/` or `curated_output_for_ai/` and run sync/check.

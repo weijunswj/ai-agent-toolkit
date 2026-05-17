@@ -7,24 +7,34 @@
   "main_path": "_projects/n8n/workflow-templates/_main",
   "outputs": [
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-workflow-sync/SKILL.md",
       "output": "for_ai/skills/automation/n8n-workflow-sync/SKILL.md",
-      "notes": "Published skill maintained under for_ai. Review when _main/ changes."
+      "notes": "Published skill generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-workflow-sync/README.md",
+      "output": "for_ai/skills/automation/n8n-workflow-sync/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output."
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/mcp/n8n-workflow-templates.md",
       "output": "for_ai/mcp/projects/n8n-workflow-templates.md",
-      "notes": "Published MCP doc maintained under for_ai. Review when _main/ changes."
+      "notes": "Published MCP doc generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/playbooks/workflow-sync.md",
       "output": "for_ai/playbooks/n8n/workflow-sync.md",
-      "notes": "AI/operator playbook maintained under for_ai. Review when _main/ changes."
+      "notes": "AI/operator playbook generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/n8n/sanitizer/README.md",
       "output": "for_ai/templates/n8n/sanitizer/README.md",
-      "notes": "AI-facing sanitizer documentation maintained under for_ai."
+      "notes": "AI-facing sanitizer documentation generated from project-owned curated AI output."
     },
     {
       "kind": "linked",
@@ -42,19 +52,22 @@
       "notes": "AI-facing sanitizer wrapper is toolkit-adapted and source-locked."
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/n8n/workflow-policy/README.md",
       "output": "for_ai/templates/n8n/workflow-policy/README.md",
-      "notes": "AI-facing workflow policy maintained under for_ai."
+      "notes": "AI-facing workflow policy generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "json",
+      "source": "curated_output_for_ai/packs/n8n-workflow-sync/pack.json",
       "output": "for_ai/packs/n8n-workflow-sync/pack.json",
-      "notes": "Published pack maintained under for_ai."
+      "notes": "Published pack generated from project-owned curated AI output."
     }
   ],
   "writes": {
     "allowed": [
       "for_ai/skills/automation/n8n-workflow-sync/SKILL.md",
+      "for_ai/skills/automation/n8n-workflow-sync/README.md",
       "for_ai/mcp/projects/n8n-workflow-templates.md",
       "for_ai/playbooks/n8n/workflow-sync.md",
       "for_ai/templates/n8n/sanitizer/README.md",
