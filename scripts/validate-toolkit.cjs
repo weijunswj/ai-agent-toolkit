@@ -82,7 +82,7 @@ const expectedFiles = [
   'scripts/package-skills.cjs',
   'scripts/package-packs.cjs',
   'scripts/safe-source-update.cjs',
-  '.github/workflows/source-watch-pr.yml',
+  '.github/workflows/source-watch-plan.yml',
   '.github/workflows/validate.yml'
 ];
 
@@ -543,7 +543,7 @@ function validateWorkflows(errors) {
   for (const entry of workflowFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
     const isGeneratedTemplateWorkflow = entry.relPath.endsWith('build-agent-rule-templates.yml');
-    const isSourceWatchWorkflow = entry.relPath.endsWith('source-watch-pr.yml');
+    const isSourceWatchWorkflow = entry.relPath.endsWith('source-watch-plan.yml');
     if (!/^permissions:\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
     if (/contents:\s*write/i.test(text) && !isGeneratedTemplateWorkflow && !isSourceWatchWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
     if (/pull-requests:\s*write/i.test(text) && !isSourceWatchWorkflow) fail(errors, `${entry.relPath} uses pull-requests: write`);
