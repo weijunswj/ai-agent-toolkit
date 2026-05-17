@@ -31,11 +31,11 @@ Do not move product-owned assets into this toolkit.
 
 ## Registries
 
-The JSON registries under `for_ai/registry/` are the source of truth for toolkit discovery.
+The JSON registries under `for_ai/registry/` are the published discovery surface. Generated registries should be refreshed from project manifests with `node repo/scripts/sync-toolkit-projects.cjs --write`.
 
 ## Packs
 
-Pack manifests under [for_ai/packs](../../for_ai/packs/) are the source of truth for installable bundles.
+Pack manifests under [for_ai/packs](../../for_ai/packs/) are the published installable bundle surface. For internal generated packs, author the project-owned source under `_projects/**/curated_output_for_ai/packs/` and run sync.
 
 ## Retired Source Provenance
 

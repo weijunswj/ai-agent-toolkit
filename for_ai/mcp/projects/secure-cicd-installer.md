@@ -1,7 +1,8 @@
 <!--
-AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: cicd.secure-installer
-Review the related _projects/**/_main source when updating.
+Source: _projects/cicd/secure-installer/curated_output_for_ai/mcp/secure-cicd-installer.md
+Update the curated output and run sync.
 -->
 # MCP Project Spec: Secure CI/CD Installer
 

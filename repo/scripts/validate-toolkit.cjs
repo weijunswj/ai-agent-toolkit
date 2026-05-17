@@ -685,7 +685,7 @@ function validateWorkflows(errors) {
 
 function isIgnoredMarkdown(relPath) {
   const parts = relPath.split('/');
-  return parts[0] === '_projects' && parts.includes('_main');
+  return parts[0] === '_projects' && (parts.includes('_main') || parts.includes('curated_output_for_ai'));
 }
 
 function isExternalOrAnchorLink(target) {

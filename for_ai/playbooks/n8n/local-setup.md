@@ -1,7 +1,8 @@
 <!--
-AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: n8n.local-setup
-Review the related _projects/**/_main source when updating.
+Source: _projects/n8n/local-setup/curated_output_for_ai/playbooks/local-setup.md
+Update the curated output and run sync.
 -->
 # Local n8n Setup
 

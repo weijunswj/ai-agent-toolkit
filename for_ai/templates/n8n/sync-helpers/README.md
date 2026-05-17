@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit curated output for AI. Do not edit directly.
+Project: cicd.secure-installer
+Source: _projects/cicd/secure-installer/curated_output_for_ai/templates/n8n/sync-helpers/README.md
+Update the curated output and run sync.
+-->
 # n8n Sync Helpers
 
 This folder contains review-required helper templates for n8n workflow sync.

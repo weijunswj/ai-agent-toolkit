@@ -7,29 +7,34 @@
   "main_path": "_projects/cicd/secure-installer/_main",
   "outputs": [
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/secure-cicd-installer/SKILL.md",
       "output": "for_ai/skills/cicd/secure-cicd-installer/SKILL.md",
-      "notes": "Published skill maintained under for_ai. Review when _main/ changes."
+      "notes": "Published skill generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/mcp/secure-cicd-installer.md",
       "output": "for_ai/mcp/projects/secure-cicd-installer.md",
-      "notes": "Published MCP doc maintained under for_ai. Review when _main/ changes."
+      "notes": "Published MCP doc generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/playbooks/secure-cicd-installer.md",
       "output": "for_ai/playbooks/cicd/secure-cicd-installer.md",
-      "notes": "AI/operator playbook maintained under for_ai. Review when _main/ changes."
+      "notes": "AI/operator playbook generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/cicd/README.md",
       "output": "for_ai/templates/cicd/README.md",
-      "notes": "AI-facing template index maintained under for_ai."
+      "notes": "AI-facing template index generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "json",
+      "source": "curated_output_for_ai/packs/secure-cicd/pack.json",
       "output": "for_ai/packs/secure-cicd/pack.json",
-      "notes": "Published pack maintained under for_ai."
+      "notes": "Published pack generated from project-owned curated AI output."
     },
     {
       "kind": "linked",
@@ -83,9 +88,10 @@
       "notice": false
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/n8n/sync-helpers/README.md",
       "output": "for_ai/templates/n8n/sync-helpers/README.md",
-      "notes": "AI-facing helper documentation maintained under for_ai."
+      "notes": "AI-facing helper documentation generated from project-owned curated AI output."
     }
   ],
   "writes": {

@@ -7,19 +7,22 @@
   "main_path": "_projects/n8n/local-setup/_main",
   "outputs": [
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-local-setup/SKILL.md",
       "output": "for_ai/skills/automation/n8n-local-setup/SKILL.md",
-      "notes": "Published skill maintained under for_ai. Review when _main/ changes."
+      "notes": "Published skill generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/mcp/n8n-local-setup.md",
       "output": "for_ai/mcp/projects/n8n-local-setup.md",
-      "notes": "Published MCP doc maintained under for_ai. Review when _main/ changes."
+      "notes": "Published MCP doc generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/playbooks/local-setup.md",
       "output": "for_ai/playbooks/n8n/local-setup.md",
-      "notes": "AI/operator playbook maintained under for_ai. Review when _main/ changes."
+      "notes": "AI/operator playbook generated from project-owned curated AI output."
     },
     {
       "kind": "concat",
@@ -80,19 +83,22 @@
       "output": "for_ai/templates/mcp-configs/opencode-mcp-config.md"
     },
     {
-      "kind": "linked",
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/mcp-configs/README.md",
       "output": "for_ai/templates/mcp-configs/README.md",
-      "notes": "AI-facing index for published MCP config templates."
+      "notes": "AI-facing index generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "json",
+      "source": "curated_output_for_ai/packs/codex-n8n-local/pack.json",
       "output": "for_ai/packs/codex-n8n-local/pack.json",
-      "notes": "Published install pack maintained under for_ai."
+      "notes": "Published install pack generated from project-owned curated AI output."
     },
     {
-      "kind": "linked",
+      "kind": "json",
+      "source": "curated_output_for_ai/packs/claude-code-n8n-local/pack.json",
       "output": "for_ai/packs/claude-code-n8n-local/pack.json",
-      "notes": "Published install pack maintained under for_ai."
+      "notes": "Published install pack generated from project-owned curated AI output."
     }
   ],
   "writes": {

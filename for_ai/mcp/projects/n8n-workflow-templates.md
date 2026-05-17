@@ -1,7 +1,8 @@
 <!--
-AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: n8n.workflow-templates
-Review the related _projects/**/_main source when updating.
+Source: _projects/n8n/workflow-templates/curated_output_for_ai/mcp/n8n-workflow-templates.md
+Update the curated output and run sync.
 -->
 # MCP Project Spec: n8n Workflow Templates
 

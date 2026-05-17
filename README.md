@@ -11,7 +11,7 @@ Start here if you are browsing or copying things manually:
 3. Use [for_ai/packs/](for_ai/packs/) as checklists before copying multiple files. Packs are approval-gated manifests, not automatic installers in v1.
 4. Use [repo/](repo/) only for maintaining this toolkit: validation scripts, tests, policy docs, provenance notes, and CI support.
 
-The [for_ai/](for_ai/) tree is the published AI-facing layer. Humans can review it, but it is not the primary manual documentation layer. In particular:
+The [for_ai/](for_ai/) tree is the published AI-facing layer. Humans can review it, but it is not the primary manual documentation layer. Many internal `for_ai/` files are generated from project-owned `_main/` or `curated_output_for_ai/` sources; update the project source and run sync instead of editing generated outputs directly. In particular:
 
 - [for_ai/skills/](for_ai/skills/) contains portable instruction packs for AI agents.
 - [for_ai/mcp/](for_ai/mcp/) contains future-facing MCP design documents. No MCP server implementation is shipped in v1.
@@ -40,8 +40,8 @@ For humans who want to use the MCP material manually:
 
 | Path | Purpose |
 | --- | --- |
-| [_projects/](_projects/) | Canonical preserved source library. Humans should use `_projects/**/_main/` for full source docs and original guides. |
-| [for_ai/](for_ai/) | AI-facing published assets: skills, MCP notes, templates, packs, registries, tools, and operator playbooks. |
+| [_projects/](_projects/) | Canonical project-owned source layer. Humans should use `_projects/**/_main/` for preserved full source docs and `curated_output_for_ai/` for reviewed AI-facing source material. |
+| [for_ai/](for_ai/) | AI-facing published assets: skills, MCP notes, templates, packs, registries, tools, and operator playbooks. Generated files include source notices. |
 | [repo/](repo/) | Repo maintenance assets: validation scripts, tests, policy docs, provenance notes, and CI support. |
 
 Root stays intentionally small: `README.md`, `AGENTS.md`, `package.json`, `.gitignore`, `.gitattributes`, `.github/`, `_projects/`, `for_ai/`, and `repo/`.
@@ -55,6 +55,14 @@ _projects/<category>/<project>/_main/
 ```
 
 Each project module also carries `toolkit.project.json`, `SOURCE-MANIFEST.md`, `SOURCE-LOCK.json`, and a tiny landing `README.md`. Those landing cards point to `_main/` and do not replace the preserved source docs.
+
+Internal modules may also keep reviewed AI-facing source material in:
+
+```text
+_projects/<category>/<project>/curated_output_for_ai/
+```
+
+When `_main/` or `curated_output_for_ai/` changes, regenerate published outputs with `node repo/scripts/sync-toolkit-projects.cjs --write`.
 
 Current project modules:
 

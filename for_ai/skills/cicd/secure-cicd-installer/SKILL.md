@@ -4,9 +4,10 @@ description: Instruction-only guidance for reviewing, planning, and applying sec
 ---
 
 <!--
-AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: cicd.secure-installer
-Review the related _projects/**/_main source when updating.
+Source: _projects/cicd/secure-installer/curated_output_for_ai/skills/secure-cicd-installer/SKILL.md
+Update the curated output and run sync.
 -->
 # Secure CI/CD Installer
 

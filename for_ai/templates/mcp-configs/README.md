@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit curated output for AI. Do not edit directly.
+Project: n8n.local-setup
+Source: _projects/n8n/local-setup/curated_output_for_ai/templates/mcp-configs/README.md
+Update the curated output and run sync.
+-->
 # MCP Config Templates
 
 These files are source templates for configuring MCP access in different AI-agent platforms.

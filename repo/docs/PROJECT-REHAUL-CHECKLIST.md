@@ -6,13 +6,13 @@ Use this checklist when reviewing the project-module architecture.
 
 - [ ] Each project has `README.md`, `SOURCE-MANIFEST.md`, `SOURCE-LOCK.json`, `toolkit.project.json`, and `_main/`.
 - [ ] `_main/` preserves actual source files without truncating full guides.
-- [ ] `curated_output_for_ai/` exists only when a reviewed transformation is needed.
+- [ ] `curated_output_for_ai/` exists only when reviewed AI-facing source material is needed.
 - [ ] No `source-repos/`, generic `original/`, or generic `derived/` pattern is introduced.
 
 ## AI-Facing Surfaces
 
 - [ ] [for_ai/skills/](../../for_ai/skills/), [for_ai/mcp/](../../for_ai/mcp/), [for_ai/templates/](../../for_ai/templates/), [for_ai/packs/](../../for_ai/packs/), [for_ai/tools/](../../for_ai/tools/), [for_ai/registry/](../../for_ai/registry/), and [for_ai/playbooks/](../../for_ai/playbooks/) remain obvious.
-- [ ] Skills and MCP docs are generated from declared recipes or maintained as linked root surfaces, not summarised from arbitrary `_main/` files.
+- [ ] Skills and MCP docs are generated from declared recipes where practical, with rare linked root surfaces justified in manifests.
 - [ ] Generated Markdown outputs include a generated-source notice.
 - [ ] Root agent-rule templates are generated from declared `_main/` and linked partial sources, and unmanaged root partial duplicates do not exist.
 - [ ] `SOURCE-LOCK.json` files pass the source-lock audit.

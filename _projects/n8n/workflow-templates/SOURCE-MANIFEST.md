@@ -8,7 +8,7 @@
 
 ## AI-Facing Surfaces
 
-- AI-facing skill, MCP doc, playbook, sanitizer docs, workflow policy, and pack are directly maintained and declared as `linked`.
+- AI-facing skill, MCP doc, playbook, sanitizer docs, workflow policy, and pack are generated from `curated_output_for_ai/`.
 - Toolkit-adapted AI-facing sanitizer scripts are linked and source-locked.
 
 ## Excluded
