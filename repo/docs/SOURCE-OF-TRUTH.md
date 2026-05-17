@@ -43,7 +43,7 @@ The `Auto-sync generated toolkit surfaces` workflow is only a deterministic gene
 - `main` is never written to.
 - The workflow only republishes declared generated/synced outputs such as `README.md`, `AGENTS.md`, and `for_ai/**`.
 - It does not update sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
-- If eligible source/routing/contract edits are mixed with forbidden workflow, maintenance-script, or preserved-source path changes, the workflow fails instead of pushing.
+- If eligible source/routing/contract edits are mixed with forbidden workflow, maintenance-script, or preserved-source path changes, the workflow fails or safely skips instead of pushing.
 
 ## Packs
 
