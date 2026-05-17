@@ -30,6 +30,7 @@ jobs:
 
       - name: Run validation
         run: |
+          node repo/scripts/sync-repo-doc-contract.cjs --check
           node repo/scripts/sync-toolkit-projects.cjs --check
           node repo/scripts/audit-project-source-locks.cjs
           node repo/scripts/validate-toolkit.cjs

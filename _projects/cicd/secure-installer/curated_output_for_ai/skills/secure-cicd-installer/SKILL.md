@@ -3,6 +3,12 @@ name: secure-cicd-installer
 description: Instruction-only guidance for reviewing, planning, and applying secure CI/CD installer materials with approval-gated writes, safe status tracking, and no default command execution.
 ---
 
+<!--
+Curated AI-facing source.
+Project: cicd.secure-installer
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # Secure CI/CD Installer
 
 Use this skill when a user asks for secure CI/CD setup, GitHub Actions hardening, installer prompt/status templates, or safe rollout planning based on this toolkit's CI/CD project module.

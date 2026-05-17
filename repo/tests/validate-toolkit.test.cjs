@@ -10,6 +10,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const validateScript = path.join(repoRoot, 'repo', 'scripts', 'validate-toolkit.cjs');
 const syncScript = path.join(repoRoot, 'repo', 'scripts', 'sync-toolkit-projects.cjs');
+const contractScript = path.join(repoRoot, 'repo', 'scripts', 'sync-repo-doc-contract.cjs');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs');
 const validator = require(validateScript);
 const safeSourceUpdate = require(path.join(repoRoot, 'repo', 'scripts', 'safe-source-update.cjs'));
@@ -47,12 +48,29 @@ function writeJsonFile(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function readTextFile(filePath) {
+  return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+}
+
 function manifestsById() {
   return new Map(validator.projectManifests().map((manifest) => [manifest.id, manifest]));
 }
 
 function manifestOutput(manifest, outputPath) {
   return (manifest.outputs || []).find((output) => output.output === outputPath);
+}
+
+function contractBlock(text) {
+  const begin = '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->';
+  const end = '<!-- END SOURCE-OF-TRUTH-CONTRACT -->';
+  const beginMatches = text.match(new RegExp(begin, 'g')) || [];
+  const endMatches = text.match(new RegExp(end, 'g')) || [];
+  assert.equal(beginMatches.length, 1, 'begin marker count');
+  assert.equal(endMatches.length, 1, 'end marker count');
+  const start = text.indexOf(begin);
+  const finish = text.indexOf(end);
+  assert.ok(start < finish, 'contract markers are ordered');
+  return text.slice(start + begin.length, finish).trim();
 }
 
 test('JSON registries parse in the current repo', () => {
@@ -100,6 +118,43 @@ test('validator expects durable retired source provenance doc instead of migrati
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Missing expected file: repo\/docs\/RETIRED-SOURCE-PROVENANCE\.md/);
+});
+
+test('source-of-truth contract is synced into main entry points', () => {
+  const partial = readTextFile(path.join(repoRoot, 'repo', 'docs', 'partials', 'source-of-truth-contract.md')).trim();
+  for (const rel of ['README.md', 'AGENTS.md', 'for_ai/README.md']) {
+    const text = readTextFile(path.join(repoRoot, rel));
+    assert.equal(contractBlock(text), partial, rel);
+  }
+});
+
+test('source-of-truth contract sync script passes and catches drift', () => {
+  let result = spawnSync(process.execPath, [contractScript, '--check'], { cwd: repoRoot, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+
+  const cwd = tempCopy();
+  fs.writeFileSync(
+    path.join(cwd, 'for_ai', 'README.md'),
+    readTextFile(path.join(cwd, 'for_ai', 'README.md')).replace('published AI-facing surface for skills', 'published AI-facing layer for skills')
+  );
+  result = spawnSync(process.execPath, [contractScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale source-of-truth contract block: for_ai\/README\.md/);
+});
+
+test('AGENTS.md gives future agents unambiguous source routing rules', () => {
+  const text = readTextFile(path.join(repoRoot, 'AGENTS.md'));
+  assert.match(text, /curated_output_for_ai/);
+  assert.match(text, /toolkit\.project\.json/);
+  assert.match(text, /Do not edit generated `for_ai\/` outputs directly/);
+  assert.match(text, /Do not generate curated files automatically from `_main`/);
+});
+
+test('validation workflow checks source-of-truth contract drift read-only', () => {
+  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'validate.yml'));
+  assert.match(workflow, /node repo\/scripts\/sync-repo-doc-contract\.cjs --check/);
+  assert.doesNotMatch(workflow, /sync-repo-doc-contract\.cjs --write/);
+  assert.match(workflow, /^permissions:\n  contents: read$/m);
 });
 
 test('project modules use _projects/_main with no mandatory exports tree', () => {
@@ -572,6 +627,27 @@ test('curated recipes must source from curated_output_for_ai', () => {
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /curated output source must start with curated_output_for_ai\//);
+});
+
+test('internal curated Markdown files carry the curated review note', () => {
+  const required = [
+    'Curated AI-facing source.',
+    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.'
+  ];
+  for (const projectDir of [
+    '_projects/n8n/local-setup/curated_output_for_ai',
+    '_projects/n8n/workflow-templates/curated_output_for_ai',
+    '_projects/cicd/secure-installer/curated_output_for_ai'
+  ]) {
+    const files = fs.readdirSync(path.join(repoRoot, projectDir), { recursive: true })
+      .map((entry) => String(entry).replace(/\\/g, '/'))
+      .filter((entry) => entry.endsWith('.md'));
+    assert.ok(files.length > 0, projectDir);
+    for (const file of files) {
+      const text = readTextFile(path.join(repoRoot, projectDir, file));
+      for (const needle of required) assert.ok(text.includes(needle), `${projectDir}/${file}`);
+    }
+  }
 });
 
 test('validator rejects stale mandatory exports architecture wording in permanent docs', () => {

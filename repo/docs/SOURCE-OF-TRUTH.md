@@ -2,6 +2,8 @@
 
 This repo owns reusable AI-agent toolkit assets.
 
+The compact shared contract lives in [source-of-truth-contract.md](partials/source-of-truth-contract.md) and is synced into the main entry points with `node repo/scripts/sync-repo-doc-contract.cjs --write`.
+
 ## Toolkit-Owned
 
 - Reusable skills.

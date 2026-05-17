@@ -1,3 +1,9 @@
+<!--
+Curated AI-facing source.
+Project: n8n.workflow-templates
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # n8n Workflow Sync
 
 This skill helps AI agents handle reusable n8n workflow sync and template hygiene without leaking credentials or product data.

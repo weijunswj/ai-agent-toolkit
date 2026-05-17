@@ -20,6 +20,8 @@ Start with:
 To sync generated AI-facing surfaces:
 
 ```powershell
+node repo/scripts/sync-repo-doc-contract.cjs --write
+node repo/scripts/sync-repo-doc-contract.cjs --check
 node repo/scripts/sync-toolkit-projects.cjs --write
 node repo/scripts/sync-toolkit-projects.cjs --check
 ```

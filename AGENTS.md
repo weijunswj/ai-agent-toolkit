@@ -1,6 +1,38 @@
 # AI Agent Toolkit Repo Rules
 
-This repo is the canonical reusable AI Agent Toolkit. Keep the topology simple:
+This repo is the canonical reusable AI Agent Toolkit.
+
+<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->
+## Source-of-Truth Contract
+
+This repo has a source layer and a published layer.
+
+- `_projects/**/_main/` preserves full source material and original docs. Do not casually rewrite preserved source.
+- `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source material. Curated files may be AI-assisted, but they are source files and must be reviewed before publishing.
+- `_projects/**/toolkit.project.json` is the routing contract. It declares which `_main/` or `curated_output_for_ai/` files publish to which `for_ai/` outputs.
+- `for_ai/` is the published AI-facing surface for skills, MCP notes, templates, packs, registries, tools, and playbooks.
+- Generated `for_ai/` files must not be edited directly. Update the matching `_projects` source or curated file, then run sync.
+- `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
+- Publish declared outputs with:
+  `node repo/scripts/sync-toolkit-projects.cjs --write`
+- Check generated freshness with:
+  `node repo/scripts/sync-toolkit-projects.cjs --check`
+- CI currently checks generated freshness, but it must not invent curated content from `_main/`.
+- Future auto-sync may write generated outputs on same-repo PR branches, but this PR must not add that auto-writeback workflow.
+- Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
+<!-- END SOURCE-OF-TRUTH-CONTRACT -->
+
+## Agent Routing Rules
+
+- Do not edit generated `for_ai/` outputs directly unless that output is declared as `linked` in the relevant `_projects/**/toolkit.project.json`.
+- If changing an internal skill, MCP doc, playbook, pack, or template doc, edit `_projects/**/curated_output_for_ai/` first, then run sync.
+- If changing preserved source, edit `_projects/**/_main/`.
+- If adding or moving a generated output, update the relevant `toolkit.project.json` recipe and `writes.allowed`.
+- Do not generate curated files automatically from `_main`; curated content is reviewed source.
+- Do not weaken safety rules around credentials, `.env`, `.tmp`, `.n8n-local`, live n8n actions, approval, attribution, or local-only constraints.
+- Run sync, check, and relevant tests before reporting completion.
+
+Keep the topology simple:
 
 - `_projects/` preserves canonical human/source material. Full original docs and guides live in `_projects/**/_main/`.
 - `for_ai/` contains AI-facing published surfaces: skills, MCP design notes, templates, packs, registries, tools, and operator playbooks.
@@ -37,6 +69,7 @@ This repo is the canonical reusable AI Agent Toolkit. Keep the topology simple:
 Before reporting completion, run the relevant checks:
 
 ```powershell
+node repo/scripts/sync-repo-doc-contract.cjs --check
 node repo/scripts/sync-toolkit-projects.cjs --check
 node repo/scripts/audit-project-source-locks.cjs
 node repo/scripts/validate-toolkit.cjs

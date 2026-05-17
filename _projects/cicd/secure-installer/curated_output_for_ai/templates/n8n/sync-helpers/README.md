@@ -1,3 +1,9 @@
+<!--
+Curated AI-facing source.
+Project: cicd.secure-installer
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # n8n Sync Helpers
 
 This folder contains review-required helper templates for n8n workflow sync.

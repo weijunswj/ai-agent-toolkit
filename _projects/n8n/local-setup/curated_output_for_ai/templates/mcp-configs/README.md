@@ -1,3 +1,9 @@
+<!--
+Curated AI-facing source.
+Project: n8n.local-setup
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # MCP Config Templates
 
 These files are source templates for configuring MCP access in different AI-agent platforms.

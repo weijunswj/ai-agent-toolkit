@@ -1,3 +1,9 @@
+<!--
+Curated AI-facing source.
+Project: n8n.workflow-templates
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # MCP Project Spec: n8n Workflow Templates
 
 Project identity: `n8n.workflow-templates`

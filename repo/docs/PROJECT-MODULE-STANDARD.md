@@ -81,6 +81,8 @@ node repo/scripts/audit-project-source-locks.cjs
 6. Run:
 
 ```powershell
+node repo/scripts/sync-repo-doc-contract.cjs --write
+node repo/scripts/sync-repo-doc-contract.cjs --check
 node repo/scripts/sync-toolkit-projects.cjs --write
 node repo/scripts/sync-toolkit-projects.cjs --check
 node repo/scripts/audit-project-source-locks.cjs

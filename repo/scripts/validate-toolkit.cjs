@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const docContractSync = require('./sync-repo-doc-contract.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const projectSync = require('./sync-toolkit-projects.cjs');
 
@@ -16,7 +17,9 @@ const expectedFiles = [
   'package.json',
   '.gitignore',
   '.gitattributes',
+  'for_ai/README.md',
   'repo/docs/HOW-TO-USE.md',
+  'repo/docs/partials/source-of-truth-contract.md',
   'repo/docs/FOR_AI_AGENTS.md',
   'repo/docs/SAFE-UPDATES.md',
   'repo/docs/SOURCE-OF-TRUTH.md',
@@ -81,6 +84,7 @@ const expectedFiles = [
   'repo/scripts/package-skills.cjs',
   'repo/scripts/package-packs.cjs',
   'repo/scripts/safe-source-update.cjs',
+  'repo/scripts/sync-repo-doc-contract.cjs',
   '.github/workflows/source-watch-plan.yml',
   '.github/workflows/validate.yml'
 ];
@@ -125,6 +129,7 @@ const expectedDirs = [
   'for_ai/mcp/registry-mcp',
   'for_ai/mcp/installer-mcp',
   'for_ai/mcp/projects',
+  'repo/docs/partials',
   '.github/workflows'
 ];
 
@@ -574,6 +579,11 @@ function validateProjectModules(errors) {
   for (const error of result.errors) fail(errors, error);
 }
 
+function validateDocContract(errors) {
+  const result = docContractSync.validateAndSync({ mode: 'check' });
+  for (const error of result.errors) fail(errors, error);
+}
+
 function validateProjectLandingCards(errors) {
   const projectReadmes = listFiles().filter((entry) =>
     /^_projects\/[^/]+\/[^/]+\/README\.md$/.test(entry.relPath)
@@ -830,6 +840,7 @@ function runValidation() {
   validateSkills(errors);
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
+  validateDocContract(errors);
   validateProjectModules(errors);
   validateProjectLandingCards(errors);
   validateSourceLocks(errors);

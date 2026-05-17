@@ -3,6 +3,12 @@ name: n8n-local-setup
 description: Guide AI agents through safe local n8n setup, MCP config selection, tunneling choices, and platform-specific agent-rule setup without running live n8n actions unless explicitly confirmed.
 ---
 
+<!--
+Curated AI-facing source.
+Project: n8n.local-setup
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # n8n Local Setup
 
 Use this skill when the user needs to set up or explain local n8n, agent rules, MCP config, tunneling, Docker Compose plus ngrok, VPS hosting notes, or platform integrations for Codex, Claude Code, OpenCode, or Antigravity.
