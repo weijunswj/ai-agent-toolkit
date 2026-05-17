@@ -207,7 +207,24 @@ function validationRulePathCandidates(root) {
     .map((value) => (path.isAbsolute(value) ? value : path.join(root, value)));
 
   const defaults = DEFAULT_VALIDATION_RULE_FILES.map((file) => path.join(root, file));
-  return [...new Set([...configured, ...defaults])];
+  const candidates = [];
+  const seen = new Map();
+  function addCandidate(filePath, required) {
+    const resolved = path.resolve(filePath);
+    const existing = seen.get(resolved);
+    if (existing) {
+      existing.required = existing.required || required;
+      return;
+    }
+
+    const candidate = { filePath: resolved, required };
+    seen.set(resolved, candidate);
+    candidates.push(candidate);
+  }
+
+  for (const filePath of configured) addCandidate(filePath, true);
+  for (const filePath of defaults) addCandidate(filePath, false);
+  return candidates;
 }
 
 function ruleFunctionFromModule(moduleExports, rulePath) {
@@ -225,8 +242,11 @@ function ruleFunctionFromModule(moduleExports, rulePath) {
 function loadProjectValidationRules(root) {
   const rules = [];
 
-  for (const rulePath of validationRulePathCandidates(root)) {
+  for (const { filePath: rulePath, required } of validationRulePathCandidates(root)) {
     if (!fs.existsSync(rulePath)) {
+      if (required) {
+        fail(`Configured n8n workflow validation rule not found: ${path.relative(root, rulePath) || rulePath}.`);
+      }
       continue;
     }
 

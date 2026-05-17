@@ -58,13 +58,17 @@
       "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
-      "kind": "linked",
+      "kind": "copy",
+      "source": "_main/templates/n8n/export-n8n-workflows-live.ps1",
       "output": "for_ai/templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "notice": false,
       "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {
-      "kind": "linked",
+      "kind": "copy",
+      "source": "_main/templates/n8n/import-n8n-workflows-live.ps1",
       "output": "for_ai/templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "notice": false,
       "notes": "AI-facing helper is toolkit-adapted and source-locked."
     },
     {

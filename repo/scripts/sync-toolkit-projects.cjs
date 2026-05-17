@@ -26,6 +26,7 @@ const forbiddenNames = new Set([
 ]);
 const forbiddenDeniedPolicy = ['.env*', '**/*credential*', '**/*.key', '**/*.pem'];
 const supportedKinds = new Set(['copy', 'concat', 'curated', 'json', 'linked']);
+const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -312,7 +313,7 @@ function expandRecipe(project, output, linked) {
   }
 
   const ext = path.extname(output.output).toLowerCase();
-  const binaryCopy = output.kind === 'copy' && ext !== '.md' && ext !== '.json';
+  const binaryCopy = output.kind === 'copy' && !textOutputExtensions.has(ext);
   return [{
     output: output.output,
     source: rels[0],

@@ -38,7 +38,6 @@ function Resolve-RepoRootFromScript {
   while ($true) {
     if (
       (Test-Path -LiteralPath (Join-Path $current ".git")) -or
-      (Test-Path -LiteralPath (Join-Path $current ".gitignore")) -or
       (Test-Path -LiteralPath (Join-Path $current "n8n-workflows"))
     ) {
       return $current
@@ -115,7 +114,24 @@ function Get-DisplayPath($Path) {
 }
 
 function Resolve-ProjectWorkflowHookScripts {
-  $scripts = New-Object System.Collections.Generic.List[string]
+  $candidates = New-Object System.Collections.Generic.List[object]
+
+  function Add-HookScriptCandidate([string]$HookPath, [bool]$Required) {
+    if ([string]::IsNullOrWhiteSpace($HookPath)) {
+      return
+    }
+
+    if ([System.IO.Path]::IsPathRooted($HookPath)) {
+      $fullPath = [System.IO.Path]::GetFullPath($HookPath)
+    } else {
+      $fullPath = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $HookPath))
+    }
+
+    $candidates.Add([PSCustomObject]@{
+      Path = $fullPath
+      Required = $Required
+    })
+  }
 
   # Generic import extension point:
   # keep this script project-agnostic. If a target repo needs import/export
@@ -123,14 +139,7 @@ function Resolve-ProjectWorkflowHookScripts {
   # repo instead of hardcoding workflow-specific rules here.
   if (-not [string]::IsNullOrWhiteSpace($env:N8N_WORKFLOW_HOOK_SCRIPT)) {
     foreach ($hookPath in @($env:N8N_WORKFLOW_HOOK_SCRIPT -split ';')) {
-      if ([string]::IsNullOrWhiteSpace($hookPath)) {
-        continue
-      }
-      if ([System.IO.Path]::IsPathRooted($hookPath)) {
-        $scripts.Add([System.IO.Path]::GetFullPath($hookPath))
-      } else {
-        $scripts.Add([System.IO.Path]::GetFullPath((Join-Path $RepoRoot $hookPath)))
-      }
+      Add-HookScriptCandidate $hookPath $true
     }
   }
 
@@ -145,22 +154,41 @@ function Resolve-ProjectWorkflowHookScripts {
     ".n8n-workflow-hooks.js",
     ".n8n-workflow-hooks.ps1"
   )) {
-    $scripts.Add([System.IO.Path]::GetFullPath((Join-Path $RepoRoot $relativePath)))
+    Add-HookScriptCandidate $relativePath $false
   }
 
   $seen = @{}
   $existingScripts = @()
-  foreach ($script in $scripts) {
+  foreach ($candidate in $candidates) {
+    $script = $candidate.Path
     if ($seen.ContainsKey($script)) {
       continue
     }
     $seen[$script] = $true
     if (Test-Path -LiteralPath $script -PathType Leaf) {
       $existingScripts += $script
+    } elseif ($candidate.Required) {
+      throw "Configured n8n workflow hook script not found: $(Get-DisplayPath $script)"
     }
   }
 
   return $existingScripts
+}
+
+function Resolve-PowerShellHookCommand {
+  $currentProcessPath = [System.Diagnostics.Process]::GetCurrentProcess().Path
+  if (-not [string]::IsNullOrWhiteSpace($currentProcessPath) -and (Test-Path -LiteralPath $currentProcessPath -PathType Leaf)) {
+    return $currentProcessPath
+  }
+
+  foreach ($candidate in @("pwsh", "powershell")) {
+    $commandInfo = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($commandInfo -and -not [string]::IsNullOrWhiteSpace($commandInfo.Source)) {
+      return $commandInfo.Source
+    }
+  }
+
+  throw "Could not find a PowerShell host to run .ps1 n8n workflow hook scripts. Install pwsh or powershell."
 }
 
 function Invoke-ProjectWorkflowHook($HookName, [hashtable]$Context) {
@@ -185,7 +213,7 @@ function Invoke-ProjectWorkflowHook($HookName, [hashtable]$Context) {
       $command = "node"
       $arguments = @($hookScript) + $hookArgs
     } elseif ($extension -eq ".ps1") {
-      $command = "powershell"
+      $command = Resolve-PowerShellHookCommand
       $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $hookScript) + $hookArgs
     } elseif ($extension -eq ".cmd" -or $extension -eq ".bat") {
       $command = $hookScript
@@ -750,8 +778,6 @@ $bindingsFileExists = Test-Path -Path $BindingsFilePath -PathType Leaf
 if (-not $bindingsFileExists) {
   Write-Step "WARN" "Credential bindings file is missing. Existing live credentials cannot be restored unless live workflows are exportable first."
 }
-
-$workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath
 
 Invoke-ProjectWorkflowHook "before-import-validation" @{
   "archived-by-name-mode" = $ArchivedByNameMode

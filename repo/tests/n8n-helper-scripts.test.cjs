@@ -12,7 +12,6 @@ const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repo
 const scriptDir = path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sync-helpers');
 const sourceScriptDir = path.join(repoRoot, '_projects', 'cicd', 'secure-installer', '_main', 'templates', 'n8n');
 const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
-const sourceValidateScript = path.join(sourceScriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
 const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');
 const sanitizerScript = path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sanitizer', 'prepare-n8n-template.js');
@@ -25,6 +24,10 @@ function tempDir() {
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n');
+}
+
+function readText(filePath) {
+  return fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
 }
 
 function safeWorkflow(overrides = {}) {
@@ -51,6 +54,7 @@ function safeWorkflow(overrides = {}) {
 function runNode(scriptPath, args = [], options = {}) {
   return spawnSync(process.execPath, [scriptPath, ...args], {
     cwd: options.cwd,
+    env: { ...process.env, ...(options.env || {}) },
     encoding: 'utf8',
   });
 }
@@ -205,7 +209,7 @@ test('validate-n8n-workflows.cjs has no SpaceKoncept-specific placeholder requir
   assert.equal(result.status, 0, result.stderr);
 });
 
-test('source validate-n8n-workflows.cjs loads repo-specific validation rules', () => {
+test('validate-n8n-workflows.cjs loads project validation rules from consumer repo paths', () => {
   const cwd = tempDir();
   writeJson(path.join(cwd, 'n8n-workflows', 'generic.json'), safeWorkflow());
   fs.mkdirSync(path.join(cwd, 'scripts'), { recursive: true });
@@ -219,11 +223,108 @@ test('source validate-n8n-workflows.cjs loads repo-specific validation rules', (
     ].join('\n')
   );
 
-  const result = runNode(sourceValidateScript, [], { cwd });
+  const result = runNode(validateScript, [], { cwd });
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /custom rule failed/);
   assert.match(result.stdout, /Using validation rule scripts[\\/]n8n-workflow-validation-rules\.cjs/);
+});
+
+test('validate-n8n-workflows.cjs fails when configured validation rule is missing', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'generic.json'), safeWorkflow());
+
+  const result = runNode(validateScript, [], {
+    cwd,
+    env: {
+      N8N_WORKFLOW_VALIDATION_RULES: 'n8n-validation/missing-validation-rule.cjs',
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Configured n8n workflow validation rule not found: n8n-validation[\\/]missing-validation-rule\.cjs/);
+});
+
+test('generated n8n helper scripts are fresh copies of project source', () => {
+  for (const fileName of [
+    'export-n8n-workflows-live.ps1',
+    'import-n8n-workflows-live.ps1',
+    'validate-n8n-workflows.cjs',
+  ]) {
+    assert.equal(readText(path.join(scriptDir, fileName)), readText(path.join(sourceScriptDir, fileName)), fileName);
+  }
+});
+
+test('n8n hook and validation extension points stay generic and product agnostic', () => {
+  const text = [
+    'export-n8n-workflows-live.ps1',
+    'import-n8n-workflows-live.ps1',
+    'validate-n8n-workflows.cjs',
+  ].map((fileName) => readText(path.join(scriptDir, fileName))).join('\n');
+
+  assert.match(text, /N8N_WORKFLOW_HOOK_SCRIPT/);
+  assert.match(text, /n8n-workflow-hooks/);
+  assert.match(text, /N8N_WORKFLOW_VALIDATION_RULES/);
+  assert.match(text, /n8n-workflow-validation-rules/);
+  assert.doesNotMatch(text, /SpaceKoncept|SPACEKONCEPT|Groq/i);
+  assert.doesNotMatch(text, /ui-ux-pro-max|design-system-generator/);
+});
+
+test('PowerShell n8n hooks use a resolved host instead of hardcoded Windows PowerShell', () => {
+  for (const fileName of [
+    'export-n8n-workflows-live.ps1',
+    'import-n8n-workflows-live.ps1',
+  ]) {
+    const text = readText(path.join(scriptDir, fileName));
+
+    assert.match(text, /function Resolve-PowerShellHookCommand/);
+    assert.match(text, /GetCurrentProcess\(\)\.Path/);
+    assert.match(text, /@\("pwsh", "powershell"\)/);
+    assert.doesNotMatch(text, /\$command = "powershell"/);
+  }
+});
+
+test('PowerShell n8n hooks require configured hook scripts but keep defaults optional', () => {
+  for (const fileName of [
+    'export-n8n-workflows-live.ps1',
+    'import-n8n-workflows-live.ps1',
+  ]) {
+    const text = readText(path.join(scriptDir, fileName));
+
+    assert.match(text, /N8N_WORKFLOW_HOOK_SCRIPT[\s\S]*Add-HookScriptCandidate \$hookPath \$true/);
+    assert.match(text, /Add-HookScriptCandidate \$relativePath \$false/);
+    assert.match(text, /Configured n8n workflow hook script not found/);
+    assert.match(text, /elseif \(\$candidate\.Required\)/);
+    assert.match(text, /Get-DisplayPath \$script/);
+    assert.doesNotMatch(text, /ConvertTo-RepoRelativePath/);
+  }
+});
+
+test('PowerShell n8n repo root resolver ignores nested gitignore files', () => {
+  for (const fileName of [
+    'export-n8n-workflows-live.ps1',
+    'import-n8n-workflows-live.ps1',
+  ]) {
+    const text = readText(path.join(scriptDir, fileName));
+    const resolverMatch = text.match(/function Resolve-RepoRootFromScript \{[\s\S]*?\n\}/);
+    assert.ok(resolverMatch, `${fileName} resolver not found`);
+    const resolver = resolverMatch[0];
+
+    assert.match(resolver, /Join-Path \$current "\.git"/);
+    assert.match(resolver, /Join-Path \$current "n8n-workflows"/);
+    assert.doesNotMatch(resolver, /\.gitignore/);
+  }
+});
+
+test('n8n helper tests do not execute live n8n import or export helpers', () => {
+  const testText = readText(__filename);
+  const childProcessCalls = testText.match(/(?:spawnSync|execFileSync)\([\s\S]*?\);/g) || [];
+
+  for (const call of childProcessCalls) {
+    assert.doesNotMatch(call, /export-n8n-workflows-live\.ps1|import-n8n-workflows-live\.ps1/);
+    assert.doesNotMatch(call, /\bn8n\s+(import|export|execute|start|webhook)/i);
+    assert.doesNotMatch(call, /\bdocker\b/i);
+  }
 });
 
 test('sync-n8n-live-exports.cjs strips live-only fields, credentials, and tags by default', () => {
