@@ -48,14 +48,13 @@ Allowed scoped writes:
 
 ## Third-Party Updates
 
-Third-party source updates require stricter review:
+Current source-watch output is advisory only. For future updater work, third-party source updates require stricter review:
 
-- Draft PR only.
 - Strict allowlist.
 - Manual script review.
 - Local-only static checks for no network, shell execution, subprocess use, package installs, or browser launches.
 - Labels such as `source-update` and `third-party-review`.
-- Request review from `weijunswj` and mention `@weijunswj` in the PR body.
+- Review from `weijunswj` before merge.
 
 For `nextlevelbuilder/ui-ux-pro-max-skill`, the allowlist is:
 
@@ -70,7 +69,7 @@ Optional AI review is advisory only. It can help summarize a diff, but it cannot
 
 GitHub Actions and Codex should handle deterministic file updates. Optional ChatGPT scheduled review can check upstream notes, explain risk, produce a Codex review prompt, and recommend approve/reject/manual review. It must not be the write mechanism.
 
-GitHub notifications depend on the user's notification settings. Requesting `weijunswj` as reviewer and mentioning `@weijunswj` in the PR body gives the strongest chance of GitHub or email notification.
+GitHub notifications depend on the user's notification settings. Future updater work should request the right reviewer through normal GitHub review settings.
 
 ## Hard Rules
 

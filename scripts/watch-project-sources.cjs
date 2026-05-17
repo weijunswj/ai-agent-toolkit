@@ -91,7 +91,7 @@ function planEntry(lockFile) {
       'node --test tests/*.test.cjs'
     ],
     notes: risk === 'third-party'
-      ? 'Draft PR only. Request weijunswj review, mention @weijunswj, and manually review scripts before merge.'
+      ? 'Read-only advisory. Future updater work must keep weijunswj review, manual script review, and attribution checks.'
       : 'Future deterministic PR update may be allowed when allowlist and validation pass. Never auto-merge.'
   };
 }

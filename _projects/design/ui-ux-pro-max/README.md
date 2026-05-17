@@ -5,8 +5,7 @@ This module preserves the safe local-search subset adapted from `nextlevelbuilde
 ## Layout
 
 - [_main/](_main/) keeps the safe preserved source subset and notes.
-- `curated_output_for_ai/` is absent because no intermediate curated source is needed.
-- [_generated/](_generated/) is reserved for optional previews only.
+- No curated or generated preview folder is used for this module.
 
 ## Third-Party Attribution
 

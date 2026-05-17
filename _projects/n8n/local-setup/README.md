@@ -5,8 +5,7 @@ This project module preserves the full local n8n setup source project and declar
 ## Layout
 
 - [_main/](_main/) keeps the actual project files and original guide names.
-- `curated_output_for_ai/` is absent because no intermediate curated source is needed.
-- [_generated/](_generated/) is reserved for optional previews only.
+- No curated or generated preview folder is used for this module.
 
 Root-level consumer surfaces remain under [skills/](../../../skills/), [guides/](../../../guides/), [templates/](../../../templates/), [packs/](../../../packs/), [mcp/](../../../mcp/), and [registry/](../../../registry/).
 

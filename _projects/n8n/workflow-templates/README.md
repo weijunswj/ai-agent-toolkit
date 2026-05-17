@@ -5,8 +5,7 @@ This project module preserves the n8n workflow-template source material and decl
 ## Layout
 
 - [_main/](_main/) keeps the actual README, scripts, and template workflow files.
-- `curated_output_for_ai/` is absent because no intermediate curated source is needed.
-- [_generated/](_generated/) is reserved for optional previews only.
+- No curated or generated preview folder is used for this module.
 
 ## Safety
 

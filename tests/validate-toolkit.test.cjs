@@ -146,7 +146,7 @@ test('validator rejects network, shell, and package-install strings in design ge
 
 test('generated agent-rule templates are normal Markdown, not one giant fenced block', () => {
   for (const file of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
-    const text = fs.readFileSync(path.join(repoRoot, 'templates', 'agent-rules', file), 'utf8');
+    const text = fs.readFileSync(path.join(repoRoot, 'templates', 'agent-rules', file), 'utf8').replace(/\r\n/g, '\n');
     assert.doesNotMatch(text, /Use this generated template[^\n]*\n\n```md\n# AI coding agent execution preferences/);
     assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials/);
     assert.match(text, /templates\/agent-rules\/partials\/skill-routing-rules\.md/);
@@ -171,6 +171,31 @@ test('root agent-rule partials are declared linked surfaces when present', () =>
     }
   }
   assert.equal(linkedOutputs.has('templates/agent-rules/partials/skill-routing-rules.md'), true);
+});
+
+test('validator rejects broken relative links in non-_main READMEs', () => {
+  const cwd = tempCopy();
+  fs.appendFileSync(path.join(cwd, 'README.md'), '\n[Missing local target](docs/DOES-NOT-EXIST.md)\n');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /README\.md links to missing path: docs\/DOES-NOT-EXIST\.md/);
+});
+
+test('README link validation ignores _main README files', () => {
+  const cwd = tempCopy();
+  const ignoredDir = path.join(cwd, 'docs', 'sample', '_main');
+  fs.mkdirSync(ignoredDir, { recursive: true });
+  fs.writeFileSync(path.join(ignoredDir, 'README.md'), '[Ignored missing target](missing.md)\n');
+  const result = runValidate(cwd);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('validator rejects README links to absent optional folders', () => {
+  const cwd = tempCopy();
+  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', 'README.md'), '\n[Generated preview](_generated/)\n');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /links to missing path: _projects\/n8n\/local-setup\/_generated/);
 });
 
 test('changing declared _main partials makes generated agent rules stale', () => {
@@ -210,6 +235,19 @@ test('root skills are linked and not duplicated under curated output by default'
   assert.equal(linkedOutputs.has('skills/automation/n8n-workflow-sync/SKILL.md'), true);
   assert.equal(linkedOutputs.has('skills/cicd/secure-cicd-installer/SKILL.md'), true);
   assert.equal(linkedOutputs.has('skills/design/ui-ux-secure-frontend-design/SKILL.md'), true);
+});
+
+test('project modules require README, manifest, lock, toolkit metadata, and _main only', () => {
+  const cwd = tempCopy();
+  fs.unlinkSync(path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json'));
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing required project module file: _projects\/n8n\/local-setup\/toolkit\.project\.json/);
+});
+
+test('project module validation treats curated and generated folders as optional', () => {
+  const errors = validator.runValidation();
+  assert.equal(errors.filter((error) => /missing (curated_output_for_ai|_generated)/.test(error)).length, 0, errors.join('\n'));
 });
 
 test('source-lock audit passes and catches exact-copy drift for retired sources', () => {
@@ -278,7 +316,16 @@ test('source watch separates archived migration sources from active update candi
   assert.ok(thirdParty);
   assert.equal(thirdParty.risk, 'third-party');
   assert.equal(thirdParty.update_policy, 'manual_review_required');
-  assert.match(thirdParty.notes, /Draft PR only/);
+  assert.equal(thirdParty.public_attribution_required, true);
+  assert.match(thirdParty.notes, /read-only advisory/i);
+  assert.doesNotMatch(thirdParty.notes, /draft PR|open PR|create PR/i);
+});
+
+test('source watch rendered output is advisory and does not claim PR creation today', () => {
+  const markdown = sourceWatcher.renderMarkdown(sourceWatcher.buildPlan(sourceWatcher.discoverLocks()));
+  assert.match(markdown, /advisory/i);
+  assert.match(markdown, /does not fetch upstream commits, copy files, update SOURCE-LOCK\.json, create branches, or create PRs/);
+  assert.doesNotMatch(markdown, /Draft PR only|opens PRs today|creates PRs today|pushes commits/i);
 });
 
 test('public source repo registry excludes retired internal migration sources', () => {
@@ -288,6 +335,34 @@ test('public source repo registry excludes retired internal migration sources', 
   assert.equal(sources.includes('weijunswj/codex-n8n-local-setup'), false);
   assert.equal(sources.includes('weijunswj/ai-cicd-installer'), false);
   assert.equal(sources.includes('weijunswj/n8n-workflow-templates'), false);
+});
+
+test('validator rejects retired internal repos as active public source-watch targets', () => {
+  const cwd = tempCopy();
+  const registryPath = path.join(cwd, 'registry', 'source-repos.registry.json');
+  const registry = readJsonFile(registryPath);
+  registry.push({
+    id: 'bad.retired',
+    source: 'weijunswj/codex-n8n-local-setup',
+    project_module: '_projects/n8n/local-setup'
+  });
+  writeJsonFile(registryPath, registry);
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /retired internal repo must not be listed as active source-watch target/);
+});
+
+test('source-lock audit rejects active third-party sources without manual review metadata', () => {
+  const cwd = tempCopy();
+  const lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
+  const lock = readJsonFile(lockPath);
+  lock.source_update_policy = 'none';
+  lock.public_attribution_required = false;
+  writeJsonFile(lockPath, lock);
+  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /third-party attribution source must use source_update_policy manual_review_required/);
+  assert.match(result.stderr, /third-party attribution source must set public_attribution_required true/);
 });
 
 test('curated recipes must source from curated_output_for_ai', () => {
@@ -307,6 +382,14 @@ test('curated recipes must source from curated_output_for_ai', () => {
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /curated output source must start with curated_output_for_ai\//);
+});
+
+test('validator rejects stale mandatory exports architecture wording in permanent docs', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(path.join(cwd, 'docs', 'bad-exports.md'), 'Every project module must include an `exports' + '/` folder.\n');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale mandatory exports architecture wording/);
 });
 
 test('validator rejects stale registry YAML references in temp docs', () => {

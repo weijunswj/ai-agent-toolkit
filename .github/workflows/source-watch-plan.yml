@@ -1,4 +1,4 @@
-name: Source Watch Plan
+name: Source Watch Advisory Plan
 
 on:
   workflow_dispatch:
