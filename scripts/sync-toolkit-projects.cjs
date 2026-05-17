@@ -89,6 +89,21 @@ function discoverProjectFiles() {
     .sort();
 }
 
+function discoverProjectModuleDirs() {
+  const modules = [];
+  const rootDir = resolveRel(projectRoot);
+  if (!fs.existsSync(rootDir)) return modules;
+  for (const category of fs.readdirSync(rootDir, { withFileTypes: true })) {
+    if (!category.isDirectory()) continue;
+    const categoryDir = path.join(rootDir, category.name);
+    for (const project of fs.readdirSync(categoryDir, { withFileTypes: true })) {
+      if (!project.isDirectory()) continue;
+      modules.push(slash(path.relative(root, path.join(categoryDir, project.name))));
+    }
+  }
+  return modules.sort();
+}
+
 function projectManifests() {
   return discoverProjectFiles().map((relPath) => readJson(relPath));
 }
@@ -386,6 +401,15 @@ function validateNoUnmanagedMirrors(errors, managedOutputs) {
 
 function validateAndSync() {
   const errors = [];
+  const requiredProjectFiles = ['README.md', 'toolkit.project.json', 'SOURCE-MANIFEST.md', 'SOURCE-LOCK.json', '_main'];
+  for (const moduleDir of discoverProjectModuleDirs()) {
+    for (const required of requiredProjectFiles) {
+      if (!fs.existsSync(resolveRel(`${moduleDir}/${required}`))) {
+        fail(errors, `missing required project module file: ${moduleDir}/${required}`);
+      }
+    }
+  }
+
   const projectFiles = discoverProjectFiles();
   if (!projectFiles.length) fail(errors, 'No toolkit project modules found under _projects/**/toolkit.project.json');
 

@@ -5,8 +5,7 @@ This module preserves the secure CI/CD installer source project and declares the
 ## Layout
 
 - [_main/](_main/) keeps the actual project README, docs, templates, and tests.
-- `curated_output_for_ai/` is absent because no intermediate curated source is needed.
-- [_generated/](_generated/) is reserved for optional previews only.
+- No curated or generated preview folder is used for this module.
 
 ## Safety
 

@@ -140,6 +140,21 @@ const registryFiles = [
   'registry/consumers.registry.json'
 ];
 
+const retiredInternalSourceRepos = new Set([
+  'weijunswj/codex-n8n-local-setup',
+  'weijunswj/ai-cicd-installer',
+  'weijunswj/n8n-workflow-templates'
+]);
+
+const activeThirdPartySources = new Map([
+  ['nextlevelbuilder/ui-ux-pro-max-skill', {
+    risk: 'third-party',
+    review_policy: 'manual_review_required',
+    requiredStatus: /attribution required/i,
+    requiredRole: /MIT|third-party|external/i
+  }]
+]);
+
 const staleReferenceRoots = [
   'README.md',
   'docs',
@@ -300,6 +315,43 @@ function validateJsonRegistries(errors) {
     entry.relPath.startsWith('registry/') && /\.(ya?ml)$/i.test(entry.relPath)
   );
   for (const entry of yamlRegistries) fail(errors, `YAML registry file is not allowed: ${entry.relPath}`);
+}
+
+function validateSourceRepoRegistry(errors) {
+  let registry;
+  try {
+    registry = readJson('registry/source-repos.registry.json');
+  } catch (error) {
+    fail(errors, `registry/source-repos.registry.json is not valid JSON: ${error.message}`);
+    return;
+  }
+  if (!Array.isArray(registry)) {
+    fail(errors, 'registry/source-repos.registry.json must be an array');
+    return;
+  }
+
+  for (const entry of registry) {
+    if (retiredInternalSourceRepos.has(entry.source)) {
+      fail(errors, `registry/source-repos.registry.json retired internal repo must not be listed as active source-watch target: ${entry.source}`);
+    }
+    const thirdParty = activeThirdPartySources.get(entry.source);
+    if (!thirdParty) continue;
+    if (entry.risk !== thirdParty.risk) {
+      fail(errors, `registry/source-repos.registry.json active third-party source missing risk metadata: ${entry.source}`);
+    }
+    if (entry.review_policy !== thirdParty.review_policy) {
+      fail(errors, `registry/source-repos.registry.json active third-party source missing manual-review metadata: ${entry.source}`);
+    }
+    if (!thirdParty.requiredStatus.test(entry.status || '')) {
+      fail(errors, `registry/source-repos.registry.json active third-party source missing attribution status: ${entry.source}`);
+    }
+    if (!thirdParty.requiredRole.test(entry.role || '')) {
+      fail(errors, `registry/source-repos.registry.json active third-party source missing attribution role: ${entry.source}`);
+    }
+    if (!entry.last_reviewed) {
+      fail(errors, `registry/source-repos.registry.json active third-party source missing last_reviewed: ${entry.source}`);
+    }
+  }
 }
 
 function pathsFromPackValue(value, paths = []) {
@@ -523,6 +575,9 @@ function validateStaleReferences(errors) {
       fail(errors, `Stale registry YAML reference found in ${entry.relPath}`);
     }
     if (text.includes(packYamlText)) fail(errors, `Stale pack YAML reference found in ${entry.relPath}`);
+    if (/(?:must|required|mandatory)[^\n.]{0,160}`?exports\/`?|`?exports\/`?[^\n.]{0,160}(?:must|required|mandatory)/i.test(text)) {
+      fail(errors, `Stale mandatory exports architecture wording found in ${entry.relPath}`);
+    }
     for (const token of ['known-' + 'repos', 'Known Repo ' + 'Patterns', 'ian-trending-' + 'system']) {
       if (text.includes(token)) fail(errors, `Stale project-specific reference "${token}" found in ${entry.relPath}`);
     }
@@ -545,10 +600,13 @@ function validateWorkflows(errors) {
     const isGeneratedTemplateWorkflow = entry.relPath.endsWith('build-agent-rule-templates.yml');
     const isSourceWatchWorkflow = entry.relPath.endsWith('source-watch-plan.yml');
     if (!/^permissions:\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
-    if (/contents:\s*write/i.test(text) && !isGeneratedTemplateWorkflow && !isSourceWatchWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
-    if (/pull-requests:\s*write/i.test(text) && !isSourceWatchWorkflow) fail(errors, `${entry.relPath} uses pull-requests: write`);
+    if (/contents:\s*write/i.test(text) && !isGeneratedTemplateWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
+    if (/pull-requests:\s*write/i.test(text)) fail(errors, `${entry.relPath} uses pull-requests: write`);
     if (/auto-merge|gh\s+pr\s+merge/i.test(text)) fail(errors, `${entry.relPath} contains forbidden merge behavior`);
-    if (/git\s+commit|git\s+push/i.test(text) && !isGeneratedTemplateWorkflow && !isSourceWatchWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
+    if (/git\s+commit|git\s+push/i.test(text) && !isGeneratedTemplateWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
+    if (isSourceWatchWorkflow && !/^name:\s*Source Watch Advisory Plan\s*$/m.test(text)) {
+      fail(errors, `${entry.relPath} workflow name must be advisory/read-only`);
+    }
     if (isGeneratedTemplateWorkflow && /git\s+commit|git\s+push/i.test(text)) {
       const allowedAdd = 'git add templates/agent-rules/AGENTS.md templates/agent-rules/CLAUDE.md templates/agent-rules/GEMINI.md';
       if (!text.includes(allowedAdd)) fail(errors, `${entry.relPath} auto-commit is not scoped to generated agent rule templates`);
@@ -560,6 +618,97 @@ function validateWorkflows(errors) {
     if (entry.relPath.endsWith('safe-source-update.yml') && !/issues:\s*write/i.test(text)) {
       fail(errors, `${entry.relPath} should use issues: write for issue summaries`);
     }
+  }
+}
+
+function isIgnoredReadme(relPath) {
+  const parts = relPath.split('/');
+  return path.basename(relPath).toLowerCase() === 'readme.md' && parts.includes('_main');
+}
+
+function isExternalOrAnchorLink(target) {
+  return (
+    !target ||
+    target.startsWith('#') ||
+    target.startsWith('//') ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target)
+  );
+}
+
+function cleanMarkdownTarget(rawTarget) {
+  let target = rawTarget.trim();
+  if (target.startsWith('<') && target.endsWith('>')) target = target.slice(1, -1).trim();
+  if (isExternalOrAnchorLink(target)) return null;
+  const whitespace = target.search(/\s/);
+  if (whitespace !== -1) target = target.slice(0, whitespace);
+  target = target.split('#')[0].split('?')[0];
+  if (isExternalOrAnchorLink(target)) return null;
+  try {
+    target = decodeURIComponent(target);
+  } catch {
+    // Keep the original target when it is not URI-encoded.
+  }
+  return target;
+}
+
+function linkTargetRel(readmeRel, target) {
+  const base = slash(path.posix.dirname(readmeRel));
+  const rel = target.startsWith('/')
+    ? slash(path.posix.normalize(target.replace(/^\/+/, '')))
+    : slash(path.posix.normalize(path.posix.join(base, target)));
+  return rel === '.' ? '' : rel;
+}
+
+function markdownLinkTargets(text) {
+  const targets = [];
+  const inline = /!?\[[^\]\n]*\]\(([^)\n]+)\)/g;
+  const reference = /^\s*\[[^\]\n]+\]:\s*(\S+)/gm;
+  for (const regex of [inline, reference]) {
+    let match;
+    while ((match = regex.exec(text)) !== null) targets.push(match[1]);
+  }
+  return targets;
+}
+
+function validateReadmeLinks(errors) {
+  const readmes = listFiles().filter((entry) =>
+    path.basename(entry.relPath).toLowerCase() === 'readme.md' && !isIgnoredReadme(entry.relPath)
+  );
+  for (const entry of readmes) {
+    const text = fs.readFileSync(entry.fullPath, 'utf8').replace(/\r\n/g, '\n');
+    for (const rawTarget of markdownLinkTargets(text)) {
+      const target = cleanMarkdownTarget(rawTarget);
+      if (!target) continue;
+      const rel = linkTargetRel(entry.relPath, target);
+      if (!rel || rel.startsWith('../') || rel === '..') {
+        fail(errors, `${entry.relPath} links outside the repo: ${target}`);
+        continue;
+      }
+      if (!existsRel(rel)) fail(errors, `${entry.relPath} links to missing path: ${rel}`);
+    }
+  }
+}
+
+function validateSourceWatchTruthfulness(errors) {
+  const workflowPath = '.github/workflows/source-watch-plan.yml';
+  if (existsRel(workflowPath)) {
+    const workflow = readText(workflowPath);
+    if (!/^name:\s*Source Watch Advisory Plan\s*$/m.test(workflow)) {
+      fail(errors, `${workflowPath} workflow name must be advisory/read-only`);
+    }
+  }
+
+  const sourceWatchFiles = [
+    'README.md',
+    'docs/SAFE-UPDATES.md',
+    'docs/MIGRATION-SOURCES.md',
+    'docs/HOW-TO-USE.md',
+    'scripts/watch-project-sources.cjs'
+  ].filter(existsRel);
+  const forbiddenClaims = /Draft PR only|opens PRs today|creates PRs today|pushes commits|fetches upstream commits|copies files|updates SOURCE-LOCK\.json|creates branches/i;
+  for (const relPath of sourceWatchFiles) {
+    const text = readText(relPath);
+    if (forbiddenClaims.test(text)) fail(errors, `${relPath} source-watch wording must stay advisory/read-only`);
   }
 }
 
@@ -577,6 +726,7 @@ function runValidation() {
   assertExpectedFiles(errors);
   validateForbiddenFiles(errors);
   validateJsonRegistries(errors);
+  validateSourceRepoRegistry(errors);
   validatePacks(errors);
   validateSkills(errors);
   validateExecutables(errors);
@@ -587,6 +737,8 @@ function runValidation() {
   validateStaleReferences(errors);
   validateSecretStrings(errors);
   validateWorkflows(errors);
+  validateReadmeLinks(errors);
+  validateSourceWatchTruthfulness(errors);
   validateMcpDocs(errors);
   return errors;
 }
@@ -608,6 +760,7 @@ module.exports = {
   skillDirs,
   validateForbiddenFiles,
   validateDesignGeneratorLocalOnly,
+  validateReadmeLinks,
   validateStaleReferences,
   validateSecretStrings
 };
