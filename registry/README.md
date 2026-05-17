@@ -8,6 +8,8 @@ Files:
 - `guides.registry.json`
 - `templates.registry.json`
 - `packs.registry.json`
+- `projects.registry.json`
+- `tools.registry.json`
 - `source-repos.registry.json`
 - `consumers.registry.json`
 

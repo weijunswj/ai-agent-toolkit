@@ -158,10 +158,6 @@ If the target port is already bound, inspect the owning process. Reuse, stop, or
 
 Re-run the exact command in the foreground with the real shell and capture stdout/stderr directly. Empty redirected logs often mean the wrapper process died before the app started.
 
-## Known Repo Patterns
-
-If working in a repo with documented local quirks, check `references/known-repos.md` before retrying broken startup paths.
-
 ## Reporting
 
 When finishing localhost setup, include:
@@ -176,7 +172,7 @@ When finishing localhost setup, include:
 Use this compact format:
 
 ```markdown
-## Done ✅
+## Done
 
 ### Status
 - Service: Up / Not up / Partially started.

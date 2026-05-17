@@ -20,6 +20,7 @@ __pycache__/
 *.credential*.json
 *n8n*credential*.json
 *n8n*binding*.json
+!*.example.json
 *.pem
 *.key
 *.p12

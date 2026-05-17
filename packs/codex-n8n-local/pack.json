@@ -5,6 +5,8 @@
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [
+    "_projects/n8n/local-setup/",
+    "_projects/n8n/local-setup/_main/",
     "guides/ai-agent-platforms/codex.md",
     "guides/n8n/local-setup.md",
     "templates/agent-rules/AGENTS.md",
@@ -23,6 +25,7 @@
     "templates/mcp-configs/codex-mcp-config.md"
   ],
   "writes_allowed": [
+    "declared generated toolkit outputs from _projects/n8n/local-setup/toolkit.project.json",
     "user-approved Codex rules/config locations",
     "consumer repo documentation paths selected by the user"
   ],

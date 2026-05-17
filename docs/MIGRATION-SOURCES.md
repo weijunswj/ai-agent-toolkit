@@ -4,6 +4,10 @@ Reviewed date: 2026-05-16.
 
 Permanent docs use source repo names and source-relative paths. Local checkout paths are inspection-only and are not part of this migration record.
 
+After this migration, `_projects/**/_main/` is canonical for retired internal migration sources. The personal source repos below remain in SOURCE-LOCK metadata as historical provenance only; they are not permanent public dependencies, are not source-watch targets, and may be deleted after migration. File-level `source_blob_sha` values remain local exact-byte drift checks.
+
+Public attribution is not required for retired internal migration sources owned by `weijunswj`. Public attribution remains required for active third-party source material.
+
 ## `weijunswj/ai-agent-toolkit`
 
 Inspected:
@@ -36,6 +40,14 @@ Remaining:
 
 ## `weijunswj/codex-n8n-local-setup`
 
+Lifecycle:
+
+- Historical migration input only.
+- Not an active upstream dependency after migration.
+- Not watched by source-watch planning.
+- May be deleted after migration because `_projects/n8n/local-setup/_main/` is canonical.
+- SOURCE-LOCK file hashes remain local provenance and drift checks.
+
 Inspected:
 
 - `README.md`
@@ -61,7 +73,7 @@ Migrated:
 
 - Platform setup guidance into `guides/ai-agent-platforms/`.
 - n8n local setup, upgrade, tunnelling, Docker Compose + ngrok, VPS, workflow sync, and credential safety guidance into `guides/n8n/`.
-- Agent-rule partials into `templates/agent-rules/partials/`.
+- Agent-rule partials from `_projects/n8n/local-setup/_main/templates/partials/` plus the linked root toolkit partial `templates/agent-rules/partials/skill-routing-rules.md`; root `templates/agent-rules/*.md` files are generated from declared concat recipes.
 - MCP config templates into `templates/mcp-configs/`.
 - Deterministic agent-rule generator into `scripts/build-agent-rule-templates.ps1`.
 - CMD generator wrapper into `scripts/- build-agent-rule-templates.cmd`.
@@ -83,6 +95,14 @@ Remaining:
 - None inaccessible.
 
 ## `weijunswj/ai-cicd-installer`
+
+Lifecycle:
+
+- Historical migration input only.
+- Not an active upstream dependency after migration.
+- Not watched by source-watch planning.
+- May be deleted after migration because `_projects/cicd/secure-installer/_main/` is canonical.
+- SOURCE-LOCK file hashes remain local provenance and drift checks.
 
 Inspected:
 
@@ -120,6 +140,14 @@ Remaining:
 
 ## `weijunswj/n8n-workflow-templates`
 
+Lifecycle:
+
+- Historical migration input only.
+- Not an active upstream dependency after migration.
+- Not watched by source-watch planning.
+- May be deleted after migration because `_projects/n8n/workflow-templates/_main/` is canonical.
+- SOURCE-LOCK file hashes remain local provenance and drift checks.
+
 Inspected:
 
 - `README.md`
@@ -152,20 +180,26 @@ Remaining:
 
 ## `nextlevelbuilder/ui-ux-pro-max-skill`
 
+Lifecycle:
+
+- Active third-party attribution source.
+- Public MIT attribution is required.
+- Source updates require strict allowlist, draft/manual review, and local-only script checks.
+
 Inspected:
 
-- Public GitHub repo and README/tree.
+- Public GitHub repo, README, license, selected scripts, and selected data files.
 
 Migrated:
 
-- Inspiration-level note only: product brief to design system to page plan to implementation review.
+- Selected CSV data into `_projects/design/ui-ux-pro-max/_main/src/ui-ux-pro-max/data/`.
+- Selected local-only adapted script material into `_projects/design/ui-ux-pro-max/_main/src/ui-ux-pro-max/scripts/`.
+- Root design generator scripts and data through declared project recipes and source locks.
+- Third-party attribution notes into `tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md`.
 
 Intentionally not migrated:
 
-- Executable code.
 - CLI tools.
-- Python scripts.
-- Data files.
 - Generated templates.
 - Assets.
 - Screenshots.
@@ -174,8 +208,8 @@ Intentionally not migrated:
 
 Skipped for safety:
 
-- Everything except high-level attribution/inspiration notes.
+- Package metadata, dependency/install flow, non-allowlisted data, and non-local tooling.
 
 Remaining:
 
-- No local checkout was provided. Public repo inspection was sufficient for the inspiration-only scope.
+- Ongoing third-party updates require manual review and strict allowlist checks.

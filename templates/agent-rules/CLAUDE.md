@@ -1,20 +1,15 @@
 <!--
-GENERATED FILE. DO NOT EDIT DIRECTLY.
-
-Edit these source files instead:
-- templates/agent-rules/partials/ai-coding-agent-execution.md
-- templates/agent-rules/partials/n8n-mcp-rules.md
-- templates/agent-rules/partials/skill-routing-rules.md
-
-Then regenerate with:
-- scripts/build-agent-rule-templates.ps1
+Generated from toolkit project source. Do not edit directly.
+Project: n8n.local-setup
+Source: _projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md
+Source: _projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md
+Source: templates/agent-rules/partials/skill-routing-rules.md
+Update the project source and run sync.
 -->
-
 # CLAUDE.md AI Coding Agent Rules
 
 Use this generated template for Claude Code.
 
-```md
 # AI coding agent execution preferences
 
 ## Core role
@@ -656,5 +651,3 @@ Use secure CI/CD materials for GitHub Actions setup, CI security gates, safe dep
 ## Safety
 
 Do not use a skill as permission to mutate live systems, write secrets, run live n8n actions, or install templates without review.
-
-```

@@ -62,7 +62,7 @@ Create or migrate the Notion database to exactly this clean default schema unles
   - `External` — brown.
 - `Notion Key` — URL, clickable Notion source and identity key using `notion.so/<page-id>`.
 - `GitHub Key` — URL, clickable GitHub source and identity key using `github.com/<owner>/<repo>`.
-- `Canonical Key` — rich text, normalized identity slug, e.g. `codex-n8n-local-setup`.
+- `Canonical Key` — rich text, normalized identity slug, e.g. `local-n8n-setup`.
 - `Visibility` — select options:
   - `Private` — red.
   - `Public-safe` — green.

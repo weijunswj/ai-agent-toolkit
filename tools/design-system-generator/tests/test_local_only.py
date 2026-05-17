@@ -41,8 +41,14 @@ class DesignGeneratorLocalOnlyTests(unittest.TestCase):
     def test_design_system_generates_from_local_data(self):
         result = self.design_system.generate_design_system("saas dashboard", "Toolkit Test")
         self.assertEqual(result["project_name"], "Toolkit Test")
-        self.assertIn("style", result)
-        self.assertIn("colors", result)
+        for key in ["project_name", "category", "pattern", "style", "colors", "typography"]:
+            self.assertIn(key, result)
+
+    def test_stack_search_reads_local_stack_data(self):
+        result = self.core.search_stack("server components", "nextjs", max_results=1)
+        self.assertEqual(result["domain"], "stack")
+        self.assertEqual(result["stack"], "nextjs")
+        self.assertGreaterEqual(result["count"], 1)
 
     def test_forbidden_imports_and_strings_are_absent_from_scripts(self):
         script_text = "\n".join(path.read_text(encoding="utf-8") for path in SCRIPTS_DIR.glob("*.py"))

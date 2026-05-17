@@ -9,7 +9,7 @@
     "auto_use_triggers": ["frontend design", "landing page", "dashboard", "form", "accessibility", "UI review"],
     "risk_level": "low",
     "instruction_only": true,
-    "source_refs": ["skills/design/ui-ux-secure-frontend-design/", "nextlevelbuilder/ui-ux-pro-max-skill:inspiration-only"]
+    "source_refs": ["_projects/design/ui-ux-pro-max/", "skills/design/ui-ux-secure-frontend-design/", "nextlevelbuilder/ui-ux-pro-max-skill:inspiration-only"]
   },
   {
     "id": "windows-localhost-workflows",
@@ -33,7 +33,31 @@
     "auto_use_triggers": ["n8n workflow sync", "workflow export", "workflow import", "credential binding", "workflow template"],
     "risk_level": "high",
     "instruction_only": true,
-    "source_refs": ["skills/automation/n8n-workflow-sync/", "templates/n8n/"]
+    "source_refs": ["_projects/n8n/workflow-templates/", "skills/automation/n8n-workflow-sync/", "templates/n8n/"]
+  },
+  {
+    "id": "n8n-local-setup",
+    "title": "n8n Local Setup",
+    "category": "automation",
+    "path": "skills/automation/n8n-local-setup/",
+    "purpose": "Safe local n8n setup, MCP config routing, tunneling choices, and platform-specific agent rule setup.",
+    "supported_platforms": ["ChatGPT", "Codex", "Claude", "Claude Code"],
+    "auto_use_triggers": ["local n8n setup", "n8n MCP config", "Codex n8n", "Claude Code n8n"],
+    "risk_level": "high",
+    "instruction_only": true,
+    "source_refs": ["_projects/n8n/local-setup/", "skills/automation/n8n-local-setup/"]
+  },
+  {
+    "id": "secure-cicd-installer",
+    "title": "Secure CI/CD Installer",
+    "category": "cicd",
+    "path": "skills/cicd/secure-cicd-installer/",
+    "purpose": "Approval-gated secure CI/CD installer planning, template review, and safe status tracking.",
+    "supported_platforms": ["ChatGPT", "Codex", "Claude", "Claude Code"],
+    "auto_use_triggers": ["secure ci", "github actions", "ci/cd installer", "deployment safety"],
+    "risk_level": "high",
+    "instruction_only": true,
+    "source_refs": ["_projects/cicd/secure-installer/", "skills/cicd/secure-cicd-installer/"]
   },
   {
     "id": "knowledge-index-updater",

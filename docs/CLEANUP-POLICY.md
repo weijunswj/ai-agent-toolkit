@@ -37,13 +37,15 @@ Do not commit files from those folders. They are allowed only as local staging/o
 
 Old root skill folders are removed only after their skill contents are moved under `skills/` and validation confirms the new paths.
 
-## Old Source Repos
+## Old Project Sources
 
-Do not delete source repos during toolkit migration.
+Do not delete project source material during toolkit migration.
 
-Recommended source repo retirement flow:
+Recommended retirement flow for old external project homes after their module exists here:
 
-1. Add README redirects in old source repos.
-2. Archive old source repos first.
-3. Wait 30-60 days.
-4. Delete only if no tools, links, agents, workflows, or humans depend on them and backups exist.
+1. Confirm the replacement project module exists under `_projects/<category>/<project>/_main/`.
+2. Confirm root-level consumer surfaces link to that module.
+3. Add README redirects in the old project home.
+4. Archive the old project home first.
+5. Wait 30-60 days.
+6. Delete only if no tools, links, agents, workflows, or humans depend on it and backups exist.

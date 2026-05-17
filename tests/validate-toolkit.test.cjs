@@ -9,8 +9,11 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
 const validateScript = path.join(repoRoot, 'scripts', 'validate-toolkit.cjs');
+const syncScript = path.join(repoRoot, 'scripts', 'sync-toolkit-projects.cjs');
+const auditScript = path.join(repoRoot, 'scripts', 'audit-project-source-locks.cjs');
 const validator = require(validateScript);
 const safeSourceUpdate = require(path.join(repoRoot, 'scripts', 'safe-source-update.cjs'));
+const sourceWatcher = require(path.join(repoRoot, 'scripts', 'watch-project-sources.cjs'));
 
 function tempCopy() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-validate-'));
@@ -36,12 +39,22 @@ function runValidate(cwd) {
   return spawnSync(process.execPath, [validateScript], { cwd, encoding: 'utf8' });
 }
 
+function readJsonFile(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function writeJsonFile(filePath, value) {
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
 test('JSON registries parse in the current repo', () => {
   for (const file of [
     'skills.registry.json',
     'guides.registry.json',
     'templates.registry.json',
     'packs.registry.json',
+    'projects.registry.json',
+    'tools.registry.json',
     'source-repos.registry.json',
     'consumers.registry.json'
   ]) {
@@ -54,7 +67,45 @@ test('skill discovery includes migrated skills', () => {
   assert.ok(skills.includes('skills/design/ui-ux-secure-frontend-design'));
   assert.ok(skills.includes('skills/development/windows-localhost-workflows'));
   assert.ok(skills.includes('skills/automation/n8n-workflow-sync'));
+  assert.ok(skills.includes('skills/automation/n8n-local-setup'));
+  assert.ok(skills.includes('skills/cicd/secure-cicd-installer'));
   assert.ok(skills.includes('skills/portfolio/knowledge-index-updater'));
+});
+
+test('project registry includes the initial project modules', () => {
+  const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'registry', 'projects.registry.json'), 'utf8'));
+  const ids = registry.map((entry) => entry.id).sort();
+  assert.deepEqual(ids, [
+    'cicd.secure-installer',
+    'design.ui-ux-pro-max',
+    'n8n.local-setup',
+    'n8n.workflow-templates'
+  ]);
+});
+
+test('project modules use _projects/_main with no mandatory exports tree', () => {
+  assert.equal(fs.existsSync(path.join(repoRoot, '_projects')), true);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'projects')), false);
+
+  for (const rel of [
+    '_projects/n8n/local-setup',
+    '_projects/n8n/workflow-templates',
+    '_projects/cicd/secure-installer',
+    '_projects/design/ui-ux-pro-max'
+  ]) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, rel, 'toolkit.project.json'), 'utf8'));
+    assert.equal(manifest.module_path, rel);
+    assert.equal(manifest.main_path, `${rel}/_main`);
+    assert.equal(fs.existsSync(path.join(repoRoot, rel, '_main')), true);
+    assert.equal(fs.existsSync(path.join(repoRoot, rel, 'main')), false);
+    assert.equal(fs.existsSync(path.join(repoRoot, rel, 'exports')), false);
+  }
+});
+
+test('.gitattributes preserves _projects _main bytes for source locks', () => {
+  const attrs = fs.readFileSync(path.join(repoRoot, '.gitattributes'), 'utf8');
+  assert.match(attrs, /^_projects\/\*\*\/_main\/\*\* -text$/m);
+  assert.doesNotMatch(attrs, /^projects\/\*\*\/main\/\*\* -text$/m);
 });
 
 test('design skill front matter and OpenAI metadata are approved', () => {
@@ -77,14 +128,8 @@ test('instruction-only design skill contains no executable files', () => {
 
 test('validator allows local-only Python design generator tooling under tools', () => {
   const cwd = tempCopy();
-  const toolRoot = path.join(cwd, 'tools', 'design-system-generator');
-  fs.mkdirSync(path.join(toolRoot, 'scripts'), { recursive: true });
-  fs.mkdirSync(path.join(toolRoot, 'data'), { recursive: true });
-  fs.writeFileSync(path.join(toolRoot, 'README.md'), '# Local design generator\n');
-  fs.writeFileSync(path.join(toolRoot, 'LICENSE-THIRD-PARTY-NOTES.md'), '# Third-party notes\n');
-  fs.writeFileSync(path.join(toolRoot, 'scripts', 'core.py'), 'import csv\n');
-  fs.writeFileSync(path.join(toolRoot, 'scripts', 'design_system.py'), 'from core import search\n');
-  fs.writeFileSync(path.join(toolRoot, 'data', 'styles.csv'), 'Style Category,Keywords\nMinimal,clean\n');
+  const testFile = path.join(cwd, 'tools', 'design-system-generator', 'tests', 'extra_allowed.py');
+  fs.writeFileSync(testFile, 'VALUE = 1\n');
   const result = runValidate(cwd);
   assert.equal(result.status, 0, result.stderr);
 });
@@ -97,6 +142,171 @@ test('validator rejects network, shell, and package-install strings in design ge
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Design generator script contains forbidden local-only token/);
+});
+
+test('generated agent-rule templates are normal Markdown, not one giant fenced block', () => {
+  for (const file of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
+    const text = fs.readFileSync(path.join(repoRoot, 'templates', 'agent-rules', file), 'utf8');
+    assert.doesNotMatch(text, /Use this generated template[^\n]*\n\n```md\n# AI coding agent execution preferences/);
+    assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials/);
+    assert.match(text, /templates\/agent-rules\/partials\/skill-routing-rules\.md/);
+    assert.doesNotMatch(text, /^- templates\/agent-rules\/partials/m);
+    assert.match(text, /\n# AI coding agent execution preferences\n/);
+    assert.match(text, /\n```md\n# SECTION NAME\n/);
+  }
+});
+
+test('root agent-rule partials are declared linked surfaces when present', () => {
+  const partialsDir = path.join(repoRoot, 'templates', 'agent-rules', 'partials');
+  const files = fs.existsSync(partialsDir)
+    ? fs.readdirSync(partialsDir, { recursive: true }).filter((entry) => fs.statSync(path.join(partialsDir, entry)).isFile()).map((entry) => entry.replace(/\\/g, '/')).sort()
+    : [];
+  assert.deepEqual(files, ['skill-routing-rules.md']);
+
+  const manifests = validator.projectManifests();
+  const linkedOutputs = new Set();
+  for (const manifest of manifests) {
+    for (const output of manifest.outputs || []) {
+      if (output.kind === 'linked') linkedOutputs.add(output.output);
+    }
+  }
+  assert.equal(linkedOutputs.has('templates/agent-rules/partials/skill-routing-rules.md'), true);
+});
+
+test('changing declared _main partials makes generated agent rules stale', () => {
+  const cwd = tempCopy();
+  const partial = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials', 'n8n-mcp-rules.md');
+  fs.appendFileSync(partial, '\n\n<!-- drift test -->\n');
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: templates\/agent-rules\/AGENTS\.md/);
+});
+
+test('changing declared _main MCP config source makes root MCP config stale', () => {
+  const cwd = tempCopy();
+  const source = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'codex-mcp-config.md');
+  fs.appendFileSync(source, '\n\n<!-- drift test -->\n');
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: templates\/mcp-configs\/codex-mcp-config\.md/);
+});
+
+test('root skills are linked and not duplicated under curated output by default', () => {
+  const curatedSkillCopies = fs.existsSync(path.join(repoRoot, '_projects'))
+    ? fs.readdirSync(path.join(repoRoot, '_projects'), { recursive: true })
+        .map((entry) => String(entry).replace(/\\/g, '/'))
+        .filter((entry) => entry.includes('curated_output_for_ai/skills/'))
+    : [];
+  assert.deepEqual(curatedSkillCopies, []);
+
+  const manifests = validator.projectManifests();
+  const linkedOutputs = new Set();
+  for (const manifest of manifests) {
+    for (const output of manifest.outputs || []) {
+      if (output.kind === 'linked') linkedOutputs.add(output.output);
+    }
+  }
+  assert.equal(linkedOutputs.has('skills/automation/n8n-local-setup/SKILL.md'), true);
+  assert.equal(linkedOutputs.has('skills/automation/n8n-workflow-sync/SKILL.md'), true);
+  assert.equal(linkedOutputs.has('skills/cicd/secure-cicd-installer/SKILL.md'), true);
+  assert.equal(linkedOutputs.has('skills/design/ui-ux-secure-frontend-design/SKILL.md'), true);
+});
+
+test('source-lock audit passes and catches exact-copy drift for retired sources', () => {
+  let result = spawnSync(process.execPath, [auditScript], { cwd: repoRoot, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+
+  const cwd = tempCopy();
+  const lock = readJsonFile(path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json'));
+  assert.equal(lock.source_lifecycle, 'retired_after_migration');
+  assert.equal(lock.source_update_policy, 'none');
+  assert.equal(lock.public_attribution_required, false);
+  const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-templates', '_main', 'README.md');
+  fs.appendFileSync(copiedFile, '\nDrift test\n');
+  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /exact-copy drift/);
+});
+
+test('source-lock audit rejects missing or unknown lifecycle metadata', () => {
+  let cwd = tempCopy();
+  let lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
+  let lock = readJsonFile(lockPath);
+  delete lock.source_lifecycle;
+  writeJsonFile(lockPath, lock);
+  let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing source_lifecycle/);
+
+  cwd = tempCopy();
+  lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
+  lock = readJsonFile(lockPath);
+  lock.source_lifecycle = 'unknown';
+  lock.source_update_policy = 'maybe';
+  writeJsonFile(lockPath, lock);
+  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unknown source_lifecycle/);
+  assert.match(result.stderr, /unknown source_update_policy/);
+});
+
+test('source-lock lifecycle metadata accepts retired internal and active third-party sources', () => {
+  const retired = readJsonFile(path.join(repoRoot, '_projects', 'n8n', 'local-setup', 'SOURCE-LOCK.json'));
+  assert.equal(retired.source_lifecycle, 'retired_after_migration');
+  assert.equal(retired.source_role, 'migration_provenance_only');
+  assert.equal(retired.source_update_policy, 'none');
+  assert.equal(retired.public_attribution_required, false);
+
+  const thirdParty = readJsonFile(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json'));
+  assert.equal(thirdParty.source_lifecycle, 'active');
+  assert.equal(thirdParty.source_role, 'third_party_attribution_source');
+  assert.equal(thirdParty.source_update_policy, 'manual_review_required');
+  assert.equal(thirdParty.public_attribution_required, true);
+});
+
+test('source watch separates archived migration sources from active update candidates', () => {
+  const plan = sourceWatcher.buildPlan(sourceWatcher.discoverLocks());
+  const activeRepos = plan.active_update_candidates.map((entry) => entry.source_repo);
+  const archivedRepos = plan.archived_migration_sources.map((entry) => entry.source_repo);
+
+  assert.deepEqual(activeRepos.filter((repo) => repo.startsWith('weijunswj/')), []);
+  assert.ok(archivedRepos.includes('weijunswj/codex-n8n-local-setup'));
+  assert.ok(archivedRepos.includes('weijunswj/ai-cicd-installer'));
+  assert.ok(archivedRepos.includes('weijunswj/n8n-workflow-templates'));
+
+  const thirdParty = plan.active_update_candidates.find((entry) => entry.source_repo === 'nextlevelbuilder/ui-ux-pro-max-skill');
+  assert.ok(thirdParty);
+  assert.equal(thirdParty.risk, 'third-party');
+  assert.equal(thirdParty.update_policy, 'manual_review_required');
+  assert.match(thirdParty.notes, /Draft PR only/);
+});
+
+test('public source repo registry excludes retired internal migration sources', () => {
+  const registry = readJsonFile(path.join(repoRoot, 'registry', 'source-repos.registry.json'));
+  const sources = registry.map((entry) => entry.source);
+  assert.ok(sources.includes('nextlevelbuilder/ui-ux-pro-max-skill'));
+  assert.equal(sources.includes('weijunswj/codex-n8n-local-setup'), false);
+  assert.equal(sources.includes('weijunswj/ai-cicd-installer'), false);
+  assert.equal(sources.includes('weijunswj/n8n-workflow-templates'), false);
+});
+
+test('curated recipes must source from curated_output_for_ai', () => {
+  const cwd = tempCopy();
+  const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
+  const manifestPath = path.join(projectDir, 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  fs.writeFileSync(path.join(projectDir, '_main', 'bad-curated.md'), 'Bad curated source\n');
+  manifest.outputs.push({
+    kind: 'curated',
+    source: '_main/bad-curated.md',
+    output: 'guides/n8n/bad-curated.md'
+  });
+  manifest.writes.allowed.push('guides/n8n/bad-curated.md');
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /curated output source must start with curated_output_for_ai\//);
 });
 
 test('validator rejects stale registry YAML references in temp docs', () => {

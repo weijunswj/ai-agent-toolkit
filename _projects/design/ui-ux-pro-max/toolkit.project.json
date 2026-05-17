@@ -1,0 +1,91 @@
+{
+  "id": "design.ui-ux-pro-max",
+  "category": "design",
+  "name": "ui-ux-pro-max",
+  "title": "UI/UX Pro Max Design",
+  "module_path": "_projects/design/ui-ux-pro-max",
+  "main_path": "_projects/design/ui-ux-pro-max/_main",
+  "outputs": [
+    {
+      "kind": "linked",
+      "output": "skills/design/ui-ux-secure-frontend-design/SKILL.md",
+      "notes": "Published skill maintained at root. Review when _main/ changes."
+    },
+    {
+      "kind": "linked",
+      "output": "mcp/projects/ui-ux-pro-max.md",
+      "notes": "Published MCP doc maintained at root. Review when _main/ changes."
+    },
+    {
+      "kind": "linked",
+      "output": "guides/design/ui-ux-pro-max.md",
+      "notes": "Canonical root guide maintained at root. Review when _main/ changes."
+    },
+    {
+      "kind": "linked",
+      "output": "tools/design-system-generator/README.md",
+      "notes": "Root tool README maintained at root with toolkit safety context."
+    },
+    {
+      "kind": "linked",
+      "output": "tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "notes": "Root third-party attribution maintained at root."
+    },
+    {
+      "kind": "copy",
+      "source": "_main/src/ui-ux-pro-max/scripts/core.py",
+      "output": "tools/design-system-generator/scripts/core.py",
+      "notice": false
+    },
+    {
+      "kind": "copy",
+      "source": "_main/src/ui-ux-pro-max/scripts/design_system.py",
+      "output": "tools/design-system-generator/scripts/design_system.py",
+      "notice": false
+    },
+    {
+      "kind": "copy",
+      "source": "_main/src/ui-ux-pro-max/data",
+      "output": "tools/design-system-generator/data",
+      "notice": false
+    },
+    {
+      "kind": "linked",
+      "output": "packs/design-system-generator/pack.json",
+      "notes": "Published pack maintained at root."
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/design/ui-ux-secure-frontend-design/SKILL.md",
+      "mcp/projects/ui-ux-pro-max.md",
+      "guides/design/ui-ux-pro-max.md",
+      "tools/design-system-generator/README.md",
+      "tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "tools/design-system-generator/scripts/core.py",
+      "tools/design-system-generator/scripts/design_system.py",
+      "tools/design-system-generator/data",
+      "packs/design-system-generator/pack.json",
+      "registry/projects.registry.json",
+      "tools/design-system-generator/output/**"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "arbitrary-output-paths/**",
+      "user-home/**",
+      "system-paths/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false
+}

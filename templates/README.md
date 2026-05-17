@@ -2,6 +2,8 @@
 
 Templates are review-required source materials for consumer repos.
 
+Project-owned template docs can be generated from declared recipes under [_projects/](../_projects/). Update `_main/` or optional curated source first, then run [scripts/sync-toolkit-projects.cjs](../scripts/sync-toolkit-projects.cjs).
+
 ## Areas
 
 - [Agent rules](agent-rules/): generated AI-agent rule files and their partials.

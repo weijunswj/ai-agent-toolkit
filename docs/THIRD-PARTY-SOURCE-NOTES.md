@@ -1,6 +1,6 @@
 # Third-Party Source Notes
 
-The external `nextlevelbuilder/ui-ux-pro-max-skill` project was reviewed as public inspiration only.
+The external `nextlevelbuilder/ui-ux-pro-max-skill` project is used only for the safe local-search subset documented in [_projects/design/ui-ux-pro-max/](../_projects/design/ui-ux-pro-max/).
 
 Reviewed source:
 
@@ -10,26 +10,21 @@ Reviewed source:
 
 ## What Was Used
 
-Only the high-level workflow idea was used:
+The toolkit vendors/adapts only the local-search subset:
 
-- Product brief.
-- Design system.
-- Page-level planning.
-- Component planning.
-- Implementation review.
+- `src/ui-ux-pro-max/scripts/core.py`
+- `src/ui-ux-pro-max/scripts/design_system.py`
+- Required CSV data under `src/ui-ux-pro-max/data/`
 
 ## What Was Not Used
 
 This toolkit does not vendor external:
 
-- Executable code.
 - CLI scripts.
-- Python scripts.
-- Data files.
 - Generated templates.
 - Assets.
 - Screenshots.
 - Package metadata.
 - Install commands.
 
-Internal scripts copied as template assets from internal source repos are review-required templates, not automatically trusted runtime code.
+Project-owned scripts preserved under `_projects/**/_main/` are source material, not automatically trusted runtime code.

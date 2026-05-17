@@ -41,12 +41,10 @@ If shell access is not available, the agent should give the user manual commands
 
 ```text
 windows-localhost-workflows/
-├── README.md
-├── SKILL.md
-├── agents/
-│   └── openai.yaml
-└── references/
-    └── known-repos.md
+- README.md
+- SKILL.md
+- agents/
+  - openai.yaml
 ```
 
 ## What counts as done

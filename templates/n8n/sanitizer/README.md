@@ -1,3 +1,8 @@
+<!--
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Project: n8n.workflow-templates
+Review the related _projects/**/_main source when updating.
+-->
 # n8n Sanitizer Templates
 
 This folder contains reusable sanitizer helper templates for n8n workflow JSON.

@@ -5,6 +5,8 @@
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [
+    "_projects/design/ui-ux-pro-max/",
+    "_projects/design/ui-ux-pro-max/_main/",
     "nextlevelbuilder/ui-ux-pro-max-skill:MIT-safe-subset"
   ],
   "suitable_for": [
@@ -15,7 +17,8 @@
     "tools/design-system-generator/"
   ],
   "writes_allowed": [
-    "tool folder selected by the user"
+    "declared generated toolkit outputs from _projects/design/ui-ux-pro-max/toolkit.project.json",
+    "tools/design-system-generator/output/** only when explicitly requested"
   ],
   "writes_denied": [
     ".env*",

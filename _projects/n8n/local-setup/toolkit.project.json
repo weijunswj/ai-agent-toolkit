@@ -1,0 +1,134 @@
+{
+  "id": "n8n.local-setup",
+  "category": "n8n",
+  "name": "local-setup",
+  "title": "Local n8n Setup",
+  "module_path": "_projects/n8n/local-setup",
+  "main_path": "_projects/n8n/local-setup/_main",
+  "outputs": [
+    {
+      "kind": "linked",
+      "output": "skills/automation/n8n-local-setup/SKILL.md",
+      "notes": "Published skill maintained at root. Review when _main/ changes."
+    },
+    {
+      "kind": "linked",
+      "output": "mcp/projects/n8n-local-setup.md",
+      "notes": "Published MCP doc maintained at root. Review when _main/ changes."
+    },
+    {
+      "kind": "linked",
+      "output": "guides/n8n/local-setup.md",
+      "notes": "Canonical root guide maintained at root. Review when _main/ changes."
+    },
+    {
+      "kind": "concat",
+      "sources": [
+        "_main/templates/partials/ai-coding-agent-execution.md",
+        "_main/templates/partials/n8n-mcp-rules.md",
+        "templates/agent-rules/partials/skill-routing-rules.md"
+      ],
+      "output": "templates/agent-rules/AGENTS.md",
+      "title": "AGENTS.md AI Coding Agent Rules",
+      "intro": "Use this generated template for Codex or OpenCode."
+    },
+    {
+      "kind": "concat",
+      "sources": [
+        "_main/templates/partials/ai-coding-agent-execution.md",
+        "_main/templates/partials/n8n-mcp-rules.md",
+        "templates/agent-rules/partials/skill-routing-rules.md"
+      ],
+      "output": "templates/agent-rules/CLAUDE.md",
+      "title": "CLAUDE.md AI Coding Agent Rules",
+      "intro": "Use this generated template for Claude Code."
+    },
+    {
+      "kind": "concat",
+      "sources": [
+        "_main/templates/partials/ai-coding-agent-execution.md",
+        "_main/templates/partials/n8n-mcp-rules.md",
+        "templates/agent-rules/partials/skill-routing-rules.md"
+      ],
+      "output": "templates/agent-rules/GEMINI.md",
+      "title": "GEMINI.md AI Coding Agent Rules",
+      "intro": "Use this generated template for Antigravity or Gemini CLI."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/agent-rules/partials/skill-routing-rules.md",
+      "notes": "Toolkit-only partial maintained at root and included by concat recipes."
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/antigravity-mcp-config.md",
+      "output": "templates/mcp-configs/antigravity-mcp-config.md"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/claude-mcp-config.md",
+      "output": "templates/mcp-configs/claude-mcp-config.md"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/codex-mcp-config.md",
+      "output": "templates/mcp-configs/codex-mcp-config.md"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/opencode-mcp-config.md",
+      "output": "templates/mcp-configs/opencode-mcp-config.md"
+    },
+    {
+      "kind": "linked",
+      "output": "templates/mcp-configs/README.md",
+      "notes": "Root index for published MCP config templates."
+    },
+    {
+      "kind": "linked",
+      "output": "packs/codex-n8n-local/pack.json",
+      "notes": "Published install pack maintained at root."
+    },
+    {
+      "kind": "linked",
+      "output": "packs/claude-code-n8n-local/pack.json",
+      "notes": "Published install pack maintained at root."
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/automation/n8n-local-setup/SKILL.md",
+      "mcp/projects/n8n-local-setup.md",
+      "guides/n8n/local-setup.md",
+      "templates/agent-rules/AGENTS.md",
+      "templates/agent-rules/CLAUDE.md",
+      "templates/agent-rules/GEMINI.md",
+      "templates/agent-rules/partials/skill-routing-rules.md",
+      "templates/mcp-configs/antigravity-mcp-config.md",
+      "templates/mcp-configs/claude-mcp-config.md",
+      "templates/mcp-configs/codex-mcp-config.md",
+      "templates/mcp-configs/opencode-mcp-config.md",
+      "templates/mcp-configs/README.md",
+      "packs/codex-n8n-local/pack.json",
+      "packs/claude-code-n8n-local/pack.json",
+      "registry/projects.registry.json"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false
+}

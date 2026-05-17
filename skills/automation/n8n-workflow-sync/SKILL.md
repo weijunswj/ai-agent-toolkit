@@ -3,6 +3,11 @@ name: n8n-workflow-sync
 description: Generic n8n workflow sync and template hygiene skill for safely moving workflows between live n8n and repos. Use for credential-safe import/export planning, workflow template sanitation, repo/live drift review, inactive template checks, and avoiding product/customer workflow leakage.
 ---
 
+<!--
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+Project: n8n.workflow-templates
+Review the related _projects/**/_main source when updating.
+-->
 # n8n Workflow Sync
 
 Use this instruction-only skill when the user wants to plan, review, or document safe n8n workflow sync between a live n8n instance and a repository.

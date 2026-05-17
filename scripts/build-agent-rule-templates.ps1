@@ -2,37 +2,48 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $TemplatesDir = Join-Path $RepoRoot 'templates\agent-rules'
-$PartialsDir = Join-Path $TemplatesDir 'partials'
+$ProjectMainPartialsDir = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials'
+$ToolkitPartialsDir = Join-Path $RepoRoot 'templates\agent-rules\partials'
 
-$PartialFiles = @(
-  'ai-coding-agent-execution.md',
-  'n8n-mcp-rules.md',
-  'skill-routing-rules.md'
+$PartialSources = @(
+  @{
+    Name = 'ai-coding-agent-execution.md'
+    Path = Join-Path $ProjectMainPartialsDir 'ai-coding-agent-execution.md'
+    Rel = '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md'
+  },
+  @{
+    Name = 'n8n-mcp-rules.md'
+    Path = Join-Path $ProjectMainPartialsDir 'n8n-mcp-rules.md'
+    Rel = '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
+  },
+  @{
+    Name = 'skill-routing-rules.md'
+    Path = Join-Path $ToolkitPartialsDir 'skill-routing-rules.md'
+    Rel = 'templates/agent-rules/partials/skill-routing-rules.md'
+  }
 )
 
-function Read-Partial($Name) {
-  $path = Join-Path $PartialsDir $Name
+function Read-Partial($Source) {
+  $path = $Source.Path
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "Missing partial: $path"
   }
-  return (Get-Content -LiteralPath $path -Raw).TrimEnd()
+  return ((Get-Content -LiteralPath $path -Raw) -replace "`r`n", "`n").TrimEnd()
 }
 
 function New-GeneratedNotice {
-  $sources = ($PartialFiles | ForEach-Object { "- templates/agent-rules/partials/$_" }) -join "`n"
-  return @"
-<!--
-GENERATED FILE. DO NOT EDIT DIRECTLY.
-
-Edit these source files instead:
-$sources
-
-Then regenerate with:
-- scripts/build-agent-rule-templates.ps1
--->
-
-
-"@
+  $notice = @(
+    '<!--',
+    'Generated from toolkit project source. Do not edit directly.',
+    'Project: n8n.local-setup'
+  )
+  foreach ($source in $PartialSources) {
+    $notice += "Source: $($source.Rel)"
+  }
+  $notice += 'Update the project source and run sync.'
+  $notice += '-->'
+  $notice += ''
+  return ($notice -join "`n")
 }
 
 function Write-GeneratedTemplate {
@@ -45,17 +56,14 @@ function Write-GeneratedTemplate {
   $bodyParts = @(
     "# $Title",
     "",
-    "Use this generated template for $Audience.",
-    "",
-    '```md'
+    "Use this generated template for $Audience."
   )
 
-  foreach ($partial in $PartialFiles) {
-    $bodyParts += Read-Partial $partial
+  foreach ($partial in $PartialSources) {
     $bodyParts += ""
+    $bodyParts += Read-Partial $partial
   }
 
-  $bodyParts += '```'
   $content = (New-GeneratedNotice) + (($bodyParts -join "`n").TrimEnd()) + "`n"
   $target = Join-Path $TemplatesDir $FileName
   $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
