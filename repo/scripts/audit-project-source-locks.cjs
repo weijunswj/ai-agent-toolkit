@@ -108,6 +108,49 @@ function validateSourcePathProvenance(file, relPath, label, errors) {
   }
 }
 
+function normalizeRepoRelativePath(value, fieldName, relPath, label, errors) {
+  const raw = String(value).replace(/\\/g, '/');
+  if (!raw) {
+    errors.push(`${relPath} ${fieldName} must not be empty: ${label}`);
+    return null;
+  }
+  if (/^[A-Za-z]:/.test(raw)) {
+    errors.push(`${relPath} ${fieldName} must be repo-relative, not a Windows drive path: ${label} uses ${value}`);
+    return null;
+  }
+  if (path.posix.isAbsolute(raw)) {
+    errors.push(`${relPath} ${fieldName} must be repo-relative, not absolute: ${label} uses ${value}`);
+    return null;
+  }
+  if (raw.split('/').includes('..')) {
+    errors.push(`${relPath} ${fieldName} must not contain .. path segments: ${label} uses ${value}`);
+    return null;
+  }
+
+  const normalized = path.posix.normalize(raw);
+  if (!normalized || normalized === '.') {
+    errors.push(`${relPath} ${fieldName} must not be empty: ${label}`);
+    return null;
+  }
+  return normalized;
+}
+
+function validateLocalPathTopology(file, relPath, label, errors) {
+  if (Object.prototype.hasOwnProperty.call(file, 'project_path')) {
+    const normalized = normalizeRepoRelativePath(file.project_path, 'project_path', relPath, label, errors);
+    if (normalized && !normalized.startsWith('_projects/')) {
+      errors.push(`${relPath} project_path must point under _projects/: ${label} uses ${file.project_path}`);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(file, 'root_surface_path')) {
+    const normalized = normalizeRepoRelativePath(file.root_surface_path, 'root_surface_path', relPath, label, errors);
+    if (normalized && !normalized.startsWith('for_ai/')) {
+      errors.push(`${relPath} root_surface_path must point under for_ai/: ${label} uses ${file.root_surface_path}`);
+    }
+  }
+}
+
 function validateLock(lock, relPath, errors) {
   for (const key of ['source_repo', 'source_ref', 'source_commit', 'files']) {
     if (!(key in lock)) errors.push(`${relPath} missing ${key}`);
@@ -124,6 +167,7 @@ function validateLock(lock, relPath, errors) {
     const label = localPath || file.source_path || '<unknown>';
     if (!file.source_path) errors.push(`${relPath} entry missing source_path: ${label}`);
     validateSourcePathProvenance(file, relPath, label, errors);
+    validateLocalPathTopology(file, relPath, label, errors);
     if (file.project_path && file.root_surface_path) errors.push(`${relPath} entry must not set both project_path and root_surface_path: ${label}`);
 
     if (mode === 'exact') {
@@ -184,6 +228,8 @@ module.exports = {
   discoverLockFiles,
   gitBlobSha,
   hashFile,
+  normalizeRepoRelativePath,
   validateLifecycleMetadata,
+  validateLocalPathTopology,
   validateSourcePathProvenance
 };
