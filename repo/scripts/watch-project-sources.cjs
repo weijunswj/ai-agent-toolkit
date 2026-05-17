@@ -56,7 +56,7 @@ function parseArgs(argv) {
   return result;
 }
 
-function isArchivedMigrationSource(lock) {
+function isRetiredProvenanceSource(lock) {
   return lock.source_update_policy === 'none' || lock.source_lifecycle === 'retired_after_migration';
 }
 
@@ -96,7 +96,7 @@ function planEntry(lockFile) {
   };
 }
 
-function archivedEntry(lockFile) {
+function retiredProvenanceEntry(lockFile) {
   const projectPath = lockFile.relPath.replace(/\/SOURCE-LOCK\.json$/, '');
   const lock = lockFile.lock;
   return {
@@ -114,20 +114,20 @@ function archivedEntry(lockFile) {
 
 function buildPlan(lockFiles = discoverLocks()) {
   const active = [];
-  const archived = [];
+  const retired = [];
   for (const lockFile of lockFiles) {
-    if (isArchivedMigrationSource(lockFile.lock)) archived.push(archivedEntry(lockFile));
+    if (isRetiredProvenanceSource(lockFile.lock)) retired.push(retiredProvenanceEntry(lockFile));
     else active.push(planEntry(lockFile));
   }
   return {
     active_update_candidates: active,
-    archived_migration_sources: archived
+    retired_provenance_sources: retired
   };
 }
 
 function renderMarkdown(plan) {
   const active = Array.isArray(plan) ? plan : plan.active_update_candidates;
-  const archived = Array.isArray(plan) ? [] : plan.archived_migration_sources;
+  const retired = Array.isArray(plan) ? [] : plan.retired_provenance_sources;
   return [
     '# Project Source Watch Plan',
     '',
@@ -161,7 +161,7 @@ function renderMarkdown(plan) {
     ]) : ['No active update candidates.', '']),
     '## Retired Internal Provenance Sources',
     '',
-    ...(archived.length ? archived.flatMap((entry) => [
+    ...(retired.length ? retired.flatMap((entry) => [
       `### ${entry.project_path}`,
       '',
       `- Source repo: ${entry.source_repo}`,
@@ -198,10 +198,10 @@ if (require.main === module) main();
 
 module.exports = {
   allowlists,
-  archivedEntry,
   buildPlan,
   discoverLocks,
-  isArchivedMigrationSource,
+  isRetiredProvenanceSource,
   planEntry,
+  retiredProvenanceEntry,
   renderMarkdown
 };

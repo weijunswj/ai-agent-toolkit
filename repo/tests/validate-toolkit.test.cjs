@@ -382,12 +382,12 @@ test('source-lock lifecycle metadata accepts retired internal and active third-p
 test('source watch separates retired provenance sources from active update candidates', () => {
   const plan = sourceWatcher.buildPlan(sourceWatcher.discoverLocks());
   const activeRepos = plan.active_update_candidates.map((entry) => entry.source_repo);
-  const archivedRepos = plan.archived_migration_sources.map((entry) => entry.source_repo);
+  const retiredRepos = plan.retired_provenance_sources.map((entry) => entry.source_repo);
 
   assert.deepEqual(activeRepos.filter((repo) => repo.startsWith('weijunswj/')), []);
-  assert.ok(archivedRepos.includes('weijunswj/codex-n8n-local-setup'));
-  assert.ok(archivedRepos.includes('weijunswj/ai-cicd-installer'));
-  assert.ok(archivedRepos.includes('weijunswj/n8n-workflow-templates'));
+  assert.ok(retiredRepos.includes('weijunswj/codex-n8n-local-setup'));
+  assert.ok(retiredRepos.includes('weijunswj/ai-cicd-installer'));
+  assert.ok(retiredRepos.includes('weijunswj/n8n-workflow-templates'));
 
   const thirdParty = plan.active_update_candidates.find((entry) => entry.source_repo === 'nextlevelbuilder/ui-ux-pro-max-skill');
   assert.ok(thirdParty);
@@ -406,7 +406,7 @@ test('source watch rendered output is advisory and does not claim PR creation to
   assert.doesNotMatch(markdown, /Draft PR only|opens PRs today|creates PRs today|pushes commits/i);
 });
 
-test('public source repo registry excludes retired internal migration sources', () => {
+test('public source repo registry excludes retired internal provenance sources', () => {
   const registry = readJsonFile(path.join(repoRoot, 'for_ai', 'registry', 'source-repos.registry.json'));
   const sources = registry.map((entry) => entry.source);
   assert.ok(sources.includes('nextlevelbuilder/ui-ux-pro-max-skill'));
