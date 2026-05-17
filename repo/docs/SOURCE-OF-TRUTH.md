@@ -37,13 +37,13 @@ The JSON registries under `for_ai/registry/` are the published discovery surface
 
 ## Guarded Generated Auto-Sync
 
-The `Auto-sync generated toolkit surfaces` workflow is only a deterministic generated-output writeback helper for same-repo PR branches targeting `main`.
+The `Auto-sync generated toolkit surfaces` workflow is only a deterministic generated-output writeback helper. Its privileged workflow definition runs from the base/default branch, then writes only to eligible same-repo PR branches targeting `main`.
 
 - Fork PRs are never written to.
 - `main` is never written to.
 - The workflow only republishes declared generated/synced outputs such as `README.md`, `AGENTS.md`, and `for_ai/**`.
 - It does not update sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
-- If eligible source/routing/contract edits are mixed with forbidden workflow, maintenance-script, or preserved-source path changes, the workflow fails or safely skips instead of pushing.
+- If eligible source/routing/contract edits are mixed with forbidden workflow, maintenance-script, test, docs, package, lockfile, or preserved-source path changes, the workflow fails instead of pushing.
 
 ## Packs
 

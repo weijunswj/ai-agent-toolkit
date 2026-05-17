@@ -693,6 +693,23 @@ function workflowPermissionLines(text) {
   return permissions;
 }
 
+function workflowStepBlocks(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const steps = [];
+  let current = null;
+  for (const line of lines) {
+    const match = line.match(/^      - name:\s*(.+?)\s*$/);
+    if (match) {
+      if (current) steps.push(current);
+      current = { name: match[1], text: `${line}\n` };
+      continue;
+    }
+    if (current) current.text += `${line}\n`;
+  }
+  if (current) steps.push(current);
+  return steps;
+}
+
 function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const permissions = workflowPermissionLines(text) || [];
   const expectedPermissions = ['contents: write', 'pull-requests: read'];
@@ -700,12 +717,12 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} must grant only contents: write and pull-requests: read`);
   }
 
-  if (/^\s{2}pull_request_target:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not use pull_request_target`);
+  if (/^\s{2}pull_request:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not use pull_request`);
   if (/^\s{2}push:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not trigger on push`);
   if (/^\s{2}schedule:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not trigger on schedule`);
   if (/^\s{2}workflow_run:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not trigger on workflow_run`);
   if (/^\s{2}workflow_dispatch:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not trigger on workflow_dispatch`);
-  if (!/^\s{2}pull_request:\s*$/m.test(text)) fail(errors, `${entry.relPath} must trigger only on pull_request`);
+  if (!/^\s{2}pull_request_target:\s*$/m.test(text)) fail(errors, `${entry.relPath} must use pull_request_target`);
 
   if (!/github\.event\.pull_request\.head\.repo\.full_name == github\.repository/.test(text)) {
     fail(errors, `${entry.relPath} missing same-repo PR guard`);
@@ -721,21 +738,68 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} must not run live n8n import/export`);
   }
 
+  const preflightIndex = text.indexOf('- name: Preflight guard');
+  const checkoutIndex = text.indexOf('uses: actions/checkout@v4');
+  if (preflightIndex === -1 || checkoutIndex === -1 || checkoutIndex < preflightIndex) {
+    fail(errors, `${entry.relPath} must run preflight before checking out the PR branch`);
+  }
+  if (/persist-credentials:\s*true/i.test(text)) {
+    fail(errors, `${entry.relPath} must not use persisted checkout credentials`);
+  }
+  if (!/persist-credentials:\s*false/i.test(text)) {
+    fail(errors, `${entry.relPath} checkout must disable persisted credentials`);
+  }
+  if (/git\s+diff\s+--name-only\s+["']?\$BASE_SHA["']?\s+HEAD/.test(text)) {
+    fail(errors, `${entry.relPath} must not compute PR changed files with git diff against the PR branch`);
+  }
+  const apiIndex = text.indexOf('gh api --paginate');
+  if (apiIndex === -1 || apiIndex > checkoutIndex || !text.includes('pulls/${PR_NUMBER}/files') || !text.includes("--jq '.[].filename'")) {
+    fail(errors, `${entry.relPath} must query PR changed files before checkout`);
+  }
+  for (const step of workflowStepBlocks(text)) {
+    const hasToken = step.text.includes('${{ github.token }}');
+    if (hasToken && !['Preflight guard', 'Push generated surfaces'].includes(step.name)) {
+      fail(errors, `${entry.relPath} must expose github.token only to preflight and final push steps`);
+    }
+  }
+
+  const preflightSection = preflightIndex === -1 || checkoutIndex === -1
+    ? ''
+    : text.slice(preflightIndex, checkoutIndex);
+  const requiredPreflightPathBlocks = [
+    { label: '.github', token: '.github/*' },
+    { label: 'repo/scripts', token: 'repo/scripts/*' },
+    { label: 'repo/tests', token: 'repo/tests/*' },
+    { label: '_projects/**/_main', token: '_projects/*/_main/*' },
+    { label: 'package/lockfile changes', token: 'package.json|package-lock.json|pnpm-lock.yaml|yarn.lock' }
+  ];
+  for (const { label, token } of requiredPreflightPathBlocks) {
+    if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing forbidden preflight path rejection for ${label}`);
+  }
+
   if (!text.includes('Forbidden post-sync change outside generated output scope') ||
       !/git\s+diff\s+--name-only/.test(text) ||
+      !/git\s+diff\s+--name-only\s+--cached/.test(text) ||
       !/git\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
     fail(errors, `${entry.relPath} missing post-sync changed-path validation`);
   }
-  if (!text.includes('_projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)')) {
+  if (!text.includes('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)')) {
     fail(errors, `${entry.relPath} missing forbidden post-sync path rejection`);
   }
-  if (!text.includes('README.md|AGENTS.md|for_ai/README.md|for_ai/*)')) {
+  if (!text.includes('README.md|AGENTS.md|for_ai/*)')) {
     fail(errors, `${entry.relPath} missing approved generated output path allowlist`);
   }
 
   const gitAddLines = (text.match(/^\s*git add .+$/gm) || []).map((line) => line.trim());
   if (gitAddLines.length !== 1 || gitAddLines[0] !== 'git add README.md AGENTS.md for_ai') {
     fail(errors, `${entry.relPath} must commit only approved generated output paths`);
+  }
+  if (!/git\s+commit\s+--no-verify\s+-m\s+"chore: sync generated toolkit surfaces"/.test(text)) {
+    fail(errors, `${entry.relPath} must use git commit --no-verify`);
+  }
+  if (!text.includes('git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"') ||
+      !text.includes('git push origin "HEAD:${HEAD_REF}"')) {
+    fail(errors, `${entry.relPath} must set push remote with the GitHub token only in the final push step`);
   }
 }
 

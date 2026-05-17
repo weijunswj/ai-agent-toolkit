@@ -1,7 +1,7 @@
 name: Auto-sync generated toolkit surfaces
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
@@ -23,27 +23,17 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE_REF: ${{ github.event.pull_request.base.ref }}
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
       HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
       REPOSITORY_FULL_NAME: ${{ github.repository }}
 
     steps:
-      - name: Checkout PR head branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
       - name: Preflight guard
         id: preflight
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -62,52 +52,61 @@ jobs:
             exit 1
           fi
 
-          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
-            git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          fi
-
-          mapfile -t changed_files < <(git diff --name-only "$BASE_SHA" HEAD)
+          mapfile -t changed_files < <(
+            gh api --paginate \
+              "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}/files" \
+              --jq '.[].filename'
+          )
 
           eligible=false
-          blocked=false
           for path in "${changed_files[@]}"; do
-            case "$path" in
-              .github/*|repo/scripts/*|_projects/*/_main/*)
-                echo "::warning file=$path::Auto-sync will safely skip because PR changes include workflow, maintenance script, or preserved source files."
-                blocked=true
-                ;;
-            esac
-
             case "$path" in
               _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md)
                 eligible=true
                 ;;
             esac
+
+            case "$path" in
+              repo/docs/partials/source-of-truth-contract.md)
+                ;;
+              .github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
+                echo "::error file=$path::Auto-sync refuses unsafe PR path: $path"
+                exit 1
+                ;;
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|README.md|AGENTS.md|for_ai/*)
+                ;;
+              *)
+                echo "::error file=$path::Auto-sync only runs on deterministic source/routing/contract and generated surface paths: $path"
+                exit 1
+                ;;
+            esac
           done
 
-          if [[ "$blocked" == "true" ]]; then
-            echo "Dangerous PR changes detected; skipping generated surface sync without pushing."
-            echo "eligible=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           if [[ "$eligible" != "true" ]]; then
-            echo "No eligible project source/routing/contract changes detected; skipping generated surface sync."
-            echo "eligible=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::Auto-sync requires at least one eligible project source/routing/contract change."
+            exit 1
           fi
 
-          echo "eligible=true" >> "$GITHUB_OUTPUT"
+      - name: Checkout PR head branch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Sync deterministic generated surfaces
-        if: steps.preflight.outputs.eligible == 'true'
         run: |
           node repo/scripts/sync-repo-doc-contract.cjs --write
           node repo/scripts/sync-toolkit-projects.cjs --write
 
       - name: Guard generated write scope
         id: post_sync
-        if: steps.preflight.outputs.eligible == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -128,14 +127,14 @@ jobs:
 
           for path in "${dirty_files[@]}"; do
             case "$path" in
-              _projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)
+              _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
                 echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
                 exit 1
                 ;;
             esac
 
             case "$path" in
-              README.md|AGENTS.md|for_ai/README.md|for_ai/*)
+              README.md|AGENTS.md|for_ai/*)
                 ;;
               *)
                 echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
@@ -163,5 +162,12 @@ jobs:
             echo "No approved generated output changes to commit."
             exit 0
           fi
-          git commit -m "chore: sync generated toolkit surfaces"
-          git push origin HEAD:${HEAD_REF}
+          git commit --no-verify -m "chore: sync generated toolkit surfaces"
+
+      - name: Push generated surfaces
+        if: steps.post_sync.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"
+          git push origin "HEAD:${HEAD_REF}"

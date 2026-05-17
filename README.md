@@ -17,9 +17,9 @@ This repo has a source layer and a published layer.
   `node repo/scripts/sync-toolkit-projects.cjs --write`
 - Check generated freshness with:
   `node repo/scripts/sync-toolkit-projects.cjs --check`
-- CI checks generated freshness and may auto-sync deterministic generated outputs only on guarded same-repo PR branches targeting `main`; fork PRs and `main` are never writeback targets.
+- CI checks generated freshness and may auto-sync deterministic generated outputs from the base/default branch workflow definition only on guarded same-repo PR branches targeting `main`; fork PRs and `main` are never writeback targets.
 - Auto-sync only republishes declared generated/synced outputs. It must not update source files, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
-- If a PR mixes eligible source/routing/contract edits with forbidden workflow, maintenance-script, or preserved-source paths, auto-sync must fail or safely skip instead of pushing.
+- If a PR mixes eligible source/routing/contract edits with forbidden workflow, maintenance-script, test, docs, package, lockfile, or preserved-source paths, auto-sync must fail instead of pushing.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 <!-- END SOURCE-OF-TRUTH-CONTRACT -->
 

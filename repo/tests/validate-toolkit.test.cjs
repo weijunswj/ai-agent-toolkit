@@ -208,17 +208,17 @@ test('validator rejects git push outside the auto-sync generated surfaces workfl
 
 test('auto-sync generated surfaces workflow rejects forbidden events and missing guards', () => {
   const cases = [
-    ['pull_request_target is forbidden', (text) => text.replace('pull_request:', 'pull_request_target:'), /must not use pull_request_target/],
-    ['push is forbidden', (text) => text.replace('pull_request:', 'push:\n  pull_request:'), /must not trigger on push/],
-    ['schedule is forbidden', (text) => text.replace('pull_request:', 'schedule:\n  pull_request:'), /must not trigger on schedule/],
-    ['workflow_run is forbidden', (text) => text.replace('pull_request:', 'workflow_run:\n  pull_request:'), /must not trigger on workflow_run/],
+    ['pull_request is forbidden', (text) => text.replace('pull_request_target:', 'pull_request:'), /must use pull_request_target/],
+    ['push is forbidden', (text) => text.replace('pull_request_target:', 'push:\n  pull_request_target:'), /must not trigger on push/],
+    ['schedule is forbidden', (text) => text.replace('pull_request_target:', 'schedule:\n  pull_request_target:'), /must not trigger on schedule/],
+    ['workflow_run is forbidden', (text) => text.replace('pull_request_target:', 'workflow_run:\n  pull_request_target:'), /must not trigger on workflow_run/],
     ['extra permissions are forbidden', (text) => text.replace('  pull-requests: read', '  pull-requests: read\n  issues: write'), /must grant only contents: write and pull-requests: read/],
     ['same-repo guard is required', (text) => text.replaceAll('github.event.pull_request.head.repo.full_name == github.repository', 'true'), /missing same-repo PR guard/],
     ['head main guard is required', (text) => text.replaceAll("github.event.pull_request.head.ref != 'main'", 'true'), /missing head\.ref != main guard/],
     ['post-sync changed-path validation is required', (text) => text.replaceAll('Forbidden post-sync change outside generated output scope', 'Removed post-sync guard'), /missing post-sync changed-path validation/],
-    ['_projects post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)', 'repo/*|.github/*|package.json|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
-    ['repo post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
-    ['.github post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)', '_projects/*|repo/*|package.json|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/]
+    ['_projects post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', 'repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
+    ['repo post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
+    ['.github post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|repo/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
@@ -234,10 +234,52 @@ test('auto-sync generated surfaces workflow rejects forbidden events and missing
 
 test('auto-sync generated surfaces workflow rejects forbidden commands and broad commit scopes', () => {
   const cases = [
-    ['workflow_dispatch is forbidden', (text) => text.replace('pull_request:', 'workflow_dispatch:\n  pull_request:'), /must not trigger on workflow_dispatch/],
+    ['workflow_dispatch is forbidden', (text) => text.replace('pull_request_target:', 'workflow_dispatch:\n  pull_request_target:'), /must not trigger on workflow_dispatch/],
     ['source-watch script is forbidden', (text) => text.replace('node repo/scripts/sync-toolkit-projects.cjs --write', 'node repo/scripts/watch-project-sources.cjs'), new RegExp('must not run source-watch or source-update ' + 'scripts')],
     ['live n8n export is forbidden', (text) => text.replace('node repo/scripts/sync-toolkit-projects.cjs --write', 'scr' + 'ipts/export-n8n-workflows-live.ps1'), /must not run live n8n import\/export/],
-    ['git add scope is fixed', (text) => text.replace('git add README.md AGENTS.md for_ai', 'git add README.md AGENTS.md for_ai repo'), /must commit only approved generated output paths/]
+    ['git add scope is fixed', (text) => text.replace('git add README.md AGENTS.md for_ai', 'git add README.md AGENTS.md for_ai repo'), /must commit only approved generated output paths/],
+    ['commit bypasses hooks', (text) => text.replace('git commit --no-verify -m', 'git commit -m'), /must use git commit --no-verify/],
+    ['final push resets remote', (text) => text.replace('git remote set-url origin', 'echo remote'), /must set push remote with the GitHub token only in the final push step/]
+  ];
+
+  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
+  const original = readTextFile(workflowPath);
+  for (const [name, mutate, expected] of cases) {
+    const cwd = tempCopy();
+    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, expected, name);
+  }
+});
+
+test('auto-sync generated surfaces workflow keeps privileged preflight before checkout', () => {
+  const cases = [
+    ['checkout before preflight is forbidden', (text) => text.replace('      - name: Preflight guard', '      - name: Checkout PR head branch'), /must run preflight before checking out the PR branch/],
+    ['persisted checkout credentials are forbidden', (text) => text.replace('persist-credentials: false', 'persist-credentials: true'), /must not use persisted checkout credentials/],
+    ['base-sha git diff changed-file detection is forbidden', (text) => text.replace("gh api --paginate \\", 'git diff --name-only "$BASE_SHA" HEAD\n          gh api --paginate \\'), /must not compute PR changed files with git diff against the PR branch/],
+    ['PR files API is required', (text) => text.replace('gh api --paginate \\', 'echo no api \\'), /must query PR changed files before checkout/],
+    ['github token is not exposed to sync or validation', (text) => text.replace('node repo/scripts/sync-toolkit-projects.cjs --write', 'GH_TOKEN="${{ github.token }}" node repo/scripts/sync-toolkit-projects.cjs --write'), /must expose github.token only to preflight and final push steps/]
+  ];
+
+  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
+  const original = readTextFile(workflowPath);
+  for (const [name, mutate, expected] of cases) {
+    const cwd = tempCopy();
+    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, expected, name);
+  }
+});
+
+test('auto-sync generated surfaces workflow blocks unsafe preflight paths', () => {
+  const cases = [
+    ['.github path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', 'repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for \.github/],
+    ['repo scripts path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), new RegExp('missing forbidden preflight path rejection for repo/' + 'scripts')],
+    ['repo tests path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/scripts/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for repo\/tests/],
+    ['_main path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for _projects\/\*\*\/_main/],
+    ['lockfile path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for package\/lockfile changes/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
@@ -255,7 +297,6 @@ test('auto-sync generated output path scope is explicit', () => {
   for (const rel of [
     'README.md',
     'AGENTS.md',
-    'for_ai/README.md',
     'for_ai/registry/projects.registry.json',
     'for_ai/templates/n8n/sync-helpers/README.md'
   ]) {
@@ -268,7 +309,12 @@ test('auto-sync generated output path scope is explicit', () => {
     '_projects/foo/_main/file.md',
     'repo/' + 'scr' + 'ipts/anything.cjs',
     '.github/workflows/anything.yml',
-    'package.json'
+    'package.json',
+    'package-lock.json',
+    'pnpm-lock.yaml',
+    'yarn.lock',
+    '.gitignore',
+    '.gitattributes'
   ]) {
     assert.equal(validator.isAutoSyncGeneratedOutputPath(rel), false, rel);
   }
