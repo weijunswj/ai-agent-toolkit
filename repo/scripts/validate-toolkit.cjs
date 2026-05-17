@@ -658,9 +658,9 @@ function validateWorkflows(errors) {
   }
 }
 
-function isIgnoredReadme(relPath) {
+function isIgnoredMarkdown(relPath) {
   const parts = relPath.split('/');
-  return path.basename(relPath).toLowerCase() === 'readme.md' && parts.includes('_main');
+  return parts[0] === '_projects' && parts.includes('_main');
 }
 
 function isExternalOrAnchorLink(target) {
@@ -688,8 +688,8 @@ function cleanMarkdownTarget(rawTarget) {
   return target;
 }
 
-function linkTargetRel(readmeRel, target) {
-  const base = slash(path.posix.dirname(readmeRel));
+function linkTargetRel(markdownRel, target) {
+  const base = slash(path.posix.dirname(markdownRel));
   const rel = target.startsWith('/')
     ? slash(path.posix.normalize(target.replace(/^\/+/, '')))
     : slash(path.posix.normalize(path.posix.join(base, target)));
@@ -699,7 +699,7 @@ function linkTargetRel(readmeRel, target) {
 function markdownLinkTargets(text) {
   const targets = [];
   const inline = /!?\[[^\]\n]*\]\(([^)\n]+)\)/g;
-  const reference = /^\s*\[[^\]\n]+\]:\s*(\S+)/gm;
+  const reference = /^\s*\[[^\]\n]+\]:[ \t]+(\S+)/gm;
   for (const regex of [inline, reference]) {
     let match;
     while ((match = regex.exec(text)) !== null) targets.push(match[1]);
@@ -707,11 +707,11 @@ function markdownLinkTargets(text) {
   return targets;
 }
 
-function validateReadmeLinks(errors) {
-  const readmes = listFiles().filter((entry) =>
-    path.basename(entry.relPath).toLowerCase() === 'readme.md' && !isIgnoredReadme(entry.relPath)
+function validateMarkdownLinks(errors) {
+  const markdownFiles = listFiles().filter((entry) =>
+    entry.relPath.toLowerCase().endsWith('.md') && !isIgnoredMarkdown(entry.relPath)
   );
-  for (const entry of readmes) {
+  for (const entry of markdownFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8').replace(/\r\n/g, '\n');
     for (const rawTarget of markdownLinkTargets(text)) {
       const target = cleanMarkdownTarget(rawTarget);
@@ -775,7 +775,7 @@ function runValidation() {
   validateStaleReferences(errors);
   validateSecretStrings(errors);
   validateWorkflows(errors);
-  validateReadmeLinks(errors);
+  validateMarkdownLinks(errors);
   validateSourceWatchTruthfulness(errors);
   validateMcpDocs(errors);
   return errors;
@@ -798,7 +798,7 @@ module.exports = {
   skillDirs,
   validateForbiddenFiles,
   validateDesignGeneratorLocalOnly,
-  validateReadmeLinks,
+  validateMarkdownLinks,
   validateStaleReferences,
   validateSecretStrings
 };

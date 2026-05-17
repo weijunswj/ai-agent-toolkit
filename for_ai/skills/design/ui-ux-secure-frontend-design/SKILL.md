@@ -4,7 +4,7 @@ description: Security-first frontend UI/UX design skill for creating, reviewing,
 ---
 
 <!--
-Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: design.ui-ux-pro-max
 Review the related _projects/**/_main source when updating.
 -->

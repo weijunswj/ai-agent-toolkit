@@ -173,19 +173,19 @@ test('root agent-rule partials are declared linked surfaces when present', () =>
   assert.equal(linkedOutputs.has('for_ai/templates/agent-rules/partials/skill-routing-rules.md'), true);
 });
 
-test('validator rejects broken relative links in non-_main READMEs', () => {
+test('validator rejects broken relative links in non-_main Markdown files', () => {
   const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, 'README.md'), '\n[Missing local target](repo/docs/DOES-NOT-EXIST.md)\n');
+  fs.appendFileSync(path.join(cwd, 'for_ai', 'mcp', 'projects', 'n8n-local-setup.md'), '\n[Missing local target](DOES-NOT-EXIST.md)\n');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /README\.md links to missing path: repo\/docs\/DOES-NOT-EXIST\.md/);
+  assert.match(result.stderr, /for_ai\/mcp\/projects\/n8n-local-setup\.md links to missing path: for_ai\/mcp\/projects\/DOES-NOT-EXIST\.md/);
 });
 
-test('README link validation ignores _main README files', () => {
+test('Markdown link validation ignores _projects _main files', () => {
   const cwd = tempCopy();
-  const ignoredDir = path.join(cwd, 'repo', 'docs', 'sample', '_main');
+  const ignoredDir = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main');
   fs.mkdirSync(ignoredDir, { recursive: true });
-  fs.writeFileSync(path.join(ignoredDir, 'README.md'), '[Ignored missing target](missing.md)\n');
+  fs.writeFileSync(path.join(ignoredDir, 'IGNORED.md'), '[Ignored missing target](missing.md)\n');
   const result = runValidate(cwd);
   assert.equal(result.status, 0, result.stderr);
 });
@@ -264,6 +264,20 @@ test('source-lock audit passes and catches exact-copy drift for retired sources'
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /exact-copy drift/);
+});
+
+test('source-lock audit rejects toolkit-local source_path provenance rewrites', () => {
+  for (const sourcePath of ['for_ai/templates/n8n/README.md', 'repo/scripts/example.cjs', '_projects/n8n/local-setup/_main/README.md']) {
+    const cwd = tempCopy();
+    const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+    const lock = readJsonFile(lockPath);
+    lock.files[0].source_path = sourcePath;
+    writeJsonFile(lockPath, lock);
+
+    const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+    assert.notEqual(result.status, 0, sourcePath);
+    assert.match(result.stderr, /source_path must stay upstream-provenance, not toolkit-local/);
+  }
 });
 
 test('source-lock audit rejects missing or unknown lifecycle metadata', () => {

@@ -35,7 +35,7 @@ The JSON registries under `for_ai/registry/` are the source of truth for toolkit
 
 ## Packs
 
-Pack manifests under [packs](../packs/) are the source of truth for installable bundles.
+Pack manifests under [for_ai/packs](../../for_ai/packs/) are the source of truth for installable bundles.
 
 ## Migration Sources
 

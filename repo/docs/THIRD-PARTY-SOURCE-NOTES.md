@@ -1,6 +1,6 @@
 # Third-Party Source Notes
 
-The external `nextlevelbuilder/ui-ux-pro-max-skill` project is used only for the safe local-search subset documented in [_projects/design/ui-ux-pro-max/](../_projects/design/ui-ux-pro-max/).
+The external `nextlevelbuilder/ui-ux-pro-max-skill` project is used only for the safe local-search subset documented in [_projects/design/ui-ux-pro-max/](../../_projects/design/ui-ux-pro-max/).
 
 Reviewed source:
 

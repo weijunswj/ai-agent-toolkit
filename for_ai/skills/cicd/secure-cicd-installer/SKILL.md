@@ -4,7 +4,7 @@ description: Instruction-only guidance for reviewing, planning, and applying sec
 ---
 
 <!--
-Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: cicd.secure-installer
 Review the related _projects/**/_main source when updating.
 -->
@@ -14,8 +14,8 @@ Use this skill when a user asks for secure CI/CD setup, GitHub Actions hardening
 
 ## Source Module
 
-- Project module: [_projects/cicd/secure-installer/](../../../_projects/cicd/secure-installer/)
-- Preserved source: [_projects/cicd/secure-installer/_main/](../../../_projects/cicd/secure-installer/_main/)
+- Project module: [_projects/cicd/secure-installer/](../../../../_projects/cicd/secure-installer/)
+- Preserved source: [_projects/cicd/secure-installer/_main/](../../../../_projects/cicd/secure-installer/_main/)
 
 ## Core Rules
 
@@ -24,9 +24,9 @@ Use this skill when a user asks for secure CI/CD setup, GitHub Actions hardening
 - Keep status tracking copy-ready and machine-readable when requested.
 - Treat `.env*`, private keys, deployment tokens, and credential files as denied writes.
 
-## Root Surfaces
+## AI-Facing Surfaces
 
-- Guide: [for_ai/playbooks/cicd/secure-cicd-installer.md](../../../guides/cicd/secure-cicd-installer.md)
+- Playbook: [for_ai/playbooks/cicd/secure-cicd-installer.md](../../../playbooks/cicd/secure-cicd-installer.md)
 - Templates: [for_ai/templates/cicd/](../../../templates/cicd/)
 - Pack checklist: [for_ai/packs/secure-cicd/pack.json](../../../packs/secure-cicd/pack.json)
 - MCP spec: [for_ai/mcp/projects/secure-cicd-installer.md](../../../mcp/projects/secure-cicd-installer.md)

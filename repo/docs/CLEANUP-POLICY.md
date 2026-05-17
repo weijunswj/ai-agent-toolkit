@@ -44,7 +44,7 @@ Do not delete project source material during toolkit migration.
 Recommended retirement flow for old external project homes after their module exists here:
 
 1. Confirm the replacement project module exists under `_projects/<category>/<project>/_main/`.
-2. Confirm root-level consumer surfaces link to that module.
+2. Confirm AI-facing consumer surfaces link to that module.
 3. Add README redirects in the old project home.
 4. Archive the old project home first.
 5. Wait 30-60 days.

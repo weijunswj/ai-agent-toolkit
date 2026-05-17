@@ -24,7 +24,7 @@ Expected defaults:
 
 Allowed writes must be declared and deterministic, such as:
 
-- Generated root-level toolkit outputs declared in `toolkit.project.json`.
+- Generated AI-facing toolkit outputs declared in `toolkit.project.json`.
 - A reviewed n8n sync helper writing `n8n-workflows/*.json` in a consumer repo.
 - Ignored consumer-repo staging writes like `.tmp/**` or `.n8n-local/**` when the helper explicitly declares them.
 - Optional design generator output under `for_ai/tools/design-system-generator/output/` when explicitly requested.

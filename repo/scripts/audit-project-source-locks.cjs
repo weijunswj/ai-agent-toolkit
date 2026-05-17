@@ -9,6 +9,7 @@ const root = process.cwd();
 const allowedSourceLifecycles = new Set(['active', 'retired_after_migration']);
 const allowedSourceRoles = new Set(['migration_provenance_only', 'third_party_attribution_source']);
 const allowedSourceUpdatePolicies = new Set(['none', 'manual_review_required']);
+const toolkitLocalSourcePathPrefixes = ['_projects/', 'for_ai/', 'repo/'];
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -92,6 +93,17 @@ function validateLifecycleMetadata(lock, relPath, errors) {
   }
 }
 
+function validateSourcePathProvenance(file, relPath, label, errors) {
+  if (!file.source_path) return;
+  const normalized = String(file.source_path).replace(/\\/g, '/');
+  for (const prefix of toolkitLocalSourcePathPrefixes) {
+    if (normalized === prefix.slice(0, -1) || normalized.startsWith(prefix)) {
+      errors.push(`${relPath} source_path must stay upstream-provenance, not toolkit-local: ${label} uses ${file.source_path}`);
+      return;
+    }
+  }
+}
+
 function validateLock(lock, relPath, errors) {
   for (const key of ['source_repo', 'source_ref', 'source_commit', 'files']) {
     if (!(key in lock)) errors.push(`${relPath} missing ${key}`);
@@ -107,6 +119,7 @@ function validateLock(lock, relPath, errors) {
     const localPath = file.project_path || file.root_surface_path;
     const label = localPath || file.source_path || '<unknown>';
     if (!file.source_path) errors.push(`${relPath} entry missing source_path: ${label}`);
+    validateSourcePathProvenance(file, relPath, label, errors);
     if (file.project_path && file.root_surface_path) errors.push(`${relPath} entry must not set both project_path and root_surface_path: ${label}`);
 
     if (mode === 'exact') {
@@ -167,5 +180,6 @@ module.exports = {
   discoverLockFiles,
   gitBlobSha,
   hashFile,
-  validateLifecycleMetadata
+  validateLifecycleMetadata,
+  validateSourcePathProvenance
 };

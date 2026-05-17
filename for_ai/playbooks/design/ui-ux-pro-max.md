@@ -1,5 +1,5 @@
 <!--
-Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: design.ui-ux-pro-max
 Review the related _projects/**/_main source when updating.
 -->
@@ -10,7 +10,7 @@ The UI/UX Pro Max design module keeps design intelligence in two separate surfac
 - Instruction-only design guidance in [for_ai/skills/design/ui-ux-secure-frontend-design/](../../skills/design/ui-ux-secure-frontend-design/).
 - Optional local-only CSV search/generation tooling in [for_ai/tools/design-system-generator/](../../tools/design-system-generator/).
 
-The source-of-truth project module is [_projects/design/ui-ux-pro-max/](../../_projects/design/ui-ux-pro-max/). Its [_main/](../../_projects/design/ui-ux-pro-max/_main/) folder preserves the safe local-search subset. Root surfaces are declared in the project manifest as linked or copy recipes.
+The source-of-truth project module is [_projects/design/ui-ux-pro-max/](../../../_projects/design/ui-ux-pro-max/). Its [_main/](../../../_projects/design/ui-ux-pro-max/_main/) folder preserves the safe local-search subset. AI-facing surfaces are declared in the project manifest as linked or copy recipes.
 
 ## Safety Boundaries
 

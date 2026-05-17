@@ -1,5 +1,5 @@
 <!--
-Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
+AI-facing toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: n8n.local-setup
 Review the related _projects/**/_main source when updating.
 -->
