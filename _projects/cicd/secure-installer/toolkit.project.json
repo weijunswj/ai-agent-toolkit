@@ -14,6 +14,12 @@
     },
     {
       "kind": "curated",
+      "source": "curated_output_for_ai/skills/secure-cicd-installer/README.md",
+      "output": "for_ai/skills/cicd/secure-cicd-installer/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output."
+    },
+    {
+      "kind": "curated",
       "source": "curated_output_for_ai/mcp/secure-cicd-installer.md",
       "output": "for_ai/mcp/projects/secure-cicd-installer.md",
       "notes": "Published MCP doc generated from project-owned curated AI output."
@@ -97,6 +103,7 @@
   "writes": {
     "allowed": [
       "for_ai/skills/cicd/secure-cicd-installer/SKILL.md",
+      "for_ai/skills/cicd/secure-cicd-installer/README.md",
       "for_ai/mcp/projects/secure-cicd-installer.md",
       "for_ai/playbooks/cicd/secure-cicd-installer.md",
       "for_ai/templates/cicd/README.md",

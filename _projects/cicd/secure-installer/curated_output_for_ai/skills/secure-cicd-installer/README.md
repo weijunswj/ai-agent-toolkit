@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: cicd.secure-installer
-Source: _projects/cicd/secure-installer/curated_output_for_ai/skills/secure-cicd-installer/README.md
-Update the curated output and run sync.
--->
 # Secure CI/CD Installer Skill
 
 Instruction-only skill for secure CI/CD installer planning, approval-gated template review, and safe status tracking.

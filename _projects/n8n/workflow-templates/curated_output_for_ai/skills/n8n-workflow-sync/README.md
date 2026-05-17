@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: n8n.workflow-templates
-Source: _projects/n8n/workflow-templates/curated_output_for_ai/skills/n8n-workflow-sync/README.md
-Update the curated output and run sync.
--->
 # n8n Workflow Sync
 
 This skill helps AI agents handle reusable n8n workflow sync and template hygiene without leaking credentials or product data.

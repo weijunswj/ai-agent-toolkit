@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md
-Update the curated output and run sync.
--->
 # n8n Local Setup Skill
 
 Instruction-only skill for safe local n8n setup, MCP config routing, and platform setup guidance.

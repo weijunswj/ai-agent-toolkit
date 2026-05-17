@@ -14,6 +14,12 @@
     },
     {
       "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-local-setup/README.md",
+      "output": "for_ai/skills/automation/n8n-local-setup/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output."
+    },
+    {
+      "kind": "curated",
       "source": "curated_output_for_ai/mcp/n8n-local-setup.md",
       "output": "for_ai/mcp/projects/n8n-local-setup.md",
       "notes": "Published MCP doc generated from project-owned curated AI output."
@@ -104,6 +110,7 @@
   "writes": {
     "allowed": [
       "for_ai/skills/automation/n8n-local-setup/SKILL.md",
+      "for_ai/skills/automation/n8n-local-setup/README.md",
       "for_ai/mcp/projects/n8n-local-setup.md",
       "for_ai/playbooks/n8n/local-setup.md",
       "for_ai/templates/agent-rules/AGENTS.md",

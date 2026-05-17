@@ -14,6 +14,12 @@
     },
     {
       "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-workflow-sync/README.md",
+      "output": "for_ai/skills/automation/n8n-workflow-sync/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output."
+    },
+    {
+      "kind": "curated",
       "source": "curated_output_for_ai/mcp/n8n-workflow-templates.md",
       "output": "for_ai/mcp/projects/n8n-workflow-templates.md",
       "notes": "Published MCP doc generated from project-owned curated AI output."
@@ -61,6 +67,7 @@
   "writes": {
     "allowed": [
       "for_ai/skills/automation/n8n-workflow-sync/SKILL.md",
+      "for_ai/skills/automation/n8n-workflow-sync/README.md",
       "for_ai/mcp/projects/n8n-workflow-templates.md",
       "for_ai/playbooks/n8n/workflow-sync.md",
       "for_ai/templates/n8n/sanitizer/README.md",
