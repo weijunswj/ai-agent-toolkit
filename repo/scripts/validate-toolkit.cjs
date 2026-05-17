@@ -13,7 +13,6 @@ const packYamlText = 'pack.' + 'yaml';
 const expectedFiles = [
   'README.md',
   'AGENTS.md',
-  'repo/docs/MIGRATION_CHECKLIST.md',
   'package.json',
   '.gitignore',
   '.gitattributes',
@@ -21,7 +20,7 @@ const expectedFiles = [
   'repo/docs/FOR_AI_AGENTS.md',
   'repo/docs/SAFE-UPDATES.md',
   'repo/docs/SOURCE-OF-TRUTH.md',
-  'repo/docs/MIGRATION-SOURCES.md',
+  'repo/docs/RETIRED-SOURCE-PROVENANCE.md',
   'repo/docs/CLEANUP-POLICY.md',
   'repo/docs/THIRD-PARTY-SOURCE-NOTES.md',
   'repo/docs/PROJECT-MODULE-STANDARD.md',

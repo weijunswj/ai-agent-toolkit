@@ -37,6 +37,6 @@ The JSON registries under `for_ai/registry/` are the source of truth for toolkit
 
 Pack manifests under [for_ai/packs](../../for_ai/packs/) are the source of truth for installable bundles.
 
-## Migration Sources
+## Retired Source Provenance
 
-The toolkit is now the canonical source of truth. Temporary migration audit notes live in [Migration Sources](MIGRATION-SOURCES.md); permanent docs should link to toolkit-owned paths or third-party attribution notes.
+The toolkit is now the canonical source of truth. Historical provenance for retired internal source repos lives in [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md); permanent docs should link to toolkit-owned paths or third-party attribution notes.

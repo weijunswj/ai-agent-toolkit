@@ -30,7 +30,7 @@ To inspect source update status:
 node repo/scripts/watch-project-sources.cjs
 ```
 
-This is an advisory plan only. Retired internal migration sources are archived provenance, not active update targets. Third-party active sources require manual review.
+This is an advisory plan only. Retired internal sources are provenance-only, not active update targets. Third-party active sources require manual review.
 
 ## Use Skills Manually
 

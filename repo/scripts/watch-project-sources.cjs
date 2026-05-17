@@ -108,7 +108,7 @@ function archivedEntry(lockFile) {
     source_role: lock.source_role,
     update_policy: lock.source_update_policy,
     public_attribution_required: lock.public_attribution_required,
-    notes: 'Historical migration provenance only. Do not fetch, watch, or update this source repo after migration.'
+    notes: 'Historical provenance only. Do not fetch, watch, or update this retired source repo.'
   };
 }
 
@@ -134,7 +134,7 @@ function renderMarkdown(plan) {
     'This deterministic plan is advisory. It does not fetch upstream commits, copy files, update SOURCE-LOCK.json, create branches, or create PRs.',
     'A future PR updater may use this plan as input, but normal local validation does not use network, execute upstream code, install packages, or run live n8n actions.',
     '',
-    'Retired internal migration sources are archived provenance and are not active update candidates.',
+    'Retired internal sources are provenance-only and are not active update candidates.',
     '',
     '## Active Update Candidates',
     '',
@@ -159,7 +159,7 @@ function renderMarkdown(plan) {
       entry.notes,
       ''
     ]) : ['No active update candidates.', '']),
-    '## Archived Migration Sources',
+    '## Retired Internal Provenance Sources',
     '',
     ...(archived.length ? archived.flatMap((entry) => [
       `### ${entry.project_path}`,

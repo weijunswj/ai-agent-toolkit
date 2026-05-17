@@ -50,7 +50,7 @@ Product repos own product code, product workflows, product config, and customer 
 
 ## Handling Uncertainty
 
-If a migration source is inaccessible during a temporary audit, document it in [Migration Sources](MIGRATION-SOURCES.md). Do not claim migration from a source that was not inspected.
+If historical source provenance needs review, use [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md). Do not claim provenance from a source that was not inspected.
 
 ## Final Report Style
 

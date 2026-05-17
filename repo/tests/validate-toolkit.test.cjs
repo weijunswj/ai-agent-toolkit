@@ -83,6 +83,17 @@ test('project registry includes the initial project modules', () => {
   ]);
 });
 
+test('validator expects durable retired source provenance doc instead of migration checklist', () => {
+  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'docs', 'MIGRATION_CHECKLIST.md')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'docs', 'RETIRED-SOURCE-PROVENANCE.md')), true);
+
+  const cwd = tempCopy();
+  fs.unlinkSync(path.join(cwd, 'repo', 'docs', 'RETIRED-SOURCE-PROVENANCE.md'));
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Missing expected file: repo\/docs\/RETIRED-SOURCE-PROVENANCE\.md/);
+});
+
 test('project modules use _projects/_main with no mandatory exports tree', () => {
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects')), true);
   assert.equal(fs.existsSync(path.join(repoRoot, 'projects')), false);
@@ -368,7 +379,7 @@ test('source-lock lifecycle metadata accepts retired internal and active third-p
   assert.equal(thirdParty.public_attribution_required, true);
 });
 
-test('source watch separates archived migration sources from active update candidates', () => {
+test('source watch separates retired provenance sources from active update candidates', () => {
   const plan = sourceWatcher.buildPlan(sourceWatcher.discoverLocks());
   const activeRepos = plan.active_update_candidates.map((entry) => entry.source_repo);
   const archivedRepos = plan.archived_migration_sources.map((entry) => entry.source_repo);
@@ -390,6 +401,7 @@ test('source watch separates archived migration sources from active update candi
 test('source watch rendered output is advisory and does not claim PR creation today', () => {
   const markdown = sourceWatcher.renderMarkdown(sourceWatcher.buildPlan(sourceWatcher.discoverLocks()));
   assert.match(markdown, /advisory/i);
+  assert.match(markdown, /Retired internal sources are provenance-only/);
   assert.match(markdown, /does not fetch upstream commits, copy files, update SOURCE-LOCK\.json, create branches, or create PRs/);
   assert.doesNotMatch(markdown, /Draft PR only|opens PRs today|creates PRs today|pushes commits/i);
 });

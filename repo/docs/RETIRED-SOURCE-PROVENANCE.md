@@ -1,12 +1,16 @@
-# Migration Sources
+# Retired Source Provenance
 
 Reviewed date: 2026-05-16.
 
-Permanent docs use source repo names and source-relative paths. Local checkout paths are inspection-only and are not part of this migration record.
+This is a historical provenance record for retired internal source repos and the active third-party attribution source used by this toolkit. It is not an active migration plan.
 
-After this migration, `_projects/**/_main/` is canonical for retired internal migration sources. The personal source repos below remain in SOURCE-LOCK metadata as historical provenance only; they are not permanent public dependencies, are not source-watch targets, and may be deleted after migration. File-level `source_blob_sha` values remain local exact-byte drift checks.
+Permanent docs use source repo names and source-relative paths. Local checkout paths are inspection-only and are not part of this provenance record.
 
-Public attribution is not required for retired internal migration sources owned by `weijunswj`. Public attribution remains required for active third-party source material.
+`_projects/**/_main/` is canonical for retired internal source material. The retired internal repos below remain in SOURCE-LOCK metadata as historical provenance only; they are not active dependencies, are not source-watch targets, and may be archived or deleted outside this repo. File-level `source_blob_sha` values remain local exact-byte drift checks.
+
+Public attribution is not required for retired internal source repos owned by `weijunswj`. Public attribution remains required for active third-party source material.
+
+`SOURCE-LOCK.json` source repo names, commits, source paths, and blob hashes are retained as provenance and local drift checks.
 
 ## `weijunswj/ai-agent-toolkit`
 
@@ -43,9 +47,9 @@ Remaining:
 Lifecycle:
 
 - Historical migration input only.
-- Not an active upstream dependency after migration.
+- Not an active upstream dependency.
 - Not watched by source-watch planning.
-- May be deleted after migration because `_projects/n8n/local-setup/_main/` is canonical.
+- May be archived or deleted because `_projects/n8n/local-setup/_main/` is canonical.
 - SOURCE-LOCK file hashes remain local provenance and drift checks.
 
 Inspected:
@@ -99,9 +103,9 @@ Remaining:
 Lifecycle:
 
 - Historical migration input only.
-- Not an active upstream dependency after migration.
+- Not an active upstream dependency.
 - Not watched by source-watch planning.
-- May be deleted after migration because `_projects/cicd/secure-installer/_main/` is canonical.
+- May be archived or deleted because `_projects/cicd/secure-installer/_main/` is canonical.
 - SOURCE-LOCK file hashes remain local provenance and drift checks.
 
 Inspected:
@@ -143,9 +147,9 @@ Remaining:
 Lifecycle:
 
 - Historical migration input only.
-- Not an active upstream dependency after migration.
+- Not an active upstream dependency.
 - Not watched by source-watch planning.
-- May be deleted after migration because `_projects/n8n/workflow-templates/_main/` is canonical.
+- May be archived or deleted because `_projects/n8n/workflow-templates/_main/` is canonical.
 - SOURCE-LOCK file hashes remain local provenance and drift checks.
 
 Inspected:
