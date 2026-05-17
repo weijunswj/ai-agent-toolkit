@@ -105,7 +105,7 @@ jobs:
           node repo/scripts/sync-repo-doc-contract.cjs --write
           node repo/scripts/sync-toolkit-projects.cjs --write
 
-      - name: Guard generated write scope
+      - name: Guard, stage, and snapshot generated write scope
         id: post_sync
         shell: bash
         run: |
@@ -143,31 +143,111 @@ jobs:
             esac
           done
 
-          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          git add README.md AGENTS.md for_ai
 
-      - name: Validate generated surfaces
+          mapfile -t staged_files < <(git diff --cached --name-only)
+          if [[ "${#staged_files[@]}" -eq 0 ]]; then
+            echo "Generated toolkit surfaces are already current."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for path in "${staged_files[@]}"; do
+            case "$path" in
+              _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
+                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+
+            case "$path" in
+              README.md|AGENTS.md|for_ai/*)
+                ;;
+              *)
+                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+          done
+
+          expected_index_tree="$(git write-tree)"
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "expected_index_tree=${expected_index_tree}" >> "$GITHUB_OUTPUT"
+
+      - name: Static generated surface checks
         if: steps.post_sync.outputs.has_changes == 'true'
         run: |
           node repo/scripts/sync-repo-doc-contract.cjs --check
           node repo/scripts/sync-toolkit-projects.cjs --check
-          npm run validate:all
+          node repo/scripts/validate-toolkit.cjs
+          git diff --cached --check
+          git diff --check
+
+      - name: Final pre-commit workspace recheck
+        if: steps.post_sync.outputs.has_changes == 'true'
+        shell: bash
+        env:
+          EXPECTED_INDEX_TREE: ${{ steps.post_sync.outputs.expected_index_tree }}
+        run: |
+          set -euo pipefail
+
+          untracked_files="$(git ls-files --others --exclude-standard)"
+          if [[ -n "$untracked_files" ]]; then
+            echo "::error::Untracked files appeared after the post-sync guard."
+            echo "$untracked_files"
+            exit 1
+          fi
+
+          if ! git diff --quiet; then
+            echo "::error::Unstaged tracked changes appeared after the post-sync guard."
+            git diff --name-only
+            exit 1
+          fi
+
+          current_index_tree="$(git write-tree)"
+          if [[ "$current_index_tree" != "${EXPECTED_INDEX_TREE}" ]]; then
+            echo "::error::Staged generated output changed after the post-sync guard."
+            exit 1
+          fi
+
+          mapfile -t staged_files < <(git diff --cached --name-only)
+          for path in "${staged_files[@]}"; do
+            case "$path" in
+              _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
+                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+
+            case "$path" in
+              README.md|AGENTS.md|for_ai/*)
+                ;;
+              *)
+                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+          done
 
       - name: Commit generated surfaces
         if: steps.post_sync.outputs.has_changes == 'true'
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md AGENTS.md for_ai
-          if git diff --cached --quiet; then
-            echo "No approved generated output changes to commit."
-            exit 0
-          fi
-          git commit --no-verify -m "chore: sync generated toolkit surfaces"
+          set -euo pipefail
+          unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND
+          export PATH="/usr/bin:/bin"
+          /usr/bin/git config user.name "github-actions[bot]"
+          /usr/bin/git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          /usr/bin/git commit --no-verify -m "chore: sync generated toolkit surfaces"
 
       - name: Push generated surfaces
         if: steps.post_sync.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"
-          git push origin "HEAD:${HEAD_REF}"
+          set -euo pipefail
+          unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND
+          export PATH="/usr/bin:/bin"
+          /usr/bin/git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"
+          /usr/bin/git push origin "HEAD:${HEAD_REF}"

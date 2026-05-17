@@ -52,6 +52,12 @@ function readTextFile(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 }
 
+function replaceLast(text, search, replacement) {
+  const index = text.lastIndexOf(search);
+  assert.notEqual(index, -1, `missing text to replace: ${search}`);
+  return `${text.slice(0, index)}${replacement}${text.slice(index + search.length)}`;
+}
+
 function manifestsById() {
   return new Map(validator.projectManifests().map((manifest) => [manifest.id, manifest]));
 }
@@ -216,9 +222,9 @@ test('auto-sync generated surfaces workflow rejects forbidden events and missing
     ['same-repo guard is required', (text) => text.replaceAll('github.event.pull_request.head.repo.full_name == github.repository', 'true'), /missing same-repo PR guard/],
     ['head main guard is required', (text) => text.replaceAll("github.event.pull_request.head.ref != 'main'", 'true'), /missing head\.ref != main guard/],
     ['post-sync changed-path validation is required', (text) => text.replaceAll('Forbidden post-sync change outside generated output scope', 'Removed post-sync guard'), /missing post-sync changed-path validation/],
-    ['_projects post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', 'repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
-    ['repo post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
-    ['.github post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|repo/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/]
+    ['_projects post-sync writes stay rejected', (text) => text.replaceAll('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', 'repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
+    ['repo post-sync writes stay rejected', (text) => text.replaceAll('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
+    ['.github post-sync writes stay rejected', (text) => text.replaceAll('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|repo/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
@@ -239,7 +245,29 @@ test('auto-sync generated surfaces workflow rejects forbidden commands and broad
     ['live n8n export is forbidden', (text) => text.replace('node repo/scripts/sync-toolkit-projects.cjs --write', 'scr' + 'ipts/export-n8n-workflows-live.ps1'), /must not run live n8n import\/export/],
     ['git add scope is fixed', (text) => text.replace('git add README.md AGENTS.md for_ai', 'git add README.md AGENTS.md for_ai repo'), /must commit only approved generated output paths/],
     ['commit bypasses hooks', (text) => text.replace('git commit --no-verify -m', 'git commit -m'), /must use git commit --no-verify/],
-    ['final push resets remote', (text) => text.replace('git remote set-url origin', 'echo remote'), /must set push remote with the GitHub token only in the final push step/]
+    ['final push resets remote', (text) => text.replace('/usr/bin/git remote set-url origin', 'echo remote'), /must set push remote with the GitHub token only in the final push step/]
+  ];
+
+  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
+  const original = readTextFile(workflowPath);
+  for (const [name, mutate, expected] of cases) {
+    const cwd = tempCopy();
+    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, expected, name);
+  }
+});
+
+test('auto-sync generated surfaces workflow rejects PR-controlled test execution', () => {
+  const cases = [
+    ['validate:all is forbidden', (text) => text.replace('node repo/scripts/validate-toolkit.cjs', 'npm run validate:all\n          node repo/scripts/validate-toolkit.cjs'), /must not run npm run validate:all/],
+    ['npm command is forbidden', (text) => text.replace('node repo/scripts/validate-toolkit.cjs', 'npm ci\n          node repo/scripts/validate-toolkit.cjs'), /must not run npm, pnpm, or yarn/],
+    ['pnpm command is forbidden', (text) => text.replace('node repo/scripts/validate-toolkit.cjs', 'pnpm test\n          node repo/scripts/validate-toolkit.cjs'), /must not run npm, pnpm, or yarn/],
+    ['yarn command is forbidden', (text) => text.replace('node repo/scripts/validate-toolkit.cjs', 'yarn test\n          node repo/scripts/validate-toolkit.cjs'), /must not run npm, pnpm, or yarn/],
+    ['node test command is forbidden', (text) => text.replace('node repo/scripts/validate-toolkit.cjs', 'node --test repo/tests/*.test.cjs\n          node repo/scripts/validate-toolkit.cjs'), /must not run generated Node test suites/],
+    ['python unit tests are forbidden', (text) => text.replace('node repo/scripts/validate-toolkit.cjs', 'python -m unittest discover -s for_ai/tools/design-system-generator/' + 'tes' + 'ts\n          node repo/scripts/validate-toolkit.cjs'), new RegExp('must not run Python unit ' + 'tests')],
+    ['generated tool tests are forbidden', (text) => text.replace('node repo/scripts/validate-toolkit.cjs', 'node for_ai/tools/design-system-generator/' + 'tes' + 'ts/run.js\n          node repo/scripts/validate-toolkit.cjs'), new RegExp('must not run generated tool ' + 'tests')]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
@@ -260,6 +288,30 @@ test('auto-sync generated surfaces workflow keeps privileged preflight before ch
     ['base-sha git diff changed-file detection is forbidden', (text) => text.replace("gh api --paginate \\", 'git diff --name-only "$BASE_SHA" HEAD\n          gh api --paginate \\'), /must not compute PR changed files with git diff against the PR branch/],
     ['PR files API is required', (text) => text.replace('gh api --paginate \\', 'echo no api \\'), /must query PR changed files before checkout/],
     ['github token is not exposed to sync or validation', (text) => text.replace('node repo/scripts/sync-toolkit-projects.cjs --write', 'GH_TOKEN="${{ github.token }}" node repo/scripts/sync-toolkit-projects.cjs --write'), /must expose github.token only to preflight and final push steps/]
+  ];
+
+  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
+  const original = readTextFile(workflowPath);
+  for (const [name, mutate, expected] of cases) {
+    const cwd = tempCopy();
+    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, expected, name);
+  }
+});
+
+test('auto-sync generated surfaces workflow snapshots and rechecks staged output before commit', () => {
+  const cases = [
+    ['final recheck is required after validation', (text) => text.replace('      - name: Final pre-commit workspace recheck', '      - name: Removed pre-commit workspace recheck'), /must recheck the workspace and staged index after validation and before commit/],
+    ['post-sync staged index snapshot is required', (text) => text.replace('expected_index_tree="$(git write-tree)"', 'expected_index_tree="$(git rev-parse HEAD)"'), /must snapshot the staged index after the post-sync guard/],
+    ['staged index tree comparison is required', (text) => text.replace('if [[ "$current_index_tree" != "${EXPECTED_INDEX_TREE}" ]]; then', 'if false; then'), /final recheck must compare the staged index tree snapshot/],
+    ['commit step must not stage files', (text) => text.replace('/usr/bin/git config user.name', '/usr/bin/git add README.md AGENTS.md for_ai\n          /usr/bin/git config user.name'), /commit step must not run git add/],
+    ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(git ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
+    ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! git diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
+    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /final recheck must reject staged paths outside generated output scope/],
+    ['commit step resets dangerous git environment', (text) => text.replace('unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /commit step must reset dangerous git environment state/],
+    ['push step resets dangerous git environment', (text) => replaceLast(text, 'unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /push step must reset dangerous git environment state/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
