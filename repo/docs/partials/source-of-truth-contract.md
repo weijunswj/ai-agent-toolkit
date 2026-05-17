@@ -13,5 +13,5 @@ This repo has a source layer and a published layer.
 - Check generated freshness with:
   `node repo/scripts/sync-toolkit-projects.cjs --check`
 - CI currently checks generated freshness, but it must not invent curated content from `_main/`.
-- Future auto-sync may write generated outputs on same-repo PR branches, but this PR must not add that auto-writeback workflow.
+- Auto-sync writeback is disabled by default. A future dedicated workflow may write generated outputs only to same-repo PR branches with explicit guardrails.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
