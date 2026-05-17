@@ -108,6 +108,22 @@ function validateSourcePathProvenance(file, relPath, label, errors) {
   }
 }
 
+function validateLocalPathTopology(file, relPath, label, errors) {
+  if (file.project_path) {
+    const normalized = String(file.project_path).replace(/\\/g, '/');
+    if (!normalized.startsWith('_projects/')) {
+      errors.push(`${relPath} project_path must point under _projects/: ${label} uses ${file.project_path}`);
+    }
+  }
+
+  if (file.root_surface_path) {
+    const normalized = String(file.root_surface_path).replace(/\\/g, '/');
+    if (!normalized.startsWith('for_ai/')) {
+      errors.push(`${relPath} root_surface_path must point under for_ai/: ${label} uses ${file.root_surface_path}`);
+    }
+  }
+}
+
 function validateLock(lock, relPath, errors) {
   for (const key of ['source_repo', 'source_ref', 'source_commit', 'files']) {
     if (!(key in lock)) errors.push(`${relPath} missing ${key}`);
@@ -124,6 +140,7 @@ function validateLock(lock, relPath, errors) {
     const label = localPath || file.source_path || '<unknown>';
     if (!file.source_path) errors.push(`${relPath} entry missing source_path: ${label}`);
     validateSourcePathProvenance(file, relPath, label, errors);
+    validateLocalPathTopology(file, relPath, label, errors);
     if (file.project_path && file.root_surface_path) errors.push(`${relPath} entry must not set both project_path and root_surface_path: ${label}`);
 
     if (mode === 'exact') {
@@ -185,5 +202,6 @@ module.exports = {
   gitBlobSha,
   hashFile,
   validateLifecycleMetadata,
+  validateLocalPathTopology,
   validateSourcePathProvenance
 };

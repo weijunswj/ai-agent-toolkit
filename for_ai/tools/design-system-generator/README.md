@@ -1,8 +1,8 @@
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Maintained under for_ai as the AI-facing design-system generator tool README.
 Project: design.ui-ux-pro-max
-Source: projects/design/ui-ux-pro-max/exports/tools/design-system-generator-README.md
-Update the source project export and run the sync/check workflow.
+Canonical source material: _projects/design/ui-ux-pro-max/_main/
+Third-party source: nextlevelbuilder/ui-ux-pro-max-skill
 -->
 # Design System Generator
 

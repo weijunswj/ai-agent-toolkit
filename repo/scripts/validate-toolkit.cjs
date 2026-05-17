@@ -190,6 +190,8 @@ const staleRootSurfacePatterns = [
   { label: 'root tests surface', regex: /(^|[\s`"'(\[,:])tests\//m }
 ];
 
+const staleProjectExportsPath = /\bprojects\/[^ \n`"')]+\/exports\//;
+
 const allowedExecutablePrefixes = [
   'repo/scripts/',
   'repo/tests/',
@@ -573,6 +575,29 @@ function validateProjectModules(errors) {
   for (const error of result.errors) fail(errors, error);
 }
 
+function validateProjectLandingCards(errors) {
+  const projectReadmes = listFiles().filter((entry) =>
+    /^_projects\/[^/]+\/[^/]+\/README\.md$/.test(entry.relPath)
+  );
+
+  for (const entry of projectReadmes) {
+    const text = fs.readFileSync(entry.fullPath, 'utf8').replace(/\r\n/g, '\n');
+    const lines = text.trimEnd().split('\n');
+    if (lines.length > 30 || text.length > 1800 || /```/.test(text)) {
+      fail(errors, `${entry.relPath} project README must stay a tiny landing card`);
+    }
+    if (!/\[[^\]\n]+\]\(_main\/?\)/.test(text)) {
+      fail(errors, `${entry.relPath} project README must link to _main/`);
+    }
+    const playbooksCanonical =
+      /for_ai\/playbooks\/?[^\n.]{0,140}\b(canonical|source[- ]of[- ]truth|human documentation|human docs|source layer)\b/i.test(text) ||
+      /\b(canonical|source[- ]of[- ]truth|human documentation|human docs|source layer)\b[^\n.]{0,140}for_ai\/playbooks\/?/i.test(text);
+    if (playbooksCanonical) {
+      fail(errors, `${entry.relPath} must not claim for_ai/playbooks/ is canonical human documentation`);
+    }
+  }
+}
+
 function projectManifests() {
   return projectSync.projectManifests();
 }
@@ -609,6 +634,7 @@ function validateStaleReferences(errors) {
       fail(errors, `Stale registry YAML reference found in ${entry.relPath}`);
     }
     if (text.includes(packYamlText)) fail(errors, `Stale pack YAML reference found in ${entry.relPath}`);
+    if (staleProjectExportsPath.test(text)) fail(errors, `Stale project exports path reference found in ${entry.relPath}`);
     if (/(?:must|required|mandatory)[^\n.]{0,160}`?exports\/`?|`?exports\/`?[^\n.]{0,160}(?:must|required|mandatory)/i.test(text)) {
       fail(errors, `Stale mandatory exports architecture wording found in ${entry.relPath}`);
     }
@@ -735,17 +761,34 @@ function validateSourceWatchTruthfulness(errors) {
     }
   }
 
-  const sourceWatchFiles = [
-    'README.md',
-    'repo/docs/SAFE-UPDATES.md',
-    'repo/docs/MIGRATION-SOURCES.md',
-    'repo/docs/HOW-TO-USE.md',
-    'repo/scripts/watch-project-sources.cjs'
-  ].filter(existsRel);
-  const forbiddenClaims = /Draft PR only|opens PRs today|creates PRs today|pushes commits|fetches upstream commits|copies files|updates SOURCE-LOCK\.json|creates branches/i;
-  for (const relPath of sourceWatchFiles) {
-    const text = readText(relPath);
-    if (forbiddenClaims.test(text)) fail(errors, `${relPath} source-watch wording must stay advisory/read-only`);
+  const sourceWatchFiles = listFiles().filter((entry) => {
+    const rel = entry.relPath;
+    if (rel === 'README.md' || rel === 'AGENTS.md') return true;
+    if (rel.startsWith('.github/workflows/')) return true;
+    if (rel.startsWith('repo/docs/')) return true;
+    if (rel === 'repo/scripts/watch-project-sources.cjs') return true;
+    if (rel.startsWith('for_ai/') && /\.(md|json|ya?ml)$/i.test(rel)) return true;
+    return false;
+  });
+  const forbiddenClaims = [
+    /\bsource[- ]watch\b[^\n.]{0,180}\b(fetches?|clones?|pulls?)\b[^\n.]*(upstream|repos?|commits?)/i,
+    /\bsource[- ]watch\b[^\n.]{0,180}\b(copies?|syncs?|applies?)\b[^\n.]*(files?|allowlisted|updates?)/i,
+    /\bsource[- ]watch\b[^\n.]{0,180}\b(updates?|writes?|modifies?)\b[^\n.]*(SOURCE-LOCK|locks?)/i,
+    /\bsource[- ]watch\b[^\n.]{0,180}\b(creates?|opens?|pushes?)\b[^\n.]*(branches?|PRs?|pull requests?|draft PRs?|commits?)/i,
+    /\bsource[- ]watch\b[^\n.]{0,180}\b(runs?|executes?)\b[^\n.]*(live n8n|n8n actions?|imports?|exports?)/i,
+    /\bsource[- ]watch\b[^\n.]{0,180}\b(mutates?|changes?|updates?)\b[^\n.]*(credentials?|secrets?|live systems?)/i
+  ];
+  const negated = /\b(does not|do not|must not|must never|never|will not|cannot|can't|read-only|advisory)\b/i;
+  for (const entry of sourceWatchFiles) {
+    const text = fs.readFileSync(entry.fullPath, 'utf8').replace(/\r\n/g, '\n');
+    for (const line of text.split('\n')) {
+      if (!/\bsource[- ]watch\b/i.test(line)) continue;
+      if (negated.test(line)) continue;
+      if (forbiddenClaims.some((pattern) => pattern.test(line))) {
+        fail(errors, `${entry.relPath} source-watch wording must stay advisory/read-only`);
+        break;
+      }
+    }
   }
 }
 
@@ -770,6 +813,7 @@ function runValidation() {
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
   validateProjectModules(errors);
+  validateProjectLandingCards(errors);
   validateSourceLocks(errors);
   validateAgentRuleSources(errors);
   validateStaleReferences(errors);

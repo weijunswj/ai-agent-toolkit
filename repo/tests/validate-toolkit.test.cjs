@@ -280,6 +280,33 @@ test('source-lock audit rejects toolkit-local source_path provenance rewrites', 
   }
 });
 
+test('source-lock audit requires local paths to stay in their topology namespaces', () => {
+  let cwd = tempCopy();
+  let lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+  let lock = readJsonFile(lockPath);
+  lock.files[0].mode = 'adapted';
+  lock.files[0].notes = 'Topology namespace regression test.';
+  lock.files[0].project_path = 'for_ai/templates/n8n/README.md';
+  delete lock.files[0].source_blob_sha;
+  writeJsonFile(lockPath, lock);
+  let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /project_path must point under _projects\//);
+
+  cwd = tempCopy();
+  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+  lock = readJsonFile(lockPath);
+  const rootSurfaceEntry = lock.files.find((entry) => entry.root_surface_path);
+  rootSurfaceEntry.mode = 'adapted';
+  rootSurfaceEntry.notes = 'Topology namespace regression test.';
+  rootSurfaceEntry.root_surface_path = 'repo/scripts/validate-toolkit.cjs';
+  delete rootSurfaceEntry.source_blob_sha;
+  writeJsonFile(lockPath, lock);
+  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /root_surface_path must point under for_ai\//);
+});
+
 test('source-lock audit rejects missing or unknown lifecycle metadata', () => {
   let cwd = tempCopy();
   let lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
@@ -412,6 +439,49 @@ test('validator rejects stale registry YAML references in temp docs', () => {
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale registry YAML reference/);
+});
+
+test('validator rejects stale project exports path references in active docs', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'bad-export-source.md'), `Source: ${'projects/design/ui-ux-pro-max/' + 'exports/tools/readme.md'}\n`);
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale project exports path reference/);
+});
+
+test('validator rejects project landing cards that stop pointing to _main', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(
+    path.join(cwd, '_projects', 'n8n', 'local-setup', 'README.md'),
+    '# Local n8n Setup\n\nUse for_ai/playbooks/ as canonical human documentation.\n'
+  );
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /project README must link to _main\//);
+  assert.match(result.stderr, /must not claim for_ai\/playbooks\/ is canonical human documentation/);
+});
+
+test('validator rejects oversized project landing cards', () => {
+  const cwd = tempCopy();
+  const longBody = Array.from({ length: 45 }, (_, index) => `Line ${index + 1}`).join('\n');
+  fs.writeFileSync(
+    path.join(cwd, '_projects', 'n8n', 'local-setup', 'README.md'),
+    `# Local n8n Setup\n\nCanonical docs live in [_main/](_main/).\n\n${longBody}\n`
+  );
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /project README must stay a tiny landing card/);
+});
+
+test('validator rejects source-watch wording that promises live update actions', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(
+    path.join(cwd, 'repo', 'docs', 'bad-source-watch.md'),
+    'Source-watch fetches upstream repos, copies allowlisted files, opens draft PRs, runs live n8n, and mutates credentials.\n'
+  );
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /source-watch wording must stay advisory\/read-only/);
 });
 
 test('validator rejects pack YAML files in temp dirs', () => {
