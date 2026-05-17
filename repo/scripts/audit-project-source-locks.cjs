@@ -9,6 +9,10 @@ const root = process.cwd();
 const allowedSourceLifecycles = new Set(['active', 'retired_after_migration']);
 const allowedSourceRoles = new Set(['migration_provenance_only', 'third_party_attribution_source']);
 const allowedSourceUpdatePolicies = new Set(['none', 'manual_review_required']);
+// These prefixes are reserved toolkit-local namespaces.
+// SOURCE-LOCK source_path values must describe upstream repo paths,
+// not toolkit-local layout paths. Upstream sources using these
+// prefixes should be rejected or normalised through a reviewed migration.
 const toolkitLocalSourcePathPrefixes = ['_projects/', 'for_ai/', 'repo/'];
 
 function slash(value) {
