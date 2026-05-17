@@ -85,6 +85,7 @@ const expectedFiles = [
   'repo/scripts/package-packs.cjs',
   'repo/scripts/safe-source-update.cjs',
   'repo/scripts/sync-repo-doc-contract.cjs',
+  '.github/workflows/auto-sync-generated-surfaces.yml',
   '.github/workflows/source-watch-plan.yml',
   '.github/workflows/validate.yml'
 ];
@@ -275,6 +276,18 @@ function listFiles() {
 
 function fail(errors, message) {
   errors.push(message);
+}
+
+const autoSyncGeneratedSurfacesWorkflowPath = '.github/workflows/auto-sync-generated-surfaces.yml';
+
+function isAutoSyncGeneratedOutputPath(relPath) {
+  const rel = slash(relPath);
+  return (
+    rel === 'README.md' ||
+    rel === 'AGENTS.md' ||
+    rel === 'for_ai/README.md' ||
+    rel.startsWith('for_ai/')
+  );
 }
 
 function assertExpectedFiles(errors) {
@@ -665,28 +678,82 @@ function validateSecretStrings(errors) {
   }
 }
 
+function workflowPermissionLines(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const start = lines.findIndex((line) => /^permissions:\s*$/.test(line));
+  if (start === -1) return null;
+  const permissions = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\S/.test(line) && line.trim() !== '') break;
+    if (line.trim() === '') continue;
+    const match = line.match(/^  ([A-Za-z-]+):\s*(\S+)\s*$/);
+    if (match) permissions.push(`${match[1]}: ${match[2]}`);
+  }
+  return permissions;
+}
+
+function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
+  const permissions = workflowPermissionLines(text) || [];
+  const expectedPermissions = ['contents: write', 'pull-requests: read'];
+  if (permissions.length !== expectedPermissions.length || expectedPermissions.some((permission) => !permissions.includes(permission))) {
+    fail(errors, `${entry.relPath} must grant only contents: write and pull-requests: read`);
+  }
+
+  if (/^\s{2}pull_request_target:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not use pull_request_target`);
+  if (/^\s{2}push:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not trigger on push`);
+  if (/^\s{2}schedule:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not trigger on schedule`);
+  if (/^\s{2}workflow_run:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not trigger on workflow_run`);
+  if (/^\s{2}workflow_dispatch:\s*$/m.test(text)) fail(errors, `${entry.relPath} must not trigger on workflow_dispatch`);
+  if (!/^\s{2}pull_request:\s*$/m.test(text)) fail(errors, `${entry.relPath} must trigger only on pull_request`);
+
+  if (!/github\.event\.pull_request\.head\.repo\.full_name == github\.repository/.test(text)) {
+    fail(errors, `${entry.relPath} missing same-repo PR guard`);
+  }
+  if (!/github\.event\.pull_request\.head\.ref != 'main'/.test(text)) {
+    fail(errors, `${entry.relPath} missing head.ref != main guard`);
+  }
+
+  if (/repo\/scripts\/(?:watch-project-sources|safe-source-update)\.cjs/i.test(text)) {
+    fail(errors, `${entry.relPath} must not run source-watch or source-update scripts`);
+  }
+  if (/\bn8n\s+(?:import|export)\b|(?:import|export)-n8n-workflows-live|docker\s+exec[^\n]*\bn8n\b/i.test(text)) {
+    fail(errors, `${entry.relPath} must not run live n8n import/export`);
+  }
+
+  if (!text.includes('Forbidden post-sync change outside generated output scope') ||
+      !/git\s+diff\s+--name-only/.test(text) ||
+      !/git\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
+    fail(errors, `${entry.relPath} missing post-sync changed-path validation`);
+  }
+  if (!text.includes('_projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)')) {
+    fail(errors, `${entry.relPath} missing forbidden post-sync path rejection`);
+  }
+  if (!text.includes('README.md|AGENTS.md|for_ai/README.md|for_ai/*)')) {
+    fail(errors, `${entry.relPath} missing approved generated output path allowlist`);
+  }
+
+  const gitAddLines = (text.match(/^\s*git add .+$/gm) || []).map((line) => line.trim());
+  if (gitAddLines.length !== 1 || gitAddLines[0] !== 'git add README.md AGENTS.md for_ai') {
+    fail(errors, `${entry.relPath} must commit only approved generated output paths`);
+  }
+}
+
 function validateWorkflows(errors) {
   const workflowFiles = listFiles().filter((entry) => entry.relPath.startsWith('.github/workflows/') && /\.ya?ml$/i.test(entry.relPath));
   for (const entry of workflowFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
-    const isGeneratedTemplateWorkflow = entry.relPath.endsWith('build-agent-rule-templates.yml');
+    const isAutoSyncGeneratedSurfacesWorkflow = entry.relPath === autoSyncGeneratedSurfacesWorkflowPath;
     const isSourceWatchWorkflow = entry.relPath.endsWith('source-watch-plan.yml');
     if (!/^permissions:\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
-    if (/contents:\s*write/i.test(text) && !isGeneratedTemplateWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
+    if (/contents:\s*write/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
     if (/pull-requests:\s*write/i.test(text)) fail(errors, `${entry.relPath} uses pull-requests: write`);
     if (/auto-merge|gh\s+pr\s+merge/i.test(text)) fail(errors, `${entry.relPath} contains forbidden merge behavior`);
-    if (/git\s+commit|git\s+push/i.test(text) && !isGeneratedTemplateWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
+    if (/git\s+commit|git\s+push/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
     if (isSourceWatchWorkflow && !/^name:\s*Source Watch Advisory Plan\s*$/m.test(text)) {
       fail(errors, `${entry.relPath} workflow name must be advisory/read-only`);
     }
-    if (isGeneratedTemplateWorkflow && /git\s+commit|git\s+push/i.test(text)) {
-      const allowedAdd = 'git add for_ai/templates/agent-rules/AGENTS.md for_ai/templates/agent-rules/CLAUDE.md for_ai/templates/agent-rules/GEMINI.md';
-      if (!text.includes(allowedAdd)) fail(errors, `${entry.relPath} auto-commit is not scoped to generated agent rule templates`);
-      if (!/github\.event_name == 'pull_request'/.test(text) || !/head\.repo\.full_name == github\.repository/.test(text)) {
-        fail(errors, `${entry.relPath} auto-commit must be limited to same-repo pull request branches`);
-      }
-      if (!/head\.ref != 'main'/.test(text)) fail(errors, `${entry.relPath} auto-commit must not run on main`);
-    }
+    if (isAutoSyncGeneratedSurfacesWorkflow) validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors);
     if (entry.relPath.endsWith('safe-source-update.yml') && !/issues:\s*write/i.test(text)) {
       fail(errors, `${entry.relPath} should use issues: write for issue summaries`);
     }
@@ -865,6 +932,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  isAutoSyncGeneratedOutputPath,
   parseFrontMatter,
   projectManifests,
   runValidation,

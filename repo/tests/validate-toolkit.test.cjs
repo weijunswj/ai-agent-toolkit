@@ -157,6 +157,123 @@ test('validation workflow checks source-of-truth contract drift read-only', () =
   assert.match(workflow, /^permissions:\n  contents: read$/m);
 });
 
+test('auto-sync generated surfaces workflow is accepted by validation', () => {
+  const errors = validator.runValidation();
+  assert.equal(errors.filter((error) => /auto-sync-generated-surfaces\.yml/.test(error)).length, 0, errors.join('\n'));
+});
+
+test('validator rejects contents write outside the auto-sync generated surfaces workflow', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(
+    path.join(cwd, '.github', 'workflows', 'unsafe-write.yml'),
+    [
+      'name: Unsafe write',
+      'on:',
+      '  pull_request:',
+      'permissions:',
+      '  contents: write',
+      'jobs:',
+      '  unsafe:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: echo unsafe'
+    ].join('\n')
+  );
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unsafe-write\.yml uses contents: write/);
+});
+
+test('validator rejects git push outside the auto-sync generated surfaces workflow', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(
+    path.join(cwd, '.github', 'workflows', 'unsafe-push.yml'),
+    [
+      'name: Unsafe push',
+      'on:',
+      '  pull_request:',
+      'permissions:',
+      '  contents: read',
+      'jobs:',
+      '  unsafe:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: git push origin HEAD:branch'
+    ].join('\n')
+  );
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unsafe-push\.yml contains forbidden commit\/push behavior/);
+});
+
+test('auto-sync generated surfaces workflow rejects forbidden events and missing guards', () => {
+  const cases = [
+    ['pull_request_target is forbidden', (text) => text.replace('pull_request:', 'pull_request_target:'), /must not use pull_request_target/],
+    ['push is forbidden', (text) => text.replace('pull_request:', 'push:\n  pull_request:'), /must not trigger on push/],
+    ['schedule is forbidden', (text) => text.replace('pull_request:', 'schedule:\n  pull_request:'), /must not trigger on schedule/],
+    ['workflow_run is forbidden', (text) => text.replace('pull_request:', 'workflow_run:\n  pull_request:'), /must not trigger on workflow_run/],
+    ['extra permissions are forbidden', (text) => text.replace('  pull-requests: read', '  pull-requests: read\n  issues: write'), /must grant only contents: write and pull-requests: read/],
+    ['same-repo guard is required', (text) => text.replaceAll('github.event.pull_request.head.repo.full_name == github.repository', 'true'), /missing same-repo PR guard/],
+    ['head main guard is required', (text) => text.replaceAll("github.event.pull_request.head.ref != 'main'", 'true'), /missing head\.ref != main guard/],
+    ['post-sync changed-path validation is required', (text) => text.replaceAll('Forbidden post-sync change outside generated output scope', 'Removed post-sync guard'), /missing post-sync changed-path validation/],
+    ['_projects post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)', 'repo/*|.github/*|package.json|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
+    ['repo post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
+    ['.github post-sync writes stay rejected', (text) => text.replace('_projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)', '_projects/*|repo/*|package.json|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/]
+  ];
+
+  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
+  const original = readTextFile(workflowPath);
+  for (const [name, mutate, expected] of cases) {
+    const cwd = tempCopy();
+    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, expected, name);
+  }
+});
+
+test('auto-sync generated surfaces workflow rejects forbidden commands and broad commit scopes', () => {
+  const cases = [
+    ['workflow_dispatch is forbidden', (text) => text.replace('pull_request:', 'workflow_dispatch:\n  pull_request:'), /must not trigger on workflow_dispatch/],
+    ['source-watch script is forbidden', (text) => text.replace('node repo/scripts/sync-toolkit-projects.cjs --write', 'node repo/scripts/watch-project-sources.cjs'), new RegExp('must not run source-watch or source-update ' + 'scripts')],
+    ['live n8n export is forbidden', (text) => text.replace('node repo/scripts/sync-toolkit-projects.cjs --write', 'scr' + 'ipts/export-n8n-workflows-live.ps1'), /must not run live n8n import\/export/],
+    ['git add scope is fixed', (text) => text.replace('git add README.md AGENTS.md for_ai', 'git add README.md AGENTS.md for_ai repo'), /must commit only approved generated output paths/]
+  ];
+
+  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
+  const original = readTextFile(workflowPath);
+  for (const [name, mutate, expected] of cases) {
+    const cwd = tempCopy();
+    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, expected, name);
+  }
+});
+
+test('auto-sync generated output path scope is explicit', () => {
+  for (const rel of [
+    'README.md',
+    'AGENTS.md',
+    'for_ai/README.md',
+    'for_ai/registry/projects.registry.json',
+    'for_ai/templates/n8n/sync-helpers/README.md'
+  ]) {
+    assert.equal(validator.isAutoSyncGeneratedOutputPath(rel), true, rel);
+  }
+
+  for (const rel of [
+    '_projects/foo/toolkit.project.json',
+    '_projects/foo/curated_output_for_ai/file.md',
+    '_projects/foo/_main/file.md',
+    'repo/' + 'scr' + 'ipts/anything.cjs',
+    '.github/workflows/anything.yml',
+    'package.json'
+  ]) {
+    assert.equal(validator.isAutoSyncGeneratedOutputPath(rel), false, rel);
+  }
+});
+
 test('project modules use _projects/_main with no mandatory exports tree', () => {
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects')), true);
   assert.equal(fs.existsSync(path.join(repoRoot, 'projects')), false);

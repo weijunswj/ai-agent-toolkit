@@ -1,0 +1,160 @@
+name: Auto-sync generated toolkit surfaces
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "_projects/**/curated_output_for_ai/**"
+      - "_projects/**/toolkit.project.json"
+      - "repo/docs/partials/source-of-truth-contract.md"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  auto-sync-generated-surfaces:
+    name: Auto-sync generated surfaces
+    if: >
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref != 'main'
+    runs-on: ubuntu-latest
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+      REPOSITORY_FULL_NAME: ${{ github.repository }}
+
+    steps:
+      - name: Checkout PR head branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Preflight guard
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$HEAD_REPO_FULL_NAME" != "$REPOSITORY_FULL_NAME" ]]; then
+            echo "::error::Auto-sync writeback is limited to same-repo PR branches."
+            exit 1
+          fi
+
+          if [[ "$BASE_REF" != "main" ]]; then
+            echo "::error::Auto-sync writeback only runs for PRs targeting main."
+            exit 1
+          fi
+
+          if [[ "$HEAD_REF" == "main" ]]; then
+            echo "::error::Auto-sync writeback never pushes to main."
+            exit 1
+          fi
+
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+
+          mapfile -t changed_files < <(git diff --name-only "$BASE_SHA" HEAD)
+
+          eligible=false
+          for path in "${changed_files[@]}"; do
+            case "$path" in
+              .github/*|repo/scripts/*|_projects/*/_main/*)
+                echo "::error file=$path::Auto-sync will not run when PR changes include workflow, maintenance script, or preserved source files."
+                exit 1
+                ;;
+            esac
+
+            case "$path" in
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md)
+                eligible=true
+                ;;
+            esac
+          done
+
+          if [[ "$eligible" != "true" ]]; then
+            echo "No eligible project source/routing/contract changes detected; skipping generated surface sync."
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+      - name: Sync deterministic generated surfaces
+        if: steps.preflight.outputs.eligible == 'true'
+        run: |
+          node repo/scripts/sync-repo-doc-contract.cjs --write
+          node repo/scripts/sync-toolkit-projects.cjs --write
+
+      - name: Guard generated write scope
+        id: post_sync
+        if: steps.preflight.outputs.eligible == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t dirty_files < <(
+            {
+              git diff --name-only
+              git diff --name-only --cached
+              git ls-files --others --exclude-standard
+            } | sort -u
+          )
+
+          if [[ "${#dirty_files[@]}" -eq 0 ]]; then
+            echo "Generated toolkit surfaces are already current."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for path in "${dirty_files[@]}"; do
+            case "$path" in
+              _projects/*|repo/*|.github/*|package.json|.gitignore|.gitattributes)
+                echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+
+            case "$path" in
+              README.md|AGENTS.md|for_ai/README.md|for_ai/*)
+                ;;
+              *)
+                echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate generated surfaces
+        if: steps.post_sync.outputs.has_changes == 'true'
+        run: |
+          node repo/scripts/sync-repo-doc-contract.cjs --check
+          node repo/scripts/sync-toolkit-projects.cjs --check
+          npm run validate:all
+
+      - name: Commit generated surfaces
+        if: steps.post_sync.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md AGENTS.md for_ai
+          if git diff --cached --quiet; then
+            echo "No approved generated output changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: sync generated toolkit surfaces"
+          git push origin HEAD:${HEAD_REF}
