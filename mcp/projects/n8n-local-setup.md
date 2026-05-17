@@ -1,8 +1,7 @@
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: n8n.local-setup
-Source: projects/n8n/local-setup/exports/mcp/n8n-local-setup.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # MCP Project Spec: Local n8n Setup
 
@@ -10,9 +9,8 @@ Project identity: `n8n.local-setup`
 
 ## Important Paths
 
-- Project module: [projects/n8n/local-setup/](../../projects/n8n/local-setup/)
-- Preserved source files: [projects/n8n/local-setup/main/](../../projects/n8n/local-setup/main/)
-- Curated exports: [projects/n8n/local-setup/exports/](../../projects/n8n/local-setup/exports/)
+- Project module: [_projects/n8n/local-setup/](../../_projects/n8n/local-setup/)
+- Preserved source files: [_projects/n8n/local-setup/_main/](../../_projects/n8n/local-setup/_main/)
 - Codex rules: [templates/agent-rules/AGENTS.md](../../templates/agent-rules/AGENTS.md)
 - Codex MCP config: [templates/mcp-configs/codex-mcp-config.md](../../templates/mcp-configs/codex-mcp-config.md)
 - Pack: [packs/codex-n8n-local/pack.json](../../packs/codex-n8n-local/pack.json)
@@ -20,7 +18,7 @@ Project identity: `n8n.local-setup`
 ## Available Operations
 
 - Read project metadata and source manifests.
-- Read curated exports and root-level consumer surfaces.
+- Read declared `_main` recipe sources, optional curated output when present, and root-level consumer surfaces.
 - Generate deterministic declared outputs via [scripts/sync-toolkit-projects.cjs](../../scripts/sync-toolkit-projects.cjs).
 
 ## Safe Writes

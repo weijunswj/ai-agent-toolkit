@@ -67,36 +67,33 @@ const expectedFiles = [
   'registry/tools.registry.json',
   'registry/source-repos.registry.json',
   'registry/consumers.registry.json',
-  'projects/n8n/local-setup/SOURCE-LOCK.json',
-  'projects/n8n/local-setup/exports/templates/README.md',
-  'projects/n8n/workflow-templates/SOURCE-LOCK.json',
-  'projects/cicd/secure-installer/SOURCE-LOCK.json',
-  'projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
-  'projects/design/ui-ux-pro-max/exports/templates/README.md',
+  '_projects/n8n/local-setup/SOURCE-LOCK.json',
+  '_projects/n8n/workflow-templates/SOURCE-LOCK.json',
+  '_projects/cicd/secure-installer/SOURCE-LOCK.json',
+  '_projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
+  'templates/agent-rules/partials/skill-routing-rules.md',
   'scripts/build-agent-rule-templates.ps1',
   'scripts/- build-agent-rule-templates.cmd',
   'scripts/validate-toolkit.cjs',
   'scripts/sync-toolkit-projects.cjs',
   'scripts/audit-project-source-locks.cjs',
+  'scripts/watch-project-sources.cjs',
   'scripts/package-skills.cjs',
   'scripts/package-packs.cjs',
-  'scripts/safe-source-update.cjs'
+  'scripts/safe-source-update.cjs',
+  '.github/workflows/source-watch-pr.yml'
 ];
 
 const expectedDirs = [
-  'projects',
-  'projects/n8n/local-setup',
-  'projects/n8n/local-setup/main',
-  'projects/n8n/local-setup/exports',
-  'projects/n8n/workflow-templates',
-  'projects/n8n/workflow-templates/main',
-  'projects/n8n/workflow-templates/exports',
-  'projects/cicd/secure-installer',
-  'projects/cicd/secure-installer/main',
-  'projects/cicd/secure-installer/exports',
-  'projects/design/ui-ux-pro-max',
-  'projects/design/ui-ux-pro-max/main',
-  'projects/design/ui-ux-pro-max/exports',
+  '_projects',
+  '_projects/n8n/local-setup',
+  '_projects/n8n/local-setup/_main',
+  '_projects/n8n/workflow-templates',
+  '_projects/n8n/workflow-templates/_main',
+  '_projects/cicd/secure-installer',
+  '_projects/cicd/secure-installer/_main',
+  '_projects/design/ui-ux-pro-max',
+  '_projects/design/ui-ux-pro-max/_main',
   'skills/design/ui-ux-secure-frontend-design',
   'skills/development/windows-localhost-workflows',
   'skills/automation/n8n-workflow-sync',
@@ -108,6 +105,7 @@ const expectedDirs = [
   'guides/cicd',
   'guides/design',
   'templates/agent-rules',
+  'templates/agent-rules/partials',
   'templates/mcp-configs',
   'templates/n8n/sync-helpers',
   'templates/n8n/sanitizer',
@@ -149,7 +147,8 @@ const staleReferenceRoots = [
   'skills',
   'MIGRATION_CHECKLIST.md',
   'tests',
-  'scripts'
+  'scripts',
+  'registry'
 ];
 
 const allowedExecutablePrefixes = [
@@ -411,7 +410,7 @@ function validateExecutables(errors) {
     const rel = entry.relPath;
     const ext = path.extname(rel).toLowerCase();
     if (!executableExtensions.has(ext)) continue;
-    const isProjectMainSource = /^projects\/[^/]+\/[^/]+\/main\//.test(rel);
+    const isProjectMainSource = /^_projects\/[^/]+\/[^/]+\/_main\//.test(rel);
     if (isProjectMainSource) continue;
     if (ext === '.py') {
       const allowedPython =
@@ -490,15 +489,25 @@ function validateProjectModules(errors) {
   for (const error of result.errors) fail(errors, error);
 }
 
+function projectManifests() {
+  return projectSync.projectManifests();
+}
+
 function validateSourceLocks(errors) {
   const result = sourceLockAudit.auditSourceLocks();
   for (const error of result.errors) fail(errors, error);
 }
 
 function validateAgentRuleSources(errors) {
+  const linkedOutputs = new Set();
+  for (const manifest of projectManifests()) {
+    for (const output of manifest.outputs || []) {
+      if (output.kind === 'linked') linkedOutputs.add(output.output);
+    }
+  }
   const rootPartialFiles = listFiles().filter((entry) => entry.relPath.startsWith('templates/agent-rules/partials/'));
   for (const entry of rootPartialFiles) {
-    fail(errors, `Root agent-rule partial is an unmanaged duplicate: ${entry.relPath}`);
+    if (!linkedOutputs.has(entry.relPath)) fail(errors, `Root agent-rule partial is an unmanaged duplicate: ${entry.relPath}`);
   }
 }
 
@@ -532,11 +541,12 @@ function validateWorkflows(errors) {
   for (const entry of workflowFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
     const isGeneratedTemplateWorkflow = entry.relPath.endsWith('build-agent-rule-templates.yml');
+    const isSourceWatchWorkflow = entry.relPath.endsWith('source-watch-pr.yml');
     if (!/^permissions:\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
-    if (/contents:\s*write/i.test(text) && !isGeneratedTemplateWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
-    if (/pull-requests:\s*write/i.test(text)) fail(errors, `${entry.relPath} uses pull-requests: write`);
+    if (/contents:\s*write/i.test(text) && !isGeneratedTemplateWorkflow && !isSourceWatchWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
+    if (/pull-requests:\s*write/i.test(text) && !isSourceWatchWorkflow) fail(errors, `${entry.relPath} uses pull-requests: write`);
     if (/auto-merge|gh\s+pr\s+merge/i.test(text)) fail(errors, `${entry.relPath} contains forbidden merge behavior`);
-    if (/git\s+commit|git\s+push/i.test(text) && !isGeneratedTemplateWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
+    if (/git\s+commit|git\s+push/i.test(text) && !isGeneratedTemplateWorkflow && !isSourceWatchWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
     if (isGeneratedTemplateWorkflow && /git\s+commit|git\s+push/i.test(text)) {
       const allowedAdd = 'git add templates/agent-rules/AGENTS.md templates/agent-rules/CLAUDE.md templates/agent-rules/GEMINI.md';
       if (!text.includes(allowedAdd)) fail(errors, `${entry.relPath} auto-commit is not scoped to generated agent rule templates`);
@@ -591,6 +601,7 @@ if (require.main === module) {
 
 module.exports = {
   parseFrontMatter,
+  projectManifests,
   runValidation,
   skillDirs,
   validateForbiddenFiles,

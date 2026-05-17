@@ -61,7 +61,7 @@ Migrated:
 
 - Platform setup guidance into `guides/ai-agent-platforms/`.
 - n8n local setup, upgrade, tunnelling, Docker Compose + ngrok, VPS, workflow sync, and credential safety guidance into `guides/n8n/`.
-- Agent-rule partials into `projects/n8n/local-setup/exports/templates/agent-rules/partials/`; root `templates/agent-rules/*.md` files are generated from those exports.
+- Agent-rule partials from `_projects/n8n/local-setup/_main/templates/partials/` plus the linked root toolkit partial `templates/agent-rules/partials/skill-routing-rules.md`; root `templates/agent-rules/*.md` files are generated from declared concat recipes.
 - MCP config templates into `templates/mcp-configs/`.
 - Deterministic agent-rule generator into `scripts/build-agent-rule-templates.ps1`.
 - CMD generator wrapper into `scripts/- build-agent-rule-templates.cmd`.

@@ -7,6 +7,10 @@
   "scripts": {
     "validate": "node scripts/validate-toolkit.cjs",
     "test": "node --test tests/*.test.cjs",
+    "sync:projects:check": "node scripts/sync-toolkit-projects.cjs --check",
+    "sync:projects:write": "node scripts/sync-toolkit-projects.cjs --write",
+    "audit:source-locks": "node scripts/audit-project-source-locks.cjs",
+    "watch:sources": "node scripts/watch-project-sources.cjs",
     "build:agent-rules": "pwsh -NoProfile -File scripts/build-agent-rule-templates.ps1",
     "package:skills:check": "node scripts/package-skills.cjs --check",
     "package:packs:check": "node scripts/package-packs.cjs --check",

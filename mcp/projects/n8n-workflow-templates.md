@@ -1,8 +1,7 @@
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: n8n.workflow-templates
-Source: projects/n8n/workflow-templates/exports/mcp/n8n-workflow-templates.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # MCP Project Spec: n8n Workflow Templates
 
@@ -10,9 +9,8 @@ Project identity: `n8n.workflow-templates`
 
 ## Important Paths
 
-- Project module: [projects/n8n/workflow-templates/](../../projects/n8n/workflow-templates/)
-- Preserved source files: [projects/n8n/workflow-templates/main/](../../projects/n8n/workflow-templates/main/)
-- Curated exports: [projects/n8n/workflow-templates/exports/](../../projects/n8n/workflow-templates/exports/)
+- Project module: [_projects/n8n/workflow-templates/](../../_projects/n8n/workflow-templates/)
+- Preserved source files: [_projects/n8n/workflow-templates/_main/](../../_projects/n8n/workflow-templates/_main/)
 - Workflow sync skill: [skills/automation/n8n-workflow-sync/](../../skills/automation/n8n-workflow-sync/)
 - Sanitizer helpers: [templates/n8n/sanitizer/](../../templates/n8n/sanitizer/)
 - Workflow policy: [templates/n8n/workflow-policy/](../../templates/n8n/workflow-policy/)

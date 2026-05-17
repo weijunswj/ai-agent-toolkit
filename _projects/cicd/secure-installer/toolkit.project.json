@@ -1,0 +1,128 @@
+{
+  "id": "cicd.secure-installer",
+  "category": "cicd",
+  "name": "secure-installer",
+  "title": "Secure CI/CD Installer",
+  "module_path": "_projects/cicd/secure-installer",
+  "main_path": "_projects/cicd/secure-installer/_main",
+  "outputs": [
+    {
+      "kind": "linked",
+      "output": "skills/cicd/secure-cicd-installer/SKILL.md",
+      "notes": "Published skill maintained at root. Review when _main/ changes."
+    },
+    {
+      "kind": "linked",
+      "output": "mcp/projects/secure-cicd-installer.md",
+      "notes": "Published MCP doc maintained at root. Review when _main/ changes."
+    },
+    {
+      "kind": "linked",
+      "output": "guides/cicd/secure-cicd-installer.md",
+      "notes": "Canonical root guide maintained at root. Review when _main/ changes."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/cicd/README.md",
+      "notes": "Root template index maintained at root."
+    },
+    {
+      "kind": "linked",
+      "output": "packs/secure-cicd/pack.json",
+      "notes": "Published pack maintained at root."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
+      "notes": "Root helper is toolkit-adapted and source-locked."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
+      "notes": "Root helper is toolkit-adapted and source-locked."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "notes": "Root helper is toolkit-adapted and source-locked."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "notes": "Root helper is toolkit-adapted and source-locked."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "notes": "Root helper is toolkit-adapted and source-locked."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "notes": "Root helper is toolkit-adapted and source-locked."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
+      "notes": "Root helper is toolkit-adapted and source-locked."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
+      "notes": "Root helper is toolkit-adapted and source-locked."
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
+      "notes": "Root helper is toolkit-adapted and source-locked."
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/n8n/validate-n8n-workflows.cjs",
+      "output": "templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
+      "notice": false
+    },
+    {
+      "kind": "linked",
+      "output": "templates/n8n/sync-helpers/README.md",
+      "notes": "Root helper documentation maintained at root."
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/cicd/secure-cicd-installer/SKILL.md",
+      "mcp/projects/secure-cicd-installer.md",
+      "guides/cicd/secure-cicd-installer.md",
+      "templates/cicd/README.md",
+      "packs/secure-cicd/pack.json",
+      "templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
+      "templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
+      "templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
+      "templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
+      "templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
+      "templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
+      "templates/n8n/sync-helpers/README.md",
+      "registry/projects.registry.json"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "deployment-secrets/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false
+}

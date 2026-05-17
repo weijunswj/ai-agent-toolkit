@@ -4,10 +4,9 @@ description: Generic n8n workflow sync and template hygiene skill for safely mov
 ---
 
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: n8n.workflow-templates
-Source: projects/n8n/workflow-templates/exports/skills/n8n-workflow-sync.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # n8n Workflow Sync
 

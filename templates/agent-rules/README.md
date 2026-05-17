@@ -8,13 +8,13 @@ Generated files:
 - `CLAUDE.md`
 - `GEMINI.md`
 
-Source partials live in the local n8n setup project exports:
+Source partials are declared in the local n8n setup project manifest:
 
-- [projects/n8n/local-setup/exports/templates/agent-rules/partials/ai-coding-agent-execution.md](../../projects/n8n/local-setup/exports/templates/agent-rules/partials/ai-coding-agent-execution.md)
-- [projects/n8n/local-setup/exports/templates/agent-rules/partials/n8n-mcp-rules.md](../../projects/n8n/local-setup/exports/templates/agent-rules/partials/n8n-mcp-rules.md)
-- [projects/n8n/local-setup/exports/templates/agent-rules/partials/skill-routing-rules.md](../../projects/n8n/local-setup/exports/templates/agent-rules/partials/skill-routing-rules.md)
+- [_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md](../../_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md)
+- [_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md](../../_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md)
+- [templates/agent-rules/partials/skill-routing-rules.md](partials/skill-routing-rules.md)
 
-The preserved original project templates remain under [projects/n8n/local-setup/main/templates/](../../projects/n8n/local-setup/main/templates/). They are archival source, not the root template generation source.
+The preserved original project templates remain under [_projects/n8n/local-setup/_main/templates/](../../_projects/n8n/local-setup/_main/templates/). They are archival source, not the root template generation source.
 
 Regenerate with:
 

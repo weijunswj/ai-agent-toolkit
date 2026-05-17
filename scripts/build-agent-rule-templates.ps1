@@ -2,16 +2,29 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $TemplatesDir = Join-Path $RepoRoot 'templates\agent-rules'
-$PartialsDir = Join-Path $RepoRoot 'projects\n8n\local-setup\exports\templates\agent-rules\partials'
+$ProjectMainPartialsDir = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials'
+$ToolkitPartialsDir = Join-Path $RepoRoot 'templates\agent-rules\partials'
 
-$PartialFiles = @(
-  'ai-coding-agent-execution.md',
-  'n8n-mcp-rules.md',
-  'skill-routing-rules.md'
+$PartialSources = @(
+  @{
+    Name = 'ai-coding-agent-execution.md'
+    Path = Join-Path $ProjectMainPartialsDir 'ai-coding-agent-execution.md'
+    Rel = '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md'
+  },
+  @{
+    Name = 'n8n-mcp-rules.md'
+    Path = Join-Path $ProjectMainPartialsDir 'n8n-mcp-rules.md'
+    Rel = '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
+  },
+  @{
+    Name = 'skill-routing-rules.md'
+    Path = Join-Path $ToolkitPartialsDir 'skill-routing-rules.md'
+    Rel = 'templates/agent-rules/partials/skill-routing-rules.md'
+  }
 )
 
-function Read-Partial($Name) {
-  $path = Join-Path $PartialsDir $Name
+function Read-Partial($Source) {
+  $path = $Source.Path
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "Missing partial: $path"
   }
@@ -19,16 +32,13 @@ function Read-Partial($Name) {
 }
 
 function New-GeneratedNotice {
-  $sources = ($PartialFiles | ForEach-Object { "- projects/n8n/local-setup/exports/templates/agent-rules/partials/$_" }) -join "`n"
+  $sources = ($PartialSources | ForEach-Object { "Source: $($_.Rel)" }) -join "`n"
   return @"
 <!--
-GENERATED FILE. DO NOT EDIT DIRECTLY.
-
-Edit these source files instead:
+Generated from toolkit project source. Do not edit directly.
+Project: n8n.local-setup
 $sources
-
-Then regenerate with:
-- scripts/build-agent-rule-templates.ps1
+Update the project source and run sync.
 -->
 
 
@@ -48,7 +58,7 @@ function Write-GeneratedTemplate {
     "Use this generated template for $Audience."
   )
 
-  foreach ($partial in $PartialFiles) {
+  foreach ($partial in $PartialSources) {
     $bodyParts += ""
     $bodyParts += Read-Partial $partial
   }

@@ -4,18 +4,18 @@ This repo is a reusable toolkit for AI-agent work. It gives humans and agents a 
 
 ## Use Project Modules
 
-Use [projects/](../projects/) when you need the preserved source context behind a root-level surface.
+Use [_projects/](../_projects/) when you need the preserved source context behind a root-level surface.
 
-- `main/` keeps actual project files.
-- `exports/` keeps curated sources for generated root-level outputs.
+- `_main/` keeps actual project files and is the source of truth.
+- `curated_output_for_ai/` is optional and only for reviewed transformations.
 - `_generated/` is preview-only and not source of truth.
 
 Start with:
 
-- [Local n8n Setup](../projects/n8n/local-setup/)
-- [n8n Workflow Templates](../projects/n8n/workflow-templates/)
-- [Secure CI/CD Installer](../projects/cicd/secure-installer/)
-- [UI/UX Pro Max Design](../projects/design/ui-ux-pro-max/)
+- [Local n8n Setup](../_projects/n8n/local-setup/)
+- [n8n Workflow Templates](../_projects/n8n/workflow-templates/)
+- [Secure CI/CD Installer](../_projects/cicd/secure-installer/)
+- [UI/UX Pro Max Design](../_projects/design/ui-ux-pro-max/)
 
 To sync generated root-level surfaces:
 
@@ -33,7 +33,7 @@ node scripts/sync-toolkit-projects.cjs --check
 
 For Codex or Claude Code, copy the whole skill folder into that tool's supported skills folder.
 
-Project-owned `SKILL.md` files are generated from `projects/**/exports/skills/*.md`. Update the project export first, then run the sync workflow.
+Root `SKILL.md` files are published toolkit surfaces. If a skill is directly maintained, update it at root and keep the related project manifest `linked` output current. If a skill becomes generated later, declare the source recipe before syncing.
 
 ## Use Templates Manually
 
@@ -66,7 +66,7 @@ Use:
 - [Codex guide](../guides/ai-agent-platforms/codex.md)
 - [Codex agent rules](../templates/agent-rules/AGENTS.md)
 - [Codex MCP config](../templates/mcp-configs/codex-mcp-config.md)
-- [Local n8n setup source module](../projects/n8n/local-setup/)
+- [Local n8n setup source module](../_projects/n8n/local-setup/)
 
 Keep live n8n tokens in user environment variables, not repo files.
 
@@ -77,7 +77,7 @@ Use:
 - [Claude Code guide](../guides/ai-agent-platforms/claude-code.md)
 - [Claude Code agent rules](../templates/agent-rules/CLAUDE.md)
 - [Claude Code MCP config](../templates/mcp-configs/claude-mcp-config.md)
-- [Claude Code source guide](../projects/n8n/local-setup/main/5.%20extra%20-%20claude%20code%20integration.md)
+- [Claude Code source guide](../_projects/n8n/local-setup/_main/5.%20extra%20-%20claude%20code%20integration.md)
 
 Use user-scoped MCP config unless a project intentionally needs project-scoped config.
 
@@ -105,4 +105,4 @@ Use [tools/design-system-generator/](../tools/design-system-generator/) for loca
 - Do not run live import/export helpers from this toolkit repo.
 - Do not run live n8n import/export helpers in CI.
 - Do not auto-merge or auto-apply upstream updates.
-- Do not edit generated root-level project outputs directly; update the project export and run sync/check.
+- Do not edit generated root-level project outputs directly; update `_main/` or curated source and run sync/check.

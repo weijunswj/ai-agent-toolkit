@@ -3,7 +3,7 @@
     "id": "design-system-generator",
     "title": "Design System Generator",
     "path": "tools/design-system-generator/",
-    "project_module": "projects/design/ui-ux-pro-max/",
+    "project_module": "_projects/design/ui-ux-pro-max/",
     "purpose": "Optional local-only CSV-backed design-system search and recommendation generation.",
     "local_only": true,
     "requires_approval": true,

@@ -40,7 +40,7 @@ function hashFile(relPath) {
 }
 
 function discoverLockFiles() {
-  return walk(resolveRel('projects'))
+  return walk(resolveRel('_projects'))
     .filter((entry) => entry.dirent.isFile() && entry.relPath.endsWith('/SOURCE-LOCK.json'))
     .map((entry) => entry.relPath)
     .sort();
@@ -57,30 +57,34 @@ function validateLock(lock, relPath, errors) {
 
   for (const file of lock.files) {
     const mode = file.mode || 'exact';
-    const label = file.project_path || file.source_path || '<unknown>';
+    const localPath = file.project_path || file.root_surface_path;
+    const label = localPath || file.source_path || '<unknown>';
     if (!file.source_path) errors.push(`${relPath} entry missing source_path: ${label}`);
+    if (file.project_path && file.root_surface_path) errors.push(`${relPath} entry must not set both project_path and root_surface_path: ${label}`);
 
     if (mode === 'exact') {
-      if (!file.project_path) errors.push(`${relPath} exact entry missing project_path: ${label}`);
+      if (!localPath) errors.push(`${relPath} exact entry missing project_path or root_surface_path: ${label}`);
       if (!file.source_blob_sha) errors.push(`${relPath} exact entry missing source_blob_sha: ${label}`);
-      if (file.project_path && !fs.existsSync(resolveRel(file.project_path))) {
-        errors.push(`${relPath} exact entry missing project file: ${file.project_path}`);
+      if (localPath && !fs.existsSync(resolveRel(localPath))) {
+        errors.push(`${relPath} exact entry missing local file: ${localPath}`);
         continue;
       }
-      if (file.project_path && file.source_blob_sha) {
-        const actual = hashFile(file.project_path);
+      if (localPath && file.source_blob_sha) {
+        const actual = hashFile(localPath);
         if (actual !== file.source_blob_sha) {
-          errors.push(`${relPath} exact-copy drift: ${file.project_path} expected ${file.source_blob_sha} got ${actual}`);
+          errors.push(`${relPath} exact-copy drift: ${localPath} expected ${file.source_blob_sha} got ${actual}`);
         }
       }
     } else if (mode === 'adapted') {
       if (!file.notes) errors.push(`${relPath} adapted entry needs notes: ${label}`);
-      if (file.project_path && !fs.existsSync(resolveRel(file.project_path))) {
-        errors.push(`${relPath} adapted entry missing project file: ${file.project_path}`);
+      if (!localPath) errors.push(`${relPath} adapted entry missing project_path or root_surface_path: ${label}`);
+      if (localPath && !fs.existsSync(resolveRel(localPath))) {
+        errors.push(`${relPath} adapted entry missing local file: ${localPath}`);
       }
     } else if (mode === 'excluded') {
       if (!file.notes) errors.push(`${relPath} excluded entry needs notes: ${label}`);
       if (file.project_path) errors.push(`${relPath} excluded entry must not set project_path: ${label}`);
+      if (file.root_surface_path) errors.push(`${relPath} excluded entry must not set root_surface_path: ${label}`);
     } else {
       errors.push(`${relPath} unknown source lock mode "${mode}": ${label}`);
     }
@@ -90,7 +94,7 @@ function validateLock(lock, relPath, errors) {
 function auditSourceLocks() {
   const errors = [];
   const locks = discoverLockFiles();
-  if (!locks.length) errors.push('No SOURCE-LOCK.json files found under projects/');
+  if (!locks.length) errors.push('No SOURCE-LOCK.json files found under _projects/');
   for (const relPath of locks) {
     try {
       validateLock(readJson(relPath), relPath, errors);

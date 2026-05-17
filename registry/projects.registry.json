@@ -1,84 +1,90 @@
 [
   {
     "id": "cicd.secure-installer",
-    "title": "Secure CI/CD Installer",
     "category": "cicd",
-    "module_path": "projects/cicd/secure-installer/",
-    "main_path": "projects/cicd/secure-installer/main/",
-    "exports_path": "projects/cicd/secure-installer/exports/",
+    "name": "secure-installer",
+    "title": "Secure CI/CD Installer",
+    "module_path": "_projects/cicd/secure-installer",
+    "main_path": "_projects/cicd/secure-installer/_main",
     "root_surfaces": [
-      "skills/cicd/secure-cicd-installer/",
       "guides/cicd/secure-cicd-installer.md",
-      "templates/cicd/",
+      "mcp/projects/secure-cicd-installer.md",
       "packs/secure-cicd/pack.json",
-      "mcp/projects/secure-cicd-installer.md"
-    ],
-    "requires_approval": true,
-    "run_commands_by_default": false,
-    "live_actions": "explicit_confirmation_only",
-    "ci_live_actions": false
+      "skills/cicd/secure-cicd-installer/SKILL.md",
+      "templates/cicd/README.md",
+      "templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
+      "templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
+      "templates/n8n/sync-helpers/README.md",
+      "templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
+      "templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
+      "templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
+      "templates/n8n/sync-helpers/validate-n8n-workflows.cjs"
+    ]
   },
   {
     "id": "design.ui-ux-pro-max",
-    "title": "UI/UX Pro Max Design",
     "category": "design",
-    "module_path": "projects/design/ui-ux-pro-max/",
-    "main_path": "projects/design/ui-ux-pro-max/main/",
-    "exports_path": "projects/design/ui-ux-pro-max/exports/",
+    "name": "ui-ux-pro-max",
+    "title": "UI/UX Pro Max Design",
+    "module_path": "_projects/design/ui-ux-pro-max",
+    "main_path": "_projects/design/ui-ux-pro-max/_main",
     "root_surfaces": [
-      "skills/design/ui-ux-secure-frontend-design/",
-      "tools/design-system-generator/",
       "guides/design/ui-ux-pro-max.md",
+      "mcp/projects/ui-ux-pro-max.md",
       "packs/design-system-generator/pack.json",
-      "mcp/projects/ui-ux-pro-max.md"
-    ],
-    "requires_approval": true,
-    "run_commands_by_default": false,
-    "live_actions": "explicit_confirmation_only",
-    "ci_live_actions": false,
-    "third_party": {
-      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
-      "license": "MIT"
-    }
+      "skills/design/ui-ux-secure-frontend-design/SKILL.md",
+      "tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "tools/design-system-generator/README.md",
+      "tools/design-system-generator/data",
+      "tools/design-system-generator/scripts/core.py",
+      "tools/design-system-generator/scripts/design_system.py"
+    ]
   },
   {
     "id": "n8n.local-setup",
-    "title": "Local n8n Setup",
     "category": "n8n",
-    "module_path": "projects/n8n/local-setup/",
-    "main_path": "projects/n8n/local-setup/main/",
-    "exports_path": "projects/n8n/local-setup/exports/",
+    "name": "local-setup",
+    "title": "Local n8n Setup",
+    "module_path": "_projects/n8n/local-setup",
+    "main_path": "_projects/n8n/local-setup/_main",
     "root_surfaces": [
-      "skills/automation/n8n-local-setup/",
       "guides/n8n/local-setup.md",
-      "templates/agent-rules/AGENTS.md",
-      "templates/mcp-configs/codex-mcp-config.md",
+      "mcp/projects/n8n-local-setup.md",
+      "packs/claude-code-n8n-local/pack.json",
       "packs/codex-n8n-local/pack.json",
-      "mcp/projects/n8n-local-setup.md"
-    ],
-    "requires_approval": true,
-    "run_commands_by_default": false,
-    "live_actions": "explicit_confirmation_only",
-    "ci_live_actions": false
+      "skills/automation/n8n-local-setup/SKILL.md",
+      "templates/agent-rules/AGENTS.md",
+      "templates/agent-rules/CLAUDE.md",
+      "templates/agent-rules/GEMINI.md",
+      "templates/agent-rules/partials/skill-routing-rules.md",
+      "templates/mcp-configs/README.md",
+      "templates/mcp-configs/antigravity-mcp-config.md",
+      "templates/mcp-configs/claude-mcp-config.md",
+      "templates/mcp-configs/codex-mcp-config.md",
+      "templates/mcp-configs/opencode-mcp-config.md"
+    ]
   },
   {
     "id": "n8n.workflow-templates",
-    "title": "n8n Workflow Templates",
     "category": "n8n",
-    "module_path": "projects/n8n/workflow-templates/",
-    "main_path": "projects/n8n/workflow-templates/main/",
-    "exports_path": "projects/n8n/workflow-templates/exports/",
+    "name": "workflow-templates",
+    "title": "n8n Workflow Templates",
+    "module_path": "_projects/n8n/workflow-templates",
+    "main_path": "_projects/n8n/workflow-templates/_main",
     "root_surfaces": [
-      "skills/automation/n8n-workflow-sync/",
       "guides/n8n/workflow-sync.md",
-      "templates/n8n/sanitizer/",
-      "templates/n8n/workflow-policy/",
+      "mcp/projects/n8n-workflow-templates.md",
       "packs/n8n-workflow-sync/pack.json",
-      "mcp/projects/n8n-workflow-templates.md"
-    ],
-    "requires_approval": true,
-    "run_commands_by_default": false,
-    "live_actions": "explicit_confirmation_only",
-    "ci_live_actions": false
+      "skills/automation/n8n-workflow-sync/SKILL.md",
+      "templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
+      "templates/n8n/sanitizer/README.md",
+      "templates/n8n/sanitizer/prepare-n8n-template.js",
+      "templates/n8n/sanitizer/sanitise-n8n-template.ps1",
+      "templates/n8n/workflow-policy/README.md"
+    ]
   }
 ]

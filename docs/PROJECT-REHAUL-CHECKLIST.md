@@ -4,17 +4,17 @@ Use this checklist when reviewing the project-module architecture.
 
 ## Module Shape
 
-- [ ] Each project has `README.md`, `SOURCE-MANIFEST.md`, `toolkit.project.json`, `main/`, `exports/`, and `_generated/`.
-- [ ] `main/` preserves actual source files without truncating full guides.
-- [ ] `exports/` contains only curated sources for root-level outputs.
+- [ ] Each project has `README.md`, `SOURCE-MANIFEST.md`, `SOURCE-LOCK.json`, `toolkit.project.json`, and `_main/`.
+- [ ] `_main/` preserves actual source files without truncating full guides.
+- [ ] `curated_output_for_ai/` exists only when a reviewed transformation is needed.
 - [ ] No `source-repos/`, generic `original/`, or generic `derived/` pattern is introduced.
 
 ## Root Surfaces
 
 - [ ] Root [skills/](../skills/), [mcp/](../mcp/), [templates/](../templates/), [packs/](../packs/), [tools/](../tools/), [registry/](../registry/), and [guides/](../guides/) remain obvious.
-- [ ] Skills and MCP docs are generated from explicit exports, not summarised from arbitrary `main/` files.
+- [ ] Skills and MCP docs are generated from declared recipes or maintained as linked root surfaces, not summarised from arbitrary `_main/` files.
 - [ ] Generated Markdown outputs include a generated-source notice.
-- [ ] Root agent-rule templates are generated from project export partials, and unmanaged root partial duplicates do not exist.
+- [ ] Root agent-rule templates are generated from declared `_main/` and linked partial sources, and unmanaged root partial duplicates do not exist.
 - [ ] `SOURCE-LOCK.json` files pass the source-lock audit.
 
 ## Safety

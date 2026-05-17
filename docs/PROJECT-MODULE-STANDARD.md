@@ -3,32 +3,34 @@
 Project modules are the source-of-truth layer for reusable toolkit inputs.
 
 ```text
-projects/<category>/<project-name>/
+_projects/<category>/<project>/
   README.md
   toolkit.project.json
   SOURCE-MANIFEST.md
-  main/
-  exports/
+  SOURCE-LOCK.json
+  _main/
+    ...actual project files...
+  curated_output_for_ai/
+    ...optional reviewed AI/toolkit-facing transformations...
   _generated/
+    ...optional generated previews...
 ```
 
 ## Folder Roles
 
-- `projects/` keeps reusable source projects inside the toolkit without burying consumer-facing outputs.
-- `main/` preserves actual project/source files with original names and structure where practical.
-- `exports/` contains curated source material used to generate or update root-level surfaces.
+- `_projects/` keeps reusable source projects visible near the top of the repo.
+- `_main/` preserves actual project/source files with original names and structure where practical.
+- `curated_output_for_ai/` is optional. Use it only when a root output needs curation, safety filtering, AI-facing wording, summarisation, or an intentionally adapted variant.
 - `_generated/` is optional preview output only and is not source of truth.
 
-Do not use `original/` or `derived/` as the standard project pattern. Do not truncate big source guides when preserving them in `main/`. If a file is shortened, label it as an export, summary, quickstart, or generated surface.
+Do not use `original/` or `derived/` as standard folder names. Do not create empty curated folders just to satisfy a schema. Do not duplicate root skills, MCP docs, templates, packs, or tools under curated output unless an intermediate curated source is genuinely useful.
 
-Project `main/templates/**` folders are preserved source only. Project `exports/templates/**` folders are the source for root toolkit templates. Root template outputs, such as [templates/agent-rules/AGENTS.md](../templates/agent-rules/AGENTS.md), are generated consumer-facing files.
-
-## Root-Level Surfaces Stay Separate
+## Root Surfaces
 
 These root folders remain obvious for consumers:
 
-- [skills/](../skills/) for instruction-only AI-agent behavior layers.
-- [mcp/](../mcp/) for safe MCP specs and project discovery docs.
+- [skills/](../skills/) for published instruction-only AI-agent behavior layers.
+- [mcp/](../mcp/) for published MCP specs and project discovery docs.
 - [templates/](../templates/) for ready-to-copy template material.
 - [packs/](../packs/) for approval-gated install/review bundles.
 - [tools/](../tools/) for optional executable tooling.
@@ -36,22 +38,23 @@ These root folders remain obvious for consumers:
 - [guides/](../guides/) for human-friendly quickstarts and canonical guides.
 - [docs/](../docs/) for policy, standards, safety, and architecture docs.
 
-## Export Mapping
+Root published surfaces should be generated only by declared recipes, sourced from curated output only when curation is needed, directly maintained as `linked`, or covered by source locks.
 
-Project exports feed root-level outputs:
+## Recipes
 
-- `projects/**/exports/skills/*.md` -> `skills/**/SKILL.md`
-- `projects/**/exports/mcp/*.md` -> `mcp/**`
-- `projects/**/exports/templates/**` -> `templates/**`
-- `projects/**/exports/packs/**` -> `packs/**/pack.json`
-- `projects/**/exports/registry/**` -> `registry/**`
-- `projects/**/exports/guides/**` -> `guides/**`
+`toolkit.project.json` declares how project source relates to root outputs:
 
-Do not auto-generate skills or MCP specs by summarising arbitrary full docs from `main/`. Generate those surfaces only from explicit exports and `toolkit.project.json`.
+- `copy`: root output is copied from `_main/` or optional curated output. Markdown copies get a generated notice by default.
+- `concat`: root output is built from multiple declared source files.
+- `curated`: root output is generated from `curated_output_for_ai/`.
+- `json`: JSON is parsed and pretty-printed deterministically without semantic mutation.
+- `linked`: root output is directly maintained and should be reviewed when `_main/` changes.
+
+The sync script never uses AI, never summarises, never executes project scripts, never installs packages, never uses network, and never runs live n8n import/export.
 
 ## Source Locks
 
-Each project module has a `SOURCE-LOCK.json` file. Exact-copy entries pin the expected Git blob SHA for preserved files. Adapted or excluded entries must say so explicitly with notes.
+Each project module has a `SOURCE-LOCK.json` file. Exact-copy entries pin the expected Git blob SHA for preserved files. Adapted or excluded entries must say so explicitly with notes. Root helper/tool surfaces may also be listed with `root_surface_path` when they intentionally mirror or adapt upstream material.
 
 Run the local audit without network access:
 
@@ -59,30 +62,19 @@ Run the local audit without network access:
 node scripts/audit-project-source-locks.cjs
 ```
 
-To refresh a lock from latest upstream `main`, use this Codex procedure:
+## Updating A Project
 
-1. Fetch or clone the upstream source outside this toolkit repo.
-2. Copy only approved safe files into the project module.
-3. Mark exact copies as `mode: "exact"` with the upstream Git blob SHA.
-4. Mark intentional local-only changes as `mode: "adapted"` with notes.
-5. Mark intentionally omitted upstream files as `mode: "excluded"` with notes.
-6. Run the source-lock audit and full validation.
-
-## Adding A Project
-
-1. Create `projects/<category>/<project-name>/`.
-2. Add `README.md`, `SOURCE-MANIFEST.md`, and `toolkit.project.json`.
-3. Preserve safe source files in `main/`.
-4. Put curated root-output sources in `exports/`.
-5. Declare every generated output in `toolkit.project.json`.
-6. Run:
+1. Update allowlisted source files under `_projects/**/_main/`.
+2. Update `SOURCE-LOCK.json` with exact, adapted, or excluded entries.
+3. Update root linked surfaces manually when needed.
+4. Update `curated_output_for_ai/` only when a reviewed intermediate source is needed.
+5. Run:
 
 ```powershell
 node scripts/sync-toolkit-projects.cjs --write
 node scripts/sync-toolkit-projects.cjs --check
+node scripts/audit-project-source-locks.cjs
 node scripts/validate-toolkit.cjs
 ```
 
-## Updating A Project
-
-Update `main/` when source material changes. Update `exports/` only when a root-level surface should change. Then run the sync/check workflow. If `main/` changes but exports do not, the sync script warns so reviewers can confirm that no root surface needs an update.
+AI may help draft or review root skills, MCP docs, and curated output, but deterministic scripts publish and check declared outputs.

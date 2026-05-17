@@ -5,9 +5,8 @@
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [
-    "projects/cicd/secure-installer/",
-    "projects/cicd/secure-installer/main/",
-    "projects/cicd/secure-installer/exports/",
+    "_projects/cicd/secure-installer/",
+    "_projects/cicd/secure-installer/_main/",
     "guides/cicd/secure-cicd-installer.md",
     "templates/cicd/secure-cicd-prompt.md"
   ],
@@ -23,7 +22,7 @@
     "templates/github-actions/README.md"
   ],
   "writes_allowed": [
-    "declared generated toolkit outputs from projects/cicd/secure-installer/toolkit.project.json",
+    "declared generated toolkit outputs from _projects/cicd/secure-installer/toolkit.project.json",
     "consumer repo docs and workflow template paths approved by the user"
   ],
   "writes_denied": [

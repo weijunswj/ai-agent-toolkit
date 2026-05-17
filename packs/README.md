@@ -4,4 +4,4 @@ Packs are approval-gated install bundle manifests. Each pack has a `pack.json` f
 
 Packs are not installed automatically in v1. Review a pack before copying any files into a consumer repo.
 
-Project-owned pack manifests are maintained from explicit exports under [projects/](../projects/). Keep `requires_approval` true and `run_commands` false by default.
+Project-owned pack manifests are root published surfaces declared in [_projects/**/toolkit.project.json](../_projects/). Keep `requires_approval` true and `run_commands` false by default.

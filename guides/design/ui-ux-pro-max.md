@@ -1,8 +1,7 @@
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: design.ui-ux-pro-max
-Source: projects/design/ui-ux-pro-max/exports/guides/design/ui-ux-pro-max.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # UI/UX Pro Max Design Module
 
@@ -11,7 +10,7 @@ The UI/UX Pro Max design module keeps design intelligence in two separate surfac
 - Instruction-only design guidance in [skills/design/ui-ux-secure-frontend-design/](../../skills/design/ui-ux-secure-frontend-design/).
 - Optional local-only CSV search/generation tooling in [tools/design-system-generator/](../../tools/design-system-generator/).
 
-The source-of-truth project module is [projects/design/ui-ux-pro-max/](../../projects/design/ui-ux-pro-max/). Its [main/](../../projects/design/ui-ux-pro-max/main/) folder preserves the safe local-search subset and its [exports/](../../projects/design/ui-ux-pro-max/exports/) folder feeds root-level consumer surfaces.
+The source-of-truth project module is [_projects/design/ui-ux-pro-max/](../../_projects/design/ui-ux-pro-max/). Its [_main/](../../_projects/design/ui-ux-pro-max/_main/) folder preserves the safe local-search subset. Root surfaces are declared in the project manifest as linked or copy recipes.
 
 ## Safety Boundaries
 

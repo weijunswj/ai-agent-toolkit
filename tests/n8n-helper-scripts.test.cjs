@@ -105,7 +105,7 @@ test('sanitise-n8n-template.ps1 dry-run creates staging folders but writes no sa
   fs.cpSync(path.dirname(sanitizerPs1), localSanitizerDir, { recursive: true });
   const localSanitizerPs1 = path.join(localSanitizerDir, 'sanitise-n8n-template.ps1');
 
-  const result = spawnSync(shell, ['-NoProfile', '-File', localSanitizerPs1, '-DryRun'], {
+  const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', localSanitizerPs1, '-DryRun'], {
     cwd,
     encoding: 'utf8',
   });

@@ -1,8 +1,7 @@
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: cicd.secure-installer
-Source: projects/cicd/secure-installer/exports/templates/cicd/README.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # CI/CD Templates
 

@@ -4,7 +4,7 @@ This toolkit allows writes only when they are required, scoped, declared, review
 
 ## Required Project Policy
 
-Every `projects/**/toolkit.project.json` must include:
+Every `_projects/**/toolkit.project.json` must include:
 
 - `writes.allowed`
 - `writes.denied`
@@ -46,7 +46,7 @@ Denied writes include:
 
 ## CI Rules
 
-CI must not run live actions, import/export n8n workflows, activate/deactivate workflows, mutate credentials, install packages from project modules, or execute scripts merely because they exist under `projects/**/main/`.
+CI must not run live actions, import/export n8n workflows, activate/deactivate workflows, mutate credentials, install packages from project modules, or execute scripts merely because they exist under `_projects/**/_main/`.
 
 ## Sync Enforcement
 

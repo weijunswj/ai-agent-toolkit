@@ -74,6 +74,25 @@ test('project registry includes the initial project modules', () => {
   ]);
 });
 
+test('project modules use _projects/_main with no mandatory exports tree', () => {
+  assert.equal(fs.existsSync(path.join(repoRoot, '_projects')), true);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'projects')), false);
+
+  for (const rel of [
+    '_projects/n8n/local-setup',
+    '_projects/n8n/workflow-templates',
+    '_projects/cicd/secure-installer',
+    '_projects/design/ui-ux-pro-max'
+  ]) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, rel, 'toolkit.project.json'), 'utf8'));
+    assert.equal(manifest.module_path, rel);
+    assert.equal(manifest.main_path, `${rel}/_main`);
+    assert.equal(fs.existsSync(path.join(repoRoot, rel, '_main')), true);
+    assert.equal(fs.existsSync(path.join(repoRoot, rel, 'main')), false);
+    assert.equal(fs.existsSync(path.join(repoRoot, rel, 'exports')), false);
+  }
+});
+
 test('design skill front matter and OpenAI metadata are approved', () => {
   const errors = validator.runValidation();
   assert.equal(errors.filter((error) => /Design skill/.test(error)).length, 0, errors.join('\n'));
@@ -114,28 +133,68 @@ test('generated agent-rule templates are normal Markdown, not one giant fenced b
   for (const file of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
     const text = fs.readFileSync(path.join(repoRoot, 'templates', 'agent-rules', file), 'utf8');
     assert.doesNotMatch(text, /Use this generated template[^\n]*\n\n```md\n# AI coding agent execution preferences/);
-    assert.match(text, /projects\/n8n\/local-setup\/exports\/templates\/agent-rules\/partials/);
+    assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials/);
+    assert.match(text, /templates\/agent-rules\/partials\/skill-routing-rules\.md/);
     assert.doesNotMatch(text, /^- templates\/agent-rules\/partials/m);
     assert.match(text, /\n# AI coding agent execution preferences\n/);
     assert.match(text, /\n```md\n# SECTION NAME\n/);
   }
 });
 
-test('root agent-rule partials do not exist as unmanaged duplicates', () => {
+test('root agent-rule partials are declared linked surfaces when present', () => {
   const partialsDir = path.join(repoRoot, 'templates', 'agent-rules', 'partials');
   const files = fs.existsSync(partialsDir)
-    ? fs.readdirSync(partialsDir, { recursive: true }).filter((entry) => fs.statSync(path.join(partialsDir, entry)).isFile())
+    ? fs.readdirSync(partialsDir, { recursive: true }).filter((entry) => fs.statSync(path.join(partialsDir, entry)).isFile()).map((entry) => entry.replace(/\\/g, '/')).sort()
     : [];
-  assert.deepEqual(files, []);
+  assert.deepEqual(files, ['skill-routing-rules.md']);
+
+  const manifests = validator.projectManifests();
+  const linkedOutputs = new Set();
+  for (const manifest of manifests) {
+    for (const output of manifest.outputs || []) {
+      if (output.kind === 'linked') linkedOutputs.add(output.output);
+    }
+  }
+  assert.equal(linkedOutputs.has('templates/agent-rules/partials/skill-routing-rules.md'), true);
 });
 
-test('changing project export partials makes generated agent rules stale', () => {
+test('changing declared _main partials makes generated agent rules stale', () => {
   const cwd = tempCopy();
-  const partial = path.join(cwd, 'projects', 'n8n', 'local-setup', 'exports', 'templates', 'agent-rules', 'partials', 'skill-routing-rules.md');
+  const partial = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials', 'n8n-mcp-rules.md');
   fs.appendFileSync(partial, '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale generated output: templates\/agent-rules\/AGENTS\.md/);
+});
+
+test('changing declared _main MCP config source makes root MCP config stale', () => {
+  const cwd = tempCopy();
+  const source = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'codex-mcp-config.md');
+  fs.appendFileSync(source, '\n\n<!-- drift test -->\n');
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: templates\/mcp-configs\/codex-mcp-config\.md/);
+});
+
+test('root skills are linked and not duplicated under curated output by default', () => {
+  const curatedSkillCopies = fs.existsSync(path.join(repoRoot, '_projects'))
+    ? fs.readdirSync(path.join(repoRoot, '_projects'), { recursive: true })
+        .map((entry) => String(entry).replace(/\\/g, '/'))
+        .filter((entry) => entry.includes('curated_output_for_ai/skills/'))
+    : [];
+  assert.deepEqual(curatedSkillCopies, []);
+
+  const manifests = validator.projectManifests();
+  const linkedOutputs = new Set();
+  for (const manifest of manifests) {
+    for (const output of manifest.outputs || []) {
+      if (output.kind === 'linked') linkedOutputs.add(output.output);
+    }
+  }
+  assert.equal(linkedOutputs.has('skills/automation/n8n-local-setup/SKILL.md'), true);
+  assert.equal(linkedOutputs.has('skills/automation/n8n-workflow-sync/SKILL.md'), true);
+  assert.equal(linkedOutputs.has('skills/cicd/secure-cicd-installer/SKILL.md'), true);
+  assert.equal(linkedOutputs.has('skills/design/ui-ux-secure-frontend-design/SKILL.md'), true);
 });
 
 test('source-lock audit passes and catches exact-copy drift', () => {
@@ -143,7 +202,7 @@ test('source-lock audit passes and catches exact-copy drift', () => {
   assert.equal(result.status, 0, result.stderr);
 
   const cwd = tempCopy();
-  const copiedFile = path.join(cwd, 'projects', 'n8n', 'workflow-templates', 'main', 'README.md');
+  const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-templates', '_main', 'README.md');
   fs.appendFileSync(copiedFile, '\nDrift test\n');
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);

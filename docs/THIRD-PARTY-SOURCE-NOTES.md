@@ -1,6 +1,6 @@
 # Third-Party Source Notes
 
-The external `nextlevelbuilder/ui-ux-pro-max-skill` project is used only for the safe local-search subset documented in [projects/design/ui-ux-pro-max/](../projects/design/ui-ux-pro-max/).
+The external `nextlevelbuilder/ui-ux-pro-max-skill` project is used only for the safe local-search subset documented in [_projects/design/ui-ux-pro-max/](../_projects/design/ui-ux-pro-max/).
 
 Reviewed source:
 
@@ -27,4 +27,4 @@ This toolkit does not vendor external:
 - Package metadata.
 - Install commands.
 
-Project-owned scripts preserved under `projects/**/main/` are source material, not automatically trusted runtime code.
+Project-owned scripts preserved under `_projects/**/_main/` are source material, not automatically trusted runtime code.

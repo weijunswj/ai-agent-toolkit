@@ -1,8 +1,7 @@
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: design.ui-ux-pro-max
-Source: projects/design/ui-ux-pro-max/exports/mcp/ui-ux-pro-max.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # MCP Project Spec: UI/UX Pro Max Design
 
@@ -10,9 +9,8 @@ Project identity: `design.ui-ux-pro-max`
 
 ## Important Paths
 
-- Project module: [projects/design/ui-ux-pro-max/](../../projects/design/ui-ux-pro-max/)
-- Preserved local-only subset: [projects/design/ui-ux-pro-max/main/](../../projects/design/ui-ux-pro-max/main/)
-- Curated exports: [projects/design/ui-ux-pro-max/exports/](../../projects/design/ui-ux-pro-max/exports/)
+- Project module: [_projects/design/ui-ux-pro-max/](../../_projects/design/ui-ux-pro-max/)
+- Preserved local-only subset: [_projects/design/ui-ux-pro-max/_main/](../../_projects/design/ui-ux-pro-max/_main/)
 - Instruction-only skill: [skills/design/ui-ux-secure-frontend-design/](../../skills/design/ui-ux-secure-frontend-design/)
 - Optional local tool: [tools/design-system-generator/](../../tools/design-system-generator/)
 

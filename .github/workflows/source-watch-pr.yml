@@ -1,0 +1,26 @@
+name: Source Watch PR Plan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '21 3 * * 1'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Render source update plan
+        run: node scripts/watch-project-sources.cjs >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate source locks
+        run: node scripts/audit-project-source-locks.cjs
+
+      - name: Check project sync
+        run: node scripts/sync-toolkit-projects.cjs --check

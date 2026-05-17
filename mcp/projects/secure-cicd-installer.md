@@ -1,8 +1,7 @@
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: cicd.secure-installer
-Source: projects/cicd/secure-installer/exports/mcp/secure-cicd-installer.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # MCP Project Spec: Secure CI/CD Installer
 
@@ -10,9 +9,8 @@ Project identity: `cicd.secure-installer`
 
 ## Important Paths
 
-- Project module: [projects/cicd/secure-installer/](../../projects/cicd/secure-installer/)
-- Preserved source files: [projects/cicd/secure-installer/main/](../../projects/cicd/secure-installer/main/)
-- Curated exports: [projects/cicd/secure-installer/exports/](../../projects/cicd/secure-installer/exports/)
+- Project module: [_projects/cicd/secure-installer/](../../_projects/cicd/secure-installer/)
+- Preserved source files: [_projects/cicd/secure-installer/_main/](../../_projects/cicd/secure-installer/_main/)
 - Templates: [templates/cicd/](../../templates/cicd/)
 - Pack: [packs/secure-cicd/pack.json](../../packs/secure-cicd/pack.json)
 

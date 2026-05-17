@@ -4,10 +4,9 @@ description: Guide AI agents through safe local n8n setup, MCP config selection,
 ---
 
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: n8n.local-setup
-Source: projects/n8n/local-setup/exports/skills/n8n-local-setup.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # n8n Local Setup
 
@@ -15,13 +14,12 @@ Use this skill when the user needs to set up or explain local n8n, agent rules, 
 
 ## Source Module
 
-- Project module: [projects/n8n/local-setup/](../../../projects/n8n/local-setup/)
-- Full source docs: [projects/n8n/local-setup/main/](../../../projects/n8n/local-setup/main/)
-- Curated exports: [projects/n8n/local-setup/exports/](../../../projects/n8n/local-setup/exports/)
+- Project module: [_projects/n8n/local-setup/](../../../_projects/n8n/local-setup/)
+- Full source docs: [_projects/n8n/local-setup/_main/](../../../_projects/n8n/local-setup/_main/)
 
 ## Core Rules
 
-- Treat [projects/n8n/local-setup/main/](../../../projects/n8n/local-setup/main/) as the full source of truth for original setup docs.
+- Treat [_projects/n8n/local-setup/_main/](../../../_projects/n8n/local-setup/_main/) as the full source of truth for original setup docs.
 - Use root [guides/n8n/](../../../guides/n8n/) for concise consumer-facing quickstarts.
 - Keep tokens, API keys, webhook secrets, and MCP credentials out of repo files.
 - Do not run live n8n import/export, workflow activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
@@ -37,6 +35,6 @@ Use this skill when the user needs to set up or explain local n8n, agent rules, 
 ## Workflow
 
 1. Confirm the user's target platform and whether they want docs, templates, or a local setup diagnosis.
-2. Read the relevant source file in `projects/n8n/local-setup/main/` when exact setup detail matters.
+2. Read the relevant source file in `_projects/n8n/local-setup/_main/` when exact setup detail matters.
 3. Point the user to the root-level template or guide when they need copy-ready material.
 4. Keep live actions safety-gated and separate from docs/template work.

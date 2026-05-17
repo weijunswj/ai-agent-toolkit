@@ -1,15 +1,11 @@
 <!--
-GENERATED FILE. DO NOT EDIT DIRECTLY.
-
-Edit these source files instead:
-- projects/n8n/local-setup/exports/templates/agent-rules/partials/ai-coding-agent-execution.md
-- projects/n8n/local-setup/exports/templates/agent-rules/partials/n8n-mcp-rules.md
-- projects/n8n/local-setup/exports/templates/agent-rules/partials/skill-routing-rules.md
-
-Then regenerate with:
-- scripts/build-agent-rule-templates.ps1
+Generated from toolkit project source. Do not edit directly.
+Project: n8n.local-setup
+Source: _projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md
+Source: _projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md
+Source: templates/agent-rules/partials/skill-routing-rules.md
+Update the project source and run sync.
 -->
-
 # AGENTS.md AI Coding Agent Rules
 
 Use this generated template for Codex or OpenCode.

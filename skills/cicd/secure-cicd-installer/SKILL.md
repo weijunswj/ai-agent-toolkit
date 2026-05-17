@@ -4,10 +4,9 @@ description: Instruction-only guidance for reviewing, planning, and applying sec
 ---
 
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: cicd.secure-installer
-Source: projects/cicd/secure-installer/exports/skills/secure-cicd-installer.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # Secure CI/CD Installer
 
@@ -15,9 +14,8 @@ Use this skill when a user asks for secure CI/CD setup, GitHub Actions hardening
 
 ## Source Module
 
-- Project module: [projects/cicd/secure-installer/](../../../projects/cicd/secure-installer/)
-- Preserved source: [projects/cicd/secure-installer/main/](../../../projects/cicd/secure-installer/main/)
-- Curated exports: [projects/cicd/secure-installer/exports/](../../../projects/cicd/secure-installer/exports/)
+- Project module: [_projects/cicd/secure-installer/](../../../_projects/cicd/secure-installer/)
+- Preserved source: [_projects/cicd/secure-installer/_main/](../../../_projects/cicd/secure-installer/_main/)
 
 ## Core Rules
 

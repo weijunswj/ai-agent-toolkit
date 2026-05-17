@@ -4,10 +4,9 @@ description: Security-first frontend UI/UX design skill for creating, reviewing,
 ---
 
 <!--
-Generated from toolkit project exports. Do not edit directly.
+Root published toolkit surface. Maintained directly and declared as linked in toolkit.project.json.
 Project: design.ui-ux-pro-max
-Source: projects/design/ui-ux-pro-max/exports/skills/ui-ux-secure-frontend-design.md
-Update the source project export and run the sync/check workflow.
+Review the related _projects/**/_main source when updating.
 -->
 # Secure UI/UX Frontend Design
 

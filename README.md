@@ -7,7 +7,7 @@ It is not a product repo. Product repos stay separate and consume generated pack
 ## What Belongs Here
 
 - Reusable AI skills in `skills/`.
-- Source-of-truth project modules in `projects/`.
+- Source-of-truth project modules in `_projects/`.
 - Agent setup guides in `guides/`.
 - Copy-safe templates in `templates/`.
 - Approval-gated install pack manifests in `packs/`.
@@ -30,7 +30,7 @@ It is not a product repo. Product repos stay separate and consume generated pack
 
 | Area | Purpose |
 | --- | --- |
-| [projects/](projects/) | Source-of-truth project modules with preserved `main/` files and curated `exports/`. |
+| [_projects/](_projects/) | Source-of-truth project modules with preserved `_main/` files. |
 | [skills/](skills/) | Portable instruction packs for AI agents. |
 | [guides/](guides/) | Human-readable setup and workflow guides. |
 | [templates/](templates/) | Copy-paste or installable template sources. |
@@ -45,27 +45,29 @@ It is not a product repo. Product repos stay separate and consume generated pack
 Project modules use this shape:
 
 ```text
-projects/<category>/<project-name>/
+_projects/<category>/<project-name>/
   README.md
   toolkit.project.json
   SOURCE-MANIFEST.md
-  main/
-  exports/
-  _generated/
+  SOURCE-LOCK.json
+  _main/
+  curated_output_for_ai/  # optional
+  _generated/            # optional
 ```
 
-- `main/` preserves actual project/source files.
-- `exports/` contains curated source material for generated root-level surfaces.
+- `_main/` preserves actual project/source files and is the project source of truth.
+- `curated_output_for_ai/` is optional and only for reviewed AI/toolkit-facing transformations.
+- `_generated/` is optional preview output only and is not source of truth.
 - Root `skills/`, `mcp/`, `templates/`, `packs/`, `tools/`, `registry/`, and `guides/` stay separate so consumers can find them quickly.
 
 See [Project Module Standard](docs/PROJECT-MODULE-STANDARD.md) and [Write Safety Model](docs/WRITE-SAFETY-MODEL.md).
 
 Current modules:
 
-- [Local n8n Setup](projects/n8n/local-setup/)
-- [n8n Workflow Templates](projects/n8n/workflow-templates/)
-- [Secure CI/CD Installer](projects/cicd/secure-installer/)
-- [UI/UX Pro Max Design](projects/design/ui-ux-pro-max/)
+- [Local n8n Setup](_projects/n8n/local-setup/)
+- [n8n Workflow Templates](_projects/n8n/workflow-templates/)
+- [Secure CI/CD Installer](_projects/cicd/secure-installer/)
+- [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/)
 
 ## Skills
 
@@ -78,7 +80,7 @@ Current reusable skills include:
 - [Secure CI/CD Installer](skills/cicd/secure-cicd-installer/)
 - [Knowledge Index Updater](skills/portfolio/knowledge-index-updater/)
 
-Each skill has a `SKILL.md` entrypoint and a `README.md`. Project-owned `SKILL.md` files are generated from explicit `projects/**/exports/skills/*.md` files and include a generated-source notice.
+Each skill has a `SKILL.md` entrypoint and a `README.md`. Root skills are published toolkit surfaces. Some are directly maintained and declared as `linked` outputs in the related `toolkit.project.json`; deterministic scripts only publish generated outputs declared in project manifests.
 
 ## Guides, Templates, And Packs
 
@@ -100,7 +102,7 @@ The installer MCP is future-facing and approval-gated. It is design-only until a
 
 ## Safe Source Updates
 
-Project modules are source-of-truth inputs. Safe source updates start in `projects/**/main/`, then curated changes flow through `projects/**/exports/` and the sync/check workflow. AI review is advisory only, and ChatGPT web review is manual paste-in review only.
+Project modules are source-of-truth inputs. Safe source updates start in `_projects/**/_main/`, then declared recipes or linked root surfaces are reviewed through the sync/check workflow. AI may draft root skills, MCP docs, or curated output, but deterministic scripts publish and check declared outputs. ChatGPT scheduled review is advisory only.
 
 ## Start Here
 
@@ -121,6 +123,7 @@ Run:
 ```powershell
 node scripts/validate-toolkit.cjs
 node scripts/sync-toolkit-projects.cjs --check
+node scripts/audit-project-source-locks.cjs
 node --test tests/*.test.cjs
 node scripts/package-skills.cjs --check
 node scripts/package-packs.cjs --check
