@@ -8,7 +8,7 @@ Reusable AI-agent skills, templates, packs, registries, MCP design notes, and lo
 | --- | --- |
 | [_projects/](_projects/) | Canonical preserved source library. Humans should use `_projects/**/_main/` for full source docs and original guides. |
 | [for_ai/](for_ai/) | AI-facing published assets: skills, MCP notes, templates, packs, registries, tools, and operator playbooks. |
-| [repo/](repo/) | Repo maintenance assets: validation scripts, tests, policy docs, migration notes, and CI support. |
+| [repo/](repo/) | Repo maintenance assets: validation scripts, tests, policy docs, provenance notes, and CI support. |
 
 Root stays intentionally small: `README.md`, `AGENTS.md`, `package.json`, `.gitignore`, `.gitattributes`, `.github/`, `_projects/`, `for_ai/`, and `repo/`.
 
@@ -53,13 +53,7 @@ Repo-local policy, validation, and CI support live under [repo/](repo/):
 
 Source-watch is advisory and read-only. It renders update candidates from source-lock metadata but does not fetch upstream commits, copy files, update `SOURCE-LOCK.json`, create branches, create PRs, run live n8n actions, or mutate credentials.
 
-Retired internal source repos remain provenance-only:
-
-- `weijunswj/codex-n8n-local-setup`
-- `weijunswj/ai-cicd-installer`
-- `weijunswj/n8n-workflow-templates`
-
-The active third-party source `nextlevelbuilder/ui-ux-pro-max-skill` remains manual-review and attribution-gated.
+Retired internal source repos remain provenance-only; see [Retired Source Provenance](repo/docs/RETIRED-SOURCE-PROVENANCE.md). The active third-party source `nextlevelbuilder/ui-ux-pro-max-skill` remains manual-review and attribution-gated.
 
 ## Validation
 

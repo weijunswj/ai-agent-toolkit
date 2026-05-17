@@ -47,8 +47,6 @@ python -m unittest discover -s for_ai/tools/design-system-generator/tests
 git diff --check
 ```
 
-For the full migration validation sequence, see `repo/docs/MIGRATION_CHECKLIST.md`.
-
 ## n8n Safety
 
 Do not run live n8n import, export, activation, deactivation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo unless a future user request explicitly asks for that live action and confirms the target instance.

@@ -83,6 +83,17 @@ test('project registry includes the initial project modules', () => {
   ]);
 });
 
+test('validator expects durable retired source provenance doc instead of migration checklist', () => {
+  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'docs', 'MIGRATION_CHECKLIST.md')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'docs', 'RETIRED-SOURCE-PROVENANCE.md')), true);
+
+  const cwd = tempCopy();
+  fs.unlinkSync(path.join(cwd, 'repo', 'docs', 'RETIRED-SOURCE-PROVENANCE.md'));
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Missing expected file: repo\/docs\/RETIRED-SOURCE-PROVENANCE\.md/);
+});
+
 test('project modules use _projects/_main with no mandatory exports tree', () => {
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects')), true);
   assert.equal(fs.existsSync(path.join(repoRoot, 'projects')), false);
@@ -368,15 +379,15 @@ test('source-lock lifecycle metadata accepts retired internal and active third-p
   assert.equal(thirdParty.public_attribution_required, true);
 });
 
-test('source watch separates archived migration sources from active update candidates', () => {
+test('source watch separates retired provenance sources from active update candidates', () => {
   const plan = sourceWatcher.buildPlan(sourceWatcher.discoverLocks());
   const activeRepos = plan.active_update_candidates.map((entry) => entry.source_repo);
-  const archivedRepos = plan.archived_migration_sources.map((entry) => entry.source_repo);
+  const retiredRepos = plan.retired_provenance_sources.map((entry) => entry.source_repo);
 
   assert.deepEqual(activeRepos.filter((repo) => repo.startsWith('weijunswj/')), []);
-  assert.ok(archivedRepos.includes('weijunswj/codex-n8n-local-setup'));
-  assert.ok(archivedRepos.includes('weijunswj/ai-cicd-installer'));
-  assert.ok(archivedRepos.includes('weijunswj/n8n-workflow-templates'));
+  assert.ok(retiredRepos.includes('weijunswj/codex-n8n-local-setup'));
+  assert.ok(retiredRepos.includes('weijunswj/ai-cicd-installer'));
+  assert.ok(retiredRepos.includes('weijunswj/n8n-workflow-templates'));
 
   const thirdParty = plan.active_update_candidates.find((entry) => entry.source_repo === 'nextlevelbuilder/ui-ux-pro-max-skill');
   assert.ok(thirdParty);
@@ -390,11 +401,12 @@ test('source watch separates archived migration sources from active update candi
 test('source watch rendered output is advisory and does not claim PR creation today', () => {
   const markdown = sourceWatcher.renderMarkdown(sourceWatcher.buildPlan(sourceWatcher.discoverLocks()));
   assert.match(markdown, /advisory/i);
+  assert.match(markdown, /Retired internal sources are provenance-only/);
   assert.match(markdown, /does not fetch upstream commits, copy files, update SOURCE-LOCK\.json, create branches, or create PRs/);
   assert.doesNotMatch(markdown, /Draft PR only|opens PRs today|creates PRs today|pushes commits/i);
 });
 
-test('public source repo registry excludes retired internal migration sources', () => {
+test('public source repo registry excludes retired internal provenance sources', () => {
   const registry = readJsonFile(path.join(repoRoot, 'for_ai', 'registry', 'source-repos.registry.json'));
   const sources = registry.map((entry) => entry.source);
   assert.ok(sources.includes('nextlevelbuilder/ui-ux-pro-max-skill'));

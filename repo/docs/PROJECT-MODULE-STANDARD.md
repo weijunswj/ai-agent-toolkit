@@ -63,7 +63,7 @@ Each lock also declares source lifecycle metadata:
 - `source_update_policy`: `none` or `manual_review_required`.
 - `public_attribution_required`: boolean.
 
-Retired internal migration sources keep exact-byte provenance but are not watched as active upstreams. Active third-party attribution sources require manual review and public attribution.
+Retired internal sources keep exact-byte provenance but are not watched as active upstreams. Active third-party attribution sources require manual review and public attribution.
 
 Run the local audit without network access:
 

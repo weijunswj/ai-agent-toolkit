@@ -26,12 +26,9 @@ Do not commit files from those folders. They are allowed only as local staging/o
 - Product/customer workflow JSON.
 - Generated ZIP/TGZ/package outputs.
 
-## Migration Checklist
+## Durable Provenance
 
-`repo/docs/MIGRATION_CHECKLIST.md` can be deleted only after:
-
-1. All final validation commands pass.
-2. The user explicitly approves final cleanup.
+Keep historical source provenance in [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md) and `_projects/**/SOURCE-LOCK.json`. Do not recreate temporary migration checklists as active repo policy.
 
 ## Old Root Folders
 

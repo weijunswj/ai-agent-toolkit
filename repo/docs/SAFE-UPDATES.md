@@ -11,7 +11,7 @@ This policy does not block intentional, scoped generator/helper writes. It block
 Current advisory flow:
 
 1. Read `_projects/**/SOURCE-LOCK.json`.
-2. Separate active update candidates from archived migration sources.
+2. Separate active update candidates from retired provenance sources.
 3. Render a source-watch plan.
 4. Run source-lock audit and project sync checks.
 
@@ -24,13 +24,13 @@ Possible future updater flow, if separately approved:
 5. Prepare a human-reviewed change proposal only after allowlisted files changed and validation passes.
 6. Request human review before merge.
 
-Retired internal migration sources use `source_update_policy: "none"` and are not watched:
+Retired internal provenance sources use `source_update_policy: "none"` and are not watched:
 
 - `weijunswj/codex-n8n-local-setup`
 - `weijunswj/ai-cicd-installer`
 - `weijunswj/n8n-workflow-templates`
 
-Their copied `_projects/**/_main/` files are canonical after migration. SOURCE-LOCK hashes remain local provenance and exact-byte drift checks.
+Their copied `_projects/**/_main/` files are canonical. SOURCE-LOCK hashes remain local provenance and exact-byte drift checks. See [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md).
 
 ## Classifications
 
