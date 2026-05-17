@@ -296,7 +296,7 @@ test('source-lock audit requires local paths to stay in their topology namespace
   cwd = tempCopy();
   lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
   lock = readJsonFile(lockPath);
-  const rootSurfaceEntry = lock.files.find((entry) => entry.root_surface_path);
+  let rootSurfaceEntry = lock.files.find((entry) => entry.root_surface_path);
   rootSurfaceEntry.mode = 'adapted';
   rootSurfaceEntry.notes = 'Topology namespace regression test.';
   rootSurfaceEntry.root_surface_path = 'repo/scripts/validate-toolkit.cjs';
@@ -305,6 +305,31 @@ test('source-lock audit requires local paths to stay in their topology namespace
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /root_surface_path must point under for_ai\//);
+
+  cwd = tempCopy();
+  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+  lock = readJsonFile(lockPath);
+  lock.files[0].mode = 'adapted';
+  lock.files[0].notes = 'Topology traversal regression test.';
+  lock.files[0].project_path = '_projects/../README.md';
+  delete lock.files[0].source_blob_sha;
+  writeJsonFile(lockPath, lock);
+  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /project_path must not contain \.\. path segments/);
+
+  cwd = tempCopy();
+  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+  lock = readJsonFile(lockPath);
+  rootSurfaceEntry = lock.files.find((entry) => entry.root_surface_path);
+  rootSurfaceEntry.mode = 'adapted';
+  rootSurfaceEntry.notes = 'Topology traversal regression test.';
+  rootSurfaceEntry.root_surface_path = 'for_ai/../repo/scripts/validate-toolkit.cjs';
+  delete rootSurfaceEntry.source_blob_sha;
+  writeJsonFile(lockPath, lock);
+  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /root_surface_path must not contain \.\. path segments/);
 });
 
 test('source-lock audit rejects missing or unknown lifecycle metadata', () => {
@@ -482,6 +507,32 @@ test('validator rejects source-watch wording that promises live update actions',
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /source-watch wording must stay advisory\/read-only/);
+});
+
+test('validator rejects source-watch action claims even with advisory wording', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(
+    path.join(cwd, 'repo', 'docs', 'bad-source-watch-advisory.md'),
+    'Source-watch is advisory but opens draft PRs.\n'
+  );
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /source-watch wording must stay advisory\/read-only/);
+});
+
+test('validator allows source-watch action phrases when the action is negated', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(
+    path.join(cwd, 'repo', 'docs', 'ok-source-watch-negated.md'),
+    [
+      'source-watch does not open PRs.',
+      'source-watch will not create branches.',
+      'source-watch never mutates credentials.',
+      'source-watch is read-only; it does not fetch upstream repos.'
+    ].join('\n')
+  );
+  const result = runValidate(cwd);
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('validator rejects pack YAML files in temp dirs', () => {

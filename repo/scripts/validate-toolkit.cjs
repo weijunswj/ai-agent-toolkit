@@ -778,13 +778,32 @@ function validateSourceWatchTruthfulness(errors) {
     /\bsource[- ]watch\b[^\n.]{0,180}\b(runs?|executes?)\b[^\n.]*(live n8n|n8n actions?|imports?|exports?)/i,
     /\bsource[- ]watch\b[^\n.]{0,180}\b(mutates?|changes?|updates?)\b[^\n.]*(credentials?|secrets?|live systems?)/i
   ];
-  const negated = /\b(does not|do not|must not|must never|never|will not|cannot|can't|read-only|advisory)\b/i;
+  const negationPattern = /\b(does not|do not|must not|must never|never|will not|cannot|can't)\b/gi;
+  const contrastAfterNegationPattern = /\b(but|however|though|although|except)\b/i;
+  function isForbiddenActionNegated(line, matchIndex) {
+    const clauseStart = Math.max(line.lastIndexOf('.', matchIndex), line.lastIndexOf(';', matchIndex), line.lastIndexOf(':', matchIndex)) + 1;
+    const prefix = line.slice(clauseStart, matchIndex).toLowerCase();
+    let lastNegationEnd = -1;
+    let match;
+    negationPattern.lastIndex = 0;
+    while ((match = negationPattern.exec(prefix)) !== null) {
+      lastNegationEnd = match.index + match[0].length;
+    }
+    if (lastNegationEnd === -1) return false;
+    return !contrastAfterNegationPattern.test(prefix.slice(lastNegationEnd));
+  }
+
   for (const entry of sourceWatchFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8').replace(/\r\n/g, '\n');
     for (const line of text.split('\n')) {
       if (!/\bsource[- ]watch\b/i.test(line)) continue;
-      if (negated.test(line)) continue;
-      if (forbiddenClaims.some((pattern) => pattern.test(line))) {
+      const hasUnnegatedForbiddenClaim = forbiddenClaims.some((pattern) => {
+        const match = pattern.exec(line);
+        if (!match) return false;
+        const actionIndex = line.toLowerCase().indexOf(match[1].toLowerCase(), match.index);
+        return !isForbiddenActionNegated(line, actionIndex === -1 ? match.index : actionIndex);
+      });
+      if (hasUnnegatedForbiddenClaim) {
         fail(errors, `${entry.relPath} source-watch wording must stay advisory/read-only`);
         break;
       }
