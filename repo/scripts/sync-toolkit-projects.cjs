@@ -35,7 +35,7 @@ const forbiddenNames = new Set([
   'derived'
 ]);
 const forbiddenDeniedPolicy = ['.env*', '**/*credential*', '**/*.key', '**/*.pem'];
-const supportedKinds = new Set(['copy', 'concat', 'curated', 'json', 'linked']);
+const supportedKinds = new Set(['copy', 'concat', 'curated', 'extract', 'json', 'linked']);
 const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
 const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']);
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
@@ -239,6 +239,9 @@ function validateProjectShape(errors, relPath) {
     }
     if (output.kind === 'concat') {
       if (!Array.isArray(output.sources) || !output.sources.length) fail(errors, `${project.id} concat output requires sources: ${output.output}`);
+    } else if (output.kind === 'extract') {
+      if (!output.source) fail(errors, `${project.id} extract output requires source: ${output.output}`);
+      if (!output.start || !output.end) fail(errors, `${project.id} extract output requires start and end markers: ${output.output}`);
     } else if (!output.source) {
       fail(errors, `${project.id} ${output.kind} output requires source: ${output.output}`);
     }
@@ -310,6 +313,19 @@ function addMarkdownNotice(text, project, relPaths) {
 }
 
 function expectedTextOutput(project, output, rels) {
+  if (output.kind === 'extract') {
+    const raw = readText(rels[0]);
+    const startIndex = raw.indexOf(output.start);
+    if (startIndex === -1) throw new Error(`${project.id} extract start marker not found in ${rels[0]}: ${output.output}`);
+    const endIndex = raw.indexOf(output.end, startIndex + output.start.length);
+    if (endIndex === -1) throw new Error(`${project.id} extract end marker not found in ${rels[0]}: ${output.output}`);
+    const extracted = raw.slice(startIndex, endIndex).trimEnd() + '\n';
+    if (path.extname(output.output).toLowerCase() === '.md' && output.notice !== false) {
+      return addMarkdownNotice(extracted, project, rels[0]);
+    }
+    return extracted;
+  }
+
   if (output.kind === 'concat') {
     const bodyParts = [];
     if (output.title) {

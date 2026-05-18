@@ -52,6 +52,17 @@ function readTextFile(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 }
 
+function secureCicdPromptFromReadme(rootDir = repoRoot) {
+  const readme = readTextFile(path.join(rootDir, '_projects', 'cicd', 'secure-installer', '_main', 'README.md'));
+  const start = '# Copy this prompt into your AI coding agent';
+  const end = '\n---\n\n## What the AI agent should generate';
+  const startIndex = readme.indexOf(start);
+  assert.notEqual(startIndex, -1, 'Secure CI/CD prompt start marker');
+  const endIndex = readme.indexOf(end, startIndex + start.length);
+  assert.notEqual(endIndex, -1, 'Secure CI/CD prompt end marker');
+  return `${readme.slice(startIndex, endIndex).trimEnd()}\n`;
+}
+
 function replaceLast(text, search, replacement) {
   const index = text.lastIndexOf(search);
   assert.notEqual(index, -1, `missing text to replace: ${search}`);
@@ -665,6 +676,31 @@ test('changing declared _main MCP config source makes root MCP config stale', ()
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/mcp-configs\/codex-mcp-config\.md/);
+});
+
+test('Secure CI/CD prompt preserves the full source prompt', () => {
+  const manifests = manifestsById();
+  const outputPath = 'skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md';
+  const output = manifestOutput(manifests.get('cicd.secure-installer'), outputPath);
+  assert.equal(output?.kind, 'extract', outputPath);
+  assert.equal(output?.source, '_main/README.md', outputPath);
+  assert.equal(output?.notice, false, outputPath);
+
+  const prompt = readTextFile(path.join(repoRoot, outputPath));
+  assert.equal(prompt, secureCicdPromptFromReadme());
+  assert.match(prompt, /Manual step needed: \[Short title\]/);
+  assert.match(prompt, /Phase 9: Commit, branch, pull request, and push policy\./);
+  assert.match(prompt, /Do not commit, push, create a pull request, merge, or deploy without my approval\./);
+});
+
+test('changing Secure CI/CD prompt source makes generated prompt stale', () => {
+  const cwd = tempCopy();
+  const source = path.join(cwd, '_projects', 'cicd', 'secure-installer', '_main', 'README.md');
+  const text = readTextFile(source);
+  fs.writeFileSync(source, text.replace('Phase 10: Final output.', 'Phase 10: Final output drift test.'), 'utf8');
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: skills\/secure-cicd-installer\/templates\/cicd\/secure-cicd-prompt\.md/);
 });
 
 test('internal AI-facing surfaces are generated from curated project output', () => {
