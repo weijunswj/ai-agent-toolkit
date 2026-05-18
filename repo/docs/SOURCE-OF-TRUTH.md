@@ -43,7 +43,8 @@ The `Auto-sync generated toolkit surfaces` workflow is only a deterministic gene
 - `main` is never written to.
 - The workflow only republishes declared generated/synced outputs such as `README.md`, `AGENTS.md`, and `for_ai/**`.
 - It does not update sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
-- Because the workflow is privileged, it does not run generated test suites or PR-controlled generated executable code; full validation remains covered by normal read-only CI.
+- Because the workflow is privileged, it does not run generated test suites, PR-controlled generated executable code, or full repo validation against raw PR heads; full validation remains covered by normal read-only CI.
+- The privileged static checks are limited to generated-surface freshness checks and git diff checks before committing generated output, which avoids blocking otherwise valid behind-main PR branches.
 - The workflow only runs deterministic sync/check/validator scripts from the protected base revision. The PR checkout is treated as data and passed to those scripts through an explicit workspace target.
 - The workflow stages and snapshots generated output after sync, then rechecks the index/workspace before commit so validation cannot add files to the writeback diff.
 - The workflow pins the PR checkout to the event head SHA, refuses stale queued runs if the PR head changed, verifies the remote PR branch before pushing, and never force pushes.

@@ -212,7 +212,6 @@ jobs:
         run: |
           node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check
           node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check
-          node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"
           /usr/bin/git -C "$PR_ROOT" diff --cached --check
           /usr/bin/git -C "$PR_ROOT" diff --check
 

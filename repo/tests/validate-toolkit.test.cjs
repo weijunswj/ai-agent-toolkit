@@ -293,7 +293,7 @@ test('auto-sync generated surfaces workflow runs trusted scripts against the PR 
     ['trusted checkout must use base SHA', (text) => text.replace('ref: ${{ github.event.pull_request.base.sha }}', 'ref: ${{ github.event.pull_request.base.ref }}'), /must check out the trusted base SHA to trusted\//],
     ['PR checkout path is required', (text) => text.replace('path: pr', 'path: pull-request'), /must check out the guarded PR head SHA to pr\//],
     ['sync scripts require explicit PR workspace', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write', 'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --write'), /must run trusted maintenance scripts with --workspace "\$PR_ROOT"/],
-    ['static checks require explicit PR workspace', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"', 'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs"'), /must run trusted maintenance scripts with --workspace "\$PR_ROOT"/],
+    ['static checks require explicit PR workspace', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check', 'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --check'), /must run trusted maintenance scripts with --workspace "\$PR_ROOT"/],
     ['git commands must target PR checkout', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --name-only', 'git diff --name-only'), /git commands must explicitly target the PR workspace/]
   ];
 
@@ -332,16 +332,35 @@ test('auto-sync generated surfaces workflow pins and rechecks the guarded PR hea
   }
 });
 
-test('auto-sync generated surfaces workflow rejects PR-controlled test execution', () => {
-  const staticValidatorCommand = 'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"';
+test('auto-sync generated surfaces workflow keeps static checks narrow', () => {
   const cases = [
-    ['validate:all is forbidden', (text) => text.replace(staticValidatorCommand, `npm run validate:all\n          ${staticValidatorCommand}`), /must not run npm run validate:all/],
-    ['npm command is forbidden', (text) => text.replace(staticValidatorCommand, `npm ci\n          ${staticValidatorCommand}`), /must not run npm, pnpm, or yarn/],
-    ['pnpm command is forbidden', (text) => text.replace(staticValidatorCommand, `pnpm test\n          ${staticValidatorCommand}`), /must not run npm, pnpm, or yarn/],
-    ['yarn command is forbidden', (text) => text.replace(staticValidatorCommand, `yarn test\n          ${staticValidatorCommand}`), /must not run npm, pnpm, or yarn/],
-    ['node test command is forbidden', (text) => text.replace(staticValidatorCommand, `node --test repo/tests/*.test.cjs\n          ${staticValidatorCommand}`), /must not run generated Node test suites/],
-    ['python unit tests are forbidden', (text) => text.replace(staticValidatorCommand, 'python -m unittest discover -s for_ai/tools/design-system-generator/' + 'tes' + `ts\n          ${staticValidatorCommand}`), new RegExp('must not run Python unit ' + 'tests')],
-    ['generated tool tests are forbidden', (text) => text.replace(staticValidatorCommand, 'node for_ai/tools/design-system-generator/' + 'tes' + `ts/run.js\n          ${staticValidatorCommand}`), new RegExp('must not run generated tool ' + 'tests')]
+    ['full validator against PR workspace is forbidden', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --cached --check', 'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"\n          /usr/bin/git -C "$PR_ROOT" diff --cached --check'), /must not run full validation against the PR workspace/],
+    ['validate-toolkit workspace invocation is forbidden', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --cached --check', 'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"\n          /usr/bin/git -C "$PR_ROOT" diff --cached --check'), /must not run full validation against the PR workspace/],
+    ['extra static command is forbidden', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --check', '/usr/bin/git -C "$PR_ROOT" diff --check\n          echo extra'), /static generated surface checks must be limited to sync freshness and git diff checks/],
+    ['missing sync contract check is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check\n', ''), /static generated surface checks must be limited to sync freshness and git diff checks/]
+  ];
+
+  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
+  const original = readTextFile(workflowPath);
+  for (const [name, mutate, expected] of cases) {
+    const cwd = tempCopy();
+    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, expected, name);
+  }
+});
+
+test('auto-sync generated surfaces workflow rejects PR-controlled test execution', () => {
+  const staticCheckAnchor = '/usr/bin/git -C "$PR_ROOT" diff --cached --check';
+  const cases = [
+    ['validate:all is forbidden', (text) => text.replace(staticCheckAnchor, `npm run validate:all\n          ${staticCheckAnchor}`), /must not run npm run validate:all/],
+    ['npm command is forbidden', (text) => text.replace(staticCheckAnchor, `npm ci\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
+    ['pnpm command is forbidden', (text) => text.replace(staticCheckAnchor, `pnpm test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
+    ['yarn command is forbidden', (text) => text.replace(staticCheckAnchor, `yarn test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
+    ['node test command is forbidden', (text) => text.replace(staticCheckAnchor, `node --test repo/tests/*.test.cjs\n          ${staticCheckAnchor}`), /must not run generated Node test suites/],
+    ['python unit tests are forbidden', (text) => text.replace(staticCheckAnchor, 'python -m unittest discover -s for_ai/tools/design-system-generator/' + 'tes' + `ts\n          ${staticCheckAnchor}`), new RegExp('must not run Python unit ' + 'tests')],
+    ['generated tool tests are forbidden', (text) => text.replace(staticCheckAnchor, 'node for_ai/tools/design-system-generator/' + 'tes' + `ts/run.js\n          ${staticCheckAnchor}`), new RegExp('must not run generated tool ' + 'tests')]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');

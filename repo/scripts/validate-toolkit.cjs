@@ -725,6 +725,16 @@ function workflowStepText(steps, name) {
   return step ? step.text : '';
 }
 
+function workflowRunCommands(stepText) {
+  const lines = stepText.replace(/\r\n/g, '\n').split('\n');
+  const runIndex = lines.findIndex((line) => /^\s*run:\s*\|\s*$/.test(line));
+  if (runIndex === -1) return [];
+  return lines
+    .slice(runIndex + 1)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const permissions = workflowPermissionLines(text) || [];
   const expectedPermissions = ['contents: write', 'pull-requests: read'];
@@ -807,6 +817,9 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (/\$PR_ROOT\/repo\/scripts\//.test(text)) {
     fail(errors, `${entry.relPath} must not execute maintenance scripts from the PR workspace`);
   }
+  if (/validate-toolkit\.cjs[^\n]*--workspace\s+"\$PR_ROOT"/.test(text)) {
+    fail(errors, `${entry.relPath} must not run full validation against the PR workspace`);
+  }
   if (/(^|\s)(?:\/usr\/bin\/)?git\s+(?!-C\s+"\$PR_ROOT")/m.test(text)) {
     fail(errors, `${entry.relPath} git commands must explicitly target the PR workspace with /usr/bin/git -C "$PR_ROOT"`);
   }
@@ -883,8 +896,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write',
     'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write',
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check',
-    'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check',
-    'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"'
+    'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check'
   ];
   for (const command of trustedWorkspaceCommands) {
     if (!text.includes(command)) {
@@ -918,12 +930,16 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       !finalRecheckStep.includes('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)')) {
     fail(errors, `${entry.relPath} final recheck must reject staged paths outside generated output scope`);
   }
-  if (!staticChecksStep.includes('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check') ||
-      !staticChecksStep.includes('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check') ||
-      !staticChecksStep.includes('node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"') ||
-      !staticChecksStep.includes('/usr/bin/git -C "$PR_ROOT" diff --cached --check') ||
-      !staticChecksStep.includes('/usr/bin/git -C "$PR_ROOT" diff --check')) {
-    fail(errors, `${entry.relPath} must run only protected static generated-surface checks before commit`);
+  const expectedStaticCheckCommands = [
+    'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check',
+    'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check',
+    '/usr/bin/git -C "$PR_ROOT" diff --cached --check',
+    '/usr/bin/git -C "$PR_ROOT" diff --check'
+  ];
+  const actualStaticCheckCommands = workflowRunCommands(staticChecksStep);
+  if (actualStaticCheckCommands.length !== expectedStaticCheckCommands.length ||
+      expectedStaticCheckCommands.some((command, index) => actualStaticCheckCommands[index] !== command)) {
+    fail(errors, `${entry.relPath} static generated surface checks must be limited to sync freshness and git diff checks`);
   }
 
   const gitAddLines = (text.match(/^\s*(?:\/usr\/bin\/)?git(?:\s+-C\s+"\$PR_ROOT")?\s+add .+$/gm) || []).map((line) => line.trim());
