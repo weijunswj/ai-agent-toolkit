@@ -42,6 +42,16 @@
       "fidelity": "reviewed_entrypoint"
     },
     {
+      "kind": "extract",
+      "source": "_main/README.md",
+      "output": "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md",
+      "start": "# Copy this prompt into your AI coding agent",
+      "end": "\n---\n\n## What the AI agent should generate",
+      "notice": false,
+      "notes": "Full AI-facing prompt extracted from the preserved source README without summarisation.",
+      "fidelity": "exact"
+    },
+    {
       "kind": "json",
       "source": "curated_output_for_ai/packs/secure-cicd/pack.json",
       "output": "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
@@ -128,6 +138,7 @@
       "mcp/projects/secure-cicd-installer.md",
       "skills/secure-cicd-installer/references/secure-cicd-installer.md",
       "skills/secure-cicd-installer/templates/cicd/README.md",
+      "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md",
       "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
       "skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd",
       "skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd",

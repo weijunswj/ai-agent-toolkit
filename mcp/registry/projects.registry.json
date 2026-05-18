@@ -41,7 +41,8 @@
       "skills/secure-cicd-installer/SKILL.md",
       "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
       "skills/secure-cicd-installer/references/secure-cicd-installer.md",
-      "skills/secure-cicd-installer/templates/cicd/README.md"
+      "skills/secure-cicd-installer/templates/cicd/README.md",
+      "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md"
     ]
   },
   {
