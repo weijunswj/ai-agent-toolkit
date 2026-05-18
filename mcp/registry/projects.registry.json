@@ -39,10 +39,14 @@
       "skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs",
       "skills/secure-cicd-installer/README.md",
       "skills/secure-cicd-installer/SKILL.md",
+      "skills/secure-cicd-installer/packs/secure-cicd/README.md",
       "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
       "skills/secure-cicd-installer/references/secure-cicd-installer.md",
+      "skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md",
       "skills/secure-cicd-installer/templates/cicd/README.md",
-      "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md"
+      "skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md",
+      "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md",
+      "skills/secure-cicd-installer/templates/github-actions/README.md"
     ]
   },
   {

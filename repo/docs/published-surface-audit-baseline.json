@@ -4,14 +4,14 @@
   "summary": {
     "projects": 4,
     "publishedFiles": 162,
-    "declaredOutputFiles": 107,
+    "declaredOutputFiles": 111,
     "packInstalledFiles": 101,
-    "undeclaredPublishedFiles": 55,
-    "packInstalledUndeclared": 24,
+    "undeclaredPublishedFiles": 51,
+    "packInstalledUndeclared": 21,
     "crossOwnedOutputs": 11,
-    "suspiciousPublishedSurfaces": 1,
+    "suspiciousPublishedSurfaces": 0,
     "duplicateProjectContentGroups": 0,
-    "boundaryRecipeOutputs": 107,
+    "boundaryRecipeOutputs": 111,
     "boundaryRecipeFindings": 0,
     "curatedDirectoryFindings": 0
   },
@@ -51,10 +51,6 @@
       "skills/n8n-workflow-sync/references/n8n/credential-safety.md",
       "skills/n8n-workflow-sync/references/workflow-template-hygiene.md",
       "skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md",
-      "skills/secure-cicd-installer/packs/secure-cicd/README.md",
-      "skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md",
-      "skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md",
-      "skills/secure-cicd-installer/templates/github-actions/README.md",
       "skills/ui-ux-secure-frontend-design/INSTALL.md",
       "skills/ui-ux-secure-frontend-design/LICENSE-THIRD-PARTY-NOTES.md",
       "skills/ui-ux-secure-frontend-design/README.md",
@@ -81,9 +77,6 @@
       "skills/n8n-workflow-sync/references/n8n/credential-safety.md",
       "skills/n8n-workflow-sync/references/workflow-template-hygiene.md",
       "skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md",
-      "skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md",
-      "skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md",
-      "skills/secure-cicd-installer/templates/github-actions/README.md",
       "skills/ui-ux-secure-frontend-design/INSTALL.md",
       "skills/ui-ux-secure-frontend-design/LICENSE-THIRD-PARTY-NOTES.md",
       "skills/ui-ux-secure-frontend-design/README.md",
@@ -112,9 +105,7 @@
       "cicd.secure-installer -> n8n.workflow-templates: skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs",
       "cicd.secure-installer -> n8n.workflow-templates: skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs"
     ],
-    "suspiciousPublishedSurfaces": [
-      "skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md <= _projects/cicd/secure-installer/_main/README.md: missing likely source markers: Copy this prompt, Manual step needed, Troubleshooting, Do not push"
-    ],
+    "suspiciousPublishedSurfaces": [],
     "duplicateProjectContentGroups": [],
     "boundaryRecipeFindings": [],
     "curatedDirectoryFindings": []
