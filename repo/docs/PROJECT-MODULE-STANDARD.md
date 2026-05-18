@@ -25,6 +25,24 @@ _projects/<category>/<project>/
 
 Do not use `original/` or `derived/` as standard folder names. Do not create empty curated folders just to satisfy a schema. Do not add curated copies unless a declared sync recipe consumes them.
 
+## Curated Output Boundaries
+
+Use `_projects/**/_main/**` directly when publishing full working instructions, prompts, templates, setup guides, troubleshooting notes, examples, or other runtime-critical material.
+
+Use `curated_output_for_ai/` for reviewed adapter material such as:
+
+- `SKILL.md` routers.
+- Skill README files.
+- Indexes and navigation tables.
+- MCP notes/spec summaries.
+- Pack manifests.
+- Compatibility shims.
+- Safety wrappers or reviewed AI-facing packaging.
+
+Do not use `curated_output_for_ai/` as a lossy replacement for required runtime instructions.
+
+If losing detail would break usefulness, publish from `_main` with an exact `copy`, `extract`, or `concat` recipe.
+
 ## Published Surfaces
 
 Only these root surfaces are intended as first-class consumer entrypoints:
