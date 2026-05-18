@@ -4,16 +4,22 @@ Project: n8n.local-setup
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-# Codex
+# Codex Platform Router
 
-Codex can consume this toolkit through skills, `AGENTS.md`, and MCP config templates.
+Codex can consume this toolkit through skills, `AGENTS.md`, and MCP config templates. This note routes to the local full-fidelity files that carry the actual runtime setup detail.
 
-## Recommended Setup
+## Boundary
 
-1. Copy useful skills from `skills/` into your Codex-supported skills location.
-2. Copy [AGENTS.md](../../templates/agent-rules/AGENTS.md) into the Codex rules location used by your environment.
-3. Use [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md) when connecting Codex to n8n documentation and a live n8n MCP endpoint.
-4. Restart Codex after changing MCP config, agent rules, or user environment variables.
+This is a short platform router. It is not the full runtime setup guide.
+
+For full setup detail, use the local full-fidelity references and templates in this copied skill folder.
+
+## Local Routes
+
+- Use [local setup](../n8n/local-setup.md) for the full Windows local n8n and Codex setup guide.
+- Use [AGENTS.md](../../templates/agent-rules/AGENTS.md) for Codex agent rules.
+- Use [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md) for the full Codex MCP config template.
+- Restart Codex after changing MCP config, agent rules, or user environment variables.
 
 ## n8n MCP Notes
 

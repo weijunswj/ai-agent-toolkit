@@ -74,7 +74,27 @@ test('audit-published-surfaces inspects curated directory contents', () => {
   const report = runAuditJson();
   const findings = report.issues.curatedDirectoryFindings.map((entry) => entry.path);
   assert.equal(findings.some((entry) => entry.includes('/curated_output_for_ai/playbooks/')), false);
-  assert.ok(findings.includes('_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md'));
+  for (const platformOverview of [
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md'
+  ]) {
+    assert.equal(findings.includes(platformOverview), false, platformOverview);
+  }
+});
+
+test('n8n local setup platform overviews declare their curated boundary', () => {
+  for (const relPath of [
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md'
+  ]) {
+    const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/\r\n/g, '\n');
+    assert.match(text, /^# .*(Platform Overview|Platform Router)/m, relPath);
+    assert.match(text, /^## Boundary$/m, relPath);
+    assert.match(text, /not the full runtime setup guide/i, relPath);
+    assert.match(text, /full-fidelity references and templates/i, relPath);
+  }
 });
 
 test('audit-published-surfaces detects new undeclared published files in a temp copy', () => {
@@ -134,6 +154,50 @@ test('audit-published-surfaces --check fails when a new curated runtime recipe i
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /new boundary recipe finding: skills\/n8n-local-setup\/references\/n8n\/new-runtime-guide\.md/);
   assert.match(result.stderr, /new curated directory boundary finding: _projects\/n8n\/local-setup\/curated_output_for_ai\/references\/n8n\/new-runtime-guide\.md/);
+});
+
+test('audit-published-surfaces still flags runtime-heavy platform overview fixtures', () => {
+  const cwd = tempCopy();
+  const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
+  const sourcePath = path.join(projectDir, 'curated_output_for_ai', 'references', 'ai-agent-platforms', 'new-runtime-platform.md');
+  fs.writeFileSync(sourcePath, [
+    '<!--',
+    'Curated AI-facing source.',
+    'Project: n8n.local-setup',
+    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+    '-->',
+    '',
+    '# New Runtime Platform Overview',
+    '',
+    '## Boundary',
+    '',
+    'This is a short platform overview and routing note. It is not the full runtime setup guide.',
+    '',
+    'For full setup detail, use the local full-fidelity references and templates in this copied skill folder.',
+    '',
+    '## Setup',
+    '',
+    '```powershell',
+    'npm install',
+    '```',
+    '',
+    '```powershell',
+    'npm run build',
+    '```',
+    '',
+    '```powershell',
+    'npm run validate',
+    '```',
+    '',
+    '```powershell',
+    'npm run deploy',
+    '```',
+    ''
+  ].join('\n'), 'utf8');
+
+  const result = runAudit(['--check'], cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /new curated directory boundary finding: _projects\/n8n\/local-setup\/curated_output_for_ai\/references\/ai-agent-platforms\/new-runtime-platform\.md/);
 });
 
 test('sync-toolkit-projects remains unaffected by the published surface audit', () => {

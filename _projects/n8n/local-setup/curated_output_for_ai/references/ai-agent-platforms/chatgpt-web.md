@@ -4,15 +4,27 @@ Project: n8n.local-setup
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-# ChatGPT Web
+# ChatGPT Web Platform Overview
 
-ChatGPT web can use instruction-only skills when custom skills are available in the account or workspace.
+ChatGPT web can use instruction-only skills when custom skills are available in the account or workspace. This note explains the platform boundary and routes users to local full-fidelity material.
 
-## Use This Toolkit
+## Boundary
 
-1. Choose a skill under `skills/`.
-2. Upload or paste the complete skill folder if ChatGPT custom Skills are available.
-3. Test with a task that matches the skill trigger.
+This is a short platform overview and routing note. It is not the full runtime setup guide.
+
+For full setup detail, use the local full-fidelity references and templates in this copied skill folder.
+
+## Local References
+
+- Use `skills/n8n-local-setup/references/n8n/local-setup.md` for the full local n8n setup guide.
+- Use `skills/n8n-local-setup/SKILL.md` as the skill router.
+- Use platform-specific local templates when an agent can read files and run local tools.
+
+## Manual Use
+
+- Choose a skill under `skills/`.
+- Upload or paste the complete skill folder if ChatGPT custom Skills are available.
+- Treat ChatGPT web output as advice unless a local agent or human verifies the repo changes.
 
 ## Limitations
 

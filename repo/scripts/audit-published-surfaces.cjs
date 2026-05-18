@@ -468,6 +468,14 @@ function curatedFileAllowedCategory(relPath) {
   return '';
 }
 
+function hasExplicitPlatformOverviewBoundary(relPath, text) {
+  return relPath.includes('/curated_output_for_ai/references/ai-agent-platforms/') &&
+    /^## Boundary$/m.test(text) &&
+    /\bshort platform (overview|router)\b/i.test(text) &&
+    /not the full runtime setup guide/i.test(text) &&
+    /full-fidelity references and templates/i.test(text);
+}
+
 function curatedDirectoryReasons(root, relPath) {
   if (!relPath.endsWith('.md')) return [];
   const allowedCategory = curatedFileAllowedCategory(relPath);
@@ -484,6 +492,8 @@ function curatedDirectoryReasons(root, relPath) {
   const markerHits = boundaryMarkerHits(text);
   if (markerHits.length) reasons.push(`runtime markers: ${markerHits.join(', ')}`);
   if (curatedRuntimePathWords.test(relPath)) reasons.push('path looks like guide, setup, workflow, prompt, template, reference, or playbook');
+  const heavyRuntimeShape = fileSize(root, relPath) >= 3000 || codeFences.length >= 4 || headingCount >= 8;
+  if (hasExplicitPlatformOverviewBoundary(relPath, text) && !heavyRuntimeShape) return [];
   if (allowedCategory === 'curated_index' && reasons.length < 3) return [];
   if (reasons.length >= 2) return reasons;
   return [];
