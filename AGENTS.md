@@ -42,6 +42,40 @@ This repo has a source layer and a published layer.
 - Do not weaken safety rules around credentials, `.env`, `.tmp`, `.n8n-local`, live n8n actions, approval, attribution, or local-only constraints.
 - Run sync, check, and relevant tests before reporting completion.
 
+## Mandatory Repo Docs By Task
+
+Before changing this repo, read the docs that match your task. These docs are part of the repo contract, not optional background reading.
+
+| Task | Required docs |
+|---|---|
+| Any AI-agent change | [`repo/docs/FOR_AI_AGENTS.md`](repo/docs/FOR_AI_AGENTS.md), [`repo/docs/SOURCE-OF-TRUTH.md`](repo/docs/SOURCE-OF-TRUTH.md) |
+| New or changed project module | [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md), [`repo/docs/SURFACE-FIDELITY-AUDIT.md`](repo/docs/SURFACE-FIDELITY-AUDIT.md) |
+| New or changed skill/MCP/published surface | [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md), [`repo/docs/SURFACE-FIDELITY-AUDIT.md`](repo/docs/SURFACE-FIDELITY-AUDIT.md) |
+| Source locks, retired repos, provenance | [`repo/docs/RETIRED-SOURCE-PROVENANCE.md`](repo/docs/RETIRED-SOURCE-PROVENANCE.md), [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md) |
+| Third-party-attributed source | [`repo/docs/THIRD-PARTY-SOURCE-NOTES.md`](repo/docs/THIRD-PARTY-SOURCE-NOTES.md), [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md) |
+| Generated-output writeback, sync, or privileged workflow changes | [`repo/docs/WRITE-SAFETY-MODEL.md`](repo/docs/WRITE-SAFETY-MODEL.md), [`repo/docs/SAFE-UPDATES.md`](repo/docs/SAFE-UPDATES.md) |
+| Cleanup, deletion, or retirement | [`repo/docs/CLEANUP-POLICY.md`](repo/docs/CLEANUP-POLICY.md), [`repo/docs/RETIRED-SOURCE-PROVENANCE.md`](repo/docs/RETIRED-SOURCE-PROVENANCE.md) |
+| Human usage/docs/navigation changes | [`repo/docs/HOW-TO-USE.md`](repo/docs/HOW-TO-USE.md), [`README.md`](README.md) |
+
+If a task touches multiple areas, read all matching docs.
+
+For new or changed project modules, `repo/docs/PROJECT-MODULE-STANDARD.md` is the detailed rulebook. `AGENTS.md` is the router; the project standard is the implementation contract.
+
+## New Or Changed Project Checklist
+
+When adding a new project module or changing a published skill/MCP surface:
+
+- Treat `_projects/**/_main/**` as preserved source/provenance.
+- Keep `SKILL.md` concise, but keep required runtime instructions local inside the copied skill folder.
+- Do not replace full working docs, prompts, templates, setup guides, troubleshooting notes, or examples with lossy summaries.
+- Use deterministic recipes in `toolkit.project.json`: `copy`, `extract`, `concat`, `curated`, `json`, or rare justified `linked`.
+- If publishing a full source doc into a skill folder, prefer exact `copy` or `extract`.
+- If exact copied docs contain old relative links that would break after publishing, add small compatibility shims under `curated_output_for_ai/reference-link-shims/` and declare them in `toolkit.project.json`.
+- Do not add shims by default. Add them only when exact copied docs would otherwise have broken relative links.
+- Update `SOURCE-MANIFEST.md` when a project uses shims, linked outputs, third-party source, or cross-surface composition.
+- Update `SOURCE-LOCK.json` when preserved/source-locked material changes.
+- Run `npm run validate:all` and `npm run audit:surfaces:check` before reporting completion.
+
 Keep the topology simple:
 
 - `_projects/` preserves canonical human/source material. Full original docs and guides live in `_projects/**/_main/`.
