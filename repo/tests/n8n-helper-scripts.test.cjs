@@ -293,6 +293,10 @@ test('PowerShell n8n hooks require configured hook scripts but keep defaults opt
 
     assert.match(text, /N8N_WORKFLOW_HOOK_SCRIPT[\s\S]*Add-HookScriptCandidate \$hookPath \$true/);
     assert.match(text, /Add-HookScriptCandidate \$relativePath \$false/);
+    assert.match(text, /"scripts\/n8n-workflow-hooks\.cjs"/);
+    assert.match(text, /"\.n8n-local\/n8n-workflow-hooks\.cjs"/);
+    assert.doesNotMatch(text, /scripts\\n8n-workflow-hooks/);
+    assert.doesNotMatch(text, /\.n8n-local\\n8n-workflow-hooks/);
     assert.match(text, /Configured n8n workflow hook script not found/);
     assert.match(text, /elseif \(\$candidate\.Required\)/);
     assert.match(text, /Get-DisplayPath \$script/);

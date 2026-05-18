@@ -121,7 +121,7 @@ function Resolve-ProjectWorkflowHookScripts {
 
   # Generic export extension point:
   # keep this script project-agnostic. If a target repo needs import/export
-  # cleanup, repair, or normalisation, add scripts\n8n-workflow-hooks.* in that
+  # cleanup, repair, or normalisation, add scripts/n8n-workflow-hooks.* in that
   # repo instead of hardcoding workflow-specific rules here.
   if (-not [string]::IsNullOrWhiteSpace($env:N8N_WORKFLOW_HOOK_SCRIPT)) {
     foreach ($hookPath in @($env:N8N_WORKFLOW_HOOK_SCRIPT -split ';')) {
@@ -130,12 +130,12 @@ function Resolve-ProjectWorkflowHookScripts {
   }
 
   foreach ($relativePath in @(
-    "scripts\n8n-workflow-hooks.cjs",
-    "scripts\n8n-workflow-hooks.js",
-    "scripts\n8n-workflow-hooks.ps1",
-    ".n8n-local\n8n-workflow-hooks.cjs",
-    ".n8n-local\n8n-workflow-hooks.js",
-    ".n8n-local\n8n-workflow-hooks.ps1",
+    "scripts/n8n-workflow-hooks.cjs",
+    "scripts/n8n-workflow-hooks.js",
+    "scripts/n8n-workflow-hooks.ps1",
+    ".n8n-local/n8n-workflow-hooks.cjs",
+    ".n8n-local/n8n-workflow-hooks.js",
+    ".n8n-local/n8n-workflow-hooks.ps1",
     ".n8n-workflow-hooks.cjs",
     ".n8n-workflow-hooks.js",
     ".n8n-workflow-hooks.ps1"
