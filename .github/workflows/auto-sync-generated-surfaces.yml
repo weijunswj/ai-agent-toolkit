@@ -1,0 +1,294 @@
+name: Auto-sync generated toolkit surfaces
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "_projects/**/curated_output_for_ai/**"
+      - "_projects/**/toolkit.project.json"
+      - "repo/docs/partials/source-of-truth-contract.md"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  auto-sync-generated-surfaces:
+    name: Auto-sync generated surfaces
+    if: >
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref != 'main'
+    runs-on: ubuntu-latest
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      REPOSITORY_FULL_NAME: ${{ github.repository }}
+      TRUSTED_ROOT: ${{ github.workspace }}/trusted
+      PR_ROOT: ${{ github.workspace }}/pr
+
+    steps:
+      - name: Preflight guard
+        id: preflight
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$HEAD_REPO_FULL_NAME" != "$REPOSITORY_FULL_NAME" ]]; then
+            echo "::error::Auto-sync writeback is limited to same-repo PR branches."
+            exit 1
+          fi
+
+          if [[ "$BASE_REF" != "main" ]]; then
+            echo "::error::Auto-sync writeback only runs for PRs targeting main."
+            exit 1
+          fi
+
+          if [[ "$HEAD_REF" == "main" ]]; then
+            echo "::error::Auto-sync writeback never pushes to main."
+            exit 1
+          fi
+
+          current_head_sha="$(
+            gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq '.head.sha'
+          )"
+
+          if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then
+            echo "::error::PR head changed after this workflow was queued; refusing stale auto-sync writeback."
+            exit 1
+          fi
+
+          mapfile -t changed_files < <(
+            gh api --paginate \
+              "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}/files" \
+              --jq '.[].filename'
+          )
+
+          eligible=false
+          for path in "${changed_files[@]}"; do
+            case "$path" in
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md)
+                eligible=true
+                ;;
+            esac
+
+            case "$path" in
+              repo/docs/partials/source-of-truth-contract.md)
+                ;;
+              .github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
+                echo "::error file=$path::Auto-sync refuses unsafe PR path: $path"
+                exit 1
+                ;;
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|README.md|AGENTS.md|for_ai/*)
+                ;;
+              *)
+                echo "::error file=$path::Auto-sync only runs on deterministic source/routing/contract and generated surface paths: $path"
+                exit 1
+                ;;
+            esac
+          done
+
+          if [[ "$eligible" != "true" ]]; then
+            echo "::error::Auto-sync requires at least one eligible project source/routing/contract change."
+            exit 1
+          fi
+
+      - name: Checkout trusted base revision
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout PR head commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out PR commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(/usr/bin/git -C "$PR_ROOT" rev-parse HEAD)"
+          if [[ "$checked_out_sha" != "$HEAD_SHA" ]]; then
+            echo "::error::Checked-out PR commit does not match guarded head SHA."
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Sync deterministic generated surfaces
+        run: |
+          node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write
+          node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write
+
+      - name: Guard, stage, and snapshot generated write scope
+        id: post_sync
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t dirty_files < <(
+            {
+              /usr/bin/git -C "$PR_ROOT" diff --name-only
+              /usr/bin/git -C "$PR_ROOT" diff --name-only --cached
+              /usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard
+            } | sort -u
+          )
+
+          if [[ "${#dirty_files[@]}" -eq 0 ]]; then
+            echo "Generated toolkit surfaces are already current."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for path in "${dirty_files[@]}"; do
+            case "$path" in
+              _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
+                echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+
+            case "$path" in
+              README.md|AGENTS.md|for_ai/*)
+                ;;
+              *)
+                echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+          done
+
+          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md for_ai
+
+          mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
+          if [[ "${#staged_files[@]}" -eq 0 ]]; then
+            echo "Generated toolkit surfaces are already current."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for path in "${staged_files[@]}"; do
+            case "$path" in
+              _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
+                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+
+            case "$path" in
+              README.md|AGENTS.md|for_ai/*)
+                ;;
+              *)
+                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+          done
+
+          expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "expected_index_tree=${expected_index_tree}" >> "$GITHUB_OUTPUT"
+
+      - name: Static generated surface checks
+        if: steps.post_sync.outputs.has_changes == 'true'
+        run: |
+          node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check
+          node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check
+          /usr/bin/git -C "$PR_ROOT" diff --cached --check
+          /usr/bin/git -C "$PR_ROOT" diff --check
+
+      - name: Final pre-commit workspace recheck
+        if: steps.post_sync.outputs.has_changes == 'true'
+        shell: bash
+        env:
+          EXPECTED_INDEX_TREE: ${{ steps.post_sync.outputs.expected_index_tree }}
+        run: |
+          set -euo pipefail
+
+          untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"
+          if [[ -n "$untracked_files" ]]; then
+            echo "::error::Untracked files appeared after the post-sync guard."
+            echo "$untracked_files"
+            exit 1
+          fi
+
+          if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then
+            echo "::error::Unstaged tracked changes appeared after the post-sync guard."
+            /usr/bin/git -C "$PR_ROOT" diff --name-only
+            exit 1
+          fi
+
+          current_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"
+          if [[ "$current_index_tree" != "${EXPECTED_INDEX_TREE}" ]]; then
+            echo "::error::Staged generated output changed after the post-sync guard."
+            exit 1
+          fi
+
+          mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
+          for path in "${staged_files[@]}"; do
+            case "$path" in
+              _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
+                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+
+            case "$path" in
+              README.md|AGENTS.md|for_ai/*)
+                ;;
+              *)
+                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
+                exit 1
+                ;;
+            esac
+          done
+
+      - name: Commit generated surfaces
+        if: steps.post_sync.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND
+          export PATH="/usr/bin:/bin"
+          /usr/bin/git -C "$PR_ROOT" config user.name "github-actions[bot]"
+          /usr/bin/git -C "$PR_ROOT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          /usr/bin/git -C "$PR_ROOT" commit --no-verify -m "chore: sync generated toolkit surfaces"
+
+      - name: Push generated surfaces
+        if: steps.post_sync.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND
+          export PATH="/usr/bin:/bin"
+          /usr/bin/git -C "$PR_ROOT" remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"
+          remote_head_sha="$(
+            /usr/bin/git -C "$PR_ROOT" ls-remote origin "refs/heads/${HEAD_REF}" | awk '{print $1}'
+          )"
+
+          if [[ "$remote_head_sha" != "$HEAD_SHA" ]]; then
+            echo "::error::PR branch moved after guarded checkout; refusing stale auto-sync push."
+            exit 1
+          fi
+
+          /usr/bin/git -C "$PR_ROOT" push origin "HEAD:${HEAD_REF}"

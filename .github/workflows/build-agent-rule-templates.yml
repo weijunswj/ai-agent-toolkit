@@ -18,21 +18,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-agent-rules:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout same-repo PR branch
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-          persist-credentials: true
-
-      - name: Checkout read-only
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -40,19 +32,6 @@ jobs:
       - name: Regenerate templates
         shell: pwsh
         run: ./repo/scripts/build-agent-rule-templates.ps1
-
-      - name: Auto-commit generated templates on same-repo PR branches
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref != 'main'
-        run: |
-          git add for_ai/templates/agent-rules/AGENTS.md for_ai/templates/agent-rules/CLAUDE.md for_ai/templates/agent-rules/GEMINI.md
-          if git diff --cached --quiet; then
-            echo "Generated agent rule templates are current."
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git commit -m "Regenerate agent rule templates"
-            git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
-          fi
 
       - name: Verify generated files are current
         run: git diff --exit-code -- for_ai/templates/agent-rules/AGENTS.md for_ai/templates/agent-rules/CLAUDE.md for_ai/templates/agent-rules/GEMINI.md
