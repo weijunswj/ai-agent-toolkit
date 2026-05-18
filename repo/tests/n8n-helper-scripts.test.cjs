@@ -130,13 +130,13 @@ test('prepare-n8n-template.js sanitizes reusable config literals and expression 
               {
                 id: 'namespace-assignment',
                 name: 'namespace',
-                value: 'SpaceKonceptRental_kb',
+                value: 'ExampleKnowledgeBase_kb',
                 type: 'string',
               },
               {
                 id: 'index-assignment',
                 name: 'pinecone_index_name',
-                value: 'spacekonceptrental-kb-rag',
+                value: 'example-knowledge-base-rag',
                 type: 'string',
               },
             ],
@@ -148,7 +148,7 @@ test('prepare-n8n-template.js sanitizes reusable config literals and expression 
         name: 'Sticky Note',
         type: 'n8n-nodes-base.stickyNote',
         parameters: {
-          content: 'Namespace defaults to SpaceKonceptRental_kb for this workflow.',
+          content: 'Namespace defaults to ExampleKnowledgeBase_kb for this workflow.',
         },
       },
       {
@@ -156,7 +156,7 @@ test('prepare-n8n-template.js sanitizes reusable config literals and expression 
         name: 'Prepare Ingestion Log',
         type: 'n8n-nodes-base.code',
         parameters: {
-          jsCode: "return [{ json: { namespace: $json.namespace || 'SpaceKonceptRental_kb' } }];",
+          jsCode: "return [{ json: { namespace: $json.namespace || 'ExampleKnowledgeBase_kb' } }];",
         },
       },
       {
@@ -164,7 +164,7 @@ test('prepare-n8n-template.js sanitizes reusable config literals and expression 
         name: 'Resolve Pinecone Index Host',
         type: 'n8n-nodes-base.httpRequest',
         parameters: {
-          url: "={{ 'https://api.pinecone.io/indexes/' + encodeURIComponent($json.pinecone_index_name || 'spacekonceptrental-kb-rag') }}",
+          url: "={{ 'https://api.pinecone.io/indexes/' + encodeURIComponent($json.pinecone_index_name || 'example-knowledge-base-rag') }}",
         },
       },
       {
@@ -191,8 +191,8 @@ test('prepare-n8n-template.js sanitizes reusable config literals and expression 
   assert.equal(result.status, 0, result.stderr);
   const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
   assert.equal(prepared.active, false);
-  assert.equal(findString(prepared, 'SpaceKonceptRental_kb'), false);
-  assert.equal(findString(prepared, 'spacekonceptrental-kb-rag'), false);
+  assert.equal(findString(prepared, 'ExampleKnowledgeBase_kb'), false);
+  assert.equal(findString(prepared, 'example-knowledge-base-rag'), false);
   assert.equal(findString(prepared, 'models/gemini-3.1-flash-lite'), false);
   assert.equal(findString(prepared, '__SET_PREPARE_CHUNK_METADATA_NAMESPACE__'), true);
   assert.equal(findString(prepared, '__SET_PREPARE_CHUNK_METADATA_PINECONE_INDEX_NAME__'), true);
