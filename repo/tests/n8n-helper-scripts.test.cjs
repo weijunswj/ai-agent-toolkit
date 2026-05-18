@@ -200,6 +200,69 @@ test('prepare-n8n-template.js sanitizes reusable config literals and expression 
   assert.equal(findString(prepared, 'Unknown customer'), true);
 });
 
+test('prepare-n8n-template.js keeps node names stable when replacing config literals in parameters', () => {
+  const cwd = tempDir();
+  const inputPath = path.join(cwd, '.to-sanitise', 'workflow.json');
+  const outputPath = path.join(cwd, '.sanitised', 'workflow.template.json');
+  const indexLiteral = 'example-node-name-index-rag';
+  const sourceName = `Prepare ${indexLiteral}`;
+  const targetName = `Use ${indexLiteral}`;
+  writeJson(inputPath, safeWorkflow({
+    id: 'live-workflow-id',
+    name: 'Node Name Stability Test',
+    active: true,
+    nodes: [
+      {
+        id: 'source-node',
+        name: sourceName,
+        type: 'n8n-nodes-base.set',
+        parameters: {
+          assignments: {
+            assignments: [
+              {
+                id: 'index-assignment',
+                name: 'pinecone_index_name',
+                value: indexLiteral,
+                type: 'string',
+              },
+            ],
+          },
+        },
+      },
+      {
+        id: 'target-node',
+        name: targetName,
+        type: 'n8n-nodes-base.set',
+        parameters: {},
+      },
+    ],
+    connections: {
+      [sourceName]: {
+        main: [[
+          {
+            node: targetName,
+            type: 'main',
+            index: 0,
+          },
+        ]],
+      },
+    },
+  }));
+
+  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+
+  assert.equal(result.status, 0, result.stderr);
+  const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+  const sourceNode = prepared.nodes.find((node) => node.id === 'source-node');
+  const targetNode = prepared.nodes.find((node) => node.id === 'target-node');
+  assert.equal(sourceNode.name, sourceName);
+  assert.equal(targetNode.name, targetName);
+  assert.equal(Object.prototype.hasOwnProperty.call(prepared.connections, sourceName), true);
+  assert.equal(prepared.connections[sourceName].main[0][0].node, targetName);
+  assert.equal(findString(sourceNode.parameters, indexLiteral), false);
+  assert.equal(findString(sourceNode.parameters, '__SET_PREPARE_EXAMPLE_NODE_NAME_INDEX_RAG_PINECONE_INDEX_NAME__'), true);
+});
+
 test('sanitise-n8n-template.ps1 dry-run creates staging folders but writes no sanitized templates', { skip: !findPowerShell() }, () => {
   const shell = findPowerShell();
   const cwd = tempDir();

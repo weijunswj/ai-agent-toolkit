@@ -270,7 +270,7 @@ function collectTemplateConfigReplacements(workflow) {
   return replacements;
 }
 
-function replaceTemplateConfigReferences(value, replacements) {
+function replaceTemplateConfigParameterReferences(value, replacements) {
   if (!replacements.size) return value;
 
   const entries = Array.from(replacements.entries()).sort((a, b) => b[0].length - a[0].length);
@@ -467,9 +467,13 @@ function stripTemplate(workflow, options) {
     return stripNode(node, warnings);
   });
 
+  for (const node of clean.nodes) {
+    // Only rewrite parameter values. Node names and connections must remain aligned.
+    node.parameters = replaceTemplateConfigParameterReferences(node.parameters || {}, templateConfigReplacements);
+  }
+
   clean.connections = isObject(clean.connections) ? normaliseKeys(clean.connections) : {};
   clean.settings = isObject(clean.settings) ? normaliseKeys(clean.settings) : {};
-  clean = replaceTemplateConfigReferences(clean, templateConfigReplacements);
 
   if (options.preserveUnicode) {
     // Node parameters have already been sanitised. PreserveUnicode only keeps future manual non-ASCII untouched.
