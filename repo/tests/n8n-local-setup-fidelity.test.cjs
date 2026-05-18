@@ -117,8 +117,10 @@ test('codex n8n local pack installs local setup link shims', () => {
     'skills/n8n-local-setup/references/n8n/3. tunneling guide.md',
     'skills/n8n-local-setup/references/n8n/3a. docker compose + ngrok.md',
     'skills/n8n-local-setup/references/n8n/4. vps hosting.md',
+    'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md',
     'skills/n8n-local-setup/references/n8n/templates/AGENTS.md',
-    'skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md'
+    'skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md',
+    'skills/n8n-local-setup/references/n8n/vps-hosting.md'
   ]) {
     assert.ok(pack.installs.includes(expectedPath), expectedPath);
   }
