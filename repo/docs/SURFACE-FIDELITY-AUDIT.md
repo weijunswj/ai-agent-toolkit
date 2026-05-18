@@ -22,6 +22,23 @@ The broader audit found:
 
 The highest remaining risk is not Secure CI/CD after this PR. It is that some copyable skill folders still depend on `_projects/**/_main/**` for exact runtime detail, or include short summary references for long preserved source guides. That is a portability and fidelity problem because copied skill folders may not include `_projects/`.
 
+## Deterministic audit command
+
+This audit is now backed by `repo/scripts/audit-published-surfaces.cjs`.
+
+Use:
+
+```powershell
+npm run audit:surfaces
+npm run audit:surfaces:check
+```
+
+The command inspects local Git-tracked `skills/` and `mcp/` files, `_projects/**/toolkit.project.json`, and `skills/**/packs/**/pack.json`. It does not call the network, run project scripts, install packages, summarize with AI, or touch live n8n.
+
+`--check` compares the current findings with `repo/docs/published-surface-audit-baseline.json`. The baseline intentionally records the current known manual, pack-installed undeclared, cross-owned, and suspicious surfaces so validation can fail when new surfaces appear before the existing follow-up cleanup is complete.
+
+Future PRs that change skill or MCP surfaces should run `npm run audit:surfaces:check` before reporting completion. If a PR intentionally resolves or reclassifies a known issue, update the baseline in the same PR with `node repo/scripts/audit-published-surfaces.cjs --write-baseline`.
+
 ## Projects audited
 
 Project modules:
@@ -301,7 +318,6 @@ Immediate fixes in this PR:
 
 Recommended follow-up fixes:
 
-- Add a declared-surface audit script that reports undeclared `skills/` and `mcp/` files, pack-installed undeclared files, cross-owned outputs, and suspicious source/output size ratios.
 - Convert n8n local setup summaries into full local references or make them explicit overview files with separate full-fidelity local docs.
 - Declare Secure CI/CD pack-installed status/policy/GitHub Actions template files.
 - Rehome or explicitly shared-own the n8n sync helpers currently owned by the Secure CI/CD project.
@@ -311,7 +327,7 @@ Recommended follow-up fixes:
 ## Recommended PR sequence
 
 1. Current PR: audit report, Secure CI/CD prompt exact extract, tests, and generated registry update.
-2. PR 2: Add a deterministic surface audit command and CI test for undeclared project-like published files.
+2. PR 2: Add a deterministic surface audit command and CI test for undeclared project-like published files. Done by `repo/scripts/audit-published-surfaces.cjs` and its baseline check.
 3. PR 3: n8n local setup fidelity pass. Publish full local references or declare short files as non-runtime overviews.
 4. PR 4: Secure CI/CD remaining template declaration pass for status, source update policy, and GitHub Actions notes.
 5. PR 5: Cross-owned n8n sync helper ownership cleanup.
