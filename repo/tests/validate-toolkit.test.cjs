@@ -277,6 +277,31 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   );
 });
 
+test('Project Module Standard documents the playbook boundary', () => {
+  const text = readTextFile(path.join(repoRoot, 'repo', 'docs', 'PROJECT-MODULE-STANDARD.md'));
+  assert.match(text, /## Playbook Boundary/);
+  assert.match(text, /Do not use `playbooks\/` as a default home for full working instructions\./);
+  assert.match(text, /A playbook may exist only when it is a short reviewed operating overview, routing guide, or safety wrapper\./);
+  assert.match(text, /publish it from `_projects\/\*\*\/_main\/\*\*` using exact `copy`, `extract`, or `concat`/);
+});
+
+test('curated playbook recipes are not full runtime skill references', () => {
+  const offenders = [];
+  for (const manifest of manifestsById().values()) {
+    for (const output of manifest.outputs || []) {
+      const sources = output.sources || [output.source].filter(Boolean);
+      const usesPlaybookSource = sources.some((source) => source.includes('curated_output_for_ai/playbooks/'));
+      const publishesRuntimeSkillSurface = /^skills\/[^/]+\/(references|templates)\//.test(output.output || '');
+      if (!usesPlaybookSource || !publishesRuntimeSkillSurface) continue;
+
+      const label = `${output.notes || ''} ${output.fidelity || ''}`;
+      const explicitlyAllowed = /\b(overview|safety wrapper|routing guide)\b/i.test(label) && output.fidelity !== 'exact';
+      if (!explicitlyAllowed) offenders.push(`${manifest.id}: ${output.output}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
 test('validation workflow checks source-of-truth contract drift read-only', () => {
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'validate.yml'));
   assert.match(workflow, /node repo\/scripts\/sync-repo-doc-contract\.cjs --check/);
@@ -733,13 +758,13 @@ test('internal AI-facing surfaces are generated from declared project output', (
     ['n8n.workflow-templates', 'skills/n8n-workflow-sync/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-sync/SKILL.md'],
     ['n8n.workflow-templates', 'skills/n8n-workflow-sync/README.md', 'curated_output_for_ai/skills/n8n-workflow-sync/README.md'],
     ['n8n.workflow-templates', 'mcp/projects/n8n-workflow-templates.md', 'curated_output_for_ai/mcp/n8n-workflow-templates.md'],
-    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/references/n8n/workflow-sync.md', 'curated_output_for_ai/playbooks/workflow-sync.md'],
+    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/references/n8n/workflow-sync.md', 'curated_output_for_ai/overviews/workflow-sync.md'],
     ['n8n.workflow-templates', 'skills/n8n-workflow-sync/templates/sanitizer/README.md', 'curated_output_for_ai/templates/n8n/sanitizer/README.md'],
     ['n8n.workflow-templates', 'skills/n8n-workflow-sync/templates/workflow-policy/README.md', 'curated_output_for_ai/templates/n8n/workflow-policy/README.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/SKILL.md', 'curated_output_for_ai/skills/secure-cicd-installer/SKILL.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/README.md', 'curated_output_for_ai/skills/secure-cicd-installer/README.md'],
     ['cicd.secure-installer', 'mcp/projects/secure-cicd-installer.md', 'curated_output_for_ai/mcp/secure-cicd-installer.md'],
-    ['cicd.secure-installer', 'skills/secure-cicd-installer/references/secure-cicd-installer.md', 'curated_output_for_ai/playbooks/secure-cicd-installer.md'],
+    ['cicd.secure-installer', 'skills/secure-cicd-installer/references/secure-cicd-installer.md', 'curated_output_for_ai/overviews/secure-cicd-installer.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/templates/cicd/README.md', 'curated_output_for_ai/templates/cicd/README.md'],
     ['cicd.secure-installer', 'skills/n8n-workflow-sync/templates/sync-helpers/README.md', 'curated_output_for_ai/templates/n8n/sync-helpers/README.md']
   ];

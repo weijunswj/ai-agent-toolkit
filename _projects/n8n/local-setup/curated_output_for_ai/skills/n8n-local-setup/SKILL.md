@@ -39,5 +39,5 @@ Use this skill when the user needs to set up or explain local n8n, agent rules, 
 
 1. Confirm the user's target platform and whether they want docs, templates, or a local setup diagnosis.
 2. Read the relevant local reference file inside this skill folder when exact setup detail matters.
-3. Point the user to the AI-facing template or playbook when they need copy-ready material.
+3. Point the user to the AI-facing template or reference when they need copy-ready material.
 4. Keep live actions safety-gated and separate from repo/docs/template work.

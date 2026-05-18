@@ -12,8 +12,8 @@
     "suspiciousPublishedSurfaces": 1,
     "duplicateProjectContentGroups": 0,
     "boundaryRecipeOutputs": 107,
-    "boundaryRecipeFindings": 2,
-    "curatedDirectoryFindings": 6
+    "boundaryRecipeFindings": 0,
+    "curatedDirectoryFindings": 3
   },
   "issueKeys": {
     "undeclaredPublishedFiles": [
@@ -116,17 +116,11 @@
       "skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md <= _projects/cicd/secure-installer/_main/README.md: missing likely source markers: Copy this prompt, Manual step needed, Troubleshooting, Do not push"
     ],
     "duplicateProjectContentGroups": [],
-    "boundaryRecipeFindings": [
-      "skills/n8n-workflow-sync/references/n8n/workflow-sync.md <= _projects/n8n/workflow-templates/curated_output_for_ai/playbooks/workflow-sync.md: suspicious_curated_runtime: skill reference output uses curated source; runtime-looking output uses curated source; curated source has runtime markers: Import, Export",
-      "skills/secure-cicd-installer/references/secure-cicd-installer.md <= _projects/cicd/secure-installer/curated_output_for_ai/playbooks/secure-cicd-installer.md: suspicious_curated_runtime: skill reference output uses curated source; runtime-looking output uses curated source; curated source has runtime markers: Do not commit, Setup"
-    ],
+    "boundaryRecipeFindings": [],
     "curatedDirectoryFindings": [
-      "_projects/cicd/secure-installer/curated_output_for_ai/playbooks/secure-cicd-installer.md: runtime markers: Do not commit, Setup; path looks like guide, setup, workflow, prompt, template, reference, or playbook",
-      "_projects/n8n/local-setup/curated_output_for_ai/playbooks/local-setup.md: many numbered setup steps; runtime markers: Install, Setup; path looks like guide, setup, workflow, prompt, template, reference, or playbook",
       "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md: runtime markers: Setup; path looks like guide, setup, workflow, prompt, template, reference, or playbook",
       "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md: many numbered setup steps; runtime markers: Setup; path looks like guide, setup, workflow, prompt, template, reference, or playbook",
-      "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md: many numbered setup steps; runtime markers: Setup; path looks like guide, setup, workflow, prompt, template, reference, or playbook",
-      "_projects/n8n/workflow-templates/curated_output_for_ai/playbooks/workflow-sync.md: many numbered setup steps; runtime markers: Import, Export; path looks like guide, setup, workflow, prompt, template, reference, or playbook"
+      "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md: many numbered setup steps; runtime markers: Setup; path looks like guide, setup, workflow, prompt, template, reference, or playbook"
     ]
   }
 }
