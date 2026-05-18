@@ -19,6 +19,8 @@
   "installs": [
     "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
     "skills/n8n-local-setup/references/n8n/local-setup.md",
+    "skills/n8n-local-setup/references/n8n/templates/AGENTS.md",
+    "skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md",
     "skills/n8n-local-setup/references/n8n/upgrading.md",
     "skills/n8n-local-setup/references/n8n/tunnelling.md",
     "skills/n8n-local-setup/templates/agent-rules/AGENTS.md",

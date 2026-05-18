@@ -19,15 +19,15 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 Use this skill when the user needs to set up or explain local n8n, agent rules, MCP config, tunneling, Docker Compose plus ngrok, VPS hosting notes, or platform integrations for Codex, Claude Code, OpenCode, or Antigravity.
 
-## Source Module
+## Source And Runtime Material
 
-- Project module: [_projects/n8n/local-setup/](../../_projects/n8n/local-setup/)
-- Full source docs: [_projects/n8n/local-setup/_main/](../../_projects/n8n/local-setup/_main/)
+- Runtime references live inside this copied skill folder under [references/n8n/](references/n8n/) and [references/ai-agent-platforms/](references/ai-agent-platforms/).
+- Project provenance lives under [_projects/n8n/local-setup/](../../_projects/n8n/local-setup/) in the toolkit repo, but normal use of a copied skill folder must not require `_projects/`.
 
 ## Core Rules
 
-- Treat [_projects/n8n/local-setup/_main/](../../_projects/n8n/local-setup/_main/) as the full source of truth for original setup docs.
-- Use [references/n8n/](references/n8n/) for local AI/operator references.
+- Use the local full-fidelity references in [references/n8n/](references/n8n/) for setup, upgrade, tunneling, Docker Compose plus ngrok, and VPS hosting details.
+- Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, and Claude web routing.
 - Keep tokens, API keys, webhook secrets, and MCP credentials out of repo files.
 - Do not run live n8n import/export, workflow activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
 - For live n8n work, require explicit current-turn confirmation and identify the target instance first.
@@ -37,11 +37,13 @@ Use this skill when the user needs to set up or explain local n8n, agent rules, 
 - Codex rules: [templates/agent-rules/AGENTS.md](templates/agent-rules/AGENTS.md)
 - Codex MCP config: [templates/mcp-configs/codex-mcp-config.md](templates/mcp-configs/codex-mcp-config.md)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
+- Upgrade reference: [references/n8n/upgrading.md](references/n8n/upgrading.md)
+- Claude Code reference: [references/ai-agent-platforms/claude-code.md](references/ai-agent-platforms/claude-code.md)
 - Pack checklist: [packs/codex-n8n-local/pack.json](packs/codex-n8n-local/pack.json)
 
 ## Workflow
 
 1. Confirm the user's target platform and whether they want docs, templates, or a local setup diagnosis.
-2. Read the relevant source file in `_projects/n8n/local-setup/_main/` when exact setup detail matters.
+2. Read the relevant local reference file inside this skill folder when exact setup detail matters.
 3. Point the user to the AI-facing template or playbook when they need copy-ready material.
 4. Keep live actions safety-gated and separate from repo/docs/template work.

@@ -1,46 +1,158 @@
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
+Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
-Source: _projects/n8n/local-setup/curated_output_for_ai/playbooks/local-setup.md
-Update the curated output and run sync.
+Source: _projects/n8n/local-setup/_main/1. local setup.md
+Update the project source and run sync.
 -->
-<!--
-Curated AI-facing source.
-Project: n8n.local-setup
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
--->
+# 1. Local Setup ( Windows )
 
-# Local n8n Setup
+This guide sets up local n8n MCP with Codex on Windows.
 
-## Goal
+* It gives you:
 
-Run local n8n for development and connect AI agents through MCP without storing secrets in repo files.
+  * Local `n8n` in Docker.
+  * `n8n_docs` in Codex for node search and validation.
+  * `n8n_live` in Codex for your real n8n instance.
+  * A clean path to public webhooks later.
 
-## Basic Shape
+* If you already have this Codex setup working and want Claude Code too, use [EXTRA: Claude Code Integration](./5.%20extra%20-%20claude%20code%20integration.md) after finishing this guide.
 
-1. Install Docker Desktop.
-2. Install Node.js LTS.
-3. Run n8n locally in Docker.
-4. Enable instance-level MCP in n8n.
-5. Configure an AI agent with:
-   - a docs MCP server for node search and validation.
-   - a live MCP endpoint for explicit live instance work.
+* If you already have this Codex setup working and want OpenCode too, use [EXTRA: OpenCode Integration](./6.%20extra%20-%20opencode%20integration.md) after finishing this guide.
 
-## Defaults
+---
 
-- Local n8n URL: `http://localhost:5678`
-- Local MCP endpoint: `http://localhost:5678/mcp-server/http`
-- Keep live MCP tokens in user environment variables.
+## 1. Install These
 
-## Safety
+### Install all three first:
 
-Do not paste live MCP tokens into repo files. Do not create live workflows unless the user explicitly asks. Keep smoke-test workflows inactive by default.
+1. Docker Desktop: [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/)
+2. Node.js LTS: [https://nodejs.org/en/download](https://nodejs.org/en/download)
+3. Codex app: [https://openai.com/index/introducing-the-codex-app/](https://openai.com/index/introducing-the-codex-app/)
 
-## Templates
+### Verify in PowerShell:
 
-Use:
+```powershell
+docker --version
+node -v
+npm -v
+```
 
-- [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md)
-- [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md)
-- [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md)
-- [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md)
+---
+
+## 2. Run n8n Locally
+
+### Paste this whole re-runnable block into PowerShell to pull the image, recreate the container, and start n8n.
+
+* Optional: Set `$WEBHOOK_URL` as your domain URL if you need to ( E.g. `$WEBHOOK_URL = "https://n8n.yourdomain.com/"` ).
+* `N8N_PROXY_HOPS=1` is included so the same command shape also works when you later move behind a tunnel or reverse proxy.
+
+```powershell
+$CONTAINER_NAME = "n8n"
+$HOST_PORT = "5678"
+$CONTAINER_PORT = "5678"
+$TZ = "Asia/Singapore"
+$VOLUME_NAME = "n8n_data"
+$IMAGE = "docker.n8n.io/n8nio/n8n:stable"
+$WEBHOOK_URL = "http://localhost:${HOST_PORT}/"
+
+# Optional public webhook example:
+# $WEBHOOK_URL = "https://n8n.yourdomain.com/"
+
+docker pull $IMAGE
+
+docker stop $CONTAINER_NAME 2>$null
+docker rm $CONTAINER_NAME 2>$null
+
+docker volume create $VOLUME_NAME | Out-Null
+
+docker run -d --name $CONTAINER_NAME `
+  -p "${HOST_PORT}:${CONTAINER_PORT}" `
+  -e "GENERIC_TIMEZONE=$TZ" `
+  -e "TZ=$TZ" `
+  -e "N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true" `
+  -e "N8N_RUNNERS_ENABLED=true" `
+  -e "WEBHOOK_URL=$WEBHOOK_URL" `
+  -e "N8N_PROXY_HOPS=1" `
+  -v "${VOLUME_NAME}:/home/node/.n8n" `
+  $IMAGE
+```
+
+### Check it in PowerShell:
+
+```powershell
+docker ps
+```
+
+### Open in any browser:
+
+```text
+http://localhost:5678
+```
+
+* Create your owner account if this is the first run, then check your email for administrator permissions from n8n for this account.
+
+---
+
+## 3. Enable Official MCP in n8n
+
+### Inside n8n:
+
+1. Open `Settings`.
+2. Open the instance-level MCP page.
+3. Enable MCP access.
+4. Copy the server URL.
+5. Copy the access token.
+
+### For the default local setup, the live MCP URL is:
+
+```text
+http://localhost:5678/mcp-server/http
+```
+
+#### If you later use a different local port, tunnel, reverse proxy, or hosted n8n domain:
+
+```text
+Use the MCP URL from that setup instead.
+```
+
+---
+
+## 4. Create Codex Routing Rules
+
+### Follow the Codex AGENTS.md Setup guide:
+
+* [templates/AGENTS.md](./templates/AGENTS.md)
+
+## 5. Create The Codex MCP Config
+
+### Follow the Codex MCP Config guide:
+
+* [templates/codex-mcp-config.md](./templates/codex-mcp-config.md)
+
+---
+
+## 6. Restart Codex
+
+### After changing any of these:
+
+  * `config.toml`
+  * `AGENTS.md`
+  * `N8N_MCP_TOKEN`
+
+### Fully close and reopen the Codex app.
+
+---
+
+## 7. Public Webhooks / Tunneling / VPS Hosting
+
+* If you need Stripe, Telegram, GitHub, Typeform, Meta, or any other external service to call your local n8n, use the local-development guide here:
+
+  * [3. Tunneling Guide](./3.%20tunneling%20guide.md)
+
+* If you want a real always-on hosted n8n with a stable domain and proper HTTPS, use:
+
+  * [4. VPS Hosting](./4.%20vps%20hosting.md)
+
+* Do not use the tunneling guide as your permanent hosting guide.
+
+* You do not need a tunnel just for Codex talking to your local `n8n_live` unless Codex cannot reach your local machine directly.
