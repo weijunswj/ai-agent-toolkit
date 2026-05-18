@@ -19,6 +19,18 @@ const sourceSectionMarkers = [
   'Do not push',
   'Do not deploy'
 ];
+const boundaryHeadingMarkers = [
+  ...sourceSectionMarkers,
+  'Install',
+  'Setup',
+  'Upgrade',
+  'Import',
+  'Export'
+];
+const curatedRuntimePathWords = /\b(guides?|setup|workflows?|prompts?|templates?|references?|playbooks?)\b/i;
+const numberedStepPattern = /^\s*\d+\.\s+/gm;
+const codeFencePattern = /^```/gm;
+const markdownHeadingPattern = /^#{1,6}\s+/gm;
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -121,7 +133,9 @@ function outputEntry(project, output, relPath, extras = {}) {
     kind: output.kind,
     source: extras.source || '',
     sources: extras.sources || [],
-    recipeOutput: output.output
+    recipeOutput: output.output,
+    notes: output.notes || '',
+    fidelity: output.fidelity || ''
   };
 }
 
@@ -298,6 +312,196 @@ function looksLikeRuntimeSurface(relPath) {
   return suspiciousPathWords.test(normalized) || relPath.includes('/references/') || relPath.includes('/templates/');
 }
 
+function sourcePathsForEntry(entry) {
+  return entry.sources?.length ? entry.sources : [entry.source].filter(Boolean);
+}
+
+function entryHasSource(entry, marker) {
+  return sourcePathsForEntry(entry).some((source) => source.includes(marker));
+}
+
+function isSkillRouter(relPath) {
+  return /^skills\/[^/]+\/SKILL\.md$/.test(relPath);
+}
+
+function isSkillReadme(relPath) {
+  return /^skills\/[^/]+\/README\.md$/.test(relPath);
+}
+
+function isPackManifest(relPath) {
+  return /\/packs\/[^/]+\/pack\.json$/.test(relPath);
+}
+
+function isMcpSpec(relPath) {
+  return relPath.startsWith('mcp/');
+}
+
+function isReferenceShim(entry) {
+  return entry.path.includes('/reference-link-shims/') ||
+    entry.source.includes('/reference-link-shims/') ||
+    entry.sources.some((source) => source.includes('/reference-link-shims/'));
+}
+
+function isIndexLike(entry) {
+  return path.basename(entry.path).toLowerCase() === 'readme.md' ||
+    /\b(index|navigation|table of contents|entrypoint|router)\b/i.test(`${entry.notes} ${entry.fidelity}`);
+}
+
+function isOverviewLike(entry) {
+  return /\boverview\b/i.test(`${entry.notes} ${entry.fidelity}`);
+}
+
+function isSkillReferenceOutput(relPath) {
+  return /^skills\/[^/]+\/references\//.test(relPath);
+}
+
+function isSkillTemplateOutput(relPath) {
+  return /^skills\/[^/]+\/templates\//.test(relPath);
+}
+
+function boundaryMarkerHits(text) {
+  return boundaryHeadingMarkers.filter((marker) => new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
+}
+
+function recipeBoundaryReasons(root, entry) {
+  const reasons = [];
+  const allowedCurated =
+    isSkillRouter(entry.path) ||
+    isSkillReadme(entry.path) ||
+    isPackManifest(entry.path) ||
+    isMcpSpec(entry.path) ||
+    isReferenceShim(entry) ||
+    isIndexLike(entry) ||
+    isOverviewLike(entry);
+
+  if (isSkillReferenceOutput(entry.path) && !allowedCurated) {
+    reasons.push('skill reference output uses curated source');
+  }
+  if (isSkillTemplateOutput(entry.path) && !allowedCurated) {
+    reasons.push('skill template output uses curated source');
+  }
+  if (looksLikeRuntimeSurface(entry.path) && !allowedCurated) {
+    reasons.push('runtime-looking output uses curated source');
+  }
+
+  for (const source of sourcePathsForEntry(entry)) {
+    if (!source.includes('/curated_output_for_ai/') || !source.endsWith('.md')) continue;
+    if (!fs.existsSync(resolveRel(root, source))) continue;
+    const text = readText(root, source);
+    const hits = boundaryMarkerHits(text);
+    if (hits.length && !allowedCurated) {
+      reasons.push(`curated source has runtime markers: ${hits.join(', ')}`);
+    }
+    if (fileSize(root, source) >= 3000 && curatedRuntimePathWords.test(source) && !allowedCurated) {
+      reasons.push('large curated Markdown source looks runtime-critical');
+    }
+  }
+
+  return [...new Set(reasons)];
+}
+
+function mainAdapterReasons(entry) {
+  const reasons = [];
+  if (isSkillRouter(entry.path) || isSkillReadme(entry.path) || isMcpSpec(entry.path) || isPackManifest(entry.path)) {
+    reasons.push('main source is publishing an adapter, index, spec, or metadata surface');
+  }
+  return reasons;
+}
+
+function classifyBoundaryRecipe(root, entry) {
+  if (entry.kind === 'generated_registry') return 'curated_metadata';
+  if (entry.kind === 'linked') return 'linked_exception';
+  const hasCuratedSource = entryHasSource(entry, '/curated_output_for_ai/');
+  const hasMainSource = entryHasSource(entry, '/_main/');
+
+  if (hasCuratedSource) {
+    if (isReferenceShim(entry)) return 'curated_shim';
+    if (isPackManifest(entry.path) || entry.kind === 'json') return 'curated_metadata';
+    if (isSkillRouter(entry.path)) return 'curated_router';
+    if (isMcpSpec(entry.path)) return 'curated_spec';
+    if (isIndexLike(entry) || isOverviewLike(entry)) return 'curated_index';
+    if (recipeBoundaryReasons(root, entry).length) return 'suspicious_curated_runtime';
+    return 'unknown';
+  }
+
+  if (hasMainSource) {
+    if (mainAdapterReasons(entry).length) return 'suspicious_main_adapter';
+    return 'main_full_fidelity';
+  }
+
+  return 'unknown';
+}
+
+function boundaryRecipes(root, entries) {
+  return entries
+    .map((entry) => ({
+      path: entry.path,
+      projectId: entry.projectId,
+      kind: entry.kind,
+      source: entry.source,
+      sources: sourcePathsForEntry(entry),
+      recipeOutput: entry.recipeOutput,
+      notes: entry.notes,
+      fidelity: entry.fidelity,
+      classification: classifyBoundaryRecipe(root, entry),
+      reasons: []
+    }))
+    .map((entry) => ({
+      ...entry,
+      reasons: entry.classification === 'suspicious_curated_runtime'
+        ? recipeBoundaryReasons(root, entry)
+        : entry.classification === 'suspicious_main_adapter'
+          ? mainAdapterReasons(entry)
+          : entry.classification === 'unknown'
+            ? ['recipe source boundary is not classifiable by current heuristics']
+            : []
+    }))
+    .sort((a, b) => `${a.classification}:${a.path}`.localeCompare(`${b.classification}:${b.path}`));
+}
+
+function curatedFileAllowedCategory(relPath) {
+  if (relPath.endsWith('/SKILL.md')) return 'curated_router';
+  if (path.basename(relPath).toLowerCase() === 'readme.md') return 'curated_index';
+  if (/\/packs\/[^/]+\/pack\.json$/.test(relPath)) return 'curated_metadata';
+  if (relPath.includes('/mcp/')) return 'curated_spec';
+  if (relPath.includes('/reference-link-shims/')) return 'curated_shim';
+  return '';
+}
+
+function curatedDirectoryReasons(root, relPath) {
+  if (!relPath.endsWith('.md')) return [];
+  const allowedCategory = curatedFileAllowedCategory(relPath);
+  if (allowedCategory && allowedCategory !== 'curated_index') return [];
+  const text = readText(root, relPath);
+  const reasons = [];
+  if (fileSize(root, relPath) >= 3000) reasons.push('large Markdown file');
+  const codeFences = text.match(codeFencePattern) || [];
+  if (codeFences.length >= 4) reasons.push('many command or code fences');
+  const numberedSteps = text.match(numberedStepPattern) || [];
+  if (numberedSteps.length >= 4) reasons.push('many numbered setup steps');
+  const headingCount = (text.match(markdownHeadingPattern) || []).length;
+  if (headingCount >= 8) reasons.push('many Markdown headings');
+  const markerHits = boundaryMarkerHits(text);
+  if (markerHits.length) reasons.push(`runtime markers: ${markerHits.join(', ')}`);
+  if (curatedRuntimePathWords.test(relPath)) reasons.push('path looks like guide, setup, workflow, prompt, template, reference, or playbook');
+  if (allowedCategory === 'curated_index' && reasons.length < 3) return [];
+  if (reasons.length >= 2) return reasons;
+  return [];
+}
+
+function curatedDirectoryFindings(root, projects) {
+  return projects
+    .flatMap((project) => listFiles(root, `${project.module_path}/curated_output_for_ai`)
+      .map((relPath) => ({
+        path: relPath,
+        projectId: project.id,
+        bytes: fileSize(root, relPath),
+        reasons: curatedDirectoryReasons(root, relPath)
+      })))
+    .filter((entry) => entry.reasons.length)
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
 function sourceTokens(relPath) {
   const base = path.basename(relPath, path.extname(relPath)).toLowerCase();
   return new Set(
@@ -451,6 +655,9 @@ function buildAudit(root) {
   const crossOwned = crossOwnedOutputs(projects, declared.entries);
   const suspicious = suspiciousPublishedSurfaces(root, projects, declared.entries, undeclaredPublishedFiles.map((file) => file.path));
   const duplicateGroups = duplicateProjectContentGroups(root);
+  const boundaryRecipeEntries = boundaryRecipes(root, declared.entries);
+  const boundaryRecipeFindings = boundaryRecipeEntries.filter((entry) => entry.reasons.length);
+  const curatedFindings = curatedDirectoryFindings(root, projects);
 
   return {
     version: 1,
@@ -469,16 +676,23 @@ function buildAudit(root) {
       packInstalledUndeclared: packInstalledUndeclared.length,
       crossOwnedOutputs: crossOwned.length,
       suspiciousPublishedSurfaces: suspicious.length,
-      duplicateProjectContentGroups: duplicateGroups.length
+      duplicateProjectContentGroups: duplicateGroups.length,
+      boundaryRecipeOutputs: boundaryRecipeEntries.length,
+      boundaryRecipeFindings: boundaryRecipeFindings.length,
+      curatedDirectoryFindings: curatedFindings.length
     },
     classifications: countBy(files, 'classification'),
+    boundaryClassifications: countBy(boundaryRecipeEntries, 'classification'),
     files,
+    boundaryRecipes: boundaryRecipeEntries,
     issues: {
       undeclaredPublishedFiles: undeclaredPublishedFiles.map(({ path, classification, packs }) => ({ path, classification, packs })).sort((a, b) => a.path.localeCompare(b.path)),
       packInstalledUndeclared: packInstalledUndeclared.map(({ path, classification, packs }) => ({ path, classification, packs })).sort((a, b) => a.path.localeCompare(b.path)),
       crossOwnedOutputs: crossOwned,
       suspiciousPublishedSurfaces: suspicious,
-      duplicateProjectContentGroups: duplicateGroups
+      duplicateProjectContentGroups: duplicateGroups,
+      boundaryRecipeFindings,
+      curatedDirectoryFindings: curatedFindings
     }
   };
 }
@@ -493,7 +707,9 @@ function baselineFromReport(report) {
       packInstalledUndeclared: report.issues.packInstalledUndeclared.map((entry) => entry.path).sort(),
       crossOwnedOutputs: report.issues.crossOwnedOutputs.map((entry) => `${entry.projectId} -> ${entry.targetProjectId}: ${entry.output}`).sort(),
       suspiciousPublishedSurfaces: report.issues.suspiciousPublishedSurfaces.map((entry) => `${entry.path} <= ${entry.source}: ${entry.reason}`).sort(),
-      duplicateProjectContentGroups: report.issues.duplicateProjectContentGroups.map((entry) => `${entry.hash}: ${entry.files.map((file) => file.path).sort().join(' | ')}`).sort()
+      duplicateProjectContentGroups: report.issues.duplicateProjectContentGroups.map((entry) => `${entry.hash}: ${entry.files.map((file) => file.path).sort().join(' | ')}`).sort(),
+      boundaryRecipeFindings: report.issues.boundaryRecipeFindings.map((entry) => `${entry.path} <= ${entry.sources.join(' + ')}: ${entry.classification}: ${entry.reasons.join('; ')}`).sort(),
+      curatedDirectoryFindings: report.issues.curatedDirectoryFindings.map((entry) => `${entry.path}: ${entry.reasons.join('; ')}`).sort()
     }
   };
 }
@@ -524,7 +740,9 @@ function compareToBaseline(root, report) {
     ...diffKeys('pack-installed undeclared surface', current.packInstalledUndeclared, expected.packInstalledUndeclared || [], (key) => key),
     ...diffKeys('cross-owned output', current.crossOwnedOutputs, expected.crossOwnedOutputs || [], (key) => key),
     ...diffKeys('suspicious published surface', current.suspiciousPublishedSurfaces, expected.suspiciousPublishedSurfaces || [], (key) => key),
-    ...diffKeys('duplicate project content group', current.duplicateProjectContentGroups, expected.duplicateProjectContentGroups || [], (key) => key)
+    ...diffKeys('duplicate project content group', current.duplicateProjectContentGroups, expected.duplicateProjectContentGroups || [], (key) => key),
+    ...diffKeys('boundary recipe finding', current.boundaryRecipeFindings, expected.boundaryRecipeFindings || [], (key) => key),
+    ...diffKeys('curated directory boundary finding', current.curatedDirectoryFindings, expected.curatedDirectoryFindings || [], (key) => key)
   ];
   return { ok: errors.length === 0, errors };
 }
@@ -551,6 +769,11 @@ function renderReport(report, checkResult = null) {
     lines.push(`- ${key}: ${value}`);
   }
   lines.push('');
+  lines.push('Boundary recipe classifications:');
+  for (const [key, value] of Object.entries(report.boundaryClassifications)) {
+    lines.push(`- ${key}: ${value}`);
+  }
+  lines.push('');
   lines.push('Pack-installed undeclared files:');
   renderList(lines, report.issues.packInstalledUndeclared, (entry) => `${entry.path} (${entry.packs.map((pack) => pack.id).join(', ')})`, 'none');
   lines.push('');
@@ -565,6 +788,22 @@ function renderReport(report, checkResult = null) {
   lines.push('');
   lines.push('Exact duplicate groups across _projects:');
   renderList(lines, report.issues.duplicateProjectContentGroups, (entry) => `${entry.hash}: ${entry.files.map((file) => file.path).join(' | ')}`, 'none');
+  lines.push('');
+  lines.push('Curated output boundary recipe findings:');
+  renderList(
+    lines,
+    report.issues.boundaryRecipeFindings,
+    (entry) => `${entry.path} <= ${entry.sources.join(' + ')} [${entry.classification}: ${entry.reasons.join('; ')}]`,
+    'none'
+  );
+  lines.push('');
+  lines.push('Curated directory boundary findings:');
+  renderList(
+    lines,
+    report.issues.curatedDirectoryFindings,
+    (entry) => `${entry.path} [${entry.reasons.join('; ')}]`,
+    'none'
+  );
   if (checkResult) {
     lines.push('');
     lines.push(checkResult.ok ? `Baseline check passed: ${baselineRelPath}` : `Baseline check failed: ${baselineRelPath}`);
