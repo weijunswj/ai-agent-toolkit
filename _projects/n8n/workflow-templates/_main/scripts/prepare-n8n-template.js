@@ -40,9 +40,23 @@ const CACHE_FIELDS = new Set([
 ]);
 
 const SENSITIVE_KEY_RE = /(api.?key|access.?token|refresh.?token|secret|password|credential|client.?id|client.?secret|document.?id|sheet.?id|folder.?id|database.?id|spreadsheet.?id|channel.?id|chat.?id|workspace.?id|account.?id)$/i;
+const TEMPLATE_CONFIG_KEY_RE = /(namespace|index|model.?name|model|workflow.?id|send.?to|document.?id|sheet.?name|folder.?to.?watch|pinecone.?index|pinecone_index_name|url)$/i;
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const URL_RE = /^https?:\/\//i;
 const LONG_ID_RE = /^[0-9A-Za-z_-]{28,}$/;
+const EXPRESSION_DEFAULT_LITERAL_RE = /(\|\||\?\?)\s*(['"])([^'"]+)\2/g;
+const SAFE_CONFIG_LITERAL_VALUES = new Set([
+  '',
+  'false',
+  'true',
+  'id',
+  'list',
+  'manual',
+  'string',
+  'number',
+  'boolean',
+  'json',
+]);
 
 function usage(exitCode = 1) {
   console.error(`Usage: node scripts/prepare-n8n-template.js <input.json> <output.template.json> [--preserve-unicode] [--allow-empty]`);
@@ -144,6 +158,146 @@ function placeholder(node, pathParts, suffix = '') {
   return `__SET_${nodePart}_${fieldPart}__`;
 }
 
+function configPlaceholder(node, pathParts, suffix = '') {
+  const cleanSuffix = String(suffix || fieldName(pathParts)).replace(/\./g, '_');
+  return placeholder(node, pathParts, cleanSuffix);
+}
+
+function isConfigKey(value) {
+  return SENSITIVE_KEY_RE.test(value || '') || TEMPLATE_CONFIG_KEY_RE.test(value || '');
+}
+
+function isTemplatableConfigLiteral(value) {
+  const trimmed = String(value || '').trim();
+  const normalized = trimmed.toLowerCase();
+
+  if (trimmed.includes('__SET_')) return false;
+  if (trimmed.startsWith('=')) return false;
+  if (SAFE_CONFIG_LITERAL_VALUES.has(normalized)) return false;
+  if (EMAIL_RE.test(trimmed)) return true;
+  if (URL_RE.test(trimmed)) return true;
+  if (LONG_ID_RE.test(trimmed) && trimmed.length >= 12) return true;
+  if (/^models\/[A-Za-z0-9._/-]+$/.test(trimmed)) return true;
+  if (/^[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)+$/.test(trimmed) && trimmed.length >= 8) return true;
+
+  return false;
+}
+
+function sanitiseExpressionDefaults(value, node, pathParts, warnings, suffix = '') {
+  return value.replace(EXPRESSION_DEFAULT_LITERAL_RE, (match, operator, quote, literal) => {
+    if (!isTemplatableConfigLiteral(literal)) return match;
+
+    const next = configPlaceholder(node, pathParts, suffix ? `${suffix}_default` : 'default');
+    warnings.push(`Replaced expression default on node "${node.name}" at ${pathParts.join('.')}.`);
+    return `${operator} ${quote}${next}${quote}`;
+  });
+}
+
+function sanitiseConfigString(value, node, pathParts, warnings, suffix = '') {
+  const safe = toAsciiSafeString(value);
+  const trimmed = safe.trim();
+
+  if (trimmed.startsWith('=')) {
+    return sanitiseExpressionDefaults(safe, node, pathParts, warnings, suffix);
+  }
+
+  if (!isTemplatableConfigLiteral(trimmed)) return safe;
+
+  const next = configPlaceholder(node, pathParts, suffix);
+  warnings.push(`Replaced template config on node "${node.name}" at ${pathParts.join('.')}.`);
+  return next;
+}
+
+function addTemplateConfigReplacement(replacements, literal, replacement) {
+  const text = String(literal || '').trim();
+  if (!isTemplatableConfigLiteral(text)) return;
+  if (!replacements.has(text)) replacements.set(text, replacement);
+}
+
+function addExpressionDefaultReplacements(replacements, value, node, pathParts, suffix = '') {
+  const safe = toAsciiSafeString(value);
+  for (const match of safe.matchAll(EXPRESSION_DEFAULT_LITERAL_RE)) {
+    const literal = match[3];
+    const replacement = configPlaceholder(node, pathParts, suffix ? `${suffix}_default` : 'default');
+    addTemplateConfigReplacement(replacements, literal, replacement);
+  }
+}
+
+function collectTemplateConfigReplacements(workflow) {
+  const replacements = new Map();
+
+  function visit(value, node, pathParts) {
+    if (typeof value === 'string') {
+      const last = fieldName(pathParts);
+      if (isConfigKey(last)) {
+        if (value.trim().startsWith('=')) {
+          addExpressionDefaultReplacements(replacements, value, node, pathParts, last);
+        } else {
+          addTemplateConfigReplacement(replacements, value, configPlaceholder(node, pathParts, last));
+        }
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, node, pathParts.concat(String(index))));
+      return;
+    }
+
+    if (!isObject(value)) return;
+
+    if (value.__rl === true && typeof value.value === 'string' && !value.value.trim().startsWith('=')) {
+      addTemplateConfigReplacement(replacements, value.value, configPlaceholder(node, pathParts));
+    }
+
+    if (typeof value.name === 'string' && typeof value.value === 'string' && isConfigKey(value.name)) {
+      if (value.value.trim().startsWith('=')) {
+        addExpressionDefaultReplacements(replacements, value.value, node, pathParts.concat('value'), value.name);
+      } else {
+        addTemplateConfigReplacement(replacements, value.value, configPlaceholder(node, pathParts.concat('value'), value.name));
+      }
+    }
+
+    for (const [key, child] of Object.entries(value)) {
+      visit(child, node, pathParts.concat(key));
+    }
+  }
+
+  for (const node of workflow.nodes || []) {
+    visit(node.parameters || {}, node, ['parameters']);
+  }
+
+  return replacements;
+}
+
+function replaceTemplateConfigParameterReferences(value, replacements) {
+  if (!replacements.size) return value;
+
+  const entries = Array.from(replacements.entries()).sort((a, b) => b[0].length - a[0].length);
+
+  function replaceString(text) {
+    let result = text;
+    for (const [literal, replacement] of entries) {
+      result = result.split(literal).join(replacement);
+    }
+    return result;
+  }
+
+  function visit(child) {
+    if (typeof child === 'string') return replaceString(child);
+    if (Array.isArray(child)) return child.map(visit);
+    if (!isObject(child)) return child;
+
+    const result = {};
+    for (const [key, nested] of Object.entries(child)) {
+      result[key] = visit(nested);
+    }
+    return result;
+  }
+
+  return visit(value);
+}
+
 function stripTopLevelFields(workflow) {
   const clean = {};
   for (const [key, value] of Object.entries(workflow)) {
@@ -169,10 +323,14 @@ function sanitiseString(value, node, pathParts, warnings) {
   const trimmed = safe.trim();
 
   if (trimmed.startsWith('=')) {
+    const last = fieldName(pathParts);
+    const withSanitisedDefaults = isConfigKey(last)
+      ? sanitiseExpressionDefaults(safe, node, pathParts, warnings, last)
+      : safe;
     if (EMAIL_RE.test(trimmed) || URL_RE.test(trimmed)) {
       warnings.push(`Expression may still contain a live value at ${node.name}.${pathParts.join('.')}. Review manually.`);
     }
-    return safe;
+    return withSanitisedDefaults;
   }
 
   if (trimmed.includes('__SET_')) return safe;
@@ -194,6 +352,10 @@ function sanitiseString(value, node, pathParts, warnings) {
     const next = placeholder(node, pathParts);
     warnings.push(`Replaced likely live ID/config on node "${node.name}" at ${pathParts.join('.')}.`);
     return next;
+  }
+
+  if (isConfigKey(last) && isTemplatableConfigLiteral(trimmed)) {
+    return sanitiseConfigString(safe, node, pathParts, warnings, last);
   }
 
   return safe;
@@ -228,7 +390,12 @@ function sanitiseValue(value, node, pathParts, warnings) {
     for (const [key, child] of Object.entries(value)) {
       if (key === 'credentials') continue;
       if (CACHE_FIELDS.has(key)) continue;
-      result[toAsciiSafeString(key)] = sanitiseValue(child, node, pathParts.concat(key), warnings);
+      const cleanKey = toAsciiSafeString(key);
+      if (cleanKey === 'value' && typeof child === 'string' && typeof value.name === 'string' && isConfigKey(value.name)) {
+        result[cleanKey] = sanitiseConfigString(child, node, pathParts.concat(cleanKey), warnings, value.name);
+      } else {
+        result[cleanKey] = sanitiseValue(child, node, pathParts.concat(cleanKey), warnings);
+      }
     }
     return result;
   }
@@ -293,10 +460,17 @@ function stripTemplate(workflow, options) {
     throw new Error('Workflow has zero nodes. Refusing to create an empty template.');
   }
 
+  const templateConfigReplacements = collectTemplateConfigReplacements(clean);
+
   clean.nodes = clean.nodes.map((node, index) => {
     if (!isObject(node)) throw new Error(`Node at index ${index} must be an object.`);
     return stripNode(node, warnings);
   });
+
+  for (const node of clean.nodes) {
+    // Only rewrite parameter values. Node names and connections must remain aligned.
+    node.parameters = replaceTemplateConfigParameterReferences(node.parameters || {}, templateConfigReplacements);
+  }
 
   clean.connections = isObject(clean.connections) ? normaliseKeys(clean.connections) : {};
   clean.settings = isObject(clean.settings) ? normaliseKeys(clean.settings) : {};

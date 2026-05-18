@@ -23,7 +23,7 @@
       "mode": "exact",
       "source_path": "scripts/prepare-n8n-template.js",
       "project_path": "_projects/n8n/workflow-templates/_main/scripts/prepare-n8n-template.js",
-      "source_blob_sha": "caf48c9bab0ebb7945e3b783e572422f84672c2c"
+      "source_blob_sha": "4d09cc76a158a5edb56f9cf8e05c54a502fb4ad6"
     },
     {
       "mode": "exact",
@@ -42,7 +42,7 @@
       "mode": "adapted",
       "source_path": "scripts/prepare-n8n-template.js",
       "root_surface_path": "skills/n8n-workflow-sync/templates/sanitizer/prepare-n8n-template.js",
-      "source_blob_sha": "caf48c9bab0ebb7945e3b783e572422f84672c2c",
+      "source_blob_sha": "4d09cc76a158a5edb56f9cf8e05c54a502fb4ad6",
       "notes": "AI-facing sanitizer script keeps toolkit-relative usage text."
     },
     {

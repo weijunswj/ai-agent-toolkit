@@ -30,6 +30,13 @@ function readText(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
 }
 
+function findString(value, needle) {
+  if (typeof value === 'string') return value.includes(needle);
+  if (Array.isArray(value)) return value.some((item) => findString(item, needle));
+  if (value && typeof value === 'object') return Object.values(value).some((item) => findString(item, needle));
+  return false;
+}
+
 function safeWorkflow(overrides = {}) {
   return {
     id: 'wf_safe',
@@ -102,6 +109,158 @@ test('prepare-n8n-template.js strips live fields and writes sanitized template o
   assert.equal('credentials' in prepared.nodes[0], false);
   assert.equal('webhookId' in prepared.nodes[0], false);
   assert.match(prepared.nodes[0].parameters.url, /^__SET_HTTP_REQUEST_URL__$/);
+});
+
+test('prepare-n8n-template.js sanitizes reusable config literals and expression defaults', () => {
+  const cwd = tempDir();
+  const inputPath = path.join(cwd, '.to-sanitise', 'workflow.json');
+  const outputPath = path.join(cwd, '.sanitised', 'workflow.template.json');
+  writeJson(inputPath, safeWorkflow({
+    id: 'live-workflow-id',
+    name: 'Config Defaults Test',
+    active: true,
+    nodes: [
+      {
+        id: 'node-1',
+        name: 'Prepare Chunk Metadata',
+        type: 'n8n-nodes-base.set',
+        parameters: {
+          assignments: {
+            assignments: [
+              {
+                id: 'namespace-assignment',
+                name: 'namespace',
+                value: 'ExampleKnowledgeBase_kb',
+                type: 'string',
+              },
+              {
+                id: 'index-assignment',
+                name: 'pinecone_index_name',
+                value: 'example-knowledge-base-rag',
+                type: 'string',
+              },
+            ],
+          },
+        },
+      },
+      {
+        id: 'note-1',
+        name: 'Sticky Note',
+        type: 'n8n-nodes-base.stickyNote',
+        parameters: {
+          content: 'Namespace defaults to ExampleKnowledgeBase_kb for this workflow.',
+        },
+      },
+      {
+        id: 'node-code',
+        name: 'Prepare Ingestion Log',
+        type: 'n8n-nodes-base.code',
+        parameters: {
+          jsCode: "return [{ json: { namespace: $json.namespace || 'ExampleKnowledgeBase_kb' } }];",
+        },
+      },
+      {
+        id: 'node-2',
+        name: 'Resolve Pinecone Index Host',
+        type: 'n8n-nodes-base.httpRequest',
+        parameters: {
+          url: "={{ 'https://api.pinecone.io/indexes/' + encodeURIComponent($json.pinecone_index_name || 'example-knowledge-base-rag') }}",
+        },
+      },
+      {
+        id: 'node-3',
+        name: 'Google Gemini Chat Model',
+        type: '@n8n/n8n-nodes-langchain.lmChatGoogleGemini',
+        parameters: {
+          modelName: 'models/gemini-3.1-flash-lite',
+        },
+      },
+      {
+        id: 'node-4',
+        name: 'Send Lead Notification',
+        type: 'n8n-nodes-base.emailSend',
+        parameters: {
+          message: "={{ $json.customer_name || 'Unknown customer' }}",
+        },
+      },
+    ],
+  }));
+
+  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+
+  assert.equal(result.status, 0, result.stderr);
+  const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+  assert.equal(prepared.active, false);
+  assert.equal(findString(prepared, 'ExampleKnowledgeBase_kb'), false);
+  assert.equal(findString(prepared, 'example-knowledge-base-rag'), false);
+  assert.equal(findString(prepared, 'models/gemini-3.1-flash-lite'), false);
+  assert.equal(findString(prepared, '__SET_PREPARE_CHUNK_METADATA_NAMESPACE__'), true);
+  assert.equal(findString(prepared, '__SET_PREPARE_CHUNK_METADATA_PINECONE_INDEX_NAME__'), true);
+  assert.equal(findString(prepared, '__SET_GOOGLE_GEMINI_CHAT_MODEL_MODELNAME__'), true);
+  assert.equal(findString(prepared, 'Unknown customer'), true);
+});
+
+test('prepare-n8n-template.js keeps node names stable when replacing config literals in parameters', () => {
+  const cwd = tempDir();
+  const inputPath = path.join(cwd, '.to-sanitise', 'workflow.json');
+  const outputPath = path.join(cwd, '.sanitised', 'workflow.template.json');
+  const indexLiteral = 'example-node-name-index-rag';
+  const sourceName = `Prepare ${indexLiteral}`;
+  const targetName = `Use ${indexLiteral}`;
+  writeJson(inputPath, safeWorkflow({
+    id: 'live-workflow-id',
+    name: 'Node Name Stability Test',
+    active: true,
+    nodes: [
+      {
+        id: 'source-node',
+        name: sourceName,
+        type: 'n8n-nodes-base.set',
+        parameters: {
+          assignments: {
+            assignments: [
+              {
+                id: 'index-assignment',
+                name: 'pinecone_index_name',
+                value: indexLiteral,
+                type: 'string',
+              },
+            ],
+          },
+        },
+      },
+      {
+        id: 'target-node',
+        name: targetName,
+        type: 'n8n-nodes-base.set',
+        parameters: {},
+      },
+    ],
+    connections: {
+      [sourceName]: {
+        main: [[
+          {
+            node: targetName,
+            type: 'main',
+            index: 0,
+          },
+        ]],
+      },
+    },
+  }));
+
+  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+
+  assert.equal(result.status, 0, result.stderr);
+  const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+  const sourceNode = prepared.nodes.find((node) => node.id === 'source-node');
+  const targetNode = prepared.nodes.find((node) => node.id === 'target-node');
+  assert.equal(sourceNode.name, sourceName);
+  assert.equal(targetNode.name, targetName);
+  assert.equal(Object.prototype.hasOwnProperty.call(prepared.connections, sourceName), true);
+  assert.equal(prepared.connections[sourceName].main[0][0].node, targetName);
+  assert.equal(findString(sourceNode.parameters, indexLiteral), false);
+  assert.equal(findString(sourceNode.parameters, '__SET_PREPARE_EXAMPLE_NODE_NAME_INDEX_RAG_PINECONE_INDEX_NAME__'), true);
 });
 
 test('sanitise-n8n-template.ps1 dry-run creates staging folders but writes no sanitized templates', { skip: !findPowerShell() }, () => {
