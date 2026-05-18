@@ -43,7 +43,7 @@ test('audit-published-surfaces detects pack-installed undeclared files', () => {
   const report = runAuditJson();
   const paths = report.issues.packInstalledUndeclared.map((entry) => entry.path);
   assert.ok(paths.includes('skills/n8n-workflow-sync/references/credential-safety.md'));
-  assert.ok(paths.includes('skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md'));
+  assert.ok(paths.includes('skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md'));
 });
 
 test('audit-published-surfaces detects cross-owned outputs', () => {

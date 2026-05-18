@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Branch: `codex/surface-fidelity-audit`
-Latest update: 2026-05-19 (`codex/review-n8n-platform-overviews`)
+Latest update: 2026-05-19 (`codex/declare-secure-cicd-remaining-templates`)
 
 ## Executive summary
 
@@ -15,14 +15,14 @@ The broader audit found:
 - 4 project modules under `_projects/`.
 - 6 current skill folders.
 - 25 tracked files under `mcp/`.
-- 146 tracked files under `skills/` and `mcp/`.
-- 107 expanded declared/generated project outputs after the n8n local setup fidelity pass.
-- 55 tracked published-surface files still manually present and not declared by project sync recipes.
-- 24 files covered by a pack install path but still not individually declared by project sync recipes.
-- 1 suspicious source/output size finding remains, outside `n8n-local-setup`.
+- 162 tracked published-surface files under `skills/` and `mcp/`.
+- 111 expanded declared/generated project outputs after the Secure CI/CD template declaration pass.
+- 51 tracked published-surface files still manually present and not declared by project sync recipes.
+- 21 files covered by a pack install path but still not individually declared by project sync recipes.
+- 0 suspicious source/output size findings remain.
 - 0 exact duplicate-content groups across `_projects`, excluding generated previews.
 
-The highest remaining risks are now the cross-owned n8n workflow-sync helper ownership, remaining undeclared Secure CI/CD pack templates, manual MCP registry/spec surfaces, and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue has been addressed.
+The highest remaining risks are now the cross-owned n8n workflow-sync helper ownership, n8n workflow-sync pack-installed reference ownership, manual MCP registry/spec surfaces, and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue and the Secure CI/CD remaining template declaration issue have been addressed.
 
 ## Deterministic audit command
 
@@ -47,13 +47,16 @@ This audit now classifies every expanded `toolkit.project.json` output recipe ag
 
 Summary counts from `npm run audit:surfaces:check`:
 
-- 107 expanded recipe outputs classified.
+- 111 expanded recipe outputs classified.
 - 49 `main_full_fidelity` outputs.
-- 15 `curated_index` outputs, including short reviewed overviews/safety wrappers.
+- 10 `curated_index` outputs, including short reviewed overviews/safety wrappers.
 - 5 `curated_metadata` outputs.
+- 1 `curated_pack_readme` output.
 - 3 `curated_router` outputs.
 - 15 `curated_shim` outputs.
 - 3 `curated_spec` outputs.
+- 2 `curated_template` outputs.
+- 6 `curated_template_index` outputs.
 - 17 `linked_exception` outputs.
 - 0 `suspicious_curated_runtime` outputs.
 - 0 `suspicious_main_adapter` outputs.
@@ -62,7 +65,7 @@ Summary counts from `npm run audit:surfaces:check`:
 Confirmed violations:
 
 - None newly confirmed by this focused boundary audit. Full runtime guides restored in earlier n8n local setup work still publish from `_main` via exact `copy` recipes.
-- The existing published-surface finding for `skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md` remains separate from this recipe-boundary audit because that file is still pack-installed but undeclared.
+- The former published-surface finding for `skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md` is resolved by declaring it as a reviewed curated template output.
 
 Suspected violations:
 
@@ -74,15 +77,50 @@ Allowed curated-output categories:
 - `SKILL.md` routers.
 - Skill README and local README/index files.
 - Pack manifests and generated metadata.
+- Pack READMEs when they are short skill-local pack indexes.
 - MCP project/spec summaries.
 - Reference-link compatibility shims.
+- Small reviewed template snippets and template indexes that do not replace full runtime instructions.
 - Small reviewed overview, safety wrapper, packaging, and adapter text that is not a lossy substitute for required runtime instructions.
 
 Recommended fixes:
 
-- Keep the existing pack-installed undeclared and Secure CI/CD template findings in the published-surface cleanup sequence rather than folding them into this focused PR.
+- Continue resolving the remaining pack-installed undeclared findings in focused PRs. Do not broaden this pass into n8n workflow-sync ownership, MCP registry/spec ownership, or UI/UX provenance cleanup.
 
-Follow-up PRs are still needed for non-playbook findings. The playbook-specific recipe findings are resolved.
+Follow-up PRs are still needed for non-playbook findings outside Secure CI/CD. The playbook-specific recipe findings and Secure CI/CD remaining template findings are resolved.
+
+## Secure CI/CD Template Declaration Pass
+
+Classification rule: full working instructions publish from `_main` directly; short reviewed templates, indexes, metadata, routers, shims, specs, and overviews may publish from `curated_output_for_ai/`.
+
+Files reviewed:
+
+| Source file | Published output | Classification | Outcome | Reason |
+| --- | --- | --- | --- | --- |
+| `_projects/cicd/secure-installer/curated_output_for_ai/templates/cicd/CURRENT_CICD_STATUS.template.md` | `skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md` | `curated_template` | Became curated. | Short status-file template for consumer repos; the full Secure CI/CD prompt remains exact-extracted from `_main/README.md`. |
+| `_projects/cicd/secure-installer/curated_output_for_ai/templates/cicd/safe-source-update-policy.md` | `skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md` | `curated_template` | Became curated. | Short reviewed policy template; it preserves approval and blocked-content constraints without replacing the full installer prompt. |
+| `_projects/cicd/secure-installer/curated_output_for_ai/templates/github-actions/README.md` | `skills/secure-cicd-installer/templates/github-actions/README.md` | `curated_template_index` | Became curated. | Template-folder index and safety notes, not a full workflow implementation guide. |
+| `_projects/cicd/secure-installer/curated_output_for_ai/packs/secure-cicd/README.md` | `skills/secure-cicd-installer/packs/secure-cicd/README.md` | `curated_pack_readme` | Became curated. | Short skill-local pack README; `pack.json` remains deterministic generated JSON from curated source. |
+
+Pack manifest and audit outcome:
+
+- Every `skills/secure-cicd-installer/packs/secure-cicd/pack.json` install path is now declared by `_projects/cicd/secure-installer/toolkit.project.json`.
+- No Secure CI/CD file remains in `packInstalledUndeclared`.
+- `CURRENT_CICD_STATUS.template.md` no longer appears in `suspiciousPublishedSurfaces`.
+- No Secure CI/CD linked/manual exception remains for these four reviewed surfaces.
+
+Audit baseline changes:
+
+- `declaredOutputFiles`: 107 -> 111.
+- `undeclaredPublishedFiles`: 55 -> 51.
+- `packInstalledUndeclared`: 24 -> 21.
+- `suspiciousPublishedSurfaces`: 1 -> 0.
+- `boundaryRecipeOutputs`: 107 -> 111.
+
+Remaining Secure CI/CD follow-up actions:
+
+- None for the four remaining template/manual surfaces reviewed in this pass.
+- Cross-owned n8n sync helper ownership remains a separate follow-up and was intentionally not rehomed here.
 
 ## n8n Platform Reference Boundary Review
 
@@ -278,9 +316,9 @@ Published file(s):
 - `skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md`
 - `skills/secure-cicd-installer/templates/github-actions/README.md`
 Problem:
-These files are installed by `skills/secure-cicd-installer/packs/secure-cicd/pack.json` but are not currently declared by `toolkit.project.json`. They may be legitimate hand-authored toolkit templates, but the audit cannot prove their source fidelity or freshness.
+These files were installed by `skills/secure-cicd-installer/packs/secure-cicd/pack.json` but were not declared by `toolkit.project.json`, so the audit could not prove their source fidelity or freshness.
 Recommended fix:
-Follow-up PR: declare them as linked surfaces with explicit reasons, or move reviewed source copies under `_projects/cicd/secure-installer/curated_output_for_ai/` and generate them.
+Fixed in the Secure CI/CD template declaration pass. Reviewed source copies now live under `_projects/cicd/secure-installer/curated_output_for_ai/`, publish through curated recipes, and regenerate into the skill folder.
 
 Finding:
 Severity: medium
@@ -314,7 +352,7 @@ Follow-up PR: declare the manual UI/UX instruction surfaces as linked with expli
 
 ## Undeclared published files
 
-After the n8n local setup fidelity pass, 55 tracked `skills/` or `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
+After the Secure CI/CD template declaration pass, 51 tracked `skills/` or `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
 
 Major groups:
 
@@ -323,7 +361,6 @@ Major groups:
 - Skills with no `_projects` module: `skills/knowledge-index-updater/**`, `skills/windows-localhost-workflows/**`.
 - n8n local setup remaining manual indexes: pack READMEs and `templates/agent-rules/README.md`. Required runtime references are now recipe-declared.
 - n8n workflow sync compatibility/reference surfaces not recipe-declared: `skills/n8n-workflow-sync/references/credential-safety.md`, `import-export-flow.md`, `workflow-template-hygiene.md`, `references/n8n/credential-safety.md`, `templates/workflow-policy/credential-migration-map-example.md`, pack README, and `agents/openai.yaml`.
-- Secure CI/CD remaining manual templates: `CURRENT_CICD_STATUS.template.md`, `safe-source-update-policy.md`, `templates/github-actions/README.md`, and pack README.
 - UI/UX manual surfaces: skill README/install/license files, examples, instruction references, frontend-design pack, pack READMEs, OpenAI agent metadata, and generator tests.
 
 Pack-covered but undeclared files were found in these install surfaces:
@@ -334,9 +371,6 @@ skills/n8n-workflow-sync/references/import-export-flow.md
 skills/n8n-workflow-sync/references/n8n/credential-safety.md
 skills/n8n-workflow-sync/references/workflow-template-hygiene.md
 skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md
-skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md
-skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md
-skills/secure-cicd-installer/templates/github-actions/README.md
 skills/ui-ux-secure-frontend-design/**
 ```
 
@@ -402,13 +436,13 @@ For retired internal sources, no routine old-repo dependency is needed; `SOURCE-
 
 4. Which surfaces currently rely on manually maintained files?
 
-Manual surfaces include the 55 undeclared files listed by group above, plus linked outputs by design. The largest manual buckets are registry/spec MCP docs, `knowledge-index-updater`, `windows-localhost-workflows`, UI/UX instruction references, and several workflow-sync/CI/CD pack-installed references.
+Manual surfaces include the 51 undeclared files listed by group above, plus linked outputs by design. The largest manual buckets are registry/spec MCP docs, `knowledge-index-updater`, `windows-localhost-workflows`, UI/UX instruction references, and several workflow-sync pack-installed references.
 
 5. Which current generated outputs should be replaced by exact source extraction?
 
 - Secure CI/CD prompt: done in this PR.
 - n8n local setup detailed guides: done. Required runtime guides are exact copy outputs in `skills/n8n-local-setup/references/`.
-- Secure CI/CD status/deployment/security policy snippets: evaluate in follow-up and either extract from README or declare as reviewed curated templates.
+- Secure CI/CD status/deployment/security policy snippets: done in the Secure CI/CD template declaration pass. They are reviewed curated templates; the full prompt remains exact-extracted from `_main/README.md`.
 
 6. Is a clean rebuild recommended?
 
@@ -425,10 +459,10 @@ Completed fixes:
 - Add this repo-local audit report.
 - Add the deterministic published-surface audit command and baseline check.
 - Restore full-fidelity `n8n-local-setup` runtime references inside the copyable skill folder.
+- Declare the remaining Secure CI/CD pack-installed status/policy/GitHub Actions template files and pack README as curated generated outputs.
 
 Recommended follow-up fixes:
 
-- Declare Secure CI/CD pack-installed status/policy/GitHub Actions template files.
 - Rehome or explicitly shared-own the n8n sync helpers currently owned by the Secure CI/CD project.
 - Bring manual MCP registry/spec surfaces under project modules or a deterministic shared surface plan.
 - Clarify UI/UX skill manual surface ownership and attribution in recipes.
@@ -438,7 +472,7 @@ Recommended follow-up fixes:
 1. Current PR: audit report, Secure CI/CD prompt exact extract, tests, and generated registry update.
 2. PR 2: Add a deterministic surface audit command and CI test for undeclared project-like published files. Done by `repo/scripts/audit-published-surfaces.cjs` and its baseline check.
 3. PR 3: n8n local setup fidelity pass. Publish full local references or declare short files as non-runtime overviews. Done for required runtime references.
-4. PR 4: Secure CI/CD remaining template declaration pass for status, source update policy, and GitHub Actions notes.
+4. PR 4: Secure CI/CD remaining template declaration pass for status, source update policy, GitHub Actions notes, and pack README. Done in `codex/declare-secure-cicd-remaining-templates`.
 5. PR 5: Cross-owned n8n sync helper ownership cleanup.
 6. PR 6: MCP registry/spec ownership cleanup.
 7. PR 7: UI/UX linked/manual surface provenance cleanup.

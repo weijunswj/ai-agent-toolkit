@@ -332,6 +332,10 @@ function isPackManifest(relPath) {
   return /\/packs\/[^/]+\/pack\.json$/.test(relPath);
 }
 
+function isPackReadme(relPath) {
+  return /^skills\/[^/]+\/packs\/[^/]+\/README\.md$/.test(relPath);
+}
+
 function isMcpSpec(relPath) {
   return relPath.startsWith('mcp/');
 }
@@ -359,6 +363,15 @@ function isSkillTemplateOutput(relPath) {
   return /^skills\/[^/]+\/templates\//.test(relPath);
 }
 
+function isSkillTemplateReadme(relPath) {
+  return /^skills\/[^/]+\/templates\/.*\/README\.md$/.test(relPath);
+}
+
+function isReviewedTemplate(entry) {
+  if (!isSkillTemplateOutput(entry.path) || isSkillTemplateReadme(entry.path)) return false;
+  return /\btemplate\b/i.test(`${entry.notes} ${entry.fidelity}`);
+}
+
 function boundaryMarkerHits(text) {
   return boundaryHeadingMarkers.filter((marker) => new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
 }
@@ -369,8 +382,11 @@ function recipeBoundaryReasons(root, entry) {
     isSkillRouter(entry.path) ||
     isSkillReadme(entry.path) ||
     isPackManifest(entry.path) ||
+    isPackReadme(entry.path) ||
     isMcpSpec(entry.path) ||
     isReferenceShim(entry) ||
+    isSkillTemplateReadme(entry.path) ||
+    isReviewedTemplate(entry) ||
     isIndexLike(entry) ||
     isOverviewLike(entry);
 
@@ -419,6 +435,9 @@ function classifyBoundaryRecipe(root, entry) {
     if (isPackManifest(entry.path) || entry.kind === 'json') return 'curated_metadata';
     if (isSkillRouter(entry.path)) return 'curated_router';
     if (isMcpSpec(entry.path)) return 'curated_spec';
+    if (isPackReadme(entry.path)) return 'curated_pack_readme';
+    if (isSkillTemplateReadme(entry.path)) return 'curated_template_index';
+    if (isReviewedTemplate(entry)) return 'curated_template';
     if (isIndexLike(entry) || isOverviewLike(entry)) return 'curated_index';
     if (recipeBoundaryReasons(root, entry).length) return 'suspicious_curated_runtime';
     return 'unknown';
@@ -461,6 +480,9 @@ function boundaryRecipes(root, entries) {
 
 function curatedFileAllowedCategory(relPath) {
   if (relPath.endsWith('/SKILL.md')) return 'curated_router';
+  if (/\/curated_output_for_ai\/templates\/.*\/README\.md$/.test(relPath)) return 'curated_template_index';
+  if (/\/curated_output_for_ai\/templates\/.*\.md$/.test(relPath)) return 'curated_template';
+  if (/\/curated_output_for_ai\/packs\/[^/]+\/README\.md$/.test(relPath)) return 'curated_pack_readme';
   if (path.basename(relPath).toLowerCase() === 'readme.md') return 'curated_index';
   if (/\/packs\/[^/]+\/pack\.json$/.test(relPath)) return 'curated_metadata';
   if (relPath.includes('/mcp/')) return 'curated_spec';

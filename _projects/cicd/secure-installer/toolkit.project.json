@@ -42,6 +42,27 @@
       "fidelity": "reviewed_entrypoint"
     },
     {
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/cicd/CURRENT_CICD_STATUS.template.md",
+      "output": "skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md",
+      "notes": "AI-facing reviewed template for consumer repo CI/CD status tracking.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/cicd/safe-source-update-policy.md",
+      "output": "skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md",
+      "notes": "AI-facing reviewed template policy for safe source update review.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/github-actions/README.md",
+      "output": "skills/secure-cicd-installer/templates/github-actions/README.md",
+      "notes": "AI-facing GitHub Actions template index generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
       "kind": "extract",
       "source": "_main/README.md",
       "output": "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md",
@@ -57,6 +78,13 @@
       "output": "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
       "notes": "Skill-local pack generated from project-owned curated AI output.",
       "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/packs/secure-cicd/README.md",
+      "output": "skills/secure-cicd-installer/packs/secure-cicd/README.md",
+      "notes": "Skill-local pack README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "linked",
@@ -138,8 +166,12 @@
       "mcp/projects/secure-cicd-installer.md",
       "skills/secure-cicd-installer/references/secure-cicd-installer.md",
       "skills/secure-cicd-installer/templates/cicd/README.md",
+      "skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md",
+      "skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md",
+      "skills/secure-cicd-installer/templates/github-actions/README.md",
       "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md",
       "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
+      "skills/secure-cicd-installer/packs/secure-cicd/README.md",
       "skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd",
       "skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd",
       "skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs",
