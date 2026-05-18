@@ -418,8 +418,14 @@ function boundaryMarkerHits(text) {
   return boundaryHeadingMarkers.filter((marker) => new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
 }
 
+function reviewedTemplateRuntimeHits(hits) {
+  const safetyOnlyMarkers = new Set(['Do not commit', 'Do not push', 'Do not deploy']);
+  return hits.filter((hit) => !safetyOnlyMarkers.has(hit));
+}
+
 function recipeBoundaryReasons(root, entry) {
   const reasons = [];
+  const reviewedTemplate = isReviewedTemplate(entry);
   const allowedCurated =
     isSkillRouter(entry.path) ||
     isSkillReadme(entry.path) ||
@@ -428,9 +434,10 @@ function recipeBoundaryReasons(root, entry) {
     isMcpSpec(entry.path) ||
     isReferenceShim(entry) ||
     isSkillTemplateReadme(entry.path) ||
-    isReviewedTemplate(entry) ||
+    reviewedTemplate ||
     isIndexLike(entry) ||
     isOverviewLike(entry);
+  const shouldAuditRuntimeHeft = !allowedCurated || reviewedTemplate;
 
   if (isSkillReferenceOutput(entry.path) && !allowedCurated) {
     reasons.push('skill reference output uses curated source');
@@ -447,10 +454,11 @@ function recipeBoundaryReasons(root, entry) {
     if (!fs.existsSync(resolveRel(root, source))) continue;
     const text = readText(root, source);
     const hits = boundaryMarkerHits(text);
-    if (hits.length && !allowedCurated) {
-      reasons.push(`curated source has runtime markers: ${hits.join(', ')}`);
+    const relevantHits = reviewedTemplate ? reviewedTemplateRuntimeHits(hits) : hits;
+    if (relevantHits.length && shouldAuditRuntimeHeft) {
+      reasons.push(`curated source has runtime markers: ${relevantHits.join(', ')}`);
     }
-    if (fileSize(root, source) >= 3000 && curatedRuntimePathWords.test(source) && !allowedCurated) {
+    if (fileSize(root, source) >= 3000 && curatedRuntimePathWords.test(source) && shouldAuditRuntimeHeft) {
       reasons.push('large curated Markdown source looks runtime-critical');
     }
   }
@@ -479,7 +487,9 @@ function classifyBoundaryRecipe(root, entry) {
     if (isMcpSpec(entry.path)) return 'curated_spec';
     if (isPackReadme(entry.path)) return 'curated_pack_readme';
     if (isSkillTemplateReadme(entry.path)) return 'curated_template_index';
-    if (isReviewedTemplate(entry)) return 'curated_template';
+    if (isReviewedTemplate(entry)) {
+      return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_template';
+    }
     if (isIndexLike(entry) || isOverviewLike(entry)) return 'curated_index';
     if (recipeBoundaryReasons(root, entry).length) return 'suspicious_curated_runtime';
     return 'unknown';

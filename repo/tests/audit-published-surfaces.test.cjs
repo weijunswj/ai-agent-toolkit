@@ -240,6 +240,55 @@ test('audit-published-surfaces --check fails when a new curated runtime recipe i
   assert.match(result.stderr, /new curated directory boundary finding: _projects\/n8n\/local-setup\/curated_output_for_ai\/references\/n8n\/new-runtime-guide\.md/);
 });
 
+test('audit-published-surfaces keeps reviewed templates under runtime-heft checks', () => {
+  const cwd = tempCopy();
+  const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
+  const sourceRel = 'curated_output_for_ai/templates/agent-rules/new-runtime-template.md';
+  const outputRel = 'skills/n8n-local-setup/templates/agent-rules/new-runtime-template.md';
+  const sourcePath = path.join(projectDir, sourceRel);
+  const outputPath = path.join(cwd, outputRel);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(sourcePath, [
+    '<!--',
+    'Curated AI-facing source.',
+    'Project: n8n.local-setup',
+    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+    '-->',
+    '',
+    '# New Runtime Template',
+    '',
+    '## Setup',
+    '',
+    '1. Install local dependencies.',
+    '2. Import the workflow.',
+    ''
+  ].join('\n'), 'utf8');
+  fs.writeFileSync(outputPath, '# New Runtime Template\n\n## Setup\n\n1. Install local dependencies.\n', 'utf8');
+
+  const manifestPath = path.join(projectDir, 'toolkit.project.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest.outputs.push({
+    kind: 'curated',
+    source: sourceRel,
+    output: outputRel,
+    notes: 'AI-facing reviewed template fixture.',
+    fidelity: 'reviewed_entrypoint'
+  });
+  manifest.writes.allowed.push(outputRel);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  assert.ok(finding);
+  assert.equal(finding.classification, 'suspicious_curated_runtime');
+  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Setup/.test(reason)));
+
+  const result = runAudit(['--check'], cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /new boundary recipe finding: skills\/n8n-local-setup\/templates\/agent-rules\/new-runtime-template\.md/);
+});
+
 test('audit-published-surfaces still flags runtime-heavy platform overview fixtures', () => {
   const cwd = tempCopy();
   const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
