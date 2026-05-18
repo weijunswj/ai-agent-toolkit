@@ -25,6 +25,7 @@ jobs:
       BASE_REF: ${{ github.event.pull_request.base.ref }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
       REPOSITORY_FULL_NAME: ${{ github.repository }}
@@ -52,6 +53,15 @@ jobs:
 
           if [[ "$HEAD_REF" == "main" ]]; then
             echo "::error::Auto-sync writeback never pushes to main."
+            exit 1
+          fi
+
+          current_head_sha="$(
+            gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq '.head.sha'
+          )"
+
+          if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then
+            echo "::error::PR head changed after this workflow was queued; refusing stale auto-sync writeback."
             exit 1
           fi
 
@@ -99,14 +109,24 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Checkout PR head branch
+      - name: Checkout PR head commit
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           path: pr
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify checked-out PR commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(/usr/bin/git -C "$PR_ROOT" rev-parse HEAD)"
+          if [[ "$checked_out_sha" != "$HEAD_SHA" ]]; then
+            echo "::error::Checked-out PR commit does not match guarded head SHA."
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -263,4 +283,13 @@ jobs:
           unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND
           export PATH="/usr/bin:/bin"
           /usr/bin/git -C "$PR_ROOT" remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"
+          remote_head_sha="$(
+            /usr/bin/git -C "$PR_ROOT" ls-remote origin "refs/heads/${HEAD_REF}" | awk '{print $1}'
+          )"
+
+          if [[ "$remote_head_sha" != "$HEAD_SHA" ]]; then
+            echo "::error::PR branch moved after guarded checkout; refusing stale auto-sync push."
+            exit 1
+          fi
+
           /usr/bin/git -C "$PR_ROOT" push origin "HEAD:${HEAD_REF}"

@@ -46,6 +46,7 @@ The `Auto-sync generated toolkit surfaces` workflow is only a deterministic gene
 - Because the workflow is privileged, it does not run generated test suites or PR-controlled generated executable code; full validation remains covered by normal read-only CI.
 - The workflow only runs deterministic sync/check/validator scripts from the protected base revision. The PR checkout is treated as data and passed to those scripts through an explicit workspace target.
 - The workflow stages and snapshots generated output after sync, then rechecks the index/workspace before commit so validation cannot add files to the writeback diff.
+- The workflow pins the PR checkout to the event head SHA, refuses stale queued runs if the PR head changed, verifies the remote PR branch before pushing, and never force pushes.
 - If eligible source/routing/contract edits are mixed with forbidden workflow, maintenance-script, test, docs, package, lockfile, or preserved-source path changes, the workflow fails instead of pushing.
 
 ## Packs

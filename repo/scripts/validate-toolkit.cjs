@@ -745,6 +745,9 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (!/github\.event\.pull_request\.head\.ref != 'main'/.test(text)) {
     fail(errors, `${entry.relPath} missing head.ref != main guard`);
   }
+  if (!text.includes('HEAD_SHA: ${{ github.event.pull_request.head.sha }}')) {
+    fail(errors, `${entry.relPath} missing guarded PR head SHA environment variable`);
+  }
 
   if (/repo\/scripts\/(?:watch-project-sources|safe-source-update)\.cjs/i.test(text)) {
     fail(errors, `${entry.relPath} must not run source-watch or source-update scripts`);
@@ -756,7 +759,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const preflightIndex = text.indexOf('- name: Preflight guard');
   const checkoutIndex = text.indexOf('uses: actions/checkout@v4');
   const trustedCheckoutIndex = text.indexOf('- name: Checkout trusted base revision');
-  const prCheckoutIndex = text.indexOf('- name: Checkout PR head branch');
+  const prCheckoutIndex = text.indexOf('- name: Checkout PR head commit');
   if (preflightIndex === -1 || checkoutIndex === -1 || checkoutIndex < preflightIndex) {
     fail(errors, `${entry.relPath} must run preflight before any checkout`);
   }
@@ -765,16 +768,19 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
   const steps = workflowStepBlocks(text);
   const trustedCheckoutStep = workflowStepText(steps, 'Checkout trusted base revision');
-  const prCheckoutStep = workflowStepText(steps, 'Checkout PR head branch');
+  const prCheckoutStep = workflowStepText(steps, 'Checkout PR head commit');
   if (!trustedCheckoutStep.includes('repository: ${{ github.repository }}') ||
       !trustedCheckoutStep.includes('ref: ${{ github.event.pull_request.base.sha }}') ||
       !trustedCheckoutStep.includes('path: trusted')) {
     fail(errors, `${entry.relPath} must check out the trusted base SHA to trusted/`);
   }
+  if (prCheckoutStep.includes('ref: ${{ github.event.pull_request.head.ref }}')) {
+    fail(errors, `${entry.relPath} must not check out the PR branch by mutable head.ref`);
+  }
   if (!prCheckoutStep.includes('repository: ${{ github.event.pull_request.head.repo.full_name }}') ||
-      !prCheckoutStep.includes('ref: ${{ github.event.pull_request.head.ref }}') ||
+      !prCheckoutStep.includes('ref: ${{ github.event.pull_request.head.sha }}') ||
       !prCheckoutStep.includes('path: pr')) {
-    fail(errors, `${entry.relPath} must check out the PR head branch to pr/`);
+    fail(errors, `${entry.relPath} must check out the guarded PR head SHA to pr/`);
   }
   if (/persist-credentials:\s*true/i.test(text)) {
     fail(errors, `${entry.relPath} must not use persisted checkout credentials`);
@@ -823,6 +829,14 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const preflightSection = preflightIndex === -1 || checkoutIndex === -1
     ? ''
     : text.slice(preflightIndex, checkoutIndex);
+  if (!preflightSection.includes('gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq \'.head.sha\'') ||
+      !preflightSection.includes('current_head_sha')) {
+    fail(errors, `${entry.relPath} preflight must verify the current PR head SHA from PR metadata`);
+  }
+  if (!preflightSection.includes('"$current_head_sha" != "$HEAD_SHA"') ||
+      !preflightSection.includes('PR head changed after this workflow was queued')) {
+    fail(errors, `${entry.relPath} preflight must reject stale runs when the PR head SHA changed`);
+  }
   const requiredPreflightPathBlocks = [
     { label: '.github', token: '.github/*' },
     { label: 'repo/scripts', token: 'repo/scripts/*' },
@@ -852,6 +866,18 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const finalRecheckStep = workflowStepText(steps, 'Final pre-commit workspace recheck');
   const commitStep = workflowStepText(steps, 'Commit generated surfaces');
   const pushStep = workflowStepText(steps, 'Push generated surfaces');
+  const verifyCheckoutStep = workflowStepText(steps, 'Verify checked-out PR commit');
+  const verifyCheckoutIndex = text.indexOf('- name: Verify checked-out PR commit');
+  const syncIndex = text.indexOf('- name: Sync deterministic generated surfaces');
+
+  if (!verifyCheckoutStep.includes('/usr/bin/git -C "$PR_ROOT" rev-parse HEAD') ||
+      !verifyCheckoutStep.includes('"$checked_out_sha" != "$HEAD_SHA"') ||
+      !verifyCheckoutStep.includes('Checked-out PR commit does not match guarded head SHA')) {
+    fail(errors, `${entry.relPath} must verify the checked-out PR commit matches HEAD_SHA`);
+  }
+  if (verifyCheckoutIndex === -1 || syncIndex === -1 || !(prCheckoutIndex < verifyCheckoutIndex && verifyCheckoutIndex < syncIndex)) {
+    fail(errors, `${entry.relPath} must verify the checked-out PR commit before running sync`);
+  }
 
   const trustedWorkspaceCommands = [
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write',
@@ -921,6 +947,16 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (!text.includes('/usr/bin/git -C "$PR_ROOT" remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"') ||
       !text.includes('/usr/bin/git -C "$PR_ROOT" push origin "HEAD:${HEAD_REF}"')) {
     fail(errors, `${entry.relPath} must set push remote with the GitHub token only in the final push step`);
+  }
+  if (/\bgit\b[^\n]*\bpush\b[^\n]*(?:--force|-f\b)|(?:--force|-f\b)[^\n]*\bgit\b[^\n]*\bpush\b/.test(text)) {
+    fail(errors, `${entry.relPath} must not force push generated output`);
+  }
+  const remoteCheckIndex = pushStep.indexOf('/usr/bin/git -C "$PR_ROOT" ls-remote origin "refs/heads/${HEAD_REF}"');
+  const pushCommandIndex = pushStep.indexOf('/usr/bin/git -C "$PR_ROOT" push origin "HEAD:${HEAD_REF}"');
+  if (remoteCheckIndex === -1 || pushCommandIndex === -1 || remoteCheckIndex > pushCommandIndex ||
+      !pushStep.includes('"$remote_head_sha" != "$HEAD_SHA"') ||
+      !pushStep.includes('PR branch moved after guarded checkout')) {
+    fail(errors, `${entry.relPath} final push must verify the PR branch still points to HEAD_SHA before pushing`);
   }
 }
 
