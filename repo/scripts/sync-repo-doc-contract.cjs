@@ -4,7 +4,17 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const root = process.cwd();
+function workspaceRootFromArgs(args = process.argv.slice(2)) {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--workspace') return args[i + 1] || '';
+    if (arg.startsWith('--workspace=')) return arg.slice('--workspace='.length);
+  }
+  return '';
+}
+
+const workspaceRoot = workspaceRootFromArgs();
+const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
 const partialPath = 'repo/docs/partials/source-of-truth-contract.md';
 const targets = ['README.md', 'AGENTS.md', 'for_ai/README.md'];
 const beginMarker = '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->';

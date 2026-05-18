@@ -23,10 +23,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE_REF: ${{ github.event.pull_request.base.ref }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
       HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
       REPOSITORY_FULL_NAME: ${{ github.repository }}
+      TRUSTED_ROOT: ${{ github.workspace }}/trusted
+      PR_ROOT: ${{ github.workspace }}/pr
 
     steps:
       - name: Preflight guard
@@ -87,11 +90,21 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout trusted base revision
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Checkout PR head branch
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
+          path: pr
           fetch-depth: 0
           persist-credentials: false
 
@@ -102,8 +115,8 @@ jobs:
 
       - name: Sync deterministic generated surfaces
         run: |
-          node repo/scripts/sync-repo-doc-contract.cjs --write
-          node repo/scripts/sync-toolkit-projects.cjs --write
+          node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write
+          node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write
 
       - name: Guard, stage, and snapshot generated write scope
         id: post_sync
@@ -113,9 +126,9 @@ jobs:
 
           mapfile -t dirty_files < <(
             {
-              git diff --name-only
-              git diff --name-only --cached
-              git ls-files --others --exclude-standard
+              /usr/bin/git -C "$PR_ROOT" diff --name-only
+              /usr/bin/git -C "$PR_ROOT" diff --name-only --cached
+              /usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard
             } | sort -u
           )
 
@@ -143,9 +156,9 @@ jobs:
             esac
           done
 
-          git add README.md AGENTS.md for_ai
+          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md for_ai
 
-          mapfile -t staged_files < <(git diff --cached --name-only)
+          mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           if [[ "${#staged_files[@]}" -eq 0 ]]; then
             echo "Generated toolkit surfaces are already current."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -170,18 +183,18 @@ jobs:
             esac
           done
 
-          expected_index_tree="$(git write-tree)"
+          expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
           echo "expected_index_tree=${expected_index_tree}" >> "$GITHUB_OUTPUT"
 
       - name: Static generated surface checks
         if: steps.post_sync.outputs.has_changes == 'true'
         run: |
-          node repo/scripts/sync-repo-doc-contract.cjs --check
-          node repo/scripts/sync-toolkit-projects.cjs --check
-          node repo/scripts/validate-toolkit.cjs
-          git diff --cached --check
-          git diff --check
+          node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check
+          node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check
+          node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"
+          /usr/bin/git -C "$PR_ROOT" diff --cached --check
+          /usr/bin/git -C "$PR_ROOT" diff --check
 
       - name: Final pre-commit workspace recheck
         if: steps.post_sync.outputs.has_changes == 'true'
@@ -191,26 +204,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          untracked_files="$(git ls-files --others --exclude-standard)"
+          untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"
           if [[ -n "$untracked_files" ]]; then
             echo "::error::Untracked files appeared after the post-sync guard."
             echo "$untracked_files"
             exit 1
           fi
 
-          if ! git diff --quiet; then
+          if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then
             echo "::error::Unstaged tracked changes appeared after the post-sync guard."
-            git diff --name-only
+            /usr/bin/git -C "$PR_ROOT" diff --name-only
             exit 1
           fi
 
-          current_index_tree="$(git write-tree)"
+          current_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"
           if [[ "$current_index_tree" != "${EXPECTED_INDEX_TREE}" ]]; then
             echo "::error::Staged generated output changed after the post-sync guard."
             exit 1
           fi
 
-          mapfile -t staged_files < <(git diff --cached --name-only)
+          mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           for path in "${staged_files[@]}"; do
             case "$path" in
               _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
@@ -236,9 +249,9 @@ jobs:
           set -euo pipefail
           unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND
           export PATH="/usr/bin:/bin"
-          /usr/bin/git config user.name "github-actions[bot]"
-          /usr/bin/git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          /usr/bin/git commit --no-verify -m "chore: sync generated toolkit surfaces"
+          /usr/bin/git -C "$PR_ROOT" config user.name "github-actions[bot]"
+          /usr/bin/git -C "$PR_ROOT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          /usr/bin/git -C "$PR_ROOT" commit --no-verify -m "chore: sync generated toolkit surfaces"
 
       - name: Push generated surfaces
         if: steps.post_sync.outputs.has_changes == 'true'
@@ -249,5 +262,5 @@ jobs:
           set -euo pipefail
           unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND
           export PATH="/usr/bin:/bin"
-          /usr/bin/git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"
-          /usr/bin/git push origin "HEAD:${HEAD_REF}"
+          /usr/bin/git -C "$PR_ROOT" remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"
+          /usr/bin/git -C "$PR_ROOT" push origin "HEAD:${HEAD_REF}"

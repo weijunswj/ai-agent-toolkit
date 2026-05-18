@@ -5,7 +5,17 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const root = process.cwd();
+function workspaceRootFromArgs(args = process.argv.slice(2)) {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--workspace') return args[i + 1] || '';
+    if (arg.startsWith('--workspace=')) return arg.slice('--workspace='.length);
+  }
+  return '';
+}
+
+const workspaceRoot = workspaceRootFromArgs();
+const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 const projectRoot = '_projects';
 const approvedOutputPrefixes = ['for_ai/skills/', 'for_ai/mcp/', 'for_ai/templates/', 'for_ai/packs/', 'for_ai/registry/', 'for_ai/playbooks/', 'for_ai/tools/'];

@@ -7,7 +7,17 @@ const docContractSync = require('./sync-repo-doc-contract.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const projectSync = require('./sync-toolkit-projects.cjs');
 
-const root = process.cwd();
+function workspaceRootFromArgs(args = process.argv.slice(2)) {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--workspace') return args[i + 1] || '';
+    if (arg.startsWith('--workspace=')) return arg.slice('--workspace='.length);
+  }
+  return '';
+}
+
+const workspaceRoot = workspaceRootFromArgs();
+const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
 const registryYamlText = 'reg' + 'istry/*.' + 'yaml';
 const packYamlText = 'pack.' + 'yaml';
 
@@ -745,8 +755,26 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
 
   const preflightIndex = text.indexOf('- name: Preflight guard');
   const checkoutIndex = text.indexOf('uses: actions/checkout@v4');
+  const trustedCheckoutIndex = text.indexOf('- name: Checkout trusted base revision');
+  const prCheckoutIndex = text.indexOf('- name: Checkout PR head branch');
   if (preflightIndex === -1 || checkoutIndex === -1 || checkoutIndex < preflightIndex) {
-    fail(errors, `${entry.relPath} must run preflight before checking out the PR branch`);
+    fail(errors, `${entry.relPath} must run preflight before any checkout`);
+  }
+  if (trustedCheckoutIndex === -1 || prCheckoutIndex === -1 || trustedCheckoutIndex < preflightIndex || prCheckoutIndex < preflightIndex) {
+    fail(errors, `${entry.relPath} must check out trusted base and PR workspaces only after preflight`);
+  }
+  const steps = workflowStepBlocks(text);
+  const trustedCheckoutStep = workflowStepText(steps, 'Checkout trusted base revision');
+  const prCheckoutStep = workflowStepText(steps, 'Checkout PR head branch');
+  if (!trustedCheckoutStep.includes('repository: ${{ github.repository }}') ||
+      !trustedCheckoutStep.includes('ref: ${{ github.event.pull_request.base.sha }}') ||
+      !trustedCheckoutStep.includes('path: trusted')) {
+    fail(errors, `${entry.relPath} must check out the trusted base SHA to trusted/`);
+  }
+  if (!prCheckoutStep.includes('repository: ${{ github.event.pull_request.head.repo.full_name }}') ||
+      !prCheckoutStep.includes('ref: ${{ github.event.pull_request.head.ref }}') ||
+      !prCheckoutStep.includes('path: pr')) {
+    fail(errors, `${entry.relPath} must check out the PR head branch to pr/`);
   }
   if (/persist-credentials:\s*true/i.test(text)) {
     fail(errors, `${entry.relPath} must not use persisted checkout credentials`);
@@ -761,12 +789,20 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (apiIndex === -1 || apiIndex > checkoutIndex || !text.includes('pulls/${PR_NUMBER}/files') || !text.includes("--jq '.[].filename'")) {
     fail(errors, `${entry.relPath} must query PR changed files before checkout`);
   }
-  const steps = workflowStepBlocks(text);
   for (const step of steps) {
     const hasToken = step.text.includes('${{ github.token }}');
     if (hasToken && !['Preflight guard', 'Push generated surfaces'].includes(step.name)) {
       fail(errors, `${entry.relPath} must expose github.token only to preflight and final push steps`);
     }
+  }
+  if (/^\s*node\s+repo\/scripts\//m.test(text)) {
+    fail(errors, `${entry.relPath} must not execute maintenance scripts from the default or PR workspace`);
+  }
+  if (/\$PR_ROOT\/repo\/scripts\//.test(text)) {
+    fail(errors, `${entry.relPath} must not execute maintenance scripts from the PR workspace`);
+  }
+  if (/(^|\s)(?:\/usr\/bin\/)?git\s+(?!-C\s+"\$PR_ROOT")/m.test(text)) {
+    fail(errors, `${entry.relPath} git commands must explicitly target the PR workspace with /usr/bin/git -C "$PR_ROOT"`);
   }
   if (/\bnpm\s+run\s+validate:all\b/.test(text)) {
     fail(errors, `${entry.relPath} must not run npm run validate:all in the privileged writeback workflow`);
@@ -799,9 +835,9 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   if (!text.includes('Forbidden post-sync change outside generated output scope') ||
-      !/git\s+diff\s+--name-only/.test(text) ||
-      !/git\s+diff\s+--name-only\s+--cached/.test(text) ||
-      !/git\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
+      !/git\s+-C\s+"\$PR_ROOT"\s+diff\s+--name-only/.test(text) ||
+      !/git\s+-C\s+"\$PR_ROOT"\s+diff\s+--name-only\s+--cached/.test(text) ||
+      !/git\s+-C\s+"\$PR_ROOT"\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
     fail(errors, `${entry.relPath} missing post-sync changed-path validation`);
   }
   if (!text.includes('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)')) {
@@ -817,7 +853,20 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const commitStep = workflowStepText(steps, 'Commit generated surfaces');
   const pushStep = workflowStepText(steps, 'Push generated surfaces');
 
-  if (!postSyncStep || !postSyncStep.includes('expected_index_tree="$(git write-tree)"') || !postSyncStep.includes('expected_index_tree=${expected_index_tree}')) {
+  const trustedWorkspaceCommands = [
+    'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write',
+    'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write',
+    'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check',
+    'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check',
+    'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"'
+  ];
+  for (const command of trustedWorkspaceCommands) {
+    if (!text.includes(command)) {
+      fail(errors, `${entry.relPath} must run trusted maintenance scripts with --workspace "$PR_ROOT"`);
+    }
+  }
+
+  if (!postSyncStep || !postSyncStep.includes('expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"') || !postSyncStep.includes('expected_index_tree=${expected_index_tree}')) {
     fail(errors, `${entry.relPath} must snapshot the staged index after the post-sync guard`);
   }
   const staticChecksIndex = text.indexOf('- name: Static generated surface checks');
@@ -827,35 +876,35 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       !(staticChecksIndex < finalRecheckIndex && finalRecheckIndex < commitIndex)) {
     fail(errors, `${entry.relPath} must recheck the workspace and staged index after validation and before commit`);
   }
-  if (!finalRecheckStep.includes('git ls-files --others --exclude-standard')) {
+  if (!finalRecheckStep.includes('/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard')) {
     fail(errors, `${entry.relPath} final recheck must reject untracked files before commit`);
   }
-  if (!finalRecheckStep.includes('git diff --quiet')) {
+  if (!finalRecheckStep.includes('/usr/bin/git -C "$PR_ROOT" diff --quiet')) {
     fail(errors, `${entry.relPath} final recheck must reject unstaged tracked changes before commit`);
   }
-  if (!finalRecheckStep.includes('current_index_tree="$(git write-tree)"') ||
+  if (!finalRecheckStep.includes('current_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"') ||
       !finalRecheckStep.includes('Staged generated output changed after the post-sync guard') ||
       !finalRecheckStep.includes('"$current_index_tree" != "${EXPECTED_INDEX_TREE}"')) {
     fail(errors, `${entry.relPath} final recheck must compare the staged index tree snapshot`);
   }
-  if (!finalRecheckStep.includes('git diff --cached --name-only') ||
+  if (!finalRecheckStep.includes('/usr/bin/git -C "$PR_ROOT" diff --cached --name-only') ||
       !finalRecheckStep.includes('README.md|AGENTS.md|for_ai/*)') ||
       !finalRecheckStep.includes('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)')) {
     fail(errors, `${entry.relPath} final recheck must reject staged paths outside generated output scope`);
   }
-  if (!staticChecksStep.includes('node repo/scripts/sync-repo-doc-contract.cjs --check') ||
-      !staticChecksStep.includes('node repo/scripts/sync-toolkit-projects.cjs --check') ||
-      !staticChecksStep.includes('node repo/scripts/validate-toolkit.cjs') ||
-      !staticChecksStep.includes('git diff --cached --check') ||
-      !staticChecksStep.includes('git diff --check')) {
+  if (!staticChecksStep.includes('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check') ||
+      !staticChecksStep.includes('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check') ||
+      !staticChecksStep.includes('node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"') ||
+      !staticChecksStep.includes('/usr/bin/git -C "$PR_ROOT" diff --cached --check') ||
+      !staticChecksStep.includes('/usr/bin/git -C "$PR_ROOT" diff --check')) {
     fail(errors, `${entry.relPath} must run only protected static generated-surface checks before commit`);
   }
 
-  const gitAddLines = (text.match(/^\s*git add .+$/gm) || []).map((line) => line.trim());
-  if (gitAddLines.length !== 1 || gitAddLines[0] !== 'git add README.md AGENTS.md for_ai') {
+  const gitAddLines = (text.match(/^\s*(?:\/usr\/bin\/)?git(?:\s+-C\s+"\$PR_ROOT")?\s+add .+$/gm) || []).map((line) => line.trim());
+  if (gitAddLines.length !== 1 || gitAddLines[0] !== '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md for_ai') {
     fail(errors, `${entry.relPath} must commit only approved generated output paths`);
   }
-  if (commitStep.includes('git add ')) {
+  if (/git(?:\s+-C\s+"\$PR_ROOT")?\s+add\b/.test(commitStep)) {
     fail(errors, `${entry.relPath} commit step must not run git add`);
   }
   const dangerousGitEnvUnset = 'unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND';
@@ -866,11 +915,11 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (!pushStep.includes(dangerousGitEnvUnset) || !pushStep.includes(safePathExport)) {
     fail(errors, `${entry.relPath} push step must reset dangerous git environment state`);
   }
-  if (!/\/usr\/bin\/git\s+commit\s+--no-verify\s+-m\s+"chore: sync generated toolkit surfaces"/.test(text)) {
+  if (!/\/usr\/bin\/git\s+-C\s+"\$PR_ROOT"\s+commit\s+--no-verify\s+-m\s+"chore: sync generated toolkit surfaces"/.test(text)) {
     fail(errors, `${entry.relPath} must use git commit --no-verify`);
   }
-  if (!text.includes('/usr/bin/git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"') ||
-      !text.includes('/usr/bin/git push origin "HEAD:${HEAD_REF}"')) {
+  if (!text.includes('/usr/bin/git -C "$PR_ROOT" remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY_FULL_NAME}.git"') ||
+      !text.includes('/usr/bin/git -C "$PR_ROOT" push origin "HEAD:${HEAD_REF}"')) {
     fail(errors, `${entry.relPath} must set push remote with the GitHub token only in the final push step`);
   }
 }
