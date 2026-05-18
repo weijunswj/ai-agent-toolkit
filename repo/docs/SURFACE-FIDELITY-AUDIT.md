@@ -2,6 +2,7 @@
 
 Date: 2026-05-18
 Branch: `codex/surface-fidelity-audit`
+Latest update: 2026-05-19 (`codex/review-curated-playbook-boundaries`)
 
 ## Executive summary
 
@@ -48,15 +49,15 @@ Summary counts from `npm run audit:surfaces:check`:
 
 - 107 expanded recipe outputs classified.
 - 49 `main_full_fidelity` outputs.
-- 13 `curated_index` outputs.
+- 15 `curated_index` outputs, including short reviewed overviews/safety wrappers.
 - 5 `curated_metadata` outputs.
 - 3 `curated_router` outputs.
 - 15 `curated_shim` outputs.
 - 3 `curated_spec` outputs.
 - 17 `linked_exception` outputs.
-- 2 `suspicious_curated_runtime` outputs.
+- 0 `suspicious_curated_runtime` outputs.
 - 0 `suspicious_main_adapter` outputs.
-- 6 curated-directory heuristic findings.
+- 3 curated-directory heuristic findings.
 
 Confirmed violations:
 
@@ -65,9 +66,8 @@ Confirmed violations:
 
 Suspected violations:
 
-- `skills/n8n-workflow-sync/references/n8n/workflow-sync.md` is generated from `_projects/n8n/workflow-templates/curated_output_for_ai/playbooks/workflow-sync.md`. It is a concise safety playbook, but the output path is a skill reference and the curated source contains import/export runtime markers. Follow-up should decide whether it is an allowed safety wrapper or should move to `_main`.
-- `skills/secure-cicd-installer/references/secure-cicd-installer.md` is generated from `_projects/cicd/secure-installer/curated_output_for_ai/playbooks/secure-cicd-installer.md`. It is useful as a reviewed entrypoint, but the output path is a skill reference and the curated source contains setup and approval/runtime markers. Follow-up should either classify it as an adapter/overview more explicitly or publish full runtime detail from `_main`.
-- Curated directory heuristics also flag `_projects/n8n/local-setup/curated_output_for_ai/playbooks/local-setup.md`, `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md`, `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md`, `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md`, and the two playbooks above. These are not deleted or moved here because the findings are heuristic and some files may be allowed overview/safety wrapper material.
+- No `curated_output_for_ai/playbooks/**` recipes remain. The former workflow-sync and Secure CI/CD playbooks were reclassified as short reviewed overviews/safety wrappers and moved to `curated_output_for_ai/overviews/**`.
+- Curated directory heuristics still flag `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md`, `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md`, and `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md`. These platform references are outside this focused playbook cleanup and remain follow-up candidates for clearer overview wording or exact source routing.
 
 Allowed curated-output categories:
 
@@ -80,11 +80,36 @@ Allowed curated-output categories:
 
 Recommended fixes:
 
-- In follow-up PRs, review each `suspicious_curated_runtime` recipe and either reclassify the file as an explicit overview/safety wrapper or move full runtime material to `_main` with `copy`, `extract`, or `concat`.
 - Decide whether the platform overview files under `curated_output_for_ai/references/ai-agent-platforms/` should carry clearer overview wording so future audits can distinguish them from setup guides.
 - Keep the existing pack-installed undeclared and Secure CI/CD template findings in the published-surface cleanup sequence rather than folding them into this focused PR.
 
-Follow-up PRs are needed. This PR intentionally adds deterministic audit coverage and baselines the current known/deferred findings instead of bulk-moving curated content.
+Follow-up PRs are still needed for non-playbook findings. The playbook-specific recipe findings are resolved.
+
+## Playbook Boundary Review
+
+Conclusion: `playbooks/` is not needed as a default repo concept. The narrow allowed meaning is only a short reviewed operating overview, routing guide, or safety wrapper that does not replace required runtime instructions. Existing runtime-critical material should publish from `_main` into `references/` or `templates/` with exact `copy`, `extract`, or `concat` recipes.
+
+Files reviewed:
+
+| Source file | Published output(s) | Current recipe before review | Classification | Reason | Recommended action |
+| --- | --- | --- | --- | --- | --- |
+| `_projects/n8n/workflow-templates/curated_output_for_ai/playbooks/workflow-sync.md` | `skills/n8n-workflow-sync/references/n8n/workflow-sync.md` | `curated`, `fidelity: exact` | `allowed_overview_or_safety_wrapper` | Short safety wrapper for credential-safe repo/live workflow sync; helper detail remains in local references and templates. | Moved to `curated_output_for_ai/overviews/workflow-sync.md`, changed recipe notes to call it an overview/safety wrapper, and regenerated the published reference. |
+| `_projects/cicd/secure-installer/curated_output_for_ai/playbooks/secure-cicd-installer.md` | `skills/secure-cicd-installer/references/secure-cicd-installer.md` | `curated`, `fidelity: exact` | `allowed_overview_or_safety_wrapper` | Short CI/CD safety wrapper and router; the full copyable CI/CD prompt is already extracted from `_main/README.md`. | Moved to `curated_output_for_ai/overviews/secure-cicd-installer.md`, changed recipe notes to call it an overview/safety wrapper, and regenerated the published reference. |
+| `_projects/n8n/local-setup/curated_output_for_ai/playbooks/local-setup.md` | None | None | `obsolete_or_duplicate` | Unpublished curated source that duplicated the shape of full-fidelity local setup references now copied from `_main`. | Removed the unused curated file. No preserved `_main` source was deleted. |
+
+Files moved or removed:
+
+- Moved workflow-sync and Secure CI/CD curated sources from `curated_output_for_ai/playbooks/` to `curated_output_for_ai/overviews/`.
+- Removed the unused local-setup curated playbook source.
+
+Files intentionally kept:
+
+- `mcp/registry/playbooks.registry.json` remains because it is a manual legacy discovery registry over existing reference paths. It is documented as pending cleanup and must not be treated as a source folder or proof that full runtime instructions belong under `playbooks/`.
+
+Remaining follow-up actions:
+
+- Decide whether `mcp/registry/playbooks.registry.json` should be renamed or replaced by a references-oriented registry in a later MCP registry cleanup.
+- Review the remaining curated-directory findings for ChatGPT web, Claude web, and Codex platform references.
 
 ## n8n local setup fidelity pass
 

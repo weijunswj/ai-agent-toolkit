@@ -20,7 +20,7 @@ _projects/<category>/<project>/
 
 - `_projects/` keeps reusable source projects visible near the top of the repo.
 - `_main/` preserves actual project/source files with original names and structure where practical.
-- `curated_output_for_ai/` is optional reviewed source for AI-facing published material such as skills, MCP docs, playbooks, template docs, and pack manifests.
+- `curated_output_for_ai/` is optional reviewed source for AI-facing published material such as skills, MCP docs, short overviews or safety wrappers, template docs, and pack manifests.
 - `_generated/` is optional preview output only and is not source of truth.
 
 Do not use `original/` or `derived/` as standard folder names. Do not create empty curated folders just to satisfy a schema. Do not add curated copies unless a declared sync recipe consumes them.
@@ -42,6 +42,26 @@ Use `curated_output_for_ai/` for reviewed adapter material such as:
 Do not use `curated_output_for_ai/` as a lossy replacement for required runtime instructions.
 
 If losing detail would break usefulness, publish from `_main` with an exact `copy`, `extract`, or `concat` recipe.
+
+## Playbook Boundary
+
+Do not use `playbooks/` as a default home for full working instructions.
+
+A playbook may exist only when it is a short reviewed operating overview, routing guide, or safety wrapper. It must not replace required runtime instructions.
+
+If a document contains full setup steps, command sequences, troubleshooting, copyable prompts, templates, import/export flows, or other runtime-critical instructions, publish it from `_projects/**/_main/**` using exact `copy`, `extract`, or `concat`.
+
+Prefer these homes instead:
+
+- Full runtime docs: `skills/<skill>/references/`
+- Copyable prompts/templates: `skills/<skill>/templates/`
+- Skill routers: `skills/<skill>/SKILL.md`
+- Skill install/use docs: `skills/<skill>/README.md`
+- MCP notes/specs: `mcp/`
+- Pack metadata: `skills/<skill>/packs/`
+- Compatibility shims: `curated_output_for_ai/reference-link-shims/`
+
+Existing `curated_output_for_ai/playbooks/` files must be classified as overview/safety-wrapper, migrated to a clearer location, or replaced by exact `_main` recipes.
 
 ## Published Surfaces
 

@@ -29,10 +29,10 @@
     },
     {
       "kind": "curated",
-      "source": "curated_output_for_ai/playbooks/workflow-sync.md",
+      "source": "curated_output_for_ai/overviews/workflow-sync.md",
       "output": "skills/n8n-workflow-sync/references/n8n/workflow-sync.md",
-      "notes": "Skill-local reference generated from project-owned curated AI output.",
-      "fidelity": "exact"
+      "notes": "Short skill-local operating overview and safety wrapper generated from project-owned curated AI output; full runtime helper detail lives in local references and templates.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",

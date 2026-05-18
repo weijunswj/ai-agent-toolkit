@@ -6,9 +6,9 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # AI Agent Platforms
 
-These playbooks explain how each AI platform should consume this toolkit.
+These platform references explain how each AI platform should consume this toolkit.
 
-| Playbook | Use when |
+| Reference | Use when |
 | --- | --- |
 | [codex.md](codex.md) | Setting up Codex rules, skills, and n8n MCP templates. |
 | [claude-code.md](claude-code.md) | Setting up Claude Code skills, rules, and n8n MCP templates. |

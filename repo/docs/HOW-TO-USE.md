@@ -75,7 +75,7 @@ Until the installer MCP exists, use packs as review checklists:
 
 Use:
 
-- [Codex playbook](../../skills/n8n-local-setup/references/ai-agent-platforms/codex.md)
+- [Codex reference](../../skills/n8n-local-setup/references/ai-agent-platforms/codex.md)
 - [Codex agent rules](../../skills/n8n-local-setup/templates/agent-rules/AGENTS.md)
 - [Codex MCP config](../../skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md)
 - [Local n8n setup source module](../../_projects/n8n/local-setup/)
@@ -86,7 +86,7 @@ Keep live n8n tokens in user environment variables, not repo files.
 
 Use:
 
-- [Claude Code playbook](../../skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md)
+- [Claude Code reference](../../skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md)
 - [Claude Code agent rules](../../skills/n8n-local-setup/templates/agent-rules/CLAUDE.md)
 - [Claude Code MCP config](../../skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md)
 - [Claude Code source guide](../../_projects/n8n/local-setup/_main/5.%20extra%20-%20claude%20code%20integration.md)

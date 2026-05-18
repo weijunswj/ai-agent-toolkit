@@ -1,7 +1,7 @@
 <!--
 Generated from toolkit curated output for AI. Do not edit directly.
 Project: cicd.secure-installer
-Source: _projects/cicd/secure-installer/curated_output_for_ai/playbooks/secure-cicd-installer.md
+Source: _projects/cicd/secure-installer/curated_output_for_ai/overviews/secure-cicd-installer.md
 Update the curated output and run sync.
 -->
 <!--
@@ -10,11 +10,15 @@ Project: cicd.secure-installer
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-# Secure CI/CD Installer
+# Secure CI/CD Installer Overview
 
 ## Goal
 
 Help an AI coding agent create a security-first CI/CD setup in a consumer repo while keeping the user in control of commits, pushes, PRs, deployment, and secrets.
+
+## Boundary
+
+This is a short reviewed operating overview and safety wrapper. It is not the full runtime guide.
 
 ## Required Behavior
 

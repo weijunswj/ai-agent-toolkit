@@ -62,21 +62,19 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     'curated_metadata',
     'curated_shim',
     'curated_spec',
-    'linked_exception',
-    'suspicious_curated_runtime'
+    'linked_exception'
   ]) {
     assert.ok(report.boundaryClassifications[classification] > 0, classification);
   }
-  const findings = report.issues.boundaryRecipeFindings.map((entry) => entry.path);
-  assert.ok(findings.includes('skills/n8n-workflow-sync/references/n8n/workflow-sync.md'));
-  assert.ok(findings.includes('skills/secure-cicd-installer/references/secure-cicd-installer.md'));
+  assert.equal(report.boundaryClassifications.suspicious_curated_runtime || 0, 0);
+  assert.deepEqual(report.issues.boundaryRecipeFindings, []);
 });
 
 test('audit-published-surfaces inspects curated directory contents', () => {
   const report = runAuditJson();
   const findings = report.issues.curatedDirectoryFindings.map((entry) => entry.path);
-  assert.ok(findings.includes('_projects/n8n/workflow-templates/curated_output_for_ai/playbooks/workflow-sync.md'));
-  assert.ok(findings.includes('_projects/cicd/secure-installer/curated_output_for_ai/playbooks/secure-cicd-installer.md'));
+  assert.equal(findings.some((entry) => entry.includes('/curated_output_for_ai/playbooks/')), false);
+  assert.ok(findings.includes('_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md'));
 });
 
 test('audit-published-surfaces detects new undeclared published files in a temp copy', () => {
