@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Branch: `codex/surface-fidelity-audit`
-Latest update: 2026-05-19 (`codex/review-curated-playbook-boundaries`)
+Latest update: 2026-05-19 (`codex/review-n8n-platform-overviews`)
 
 ## Executive summary
 
@@ -57,7 +57,7 @@ Summary counts from `npm run audit:surfaces:check`:
 - 17 `linked_exception` outputs.
 - 0 `suspicious_curated_runtime` outputs.
 - 0 `suspicious_main_adapter` outputs.
-- 3 curated-directory heuristic findings.
+- 0 curated-directory heuristic findings.
 
 Confirmed violations:
 
@@ -67,7 +67,7 @@ Confirmed violations:
 Suspected violations:
 
 - No `curated_output_for_ai/playbooks/**` recipes remain. The former workflow-sync and Secure CI/CD playbooks were reclassified as short reviewed overviews/safety wrappers and moved to `curated_output_for_ai/overviews/**`.
-- Curated directory heuristics still flag `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md`, `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md`, and `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md`. These platform references are outside this focused playbook cleanup and remain follow-up candidates for clearer overview wording or exact source routing.
+- None for the n8n platform overview/router files reviewed in this pass. They remain short curated platform notes and route to full-fidelity local references/templates.
 
 Allowed curated-output categories:
 
@@ -80,10 +80,31 @@ Allowed curated-output categories:
 
 Recommended fixes:
 
-- Decide whether the platform overview files under `curated_output_for_ai/references/ai-agent-platforms/` should carry clearer overview wording so future audits can distinguish them from setup guides.
 - Keep the existing pack-installed undeclared and Secure CI/CD template findings in the published-surface cleanup sequence rather than folding them into this focused PR.
 
 Follow-up PRs are still needed for non-playbook findings. The playbook-specific recipe findings are resolved.
+
+## n8n Platform Reference Boundary Review
+
+Classification rule: a platform overview may stay curated only when it is a short router or safety wrapper that does not replace required runtime setup instructions.
+
+Files reviewed:
+
+| Source file | Published output | Classification | Outcome | Reason |
+| --- | --- | --- | --- | --- |
+| `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md` | `skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md` | `allowed_platform_overview` | Stayed curated and was rewritten as a clearer platform overview. | It explains ChatGPT web limitations and manual-use routing, then points to full local references/templates. |
+| `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md` | `skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md` | `allowed_platform_overview` | Stayed curated and was rewritten as a clearer platform overview. | It explains Claude web limitations and routes to the full Claude Code Desktop guide plus local setup references. |
+| `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md` | `skills/n8n-local-setup/references/ai-agent-platforms/codex.md` | `allowed_platform_overview` | Stayed curated and was rewritten as a platform router. | It routes to `references/n8n/local-setup.md`, `templates/agent-rules/AGENTS.md`, and `templates/mcp-configs/codex-mcp-config.md` instead of duplicating runtime setup detail. |
+
+Why this follows [Project Module Standard](PROJECT-MODULE-STANDARD.md):
+
+- Full runtime guides and templates remain exact `_main` `copy` or `concat` outputs.
+- The reviewed curated files are short platform overview/router notes with an explicit `## Boundary` section.
+- The audit exception is narrow: explicit platform overview/router files may pass only when they are not large and do not contain many code fences or a large guide body.
+
+Remaining follow-up actions:
+
+- None for these three n8n platform references.
 
 ## Playbook Boundary Review
 

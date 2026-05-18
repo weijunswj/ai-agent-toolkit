@@ -10,7 +10,7 @@ These platform references explain how each AI platform should consume this toolk
 
 | Reference | Use when |
 | --- | --- |
-| [codex.md](codex.md) | Setting up Codex rules, skills, and n8n MCP templates. |
+| [codex.md](codex.md) | Codex platform router for local rules, references, and n8n MCP templates. |
 | [claude-code.md](claude-code.md) | Setting up Claude Code skills, rules, and n8n MCP templates. |
 | [chatgpt-web.md](chatgpt-web.md) | Using instruction-only skills in ChatGPT web. |
 | [claude-web.md](claude-web.md) | Using instruction-only skills in Claude web. |

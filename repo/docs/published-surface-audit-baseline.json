@@ -13,7 +13,7 @@
     "duplicateProjectContentGroups": 0,
     "boundaryRecipeOutputs": 107,
     "boundaryRecipeFindings": 0,
-    "curatedDirectoryFindings": 3
+    "curatedDirectoryFindings": 0
   },
   "issueKeys": {
     "undeclaredPublishedFiles": [
@@ -117,10 +117,6 @@
     ],
     "duplicateProjectContentGroups": [],
     "boundaryRecipeFindings": [],
-    "curatedDirectoryFindings": [
-      "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md: runtime markers: Setup; path looks like guide, setup, workflow, prompt, template, reference, or playbook",
-      "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md: many numbered setup steps; runtime markers: Setup; path looks like guide, setup, workflow, prompt, template, reference, or playbook",
-      "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md: many numbered setup steps; runtime markers: Setup; path looks like guide, setup, workflow, prompt, template, reference, or playbook"
-    ]
+    "curatedDirectoryFindings": []
   }
 }

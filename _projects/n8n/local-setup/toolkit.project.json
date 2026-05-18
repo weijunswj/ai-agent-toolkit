@@ -101,7 +101,7 @@
       "kind": "curated",
       "source": "curated_output_for_ai/references/ai-agent-platforms/codex.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
-      "notes": "Codex platform overview generated from project-owned curated AI output.",
+      "notes": "Codex platform router generated from project-owned curated AI output.",
       "fidelity": "reviewed_entrypoint"
     },
     {
