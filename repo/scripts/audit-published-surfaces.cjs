@@ -135,7 +135,10 @@ function outputEntry(project, output, relPath, extras = {}) {
     sources: extras.sources || [],
     recipeOutput: output.output,
     notes: output.notes || '',
-    fidelity: output.fidelity || ''
+    fidelity: output.fidelity || '',
+    sharedSurface: output.shared_surface === true,
+    surfaceOwnerProject: output.surface_owner_project || '',
+    sharedSurfaceReason: output.shared_surface_reason || ''
   };
 }
 
@@ -266,29 +269,68 @@ function projectOwners(projects) {
   return { bySkillRoot, byMcpPath };
 }
 
-function crossOwnedOutputs(projects, declaredEntries) {
+function crossOwnedEntry(entry, target, root) {
+  return {
+    projectId: entry.projectId,
+    projectPath: entry.projectPath,
+    targetProjectId: target.id,
+    targetSkill: root,
+    output: entry.path,
+    kind: entry.kind
+  };
+}
+
+function crossOwnershipOutputs(projects, declaredEntries) {
   const owners = projectOwners(projects);
-  return declaredEntries
-    .filter((entry) => {
-      const root = skillRoot(entry.path);
-      if (!root) return false;
-      const target = owners.bySkillRoot.get(root);
-      if (!target) return false;
-      return target.id !== entry.projectId;
-    })
-    .map((entry) => {
-      const root = skillRoot(entry.path);
-      const target = owners.bySkillRoot.get(root);
-      return {
-        projectId: entry.projectId,
-        projectPath: entry.projectPath,
-        targetProjectId: target.id,
-        targetSkill: root,
-        output: entry.path,
-        kind: entry.kind
-      };
-    })
-    .sort((a, b) => `${a.projectId}:${a.output}`.localeCompare(`${b.projectId}:${b.output}`));
+  const crossOwned = [];
+  const sharedSurface = [];
+  const sharedSurfaceMetadataFindings = [];
+
+  for (const entry of declaredEntries) {
+    const root = skillRoot(entry.path);
+    if (!root) continue;
+    const target = owners.bySkillRoot.get(root);
+    if (!target || target.id === entry.projectId) continue;
+
+    const base = crossOwnedEntry(entry, target, root);
+    const missing = [];
+    const metadataPresent = entry.sharedSurface || entry.surfaceOwnerProject || entry.sharedSurfaceReason;
+    if (!entry.sharedSurface) missing.push('shared_surface must be true');
+    if (!entry.surfaceOwnerProject) {
+      missing.push('surface_owner_project is required');
+    } else if (entry.surfaceOwnerProject !== target.id) {
+      missing.push(`surface_owner_project must be ${target.id}`);
+    }
+    if (!entry.sharedSurfaceReason || !entry.sharedSurfaceReason.trim()) {
+      missing.push('shared_surface_reason is required');
+    }
+
+    if (!missing.length) {
+      sharedSurface.push({
+        ...base,
+        surfaceOwnerProject: entry.surfaceOwnerProject,
+        sharedSurfaceReason: entry.sharedSurfaceReason
+      });
+      continue;
+    }
+
+    crossOwned.push(base);
+    if (metadataPresent) {
+      sharedSurfaceMetadataFindings.push({
+        ...base,
+        surfaceOwnerProject: entry.surfaceOwnerProject,
+        sharedSurfaceReason: entry.sharedSurfaceReason,
+        reasons: missing
+      });
+    }
+  }
+
+  const sortKey = (entry) => `${entry.projectId}:${entry.output}`;
+  return {
+    crossOwned: crossOwned.sort((a, b) => sortKey(a).localeCompare(sortKey(b))),
+    sharedSurface: sharedSurface.sort((a, b) => sortKey(a).localeCompare(sortKey(b))),
+    sharedSurfaceMetadataFindings: sharedSurfaceMetadataFindings.sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
+  };
 }
 
 function fileSize(root, relPath) {
@@ -684,7 +726,7 @@ function buildAudit(root) {
 
   const undeclaredPublishedFiles = files.filter((file) => !declared.byPath.has(file.path));
   const packInstalledUndeclared = files.filter((file) => file.classification === 'pack_installed_undeclared');
-  const crossOwned = crossOwnedOutputs(projects, declared.entries);
+  const crossOwnership = crossOwnershipOutputs(projects, declared.entries);
   const suspicious = suspiciousPublishedSurfaces(root, projects, declared.entries, undeclaredPublishedFiles.map((file) => file.path));
   const duplicateGroups = duplicateProjectContentGroups(root);
   const boundaryRecipeEntries = boundaryRecipes(root, declared.entries);
@@ -706,7 +748,9 @@ function buildAudit(root) {
       packInstalledFiles: packInstalled.byPath.size,
       undeclaredPublishedFiles: undeclaredPublishedFiles.length,
       packInstalledUndeclared: packInstalledUndeclared.length,
-      crossOwnedOutputs: crossOwned.length,
+      crossOwnedOutputs: crossOwnership.crossOwned.length,
+      sharedSurfaceOutputs: crossOwnership.sharedSurface.length,
+      sharedSurfaceMetadataFindings: crossOwnership.sharedSurfaceMetadataFindings.length,
       suspiciousPublishedSurfaces: suspicious.length,
       duplicateProjectContentGroups: duplicateGroups.length,
       boundaryRecipeOutputs: boundaryRecipeEntries.length,
@@ -720,7 +764,9 @@ function buildAudit(root) {
     issues: {
       undeclaredPublishedFiles: undeclaredPublishedFiles.map(({ path, classification, packs }) => ({ path, classification, packs })).sort((a, b) => a.path.localeCompare(b.path)),
       packInstalledUndeclared: packInstalledUndeclared.map(({ path, classification, packs }) => ({ path, classification, packs })).sort((a, b) => a.path.localeCompare(b.path)),
-      crossOwnedOutputs: crossOwned,
+      crossOwnedOutputs: crossOwnership.crossOwned,
+      sharedSurfaceOutputs: crossOwnership.sharedSurface,
+      sharedSurfaceMetadataFindings: crossOwnership.sharedSurfaceMetadataFindings,
       suspiciousPublishedSurfaces: suspicious,
       duplicateProjectContentGroups: duplicateGroups,
       boundaryRecipeFindings,
@@ -738,6 +784,8 @@ function baselineFromReport(report) {
       undeclaredPublishedFiles: report.issues.undeclaredPublishedFiles.map((entry) => entry.path).sort(),
       packInstalledUndeclared: report.issues.packInstalledUndeclared.map((entry) => entry.path).sort(),
       crossOwnedOutputs: report.issues.crossOwnedOutputs.map((entry) => `${entry.projectId} -> ${entry.targetProjectId}: ${entry.output}`).sort(),
+      sharedSurfaceOutputs: report.issues.sharedSurfaceOutputs.map((entry) => `${entry.projectId} -> ${entry.targetProjectId}: ${entry.output} [${entry.sharedSurfaceReason}]`).sort(),
+      sharedSurfaceMetadataFindings: report.issues.sharedSurfaceMetadataFindings.map((entry) => `${entry.projectId} -> ${entry.targetProjectId}: ${entry.output}: ${entry.reasons.join('; ')}`).sort(),
       suspiciousPublishedSurfaces: report.issues.suspiciousPublishedSurfaces.map((entry) => `${entry.path} <= ${entry.source}: ${entry.reason}`).sort(),
       duplicateProjectContentGroups: report.issues.duplicateProjectContentGroups.map((entry) => `${entry.hash}: ${entry.files.map((file) => file.path).sort().join(' | ')}`).sort(),
       boundaryRecipeFindings: report.issues.boundaryRecipeFindings.map((entry) => `${entry.path} <= ${entry.sources.join(' + ')}: ${entry.classification}: ${entry.reasons.join('; ')}`).sort(),
@@ -771,6 +819,8 @@ function compareToBaseline(root, report) {
     ...diffKeys('undeclared published surface', current.undeclaredPublishedFiles, expected.undeclaredPublishedFiles || [], (key) => key),
     ...diffKeys('pack-installed undeclared surface', current.packInstalledUndeclared, expected.packInstalledUndeclared || [], (key) => key),
     ...diffKeys('cross-owned output', current.crossOwnedOutputs, expected.crossOwnedOutputs || [], (key) => key),
+    ...diffKeys('shared-surface output', current.sharedSurfaceOutputs, expected.sharedSurfaceOutputs || [], (key) => key),
+    ...diffKeys('shared-surface metadata finding', current.sharedSurfaceMetadataFindings, expected.sharedSurfaceMetadataFindings || [], (key) => key),
     ...diffKeys('suspicious published surface', current.suspiciousPublishedSurfaces, expected.suspiciousPublishedSurfaces || [], (key) => key),
     ...diffKeys('duplicate project content group', current.duplicateProjectContentGroups, expected.duplicateProjectContentGroups || [], (key) => key),
     ...diffKeys('boundary recipe finding', current.boundaryRecipeFindings, expected.boundaryRecipeFindings || [], (key) => key),
@@ -811,6 +861,12 @@ function renderReport(report, checkResult = null) {
   lines.push('');
   lines.push('Cross-owned outputs:');
   renderList(lines, report.issues.crossOwnedOutputs, (entry) => `${entry.projectId} -> ${entry.targetProjectId}: ${entry.output}`, 'none');
+  lines.push('');
+  lines.push('Declared shared-surface outputs:');
+  renderList(lines, report.issues.sharedSurfaceOutputs, (entry) => `${entry.projectId} -> ${entry.targetProjectId}: ${entry.output} (${entry.sharedSurfaceReason})`, 'none');
+  lines.push('');
+  lines.push('Shared-surface metadata findings:');
+  renderList(lines, report.issues.sharedSurfaceMetadataFindings, (entry) => `${entry.projectId} -> ${entry.targetProjectId}: ${entry.output} [${entry.reasons.join('; ')}]`, 'none');
   lines.push('');
   lines.push('Suspicious published surfaces:');
   renderList(lines, report.issues.suspiciousPublishedSurfaces, (entry) => `${entry.path} <= ${entry.source} (${entry.reason}; ratio ${entry.ratio})`, 'none');
