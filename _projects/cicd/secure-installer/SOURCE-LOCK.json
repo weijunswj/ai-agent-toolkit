@@ -85,70 +85,70 @@
     {
       "mode": "adapted",
       "source_path": "templates/n8n/- export-n8n-workflows-live.cmd",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd",
       "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66",
       "notes": "AI-facing helper keeps toolkit-relative command paths."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/- import-n8n-workflows-live.cmd",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd",
       "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898",
       "notes": "AI-facing helper keeps toolkit-relative command paths."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/compare-n8n-workflow-credentials.cjs",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs",
       "source_blob_sha": "e08a2877950c780602d0aa95c3fd18f895d66ed5",
       "notes": "AI-facing helper keeps toolkit-relative usage text."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/export-n8n-workflows-live.ps1",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1",
       "source_blob_sha": "7cef2a3aaa3a60f66fe4ee6c83055c459be56f65",
       "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/import-n8n-workflows-live.ps1",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1",
       "source_blob_sha": "7c124a2e2b7598bcbab3d75524ea0377008589b0",
       "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/n8n-workflow-sync-menu.ps1",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1",
       "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a",
       "notes": "AI-facing helper keeps toolkit-relative command paths."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/prepare-n8n-live-import.cjs",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs",
       "source_blob_sha": "993af3fa2d0109a3c0f96557c4a546f0051b375c",
       "notes": "AI-facing helper keeps toolkit-relative usage text."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/should-import-n8n-workflow.cjs",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs",
       "source_blob_sha": "133ad09249778e1a76ec6a6856da6a6c9f3432b1",
       "notes": "AI-facing helper keeps toolkit-relative usage text."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/sync-n8n-live-exports.cjs",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs",
       "source_blob_sha": "e1203399a67cdbee3c07657bffddeb886b6b3c43",
       "notes": "AI-facing helper keeps toolkit-relative usage text."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/validate-n8n-workflows.cjs",
-      "root_surface_path": "for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
+      "root_surface_path": "skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs",
       "source_blob_sha": "0447740b535b9babf88babd6c9ff2e508d9fa9be",
       "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules."
     },

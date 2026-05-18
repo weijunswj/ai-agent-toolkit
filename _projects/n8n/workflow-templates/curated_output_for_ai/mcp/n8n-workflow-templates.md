@@ -10,17 +10,17 @@ Project identity: `n8n.workflow-templates`
 
 ## Important Paths
 
-- Project module: [_projects/n8n/workflow-templates/](../../../_projects/n8n/workflow-templates/)
-- Preserved source files: [_projects/n8n/workflow-templates/_main/](../../../_projects/n8n/workflow-templates/_main/)
-- Workflow sync skill: [for_ai/skills/automation/n8n-workflow-sync/](../../skills/automation/n8n-workflow-sync/)
-- Sanitizer helpers: [for_ai/templates/n8n/sanitizer/](../../templates/n8n/sanitizer/)
-- Workflow policy: [for_ai/templates/n8n/workflow-policy/](../../templates/n8n/workflow-policy/)
+- Project module: [_projects/n8n/workflow-templates/](../../_projects/n8n/workflow-templates/)
+- Preserved source files: [_projects/n8n/workflow-templates/_main/](../../_projects/n8n/workflow-templates/_main/)
+- Workflow sync skill: [skills/n8n-workflow-sync/](../../skills/n8n-workflow-sync/)
+- Sanitizer helpers: [skills/n8n-workflow-sync/templates/sanitizer/](../../skills/n8n-workflow-sync/templates/sanitizer/)
+- Workflow policy: [skills/n8n-workflow-sync/templates/workflow-policy/](../../skills/n8n-workflow-sync/templates/workflow-policy/)
 
 ## Available Operations
 
 - Read project metadata and source manifests.
 - Read sanitizer and workflow-policy template sources.
-- Generate deterministic declared outputs via [repo/scripts/sync-toolkit-projects.cjs](../../../repo/scripts/sync-toolkit-projects.cjs).
+- Generate deterministic declared outputs via [repo/scripts/sync-toolkit-projects.cjs](../../repo/scripts/sync-toolkit-projects.cjs).
 
 ## Safe Writes
 

@@ -9,7 +9,10 @@ const root = process.cwd();
 function classify(filePath) {
   const lower = String(filePath || '').toLowerCase();
   const isN8nHelperTemplate =
-    lower.startsWith('for_ai/templates/n8n/') &&
+    (
+      lower.startsWith('skills/n8n-workflow-sync/templates/sync-helpers/') ||
+      lower.startsWith('skills/n8n-workflow-sync/templates/sanitizer/')
+    ) &&
     (lower.endsWith('.md') || lower.endsWith('.ps1') || lower.endsWith('.cmd') || lower.endsWith('.cjs') || lower.endsWith('.js'));
   if (isN8nHelperTemplate) return 'manual';
   if (

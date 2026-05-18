@@ -26,7 +26,7 @@ Run security checks before lint, tests, build, package, or deploy. Deployment sh
 
 ## Toolkit Materials
 
-- [Secure CI/CD prompt](../../templates/cicd/secure-cicd-prompt.md)
-- [Current CI/CD status template](../../templates/cicd/CURRENT_CICD_STATUS.template.md)
-- [Safe source update policy](../../templates/cicd/safe-source-update-policy.md)
-- [Secure CI/CD pack](../../packs/secure-cicd/pack.json)
+- [Secure CI/CD prompt](../templates/cicd/secure-cicd-prompt.md)
+- [Current CI/CD status template](../templates/cicd/CURRENT_CICD_STATUS.template.md)
+- [Safe source update policy](../templates/cicd/safe-source-update-policy.md)
+- [Secure CI/CD pack](../packs/secure-cicd/pack.json)

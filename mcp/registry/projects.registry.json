@@ -1,0 +1,165 @@
+[
+  {
+    "id": "cicd.secure-installer",
+    "category": "cicd",
+    "name": "secure-installer",
+    "title": "Secure CI/CD Installer",
+    "project": {
+      "name": "Secure CI/CD Installer",
+      "category": "cicd",
+      "summary": "Approval-gated CI/CD installer guidance, GitHub Actions hardening notes, status templates, and n8n helper scripts."
+    },
+    "surface": {
+      "publish_as": "both",
+      "skill": {
+        "status": "published",
+        "path": "skills/secure-cicd-installer",
+        "summary": "Helps an agent plan and apply secure CI/CD installer materials while keeping writes, commands, credentials, and live actions gated."
+      },
+      "mcp": {
+        "status": "published",
+        "path": "mcp/projects/secure-cicd-installer.md",
+        "summary": "Spec-only MCP notes for future deterministic CI/CD and repository checks."
+      }
+    },
+    "module_path": "_projects/cicd/secure-installer",
+    "main_path": "_projects/cicd/secure-installer/_main",
+    "root_surfaces": [
+      "mcp/projects/secure-cicd-installer.md",
+      "skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd",
+      "skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd",
+      "skills/n8n-workflow-sync/templates/sync-helpers/README.md",
+      "skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1",
+      "skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1",
+      "skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs",
+      "skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs",
+      "skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs",
+      "skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs",
+      "skills/secure-cicd-installer/README.md",
+      "skills/secure-cicd-installer/SKILL.md",
+      "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
+      "skills/secure-cicd-installer/references/secure-cicd-installer.md",
+      "skills/secure-cicd-installer/templates/cicd/README.md"
+    ]
+  },
+  {
+    "id": "design.ui-ux-pro-max",
+    "category": "design",
+    "name": "ui-ux-pro-max",
+    "title": "UI/UX Pro Max Design",
+    "project": {
+      "name": "UI/UX Pro Max Design",
+      "category": "design",
+      "summary": "Third-party-attributed UI/UX design knowledge preserved with a local-only design-system generator and a security-first frontend skill."
+    },
+    "surface": {
+      "publish_as": "both",
+      "skill": {
+        "status": "published",
+        "path": "skills/ui-ux-secure-frontend-design",
+        "summary": "Helps an agent create, review, and improve frontend UI/UX with accessibility, responsive, privacy, and security guardrails."
+      },
+      "mcp": {
+        "status": "published",
+        "path": "mcp/projects/ui-ux-pro-max.md",
+        "summary": "Spec-only MCP notes for future design-system generator and review surfaces; no runnable MCP server is shipped."
+      }
+    },
+    "module_path": "_projects/design/ui-ux-pro-max",
+    "main_path": "_projects/design/ui-ux-pro-max/_main",
+    "root_surfaces": [
+      "mcp/projects/ui-ux-pro-max.md",
+      "skills/ui-ux-secure-frontend-design/SKILL.md",
+      "skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json",
+      "skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/data",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/design_system.py"
+    ]
+  },
+  {
+    "id": "n8n.local-setup",
+    "category": "n8n",
+    "name": "local-setup",
+    "title": "Local n8n Setup",
+    "project": {
+      "name": "Local n8n Setup",
+      "category": "n8n",
+      "summary": "Preserved local n8n setup guides plus copyable agent templates for Codex, Claude Code, OpenCode, Antigravity, tunneling, and MCP configuration."
+    },
+    "surface": {
+      "publish_as": "both",
+      "skill": {
+        "status": "published",
+        "path": "skills/n8n-local-setup",
+        "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and agent-rule templates without running live actions by default."
+      },
+      "mcp": {
+        "status": "published",
+        "path": "mcp/projects/n8n-local-setup.md",
+        "summary": "Spec-only MCP notes for local n8n setup and configuration surfaces; no runnable server is shipped."
+      }
+    },
+    "module_path": "_projects/n8n/local-setup",
+    "main_path": "_projects/n8n/local-setup/_main",
+    "root_surfaces": [
+      "mcp/projects/n8n-local-setup.md",
+      "skills/n8n-local-setup/README.md",
+      "skills/n8n-local-setup/SKILL.md",
+      "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
+      "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
+      "skills/n8n-local-setup/references/n8n/local-setup.md",
+      "skills/n8n-local-setup/templates/agent-rules/AGENTS.md",
+      "skills/n8n-local-setup/templates/agent-rules/CLAUDE.md",
+      "skills/n8n-local-setup/templates/agent-rules/GEMINI.md",
+      "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md",
+      "skills/n8n-local-setup/templates/mcp-configs/README.md",
+      "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md"
+    ]
+  },
+  {
+    "id": "n8n.workflow-templates",
+    "category": "n8n",
+    "name": "workflow-templates",
+    "title": "n8n Workflow Templates",
+    "project": {
+      "name": "n8n Workflow Templates",
+      "category": "n8n",
+      "summary": "Reusable n8n workflow template hygiene guidance, sanitizer helpers, and safe repo/live workflow sync conventions."
+    },
+    "surface": {
+      "publish_as": "both",
+      "skill": {
+        "status": "published",
+        "path": "skills/n8n-workflow-sync",
+        "summary": "Helps an agent review, sanitize, validate, and plan n8n workflow import/export sync safely."
+      },
+      "mcp": {
+        "status": "published",
+        "path": "mcp/projects/n8n-workflow-templates.md",
+        "summary": "Spec-only MCP notes for future deterministic workflow-template validation and routing tools."
+      }
+    },
+    "module_path": "_projects/n8n/workflow-templates",
+    "main_path": "_projects/n8n/workflow-templates/_main",
+    "root_surfaces": [
+      "mcp/projects/n8n-workflow-templates.md",
+      "skills/n8n-workflow-sync/README.md",
+      "skills/n8n-workflow-sync/SKILL.md",
+      "skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json",
+      "skills/n8n-workflow-sync/references/n8n/workflow-sync.md",
+      "skills/n8n-workflow-sync/templates/sanitizer/- sanitise-n8n-template.cmd",
+      "skills/n8n-workflow-sync/templates/sanitizer/README.md",
+      "skills/n8n-workflow-sync/templates/sanitizer/prepare-n8n-template.js",
+      "skills/n8n-workflow-sync/templates/sanitizer/sanitise-n8n-template.ps1",
+      "skills/n8n-workflow-sync/templates/workflow-policy/README.md"
+    ]
+  }
+]

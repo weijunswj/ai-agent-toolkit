@@ -197,14 +197,14 @@
     {
       "mode": "adapted",
       "source_path": "src/ui-ux-pro-max/scripts/core.py",
-      "root_surface_path": "for_ai/tools/design-system-generator/scripts/core.py",
+      "root_surface_path": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py",
       "source_blob_sha": "b613844e8461aaaeb6b8efaca69f33f4a0757e1c",
       "notes": "AI-facing tool uses the toolkit-adapted local-only script from _main."
     },
     {
       "mode": "adapted",
       "source_path": "src/ui-ux-pro-max/scripts/design_system.py",
-      "root_surface_path": "for_ai/tools/design-system-generator/scripts/design_system.py",
+      "root_surface_path": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/design_system.py",
       "source_blob_sha": "512a808c4ed44d2ddc5f583b40bba3e78e3afb46",
       "notes": "AI-facing tool uses the toolkit-adapted local-only script from _main."
     },

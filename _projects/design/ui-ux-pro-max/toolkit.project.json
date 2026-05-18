@@ -8,66 +8,75 @@
   "outputs": [
     {
       "kind": "linked",
-      "output": "for_ai/skills/design/ui-ux-secure-frontend-design/SKILL.md",
-      "notes": "Published skill maintained under for_ai. Review when _main/ changes."
+      "output": "skills/ui-ux-secure-frontend-design/SKILL.md",
+      "notes": "Published skill maintained in the published surface. Review when _main/ changes.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "linked",
-      "output": "for_ai/mcp/projects/ui-ux-pro-max.md",
-      "notes": "Published MCP doc maintained under for_ai. Review when _main/ changes."
+      "output": "mcp/projects/ui-ux-pro-max.md",
+      "notes": "Published MCP doc maintained in the published surface. Review when _main/ changes.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "linked",
-      "output": "for_ai/playbooks/design/ui-ux-pro-max.md",
-      "notes": "AI/operator playbook maintained under for_ai. Review when _main/ changes."
+      "output": "skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md",
+      "notes": "Skill-local reference maintained in the published surface. Review when _main/ changes.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/tools/design-system-generator/README.md",
-      "notes": "AI-facing tool README maintained under for_ai with toolkit safety context."
+      "output": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md",
+      "notes": "AI-facing tool README maintained in the published surface with toolkit safety context.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "linked",
-      "output": "for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
-      "notes": "AI-facing third-party attribution maintained under for_ai."
+      "output": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "notes": "AI-facing third-party attribution maintained in the published surface.",
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/src/ui-ux-pro-max/scripts/core.py",
-      "output": "for_ai/tools/design-system-generator/scripts/core.py",
-      "notice": false
+      "output": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py",
+      "notice": false,
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/src/ui-ux-pro-max/scripts/design_system.py",
-      "output": "for_ai/tools/design-system-generator/scripts/design_system.py",
-      "notice": false
+      "output": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/design_system.py",
+      "notice": false,
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/src/ui-ux-pro-max/data",
-      "output": "for_ai/tools/design-system-generator/data",
-      "notice": false
+      "output": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/data",
+      "notice": false,
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/packs/design-system-generator/pack.json",
-      "notes": "Published pack maintained under for_ai."
+      "output": "skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json",
+      "notes": "Skill-local pack maintained in the published surface.",
+      "fidelity": "generated_metadata"
     }
   ],
   "writes": {
     "allowed": [
-      "for_ai/skills/design/ui-ux-secure-frontend-design/SKILL.md",
-      "for_ai/mcp/projects/ui-ux-pro-max.md",
-      "for_ai/playbooks/design/ui-ux-pro-max.md",
-      "for_ai/tools/design-system-generator/README.md",
-      "for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
-      "for_ai/tools/design-system-generator/scripts/core.py",
-      "for_ai/tools/design-system-generator/scripts/design_system.py",
-      "for_ai/tools/design-system-generator/data",
-      "for_ai/packs/design-system-generator/pack.json",
-      "for_ai/registry/projects.registry.json",
-      "for_ai/tools/design-system-generator/output/**"
+      "skills/ui-ux-secure-frontend-design/SKILL.md",
+      "mcp/projects/ui-ux-pro-max.md",
+      "skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/design_system.py",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/data",
+      "skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json",
+      "mcp/registry/projects.registry.json",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/**"
     ],
     "denied": [
       ".env*",
@@ -87,5 +96,23 @@
   "requires_approval": true,
   "run_commands_by_default": false,
   "live_actions": "explicit_confirmation_only",
-  "ci_live_actions": false
+  "ci_live_actions": false,
+  "project": {
+    "name": "UI/UX Pro Max Design",
+    "category": "design",
+    "summary": "Third-party-attributed UI/UX design knowledge preserved with a local-only design-system generator and a security-first frontend skill."
+  },
+  "surface": {
+    "publish_as": "both",
+    "skill": {
+      "status": "published",
+      "path": "skills/ui-ux-secure-frontend-design",
+      "summary": "Helps an agent create, review, and improve frontend UI/UX with accessibility, responsive, privacy, and security guardrails."
+    },
+    "mcp": {
+      "status": "published",
+      "path": "mcp/projects/ui-ux-pro-max.md",
+      "summary": "Spec-only MCP notes for future design-system generator and review surfaces; no runnable MCP server is shipped."
+    }
+  }
 }

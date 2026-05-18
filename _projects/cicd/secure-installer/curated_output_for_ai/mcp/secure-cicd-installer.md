@@ -10,15 +10,15 @@ Project identity: `cicd.secure-installer`
 
 ## Important Paths
 
-- Project module: [_projects/cicd/secure-installer/](../../../_projects/cicd/secure-installer/)
-- Preserved source files: [_projects/cicd/secure-installer/_main/](../../../_projects/cicd/secure-installer/_main/)
-- Templates: [for_ai/templates/cicd/](../../templates/cicd/)
-- Pack: [for_ai/packs/secure-cicd/pack.json](../../packs/secure-cicd/pack.json)
+- Project module: [_projects/cicd/secure-installer/](../../_projects/cicd/secure-installer/)
+- Preserved source files: [_projects/cicd/secure-installer/_main/](../../_projects/cicd/secure-installer/_main/)
+- Templates: [skills/secure-cicd-installer/templates/cicd/](../../skills/secure-cicd-installer/templates/cicd/)
+- Pack: [skills/secure-cicd-installer/packs/secure-cicd/pack.json](../../skills/secure-cicd-installer/packs/secure-cicd/pack.json)
 
 ## Available Operations
 
 - Read project metadata, source manifests, pack metadata, and copy-ready templates.
-- Generate deterministic declared outputs via [repo/scripts/sync-toolkit-projects.cjs](../../../repo/scripts/sync-toolkit-projects.cjs).
+- Generate deterministic declared outputs via [repo/scripts/sync-toolkit-projects.cjs](../../repo/scripts/sync-toolkit-projects.cjs).
 
 ## Safe Writes
 

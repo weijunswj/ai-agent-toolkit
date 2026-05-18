@@ -18,8 +18,8 @@ const workspaceRoot = workspaceRootFromArgs();
 const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 const projectRoot = '_projects';
-const approvedOutputPrefixes = ['for_ai/skills/', 'for_ai/mcp/', 'for_ai/templates/', 'for_ai/packs/', 'for_ai/registry/', 'for_ai/playbooks/', 'for_ai/tools/'];
-const rootSurfacePrefixes = ['for_ai/skills/', 'for_ai/mcp/', 'for_ai/templates/', 'for_ai/packs/', 'for_ai/registry/', 'for_ai/playbooks/', 'for_ai/tools/'];
+const approvedOutputPrefixes = ['skills/', 'mcp/'];
+const rootSurfacePrefixes = ['skills/', 'mcp/'];
 const forbiddenNames = new Set([
   '.n8n-local',
   '.tmp',
@@ -37,6 +37,9 @@ const forbiddenNames = new Set([
 const forbiddenDeniedPolicy = ['.env*', '**/*credential*', '**/*.key', '**/*.pem'];
 const supportedKinds = new Set(['copy', 'concat', 'curated', 'json', 'linked']);
 const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
+const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']);
+const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
+const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -176,6 +179,33 @@ function validateProjectShape(errors, relPath) {
   }
   if ('exports_path' in project) fail(errors, `${relPath} must not use exports_path`);
   if (!Array.isArray(project.outputs)) fail(errors, `${relPath} outputs must be an array`);
+  if (!project.project || typeof project.project !== 'object') {
+    fail(errors, `${relPath} missing project metadata`);
+  } else {
+    for (const key of ['name', 'category', 'summary']) {
+      if (!project.project[key]) fail(errors, `${relPath} project.${key} is required`);
+    }
+  }
+  if (!project.surface || typeof project.surface !== 'object') {
+    fail(errors, `${relPath} missing surface metadata`);
+  } else {
+    if (!supportedPublishSurfaces.has(project.surface.publish_as)) {
+      fail(errors, `${relPath} surface.publish_as must be one of skill, mcp, both, source_only`);
+    }
+    for (const key of ['skill', 'mcp']) {
+      const surface = project.surface[key];
+      if (!surface || typeof surface !== 'object') {
+        fail(errors, `${relPath} surface.${key} metadata is required`);
+        continue;
+      }
+      if (!supportedSurfaceStatuses.has(surface.status)) {
+        fail(errors, `${relPath} surface.${key}.status must be one of published, candidate, not_applicable`);
+      }
+      if (surface.status !== 'not_applicable' && (!surface.path || !surface.summary)) {
+        fail(errors, `${relPath} surface.${key} requires path and summary unless status is not_applicable`);
+      }
+    }
+  }
 
   const expectedModulePath = slash(path.dirname(relPath));
   if (project.module_path !== expectedModulePath) fail(errors, `${relPath} module_path should be ${expectedModulePath}`);
@@ -199,6 +229,9 @@ function validateProjectShape(errors, relPath) {
     if (!supportedKinds.has(output.kind)) fail(errors, `${project.id} unsupported output kind: ${output.kind}`);
     if (!isApprovedOutputPath(output.output)) fail(errors, `${project.id} output path is not an approved root surface: ${output.output}`);
     if (!project.writes?.allowed?.includes(output.output)) fail(errors, `${project.id} output is not declared in writes.allowed: ${output.output}`);
+    if (output.fidelity && !supportedFidelityValues.has(output.fidelity)) {
+      fail(errors, `${project.id} unsupported output fidelity: ${output.fidelity}`);
+    }
     if (output.kind === 'linked') {
       if (output.source || output.sources) fail(errors, `${project.id} linked output must not set source or sources: ${output.output}`);
       if (!fs.existsSync(resolveRel(output.output))) fail(errors, `${project.id} linked output missing: ${output.output}`);
@@ -363,6 +396,8 @@ function registryEntries(projects) {
       category: project.category,
       name: project.name,
       title: project.title,
+      project: project.project,
+      surface: project.surface,
       module_path: project.module_path,
       main_path: project.main_path,
       root_surfaces: [...new Set((project.outputs || []).map((output) => output.output))].sort()
@@ -442,7 +477,7 @@ function validateAndSync() {
 
   syncExpanded(expanded, errors);
 
-  const registryPath = 'for_ai/registry/projects.registry.json';
+  const registryPath = 'mcp/registry/projects.registry.json';
   const expectedRegistry = JSON.stringify(registryEntries(projects), null, 2) + '\n';
   if (mode === 'write') {
     writeText(registryPath, expectedRegistry);

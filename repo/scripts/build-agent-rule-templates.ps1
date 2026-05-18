@@ -1,9 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
-$TemplatesDir = Join-Path $RepoRoot 'for_ai\templates\agent-rules'
+$TemplatesDir = Join-Path $RepoRoot 'skills\n8n-local-setup\templates\agent-rules'
 $ProjectMainPartialsDir = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials'
-$ToolkitPartialsDir = Join-Path $RepoRoot 'for_ai\templates\agent-rules\partials'
+$ToolkitPartialsDir = Join-Path $RepoRoot 'skills\n8n-local-setup\templates\agent-rules\partials'
 
 $PartialSources = @(
   @{
@@ -19,7 +19,7 @@ $PartialSources = @(
   @{
     Name = 'skill-routing-rules.md'
     Path = Join-Path $ToolkitPartialsDir 'skill-routing-rules.md'
-    Rel = 'for_ai/templates/agent-rules/partials/skill-routing-rules.md'
+    Rel = 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'
   }
 )
 
@@ -74,4 +74,4 @@ Write-GeneratedTemplate -FileName 'AGENTS.md' -Title 'AGENTS.md AI Coding Agent 
 Write-GeneratedTemplate -FileName 'CLAUDE.md' -Title 'CLAUDE.md AI Coding Agent Rules' -Audience 'Claude Code'
 Write-GeneratedTemplate -FileName 'GEMINI.md' -Title 'GEMINI.md AI Coding Agent Rules' -Audience 'Antigravity or Gemini CLI'
 
-Write-Host 'Generated for_ai/templates/agent-rules/AGENTS.md, CLAUDE.md, and GEMINI.md.'
+Write-Host 'Generated skills/n8n-local-setup/templates/agent-rules/AGENTS.md, CLAUDE.md, and GEMINI.md.'

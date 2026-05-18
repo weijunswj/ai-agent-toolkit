@@ -10,17 +10,17 @@ Project identity: `n8n.local-setup`
 
 ## Important Paths
 
-- Project module: [_projects/n8n/local-setup/](../../../_projects/n8n/local-setup/)
-- Preserved source files: [_projects/n8n/local-setup/_main/](../../../_projects/n8n/local-setup/_main/)
-- Codex rules: [for_ai/templates/agent-rules/AGENTS.md](../../templates/agent-rules/AGENTS.md)
-- Codex MCP config: [for_ai/templates/mcp-configs/codex-mcp-config.md](../../templates/mcp-configs/codex-mcp-config.md)
-- Pack: [for_ai/packs/codex-n8n-local/pack.json](../../packs/codex-n8n-local/pack.json)
+- Project module: [_projects/n8n/local-setup/](../../_projects/n8n/local-setup/)
+- Preserved source files: [_projects/n8n/local-setup/_main/](../../_projects/n8n/local-setup/_main/)
+- Codex rules: [skills/n8n-local-setup/templates/agent-rules/AGENTS.md](../../skills/n8n-local-setup/templates/agent-rules/AGENTS.md)
+- Codex MCP config: [skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md](../../skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md)
+- Pack: [skills/n8n-local-setup/packs/codex-n8n-local/pack.json](../../skills/n8n-local-setup/packs/codex-n8n-local/pack.json)
 
 ## Available Operations
 
 - Read project metadata and source manifests.
 - Read declared `_main` recipe sources, optional curated output when present, and AI-facing consumer surfaces.
-- Generate deterministic declared outputs via [repo/scripts/sync-toolkit-projects.cjs](../../../repo/scripts/sync-toolkit-projects.cjs).
+- Generate deterministic declared outputs via [repo/scripts/sync-toolkit-projects.cjs](../../repo/scripts/sync-toolkit-projects.cjs).
 
 ## Safe Writes
 

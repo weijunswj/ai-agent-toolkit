@@ -24,10 +24,10 @@ Inspected:
 
 Migrated:
 
-- Existing design skill to `for_ai/skills/design/ui-ux-secure-frontend-design/`.
-- Existing Windows localhost skill to `for_ai/skills/development/windows-localhost-workflows/`.
-- Existing knowledge index skill to `for_ai/skills/portfolio/knowledge-index-updater/`.
-- Reusable skill metadata into `for_ai/registry/skills.registry.json`.
+- Existing design skill to `skills/ui-ux-secure-frontend-design/`.
+- Existing Windows localhost skill to `skills/windows-localhost-workflows/`.
+- Existing knowledge index skill to `skills/knowledge-index-updater/`.
+- Reusable skill metadata into `mcp/registry/skills.registry.json`.
 
 Intentionally not migrated:
 
@@ -63,22 +63,22 @@ Inspected:
 - `5. extra - claude code integration.md`
 - `6. extra - opencode integration.md`
 - `7. extra - antigravity integration.md`
-- `for_ai/templates/AGENTS.md`
-- `for_ai/templates/CLAUDE.md`
-- `for_ai/templates/GEMINI.md`
-- `for_ai/templates/partials/ai-coding-agent-execution.md`
-- `for_ai/templates/partials/n8n-mcp-rules.md`
-- `for_ai/templates/*-mcp-config.md`
+- `skills/n8n-local-setup/templates/agent-rules/AGENTS.md`
+- `skills/n8n-local-setup/templates/agent-rules/CLAUDE.md`
+- `skills/n8n-local-setup/templates/agent-rules/GEMINI.md`
+- `_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md`
+- `_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md`
+- `skills/n8n-local-setup/templates/mcp-configs/*-mcp-config.md`
 - `repo/scripts/build-templates.ps1`
 - `.github/workflows/build-templates.yml`
 - `repo/scripts/windows/start-n8n-ngrok.bat`
 
 Migrated:
 
-- Platform setup guidance into `for_ai/playbooks/ai-agent-platforms/`.
-- n8n local setup, upgrade, tunnelling, Docker Compose + ngrok, VPS, workflow sync, and credential safety guidance into `for_ai/playbooks/n8n/`.
-- Agent-rule partials from `_projects/n8n/local-setup/_main/templates/partials/` plus the linked root toolkit partial `for_ai/templates/agent-rules/partials/skill-routing-rules.md`; root `for_ai/templates/agent-rules/*.md` files are generated from declared concat recipes.
-- MCP config templates into `for_ai/templates/mcp-configs/`.
+- Platform setup guidance into `skills/n8n-local-setup/references/ai-agent-platforms/`.
+- n8n local setup, upgrade, tunnelling, Docker Compose + ngrok, VPS, workflow sync, and credential safety guidance into `skills/n8n-local-setup/references/n8n/`.
+- Agent-rule partials from `_projects/n8n/local-setup/_main/templates/partials/` plus the linked root toolkit partial `skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md`; root `skills/n8n-local-setup/templates/agent-rules/*.md` files are generated from declared concat recipes.
+- MCP config templates into `skills/n8n-local-setup/templates/mcp-configs/`.
 - Deterministic agent-rule generator into `repo/scripts/build-agent-rule-templates.ps1`.
 - CMD generator wrapper into `repo/scripts/- build-agent-rule-templates.cmd`.
 - Scoped generated-template CI behavior into `.github/workflows/build-agent-rule-templates.yml`.
@@ -112,18 +112,18 @@ Inspected:
 
 - `README.md`
 - `.gitignore`
-- `for_ai/templates/n8n/*.cjs`
-- `for_ai/templates/n8n/*.ps1`
-- `for_ai/templates/n8n/*.cmd`
+- `skills/n8n-workflow-sync/templates/sync-helpers/*.cjs`
+- `skills/n8n-workflow-sync/templates/sync-helpers/*.ps1`
+- `skills/n8n-workflow-sync/templates/sync-helpers/*.cmd`
 - `repo/docs/n8n/n8n-credential-migration-map.example.json`
 - `repo/tests/n8n-helper-scripts.test.js`
 
 Migrated:
 
-- Security-first CI/CD installer concepts into `for_ai/playbooks/cicd/secure-cicd-installer.md`.
-- Prompt and status template material into `for_ai/templates/cicd/`.
-- n8n helper-template scripts into `for_ai/templates/n8n/sync-helpers/`.
-- Credential migration-map example into `for_ai/templates/n8n/workflow-policy/`.
+- Security-first CI/CD installer concepts into `skills/secure-cicd-installer/references/secure-cicd-installer.md`.
+- Prompt and status template material into `skills/secure-cicd-installer/templates/cicd/`.
+- n8n helper-template scripts into `skills/n8n-workflow-sync/templates/sync-helpers/`.
+- Credential migration-map example into `skills/n8n-workflow-sync/templates/workflow-policy/`.
 - Test concepts into toolkit tests.
 - Reusable n8n helper tests into `repo/tests/n8n-helper-scripts.test.cjs`.
 
@@ -160,12 +160,12 @@ Inspected:
 - `repo/scripts/sanitise-n8n-template.ps1`
 - `repo/scripts/prepare-n8n-template.js`
 - `repo/scripts/- sanitise-n8n-template.cmd`
-- `for_ai/templates/00-error-handler/00-error-handler.template.json`
+- `_projects/n8n/workflow-templates/_main/templates/00-error-handler/00-error-handler.template.json`
 
 Migrated:
 
-- Sanitizer workflow and staging-folder rules into `for_ai/templates/n8n/README.md`.
-- Sanitizer scripts into `for_ai/templates/n8n/sanitizer/`.
+- Sanitizer workflow and staging-folder rules into `skills/n8n-workflow-sync/templates/workflow-policy/README.md`.
+- Sanitizer scripts into `skills/n8n-workflow-sync/templates/sanitizer/`.
 - Template hygiene guidance into the n8n workflow sync skill references.
 - Dry-run and sanitizer smoke test coverage into `repo/tests/n8n-helper-scripts.test.cjs`.
 
@@ -176,7 +176,7 @@ Intentionally not migrated:
 
 Skipped for safety:
 
-- `for_ai/templates/00-error-handler/00-error-handler.template.json` was not migrated in v1 because it is a full workflow JSON with Code, Google Sheets, email, and Telegram behavior.
+- `_projects/n8n/workflow-templates/_main/templates/00-error-handler/00-error-handler.template.json` was not migrated in v1 because it is a full workflow JSON with Code, Google Sheets, email, and Telegram behavior.
 
 Remaining:
 
@@ -199,7 +199,7 @@ Migrated:
 - Selected CSV data into `_projects/design/ui-ux-pro-max/_main/src/ui-ux-pro-max/data/`.
 - Selected local-only adapted script material into `_projects/design/ui-ux-pro-max/_main/src/ui-ux-pro-max/scripts/`.
 - Root design generator scripts and data through declared project recipes and source locks.
-- Third-party attribution notes into `for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md`.
+- Third-party attribution notes into `skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md`.
 
 Intentionally not migrated:
 

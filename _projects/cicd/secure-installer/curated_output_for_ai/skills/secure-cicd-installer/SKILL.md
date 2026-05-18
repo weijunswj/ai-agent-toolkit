@@ -15,8 +15,8 @@ Use this skill when a user asks for secure CI/CD setup, GitHub Actions hardening
 
 ## Source Module
 
-- Project module: [_projects/cicd/secure-installer/](../../../../_projects/cicd/secure-installer/)
-- Preserved source: [_projects/cicd/secure-installer/_main/](../../../../_projects/cicd/secure-installer/_main/)
+- Project module: [_projects/cicd/secure-installer/](../../_projects/cicd/secure-installer/)
+- Preserved source: [_projects/cicd/secure-installer/_main/](../../_projects/cicd/secure-installer/_main/)
 
 ## Core Rules
 
@@ -27,7 +27,7 @@ Use this skill when a user asks for secure CI/CD setup, GitHub Actions hardening
 
 ## AI-Facing Surfaces
 
-- Playbook: [for_ai/playbooks/cicd/secure-cicd-installer.md](../../../playbooks/cicd/secure-cicd-installer.md)
-- Templates: [for_ai/templates/cicd/](../../../templates/cicd/)
-- Pack checklist: [for_ai/packs/secure-cicd/pack.json](../../../packs/secure-cicd/pack.json)
-- MCP spec: [for_ai/mcp/projects/secure-cicd-installer.md](../../../mcp/projects/secure-cicd-installer.md)
+- Reference: [references/secure-cicd-installer.md](references/secure-cicd-installer.md)
+- Templates: [templates/cicd/](templates/cicd/)
+- Pack checklist: [packs/secure-cicd/pack.json](packs/secure-cicd/pack.json)
+- MCP spec: [../../mcp/projects/secure-cicd-installer.md](../../mcp/projects/secure-cicd-installer.md)

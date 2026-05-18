@@ -23,7 +23,8 @@ const allowedSourceUpdatePolicies = new Set(['none', 'manual_review_required']);
 // SOURCE-LOCK source_path values must describe upstream repo paths,
 // not toolkit-local layout paths. Upstream sources using these
 // prefixes should be rejected or normalised through a reviewed migration.
-const toolkitLocalSourcePathPrefixes = ['_projects/', 'for_ai/', 'repo/'];
+const toolkitLocalSourcePathPrefixes = ['_projects/', 'skills/', 'mcp/', 'repo/'];
+const rootSurfacePathPrefixes = ['skills/', 'mcp/'];
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -155,8 +156,8 @@ function validateLocalPathTopology(file, relPath, label, errors) {
 
   if (Object.prototype.hasOwnProperty.call(file, 'root_surface_path')) {
     const normalized = normalizeRepoRelativePath(file.root_surface_path, 'root_surface_path', relPath, label, errors);
-    if (normalized && !normalized.startsWith('for_ai/')) {
-      errors.push(`${relPath} root_surface_path must point under for_ai/: ${label} uses ${file.root_surface_path}`);
+    if (normalized && !rootSurfacePathPrefixes.some((prefix) => normalized.startsWith(prefix))) {
+      errors.push(`${relPath} root_surface_path must point under skills/ or mcp/: ${label} uses ${file.root_surface_path}`);
     }
   }
 }

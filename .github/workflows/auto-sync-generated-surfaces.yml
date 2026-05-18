@@ -65,6 +65,20 @@ jobs:
             exit 1
           fi
 
+          changed_file_count="$(
+            gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq '.changed_files'
+          )"
+
+          if ! [[ "$changed_file_count" =~ ^[0-9]+$ ]]; then
+            echo "::error::Could not read PR changed-file count; refusing auto-sync writeback."
+            exit 1
+          fi
+
+          if (( changed_file_count > 3000 )); then
+            echo "::error::PR changes ${changed_file_count} files; GitHub's PR files API is capped at 3000, so auto-sync cannot prove the writeback scope."
+            exit 1
+          fi
+
           mapfile -t changed_files < <(
             gh api --paginate \
               "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}/files" \
@@ -86,7 +100,7 @@ jobs:
                 echo "::error file=$path::Auto-sync refuses unsafe PR path: $path"
                 exit 1
                 ;;
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|README.md|AGENTS.md|for_ai/*)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|README.md|AGENTS.md|skills/*|mcp/*)
                 ;;
               *)
                 echo "::error file=$path::Auto-sync only runs on deterministic source/routing/contract and generated surface paths: $path"
@@ -167,7 +181,7 @@ jobs:
             esac
 
             case "$path" in
-              README.md|AGENTS.md|for_ai/*)
+              README.md|AGENTS.md|skills/*|mcp/*)
                 ;;
               *)
                 echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
@@ -176,7 +190,7 @@ jobs:
             esac
           done
 
-          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md for_ai
+          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp
 
           mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           if [[ "${#staged_files[@]}" -eq 0 ]]; then
@@ -194,7 +208,7 @@ jobs:
             esac
 
             case "$path" in
-              README.md|AGENTS.md|for_ai/*)
+              README.md|AGENTS.md|skills/*|mcp/*)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
@@ -252,7 +266,7 @@ jobs:
             esac
 
             case "$path" in
-              README.md|AGENTS.md|for_ai/*)
+              README.md|AGENTS.md|skills/*|mcp/*)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"

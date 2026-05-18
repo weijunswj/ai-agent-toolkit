@@ -13,11 +13,20 @@ function slash(value) {
 }
 
 function packFiles() {
-  const packsRoot = path.join(root, 'for_ai', 'packs');
-  return fs.readdirSync(packsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(packsRoot, entry.name, 'pack.json'))
-    .filter((file) => fs.existsSync(file));
+  const result = [];
+  const skillsRoot = path.join(root, 'skills');
+  if (!fs.existsSync(skillsRoot)) return result;
+  for (const skill of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
+    if (!skill.isDirectory()) continue;
+    const packsRoot = path.join(skillsRoot, skill.name, 'packs');
+    if (!fs.existsSync(packsRoot)) continue;
+    for (const pack of fs.readdirSync(packsRoot, { withFileTypes: true })) {
+      if (!pack.isDirectory()) continue;
+      const manifest = path.join(packsRoot, pack.name, 'pack.json');
+      if (fs.existsSync(manifest)) result.push(manifest);
+    }
+  }
+  return result.sort();
 }
 
 function validatePack(filePath) {

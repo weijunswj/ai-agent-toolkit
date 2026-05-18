@@ -15,23 +15,23 @@ Use this skill when the user needs to set up or explain local n8n, agent rules, 
 
 ## Source Module
 
-- Project module: [_projects/n8n/local-setup/](../../../../_projects/n8n/local-setup/)
-- Full source docs: [_projects/n8n/local-setup/_main/](../../../../_projects/n8n/local-setup/_main/)
+- Project module: [_projects/n8n/local-setup/](../../_projects/n8n/local-setup/)
+- Full source docs: [_projects/n8n/local-setup/_main/](../../_projects/n8n/local-setup/_main/)
 
 ## Core Rules
 
-- Treat [_projects/n8n/local-setup/_main/](../../../../_projects/n8n/local-setup/_main/) as the full source of truth for original setup docs.
-- Use [for_ai/playbooks/n8n/](../../../playbooks/n8n/) for concise AI/operator playbooks.
+- Treat [_projects/n8n/local-setup/_main/](../../_projects/n8n/local-setup/_main/) as the full source of truth for original setup docs.
+- Use [references/n8n/](references/n8n/) for local AI/operator references.
 - Keep tokens, API keys, webhook secrets, and MCP credentials out of repo files.
 - Do not run live n8n import/export, workflow activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
 - For live n8n work, require explicit current-turn confirmation and identify the target instance first.
 
 ## Common Outputs
 
-- Codex rules: [for_ai/templates/agent-rules/AGENTS.md](../../../templates/agent-rules/AGENTS.md)
-- Codex MCP config: [for_ai/templates/mcp-configs/codex-mcp-config.md](../../../templates/mcp-configs/codex-mcp-config.md)
-- Local setup playbook: [for_ai/playbooks/n8n/local-setup.md](../../../playbooks/n8n/local-setup.md)
-- Pack checklist: [for_ai/packs/codex-n8n-local/pack.json](../../../packs/codex-n8n-local/pack.json)
+- Codex rules: [templates/agent-rules/AGENTS.md](templates/agent-rules/AGENTS.md)
+- Codex MCP config: [templates/mcp-configs/codex-mcp-config.md](templates/mcp-configs/codex-mcp-config.md)
+- Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
+- Pack checklist: [packs/codex-n8n-local/pack.json](packs/codex-n8n-local/pack.json)
 
 ## Workflow
 

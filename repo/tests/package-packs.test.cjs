@@ -23,11 +23,17 @@ function tempCopy() {
 }
 
 test('every pack has valid pack manifest and existing install paths', () => {
-  const packsRoot = path.join(repoRoot, 'for_ai', 'packs');
-  const packFiles = fs.readdirSync(packsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(packsRoot, entry.name, 'pack.json'))
-    .filter((file) => fs.existsSync(file));
+  const skillsRoot = path.join(repoRoot, 'skills');
+  const packFiles = [];
+  for (const skill of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
+    if (!skill.isDirectory()) continue;
+    const packsRoot = path.join(skillsRoot, skill.name, 'packs');
+    if (!fs.existsSync(packsRoot)) continue;
+    for (const pack of fs.readdirSync(packsRoot, { withFileTypes: true })) {
+      const manifest = path.join(packsRoot, pack.name, 'pack.json');
+      if (pack.isDirectory() && fs.existsSync(manifest)) packFiles.push(manifest);
+    }
+  }
   assert.equal(packFiles.length, 6);
   for (const file of packFiles) {
     const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -52,7 +58,7 @@ test('package-packs writes full pack metadata in non-check mode', () => {
   const result = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 
-  const sourcePack = JSON.parse(fs.readFileSync(path.join(cwd, 'for_ai', 'packs', 'n8n-workflow-sync', 'pack.json'), 'utf8'));
+  const sourcePack = JSON.parse(fs.readFileSync(path.join(cwd, 'skills', 'n8n-workflow-sync', 'packs', 'n8n-workflow-sync', 'pack.json'), 'utf8'));
   const packagedPackPath = path.join(cwd, '_dist', 'packs', 'n8n-workflow-sync', 'pack.json');
   const installPlanPath = path.join(cwd, '_dist', 'packs', 'n8n-workflow-sync', 'install-plan.json');
   assert.equal(fs.existsSync(packagedPackPath), true);
@@ -67,6 +73,6 @@ test('package-packs writes full pack metadata in non-check mode', () => {
     assert.deepEqual(generated.writes_denied, sourcePack.writes_denied);
     assert.equal(generated.risk_level, sourcePack.risk_level);
     assert.deepEqual(generated.notes, sourcePack.notes);
-    assert.equal(generated.path, 'for_ai/packs/n8n-workflow-sync/pack.json');
+    assert.equal(generated.path, 'skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json');
   }
 });

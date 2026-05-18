@@ -106,22 +106,22 @@ test('JSON registries parse in the current repo', () => {
     'source-repos.registry.json',
     'consumers.registry.json'
   ]) {
-    assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(repoRoot, 'for_ai', 'registry', file), 'utf8')));
+    assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', file), 'utf8')));
   }
 });
 
 test('skill discovery includes migrated skills', () => {
   const skills = validator.skillDirs();
-  assert.ok(skills.includes('for_ai/skills/design/ui-ux-secure-frontend-design'));
-  assert.ok(skills.includes('for_ai/skills/development/windows-localhost-workflows'));
-  assert.ok(skills.includes('for_ai/skills/automation/n8n-workflow-sync'));
-  assert.ok(skills.includes('for_ai/skills/automation/n8n-local-setup'));
-  assert.ok(skills.includes('for_ai/skills/cicd/secure-cicd-installer'));
-  assert.ok(skills.includes('for_ai/skills/portfolio/knowledge-index-updater'));
+  assert.ok(skills.includes('skills/ui-ux-secure-frontend-design'));
+  assert.ok(skills.includes('skills/windows-localhost-workflows'));
+  assert.ok(skills.includes('skills/n8n-workflow-sync'));
+  assert.ok(skills.includes('skills/n8n-local-setup'));
+  assert.ok(skills.includes('skills/secure-cicd-installer'));
+  assert.ok(skills.includes('skills/knowledge-index-updater'));
 });
 
 test('project registry includes the initial project modules', () => {
-  const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'for_ai', 'registry', 'projects.registry.json'), 'utf8'));
+  const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'projects.registry.json'), 'utf8'));
   const ids = registry.map((entry) => entry.id).sort();
   assert.deepEqual(ids, [
     'cicd.secure-installer',
@@ -129,6 +129,41 @@ test('project registry includes the initial project modules', () => {
     'n8n.local-setup',
     'n8n.workflow-templates'
   ]);
+  for (const entry of registry) {
+    assert.ok(entry.project?.summary, entry.id);
+    assert.ok(['skill', 'mcp', 'both', 'source_only'].includes(entry.surface?.publish_as), entry.id);
+    assert.doesNotMatch(JSON.stringify(entry.root_surfaces), /(^|[^A-Za-z0-9_])for_ai\//);
+  }
+});
+
+test('project metadata supports all declared publish_as values', () => {
+  for (const publishAs of ['skill', 'mcp', 'both', 'source_only']) {
+    const cwd = tempCopy();
+    const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+    const manifest = readJsonFile(manifestPath);
+    manifest.surface.publish_as = publishAs;
+    if (publishAs === 'source_only') {
+      manifest.surface.skill = { status: 'not_applicable' };
+      manifest.surface.mcp = { status: 'not_applicable' };
+    }
+    writeJsonFile(manifestPath, manifest);
+    const result = spawnSync(process.execPath, [syncScript, '--write'], { cwd, encoding: 'utf8' });
+    assert.equal(result.status, 0, `${publishAs}\n${result.stderr}`);
+  }
+});
+
+test('sync output declarations target skills and mcp, not legacy surfaces', () => {
+  for (const manifest of validator.projectManifests()) {
+    for (const output of manifest.outputs || []) {
+      assert.match(output.output, /^(skills|mcp)\//, `${manifest.id}: ${output.output}`);
+      assert.doesNotMatch(output.output, /(^|[^A-Za-z0-9_])for_ai\//);
+    }
+    for (const allowed of manifest.writes.allowed || []) {
+      if (allowed === 'mcp/registry/projects.registry.json') continue;
+      if (allowed.endsWith('/output/**')) continue;
+      assert.match(allowed, /^(skills|mcp)\//, `${manifest.id}: ${allowed}`);
+    }
+  }
 });
 
 test('validator expects durable retired source provenance doc instead of migration checklist', () => {
@@ -144,7 +179,7 @@ test('validator expects durable retired source provenance doc instead of migrati
 
 test('source-of-truth contract is synced into main entry points', () => {
   const partial = readTextFile(path.join(repoRoot, 'repo', 'docs', 'partials', 'source-of-truth-contract.md')).trim();
-  for (const rel of ['README.md', 'AGENTS.md', 'for_ai/README.md']) {
+  for (const rel of ['README.md', 'AGENTS.md']) {
     const text = readTextFile(path.join(repoRoot, rel));
     assert.equal(contractBlock(text), partial, rel);
   }
@@ -156,12 +191,41 @@ test('source-of-truth contract sync script passes and catches drift', () => {
 
   const cwd = tempCopy();
   fs.writeFileSync(
-    path.join(cwd, 'for_ai', 'README.md'),
-    readTextFile(path.join(cwd, 'for_ai', 'README.md')).replace('published AI-facing surface for skills', 'published AI-facing layer for skills')
+    path.join(cwd, 'README.md'),
+    readTextFile(path.join(cwd, 'README.md')).replace('This repo has a source layer and a published layer.', 'This repo has a source layer and a changed published layer.')
   );
   result = spawnSync(process.execPath, [contractScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale source-of-truth contract block: for_ai\/README\.md/);
+  assert.match(result.stderr, /Stale source-of-truth contract block: README\.md/);
+});
+
+test('README is a user-facing map with the contract in the appendix', () => {
+  const text = readTextFile(path.join(repoRoot, 'README.md'));
+  const sections = [
+    '## What this repo is',
+    '## Quick Start',
+    '## Projects',
+    '## Skills',
+    '## MCP',
+    '## Folder Map',
+    '## For Maintainers',
+    '## Validation',
+    '## Appendix: Source-of-Truth Contract'
+  ];
+  let previous = -1;
+  for (const section of sections) {
+    const index = text.indexOf(section);
+    assert.notEqual(index, -1, section);
+    assert.ok(index > previous, section);
+    previous = index;
+  }
+  assert.ok(text.indexOf('<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->') > text.indexOf('## Appendix: Source-of-Truth Contract'));
+  assert.match(text, /`skills\/<skill-name>\/`/);
+  assert.match(text, /`mcp\/`/);
+  assert.doesNotMatch(text, /(^|[^A-Za-z0-9_])for_ai\//);
+  for (const surface of ['packs', 'playbooks', 'templates', 'registries', 'registry', 'tools']) {
+    assert.doesNotMatch(text, new RegExp(`\\|\\s+\`?${surface}/?\`?\\s+\\|`, 'i'));
+  }
 });
 
 test('trusted maintenance scripts support an explicit workspace root', () => {
@@ -178,7 +242,7 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   const text = readTextFile(path.join(repoRoot, 'AGENTS.md'));
   assert.match(text, /curated_output_for_ai/);
   assert.match(text, /toolkit\.project\.json/);
-  assert.match(text, /Do not edit generated `for_ai\/` outputs directly/);
+  assert.match(text, /Do not edit generated `skills\/` or `mcp\/` outputs directly/);
   assert.match(text, /Do not generate curated files automatically from `_main`/);
 });
 
@@ -247,6 +311,7 @@ test('auto-sync generated surfaces workflow rejects forbidden events and missing
     ['extra permissions are forbidden', (text) => text.replace('  pull-requests: read', '  pull-requests: read\n  issues: write'), /must grant only contents: write and pull-requests: read/],
     ['same-repo guard is required', (text) => text.replaceAll('github.event.pull_request.head.repo.full_name == github.repository', 'true'), /missing same-repo PR guard/],
     ['head main guard is required', (text) => text.replaceAll("github.event.pull_request.head.ref != 'main'", 'true'), /missing head\.ref != main guard/],
+    ['oversized PR file-list guard is required', (text) => text.replace('if (( changed_file_count > 3000 )); then', 'if false; then'), /preflight must reject PRs with more than 3000 changed files/],
     ['post-sync changed-path validation is required', (text) => text.replaceAll('Forbidden post-sync change outside generated output scope', 'Removed post-sync guard'), /missing post-sync changed-path validation/],
     ['_projects post-sync writes stay rejected', (text) => text.replaceAll('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', 'repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
     ['repo post-sync writes stay rejected', (text) => text.replaceAll('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
@@ -269,7 +334,7 @@ test('auto-sync generated surfaces workflow rejects forbidden commands and broad
     ['workflow_dispatch is forbidden', (text) => text.replace('pull_request_target:', 'workflow_dispatch:\n  pull_request_target:'), /must not trigger on workflow_dispatch/],
     ['source-watch script is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'node "$TRUSTED_ROOT/repo/scripts/watch-project-sources.cjs" --workspace "$PR_ROOT"'), new RegExp('must not run source-watch or source-update ' + 'scripts')],
     ['live n8n export is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'scr' + 'ipts/export-n8n-workflows-live.ps1'), /must not run live n8n import\/export/],
-    ['git add scope is fixed', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md for_ai', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md for_ai repo'), /must commit only approved generated output paths/],
+    ['git add scope is fixed', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp repo'), /must commit only approved generated output paths/],
     ['commit bypasses hooks', (text) => text.replace('commit --no-verify -m', 'commit -m'), /must use git commit --no-verify/],
     ['final push resets remote', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" remote set-url origin', 'echo remote'), /must set push remote with the GitHub token only in the final push step/]
   ];
@@ -359,8 +424,8 @@ test('auto-sync generated surfaces workflow rejects PR-controlled test execution
     ['pnpm command is forbidden', (text) => text.replace(staticCheckAnchor, `pnpm test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
     ['yarn command is forbidden', (text) => text.replace(staticCheckAnchor, `yarn test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
     ['node test command is forbidden', (text) => text.replace(staticCheckAnchor, `node --test repo/tests/*.test.cjs\n          ${staticCheckAnchor}`), /must not run generated Node test suites/],
-    ['python unit tests are forbidden', (text) => text.replace(staticCheckAnchor, 'python -m unittest discover -s for_ai/tools/design-system-generator/' + 'tes' + `ts\n          ${staticCheckAnchor}`), new RegExp('must not run Python unit ' + 'tests')],
-    ['generated tool tests are forbidden', (text) => text.replace(staticCheckAnchor, 'node for_ai/tools/design-system-generator/' + 'tes' + `ts/run.js\n          ${staticCheckAnchor}`), new RegExp('must not run generated tool ' + 'tests')]
+    ['python unit tests are forbidden', (text) => text.replace(staticCheckAnchor, 'python -m unittest discover -s skills/ui-ux-secure-frontend-design/tools/design-system-generator/' + 'tes' + `ts\n          ${staticCheckAnchor}`), new RegExp('must not run Python unit ' + 'tests')],
+    ['generated tool tests are forbidden', (text) => text.replace(staticCheckAnchor, 'node skills/ui-ux-secure-frontend-design/tools/design-system-generator/' + 'tes' + `ts/run.js\n          ${staticCheckAnchor}`), new RegExp('must not run generated tool ' + 'tests')]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
@@ -399,7 +464,7 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
     ['final recheck is required after validation', (text) => text.replace('      - name: Final pre-commit workspace recheck', '      - name: Removed pre-commit workspace recheck'), /must recheck the workspace and staged index after validation and before commit/],
     ['post-sync staged index snapshot is required', (text) => text.replace('expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"', 'expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" rev-parse HEAD)"'), /must snapshot the staged index after the post-sync guard/],
     ['staged index tree comparison is required', (text) => text.replace('if [[ "$current_index_tree" != "${EXPECTED_INDEX_TREE}" ]]; then', 'if false; then'), /final recheck must compare the staged index tree snapshot/],
-    ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md for_ai\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
+    ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
     ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
     ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
     ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /final recheck must reject staged paths outside generated output scope/],
@@ -442,8 +507,8 @@ test('auto-sync generated output path scope is explicit', () => {
   for (const rel of [
     'README.md',
     'AGENTS.md',
-    'for_ai/registry/projects.registry.json',
-    'for_ai/templates/n8n/sync-helpers/README.md'
+    'mcp/registry/projects.registry.json',
+    'skills/n8n-workflow-sync/templates/sync-helpers/README.md'
   ]) {
     assert.equal(validator.isAutoSyncGeneratedOutputPath(rel), true, rel);
   }
@@ -495,7 +560,7 @@ test('design skill front matter and OpenAI metadata are approved', () => {
   assert.equal(errors.filter((error) => /Design skill/.test(error)).length, 0, errors.join('\n'));
 });
 
-test('instruction-only design skill contains no executable files', () => {
+test('design skill keeps generator tooling inside the skill folder', () => {
   const files = [];
   function walk(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -504,13 +569,14 @@ test('instruction-only design skill contains no executable files', () => {
       else files.push(full);
     }
   }
-  walk(path.join(repoRoot, 'for_ai', 'skills', 'design', 'ui-ux-secure-frontend-design'));
-  assert.equal(files.some((file) => /\.(ps1|cmd|bat|cjs|js|mjs|ts|tsx|py|sh|exe)$/i.test(file)), false);
+  walk(path.join(repoRoot, 'skills', 'ui-ux-secure-frontend-design'));
+  assert.equal(files.some((file) => file.endsWith(path.join('tools', 'design-system-generator', 'scripts', 'design_system.py'))), true);
+  assert.equal(files.some((file) => file.includes(`${path.sep}for_ai${path.sep}`)), false);
 });
 
-test('validator allows local-only Python design generator tooling under tools', () => {
+test('validator allows local-only Python design generator tooling under skill tools', () => {
   const cwd = tempCopy();
-  const testFile = path.join(cwd, 'for_ai', 'tools', 'design-system-generator', 'tests', 'extra_allowed.py');
+  const testFile = path.join(cwd, 'skills', 'ui-ux-secure-frontend-design', 'tools', 'design-system-generator', 'tests', 'extra_allowed.py');
   fs.writeFileSync(testFile, 'VALUE = 1\n');
   const result = runValidate(cwd);
   assert.equal(result.status, 0, result.stderr);
@@ -518,7 +584,7 @@ test('validator allows local-only Python design generator tooling under tools', 
 
 test('validator rejects network, shell, and package-install strings in design generator scripts', () => {
   const cwd = tempCopy();
-  const scriptDir = path.join(cwd, 'for_ai', 'tools', 'design-system-generator', 'scripts');
+  const scriptDir = path.join(cwd, 'skills', 'ui-ux-secure-frontend-design', 'tools', 'design-system-generator', 'scripts');
   fs.mkdirSync(scriptDir, { recursive: true });
   fs.writeFileSync(path.join(scriptDir, 'core.py'), 'import requests\n');
   const result = runValidate(cwd);
@@ -528,18 +594,18 @@ test('validator rejects network, shell, and package-install strings in design ge
 
 test('generated agent-rule templates are normal Markdown, not one giant fenced block', () => {
   for (const file of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
-    const text = fs.readFileSync(path.join(repoRoot, 'for_ai', 'templates', 'agent-rules', file), 'utf8').replace(/\r\n/g, '\n');
+    const text = fs.readFileSync(path.join(repoRoot, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', file), 'utf8').replace(/\r\n/g, '\n');
     assert.doesNotMatch(text, /Use this generated template[^\n]*\n\n```md\n# AI coding agent execution preferences/);
     assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials/);
-    assert.match(text, /for_ai\/templates\/agent-rules\/partials\/skill-routing-rules\.md/);
-    assert.doesNotMatch(text, /^- for_ai\/templates\/agent-rules\/partials/m);
+    assert.match(text, /skills\/n8n-local-setup\/templates\/agent-rules\/partials\/skill-routing-rules\.md/);
+    assert.doesNotMatch(text, /^- skills\/n8n-local-setup\/templates\/agent-rules\/partials/m);
     assert.match(text, /\n# AI coding agent execution preferences\n/);
     assert.match(text, /\n```md\n# SECTION NAME\n/);
   }
 });
 
 test('root agent-rule partials are declared linked surfaces when present', () => {
-  const partialsDir = path.join(repoRoot, 'for_ai', 'templates', 'agent-rules', 'partials');
+  const partialsDir = path.join(repoRoot, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', 'partials');
   const files = fs.existsSync(partialsDir)
     ? fs.readdirSync(partialsDir, { recursive: true }).filter((entry) => fs.statSync(path.join(partialsDir, entry)).isFile()).map((entry) => entry.replace(/\\/g, '/')).sort()
     : [];
@@ -552,15 +618,15 @@ test('root agent-rule partials are declared linked surfaces when present', () =>
       if (output.kind === 'linked') linkedOutputs.add(output.output);
     }
   }
-  assert.equal(linkedOutputs.has('for_ai/templates/agent-rules/partials/skill-routing-rules.md'), true);
+  assert.equal(linkedOutputs.has('skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'), true);
 });
 
 test('validator rejects broken relative links in non-_main Markdown files', () => {
   const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, 'for_ai', 'mcp', 'projects', 'n8n-local-setup.md'), '\n[Missing local target](DOES-NOT-EXIST.md)\n');
+  fs.appendFileSync(path.join(cwd, 'mcp', 'projects', 'n8n-local-setup.md'), '\n[Missing local target](DOES-NOT-EXIST.md)\n');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /for_ai\/mcp\/projects\/n8n-local-setup\.md links to missing path: for_ai\/mcp\/projects\/DOES-NOT-EXIST\.md/);
+  assert.match(result.stderr, /mcp\/projects\/n8n-local-setup\.md links to missing path: mcp\/projects\/DOES-NOT-EXIST\.md/);
 });
 
 test('Markdown link validation ignores _projects source files', () => {
@@ -589,7 +655,7 @@ test('changing declared _main partials makes generated agent rules stale', () =>
   fs.appendFileSync(partial, '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: for_ai\/templates\/agent-rules\/AGENTS\.md/);
+  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/agent-rules\/AGENTS\.md/);
 });
 
 test('changing declared _main MCP config source makes root MCP config stale', () => {
@@ -598,35 +664,35 @@ test('changing declared _main MCP config source makes root MCP config stale', ()
   fs.appendFileSync(source, '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: for_ai\/templates\/mcp-configs\/codex-mcp-config\.md/);
+  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/mcp-configs\/codex-mcp-config\.md/);
 });
 
 test('internal AI-facing surfaces are generated from curated project output', () => {
   const manifests = manifestsById();
   const expectedMarkdown = [
-    ['n8n.local-setup', 'for_ai/skills/automation/n8n-local-setup/SKILL.md', 'curated_output_for_ai/skills/n8n-local-setup/SKILL.md'],
-    ['n8n.local-setup', 'for_ai/skills/automation/n8n-local-setup/README.md', 'curated_output_for_ai/skills/n8n-local-setup/README.md'],
-    ['n8n.local-setup', 'for_ai/mcp/projects/n8n-local-setup.md', 'curated_output_for_ai/mcp/n8n-local-setup.md'],
-    ['n8n.local-setup', 'for_ai/playbooks/n8n/local-setup.md', 'curated_output_for_ai/playbooks/local-setup.md'],
-    ['n8n.local-setup', 'for_ai/templates/mcp-configs/README.md', 'curated_output_for_ai/templates/mcp-configs/README.md'],
-    ['n8n.workflow-templates', 'for_ai/skills/automation/n8n-workflow-sync/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-sync/SKILL.md'],
-    ['n8n.workflow-templates', 'for_ai/skills/automation/n8n-workflow-sync/README.md', 'curated_output_for_ai/skills/n8n-workflow-sync/README.md'],
-    ['n8n.workflow-templates', 'for_ai/mcp/projects/n8n-workflow-templates.md', 'curated_output_for_ai/mcp/n8n-workflow-templates.md'],
-    ['n8n.workflow-templates', 'for_ai/playbooks/n8n/workflow-sync.md', 'curated_output_for_ai/playbooks/workflow-sync.md'],
-    ['n8n.workflow-templates', 'for_ai/templates/n8n/sanitizer/README.md', 'curated_output_for_ai/templates/n8n/sanitizer/README.md'],
-    ['n8n.workflow-templates', 'for_ai/templates/n8n/workflow-policy/README.md', 'curated_output_for_ai/templates/n8n/workflow-policy/README.md'],
-    ['cicd.secure-installer', 'for_ai/skills/cicd/secure-cicd-installer/SKILL.md', 'curated_output_for_ai/skills/secure-cicd-installer/SKILL.md'],
-    ['cicd.secure-installer', 'for_ai/skills/cicd/secure-cicd-installer/README.md', 'curated_output_for_ai/skills/secure-cicd-installer/README.md'],
-    ['cicd.secure-installer', 'for_ai/mcp/projects/secure-cicd-installer.md', 'curated_output_for_ai/mcp/secure-cicd-installer.md'],
-    ['cicd.secure-installer', 'for_ai/playbooks/cicd/secure-cicd-installer.md', 'curated_output_for_ai/playbooks/secure-cicd-installer.md'],
-    ['cicd.secure-installer', 'for_ai/templates/cicd/README.md', 'curated_output_for_ai/templates/cicd/README.md'],
-    ['cicd.secure-installer', 'for_ai/templates/n8n/sync-helpers/README.md', 'curated_output_for_ai/templates/n8n/sync-helpers/README.md']
+    ['n8n.local-setup', 'skills/n8n-local-setup/SKILL.md', 'curated_output_for_ai/skills/n8n-local-setup/SKILL.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/README.md', 'curated_output_for_ai/skills/n8n-local-setup/README.md'],
+    ['n8n.local-setup', 'mcp/projects/n8n-local-setup.md', 'curated_output_for_ai/mcp/n8n-local-setup.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/local-setup.md', 'curated_output_for_ai/playbooks/local-setup.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/README.md', 'curated_output_for_ai/templates/mcp-configs/README.md'],
+    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-sync/SKILL.md'],
+    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/README.md', 'curated_output_for_ai/skills/n8n-workflow-sync/README.md'],
+    ['n8n.workflow-templates', 'mcp/projects/n8n-workflow-templates.md', 'curated_output_for_ai/mcp/n8n-workflow-templates.md'],
+    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/references/n8n/workflow-sync.md', 'curated_output_for_ai/playbooks/workflow-sync.md'],
+    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/templates/sanitizer/README.md', 'curated_output_for_ai/templates/n8n/sanitizer/README.md'],
+    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/templates/workflow-policy/README.md', 'curated_output_for_ai/templates/n8n/workflow-policy/README.md'],
+    ['cicd.secure-installer', 'skills/secure-cicd-installer/SKILL.md', 'curated_output_for_ai/skills/secure-cicd-installer/SKILL.md'],
+    ['cicd.secure-installer', 'skills/secure-cicd-installer/README.md', 'curated_output_for_ai/skills/secure-cicd-installer/README.md'],
+    ['cicd.secure-installer', 'mcp/projects/secure-cicd-installer.md', 'curated_output_for_ai/mcp/secure-cicd-installer.md'],
+    ['cicd.secure-installer', 'skills/secure-cicd-installer/references/secure-cicd-installer.md', 'curated_output_for_ai/playbooks/secure-cicd-installer.md'],
+    ['cicd.secure-installer', 'skills/secure-cicd-installer/templates/cicd/README.md', 'curated_output_for_ai/templates/cicd/README.md'],
+    ['cicd.secure-installer', 'skills/n8n-workflow-sync/templates/sync-helpers/README.md', 'curated_output_for_ai/templates/n8n/sync-helpers/README.md']
   ];
   const expectedJson = [
-    ['n8n.local-setup', 'for_ai/packs/codex-n8n-local/pack.json', 'curated_output_for_ai/packs/codex-n8n-local/pack.json'],
-    ['n8n.local-setup', 'for_ai/packs/claude-code-n8n-local/pack.json', 'curated_output_for_ai/packs/claude-code-n8n-local/pack.json'],
-    ['n8n.workflow-templates', 'for_ai/packs/n8n-workflow-sync/pack.json', 'curated_output_for_ai/packs/n8n-workflow-sync/pack.json'],
-    ['cicd.secure-installer', 'for_ai/packs/secure-cicd/pack.json', 'curated_output_for_ai/packs/secure-cicd/pack.json']
+    ['n8n.local-setup', 'skills/n8n-local-setup/packs/codex-n8n-local/pack.json', 'curated_output_for_ai/packs/codex-n8n-local/pack.json'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json', 'curated_output_for_ai/packs/claude-code-n8n-local/pack.json'],
+    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json', 'curated_output_for_ai/packs/n8n-workflow-sync/pack.json'],
+    ['cicd.secure-installer', 'skills/secure-cicd-installer/packs/secure-cicd/pack.json', 'curated_output_for_ai/packs/secure-cicd/pack.json']
   ];
 
   for (const [projectId, outputPath, source] of expectedMarkdown) {
@@ -651,15 +717,15 @@ test('internal AI-facing surfaces are generated from curated project output', ()
 test('curated Markdown outputs carry curated-source notices', () => {
   for (const [outputPath, sourcePath] of [
     [
-      'for_ai/skills/automation/n8n-local-setup/SKILL.md',
+      'skills/n8n-local-setup/SKILL.md',
       '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/SKILL.md'
     ],
     [
-      'for_ai/skills/automation/n8n-local-setup/README.md',
+      'skills/n8n-local-setup/README.md',
       '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md'
     ],
     [
-      'for_ai/templates/n8n/sync-helpers/README.md',
+      'skills/n8n-workflow-sync/templates/sync-helpers/README.md',
       '_projects/cicd/secure-installer/curated_output_for_ai/templates/n8n/sync-helpers/README.md'
     ]
   ]) {
@@ -685,22 +751,22 @@ test('changing curated skill README source makes generated skill README stale', 
   fs.appendFileSync(source, '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: for_ai\/skills\/automation\/n8n-local-setup\/README\.md/);
+  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/README\.md/);
 });
 
 test('curated JSON pack outputs match deterministic source formatting', () => {
   for (const [sourcePath, outputPath] of [
     [
       '_projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/pack.json',
-      'for_ai/packs/codex-n8n-local/pack.json'
+      'skills/n8n-local-setup/packs/codex-n8n-local/pack.json'
     ],
     [
       '_projects/n8n/workflow-templates/curated_output_for_ai/packs/n8n-workflow-sync/pack.json',
-      'for_ai/packs/n8n-workflow-sync/pack.json'
+      'skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json'
     ],
     [
       '_projects/cicd/secure-installer/curated_output_for_ai/packs/secure-cicd/pack.json',
-      'for_ai/packs/secure-cicd/pack.json'
+      'skills/secure-cicd-installer/packs/secure-cicd/pack.json'
     ]
   ]) {
     const expected = `${JSON.stringify(readJsonFile(path.join(repoRoot, sourcePath)), null, 2)}\n`;
@@ -712,12 +778,12 @@ test('third-party UI UX project remains a linked special case', () => {
   const manifests = manifestsById();
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'curated_output_for_ai')), false);
   for (const outputPath of [
-    'for_ai/skills/design/ui-ux-secure-frontend-design/SKILL.md',
-    'for_ai/mcp/projects/ui-ux-pro-max.md',
-    'for_ai/playbooks/design/ui-ux-pro-max.md',
-    'for_ai/tools/design-system-generator/README.md',
-    'for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
-    'for_ai/packs/design-system-generator/pack.json'
+    'skills/ui-ux-secure-frontend-design/SKILL.md',
+    'mcp/projects/ui-ux-pro-max.md',
+    'skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md',
+    'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md',
+    'skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
+    'skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json'
   ]) {
     assert.equal(manifestOutput(manifests.get('design.ui-ux-pro-max'), outputPath)?.kind, 'linked', outputPath);
   }
@@ -753,7 +819,7 @@ test('source-lock audit passes and catches exact-copy drift for retired sources'
 });
 
 test('source-lock audit rejects toolkit-local source_path provenance rewrites', () => {
-  for (const sourcePath of ['for_ai/templates/n8n/README.md', 'repo/scripts/example.cjs', '_projects/n8n/local-setup/_main/README.md']) {
+  for (const sourcePath of ['skills/n8n-workflow-sync/templates/sync-helpers/README.md', 'repo/scripts/example.cjs', '_projects/n8n/local-setup/_main/README.md']) {
     const cwd = tempCopy();
     const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
     const lock = readJsonFile(lockPath);
@@ -772,7 +838,7 @@ test('source-lock audit requires local paths to stay in their topology namespace
   let lock = readJsonFile(lockPath);
   lock.files[0].mode = 'adapted';
   lock.files[0].notes = 'Topology namespace regression test.';
-  lock.files[0].project_path = 'for_ai/templates/n8n/README.md';
+  lock.files[0].project_path = 'skills/n8n-workflow-sync/templates/sync-helpers/README.md';
   delete lock.files[0].source_blob_sha;
   writeJsonFile(lockPath, lock);
   let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
@@ -790,7 +856,7 @@ test('source-lock audit requires local paths to stay in their topology namespace
   writeJsonFile(lockPath, lock);
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /root_surface_path must point under for_ai\//);
+  assert.match(result.stderr, /root_surface_path must point under skills\/ or mcp\//);
 
   cwd = tempCopy();
   lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
@@ -810,7 +876,7 @@ test('source-lock audit requires local paths to stay in their topology namespace
   rootSurfaceEntry = lock.files.find((entry) => entry.root_surface_path);
   rootSurfaceEntry.mode = 'adapted';
   rootSurfaceEntry.notes = 'Topology traversal regression test.';
-  rootSurfaceEntry.root_surface_path = 'for_ai/../repo/scripts/validate-toolkit.cjs';
+  rootSurfaceEntry.root_surface_path = 'skills/../repo/scripts/validate-toolkit.cjs';
   delete rootSurfaceEntry.source_blob_sha;
   writeJsonFile(lockPath, lock);
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
@@ -882,7 +948,7 @@ test('source watch rendered output is advisory and does not claim PR creation to
 });
 
 test('public source repo registry excludes retired internal provenance sources', () => {
-  const registry = readJsonFile(path.join(repoRoot, 'for_ai', 'registry', 'source-repos.registry.json'));
+  const registry = readJsonFile(path.join(repoRoot, 'mcp', 'registry', 'source-repos.registry.json'));
   const sources = registry.map((entry) => entry.source);
   assert.ok(sources.includes('nextlevelbuilder/ui-ux-pro-max-skill'));
   assert.equal(sources.includes('weijunswj/codex-n8n-local-setup'), false);
@@ -892,7 +958,7 @@ test('public source repo registry excludes retired internal provenance sources',
 
 test('validator rejects retired internal repos as active public source-watch targets', () => {
   const cwd = tempCopy();
-  const registryPath = path.join(cwd, 'for_ai', 'registry', 'source-repos.registry.json');
+  const registryPath = path.join(cwd, 'mcp', 'registry', 'source-repos.registry.json');
   const registry = readJsonFile(registryPath);
   registry.push({
     id: 'bad.retired',
@@ -927,9 +993,9 @@ test('curated recipes must source from curated_output_for_ai', () => {
   manifest.outputs.push({
     kind: 'curated',
     source: '_main/bad-curated.md',
-    output: 'for_ai/playbooks/n8n/bad-curated.md'
+    output: 'skills/n8n-local-setup/references/n8n/bad-curated.md'
   });
-  manifest.writes.allowed.push('for_ai/playbooks/n8n/bad-curated.md');
+  manifest.writes.allowed.push('skills/n8n-local-setup/references/n8n/bad-curated.md');
   writeJsonFile(manifestPath, manifest);
 
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
@@ -968,7 +1034,7 @@ test('validator rejects stale mandatory exports architecture wording in permanen
 
 test('validator rejects stale registry YAML references in temp docs', () => {
   const cwd = tempCopy();
-  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'bad.md'), `Use ${'for_ai/registry/*.' + 'yaml'} here.\n`);
+  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'bad.md'), `Use ${'mcp/registry/*.' + 'yaml'} here.\n`);
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale registry YAML reference/);
@@ -986,12 +1052,12 @@ test('validator rejects project landing cards that stop pointing to _main', () =
   const cwd = tempCopy();
   fs.writeFileSync(
     path.join(cwd, '_projects', 'n8n', 'local-setup', 'README.md'),
-    '# Local n8n Setup\n\nUse for_ai/playbooks/ as canonical human documentation.\n'
+    '# Local n8n Setup\n\nUse playbooks/ as canonical human documentation.\n'
   );
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /project README must link to _main\//);
-  assert.match(result.stderr, /must not claim for_ai\/playbooks\/ is canonical human documentation/);
+  assert.match(result.stderr, /must not claim playbooks are canonical human documentation/);
 });
 
 test('validator rejects oversized project landing cards', () => {
@@ -1045,7 +1111,7 @@ test('validator allows source-watch action phrases when the action is negated', 
 
 test('validator rejects pack YAML files in temp dirs', () => {
   const cwd = tempCopy();
-  const badDir = path.join(cwd, 'for_ai', 'packs', 'bad');
+  const badDir = path.join(cwd, 'skills', 'n8n-local-setup', 'packs', 'bad');
   fs.mkdirSync(badDir, { recursive: true });
   fs.writeFileSync(path.join(badDir, 'pack.' + 'yaml'), 'id: bad\n');
   const result = runValidate(cwd);
@@ -1074,7 +1140,7 @@ test('validator rejects obvious secret-looking strings', () => {
 });
 
 test('safe-source-update classifies n8n helper templates as manual and workflow JSON as blocked', () => {
-  assert.equal(safeSourceUpdate.classify('for_ai/templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs'), 'manual');
-  assert.equal(safeSourceUpdate.classify('for_ai/templates/n8n/sanitizer/sanitise-n8n-template.ps1'), 'manual');
+  assert.equal(safeSourceUpdate.classify('skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs'), 'manual');
+  assert.equal(safeSourceUpdate.classify('skills/n8n-workflow-sync/templates/sanitizer/sanitise-n8n-template.ps1'), 'manual');
   assert.equal(safeSourceUpdate.classify('n8n-workflows/customer-workflow.json'), 'blocked');
 });

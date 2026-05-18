@@ -1,0 +1,107 @@
+[
+  {
+    "id": "platforms-index",
+    "title": "AI Agent Platforms",
+    "path": "skills/n8n-local-setup/references/ai-agent-platforms/README.md"
+  },
+  {
+    "id": "codex",
+    "title": "Codex",
+    "path": "skills/n8n-local-setup/references/ai-agent-platforms/codex.md"
+  },
+  {
+    "id": "claude-code",
+    "title": "Claude Code",
+    "path": "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md"
+  },
+  {
+    "id": "chatgpt-web",
+    "title": "ChatGPT Web",
+    "path": "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md"
+  },
+  {
+    "id": "claude-web",
+    "title": "Claude Web",
+    "path": "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md"
+  },
+  {
+    "id": "opencode",
+    "title": "OpenCode",
+    "path": "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md"
+  },
+  {
+    "id": "antigravity",
+    "title": "Antigravity",
+    "path": "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md"
+  },
+  {
+    "id": "mcp-index",
+    "title": "MCP Playbooks",
+    "path": "mcp/references/README.md"
+  },
+  {
+    "id": "local-mcp-setup",
+    "title": "Local MCP Setup",
+    "path": "mcp/references/local-mcp-setup.md"
+  },
+  {
+    "id": "registry-mcp",
+    "title": "Registry MCP",
+    "path": "mcp/references/registry-mcp.md"
+  },
+  {
+    "id": "installer-mcp",
+    "title": "Installer MCP",
+    "path": "mcp/references/installer-mcp.md"
+  },
+  {
+    "id": "mcp-security",
+    "title": "MCP Security",
+    "path": "mcp/references/mcp-security.md"
+  },
+  {
+    "id": "n8n-local-setup",
+    "title": "Local n8n Setup",
+    "path": "skills/n8n-local-setup/references/n8n/local-setup.md"
+  },
+  {
+    "id": "n8n-upgrading",
+    "title": "Upgrading n8n",
+    "path": "skills/n8n-local-setup/references/n8n/upgrading.md"
+  },
+  {
+    "id": "n8n-tunnelling",
+    "title": "Tunnelling",
+    "path": "skills/n8n-local-setup/references/n8n/tunnelling.md"
+  },
+  {
+    "id": "n8n-docker-compose-ngrok",
+    "title": "Docker Compose Plus ngrok",
+    "path": "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md"
+  },
+  {
+    "id": "n8n-vps-hosting",
+    "title": "VPS Hosting",
+    "path": "skills/n8n-local-setup/references/n8n/vps-hosting.md"
+  },
+  {
+    "id": "n8n-workflow-sync",
+    "title": "Workflow Sync",
+    "path": "skills/n8n-workflow-sync/references/n8n/workflow-sync.md"
+  },
+  {
+    "id": "n8n-credential-safety",
+    "title": "Credential Safety",
+    "path": "skills/n8n-workflow-sync/references/n8n/credential-safety.md"
+  },
+  {
+    "id": "secure-cicd-installer",
+    "title": "Secure CI/CD Installer",
+    "path": "skills/secure-cicd-installer/references/secure-cicd-installer.md"
+  },
+  {
+    "id": "ui-ux-pro-max",
+    "title": "UI/UX Pro Max Design Module",
+    "path": "skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md"
+  }
+]
