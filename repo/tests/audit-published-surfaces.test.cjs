@@ -10,6 +10,19 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
 const syncScript = path.join(repoRoot, 'repo', 'scripts', 'sync-toolkit-projects.cjs');
+const approvedN8nSyncHelpers = [
+  'skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd',
+  'skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd',
+  'skills/n8n-workflow-sync/templates/sync-helpers/README.md',
+  'skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs',
+  'skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1',
+  'skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1',
+  'skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1',
+  'skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs',
+  'skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs',
+  'skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs',
+  'skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs'
+];
 
 function tempCopy() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-surface-audit-'));
@@ -33,6 +46,32 @@ function runAuditJson(cwd = repoRoot) {
   return JSON.parse(result.stdout);
 }
 
+function addCrossOwnedOutputFixture(cwd, metadata = {}) {
+  const projectDir = path.join(cwd, '_projects', 'cicd', 'secure-installer');
+  const sourceRel = 'curated_output_for_ai/templates/n8n/sync-helpers/new-cross-owned-helper.md';
+  const outputRel = 'skills/n8n-workflow-sync/templates/sync-helpers/new-cross-owned-helper.md';
+  const sourcePath = path.join(projectDir, sourceRel);
+  const outputPath = path.join(cwd, outputRel);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(sourcePath, '# New cross-owned helper fixture\n\nReview-required n8n template fixture.\n', 'utf8');
+  fs.writeFileSync(outputPath, '# New cross-owned helper fixture\n\nReview-required n8n template fixture.\n', 'utf8');
+
+  const manifestPath = path.join(projectDir, 'toolkit.project.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest.outputs.push({
+    kind: 'curated',
+    source: sourceRel,
+    output: outputRel,
+    notes: 'AI-facing reviewed template fixture.',
+    fidelity: 'reviewed_entrypoint',
+    ...metadata
+  });
+  manifest.writes.allowed.push(outputRel);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  return outputRel;
+}
+
 test('audit-published-surfaces runs successfully on the current repo', () => {
   const result = runAudit();
   assert.equal(result.status, 0, result.stderr);
@@ -46,10 +85,26 @@ test('audit-published-surfaces detects pack-installed undeclared files', () => {
   assert.ok(paths.includes('skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md'));
 });
 
-test('audit-published-surfaces detects cross-owned outputs', () => {
+test('audit-published-surfaces classifies approved n8n sync helpers as shared-surface outputs', () => {
   const report = runAuditJson();
-  const outputs = report.issues.crossOwnedOutputs.map((entry) => entry.output);
-  assert.ok(outputs.includes('skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1'));
+  const crossOwned = report.issues.crossOwnedOutputs.map((entry) => entry.output);
+  const shared = report.issues.sharedSurfaceOutputs;
+  const sharedOutputs = shared.map((entry) => entry.output);
+
+  assert.equal(report.summary.crossOwnedOutputs, 0);
+  assert.equal(report.summary.sharedSurfaceOutputs, approvedN8nSyncHelpers.length);
+  assert.equal(report.summary.sharedSurfaceMetadataFindings, 0);
+  for (const output of approvedN8nSyncHelpers) {
+    assert.equal(crossOwned.includes(output), false, output);
+    assert.ok(sharedOutputs.includes(output), output);
+  }
+  for (const entry of shared) {
+    assert.equal(entry.projectId, 'cicd.secure-installer');
+    assert.equal(entry.targetProjectId, 'n8n.workflow-templates');
+    assert.equal(entry.surfaceOwnerProject, 'n8n.workflow-templates');
+    assert.match(entry.sharedSurfaceReason, /ai-cicd-installer source provenance/);
+    assert.match(entry.sharedSurfaceReason, /n8n workflow sync skill/);
+  }
 });
 
 test('audit-published-surfaces classifies curated boundary recipes', () => {
@@ -118,6 +173,35 @@ test('audit-published-surfaces --check fails when a new undeclared published fil
   assert.match(result.stderr, /new undeclared published surface: mcp\/registry\/new-audit-fixture\.registry\.json/);
 });
 
+test('audit-published-surfaces --check fails when a new cross-owned output lacks shared metadata', () => {
+  const cwd = tempCopy();
+  const outputRel = addCrossOwnedOutputFixture(cwd);
+
+  const result = runAudit(['--check'], cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, new RegExp(`new cross-owned output: cicd\\.secure-installer -> n8n\\.workflow-templates: ${outputRel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+});
+
+test('audit-published-surfaces rejects shared-surface metadata without a reason', () => {
+  const cwd = tempCopy();
+  const outputRel = addCrossOwnedOutputFixture(cwd, {
+    shared_surface: true,
+    surface_owner_project: 'n8n.workflow-templates'
+  });
+
+  const report = runAuditJson(cwd);
+  assert.ok(report.issues.crossOwnedOutputs.some((entry) => entry.output === outputRel));
+  assert.equal(report.issues.sharedSurfaceOutputs.some((entry) => entry.output === outputRel), false);
+  const finding = report.issues.sharedSurfaceMetadataFindings.find((entry) => entry.output === outputRel);
+  assert.ok(finding);
+  assert.deepEqual(finding.reasons, ['shared_surface_reason is required']);
+
+  const result = runAudit(['--check'], cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /new shared-surface metadata finding:/);
+  assert.match(result.stderr, /shared_surface_reason is required/);
+});
+
 test('audit-published-surfaces --check fails when a new curated runtime recipe is introduced', () => {
   const cwd = tempCopy();
   const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
@@ -154,6 +238,55 @@ test('audit-published-surfaces --check fails when a new curated runtime recipe i
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /new boundary recipe finding: skills\/n8n-local-setup\/references\/n8n\/new-runtime-guide\.md/);
   assert.match(result.stderr, /new curated directory boundary finding: _projects\/n8n\/local-setup\/curated_output_for_ai\/references\/n8n\/new-runtime-guide\.md/);
+});
+
+test('audit-published-surfaces keeps reviewed templates under runtime-heft checks', () => {
+  const cwd = tempCopy();
+  const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
+  const sourceRel = 'curated_output_for_ai/templates/agent-rules/new-runtime-template.md';
+  const outputRel = 'skills/n8n-local-setup/templates/agent-rules/new-runtime-template.md';
+  const sourcePath = path.join(projectDir, sourceRel);
+  const outputPath = path.join(cwd, outputRel);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(sourcePath, [
+    '<!--',
+    'Curated AI-facing source.',
+    'Project: n8n.local-setup',
+    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+    '-->',
+    '',
+    '# New Runtime Template',
+    '',
+    '## Setup',
+    '',
+    '1. Install local dependencies.',
+    '2. Import the workflow.',
+    ''
+  ].join('\n'), 'utf8');
+  fs.writeFileSync(outputPath, '# New Runtime Template\n\n## Setup\n\n1. Install local dependencies.\n', 'utf8');
+
+  const manifestPath = path.join(projectDir, 'toolkit.project.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest.outputs.push({
+    kind: 'curated',
+    source: sourceRel,
+    output: outputRel,
+    notes: 'AI-facing reviewed template fixture.',
+    fidelity: 'reviewed_entrypoint'
+  });
+  manifest.writes.allowed.push(outputRel);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  assert.ok(finding);
+  assert.equal(finding.classification, 'suspicious_curated_runtime');
+  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Setup/.test(reason)));
+
+  const result = runAudit(['--check'], cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /new boundary recipe finding: skills\/n8n-local-setup\/templates\/agent-rules\/new-runtime-template\.md/);
 });
 
 test('audit-published-surfaces still flags runtime-heavy platform overview fixtures', () => {

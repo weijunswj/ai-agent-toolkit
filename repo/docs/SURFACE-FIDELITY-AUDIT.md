@@ -19,10 +19,12 @@ The broader audit found:
 - 111 expanded declared/generated project outputs after the Secure CI/CD template declaration pass.
 - 51 tracked published-surface files still manually present and not declared by project sync recipes.
 - 21 files covered by a pack install path but still not individually declared by project sync recipes.
+- 0 unresolved cross-owned outputs after the n8n sync helper shared-surface review.
+- 11 declared shared-surface outputs for n8n sync helpers retained under Secure CI/CD provenance.
 - 0 suspicious source/output size findings remain.
 - 0 exact duplicate-content groups across `_projects`, excluding generated previews.
 
-The highest remaining risks are now the cross-owned n8n workflow-sync helper ownership, n8n workflow-sync pack-installed reference ownership, manual MCP registry/spec surfaces, and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue and the Secure CI/CD remaining template declaration issue have been addressed.
+The highest remaining risks are now n8n workflow-sync pack-installed reference ownership, manual MCP registry/spec surfaces, and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue, Secure CI/CD remaining template declaration issue, and n8n sync helper shared-surface ownership issue have been addressed.
 
 ## Deterministic audit command
 
@@ -37,7 +39,7 @@ npm run audit:surfaces:check
 
 The command inspects local Git-tracked `skills/` and `mcp/` files, `_projects/**/toolkit.project.json`, and `skills/**/packs/**/pack.json`. It does not call the network, run project scripts, install packages, summarize with AI, or touch live n8n.
 
-`--check` compares the current findings with `repo/docs/published-surface-audit-baseline.json`. The baseline intentionally records the current known manual, pack-installed undeclared, cross-owned, and suspicious surfaces so validation can fail when new surfaces appear before the existing follow-up cleanup is complete.
+`--check` compares the current findings with `repo/docs/published-surface-audit-baseline.json`. The baseline intentionally records the current known manual, pack-installed undeclared, unresolved cross-owned, declared shared-surface, and suspicious surfaces so validation can fail when new surfaces appear before the existing follow-up cleanup is complete.
 
 Future PRs that change skill or MCP surfaces should run `npm run audit:surfaces:check` before reporting completion. If a PR intentionally resolves or reclassifies a known issue, update the baseline in the same PR with `node repo/scripts/audit-published-surfaces.cjs --write-baseline`.
 
@@ -120,7 +122,40 @@ Audit baseline changes:
 Remaining Secure CI/CD follow-up actions:
 
 - None for the four remaining template/manual surfaces reviewed in this pass.
-- Cross-owned n8n sync helper ownership remains a separate follow-up and was intentionally not rehomed here.
+- The n8n sync helper ownership split is now handled by explicit shared-surface metadata instead of rehoming.
+
+## n8n Sync Helper Shared-Surface Review
+
+Files reviewed:
+
+- `skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd`
+- `skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd`
+- `skills/n8n-workflow-sync/templates/sync-helpers/README.md`
+- `skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs`
+- `skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1`
+- `skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1`
+- `skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1`
+- `skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs`
+- `skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs`
+- `skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs`
+- `skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs`
+
+Chosen outcome: explicit shared-surface classification.
+
+The helpers were not rehomed. `_projects/cicd/secure-installer/SOURCE-LOCK.json` ties these files to the retired `weijunswj/ai-cicd-installer` migration source, including adapted root-surface entries for the published helper scripts. Moving the source into `_projects/n8n/workflow-templates/_main/` would make the folder tree look cleaner but would obscure that provenance.
+
+The published surface owner is still `n8n.workflow-templates` / `skills/n8n-workflow-sync` because these helpers are copied as n8n workflow sync templates and installed by the n8n workflow sync pack. `_projects/cicd/secure-installer/toolkit.project.json` now marks each helper output with `shared_surface: true`, `surface_owner_project: "n8n.workflow-templates"`, and a reason explaining the provenance/owner split.
+
+Audit baseline changes:
+
+- `crossOwnedOutputs`: 11 -> 0.
+- `sharedSurfaceOutputs`: 0 -> 11.
+- `sharedSurfaceMetadataFindings`: 0 -> 0.
+
+Remaining follow-up actions:
+
+- None for the sync-helper ownership classification.
+- The n8n workflow-sync pack-installed undeclared reference files remain a separate follow-up.
 
 ## n8n Platform Reference Boundary Review
 
@@ -380,7 +415,7 @@ Create one or more follow-up PRs that either declare these as linked surfaces wi
 ## Cross-project ownership issues
 
 Finding:
-Severity: high
+Severity: resolved
 Source file(s):
 - `_projects/cicd/secure-installer/_main/templates/n8n/**`
 - `_projects/cicd/secure-installer/SOURCE-LOCK.json`
@@ -388,9 +423,9 @@ Source file(s):
 Published file(s):
 - `skills/n8n-workflow-sync/templates/sync-helpers/**`
 Problem:
-The Secure CI/CD project owns and publishes n8n sync helper outputs into the `n8n-workflow-sync` skill surface. This is declared and partly source-locked, but it is cross-owned: a CI/CD project writes into an n8n skill. The n8n workflow-sync pack also installs that folder.
-Recommended fix:
-Do not rehome in this PR. Follow-up PR: move ownership to `_projects/n8n/workflow-templates` if the helpers are now n8n workflow-sync assets, or introduce a small deterministic shared-surface recipe layer such as `_projects/_surfaces/` with explicit ownership notes.
+The Secure CI/CD project retains n8n sync helper source provenance from `weijunswj/ai-cicd-installer`, while the outputs belong in the `n8n-workflow-sync` skill surface. The n8n workflow-sync pack also installs that folder.
+Resolution:
+The helpers remain under `cicd.secure-installer` for source provenance and are explicitly declared as shared-surface outputs owned by `n8n.workflow-templates`. The audit now reports them under `sharedSurfaceOutputs` and still reports any undeclared cross-owned output under `crossOwnedOutputs`.
 
 Finding:
 Severity: low
@@ -460,10 +495,10 @@ Completed fixes:
 - Add the deterministic published-surface audit command and baseline check.
 - Restore full-fidelity `n8n-local-setup` runtime references inside the copyable skill folder.
 - Declare the remaining Secure CI/CD pack-installed status/policy/GitHub Actions template files and pack README as curated generated outputs.
+- Explicitly classify the n8n sync helpers as shared-surface outputs owned by `n8n.workflow-templates` while retaining Secure CI/CD source provenance.
 
 Recommended follow-up fixes:
 
-- Rehome or explicitly shared-own the n8n sync helpers currently owned by the Secure CI/CD project.
 - Bring manual MCP registry/spec surfaces under project modules or a deterministic shared surface plan.
 - Clarify UI/UX skill manual surface ownership and attribution in recipes.
 
@@ -473,7 +508,7 @@ Recommended follow-up fixes:
 2. PR 2: Add a deterministic surface audit command and CI test for undeclared project-like published files. Done by `repo/scripts/audit-published-surfaces.cjs` and its baseline check.
 3. PR 3: n8n local setup fidelity pass. Publish full local references or declare short files as non-runtime overviews. Done for required runtime references.
 4. PR 4: Secure CI/CD remaining template declaration pass for status, source update policy, GitHub Actions notes, and pack README. Done in `codex/declare-secure-cicd-remaining-templates`.
-5. PR 5: Cross-owned n8n sync helper ownership cleanup.
+5. PR 5: Cross-owned n8n sync helper ownership cleanup. Done by explicit shared-surface metadata.
 6. PR 6: MCP registry/spec ownership cleanup.
 7. PR 7: UI/UX linked/manual surface provenance cleanup.
 

@@ -18,6 +18,7 @@
   - `curated_output_for_ai/packs/secure-cicd/README.md`
 - Toolkit-adapted export, import, and validation helpers are copied from `_main/templates/n8n/`.
 - Remaining toolkit-adapted AI-facing n8n sync helpers are linked and source-locked.
+- The n8n sync helper outputs intentionally target the `n8n.workflow-templates` / `n8n-workflow-sync` published surface while source provenance remains here from `weijunswj/ai-cicd-installer`.
 
 ## Excluded
 
