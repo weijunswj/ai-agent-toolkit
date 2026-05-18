@@ -1,0 +1,605 @@
+#!/usr/bin/env node
+'use strict';
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+const baselineRelPath = 'repo/docs/published-surface-audit-baseline.json';
+const publishedRoots = ['skills', 'mcp'];
+const projectRoot = '_projects';
+const textExtensions = new Set(['.md', '.json', '.ps1', '.cmd', '.cjs', '.js', '.txt', '.yaml', '.yml']);
+const suspiciousPathWords = /\b(prompt|template|reference|guide|setup|policy|agent|rules|readme)\b/i;
+const sourceSectionMarkers = [
+  'Copy this prompt',
+  'Manual step needed',
+  'Troubleshooting',
+  'Do not commit',
+  'Do not push',
+  'Do not deploy'
+];
+
+function slash(value) {
+  return value.split(path.sep).join('/');
+}
+
+function normalizeRel(value) {
+  return slash(path.normalize(value)).replace(/^\.\//, '');
+}
+
+function workspaceRootFromArgs(args) {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--workspace') return args[i + 1] || '';
+    if (arg.startsWith('--workspace=')) return arg.slice('--workspace='.length);
+  }
+  return '';
+}
+
+function parseArgs(argv = process.argv.slice(2)) {
+  return {
+    argv,
+    check: argv.includes('--check'),
+    json: argv.includes('--json'),
+    writeBaseline: argv.includes('--write-baseline'),
+    workspace: workspaceRootFromArgs(argv)
+  };
+}
+
+function resolveRel(root, relPath) {
+  return path.join(root, relPath);
+}
+
+function readText(root, relPath) {
+  return fs.readFileSync(resolveRel(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+}
+
+function readJson(root, relPath) {
+  return JSON.parse(readText(root, relPath));
+}
+
+function walk(root, relDir, files = []) {
+  const fullDir = resolveRel(root, relDir);
+  if (!fs.existsSync(fullDir)) return files;
+  for (const entry of fs.readdirSync(fullDir, { withFileTypes: true })) {
+    if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === '_dist') continue;
+    const fullPath = path.join(fullDir, entry.name);
+    const relPath = slash(path.relative(root, fullPath));
+    if (entry.isDirectory()) {
+      walk(root, relPath, files);
+    } else if (entry.isFile()) {
+      files.push(relPath);
+    }
+  }
+  return files;
+}
+
+function listFiles(root, relDir) {
+  return walk(root, relDir).sort();
+}
+
+function gitTrackedFiles(root, prefixes) {
+  const result = spawnSync('git', ['ls-files', '--', ...prefixes], { cwd: root, encoding: 'utf8' });
+  if (result.status !== 0) return null;
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(normalizeRel)
+    .sort();
+}
+
+function trackedOrFilesystemFiles(root, prefixes) {
+  const tracked = gitTrackedFiles(root, prefixes);
+  if (tracked) return { source: 'git', files: tracked };
+  const files = prefixes.flatMap((prefix) => listFiles(root, prefix)).sort();
+  return { source: 'filesystem', files };
+}
+
+function discoverProjectManifests(root) {
+  return listFiles(root, projectRoot)
+    .filter((relPath) => relPath.endsWith('/toolkit.project.json'))
+    .map((relPath) => readJson(root, relPath))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function sourceRel(project, relPath) {
+  if (!relPath) return '';
+  const normalized = normalizeRel(relPath);
+  if (normalized.startsWith('_projects/') || normalized.startsWith('skills/') || normalized.startsWith('mcp/')) {
+    return normalized;
+  }
+  return normalizeRel(path.join(project.module_path, normalized));
+}
+
+function outputEntry(project, output, relPath, extras = {}) {
+  return {
+    path: normalizeRel(relPath),
+    projectId: project.id,
+    projectPath: project.module_path,
+    kind: output.kind,
+    source: extras.source || '',
+    sources: extras.sources || [],
+    recipeOutput: output.output
+  };
+}
+
+function expandProjectOutput(root, project, output) {
+  const outputPath = normalizeRel(output.output);
+  if (output.kind === 'linked') {
+    const full = resolveRel(root, outputPath);
+    if (fs.existsSync(full) && fs.statSync(full).isDirectory()) {
+      return listFiles(root, outputPath).map((relPath) => outputEntry(project, output, relPath));
+    }
+    return [outputEntry(project, output, outputPath)];
+  }
+
+  const sources = Array.isArray(output.sources)
+    ? output.sources.map((item) => sourceRel(project, item))
+    : [sourceRel(project, output.source)].filter(Boolean);
+
+  if (output.kind === 'copy' && sources.length === 1) {
+    const sourcePath = resolveRel(root, sources[0]);
+    if (fs.existsSync(sourcePath) && fs.statSync(sourcePath).isDirectory()) {
+      return listFiles(root, sources[0]).map((sourceFile) => {
+        const child = slash(path.relative(sourcePath, resolveRel(root, sourceFile)));
+        return outputEntry(project, output, path.join(outputPath, child), { source: sourceFile, sources: [sourceFile] });
+      });
+    }
+  }
+
+  return [outputEntry(project, output, outputPath, { source: sources[0] || '', sources })];
+}
+
+function declaredOutputs(root, projects) {
+  const entries = [];
+  for (const project of projects) {
+    for (const output of project.outputs || []) {
+      entries.push(...expandProjectOutput(root, project, output));
+    }
+  }
+  if (fs.existsSync(resolveRel(root, 'mcp/registry/projects.registry.json'))) {
+    entries.push({
+      path: 'mcp/registry/projects.registry.json',
+      projectId: 'repo.project-registry',
+      projectPath: projectRoot,
+      kind: 'generated_registry',
+      source: '_projects/**/toolkit.project.json',
+      sources: projects.map((project) => `${project.module_path}/toolkit.project.json`),
+      recipeOutput: 'mcp/registry/projects.registry.json'
+    });
+  }
+  const byPath = new Map();
+  for (const entry of entries) {
+    const list = byPath.get(entry.path) || [];
+    list.push(entry);
+    byPath.set(entry.path, list);
+  }
+  return { entries: entries.sort((a, b) => a.path.localeCompare(b.path)), byPath };
+}
+
+function discoverPackManifests(root) {
+  return listFiles(root, 'skills')
+    .filter((relPath) => /\/packs\/[^/]+\/pack\.json$/.test(relPath))
+    .map((relPath) => {
+      const pack = readJson(root, relPath);
+      return {
+        path: relPath,
+        id: pack.id || relPath,
+        installs: Array.isArray(pack.installs) ? pack.installs.map(normalizeRel) : []
+      };
+    })
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function expandInstallPath(root, installPath, publishedFiles) {
+  const normalized = normalizeRel(installPath).replace(/\/\*\*$/, '/');
+  const full = resolveRel(root, normalized);
+  if (fs.existsSync(full) && fs.statSync(full).isFile()) return [normalized];
+  const prefix = normalized.endsWith('/') ? normalized : `${normalized}/`;
+  return publishedFiles.filter((relPath) => relPath.startsWith(prefix));
+}
+
+function packInstalledFiles(root, publishedFiles) {
+  const manifests = discoverPackManifests(root);
+  const byPath = new Map();
+  for (const pack of manifests) {
+    for (const installPath of pack.installs) {
+      for (const relPath of expandInstallPath(root, installPath, publishedFiles)) {
+        const packs = byPath.get(relPath) || [];
+        packs.push({ id: pack.id, path: pack.path, install: installPath });
+        byPath.set(relPath, packs);
+      }
+    }
+  }
+  return { manifests, byPath };
+}
+
+function manualClassification(relPath) {
+  if (relPath === 'mcp/README.md') return 'manual_repo_surface';
+  if (relPath.startsWith('mcp/registry/')) return 'manual_registry_surface';
+  if (relPath.startsWith('mcp/')) return 'manual_mcp_surface';
+  if (relPath.startsWith('skills/')) return 'manual_skill_surface';
+  return 'unknown_manual_surface';
+}
+
+function classifyPublishedFile(relPath, declared, packInstalled) {
+  const declaredEntries = declared.get(relPath) || [];
+  const installed = packInstalled.has(relPath);
+  if (declaredEntries.length && installed) return 'pack_installed_declared';
+  if (declaredEntries.some((entry) => entry.kind === 'linked')) return 'declared_linked';
+  if (declaredEntries.length) return 'declared_generated';
+  if (installed) return 'pack_installed_undeclared';
+  return manualClassification(relPath);
+}
+
+function skillRoot(relPath) {
+  const parts = relPath.split('/');
+  if (parts[0] !== 'skills' || !parts[1]) return '';
+  return `${parts[0]}/${parts[1]}`;
+}
+
+function projectOwners(projects) {
+  const bySkillRoot = new Map();
+  const byMcpPath = new Map();
+  for (const project of projects) {
+    const skillPath = project.surface?.skill?.path ? normalizeRel(project.surface.skill.path) : '';
+    if (skillPath) bySkillRoot.set(skillPath, project);
+    const mcpPath = project.surface?.mcp?.path ? normalizeRel(project.surface.mcp.path) : '';
+    if (mcpPath) byMcpPath.set(mcpPath, project);
+  }
+  return { bySkillRoot, byMcpPath };
+}
+
+function crossOwnedOutputs(projects, declaredEntries) {
+  const owners = projectOwners(projects);
+  return declaredEntries
+    .filter((entry) => {
+      const root = skillRoot(entry.path);
+      if (!root) return false;
+      const target = owners.bySkillRoot.get(root);
+      if (!target) return false;
+      return target.id !== entry.projectId;
+    })
+    .map((entry) => {
+      const root = skillRoot(entry.path);
+      const target = owners.bySkillRoot.get(root);
+      return {
+        projectId: entry.projectId,
+        projectPath: entry.projectPath,
+        targetProjectId: target.id,
+        targetSkill: root,
+        output: entry.path,
+        kind: entry.kind
+      };
+    })
+    .sort((a, b) => `${a.projectId}:${a.output}`.localeCompare(`${b.projectId}:${b.output}`));
+}
+
+function fileSize(root, relPath) {
+  try {
+    return fs.statSync(resolveRel(root, relPath)).size;
+  } catch {
+    return 0;
+  }
+}
+
+function isTextLike(relPath) {
+  return textExtensions.has(path.extname(relPath).toLowerCase());
+}
+
+function markerHits(text) {
+  return sourceSectionMarkers.filter((marker) => text.includes(marker));
+}
+
+function looksLikeRuntimeSurface(relPath) {
+  const normalized = relPath.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+  return suspiciousPathWords.test(normalized) || relPath.includes('/references/') || relPath.includes('/templates/');
+}
+
+function sourceTokens(relPath) {
+  const base = path.basename(relPath, path.extname(relPath)).toLowerCase();
+  return new Set(
+    base
+      .replace(/tunnelling/g, 'tunneling')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(/\s+/)
+      .filter((token) => token.length > 2 && !['readme', 'template', 'guide', 'extra'].includes(token))
+  );
+}
+
+function inferProjectForPublishedFile(projects, relPath) {
+  const owners = projectOwners(projects);
+  const root = skillRoot(relPath);
+  if (root && owners.bySkillRoot.has(root)) return owners.bySkillRoot.get(root);
+  if (owners.byMcpPath.has(relPath)) return owners.byMcpPath.get(relPath);
+  return null;
+}
+
+function likelySourceDoc(root, project, relPath) {
+  if (!project) return null;
+  const tokens = sourceTokens(relPath);
+  if (!tokens.size) return null;
+  const candidates = listFiles(root, project.main_path)
+    .filter((item) => item.endsWith('.md') && !item.includes('/_generated/'))
+    .map((source) => {
+      const candidateTokens = sourceTokens(source);
+      let score = 0;
+      for (const token of tokens) {
+        if (candidateTokens.has(token)) score += 2;
+        if (source.toLowerCase().includes(token)) score += 1;
+      }
+      return { source, score, size: fileSize(root, source) };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || b.size - a.size || a.source.localeCompare(b.source));
+  return candidates[0] || null;
+}
+
+function suspiciousDeclaredOutputs(root, declaredEntries) {
+  const issues = [];
+  for (const entry of declaredEntries) {
+    if (!entry.source || !isTextLike(entry.path) || !isTextLike(entry.source)) continue;
+    if (!fs.existsSync(resolveRel(root, entry.path)) || !fs.existsSync(resolveRel(root, entry.source))) continue;
+    if (!looksLikeRuntimeSurface(entry.path) && !looksLikeRuntimeSurface(entry.source)) continue;
+    const sourceSize = fileSize(root, entry.source);
+    const outputSize = fileSize(root, entry.path);
+    if (sourceSize < 3000 || outputSize === 0 || outputSize / sourceSize >= 0.4) continue;
+
+    const sourceText = readText(root, entry.source);
+    const outputText = readText(root, entry.path);
+    const missingMarkers = markerHits(sourceText).filter((marker) => !outputText.includes(marker));
+    issues.push({
+      path: entry.path,
+      source: entry.source,
+      projectId: entry.projectId,
+      sourceBytes: sourceSize,
+      outputBytes: outputSize,
+      ratio: Number((outputSize / sourceSize).toFixed(3)),
+      reason: missingMarkers.length ? `missing source markers: ${missingMarkers.join(', ')}` : 'published output is much smaller than declared source'
+    });
+  }
+  return issues;
+}
+
+function suspiciousManualOutputs(root, projects, undeclaredFiles) {
+  const issues = [];
+  for (const file of undeclaredFiles) {
+    if (!file.endsWith('.md') || !looksLikeRuntimeSurface(file)) continue;
+    const project = inferProjectForPublishedFile(projects, file);
+    const candidate = likelySourceDoc(root, project, file);
+    if (!candidate) continue;
+    const outputSize = fileSize(root, file);
+    const sourceSize = candidate.size;
+    if (sourceSize < 3000 || outputSize === 0 || outputSize / sourceSize >= 0.5) continue;
+
+    const sourceText = readText(root, candidate.source);
+    const outputText = readText(root, file);
+    const missingMarkers = markerHits(sourceText).filter((marker) => !outputText.includes(marker));
+    issues.push({
+      path: file,
+      source: candidate.source,
+      projectId: project.id,
+      sourceBytes: sourceSize,
+      outputBytes: outputSize,
+      ratio: Number((outputSize / sourceSize).toFixed(3)),
+      reason: missingMarkers.length ? `missing likely source markers: ${missingMarkers.join(', ')}` : 'manual published file is much smaller than likely source doc'
+    });
+  }
+  return issues;
+}
+
+function suspiciousPublishedSurfaces(root, projects, declaredEntries, undeclaredFiles) {
+  return [
+    ...suspiciousDeclaredOutputs(root, declaredEntries),
+    ...suspiciousManualOutputs(root, projects, undeclaredFiles)
+  ].sort((a, b) => `${a.path}:${a.source}`.localeCompare(`${b.path}:${b.source}`));
+}
+
+function projectModuleForPath(relPath) {
+  const parts = relPath.split('/');
+  if (parts[0] !== '_projects' || !parts[1] || !parts[2]) return '';
+  return `${parts[0]}/${parts[1]}/${parts[2]}`;
+}
+
+function duplicateProjectContentGroups(root) {
+  const groups = new Map();
+  for (const relPath of listFiles(root, projectRoot)) {
+    if (relPath.includes('/_generated/')) continue;
+    const modulePath = projectModuleForPath(relPath);
+    if (!modulePath) continue;
+    const content = fs.readFileSync(resolveRel(root, relPath));
+    if (!content.length) continue;
+    const hash = crypto.createHash('sha256').update(content).digest('hex');
+    const group = groups.get(hash) || [];
+    group.push({ path: relPath, modulePath, bytes: content.length });
+    groups.set(hash, group);
+  }
+  return [...groups.entries()]
+    .map(([hash, files]) => ({ hash, files }))
+    .filter((group) => new Set(group.files.map((file) => file.modulePath)).size > 1)
+    .sort((a, b) => a.hash.localeCompare(b.hash));
+}
+
+function countBy(items, field) {
+  const counts = {};
+  for (const item of items) counts[item[field]] = (counts[item[field]] || 0) + 1;
+  return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function buildAudit(root) {
+  const projects = discoverProjectManifests(root);
+  const tracked = trackedOrFilesystemFiles(root, publishedRoots);
+  const publishedFiles = tracked.files.filter((relPath) => relPath.startsWith('skills/') || relPath.startsWith('mcp/')).sort();
+  const declared = declaredOutputs(root, projects);
+  const packInstalled = packInstalledFiles(root, publishedFiles);
+
+  const files = publishedFiles.map((relPath) => {
+    const declaredEntries = declared.byPath.get(relPath) || [];
+    const packs = packInstalled.byPath.get(relPath) || [];
+    return {
+      path: relPath,
+      classification: classifyPublishedFile(relPath, declared.byPath, packInstalled.byPath),
+      declared: declaredEntries.map((entry) => ({ projectId: entry.projectId, kind: entry.kind, source: entry.source, recipeOutput: entry.recipeOutput })),
+      packs
+    };
+  });
+
+  const undeclaredPublishedFiles = files.filter((file) => !declared.byPath.has(file.path));
+  const packInstalledUndeclared = files.filter((file) => file.classification === 'pack_installed_undeclared');
+  const crossOwned = crossOwnedOutputs(projects, declared.entries);
+  const suspicious = suspiciousPublishedSurfaces(root, projects, declared.entries, undeclaredPublishedFiles.map((file) => file.path));
+  const duplicateGroups = duplicateProjectContentGroups(root);
+
+  return {
+    version: 1,
+    generatedAt: new Date(0).toISOString(),
+    inputs: {
+      fileSource: tracked.source,
+      projectManifests: projects.map((project) => `${project.module_path}/toolkit.project.json`),
+      packManifests: packInstalled.manifests.map((pack) => pack.path)
+    },
+    summary: {
+      projects: projects.length,
+      publishedFiles: publishedFiles.length,
+      declaredOutputFiles: declared.byPath.size,
+      packInstalledFiles: packInstalled.byPath.size,
+      undeclaredPublishedFiles: undeclaredPublishedFiles.length,
+      packInstalledUndeclared: packInstalledUndeclared.length,
+      crossOwnedOutputs: crossOwned.length,
+      suspiciousPublishedSurfaces: suspicious.length,
+      duplicateProjectContentGroups: duplicateGroups.length
+    },
+    classifications: countBy(files, 'classification'),
+    files,
+    issues: {
+      undeclaredPublishedFiles: undeclaredPublishedFiles.map(({ path, classification, packs }) => ({ path, classification, packs })).sort((a, b) => a.path.localeCompare(b.path)),
+      packInstalledUndeclared: packInstalledUndeclared.map(({ path, classification, packs }) => ({ path, classification, packs })).sort((a, b) => a.path.localeCompare(b.path)),
+      crossOwnedOutputs: crossOwned,
+      suspiciousPublishedSurfaces: suspicious,
+      duplicateProjectContentGroups: duplicateGroups
+    }
+  };
+}
+
+function baselineFromReport(report) {
+  return {
+    version: 1,
+    description: 'Known published-surface audit findings allowed until follow-up PRs classify or generate them.',
+    summary: report.summary,
+    issueKeys: {
+      undeclaredPublishedFiles: report.issues.undeclaredPublishedFiles.map((entry) => entry.path).sort(),
+      packInstalledUndeclared: report.issues.packInstalledUndeclared.map((entry) => entry.path).sort(),
+      crossOwnedOutputs: report.issues.crossOwnedOutputs.map((entry) => `${entry.projectId} -> ${entry.targetProjectId}: ${entry.output}`).sort(),
+      suspiciousPublishedSurfaces: report.issues.suspiciousPublishedSurfaces.map((entry) => `${entry.path} <= ${entry.source}: ${entry.reason}`).sort(),
+      duplicateProjectContentGroups: report.issues.duplicateProjectContentGroups.map((entry) => `${entry.hash}: ${entry.files.map((file) => file.path).sort().join(' | ')}`).sort()
+    }
+  };
+}
+
+function diffKeys(label, current, baseline, display) {
+  const currentSet = new Set(current);
+  const baselineSet = new Set(baseline);
+  const errors = [];
+  for (const key of currentSet) {
+    if (!baselineSet.has(key)) errors.push(`new ${label}: ${display(key)}`);
+  }
+  for (const key of baselineSet) {
+    if (!currentSet.has(key)) errors.push(`baseline ${label} no longer reported: ${display(key)}`);
+  }
+  return errors;
+}
+
+function compareToBaseline(root, report) {
+  const baselinePath = resolveRel(root, baselineRelPath);
+  if (!fs.existsSync(baselinePath)) {
+    return { ok: false, errors: [`missing published surface audit baseline: ${baselineRelPath}`] };
+  }
+  const baseline = readJson(root, baselineRelPath);
+  const current = baselineFromReport(report).issueKeys;
+  const expected = baseline.issueKeys || {};
+  const errors = [
+    ...diffKeys('undeclared published surface', current.undeclaredPublishedFiles, expected.undeclaredPublishedFiles || [], (key) => key),
+    ...diffKeys('pack-installed undeclared surface', current.packInstalledUndeclared, expected.packInstalledUndeclared || [], (key) => key),
+    ...diffKeys('cross-owned output', current.crossOwnedOutputs, expected.crossOwnedOutputs || [], (key) => key),
+    ...diffKeys('suspicious published surface', current.suspiciousPublishedSurfaces, expected.suspiciousPublishedSurfaces || [], (key) => key),
+    ...diffKeys('duplicate project content group', current.duplicateProjectContentGroups, expected.duplicateProjectContentGroups || [], (key) => key)
+  ];
+  return { ok: errors.length === 0, errors };
+}
+
+function renderList(lines, items, formatter, emptyText) {
+  if (!items.length) {
+    lines.push(`- ${emptyText}`);
+    return;
+  }
+  for (const item of items) lines.push(`- ${formatter(item)}`);
+}
+
+function renderReport(report, checkResult = null) {
+  const lines = [];
+  lines.push('Published surface audit');
+  lines.push('');
+  lines.push('Summary:');
+  for (const [key, value] of Object.entries(report.summary)) {
+    lines.push(`- ${key}: ${value}`);
+  }
+  lines.push('');
+  lines.push('Classifications:');
+  for (const [key, value] of Object.entries(report.classifications)) {
+    lines.push(`- ${key}: ${value}`);
+  }
+  lines.push('');
+  lines.push('Pack-installed undeclared files:');
+  renderList(lines, report.issues.packInstalledUndeclared, (entry) => `${entry.path} (${entry.packs.map((pack) => pack.id).join(', ')})`, 'none');
+  lines.push('');
+  lines.push('Cross-owned outputs:');
+  renderList(lines, report.issues.crossOwnedOutputs, (entry) => `${entry.projectId} -> ${entry.targetProjectId}: ${entry.output}`, 'none');
+  lines.push('');
+  lines.push('Suspicious published surfaces:');
+  renderList(lines, report.issues.suspiciousPublishedSurfaces, (entry) => `${entry.path} <= ${entry.source} (${entry.reason}; ratio ${entry.ratio})`, 'none');
+  lines.push('');
+  lines.push('Manual and undeclared published files:');
+  renderList(lines, report.issues.undeclaredPublishedFiles, (entry) => `${entry.path} [${entry.classification}]`, 'none');
+  lines.push('');
+  lines.push('Exact duplicate groups across _projects:');
+  renderList(lines, report.issues.duplicateProjectContentGroups, (entry) => `${entry.hash}: ${entry.files.map((file) => file.path).join(' | ')}`, 'none');
+  if (checkResult) {
+    lines.push('');
+    lines.push(checkResult.ok ? `Baseline check passed: ${baselineRelPath}` : `Baseline check failed: ${baselineRelPath}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function main() {
+  const args = parseArgs();
+  const root = path.resolve(args.workspace || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
+  const report = buildAudit(root);
+  if (args.writeBaseline) {
+    const baselinePath = resolveRel(root, baselineRelPath);
+    fs.mkdirSync(path.dirname(baselinePath), { recursive: true });
+    fs.writeFileSync(baselinePath, `${JSON.stringify(baselineFromReport(report), null, 2)}\n`, 'utf8');
+  }
+  const checkResult = args.check ? compareToBaseline(root, report) : null;
+
+  if (args.json) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    process.stdout.write(renderReport(report, checkResult));
+  }
+
+  if (checkResult && !checkResult.ok) {
+    process.stderr.write(`${checkResult.errors.join('\n')}\n`);
+    process.exitCode = 1;
+  }
+}
+
+if (require.main === module) main();
+
+module.exports = {
+  baselineFromReport,
+  buildAudit,
+  compareToBaseline,
+  renderReport
+};

@@ -92,6 +92,7 @@ const expectedFiles = [
   'repo/scripts/validate-toolkit.cjs',
   'repo/scripts/sync-toolkit-projects.cjs',
   'repo/scripts/audit-project-source-locks.cjs',
+  'repo/scripts/audit-published-surfaces.cjs',
   'repo/scripts/watch-project-sources.cjs',
   'repo/scripts/package-skills.cjs',
   'repo/scripts/package-packs.cjs',
@@ -99,6 +100,7 @@ const expectedFiles = [
   'repo/scripts/run-design-tests.cjs',
   'repo/scripts/safe-source-update.cjs',
   'repo/scripts/sync-repo-doc-contract.cjs',
+  'repo/docs/published-surface-audit-baseline.json',
   '.github/workflows/auto-sync-generated-surfaces.yml',
   '.github/workflows/source-watch-plan.yml',
   '.github/workflows/validate.yml'
