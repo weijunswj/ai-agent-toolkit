@@ -703,13 +703,12 @@ test('changing Secure CI/CD prompt source makes generated prompt stale', () => {
   assert.match(result.stderr, /Stale generated output: skills\/secure-cicd-installer\/templates\/cicd\/secure-cicd-prompt\.md/);
 });
 
-test('internal AI-facing surfaces are generated from curated project output', () => {
+test('internal AI-facing surfaces are generated from declared project output', () => {
   const manifests = manifestsById();
   const expectedMarkdown = [
     ['n8n.local-setup', 'skills/n8n-local-setup/SKILL.md', 'curated_output_for_ai/skills/n8n-local-setup/SKILL.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/README.md', 'curated_output_for_ai/skills/n8n-local-setup/README.md'],
     ['n8n.local-setup', 'mcp/projects/n8n-local-setup.md', 'curated_output_for_ai/mcp/n8n-local-setup.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/local-setup.md', 'curated_output_for_ai/playbooks/local-setup.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/README.md', 'curated_output_for_ai/templates/mcp-configs/README.md'],
     ['n8n.workflow-templates', 'skills/n8n-workflow-sync/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-sync/SKILL.md'],
     ['n8n.workflow-templates', 'skills/n8n-workflow-sync/README.md', 'curated_output_for_ai/skills/n8n-workflow-sync/README.md'],
@@ -724,6 +723,16 @@ test('internal AI-facing surfaces are generated from curated project output', ()
     ['cicd.secure-installer', 'skills/secure-cicd-installer/templates/cicd/README.md', 'curated_output_for_ai/templates/cicd/README.md'],
     ['cicd.secure-installer', 'skills/n8n-workflow-sync/templates/sync-helpers/README.md', 'curated_output_for_ai/templates/n8n/sync-helpers/README.md']
   ];
+  const expectedExactCopies = [
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/local-setup.md', '_main/1. local setup.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/upgrading.md', '_main/2. upgrading.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/tunnelling.md', '_main/3. tunneling guide.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md', '_main/3a. docker compose + ngrok.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/vps-hosting.md', '_main/4. vps hosting.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md', '_main/5. extra - claude code integration.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md', '_main/6. extra - opencode integration.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md', '_main/7. extra - antigravity integration.md']
+  ];
   const expectedJson = [
     ['n8n.local-setup', 'skills/n8n-local-setup/packs/codex-n8n-local/pack.json', 'curated_output_for_ai/packs/codex-n8n-local/pack.json'],
     ['n8n.local-setup', 'skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json', 'curated_output_for_ai/packs/claude-code-n8n-local/pack.json'],
@@ -734,6 +743,11 @@ test('internal AI-facing surfaces are generated from curated project output', ()
   for (const [projectId, outputPath, source] of expectedMarkdown) {
     const output = manifestOutput(manifests.get(projectId), outputPath);
     assert.equal(output?.kind, 'curated', outputPath);
+    assert.equal(output?.source, source, outputPath);
+  }
+  for (const [projectId, outputPath, source] of expectedExactCopies) {
+    const output = manifestOutput(manifests.get(projectId), outputPath);
+    assert.equal(output?.kind, 'copy', outputPath);
     assert.equal(output?.source, source, outputPath);
   }
   for (const [projectId, outputPath, source] of expectedJson) {

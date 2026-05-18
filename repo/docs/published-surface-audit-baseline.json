@@ -3,13 +3,13 @@
   "description": "Known published-surface audit findings allowed until follow-up PRs classify or generate them.",
   "summary": {
     "projects": 4,
-    "publishedFiles": 146,
-    "declaredOutputFiles": 80,
-    "packInstalledFiles": 90,
-    "undeclaredPublishedFiles": 66,
-    "packInstalledUndeclared": 28,
+    "publishedFiles": 162,
+    "declaredOutputFiles": 107,
+    "packInstalledFiles": 92,
+    "undeclaredPublishedFiles": 55,
+    "packInstalledUndeclared": 24,
     "crossOwnedOutputs": 11,
-    "suspiciousPublishedSurfaces": 10,
+    "suspiciousPublishedSurfaces": 1,
     "duplicateProjectContentGroups": 0
   },
   "issueKeys": {
@@ -40,17 +40,6 @@
       "skills/knowledge-index-updater/agents/openai.yaml",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
-      "skills/n8n-local-setup/references/ai-agent-platforms/README.md",
-      "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md",
-      "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
-      "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
-      "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
-      "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
-      "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",
-      "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md",
-      "skills/n8n-local-setup/references/n8n/tunnelling.md",
-      "skills/n8n-local-setup/references/n8n/upgrading.md",
-      "skills/n8n-local-setup/references/n8n/vps-hosting.md",
       "skills/n8n-local-setup/templates/agent-rules/README.md",
       "skills/n8n-workflow-sync/agents/openai.yaml",
       "skills/n8n-workflow-sync/packs/n8n-workflow-sync/README.md",
@@ -82,10 +71,6 @@
       "skills/windows-localhost-workflows/agents/openai.yaml"
     ],
     "packInstalledUndeclared": [
-      "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
-      "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
-      "skills/n8n-local-setup/references/n8n/tunnelling.md",
-      "skills/n8n-local-setup/references/n8n/upgrading.md",
       "skills/n8n-workflow-sync/agents/openai.yaml",
       "skills/n8n-workflow-sync/packs/n8n-workflow-sync/README.md",
       "skills/n8n-workflow-sync/references/credential-safety.md",
@@ -125,15 +110,6 @@
       "cicd.secure-installer -> n8n.workflow-templates: skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs"
     ],
     "suspiciousPublishedSurfaces": [
-      "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md <= _projects/n8n/local-setup/_main/templates/antigravity-mcp-config.md: missing likely source markers: Troubleshooting",
-      "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md <= _projects/n8n/local-setup/_main/5. extra - claude code integration.md: manual published file is much smaller than likely source doc",
-      "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md <= _projects/n8n/local-setup/_main/templates/CLAUDE.md: manual published file is much smaller than likely source doc",
-      "skills/n8n-local-setup/references/ai-agent-platforms/codex.md <= _projects/n8n/local-setup/_main/templates/codex-mcp-config.md: missing likely source markers: Troubleshooting",
-      "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md <= _projects/n8n/local-setup/_main/templates/opencode-mcp-config.md: missing likely source markers: Troubleshooting",
-      "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md <= _projects/n8n/local-setup/_main/3a. docker compose + ngrok.md: manual published file is much smaller than likely source doc",
-      "skills/n8n-local-setup/references/n8n/tunnelling.md <= _projects/n8n/local-setup/_main/3. tunneling guide.md: manual published file is much smaller than likely source doc",
-      "skills/n8n-local-setup/references/n8n/upgrading.md <= _projects/n8n/local-setup/_main/2. upgrading.md: manual published file is much smaller than likely source doc",
-      "skills/n8n-local-setup/references/n8n/vps-hosting.md <= _projects/n8n/local-setup/_main/4. vps hosting.md: missing likely source markers: Do not commit",
       "skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md <= _projects/cicd/secure-installer/_main/README.md: missing likely source markers: Copy this prompt, Manual step needed, Troubleshooting, Do not push"
     ],
     "duplicateProjectContentGroups": []

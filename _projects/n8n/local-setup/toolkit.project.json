@@ -28,11 +28,102 @@
       "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "curated",
-      "source": "curated_output_for_ai/playbooks/local-setup.md",
+      "kind": "copy",
+      "source": "_main/1. local setup.md",
       "output": "skills/n8n-local-setup/references/n8n/local-setup.md",
-      "notes": "Skill-local reference generated from project-owned curated AI output.",
+      "notes": "Full local setup guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/2. upgrading.md",
+      "output": "skills/n8n-local-setup/references/n8n/upgrading.md",
+      "notes": "Full upgrade guide copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/3. tunneling guide.md",
+      "output": "skills/n8n-local-setup/references/n8n/tunnelling.md",
+      "notes": "Full tunneling guide copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/3a. docker compose + ngrok.md",
+      "output": "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md",
+      "notes": "Full Docker Compose plus ngrok guide copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/4. vps hosting.md",
+      "output": "skills/n8n-local-setup/references/n8n/vps-hosting.md",
+      "notes": "Full VPS hosting guide copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/5. extra - claude code integration.md",
+      "output": "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
+      "notes": "Full Claude Code integration guide copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/6. extra - opencode integration.md",
+      "output": "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",
+      "notes": "Full OpenCode integration guide copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/7. extra - antigravity integration.md",
+      "output": "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md",
+      "notes": "Full Antigravity integration guide copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/n8n/README.md",
+      "output": "skills/n8n-local-setup/references/n8n/README.md",
+      "notes": "Skill-local n8n reference index generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/ai-agent-platforms/README.md",
+      "output": "skills/n8n-local-setup/references/ai-agent-platforms/README.md",
+      "notes": "Skill-local platform reference index generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/ai-agent-platforms/codex.md",
+      "output": "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
+      "notes": "Codex platform overview generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md",
+      "output": "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
+      "notes": "ChatGPT web platform overview generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/ai-agent-platforms/claude-web.md",
+      "output": "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
+      "notes": "Claude web platform overview generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "curated_output_for_ai/reference-link-shims",
+      "output": "skills/n8n-local-setup/references",
+      "notes": "Skill-local link compatibility shims for full-fidelity guides that preserve original source links.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "concat",
@@ -128,6 +219,19 @@
       "skills/n8n-local-setup/README.md",
       "mcp/projects/n8n-local-setup.md",
       "skills/n8n-local-setup/references/n8n/local-setup.md",
+      "skills/n8n-local-setup/references/n8n/upgrading.md",
+      "skills/n8n-local-setup/references/n8n/tunnelling.md",
+      "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md",
+      "skills/n8n-local-setup/references/n8n/vps-hosting.md",
+      "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
+      "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",
+      "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md",
+      "skills/n8n-local-setup/references/n8n/README.md",
+      "skills/n8n-local-setup/references/ai-agent-platforms/README.md",
+      "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
+      "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
+      "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
+      "skills/n8n-local-setup/references",
       "skills/n8n-local-setup/templates/agent-rules/AGENTS.md",
       "skills/n8n-local-setup/templates/agent-rules/CLAUDE.md",
       "skills/n8n-local-setup/templates/agent-rules/GEMINI.md",

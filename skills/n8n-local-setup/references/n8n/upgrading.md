@@ -1,20 +1,63 @@
-# Upgrading n8n
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: n8n.local-setup
+Source: _projects/n8n/local-setup/_main/2. upgrading.md
+Update the project source and run sync.
+-->
+# 2. Upgrading n8n
 
-## Before Updating
+This guide covers the safest low-friction ways to update a self-hosted n8n instance.
 
-1. Back up workflows or take a snapshot.
+It is written for five common setups:
+
+* Hostinger Docker Manager / Docker Catalog installs.
+* Hostinger VPS template installs.
+* Standard Docker Compose installs on any VPS.
+* Local Docker installs like the Windows setup in this repo.
+* Local npm installs.
+
+Important:
+
+* Back up first.
+* Read the release notes before big version jumps.
+* Do a quick smoke test after every upgrade.
+
+---
+
+## 1. Before You Update
+
+Do these first:
+
+1. Take a backup or snapshot.
 2. Record the current n8n version.
-3. Know whether the install is local Docker, Docker Compose, hosted VPS, or npm.
-4. Read release notes before large jumps.
-5. Plan a quick smoke test.
+3. Know where your `docker-compose.yml` or `.env` lives.
+4. Expect a short restart window.
 
-## Local Docker Pattern
+If your instance is business-critical, do the update during a quiet period.
 
-For local Docker, pull the target image, recreate the container, and preserve the Docker volume. Do not delete the volume unless the goal is to delete local n8n data.
+---
 
-## Docker Compose Pattern
+## 2. Hostinger Docker Manager / Docker Catalog
 
-For Compose-based installs:
+This is the lowest-effort Hostinger route.
+
+### Option A. Docker Manager UI
+
+If your n8n instance was deployed through Hostinger Docker Manager:
+
+1. Open Docker Manager.
+2. Find the n8n project.
+3. Use **Update**.
+
+### Option B. SSH / Browser Terminal
+
+For current Hostinger Docker Catalog deployments, the n8n project commonly lives under:
+
+```bash
+cd /docker/n8n
+```
+
+Then run:
 
 ```bash
 docker compose pull
@@ -22,12 +65,187 @@ docker compose down
 docker compose up -d
 ```
 
-Run from the folder that owns the Compose file.
+---
 
-## Smoke Test
+## 3. Hostinger VPS Template Path
 
-- Login works.
-- Credentials still decrypt.
-- Webhook URLs are correct.
-- Scheduled workflows still run.
-- Community nodes still load if used.
+If you used Hostinger's n8n VPS template, n8n comes preinstalled in Docker.
+
+Hostinger's template guide currently points you to `/root/docker-compose.yml` for environment changes, so the compose project commonly lives under `/root`.
+
+Typical update flow:
+
+```bash
+cd /root
+docker compose pull
+docker compose down
+docker compose up -d
+```
+
+If your files live elsewhere, update from the folder that contains your `docker-compose.yml`.
+
+---
+
+## 4. Standard Docker Compose Upgrade On Any VPS
+
+If you are running a normal Docker Compose based install on any provider:
+
+```bash
+cd /path/to/your/compose/project
+docker compose pull
+docker compose down
+docker compose up -d
+```
+
+That is also the flow used in n8n's official Docker Compose based VPS guides.
+
+---
+
+## 5. Local Docker Upgrade ( Windows / This Repo Style )
+
+If you followed the local Docker setup from this repo, paste this whole block into PowerShell.
+
+The defaults assume local n8n on `http://localhost:5678/`. If you later expose n8n through a tunnel, reverse proxy, or VPS domain, change only `$WEBHOOK_URL` before running the command.
+
+```powershell
+$CONTAINER_NAME = "n8n"
+$HOST_PORT = "5678"
+$CONTAINER_PORT = "5678"
+$TZ = "Asia/Singapore"
+$VOLUME_NAME = "n8n_data"
+$IMAGE = "docker.n8n.io/n8nio/n8n:stable"
+$WEBHOOK_URL = "http://localhost:${HOST_PORT}/"
+
+# Optional public webhook example:
+# $WEBHOOK_URL = "https://n8n.yourdomain.com/"
+
+docker pull $IMAGE
+
+docker stop $CONTAINER_NAME 2>$null
+docker rm $CONTAINER_NAME 2>$null
+
+docker volume create $VOLUME_NAME | Out-Null
+
+docker run -d --name $CONTAINER_NAME `
+  -p "${HOST_PORT}:${CONTAINER_PORT}" `
+  -e "GENERIC_TIMEZONE=$TZ" `
+  -e "TZ=$TZ" `
+  -e "N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true" `
+  -e "N8N_RUNNERS_ENABLED=true" `
+  -e "WEBHOOK_URL=$WEBHOOK_URL" `
+  -e "N8N_PROXY_HOPS=1" `
+  -v "${VOLUME_NAME}:/home/node/.n8n" `
+  $IMAGE
+```
+
+Notes:
+
+* The Docker volume keeps your local n8n data during the recreate.
+* `WEBHOOK_URL` stays in the command even for localhost, so changing to a public URL later is one-line lazy mode.
+* `N8N_PROXY_HOPS=1` is harmless for this setup and useful once you put n8n behind a tunnel or reverse proxy.
+
+---
+
+## 6. If You Installed n8n With npm
+
+If you are running a local or direct npm install, the official n8n update command is:
+
+```bash
+npm update -g n8n
+```
+
+If you need to go to a specific version:
+
+```bash
+npm install -g n8n@<version>
+```
+
+---
+
+## 7. Verify The Upgrade
+
+### Check containers
+
+```bash
+docker compose ps
+```
+
+If you are using the local single-container Windows setup instead of Compose:
+
+```powershell
+docker ps
+```
+
+### Check version from inside the container
+
+For the single-container local setup:
+
+```powershell
+$CONTAINER_NAME = "n8n"
+docker exec $CONTAINER_NAME n8n --version
+```
+
+For Compose setups, first find the n8n container name, then run:
+
+```bash
+docker exec -it <container_name> n8n -v
+```
+
+### Check the app itself
+
+After the stack comes back:
+
+* Open the n8n editor.
+* Trigger a simple workflow.
+* Confirm webhooks still load.
+* Confirm community nodes still appear if you use them.
+
+---
+
+## 8. Rollback Plan
+
+If you want easier rollbacks, pin a specific n8n image tag instead of always tracking `stable` or `latest`.
+
+That makes it much easier to revert after a bad update. If something breaks, switch the image tag back to the last known-good version and restart the stack.
+
+If the upgrade involved a database migration and you need to revert an npm install, check the n8n update docs and release notes before rolling back.
+
+---
+
+## 9. Post-Upgrade Smoke Test
+
+Run this quick checklist:
+
+* Login works.
+* Credentials still decrypt correctly.
+* Webhook URLs are still correct.
+* Scheduled workflows still run.
+* Community nodes still load.
+* Queue workers reconnect properly if you use queue mode.
+
+If you use a reverse proxy, also confirm:
+
+* `WEBHOOK_URL` is still correct.
+* `N8N_PROXY_HOPS=1` is still set.
+
+---
+
+## 10. When Not To Update Immediately
+
+If your instance runs revenue-critical or client-facing automations, do not update blindly the moment a new release lands.
+
+Wait long enough to read the release notes, then update with a backup or snapshot ready.
+
+---
+
+## References
+
+* [Hostinger - How to Update N8N at Hostinger](https://www.hostinger.com/support/11767754-how-to-update-n8n-at-hostinger/)
+* [Hostinger - How to Use the N8N VPS Template at Hostinger](https://www.hostinger.com/support/10473267-how-to-use-the-n8n-vps-template-at-hostinger)
+* [Hostinger - How to Back Up or Restore a VPS at Hostinger](https://www.hostinger.com/support/1583232-how-to-back-up-or-restore-a-vps-at-hostinger/)
+* [n8n Docs - Update self-hosted n8n](https://docs.n8n.io/hosting/installation/updating/)
+* [n8n Docs - Release notes](https://docs.n8n.io/release-notes/)
+* [n8n Docs - npm installation](https://docs.n8n.io/hosting/installation/npm/)
+* [n8n Docs - DigitalOcean server setup](https://docs.n8n.io/hosting/installation/server-setups/digital-ocean/)
+* [n8n Docs - Hetzner server setup](https://docs.n8n.io/hosting/installation/server-setups/hetzner/)
+* [n8n Docs - Configure webhook URLs with reverse proxy](https://docs.n8n.io/hosting/configuration/configuration-examples/webhook-url/)
