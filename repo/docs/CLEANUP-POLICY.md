@@ -32,7 +32,7 @@ Keep historical source provenance in [Retired Source Provenance](RETIRED-SOURCE-
 
 ## Old Root Folders
 
-Old root skill folders are removed only after their skill contents are moved under `for_ai/skills/` and validation confirms the new paths.
+Old root skill folders are removed only after their skill contents are moved under `skills/` and validation confirms the new paths.
 
 ## Old Project Sources
 

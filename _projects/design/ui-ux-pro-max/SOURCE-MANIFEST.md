@@ -7,7 +7,7 @@
 - `src/ui-ux-pro-max/data/*.csv`
 - `src/ui-ux-pro-max/data/stacks/*.csv`
 
-The preserved scripts are the toolkit-adapted local-only subset used by [for_ai/tools/design-system-generator/](../../../for_ai/tools/design-system-generator/).
+The preserved scripts are the toolkit-adapted local-only subset used by [skills/ui-ux-secure-frontend-design/tools/design-system-generator/](../../../skills/ui-ux-secure-frontend-design/tools/design-system-generator/).
 
 ## AI-Facing Surfaces
 

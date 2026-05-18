@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const docContractSync = require('./sync-repo-doc-contract.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
+const skillPortabilityAudit = require('./audit-skill-portability.cjs');
 const projectSync = require('./sync-toolkit-projects.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
@@ -20,6 +21,7 @@ const workspaceRoot = workspaceRootFromArgs();
 const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
 const registryYamlText = 'reg' + 'istry/*.' + 'yaml';
 const packYamlText = 'pack.' + 'yaml';
+const removedForAiPathPattern = new RegExp('(^|[^A-Za-z0-9_])' + 'for_' + 'ai\\/');
 
 const expectedFiles = [
   'README.md',
@@ -27,8 +29,8 @@ const expectedFiles = [
   'package.json',
   '.gitignore',
   '.gitattributes',
-  'for_ai/README.md',
   'repo/docs/HOW-TO-USE.md',
+  'repo/docs/SKILL-PORTABILITY-AND-FIDELITY.md',
   'repo/docs/partials/source-of-truth-contract.md',
   'repo/docs/FOR_AI_AGENTS.md',
   'repo/docs/SAFE-UPDATES.md',
@@ -39,52 +41,52 @@ const expectedFiles = [
   'repo/docs/PROJECT-MODULE-STANDARD.md',
   'repo/docs/WRITE-SAFETY-MODEL.md',
   'repo/docs/PROJECT-REHAUL-CHECKLIST.md',
-  'for_ai/tools/design-system-generator/README.md',
-  'for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
-  'for_ai/tools/design-system-generator/scripts/core.py',
-  'for_ai/tools/design-system-generator/scripts/design_system.py',
-  'for_ai/tools/design-system-generator/data/app-interface.csv',
-  'for_ai/tools/design-system-generator/data/charts.csv',
-  'for_ai/tools/design-system-generator/data/products.csv',
-  'for_ai/tools/design-system-generator/data/styles.csv',
-  'for_ai/tools/design-system-generator/data/colors.csv',
-  'for_ai/tools/design-system-generator/data/google-fonts.csv',
-  'for_ai/tools/design-system-generator/data/icons.csv',
-  'for_ai/tools/design-system-generator/data/landing.csv',
-  'for_ai/tools/design-system-generator/data/react-performance.csv',
-  'for_ai/tools/design-system-generator/data/typography.csv',
-  'for_ai/tools/design-system-generator/data/ui-reasoning.csv',
-  'for_ai/tools/design-system-generator/data/ux-guidelines.csv',
-  'for_ai/tools/design-system-generator/data/stacks/react.csv',
-  'for_ai/tools/design-system-generator/data/stacks/nextjs.csv',
-  'for_ai/tools/design-system-generator/data/stacks/vue.csv',
-  'for_ai/tools/design-system-generator/data/stacks/svelte.csv',
-  'for_ai/tools/design-system-generator/data/stacks/astro.csv',
-  'for_ai/tools/design-system-generator/data/stacks/swiftui.csv',
-  'for_ai/tools/design-system-generator/data/stacks/react-native.csv',
-  'for_ai/tools/design-system-generator/data/stacks/flutter.csv',
-  'for_ai/tools/design-system-generator/data/stacks/nuxtjs.csv',
-  'for_ai/tools/design-system-generator/data/stacks/nuxt-ui.csv',
-  'for_ai/tools/design-system-generator/data/stacks/html-tailwind.csv',
-  'for_ai/tools/design-system-generator/data/stacks/shadcn.csv',
-  'for_ai/tools/design-system-generator/data/stacks/jetpack-compose.csv',
-  'for_ai/tools/design-system-generator/data/stacks/threejs.csv',
-  'for_ai/tools/design-system-generator/data/stacks/angular.csv',
-  'for_ai/tools/design-system-generator/data/stacks/laravel.csv',
-  'for_ai/tools/design-system-generator/tests/test_local_only.py',
-  'for_ai/registry/skills.registry.json',
-  'for_ai/registry/playbooks.registry.json',
-  'for_ai/registry/templates.registry.json',
-  'for_ai/registry/packs.registry.json',
-  'for_ai/registry/projects.registry.json',
-  'for_ai/registry/tools.registry.json',
-  'for_ai/registry/source-repos.registry.json',
-  'for_ai/registry/consumers.registry.json',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/design_system.py',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/app-interface.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/charts.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/products.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/styles.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/colors.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/google-fonts.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/icons.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/landing.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/react-performance.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/typography.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/ui-reasoning.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/ux-guidelines.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/react.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/nextjs.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/vue.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/svelte.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/astro.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/swiftui.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/react-native.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/flutter.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/nuxtjs.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/nuxt-ui.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/html-tailwind.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/shadcn.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/jetpack-compose.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/threejs.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/angular.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/laravel.csv',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/test_local_only.py',
+  'mcp/registry/skills.registry.json',
+  'mcp/registry/playbooks.registry.json',
+  'mcp/registry/templates.registry.json',
+  'mcp/registry/packs.registry.json',
+  'mcp/registry/projects.registry.json',
+  'mcp/registry/tools.registry.json',
+  'mcp/registry/source-repos.registry.json',
+  'mcp/registry/consumers.registry.json',
   '_projects/n8n/local-setup/SOURCE-LOCK.json',
   '_projects/n8n/workflow-templates/SOURCE-LOCK.json',
   '_projects/cicd/secure-installer/SOURCE-LOCK.json',
   '_projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
-  'for_ai/templates/agent-rules/partials/skill-routing-rules.md',
+  'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md',
   'repo/scripts/build-agent-rule-templates.ps1',
   'repo/scripts/- build-agent-rule-templates.cmd',
   'repo/scripts/validate-toolkit.cjs',
@@ -93,6 +95,8 @@ const expectedFiles = [
   'repo/scripts/watch-project-sources.cjs',
   'repo/scripts/package-skills.cjs',
   'repo/scripts/package-packs.cjs',
+  'repo/scripts/audit-skill-portability.cjs',
+  'repo/scripts/run-design-tests.cjs',
   'repo/scripts/safe-source-update.cjs',
   'repo/scripts/sync-repo-doc-contract.cjs',
   '.github/workflows/auto-sync-generated-surfaces.yml',
@@ -110,49 +114,49 @@ const expectedDirs = [
   '_projects/cicd/secure-installer/_main',
   '_projects/design/ui-ux-pro-max',
   '_projects/design/ui-ux-pro-max/_main',
-  'for_ai/skills/design/ui-ux-secure-frontend-design',
-  'for_ai/skills/development/windows-localhost-workflows',
-  'for_ai/skills/automation/n8n-workflow-sync',
-  'for_ai/skills/automation/n8n-local-setup',
-  'for_ai/skills/cicd/secure-cicd-installer',
-  'for_ai/playbooks/ai-agent-platforms',
-  'for_ai/playbooks/mcp',
-  'for_ai/playbooks/n8n',
-  'for_ai/playbooks/cicd',
-  'for_ai/playbooks/design',
-  'for_ai/templates/agent-rules',
-  'for_ai/templates/agent-rules/partials',
-  'for_ai/templates/mcp-configs',
-  'for_ai/templates/n8n/sync-helpers',
-  'for_ai/templates/n8n/sanitizer',
-  'for_ai/templates/n8n/workflow-policy',
-  'for_ai/tools/design-system-generator',
-  'for_ai/tools/design-system-generator/scripts',
-  'for_ai/tools/design-system-generator/data',
-  'for_ai/tools/design-system-generator/data/stacks',
-  'for_ai/tools/design-system-generator/tests',
-  'for_ai/packs/frontend-design-skill',
-  'for_ai/packs/design-system-generator',
-  'for_ai/packs/codex-n8n-local',
-  'for_ai/packs/claude-code-n8n-local',
-  'for_ai/packs/secure-cicd',
-  'for_ai/packs/n8n-workflow-sync',
-  'for_ai/mcp/registry-mcp',
-  'for_ai/mcp/installer-mcp',
-  'for_ai/mcp/projects',
+  'skills/ui-ux-secure-frontend-design',
+  'skills/windows-localhost-workflows',
+  'skills/n8n-workflow-sync',
+  'skills/n8n-local-setup',
+  'skills/secure-cicd-installer',
+  'skills/knowledge-index-updater',
+  'skills/n8n-local-setup/references/ai-agent-platforms',
+  'mcp/references',
+  'skills/n8n-local-setup/references/n8n',
+  'skills/n8n-local-setup/templates/agent-rules',
+  'skills/n8n-local-setup/templates/agent-rules/partials',
+  'skills/n8n-local-setup/templates/mcp-configs',
+  'skills/n8n-workflow-sync/templates/sync-helpers',
+  'skills/n8n-workflow-sync/templates/sanitizer',
+  'skills/n8n-workflow-sync/templates/workflow-policy',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests',
+  'skills/ui-ux-secure-frontend-design/packs/frontend-design-skill',
+  'skills/ui-ux-secure-frontend-design/packs/design-system-generator',
+  'skills/n8n-local-setup/packs/codex-n8n-local',
+  'skills/n8n-local-setup/packs/claude-code-n8n-local',
+  'skills/secure-cicd-installer/packs/secure-cicd',
+  'skills/n8n-workflow-sync/packs/n8n-workflow-sync',
+  'mcp/registry-mcp',
+  'mcp/installer-mcp',
+  'mcp/projects',
+  'mcp/registry',
   'repo/docs/partials',
   '.github/workflows'
 ];
 
 const registryFiles = [
-  'for_ai/registry/skills.registry.json',
-  'for_ai/registry/playbooks.registry.json',
-  'for_ai/registry/templates.registry.json',
-  'for_ai/registry/packs.registry.json',
-  'for_ai/registry/projects.registry.json',
-  'for_ai/registry/tools.registry.json',
-  'for_ai/registry/source-repos.registry.json',
-  'for_ai/registry/consumers.registry.json'
+  'mcp/registry/skills.registry.json',
+  'mcp/registry/playbooks.registry.json',
+  'mcp/registry/templates.registry.json',
+  'mcp/registry/packs.registry.json',
+  'mcp/registry/projects.registry.json',
+  'mcp/registry/tools.registry.json',
+  'mcp/registry/source-repos.registry.json',
+  'mcp/registry/consumers.registry.json'
 ];
 
 const retiredInternalSourceRepos = new Set([
@@ -178,9 +182,10 @@ const allowedRootEntries = new Set([
   'AGENTS.md',
   'README.md',
   '_projects',
-  'for_ai',
+  'mcp',
   'package.json',
-  'repo'
+  'repo',
+  'skills'
 ]);
 
 const staleReferenceRoots = [
@@ -188,21 +193,15 @@ const staleReferenceRoots = [
   'AGENTS.md',
   'package.json',
   '.github',
-  'repo',
-  'for_ai'
+  'repo'
 ];
 
 const staleRootSurfacePatterns = [
-  { label: 'root skills surface', regex: /(^|[\s`"'(\[,:])skills\//m },
-  { label: 'root MCP surface', regex: /(^|[\s`"'(\[,:])mcp\//m },
-  { label: 'root templates surface', regex: /(^|[\s`"'(\[,:])templates\//m },
-  { label: 'root packs surface', regex: /(^|[\s`"'(\[,:])packs\//m },
-  { label: 'root registry surface', regex: /(^|[\s`"'(\[,:])registry\//m },
-  { label: 'root tools surface', regex: /(^|[\s`"'(\[,:])tools\//m },
-  { label: 'root guides surface', regex: /(^|[\s`"'(\[,:])guides\//m },
-  { label: 'root docs surface', regex: /(^|[\s`"'(\[,:])docs\//m },
-  { label: 'root scripts surface', regex: /(^|[\s`"'(\[,:])scripts\//m },
-  { label: 'root tests surface', regex: /(^|[\s`"'(\[,:])tests\//m }
+  { label: 'root templates surface', regex: /(^|\n)\s*\|\s+`?templates\/?`?\s+\|/i },
+  { label: 'root packs surface', regex: /(^|\n)\s*\|\s+`?packs\/?`?\s+\|/i },
+  { label: 'root registry surface', regex: /(^|\n)\s*\|\s+`?registry\/?`?\s+\|/i },
+  { label: 'root tools surface', regex: /(^|\n)\s*\|\s+`?tools\/?`?\s+\|/i },
+  { label: 'root guides surface', regex: /(^|\n)\s*\|\s+`?guides\/?`?\s+\|/i }
 ];
 
 const staleProjectExportsPath = /\bprojects\/[^ \n`"')]+\/exports\//;
@@ -211,10 +210,10 @@ const allowedExecutablePrefixes = [
   'repo/scripts/',
   'repo/tests/',
   '.github/workflows/',
-  'for_ai/tools/design-system-generator/scripts/',
-  'for_ai/tools/design-system-generator/tests/',
-  'for_ai/templates/n8n/sync-helpers/',
-  'for_ai/templates/n8n/sanitizer/'
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/',
+  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/',
+  'skills/n8n-workflow-sync/templates/sync-helpers/',
+  'skills/n8n-workflow-sync/templates/sanitizer/'
 ];
 
 const executableExtensions = new Set([
@@ -295,8 +294,8 @@ function isAutoSyncGeneratedOutputPath(relPath) {
   return (
     rel === 'README.md' ||
     rel === 'AGENTS.md' ||
-    rel === 'for_ai/README.md' ||
-    rel.startsWith('for_ai/')
+    rel.startsWith('skills/') ||
+    rel.startsWith('mcp/')
   );
 }
 
@@ -363,7 +362,7 @@ function validateJsonRegistries(errors) {
   }
 
   const yamlRegistries = listFiles().filter((entry) =>
-    entry.relPath.startsWith('for_ai/registry/') && /\.(ya?ml)$/i.test(entry.relPath)
+    entry.relPath.startsWith('mcp/registry/') && /\.(ya?ml)$/i.test(entry.relPath)
   );
   for (const entry of yamlRegistries) fail(errors, `YAML registry file is not allowed: ${entry.relPath}`);
 }
@@ -379,36 +378,36 @@ function validateRootTopology(errors) {
 function validateSourceRepoRegistry(errors) {
   let registry;
   try {
-    registry = readJson('for_ai/registry/source-repos.registry.json');
+    registry = readJson('mcp/registry/source-repos.registry.json');
   } catch (error) {
-    fail(errors, `for_ai/registry/source-repos.registry.json is not valid JSON: ${error.message}`);
+    fail(errors, `mcp/registry/source-repos.registry.json is not valid JSON: ${error.message}`);
     return;
   }
   if (!Array.isArray(registry)) {
-    fail(errors, 'for_ai/registry/source-repos.registry.json must be an array');
+    fail(errors, 'mcp/registry/source-repos.registry.json must be an array');
     return;
   }
 
   for (const entry of registry) {
     if (retiredInternalSourceRepos.has(entry.source)) {
-      fail(errors, `for_ai/registry/source-repos.registry.json retired internal repo must not be listed as active source-watch target: ${entry.source}`);
+      fail(errors, `mcp/registry/source-repos.registry.json retired internal repo must not be listed as active source-watch target: ${entry.source}`);
     }
     const thirdParty = activeThirdPartySources.get(entry.source);
     if (!thirdParty) continue;
     if (entry.risk !== thirdParty.risk) {
-      fail(errors, `for_ai/registry/source-repos.registry.json active third-party source missing risk metadata: ${entry.source}`);
+      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing risk metadata: ${entry.source}`);
     }
     if (entry.review_policy !== thirdParty.review_policy) {
-      fail(errors, `for_ai/registry/source-repos.registry.json active third-party source missing manual-review metadata: ${entry.source}`);
+      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing manual-review metadata: ${entry.source}`);
     }
     if (!thirdParty.requiredStatus.test(entry.status || '')) {
-      fail(errors, `for_ai/registry/source-repos.registry.json active third-party source missing attribution status: ${entry.source}`);
+      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing attribution status: ${entry.source}`);
     }
     if (!thirdParty.requiredRole.test(entry.role || '')) {
-      fail(errors, `for_ai/registry/source-repos.registry.json active third-party source missing attribution role: ${entry.source}`);
+      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing attribution role: ${entry.source}`);
     }
     if (!entry.last_reviewed) {
-      fail(errors, `for_ai/registry/source-repos.registry.json active third-party source missing last_reviewed: ${entry.source}`);
+      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing last_reviewed: ${entry.source}`);
     }
   }
 }
@@ -459,14 +458,10 @@ function parseFrontMatter(text) {
 
 function skillDirs() {
   const result = [];
-  const skillsRoot = resolveRel('for_ai/skills');
+  const skillsRoot = resolveRel('skills');
   if (!fs.existsSync(skillsRoot)) return result;
-  for (const category of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
-    if (!category.isDirectory()) continue;
-    const categoryDir = path.join(skillsRoot, category.name);
-    for (const skill of fs.readdirSync(categoryDir, { withFileTypes: true })) {
-      if (skill.isDirectory()) result.push(slash(path.relative(root, path.join(categoryDir, skill.name))));
-    }
+  for (const skill of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
+    if (skill.isDirectory()) result.push(slash(path.relative(root, path.join(skillsRoot, skill.name))));
   }
   return result.sort();
 }
@@ -493,13 +488,13 @@ function validateSkills(errors) {
     }
   }
 
-  const designSkill = 'for_ai/skills/design/ui-ux-secure-frontend-design/SKILL.md';
+  const designSkill = 'skills/ui-ux-secure-frontend-design/SKILL.md';
   const expectedDescription = 'Security-first frontend UI/UX design skill for creating, reviewing, and improving web interfaces. Use for design systems, landing pages, SaaS dashboards, forms, component planning, accessibility, responsive polish, privacy-safe UX, and implementation review.';
   const designMatter = parseFrontMatter(readText(designSkill));
   if (designMatter?.name !== 'ui-ux-secure-frontend-design') fail(errors, 'Design skill front matter name is not approved');
   if (designMatter?.description !== expectedDescription) fail(errors, 'Design skill front matter description is not approved');
 
-  const openai = readText('for_ai/skills/design/ui-ux-secure-frontend-design/agents/openai.yaml').trim() + '\n';
+  const openai = readText('skills/ui-ux-secure-frontend-design/agents/openai.yaml').trim() + '\n';
   const expectedOpenai = [
     'interface:',
     '  display_name: "Secure UI/UX Frontend Design"',
@@ -512,7 +507,7 @@ function validateSkills(errors) {
   ].join('\n');
   if (openai !== expectedOpenai) fail(errors, 'Design skill agents/openai.yaml does not match approved shape');
 
-  for (const entry of listFiles().filter((item) => item.relPath.startsWith('for_ai/skills/design/ui-ux-secure-frontend-design/') && item.relPath.endsWith('.md'))) {
+  for (const entry of listFiles().filter((item) => item.relPath.startsWith('skills/ui-ux-secure-frontend-design/') && item.relPath.endsWith('.md'))) {
     const raw = fs.readFileSync(entry.fullPath, 'utf8');
     if (raw.includes('\r\n')) fail(errors, `Design skill Markdown is not LF-normalized: ${entry.relPath}`);
   }
@@ -527,14 +522,13 @@ function validateExecutables(errors) {
     if (isProjectMainSource) continue;
     if (ext === '.py') {
       const allowedPython =
-        rel.startsWith('for_ai/tools/design-system-generator/scripts/') ||
-        rel.startsWith('for_ai/tools/design-system-generator/tests/') ||
+        rel.startsWith('skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/') ||
+        rel.startsWith('skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/') ||
         rel.startsWith('repo/tests/');
       if (!allowedPython) fail(errors, `Python file outside approved locations: ${rel}`);
     }
     const allowed = allowedExecutablePrefixes.some((prefix) => rel.startsWith(prefix));
     if (!allowed) fail(errors, `Executable file outside approved locations: ${rel}`);
-    if (rel.startsWith('for_ai/skills/')) fail(errors, `Instruction-only skill contains executable file: ${rel}`);
   }
 }
 
@@ -572,14 +566,14 @@ function validateDesignGeneratorLocalOnly(errors) {
     'laravel.csv'
   ];
   for (const file of requiredData) {
-    if (!existsRel(`for_ai/tools/design-system-generator/data/${file}`)) fail(errors, `Missing design generator data file: ${file}`);
+    if (!existsRel(`skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/${file}`)) fail(errors, `Missing design generator data file: ${file}`);
   }
   for (const file of requiredStacks) {
-    if (!existsRel(`for_ai/tools/design-system-generator/data/stacks/${file}`)) fail(errors, `Missing design generator stack data file: ${file}`);
+    if (!existsRel(`skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/${file}`)) fail(errors, `Missing design generator stack data file: ${file}`);
   }
 
   const scriptFiles = listFiles().filter((entry) =>
-    entry.relPath.startsWith('for_ai/tools/design-system-generator/scripts/') && entry.relPath.endsWith('.py')
+    entry.relPath.startsWith('skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/') && entry.relPath.endsWith('.py')
   );
 
   for (const entry of scriptFiles) {
@@ -591,7 +585,7 @@ function validateDesignGeneratorLocalOnly(errors) {
     }
   }
 
-  const licenseNotes = readText('for_ai/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md');
+  const licenseNotes = readText('skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md');
   if (!licenseNotes.includes('nextlevelbuilder/ui-ux-pro-max-skill') || !licenseNotes.includes('MIT')) {
     fail(errors, 'Design generator third-party licence notes must mention upstream project and MIT licence');
   }
@@ -605,6 +599,46 @@ function validateProjectModules(errors) {
 function validateDocContract(errors) {
   const result = docContractSync.validateAndSync({ mode: 'check' });
   for (const error of result.errors) fail(errors, error);
+}
+
+function validateReadmeSurface(errors) {
+  const text = readText('README.md');
+  const requiredSections = [
+    '## What this repo is',
+    '## Quick Start',
+    '## Projects',
+    '## Skills',
+    '## MCP',
+    '## Folder Map',
+    '## For Maintainers',
+    '## Validation',
+    '## Appendix: Source-of-Truth Contract'
+  ];
+  let lastIndex = -1;
+  for (const section of requiredSections) {
+    const index = text.indexOf(section);
+    if (index === -1) {
+      fail(errors, `README.md missing required section: ${section.slice(3)}`);
+      continue;
+    }
+    if (index < lastIndex) fail(errors, `README.md section is out of order: ${section.slice(3)}`);
+    lastIndex = index;
+  }
+  const appendixIndex = text.indexOf('## Appendix: Source-of-Truth Contract');
+  const contractIndex = text.indexOf('<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->');
+  if (appendixIndex === -1 || contractIndex === -1 || contractIndex < appendixIndex) {
+    fail(errors, 'README.md source-of-truth contract block must live under the appendix');
+  }
+  if (!text.includes('skills/') || !text.includes('mcp/')) {
+    fail(errors, 'README.md must use root-level skills/ and mcp/ surfaces');
+  }
+  if (removedForAiPathPattern.test(text)) {
+    fail(errors, 'README.md must not reference the removed legacy AI surface');
+  }
+  for (const surface of ['packs', 'playbooks', 'templates', 'registries', 'registry', 'tools']) {
+    const primaryRow = new RegExp(`\\|\\s+\`?${surface}/?\`?\\s+\\|`, 'i');
+    if (primaryRow.test(text)) fail(errors, `README.md must not present ${surface}/ as a primary user-facing entrypoint`);
+  }
 }
 
 function validateProjectLandingCards(errors) {
@@ -622,10 +656,10 @@ function validateProjectLandingCards(errors) {
       fail(errors, `${entry.relPath} project README must link to _main/`);
     }
     const playbooksCanonical =
-      /for_ai\/playbooks\/?[^\n.]{0,140}\b(canonical|source[- ]of[- ]truth|human documentation|human docs|source layer)\b/i.test(text) ||
-      /\b(canonical|source[- ]of[- ]truth|human documentation|human docs|source layer)\b[^\n.]{0,140}for_ai\/playbooks\/?/i.test(text);
+      /(^|[^A-Za-z0-9_])playbooks\/?[^\n.]{0,140}\b(canonical|source[- ]of[- ]truth|human documentation|human docs|source layer)\b/i.test(text) ||
+      /\b(canonical|source[- ]of[- ]truth|human documentation|human docs|source layer)\b[^\n.]{0,140}(^|[^A-Za-z0-9_])playbooks\/?/i.test(text);
     if (playbooksCanonical) {
-      fail(errors, `${entry.relPath} must not claim for_ai/playbooks/ is canonical human documentation`);
+      fail(errors, `${entry.relPath} must not claim playbooks are canonical human documentation`);
     }
   }
 }
@@ -639,6 +673,11 @@ function validateSourceLocks(errors) {
   for (const error of result.errors) fail(errors, error);
 }
 
+function validateSkillPortability(errors) {
+  const result = skillPortabilityAudit.auditSkillPortability();
+  for (const error of result.errors) fail(errors, error);
+}
+
 function validateAgentRuleSources(errors) {
   const linkedOutputs = new Set();
   for (const manifest of projectManifests()) {
@@ -646,7 +685,7 @@ function validateAgentRuleSources(errors) {
       if (output.kind === 'linked') linkedOutputs.add(output.output);
     }
   }
-  const rootPartialFiles = listFiles().filter((entry) => entry.relPath.startsWith('for_ai/templates/agent-rules/partials/'));
+  const rootPartialFiles = listFiles().filter((entry) => entry.relPath.startsWith('skills/n8n-local-setup/templates/agent-rules/partials/'));
   for (const entry of rootPartialFiles) {
     if (!linkedOutputs.has(entry.relPath)) fail(errors, `Root agent-rule partial is an unmanaged duplicate: ${entry.relPath}`);
   }
@@ -656,13 +695,12 @@ function validateStaleReferences(errors) {
   const roots = new Set(staleReferenceRoots);
   for (const entry of listFiles()) {
     if (entry.relPath.includes('/_main/')) continue;
-    if (/^for_ai\/templates\/n8n\/(sync-helpers|sanitizer)\/.*\.(cjs|js|ps1|cmd)$/.test(entry.relPath)) continue;
-    if (entry.relPath.startsWith('for_ai/tools/design-system-generator/data/')) continue;
-    if (entry.relPath.startsWith('for_ai/tools/design-system-generator/scripts/')) continue;
+    if (entry.relPath.startsWith('skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/')) continue;
+    if (entry.relPath.startsWith('skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/')) continue;
     const top = entry.relPath.split('/')[0];
     if (!roots.has(top) && !roots.has(entry.relPath)) continue;
     const text = fs.readFileSync(entry.fullPath, 'utf8');
-    if (text.includes(registryYamlText) || text.includes('for_ai/registry/*.' + 'yaml') || text.includes('for_ai/registry/skills.' + 'yaml') || text.includes('for_ai/registry/guides.' + 'yaml')) {
+    if (text.includes(registryYamlText) || text.includes('mcp/registry/*.' + 'yaml') || text.includes('mcp/registry/skills.' + 'yaml') || text.includes('mcp/registry/guides.' + 'yaml')) {
       fail(errors, `Stale registry YAML reference found in ${entry.relPath}`);
     }
     if (text.includes(packYamlText)) fail(errors, `Stale pack YAML reference found in ${entry.relPath}`);
@@ -701,6 +739,30 @@ function workflowPermissionLines(text) {
     if (match) permissions.push(`${match[1]}: ${match[2]}`);
   }
   return permissions;
+}
+
+function validateNoOldForAiReferences(errors) {
+  const files = listFiles().filter((entry) => {
+    const rel = entry.relPath;
+    if (rel.includes('/_main/') || rel.includes('/curated_output_for_ai/')) return false;
+    if (rel.startsWith('repo/tests/')) return false;
+    return (
+      rel === 'README.md' ||
+      rel === 'AGENTS.md' ||
+      rel === 'package.json' ||
+      rel.startsWith('.github/') ||
+      rel.startsWith('repo/docs/') ||
+      rel.startsWith('repo/scripts/') ||
+      rel.startsWith('skills/') ||
+      rel.startsWith('mcp/')
+    );
+  });
+  for (const entry of files) {
+    const text = fs.readFileSync(entry.fullPath, 'utf8');
+    if (removedForAiPathPattern.test(text)) {
+      fail(errors, `${entry.relPath} references removed legacy AI surface path`);
+    }
+  }
 }
 
 function workflowStepBlocks(text) {
@@ -835,7 +897,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (/\bpython(?:3)?\s+-m\s+unittest\b|\bpytest\b/.test(text)) {
     fail(errors, `${entry.relPath} must not run Python unit tests in the privileged writeback workflow`);
   }
-  if (/for_ai\/tools\/[^\n]*tests|design-system-generator\/tests/.test(text)) {
+  if (/skills\/ui-ux-secure-frontend-design\/tools\/design-system-generator\/tests|design-system-generator\/tests/.test(text)) {
     fail(errors, `${entry.relPath} must not run generated tool tests in the privileged writeback workflow`);
   }
 
@@ -849,6 +911,12 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (!preflightSection.includes('"$current_head_sha" != "$HEAD_SHA"') ||
       !preflightSection.includes('PR head changed after this workflow was queued')) {
     fail(errors, `${entry.relPath} preflight must reject stale runs when the PR head SHA changed`);
+  }
+  if (!preflightSection.includes("gh api \"repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}\" --jq '.changed_files'") ||
+      !preflightSection.includes('changed_file_count') ||
+      !preflightSection.includes('changed_file_count > 3000') ||
+      !preflightSection.includes("GitHub's PR files API is capped at 3000")) {
+    fail(errors, `${entry.relPath} preflight must reject PRs with more than 3000 changed files before using the capped files API`);
   }
   const requiredPreflightPathBlocks = [
     { label: '.github', token: '.github/*' },
@@ -870,7 +938,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (!text.includes('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)')) {
     fail(errors, `${entry.relPath} missing forbidden post-sync path rejection`);
   }
-  if (!text.includes('README.md|AGENTS.md|for_ai/*)')) {
+  if (!text.includes('README.md|AGENTS.md|skills/*|mcp/*)')) {
     fail(errors, `${entry.relPath} missing approved generated output path allowlist`);
   }
 
@@ -926,7 +994,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} final recheck must compare the staged index tree snapshot`);
   }
   if (!finalRecheckStep.includes('/usr/bin/git -C "$PR_ROOT" diff --cached --name-only') ||
-      !finalRecheckStep.includes('README.md|AGENTS.md|for_ai/*)') ||
+      !finalRecheckStep.includes('README.md|AGENTS.md|skills/*|mcp/*)') ||
       !finalRecheckStep.includes('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)')) {
     fail(errors, `${entry.relPath} final recheck must reject staged paths outside generated output scope`);
   }
@@ -943,7 +1011,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const gitAddLines = (text.match(/^\s*(?:\/usr\/bin\/)?git(?:\s+-C\s+"\$PR_ROOT")?\s+add .+$/gm) || []).map((line) => line.trim());
-  if (gitAddLines.length !== 1 || gitAddLines[0] !== '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md for_ai') {
+  if (gitAddLines.length !== 1 || gitAddLines[0] !== '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp') {
     fail(errors, `${entry.relPath} must commit only approved generated output paths`);
   }
   if (/git(?:\s+-C\s+"\$PR_ROOT")?\s+add\b/.test(commitStep)) {
@@ -1080,7 +1148,7 @@ function validateSourceWatchTruthfulness(errors) {
     if (rel.startsWith('.github/workflows/')) return true;
     if (rel.startsWith('repo/docs/')) return true;
     if (rel === 'repo/scripts/watch-project-sources.cjs') return true;
-    if (rel.startsWith('for_ai/') && /\.(md|json|ya?ml)$/i.test(rel)) return true;
+    if ((rel.startsWith('skills/') || rel.startsWith('mcp/')) && /\.(md|json|ya?ml)$/i.test(rel)) return true;
     return false;
   });
   const forbiddenClaims = [
@@ -1125,7 +1193,7 @@ function validateSourceWatchTruthfulness(errors) {
 }
 
 function validateMcpDocs(errors) {
-  for (const entry of listFiles().filter((item) => item.relPath.startsWith('for_ai/mcp/'))) {
+  for (const entry of listFiles().filter((item) => item.relPath.startsWith('mcp/'))) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
     if (/tool\s*:\s*(shell|write|exec)|execute_shell|write_file|read_any_file/i.test(text)) {
       fail(errors, `${entry.relPath} appears to define arbitrary MCP shell/write/read tools`);
@@ -1145,10 +1213,13 @@ function runValidation() {
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
   validateDocContract(errors);
+  validateReadmeSurface(errors);
   validateProjectModules(errors);
   validateProjectLandingCards(errors);
   validateSourceLocks(errors);
+  validateSkillPortability(errors);
   validateAgentRuleSources(errors);
+  validateNoOldForAiReferences(errors);
   validateStaleReferences(errors);
   validateSecretStrings(errors);
   validateWorkflows(errors);

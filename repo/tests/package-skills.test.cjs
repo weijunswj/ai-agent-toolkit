@@ -31,13 +31,10 @@ test('package-skills --check validates inputs and does not write outputs', () =>
 });
 
 test('all skill folders have README and SKILL files', () => {
-  const skillsRoot = path.join(repoRoot, 'for_ai', 'skills');
+  const skillsRoot = path.join(repoRoot, 'skills');
   const skillDirs = [];
-  for (const category of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
-    if (!category.isDirectory()) continue;
-    for (const skill of fs.readdirSync(path.join(skillsRoot, category.name), { withFileTypes: true })) {
-      if (skill.isDirectory()) skillDirs.push(path.join(skillsRoot, category.name, skill.name));
-    }
+  for (const skill of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
+    if (skill.isDirectory()) skillDirs.push(path.join(skillsRoot, skill.name));
   }
   assert.ok(skillDirs.length >= 4);
   for (const dir of skillDirs) {

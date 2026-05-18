@@ -11,7 +11,7 @@ Use this checklist when reviewing the project-module architecture.
 
 ## AI-Facing Surfaces
 
-- [ ] [for_ai/skills/](../../for_ai/skills/), [for_ai/mcp/](../../for_ai/mcp/), [for_ai/templates/](../../for_ai/templates/), [for_ai/packs/](../../for_ai/packs/), [for_ai/tools/](../../for_ai/tools/), [for_ai/registry/](../../for_ai/registry/), and [for_ai/playbooks/](../../for_ai/playbooks/) remain obvious.
+- [ ] [skills/](../../skills/) and [mcp/](../../mcp/) remain obvious as the only published AI-facing root surfaces.
 - [ ] Skills and MCP docs are generated from declared recipes where practical, with rare linked root surfaces justified in manifests.
 - [ ] Generated Markdown outputs include a generated-source notice.
 - [ ] Root agent-rule templates are generated from declared `_main/` and linked partial sources, and unmanaged root partial duplicates do not exist.
@@ -27,7 +27,7 @@ Use this checklist when reviewing the project-module architecture.
 
 ## Design Generator
 
-- [ ] Optional generator lives under [for_ai/tools/design-system-generator/](../../for_ai/tools/design-system-generator/).
+- [ ] Optional generator lives under [skills/ui-ux-secure-frontend-design/tools/design-system-generator/](../../skills/ui-ux-secure-frontend-design/tools/design-system-generator/).
 - [ ] It searches local CSV data only.
 - [ ] It contains no network, shell, browser, subprocess, or installer code.
 - [ ] Third-party MIT attribution is preserved.
@@ -43,6 +43,6 @@ node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/*.test.cjs
 node repo/scripts/package-skills.cjs --check
 node repo/scripts/package-packs.cjs --check
-python -m unittest discover -s for_ai/tools/design-system-generator/tests
+node repo/scripts/run-design-tests.cjs
 git diff --check
 ```

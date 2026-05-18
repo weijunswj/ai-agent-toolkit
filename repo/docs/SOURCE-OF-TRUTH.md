@@ -33,7 +33,7 @@ Do not move product-owned assets into this toolkit.
 
 ## Registries
 
-The JSON registries under `for_ai/registry/` are the published discovery surface. Generated registries should be refreshed from project manifests with `node repo/scripts/sync-toolkit-projects.cjs --write`.
+The JSON registries under `mcp/registry/` are the published discovery surface. Generated registries should be refreshed from project manifests with `node repo/scripts/sync-toolkit-projects.cjs --write`.
 
 ## Guarded Generated Auto-Sync
 
@@ -41,7 +41,7 @@ The `Auto-sync generated toolkit surfaces` workflow is only a deterministic gene
 
 - Fork PRs are never written to.
 - `main` is never written to.
-- The workflow only republishes declared generated/synced outputs such as `README.md`, `AGENTS.md`, and `for_ai/**`.
+- The workflow only republishes declared generated/synced outputs such as `README.md`, `AGENTS.md`, `skills/**`, and `mcp/**`.
 - It does not update sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
 - Because the workflow is privileged, it does not run generated test suites, PR-controlled generated executable code, or full repo validation against raw PR heads; full validation remains covered by normal read-only CI.
 - The privileged static checks are limited to generated-surface freshness checks and git diff checks before committing generated output, which avoids blocking otherwise valid behind-main PR branches.
@@ -50,9 +50,9 @@ The `Auto-sync generated toolkit surfaces` workflow is only a deterministic gene
 - The workflow pins the PR checkout to the event head SHA, refuses stale queued runs if the PR head changed, verifies the remote PR branch before pushing, and never force pushes.
 - If eligible source/routing/contract edits are mixed with forbidden workflow, maintenance-script, test, docs, package, lockfile, or preserved-source path changes, the workflow fails instead of pushing.
 
-## Packs
+## Skill-Local Packs
 
-Pack manifests under [for_ai/packs](../../for_ai/packs/) are the published installable bundle surface. For internal generated packs, author the project-owned source under `_projects/**/curated_output_for_ai/packs/` and run sync.
+Pack manifests are not a first-class root surface. When a pack is still useful as a review checklist, keep it inside the related skill folder under `skills/<skill-name>/packs/`. For internal generated packs, author the project-owned source under `_projects/**/curated_output_for_ai/packs/` and run sync.
 
 ## Retired Source Provenance
 

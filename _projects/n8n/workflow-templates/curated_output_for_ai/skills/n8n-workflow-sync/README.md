@@ -25,12 +25,11 @@ It is generic, credential-free, and product-neutral.
 - Committed credential binding files.
 - `.env`, committed `.n8n-local/`, or committed `.tmp/`.
 - Product-specific node names or customer data.
-- Runtime scripts inside the skill folder.
 
 The related helper templates may write ignored `.n8n-local/**` and `.tmp/**` in a reviewed consumer repo. Those local outputs must never be committed.
 
 ## Related Toolkit Templates
 
-- [n8n sync helpers](../../../templates/n8n/sync-helpers/)
-- [n8n sanitizer](../../../templates/n8n/sanitizer/)
-- [n8n workflow policy](../../../templates/n8n/workflow-policy/)
+- [n8n sync helpers](templates/sync-helpers/)
+- [n8n sanitizer](templates/sanitizer/)
+- [n8n workflow policy](templates/workflow-policy/)

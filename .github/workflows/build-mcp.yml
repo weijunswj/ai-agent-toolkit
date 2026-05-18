@@ -3,15 +3,15 @@ name: Build MCP docs
 on:
   pull_request:
     paths:
-      - for_ai/mcp/**
-      - for_ai/registry/**
+      - mcp/**
+      - mcp/registry/**
       - .github/workflows/build-mcp.yml
   push:
     branches:
       - main
     paths:
-      - for_ai/mcp/**
-      - for_ai/registry/**
+      - mcp/**
+      - mcp/registry/**
       - .github/workflows/build-mcp.yml
   workflow_dispatch:
 

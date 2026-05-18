@@ -36,6 +36,7 @@ jobs:
           node repo/scripts/validate-toolkit.cjs
           node --test repo/tests/*.test.cjs
           node repo/scripts/package-skills.cjs --check
+          node repo/scripts/audit-skill-portability.cjs
           node repo/scripts/package-packs.cjs --check
-          python -m unittest discover -s for_ai/tools/design-system-generator/tests
+          python -m unittest discover -s skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests
           git diff --check

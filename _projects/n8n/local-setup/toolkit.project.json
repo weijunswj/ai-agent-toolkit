@@ -9,122 +9,137 @@
     {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/n8n-local-setup/SKILL.md",
-      "output": "for_ai/skills/automation/n8n-local-setup/SKILL.md",
-      "notes": "Published skill generated from project-owned curated AI output."
+      "output": "skills/n8n-local-setup/SKILL.md",
+      "notes": "Published skill generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/n8n-local-setup/README.md",
-      "output": "for_ai/skills/automation/n8n-local-setup/README.md",
-      "notes": "Published skill README generated from project-owned curated AI output."
+      "output": "skills/n8n-local-setup/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/mcp/n8n-local-setup.md",
-      "output": "for_ai/mcp/projects/n8n-local-setup.md",
-      "notes": "Published MCP doc generated from project-owned curated AI output."
+      "output": "mcp/projects/n8n-local-setup.md",
+      "notes": "Published MCP doc generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/playbooks/local-setup.md",
-      "output": "for_ai/playbooks/n8n/local-setup.md",
-      "notes": "AI/operator playbook generated from project-owned curated AI output."
+      "output": "skills/n8n-local-setup/references/n8n/local-setup.md",
+      "notes": "Skill-local reference generated from project-owned curated AI output.",
+      "fidelity": "exact"
     },
     {
       "kind": "concat",
       "sources": [
         "_main/templates/partials/ai-coding-agent-execution.md",
         "_main/templates/partials/n8n-mcp-rules.md",
-        "for_ai/templates/agent-rules/partials/skill-routing-rules.md"
+        "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md"
       ],
-      "output": "for_ai/templates/agent-rules/AGENTS.md",
+      "output": "skills/n8n-local-setup/templates/agent-rules/AGENTS.md",
       "title": "AGENTS.md AI Coding Agent Rules",
-      "intro": "Use this generated template for Codex or OpenCode."
+      "intro": "Use this generated template for Codex or OpenCode.",
+      "fidelity": "exact"
     },
     {
       "kind": "concat",
       "sources": [
         "_main/templates/partials/ai-coding-agent-execution.md",
         "_main/templates/partials/n8n-mcp-rules.md",
-        "for_ai/templates/agent-rules/partials/skill-routing-rules.md"
+        "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md"
       ],
-      "output": "for_ai/templates/agent-rules/CLAUDE.md",
+      "output": "skills/n8n-local-setup/templates/agent-rules/CLAUDE.md",
       "title": "CLAUDE.md AI Coding Agent Rules",
-      "intro": "Use this generated template for Claude Code."
+      "intro": "Use this generated template for Claude Code.",
+      "fidelity": "exact"
     },
     {
       "kind": "concat",
       "sources": [
         "_main/templates/partials/ai-coding-agent-execution.md",
         "_main/templates/partials/n8n-mcp-rules.md",
-        "for_ai/templates/agent-rules/partials/skill-routing-rules.md"
+        "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md"
       ],
-      "output": "for_ai/templates/agent-rules/GEMINI.md",
+      "output": "skills/n8n-local-setup/templates/agent-rules/GEMINI.md",
       "title": "GEMINI.md AI Coding Agent Rules",
-      "intro": "Use this generated template for Antigravity or Gemini CLI."
+      "intro": "Use this generated template for Antigravity or Gemini CLI.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/agent-rules/partials/skill-routing-rules.md",
-      "notes": "Toolkit-only partial maintained under for_ai and included by concat recipes."
+      "output": "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md",
+      "notes": "Toolkit-only partial maintained in the published surface and included by concat recipes.",
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/templates/antigravity-mcp-config.md",
-      "output": "for_ai/templates/mcp-configs/antigravity-mcp-config.md"
+      "output": "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/templates/claude-mcp-config.md",
-      "output": "for_ai/templates/mcp-configs/claude-mcp-config.md"
+      "output": "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/templates/codex-mcp-config.md",
-      "output": "for_ai/templates/mcp-configs/codex-mcp-config.md"
+      "output": "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/templates/opencode-mcp-config.md",
-      "output": "for_ai/templates/mcp-configs/opencode-mcp-config.md"
+      "output": "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md",
+      "fidelity": "exact"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/templates/mcp-configs/README.md",
-      "output": "for_ai/templates/mcp-configs/README.md",
-      "notes": "AI-facing index generated from project-owned curated AI output."
+      "output": "skills/n8n-local-setup/templates/mcp-configs/README.md",
+      "notes": "AI-facing index generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "json",
       "source": "curated_output_for_ai/packs/codex-n8n-local/pack.json",
-      "output": "for_ai/packs/codex-n8n-local/pack.json",
-      "notes": "Published install pack generated from project-owned curated AI output."
+      "output": "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
+      "notes": "Published install pack generated from project-owned curated AI output.",
+      "fidelity": "generated_metadata"
     },
     {
       "kind": "json",
       "source": "curated_output_for_ai/packs/claude-code-n8n-local/pack.json",
-      "output": "for_ai/packs/claude-code-n8n-local/pack.json",
-      "notes": "Published install pack generated from project-owned curated AI output."
+      "output": "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
+      "notes": "Published install pack generated from project-owned curated AI output.",
+      "fidelity": "generated_metadata"
     }
   ],
   "writes": {
     "allowed": [
-      "for_ai/skills/automation/n8n-local-setup/SKILL.md",
-      "for_ai/skills/automation/n8n-local-setup/README.md",
-      "for_ai/mcp/projects/n8n-local-setup.md",
-      "for_ai/playbooks/n8n/local-setup.md",
-      "for_ai/templates/agent-rules/AGENTS.md",
-      "for_ai/templates/agent-rules/CLAUDE.md",
-      "for_ai/templates/agent-rules/GEMINI.md",
-      "for_ai/templates/agent-rules/partials/skill-routing-rules.md",
-      "for_ai/templates/mcp-configs/antigravity-mcp-config.md",
-      "for_ai/templates/mcp-configs/claude-mcp-config.md",
-      "for_ai/templates/mcp-configs/codex-mcp-config.md",
-      "for_ai/templates/mcp-configs/opencode-mcp-config.md",
-      "for_ai/templates/mcp-configs/README.md",
-      "for_ai/packs/codex-n8n-local/pack.json",
-      "for_ai/packs/claude-code-n8n-local/pack.json",
-      "for_ai/registry/projects.registry.json"
+      "skills/n8n-local-setup/SKILL.md",
+      "skills/n8n-local-setup/README.md",
+      "mcp/projects/n8n-local-setup.md",
+      "skills/n8n-local-setup/references/n8n/local-setup.md",
+      "skills/n8n-local-setup/templates/agent-rules/AGENTS.md",
+      "skills/n8n-local-setup/templates/agent-rules/CLAUDE.md",
+      "skills/n8n-local-setup/templates/agent-rules/GEMINI.md",
+      "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md",
+      "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/README.md",
+      "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
+      "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
+      "mcp/registry/projects.registry.json"
     ],
     "denied": [
       ".env*",
@@ -143,5 +158,23 @@
   "requires_approval": true,
   "run_commands_by_default": false,
   "live_actions": "explicit_confirmation_only",
-  "ci_live_actions": false
+  "ci_live_actions": false,
+  "project": {
+    "name": "Local n8n Setup",
+    "category": "n8n",
+    "summary": "Preserved local n8n setup guides plus copyable agent templates for Codex, Claude Code, OpenCode, Antigravity, tunneling, and MCP configuration."
+  },
+  "surface": {
+    "publish_as": "both",
+    "skill": {
+      "status": "published",
+      "path": "skills/n8n-local-setup",
+      "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and agent-rule templates without running live actions by default."
+    },
+    "mcp": {
+      "status": "published",
+      "path": "mcp/projects/n8n-local-setup.md",
+      "summary": "Spec-only MCP notes for local n8n setup and configuration surfaces; no runnable server is shipped."
+    }
+  }
 }

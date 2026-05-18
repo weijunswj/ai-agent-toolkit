@@ -30,6 +30,6 @@ Never run live import/export in CI, and never commit `.tmp/**`, `.n8n-local/**`,
 
 ## Toolkit Templates
 
-Use [n8n sync helpers](../../templates/n8n/sync-helpers/) as review-required template assets. Copy them into a consumer repo only after reviewing the target workflow policy.
+Use [n8n sync helpers](../../templates/sync-helpers/) as review-required template assets. Copy them into a consumer repo only after reviewing the target workflow policy.
 
 Do not run those helper scripts from this toolkit repo.

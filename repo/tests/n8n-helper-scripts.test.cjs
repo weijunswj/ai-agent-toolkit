@@ -6,16 +6,16 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const { comparableWorkflow } = require(path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sync-helpers', 'should-import-n8n-workflow.cjs'));
-const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sync-helpers', 'prepare-n8n-live-import.cjs'));
+const { comparableWorkflow } = require(path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sync-helpers', 'should-import-n8n-workflow.cjs'));
+const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sync-helpers', 'prepare-n8n-live-import.cjs'));
 
-const scriptDir = path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sync-helpers');
+const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sync-helpers');
 const sourceScriptDir = path.join(repoRoot, '_projects', 'cicd', 'secure-installer', '_main', 'templates', 'n8n');
 const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
 const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');
-const sanitizerScript = path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sanitizer', 'prepare-n8n-template.js');
-const sanitizerPs1 = path.join(repoRoot, 'for_ai', 'templates', 'n8n', 'sanitizer', 'sanitise-n8n-template.ps1');
+const sanitizerScript = path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sanitizer', 'prepare-n8n-template.js');
+const sanitizerPs1 = path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sanitizer', 'sanitise-n8n-template.ps1');
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-helper-test-'));

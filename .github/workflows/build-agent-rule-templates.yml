@@ -3,7 +3,7 @@ name: Build agent rule templates
 on:
   pull_request:
     paths:
-      - for_ai/templates/agent-rules/partials/**
+      - skills/n8n-local-setup/templates/agent-rules/partials/**
       - repo/scripts/build-agent-rule-templates.ps1
       - repo/scripts/- build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
@@ -11,7 +11,7 @@ on:
     branches:
       - main
     paths:
-      - for_ai/templates/agent-rules/partials/**
+      - skills/n8n-local-setup/templates/agent-rules/partials/**
       - repo/scripts/build-agent-rule-templates.ps1
       - repo/scripts/- build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
@@ -34,4 +34,4 @@ jobs:
         run: ./repo/scripts/build-agent-rule-templates.ps1
 
       - name: Verify generated files are current
-        run: git diff --exit-code -- for_ai/templates/agent-rules/AGENTS.md for_ai/templates/agent-rules/CLAUDE.md for_ai/templates/agent-rules/GEMINI.md
+        run: git diff --exit-code -- skills/n8n-local-setup/templates/agent-rules/AGENTS.md skills/n8n-local-setup/templates/agent-rules/CLAUDE.md skills/n8n-local-setup/templates/agent-rules/GEMINI.md

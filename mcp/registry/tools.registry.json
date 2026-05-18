@@ -1,0 +1,14 @@
+[
+  {
+    "id": "design-system-generator",
+    "title": "Design System Generator",
+    "path": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/",
+    "project_module": "_projects/design/ui-ux-pro-max/",
+    "purpose": "Optional local-only CSV-backed design-system search and recommendation generation.",
+    "local_only": true,
+    "requires_approval": true,
+    "run_commands_by_default": false,
+    "writes_allowed": ["skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/** when explicitly requested"],
+    "writes_denied": [".env*", "credentials", "private keys", "network downloads", "package installs", "arbitrary output paths"]
+  }
+]

@@ -6,12 +6,12 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 
 | Term | Meaning |
 | --- | --- |
-| Skill | Portable instruction pack under `for_ai/skills/`. |
-| Guide | Setup or workflow documentation under `for_ai/playbooks/` or `repo/docs/`. |
-| Template | Copy-safe source material under `for_ai/templates/`. |
-| Pack | Approval-gated bundle manifest under `for_ai/packs/`. |
-| Registry | JSON discovery metadata under `for_ai/registry/`. |
-| MCP | Future server design under `for_ai/mcp/`. |
+| Skill | Portable instruction pack under `skills/`. |
+| Guide | Setup or workflow documentation under `_projects/**/_main/`, skill `references/`, or `repo/docs/`. |
+| Template | Copy-safe source material inside the relevant skill folder. |
+| Pack | Approval-gated bundle manifest inside the relevant skill folder under `packs/`. |
+| MCP registry data | JSON discovery metadata under `mcp/registry/`. |
+| MCP | Future server design under `mcp/`. |
 
 ## Task Routing
 
@@ -34,7 +34,7 @@ Never commit or install:
 
 Scoped writes are allowed only when the relevant template or helper is being run intentionally:
 
-- [Agent-rule generator](../scripts/build-agent-rule-templates.ps1) may regenerate only [AGENTS.md](../../for_ai/templates/agent-rules/AGENTS.md), [CLAUDE.md](../../for_ai/templates/agent-rules/CLAUDE.md), and [GEMINI.md](../../for_ai/templates/agent-rules/GEMINI.md).
+- [Agent-rule generator](../scripts/build-agent-rule-templates.ps1) may regenerate only [AGENTS.md](../../skills/n8n-local-setup/templates/agent-rules/AGENTS.md), [CLAUDE.md](../../skills/n8n-local-setup/templates/agent-rules/CLAUDE.md), and [GEMINI.md](../../skills/n8n-local-setup/templates/agent-rules/GEMINI.md).
 - n8n sanitizer templates may write ignored `.to-sanitise/**` and `.sanitised/**` staging folders.
 - n8n sync helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, and ignored `.n8n-local/**` in a consumer repo after review.
 

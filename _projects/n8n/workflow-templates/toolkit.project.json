@@ -9,74 +9,84 @@
     {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/n8n-workflow-sync/SKILL.md",
-      "output": "for_ai/skills/automation/n8n-workflow-sync/SKILL.md",
-      "notes": "Published skill generated from project-owned curated AI output."
+      "output": "skills/n8n-workflow-sync/SKILL.md",
+      "notes": "Published skill generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/n8n-workflow-sync/README.md",
-      "output": "for_ai/skills/automation/n8n-workflow-sync/README.md",
-      "notes": "Published skill README generated from project-owned curated AI output."
+      "output": "skills/n8n-workflow-sync/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/mcp/n8n-workflow-templates.md",
-      "output": "for_ai/mcp/projects/n8n-workflow-templates.md",
-      "notes": "Published MCP doc generated from project-owned curated AI output."
+      "output": "mcp/projects/n8n-workflow-templates.md",
+      "notes": "Published MCP doc generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/playbooks/workflow-sync.md",
-      "output": "for_ai/playbooks/n8n/workflow-sync.md",
-      "notes": "AI/operator playbook generated from project-owned curated AI output."
+      "output": "skills/n8n-workflow-sync/references/n8n/workflow-sync.md",
+      "notes": "Skill-local reference generated from project-owned curated AI output.",
+      "fidelity": "exact"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/templates/n8n/sanitizer/README.md",
-      "output": "for_ai/templates/n8n/sanitizer/README.md",
-      "notes": "AI-facing sanitizer documentation generated from project-owned curated AI output."
+      "output": "skills/n8n-workflow-sync/templates/sanitizer/README.md",
+      "notes": "AI-facing sanitizer documentation generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
-      "notes": "AI-facing sanitizer wrapper is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sanitizer/- sanitise-n8n-template.cmd",
+      "notes": "AI-facing sanitizer wrapper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sanitizer/prepare-n8n-template.js",
-      "notes": "AI-facing sanitizer script is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sanitizer/prepare-n8n-template.js",
+      "notes": "AI-facing sanitizer script is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sanitizer/sanitise-n8n-template.ps1",
-      "notes": "AI-facing sanitizer wrapper is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sanitizer/sanitise-n8n-template.ps1",
+      "notes": "AI-facing sanitizer wrapper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/templates/n8n/workflow-policy/README.md",
-      "output": "for_ai/templates/n8n/workflow-policy/README.md",
-      "notes": "AI-facing workflow policy generated from project-owned curated AI output."
+      "output": "skills/n8n-workflow-sync/templates/workflow-policy/README.md",
+      "notes": "AI-facing workflow policy generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "json",
       "source": "curated_output_for_ai/packs/n8n-workflow-sync/pack.json",
-      "output": "for_ai/packs/n8n-workflow-sync/pack.json",
-      "notes": "Published pack generated from project-owned curated AI output."
+      "output": "skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json",
+      "notes": "Skill-local pack generated from project-owned curated AI output.",
+      "fidelity": "generated_metadata"
     }
   ],
   "writes": {
     "allowed": [
-      "for_ai/skills/automation/n8n-workflow-sync/SKILL.md",
-      "for_ai/skills/automation/n8n-workflow-sync/README.md",
-      "for_ai/mcp/projects/n8n-workflow-templates.md",
-      "for_ai/playbooks/n8n/workflow-sync.md",
-      "for_ai/templates/n8n/sanitizer/README.md",
-      "for_ai/templates/n8n/sanitizer/- sanitise-n8n-template.cmd",
-      "for_ai/templates/n8n/sanitizer/prepare-n8n-template.js",
-      "for_ai/templates/n8n/sanitizer/sanitise-n8n-template.ps1",
-      "for_ai/templates/n8n/workflow-policy/README.md",
-      "for_ai/packs/n8n-workflow-sync/pack.json",
-      "for_ai/registry/projects.registry.json"
+      "skills/n8n-workflow-sync/SKILL.md",
+      "skills/n8n-workflow-sync/README.md",
+      "mcp/projects/n8n-workflow-templates.md",
+      "skills/n8n-workflow-sync/references/n8n/workflow-sync.md",
+      "skills/n8n-workflow-sync/templates/sanitizer/README.md",
+      "skills/n8n-workflow-sync/templates/sanitizer/- sanitise-n8n-template.cmd",
+      "skills/n8n-workflow-sync/templates/sanitizer/prepare-n8n-template.js",
+      "skills/n8n-workflow-sync/templates/sanitizer/sanitise-n8n-template.ps1",
+      "skills/n8n-workflow-sync/templates/workflow-policy/README.md",
+      "skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json",
+      "mcp/registry/projects.registry.json"
     ],
     "denied": [
       ".env*",
@@ -95,5 +105,23 @@
   "requires_approval": true,
   "run_commands_by_default": false,
   "live_actions": "explicit_confirmation_only",
-  "ci_live_actions": false
+  "ci_live_actions": false,
+  "project": {
+    "name": "n8n Workflow Templates",
+    "category": "n8n",
+    "summary": "Reusable n8n workflow template hygiene guidance, sanitizer helpers, and safe repo/live workflow sync conventions."
+  },
+  "surface": {
+    "publish_as": "both",
+    "skill": {
+      "status": "published",
+      "path": "skills/n8n-workflow-sync",
+      "summary": "Helps an agent review, sanitize, validate, and plan n8n workflow import/export sync safely."
+    },
+    "mcp": {
+      "status": "published",
+      "path": "mcp/projects/n8n-workflow-templates.md",
+      "summary": "Spec-only MCP notes for future deterministic workflow-template validation and routing tools."
+    }
+  }
 }

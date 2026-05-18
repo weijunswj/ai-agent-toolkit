@@ -9,121 +9,138 @@
     {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/secure-cicd-installer/SKILL.md",
-      "output": "for_ai/skills/cicd/secure-cicd-installer/SKILL.md",
-      "notes": "Published skill generated from project-owned curated AI output."
+      "output": "skills/secure-cicd-installer/SKILL.md",
+      "notes": "Published skill generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/secure-cicd-installer/README.md",
-      "output": "for_ai/skills/cicd/secure-cicd-installer/README.md",
-      "notes": "Published skill README generated from project-owned curated AI output."
+      "output": "skills/secure-cicd-installer/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/mcp/secure-cicd-installer.md",
-      "output": "for_ai/mcp/projects/secure-cicd-installer.md",
-      "notes": "Published MCP doc generated from project-owned curated AI output."
+      "output": "mcp/projects/secure-cicd-installer.md",
+      "notes": "Published MCP doc generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/playbooks/secure-cicd-installer.md",
-      "output": "for_ai/playbooks/cicd/secure-cicd-installer.md",
-      "notes": "AI/operator playbook generated from project-owned curated AI output."
+      "output": "skills/secure-cicd-installer/references/secure-cicd-installer.md",
+      "notes": "Skill-local reference generated from project-owned curated AI output.",
+      "fidelity": "exact"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/templates/cicd/README.md",
-      "output": "for_ai/templates/cicd/README.md",
-      "notes": "AI-facing template index generated from project-owned curated AI output."
+      "output": "skills/secure-cicd-installer/templates/cicd/README.md",
+      "notes": "AI-facing template index generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "json",
       "source": "curated_output_for_ai/packs/secure-cicd/pack.json",
-      "output": "for_ai/packs/secure-cicd/pack.json",
-      "notes": "Published pack generated from project-owned curated AI output."
+      "output": "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
+      "notes": "Skill-local pack generated from project-owned curated AI output.",
+      "fidelity": "generated_metadata"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/templates/n8n/export-n8n-workflows-live.ps1",
-      "output": "for_ai/templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1",
       "notice": false,
-      "notes": "AI-facing helper is toolkit-adapted and source-locked."
+      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/templates/n8n/import-n8n-workflows-live.ps1",
-      "output": "for_ai/templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1",
       "notice": false,
-      "notes": "AI-facing helper is toolkit-adapted and source-locked."
+      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "linked",
-      "output": "for_ai/templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked."
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs",
+      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
       "source": "_main/templates/n8n/validate-n8n-workflows.cjs",
-      "output": "for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
-      "notice": false
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs",
+      "notice": false,
+      "fidelity": "exact"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/templates/n8n/sync-helpers/README.md",
-      "output": "for_ai/templates/n8n/sync-helpers/README.md",
-      "notes": "AI-facing helper documentation generated from project-owned curated AI output."
+      "output": "skills/n8n-workflow-sync/templates/sync-helpers/README.md",
+      "notes": "AI-facing helper documentation generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     }
   ],
   "writes": {
     "allowed": [
-      "for_ai/skills/cicd/secure-cicd-installer/SKILL.md",
-      "for_ai/skills/cicd/secure-cicd-installer/README.md",
-      "for_ai/mcp/projects/secure-cicd-installer.md",
-      "for_ai/playbooks/cicd/secure-cicd-installer.md",
-      "for_ai/templates/cicd/README.md",
-      "for_ai/packs/secure-cicd/pack.json",
-      "for_ai/templates/n8n/sync-helpers/- export-n8n-workflows-live.cmd",
-      "for_ai/templates/n8n/sync-helpers/- import-n8n-workflows-live.cmd",
-      "for_ai/templates/n8n/sync-helpers/compare-n8n-workflow-credentials.cjs",
-      "for_ai/templates/n8n/sync-helpers/export-n8n-workflows-live.ps1",
-      "for_ai/templates/n8n/sync-helpers/import-n8n-workflows-live.ps1",
-      "for_ai/templates/n8n/sync-helpers/n8n-workflow-sync-menu.ps1",
-      "for_ai/templates/n8n/sync-helpers/prepare-n8n-live-import.cjs",
-      "for_ai/templates/n8n/sync-helpers/should-import-n8n-workflow.cjs",
-      "for_ai/templates/n8n/sync-helpers/sync-n8n-live-exports.cjs",
-      "for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs",
-      "for_ai/templates/n8n/sync-helpers/README.md",
-      "for_ai/registry/projects.registry.json"
+      "skills/secure-cicd-installer/SKILL.md",
+      "skills/secure-cicd-installer/README.md",
+      "mcp/projects/secure-cicd-installer.md",
+      "skills/secure-cicd-installer/references/secure-cicd-installer.md",
+      "skills/secure-cicd-installer/templates/cicd/README.md",
+      "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
+      "skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd",
+      "skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd",
+      "skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs",
+      "skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1",
+      "skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1",
+      "skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1",
+      "skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs",
+      "skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs",
+      "skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs",
+      "skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs",
+      "skills/n8n-workflow-sync/templates/sync-helpers/README.md",
+      "mcp/registry/projects.registry.json"
     ],
     "denied": [
       ".env*",
@@ -141,5 +158,23 @@
   "requires_approval": true,
   "run_commands_by_default": false,
   "live_actions": "explicit_confirmation_only",
-  "ci_live_actions": false
+  "ci_live_actions": false,
+  "project": {
+    "name": "Secure CI/CD Installer",
+    "category": "cicd",
+    "summary": "Approval-gated CI/CD installer guidance, GitHub Actions hardening notes, status templates, and n8n helper scripts."
+  },
+  "surface": {
+    "publish_as": "both",
+    "skill": {
+      "status": "published",
+      "path": "skills/secure-cicd-installer",
+      "summary": "Helps an agent plan and apply secure CI/CD installer materials while keeping writes, commands, credentials, and live actions gated."
+    },
+    "mcp": {
+      "status": "published",
+      "path": "mcp/projects/secure-cicd-installer.md",
+      "summary": "Spec-only MCP notes for future deterministic CI/CD and repository checks."
+    }
+  }
 }
