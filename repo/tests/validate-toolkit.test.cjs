@@ -251,10 +251,30 @@ test('trusted maintenance scripts support an explicit workspace root', () => {
 
 test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   const text = readTextFile(path.join(repoRoot, 'AGENTS.md'));
+  const mandatoryDocs = [
+    'repo/docs/FOR_AI_AGENTS.md',
+    'repo/docs/SOURCE-OF-TRUTH.md',
+    'repo/docs/PROJECT-MODULE-STANDARD.md',
+    'repo/docs/SURFACE-FIDELITY-AUDIT.md',
+    'repo/docs/RETIRED-SOURCE-PROVENANCE.md',
+    'repo/docs/THIRD-PARTY-SOURCE-NOTES.md',
+    'repo/docs/WRITE-SAFETY-MODEL.md',
+    'repo/docs/SAFE-UPDATES.md',
+    'repo/docs/CLEANUP-POLICY.md',
+    'repo/docs/HOW-TO-USE.md'
+  ];
+
   assert.match(text, /curated_output_for_ai/);
   assert.match(text, /toolkit\.project\.json/);
   assert.match(text, /Do not edit generated `skills\/` or `mcp\/` outputs directly/);
   assert.match(text, /Do not generate curated files automatically from `_main`/);
+  for (const doc of mandatoryDocs) {
+    assert.ok(text.includes(`](${doc})`), `AGENTS.md links ${doc}`);
+  }
+  assert.match(
+    text,
+    /For new or changed project modules, `repo\/docs\/PROJECT-MODULE-STANDARD\.md` is the detailed rulebook\./
+  );
 });
 
 test('validation workflow checks source-of-truth contract drift read-only', () => {

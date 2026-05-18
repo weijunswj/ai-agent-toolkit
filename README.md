@@ -7,9 +7,9 @@ A practical toolkit of AI-agent skills, MCP specs/tools, and preserved project g
 This repo keeps reusable AI-agent material in a layout that is easy to navigate:
 
 - Need the full guide? Go to `_projects/**/_main/`.
-- Need to install a skill? Copy the whole folder under `skills/<skill-name>/`.
-- Need MCP? Go to `mcp/` for status, specs, registries, and command/tool notes.
-- Need to maintain the toolkit? Use `repo/`.
+- Need to install a skill? Copy the whole folder under [`skills/`](skills/) as `skills/<skill-name>/`.
+- Need MCP? Go to [`mcp/`](mcp/) for status, specs, registries, and command/tool notes.
+- Need to maintain the toolkit? Use [`repo/`](repo/).
 
 ## Quick Start
 
@@ -25,35 +25,35 @@ Keep the folder intact so `SKILL.md`, references, templates, examples, helper fi
 
 ### I want MCP
 
-Open `mcp/` to see available MCP areas, commands/tools, status, and usage notes.
+Open [`mcp/`](mcp/) to see available MCP areas, commands/tools, status, and usage notes.
 
 ### I want to maintain this toolkit
 
-Use `repo/` for scripts, tests, docs, validation, and CI support.
+Use [`repo/`](repo/) for scripts, tests, docs, validation, and CI support.
 
 ## Projects
 
 | Project | What it does | Full guide | Surface | Skill | MCP |
 |---|---|---|---|---|---|
-| Local n8n Setup | Local n8n setup, MCP config, tunneling, and agent-rule templates. | `_projects/n8n/local-setup/_main/` | both | `skills/n8n-local-setup/` | `mcp/projects/n8n-local-setup.md` |
-| n8n Workflow Templates | Credential-safe workflow template hygiene, sanitizer tooling, and repo/live sync guidance. | `_projects/n8n/workflow-templates/_main/` | both | `skills/n8n-workflow-sync/` | `mcp/projects/n8n-workflow-templates.md` |
-| Secure CI/CD Installer | Approval-gated CI/CD setup, GitHub Actions safety, and status templates. | `_projects/cicd/secure-installer/_main/` | both | `skills/secure-cicd-installer/` | `mcp/projects/secure-cicd-installer.md` |
-| UI/UX Pro Max Design | Third-party-attributed UI/UX design source, local generator data, and frontend design guidance. | `_projects/design/ui-ux-pro-max/_main/` | both | `skills/ui-ux-secure-frontend-design/` | `mcp/projects/ui-ux-pro-max.md` |
+| Local n8n Setup | Local n8n setup, MCP config, tunneling, and agent-rule templates. | [`_projects/n8n/local-setup/_main/`](_projects/n8n/local-setup/_main/) | both | [`skills/n8n-local-setup/`](skills/n8n-local-setup/) | [`mcp/projects/n8n-local-setup.md`](mcp/projects/n8n-local-setup.md) |
+| n8n Workflow Templates | Credential-safe workflow template hygiene, sanitizer tooling, and repo/live sync guidance. | [`_projects/n8n/workflow-templates/_main/`](_projects/n8n/workflow-templates/_main/) | both | [`skills/n8n-workflow-sync/`](skills/n8n-workflow-sync/) | [`mcp/projects/n8n-workflow-templates.md`](mcp/projects/n8n-workflow-templates.md) |
+| Secure CI/CD Installer | Approval-gated CI/CD setup, GitHub Actions safety, and status templates. | [`_projects/cicd/secure-installer/_main/`](_projects/cicd/secure-installer/_main/) | both | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) | [`mcp/projects/secure-cicd-installer.md`](mcp/projects/secure-cicd-installer.md) |
+| UI/UX Pro Max Design | Third-party-attributed UI/UX design source, local generator data, and frontend design guidance. | [`_projects/design/ui-ux-pro-max/_main/`](_projects/design/ui-ux-pro-max/_main/) | both | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) | [`mcp/projects/ui-ux-pro-max.md`](mcp/projects/ui-ux-pro-max.md) |
 
 ## Skills
 
-Skills are copyable folder packages for AI agents. To install one, copy the whole folder under `skills/`; do not cherry-pick only `SKILL.md`.
+Skills are copyable folder packages for AI agents. To install one, copy the whole folder under [`skills/`](skills/); do not cherry-pick only `SKILL.md`.
 
 Required runtime context should live inside the skill folder in local files such as `references/`, `examples/`, `templates/`, `tools/`, or `packs/`. External links are for provenance or further reading, not required runtime context.
 
 | Skill | What it helps with | Folder |
 |---|---|---|
-| n8n Local Setup | Safe local n8n setup, MCP config selection, tunnels, and platform agent rules. | `skills/n8n-local-setup/` |
-| n8n Workflow Sync | Safe workflow import/export planning, sanitation, credential safety, and helper templates. | `skills/n8n-workflow-sync/` |
-| Secure CI/CD Installer | Secure CI/CD planning, approval-gated templates, and status tracking. | `skills/secure-cicd-installer/` |
-| Secure UI/UX Frontend Design | Frontend design, review, accessibility, responsiveness, privacy, and security guardrails. | `skills/ui-ux-secure-frontend-design/` |
-| Windows Localhost Workflows | Start, verify, and troubleshoot localhost development services on Windows. | `skills/windows-localhost-workflows/` |
-| Knowledge Index Updater | Maintain a Notion/GitHub knowledge index without duplicate rows. | `skills/knowledge-index-updater/` |
+| n8n Local Setup | Safe local n8n setup, MCP config selection, tunnels, and platform agent rules. | [`skills/n8n-local-setup/`](skills/n8n-local-setup/) |
+| n8n Workflow Sync | Safe workflow import/export planning, sanitation, credential safety, and helper templates. | [`skills/n8n-workflow-sync/`](skills/n8n-workflow-sync/) |
+| Secure CI/CD Installer | Secure CI/CD planning, approval-gated templates, and status tracking. | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) |
+| Secure UI/UX Frontend Design | Frontend design, review, accessibility, responsiveness, privacy, and security guardrails. | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) |
+| Windows Localhost Workflows | Start, verify, and troubleshoot localhost development services on Windows. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
+| Knowledge Index Updater | Maintain a Notion/GitHub knowledge index without duplicate rows. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |
 
 ## MCP
 
@@ -61,11 +61,11 @@ The MCP surface is design/spec-only today. No runnable MCP server is shipped in 
 
 | MCP area | Status | Provides |
 |---|---|---|
-| `mcp/registry-mcp/` | Design/spec-only | Future read-only discovery and routing over JSON registries. |
-| `mcp/installer-mcp/` | Design/spec-only | Future approval-gated installer flow for skill-local pack manifests. |
-| `mcp/projects/` | Published specs | Project-specific MCP notes and safety boundaries. |
-| `mcp/registry/` | Data only | JSON discovery metadata for future MCP/installer use. |
-| `mcp/references/` | Reference docs | MCP setup, registry, installer, and security notes. |
+| [`mcp/registry-mcp/`](mcp/registry-mcp/) | Design/spec-only | Future read-only discovery and routing over JSON registries. |
+| [`mcp/installer-mcp/`](mcp/installer-mcp/) | Design/spec-only | Future approval-gated installer flow for skill-local pack manifests. |
+| [`mcp/projects/`](mcp/projects/) | Published specs | Project-specific MCP notes and safety boundaries. |
+| [`mcp/registry/`](mcp/registry/) | Data only | JSON discovery metadata for future MCP/installer use. |
+| [`mcp/references/`](mcp/references/) | Reference docs | MCP setup, registry, installer, and security notes. |
 
 No MCP commands are runnable from this repo today. The specs describe future tools only:
 
@@ -83,10 +83,10 @@ No MCP commands are runnable from this repo today. The specs describe future too
 
 | Path | Use it when |
 |---|---|
-| `_projects/` | You want full preserved project guides/source material. |
-| `skills/` | You want copyable agent skills. |
-| `mcp/` | You want MCP specs/tools/commands. |
-| `repo/` | You are maintaining this toolkit. |
+| [`_projects/`](_projects/) | You want full preserved project guides/source material. |
+| [`skills/`](skills/) | You want copyable agent skills. |
+| [`mcp/`](mcp/) | You want MCP specs/tools/commands. |
+| [`repo/`](repo/) | You are maintaining this toolkit. |
 
 ## For Maintainers
 
@@ -95,9 +95,11 @@ Edit source first, then publish:
 1. Update `_projects/**/_main/` only when preserved source must change.
 2. Update `_projects/**/curated_output_for_ai/` for reviewed AI-facing source.
 3. Update `_projects/**/toolkit.project.json` when routing or surface metadata changes.
-4. Run `node repo/scripts/sync-toolkit-projects.cjs --write`.
+4. Run [`repo/scripts/sync-toolkit-projects.cjs`](repo/scripts/sync-toolkit-projects.cjs) with `--write`.
 
-Do not edit generated `skills/` or `mcp/` outputs directly unless the output is explicitly declared as `linked`.
+Do not edit generated [`skills/`](skills/) or [`mcp/`](mcp/) outputs directly unless the output is explicitly declared as `linked`.
+
+For project module rules, follow [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md).
 
 ## Validation
 
