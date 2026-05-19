@@ -76,13 +76,13 @@
     ]
   },
   {
-    "id": "dev.windows-localhost-workflows",
-    "category": "dev",
+    "id": "development.windows-localhost-workflows",
+    "category": "development",
     "name": "windows-localhost-workflows",
     "title": "Windows Localhost Workflows",
     "project": {
       "name": "Windows Localhost Workflows",
-      "category": "dev",
+      "category": "development",
       "summary": "Reusable AI skill for starting, verifying, and troubleshooting localhost development workflows on Windows."
     },
     "surface": {
@@ -97,8 +97,8 @@
         "summary": "No MCP surface is published for this standalone skill."
       }
     },
-    "module_path": "_projects/dev/windows-localhost-workflows",
-    "main_path": "_projects/dev/windows-localhost-workflows/_main",
+    "module_path": "_projects/development/windows-localhost-workflows",
+    "main_path": "_projects/development/windows-localhost-workflows/_main",
     "root_surfaces": [
       "skills/windows-localhost-workflows/README.md",
       "skills/windows-localhost-workflows/SKILL.md",
@@ -134,59 +134,6 @@
       "skills/knowledge-index-updater/SKILL.md",
       "skills/knowledge-index-updater/agents/claude.md",
       "skills/knowledge-index-updater/agents/openai.yaml"
-    ]
-  },
-  {
-    "id": "meta.context-preserving-ai-publisher",
-    "category": "meta",
-    "name": "context-preserving-ai-publisher",
-    "title": "Context-Preserving AI Publisher",
-    "project": {
-      "name": "Context-Preserving AI Publisher",
-      "category": "meta",
-      "summary": "Generic agent-agnostic methodology, references, and templates for source-traceable AI-facing repo publishing without context drift."
-    },
-    "surface": {
-      "publish_as": "skill",
-      "skill": {
-        "status": "published",
-        "path": "skills/context-preserving-ai-publisher",
-        "summary": "Helps agents bootstrap or maintain manifest-driven AI-facing repo surfaces while preserving source context, local law, and audit integrity."
-      },
-      "mcp": {
-        "status": "not_applicable"
-      }
-    },
-    "module_path": "_projects/meta/context-preserving-ai-publisher",
-    "main_path": "_projects/meta/context-preserving-ai-publisher/_main",
-    "root_surfaces": [
-      "skills/context-preserving-ai-publisher/README.md",
-      "skills/context-preserving-ai-publisher/SKILL.md",
-      "skills/context-preserving-ai-publisher/references/README.md",
-      "skills/context-preserving-ai-publisher/references/agent-agnostic-principles.md",
-      "skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md",
-      "skills/context-preserving-ai-publisher/references/bootstrap-mode.md",
-      "skills/context-preserving-ai-publisher/references/context-drift-model.md",
-      "skills/context-preserving-ai-publisher/references/deletion-policy.md",
-      "skills/context-preserving-ai-publisher/references/enforcement-model.md",
-      "skills/context-preserving-ai-publisher/references/examples.md",
-      "skills/context-preserving-ai-publisher/references/maintenance-mode.md",
-      "skills/context-preserving-ai-publisher/references/source-to-surface-decision-tree.md",
-      "skills/context-preserving-ai-publisher/references/validation-strategy.md",
-      "skills/context-preserving-ai-publisher/templates/agent-task-brief.template.md",
-      "skills/context-preserving-ai-publisher/templates/audit-triage.template.md",
-      "skills/context-preserving-ai-publisher/templates/ci/generated-surface-check.template.yml",
-      "skills/context-preserving-ai-publisher/templates/ci/safe-auto-sync.template.yml",
-      "skills/context-preserving-ai-publisher/templates/pr-summary.template.md",
-      "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json",
-      "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-MANIFEST.template.md",
-      "skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json",
-      "skills/context-preserving-ai-publisher/templates/repo-docs/agent-routing.template.md",
-      "skills/context-preserving-ai-publisher/templates/repo-docs/deletion-policy.template.md",
-      "skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md",
-      "skills/context-preserving-ai-publisher/templates/repo-docs/source-of-truth.template.md",
-      "skills/context-preserving-ai-publisher/templates/repo-docs/surface-fidelity-audit.template.md",
-      "skills/context-preserving-ai-publisher/templates/source-to-surface-decision.template.md"
     ]
   },
   {
@@ -287,6 +234,59 @@
       "skills/n8n-workflow-templates/SKILL.md",
       "skills/n8n-workflow-templates/templates/README.md",
       "skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json"
+    ]
+  },
+  {
+    "id": "repo-methodology.context-preserving-ai-publisher",
+    "category": "repo-methodology",
+    "name": "context-preserving-ai-publisher",
+    "title": "Context-Preserving AI Publisher",
+    "project": {
+      "name": "Context-Preserving AI Publisher",
+      "category": "repo-methodology",
+      "summary": "Generic agent-agnostic methodology, references, and templates for source-traceable AI-facing repo publishing without context drift."
+    },
+    "surface": {
+      "publish_as": "skill",
+      "skill": {
+        "status": "published",
+        "path": "skills/context-preserving-ai-publisher",
+        "summary": "Helps agents bootstrap or maintain manifest-driven AI-facing repo surfaces while preserving source context, local law, and audit integrity."
+      },
+      "mcp": {
+        "status": "not_applicable"
+      }
+    },
+    "module_path": "_projects/repo-methodology/context-preserving-ai-publisher",
+    "main_path": "_projects/repo-methodology/context-preserving-ai-publisher/_main",
+    "root_surfaces": [
+      "skills/context-preserving-ai-publisher/README.md",
+      "skills/context-preserving-ai-publisher/SKILL.md",
+      "skills/context-preserving-ai-publisher/references/README.md",
+      "skills/context-preserving-ai-publisher/references/agent-agnostic-principles.md",
+      "skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md",
+      "skills/context-preserving-ai-publisher/references/bootstrap-mode.md",
+      "skills/context-preserving-ai-publisher/references/context-drift-model.md",
+      "skills/context-preserving-ai-publisher/references/deletion-policy.md",
+      "skills/context-preserving-ai-publisher/references/enforcement-model.md",
+      "skills/context-preserving-ai-publisher/references/examples.md",
+      "skills/context-preserving-ai-publisher/references/maintenance-mode.md",
+      "skills/context-preserving-ai-publisher/references/source-to-surface-decision-tree.md",
+      "skills/context-preserving-ai-publisher/references/validation-strategy.md",
+      "skills/context-preserving-ai-publisher/templates/agent-task-brief.template.md",
+      "skills/context-preserving-ai-publisher/templates/audit-triage.template.md",
+      "skills/context-preserving-ai-publisher/templates/ci/generated-surface-check.template.yml",
+      "skills/context-preserving-ai-publisher/templates/ci/safe-auto-sync.template.yml",
+      "skills/context-preserving-ai-publisher/templates/pr-summary.template.md",
+      "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json",
+      "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-MANIFEST.template.md",
+      "skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/agent-routing.template.md",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/deletion-policy.template.md",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/source-of-truth.template.md",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/surface-fidelity-audit.template.md",
+      "skills/context-preserving-ai-publisher/templates/source-to-surface-decision.template.md"
     ]
   }
 ]

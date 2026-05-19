@@ -1,10 +1,10 @@
 {
-  "id": "meta.context-preserving-ai-publisher",
-  "category": "meta",
+  "id": "repo-methodology.context-preserving-ai-publisher",
+  "category": "repo-methodology",
   "name": "context-preserving-ai-publisher",
   "title": "Context-Preserving AI Publisher",
-  "module_path": "_projects/meta/context-preserving-ai-publisher",
-  "main_path": "_projects/meta/context-preserving-ai-publisher/_main",
+  "module_path": "_projects/repo-methodology/context-preserving-ai-publisher",
+  "main_path": "_projects/repo-methodology/context-preserving-ai-publisher/_main",
   "outputs": [
     {
       "kind": "curated",
@@ -247,7 +247,7 @@
   "ci_live_actions": false,
   "project": {
     "name": "Context-Preserving AI Publisher",
-    "category": "meta",
+    "category": "repo-methodology",
     "summary": "Generic agent-agnostic methodology, references, and templates for source-traceable AI-facing repo publishing without context drift."
   },
   "surface": {

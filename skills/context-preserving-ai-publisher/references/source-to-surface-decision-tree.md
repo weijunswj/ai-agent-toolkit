@@ -1,7 +1,7 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
-Project: meta.context-preserving-ai-publisher
-Source: _projects/meta/context-preserving-ai-publisher/_main/source-to-surface-decision-tree.md
+Project: repo-methodology.context-preserving-ai-publisher
+Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/source-to-surface-decision-tree.md
 Update the project source and run sync.
 -->
 # Source-To-Surface Decision Tree

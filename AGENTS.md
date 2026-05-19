@@ -79,6 +79,7 @@ When adding a new project module or changing a published skill/MCP surface:
 Keep the topology simple:
 
 - `_projects/` preserves canonical human/source material. Full original docs and guides live in `_projects/**/_main/`.
+- Current `_projects/` categories are `cicd/`, `design/`, `development/`, `knowledge/`, `n8n/`, and `repo-methodology/`.
 - `skills/` contains copyable agent skills. Copy the whole skill folder, not only `SKILL.md`.
 - `mcp/` contains MCP specs, registries, project MCP notes, and any implemented commands/tools.
 - `repo/` contains repo maintenance assets: docs, scripts, tests, validation policy, and CI support.

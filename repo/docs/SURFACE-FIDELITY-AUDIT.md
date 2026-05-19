@@ -32,7 +32,7 @@ The highest remaining risks are now manual MCP registry/spec surfaces and UI/UX 
 The former orphan root skill folders are now owned by focused project modules:
 
 - `_projects/knowledge/knowledge-index-updater/` owns `skills/knowledge-index-updater/`.
-- `_projects/dev/windows-localhost-workflows/` owns `skills/windows-localhost-workflows/`.
+- `_projects/development/windows-localhost-workflows/` owns `skills/windows-localhost-workflows/`.
 
 The existing standalone skill folders are promoted into `_main/skill/**` and regenerated into the published `skills/` folders through exact `copy` recipes. Markdown outputs receive the standard generated notice, while `_main/skill/**` preserves the former standalone skill content exactly.
 
@@ -54,6 +54,22 @@ Amendment movement from the prior PR #29 baseline:
 Remaining follow-up actions:
 
 - None for `knowledge-index-updater` or `windows-localhost-workflows`.
+
+## Category Cleanup Amendment
+
+The project category names were clarified without adding or removing declared skill/MCP routes:
+
+- `_projects/dev/windows-localhost-workflows/` became `_projects/development/windows-localhost-workflows/`.
+- Project id `dev.windows-localhost-workflows` became `development.windows-localhost-workflows`.
+- `_projects/meta/context-preserving-ai-publisher/` became `_projects/repo-methodology/context-preserving-ai-publisher/`.
+- Project id `meta.context-preserving-ai-publisher` became `repo-methodology.context-preserving-ai-publisher`.
+- `_projects/cicd/`, `_projects/design/`, `_projects/knowledge/`, and `_projects/n8n/` intentionally remain first-class categories.
+
+Audit baseline movement recorded with this cleanup:
+
+- `publishedFiles`: 187 to 188 after the generated `skills/context-preserving-ai-publisher/references/validation-strategy.md` file became tracked.
+- `declared_generated`: 88 to 89.
+- `projects`, `declaredOutputFiles`, `undeclaredPublishedFiles`, `boundaryRecipeOutputs`, `boundaryRecipeFindings`, and `curatedDirectoryFindings` stayed unchanged.
 
 ## n8n Workflow Toolkit Reshape
 
@@ -283,10 +299,10 @@ The skill router now points agents to local skill-folder references for runtime 
 Project modules:
 
 - `_projects/cicd/secure-installer`
-- `_projects/dev/windows-localhost-workflows`
+- `_projects/development/windows-localhost-workflows`
 - `_projects/design/ui-ux-pro-max`
 - `_projects/knowledge/knowledge-index-updater`
-- `_projects/meta/context-preserving-ai-publisher`
+- `_projects/repo-methodology/context-preserving-ai-publisher`
 - `_projects/n8n/local-setup`
 - `_projects/n8n/workflow-toolkit`
 
@@ -325,8 +341,8 @@ Declared full-fidelity or deterministic generated surfaces include:
 - `skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json`, via JSON recipe from workflow-toolkit `_main`.
 - `skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/*` and `data/**`, via exact copy recipes from the preserved local-only subset.
 - `skills/knowledge-index-updater/SKILL.md`, `README.md`, and `agents/**`, via exact copy recipes from `_projects/knowledge/knowledge-index-updater/_main/skill/**`.
-- `skills/windows-localhost-workflows/SKILL.md`, `README.md`, and `agents/**`, via exact copy recipes from `_projects/dev/windows-localhost-workflows/_main/skill/**`.
-- `skills/context-preserving-ai-publisher/references/validation-strategy.md`, via exact copy from `_projects/meta/context-preserving-ai-publisher/_main/validation-strategy.md`.
+- `skills/windows-localhost-workflows/SKILL.md`, `README.md`, and `agents/**`, via exact copy recipes from `_projects/development/windows-localhost-workflows/_main/skill/**`.
+- `skills/context-preserving-ai-publisher/references/validation-strategy.md`, via exact copy from `_projects/repo-methodology/context-preserving-ai-publisher/_main/validation-strategy.md`.
 
 Summary or reviewed-entrypoint surfaces include:
 

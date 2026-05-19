@@ -2,7 +2,7 @@
 
 <!--
 Curated AI-facing source.
-Project: meta.context-preserving-ai-publisher
+Project: repo-methodology.context-preserving-ai-publisher
 
 Published-surface source note: This file is authored as a published-surface source; relative links are intended to resolve after sync at skills/context-preserving-ai-publisher/README.md.
 -->

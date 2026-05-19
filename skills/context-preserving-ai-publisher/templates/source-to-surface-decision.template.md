@@ -1,7 +1,7 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
-Project: meta.context-preserving-ai-publisher
-Source: _projects/meta/context-preserving-ai-publisher/_main/templates/source-to-surface-decision.template.md
+Project: repo-methodology.context-preserving-ai-publisher
+Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/templates/source-to-surface-decision.template.md
 Update the project source and run sync.
 -->
 # Source-To-Surface Decision

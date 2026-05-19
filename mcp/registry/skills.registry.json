@@ -182,7 +182,7 @@
     "risk_level": "medium",
     "instruction_only": true,
     "source_refs": [
-      "_projects/meta/context-preserving-ai-publisher/",
+      "_projects/repo-methodology/context-preserving-ai-publisher/",
       "skills/context-preserving-ai-publisher/"
     ]
   },

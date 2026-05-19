@@ -27,6 +27,15 @@ This repo keeps reusable AI-agent material in a source-first layout. Full source
 - **MCP:** A spec/registry area for future tool/server discovery. It is design/spec-only unless a specific subfolder says otherwise.
 - **Generated surface:** A published file under [`skills/`](skills/) or [`mcp/`](mcp/) that is rebuilt from project source by a deterministic sync script.
 
+## Project Categories
+
+- `cicd/` = CI/CD and GitHub Actions safety material.
+- `design/` = UI/UX and frontend design material.
+- `development/` = general development workflow helpers.
+- `knowledge/` = knowledge-base and index-maintenance skills.
+- `n8n/` = n8n setup, workflow helper scripts, and workflow templates.
+- `repo-methodology/` = how this toolkit preserves source truth, generates skills/MCP surfaces, and prevents context drift.
+
 ## Projects
 
 Open a project when you need the maintained source behind a skill or MCP note.
@@ -37,8 +46,8 @@ Open a project when you need the maintained source behind a skill or MCP note.
 | [n8n Workflow Toolkit](_projects/n8n/workflow-toolkit/) | Owns reusable n8n workflow helper material. | Safe helper scripts for sanitising, validating, exporting, importing, comparing, and preparing workflow JSON, plus public inactive workflow templates. | [`skills/n8n-workflow-helper-scripts/`](skills/n8n-workflow-helper-scripts/), [`skills/n8n-workflow-templates/`](skills/n8n-workflow-templates/), and [`mcp/projects/n8n-workflow-toolkit.md`](mcp/projects/n8n-workflow-toolkit.md) |
 | [Secure CI/CD Installer](_projects/cicd/secure-installer/) | Helps plan CI/CD changes with approval gates and safety status tracking. | The full installer prompt, CI/CD status templates, GitHub Actions notes, and safety policy source. | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) and [`mcp/projects/secure-cicd-installer.md`](mcp/projects/secure-cicd-installer.md) |
 | [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Provides frontend design guidance and a local design-system generator. | Third-party-attributed design source, local CSV data, generator scripts, and attribution notes. | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) and [`mcp/projects/ui-ux-pro-max.md`](mcp/projects/ui-ux-pro-max.md) |
-| [Context-Preserving AI Publisher](_projects/meta/context-preserving-ai-publisher/) | Helps maintain source-traceable skills, MCP notes, templates, manifests, and audit baselines. | Generic publishing methodology, source-to-surface decision rules, validation guidance, and starter templates. | [`skills/context-preserving-ai-publisher/`](skills/context-preserving-ai-publisher/) |
-| [Windows Localhost Workflows](_projects/dev/windows-localhost-workflows/) | Helps an agent start and prove Windows localhost dev services are reachable. | The full standalone skill source for launch discovery, port checks, logs, background start, and HTTP verification. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
+| [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Helps maintain source-traceable skills, MCP notes, templates, manifests, and audit baselines. | Generic publishing methodology, source-to-surface decision rules, validation guidance, and starter templates. | [`skills/context-preserving-ai-publisher/`](skills/context-preserving-ai-publisher/) |
+| [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Helps an agent start and prove Windows localhost dev services are reachable. | The full standalone skill source for launch discovery, port checks, logs, background start, and HTTP verification. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
 | [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Helps maintain a Notion/GitHub knowledge index without duplicate rows. | The full standalone skill source for schema setup, source matching, duplicate handling, and daily updater behavior. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |
 
 ## Skills

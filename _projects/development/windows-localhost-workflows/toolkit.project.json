@@ -1,10 +1,10 @@
 {
-  "id": "dev.windows-localhost-workflows",
-  "category": "dev",
+  "id": "development.windows-localhost-workflows",
+  "category": "development",
   "name": "windows-localhost-workflows",
   "title": "Windows Localhost Workflows",
-  "module_path": "_projects/dev/windows-localhost-workflows",
-  "main_path": "_projects/dev/windows-localhost-workflows/_main",
+  "module_path": "_projects/development/windows-localhost-workflows",
+  "main_path": "_projects/development/windows-localhost-workflows/_main",
   "outputs": [
     {
       "kind": "copy",
@@ -53,7 +53,7 @@
   "ci_live_actions": false,
   "project": {
     "name": "Windows Localhost Workflows",
-    "category": "dev",
+    "category": "development",
     "summary": "Reusable AI skill for starting, verifying, and troubleshooting localhost development workflows on Windows."
   },
   "surface": {

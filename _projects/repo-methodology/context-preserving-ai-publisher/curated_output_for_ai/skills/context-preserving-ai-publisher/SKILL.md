@@ -5,7 +5,7 @@ description: Use when creating or maintaining source-traceable AI-facing repo su
 
 <!--
 Curated AI-facing source.
-Project: meta.context-preserving-ai-publisher
+Project: repo-methodology.context-preserving-ai-publisher
 Review rule: Keep this skill agent-agnostic. Do not copy this toolkit repo's local law into the generic workflow.
 
 Published-surface source note: This file is authored as a published-surface source; relative links are intended to resolve after sync at skills/context-preserving-ai-publisher/SKILL.md.

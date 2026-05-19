@@ -13,6 +13,15 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 | MCP registry data | JSON discovery metadata under `mcp/registry/`. |
 | MCP | Future server design under `mcp/`. |
 
+## Project Categories
+
+- `cicd/`: CI/CD and GitHub Actions safety material.
+- `design/`: UI/UX and frontend design material.
+- `development/`: general development workflow helpers.
+- `knowledge/`: knowledge-base and index-maintenance skills.
+- `n8n/`: n8n setup, workflow helper scripts, and workflow templates.
+- `repo-methodology/`: source-preserving repo publishing, generated-surface discipline, audit strategy, and anti-drift methodology.
+
 ## Task Routing
 
 - Use `ui-ux-secure-frontend-design` for frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review.
