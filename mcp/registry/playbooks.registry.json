@@ -85,14 +85,14 @@
     "path": "skills/n8n-local-setup/references/n8n/vps-hosting.md"
   },
   {
-    "id": "n8n-workflow-sync",
-    "title": "Workflow Sync",
-    "path": "skills/n8n-workflow-sync/references/n8n/workflow-sync.md"
+    "id": "n8n-workflow-helper-sync",
+    "title": "Workflow Helper Sync",
+    "path": "skills/n8n-workflow-helper-scripts/references/workflow-sync.md"
   },
   {
     "id": "n8n-credential-safety",
     "title": "Credential Safety",
-    "path": "skills/n8n-workflow-sync/references/n8n/credential-safety.md"
+    "path": "skills/n8n-workflow-helper-scripts/references/n8n-credential-safety.md"
   },
   {
     "id": "secure-cicd-installer",

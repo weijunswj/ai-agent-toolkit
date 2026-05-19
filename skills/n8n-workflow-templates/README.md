@@ -1,0 +1,31 @@
+<!--
+Generated from toolkit curated output for AI. Do not edit directly.
+Project: n8n.workflow-toolkit
+Source: _projects/n8n/workflow-toolkit/curated_output_for_ai/skills/n8n-workflow-templates/README.md
+Update the curated output and run sync.
+-->
+<!--
+Curated AI-facing source.
+Project: n8n.workflow-toolkit
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
+# n8n Workflow Templates
+
+This skill contains reviewed public n8n workflow JSON templates.
+
+Templates here are intended to be copied into consumer repos only after review.
+
+## Included Templates
+
+- [Global Error Handler](templates/error-handling/global-error-handler.template.json)
+
+## Safety Rules
+
+- Keep templates inactive.
+- Do not add credentials or credential bindings.
+- Do not add live workflow IDs or webhook IDs.
+- Do not add product, customer, or private environment data.
+- Use placeholders for non-secret manual configuration.
+
+Use the helper-script skill when you need sanitizer, validation, import/export, compare, prepare, or sync helpers.

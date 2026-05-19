@@ -53,11 +53,11 @@
     ]
   },
   {
-    "id": "n8n-workflow-sync",
-    "title": "n8n Workflow Sync",
+    "id": "n8n-workflow-helper-scripts",
+    "title": "n8n Workflow Helper Scripts",
     "category": "automation",
-    "path": "skills/n8n-workflow-sync/",
-    "purpose": "Credential-safe n8n workflow sync, import/export review, and template hygiene.",
+    "path": "skills/n8n-workflow-helper-scripts/",
+    "purpose": "Credential-safe n8n helper-script templates for sanitizer, import/export sync, validation, compare, prepare, and repo/live workflow hygiene.",
     "supported_platforms": [
       "ChatGPT",
       "Codex",
@@ -69,14 +69,41 @@
       "workflow export",
       "workflow import",
       "credential binding",
-      "workflow template"
+      "workflow sanitizer",
+      "n8n helper scripts"
     ],
     "risk_level": "high",
     "instruction_only": true,
     "source_refs": [
-      "_projects/n8n/workflow-templates/",
-      "skills/n8n-workflow-sync/",
-      "skills/n8n-workflow-sync/templates/"
+      "_projects/n8n/workflow-toolkit/",
+      "skills/n8n-workflow-helper-scripts/",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/"
+    ]
+  },
+  {
+    "id": "n8n-workflow-templates",
+    "title": "n8n Workflow Templates",
+    "category": "automation",
+    "path": "skills/n8n-workflow-templates/",
+    "purpose": "Public generic inactive n8n workflow JSON templates that are credential-free and safe for review before copying.",
+    "supported_platforms": [
+      "ChatGPT",
+      "Codex",
+      "Claude",
+      "Claude Code"
+    ],
+    "auto_use_triggers": [
+      "n8n workflow template",
+      "global error handler template",
+      "reusable workflow json",
+      "inactive workflow template"
+    ],
+    "risk_level": "high",
+    "instruction_only": true,
+    "source_refs": [
+      "_projects/n8n/workflow-toolkit/",
+      "skills/n8n-workflow-templates/",
+      "skills/n8n-workflow-templates/templates/"
     ]
   },
   {

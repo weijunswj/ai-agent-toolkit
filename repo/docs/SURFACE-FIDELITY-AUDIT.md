@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Branch: `codex/surface-fidelity-audit`
-Latest update: 2026-05-19 (`codex/declare-n8n-workflow-sync-references`)
+Latest update: 2026-05-19 (`codex/reshape-n8n-workflow-toolkit`)
 
 ## Executive summary
 
@@ -10,21 +10,43 @@ The audit found repo-wide fidelity risk, but not a reason to wipe or rebuild the
 
 The confirmed Secure CI/CD prompt truncation was real. Before this PR, `skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md` was a short 30-line prompt while `_projects/cicd/secure-installer/_main/README.md` preserves a full prompt under `# Copy this prompt into your AI coding agent`. This PR fixes that by adding an exact deterministic `extract` recipe and regenerating the published prompt from the preserved source section.
 
-The broader audit found:
+The current audit finds:
 
-- 4 project modules under `_projects/`.
-- 6 current skill folders.
+- 5 project modules under `_projects/`.
+- 7 current skill folders.
 - 25 tracked files under `mcp/`.
-- 162 tracked published-surface files under `skills/` and `mcp/`.
-- 118 expanded declared/generated project outputs after the n8n workflow-sync pack reference declaration pass.
+- 160 tracked published-surface files under `skills/` and `mcp/`.
+- 143 expanded declared/generated project outputs after the n8n workflow toolkit reshape.
 - 44 tracked published-surface files still manually present and not declared by project sync recipes.
 - 14 files covered by a pack install path but still not individually declared by project sync recipes.
-- 0 unresolved cross-owned outputs after the n8n sync helper shared-surface review.
-- 11 declared shared-surface outputs for n8n sync helpers retained under Secure CI/CD provenance.
-- 0 suspicious source/output size findings remain.
-- 0 exact duplicate-content groups across `_projects`, excluding generated previews.
+- 0 unresolved cross-owned outputs.
+- 0 declared shared-surface outputs.
+- 0 shared-surface metadata findings.
+- 0 suspicious source/output size findings.
+- 0 exact duplicate-content groups across `_projects`, excluding generated previews and the explicit retired Secure CI/CD n8n helper provenance copies now owned by `n8n.workflow-toolkit`.
 
 The highest remaining risks are now manual MCP registry/spec surfaces and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue, Secure CI/CD remaining template declaration issue, n8n sync helper shared-surface ownership issue, and n8n workflow-sync pack-installed reference declaration issue have been addressed.
+
+## n8n Workflow Toolkit Reshape
+
+The former `_projects/n8n/workflow-templates/` module mixed sanitizer scripts, import/export sync helpers, workflow-template JSON, and workflow-sync published surfaces. It is now reshaped as `_projects/n8n/workflow-toolkit/` with project id `n8n.workflow-toolkit`.
+
+Final published surfaces:
+
+- `skills/n8n-workflow-helper-scripts/` owns sanitizer and import/export sync helper templates.
+- `skills/n8n-workflow-templates/` owns reusable public n8n workflow JSON templates.
+- `mcp/projects/n8n-workflow-toolkit.md` is a concise spec-only project note.
+
+The old `skills/n8n-workflow-sync/` generated surface and `mcp/projects/n8n-workflow-templates.md` were removed with no compatibility shim. Secure CI/CD retains its retired `_main/templates/n8n/**` provenance copies, but those files no longer declare or own published n8n helper outputs. The audit has a narrow duplicate-source exception for those retired exact provenance copies against the new canonical workflow-toolkit helper source.
+
+Audit baseline movement from the previous baseline:
+
+- `publishedFiles`: 188 to 160.
+- `declaredOutputFiles`: 144 to 143.
+- `packInstalledFiles`: 101 to 74.
+- `sharedSurfaceOutputs`: 11 to 0.
+- `boundaryRecipeOutputs`: 144 to 143.
+- `crossOwnedOutputs`, `sharedSurfaceMetadataFindings`, `suspiciousPublishedSurfaces`, `duplicateProjectContentGroups`, `boundaryRecipeFindings`, and `curatedDirectoryFindings`: stayed 0.
 
 ## Deterministic audit command
 
@@ -49,20 +71,18 @@ This audit now classifies every expanded `toolkit.project.json` output recipe ag
 
 Summary counts from `npm run audit:surfaces:check`:
 
-- 118 expanded recipe outputs classified.
-- 49 `main_full_fidelity` outputs.
-- 8 `curated_index` outputs, including short reviewed overviews/safety wrappers.
-- 1 `curated_agent_metadata` output.
-- 5 `curated_metadata` outputs.
-- 2 `curated_pack_readme` outputs.
-- 6 `curated_reference` outputs.
-- 3 `curated_router` outputs.
+- 143 expanded recipe outputs classified.
+- 83 `main_full_fidelity` outputs.
+- 9 `curated_index` outputs, including short reviewed overviews/safety wrappers.
+- 4 `curated_metadata` outputs.
+- 1 `curated_pack_readme` output.
+- 7 `curated_reference` outputs.
+- 5 `curated_router` outputs.
 - 15 `curated_shim` outputs.
 - 3 `curated_spec` outputs.
 - 2 `curated_template` outputs.
-- 1 `curated_template_example` output.
-- 6 `curated_template_index` outputs.
-- 17 `linked_exception` outputs.
+- 7 `curated_template_index` outputs.
+- 7 `linked_exception` outputs.
 - 0 `suspicious_curated_runtime` outputs.
 - 0 `suspicious_main_adapter` outputs.
 - 0 curated-directory heuristic findings.
@@ -127,78 +147,42 @@ Audit baseline changes:
 
 Remaining Secure CI/CD follow-up actions:
 
-- None for the four remaining template/manual surfaces reviewed in this pass.
-- The n8n sync helper ownership split is now handled by explicit shared-surface metadata instead of rehoming.
+- None for the four remaining template/manual surfaces reviewed in that pass.
+- The former n8n sync helper shared-surface split has been superseded by the workflow-toolkit reshape.
 
-## n8n Sync Helper Shared-Surface Review
+## n8n Workflow Toolkit Ownership Review
 
-Files reviewed:
-
-- `skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd`
-- `skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd`
-- `skills/n8n-workflow-sync/templates/sync-helpers/README.md`
-- `skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs`
-- `skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1`
-- `skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1`
-- `skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1`
-- `skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs`
-- `skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs`
-- `skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs`
-- `skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs`
-
-Chosen outcome: explicit shared-surface classification.
-
-The helpers were not rehomed. `_projects/cicd/secure-installer/SOURCE-LOCK.json` ties these files to the retired `weijunswj/ai-cicd-installer` migration source, including adapted root-surface entries for the published helper scripts. Moving the source into `_projects/n8n/workflow-templates/_main/` would make the folder tree look cleaner but would obscure that provenance.
-
-The published surface owner is still `n8n.workflow-templates` / `skills/n8n-workflow-sync` because these helpers are copied as n8n workflow sync templates and installed by the n8n workflow sync pack. `_projects/cicd/secure-installer/toolkit.project.json` now marks each helper output with `shared_surface: true`, `surface_owner_project: "n8n.workflow-templates"`, and a reason explaining the provenance/owner split.
-
-Audit baseline changes:
-
-- `crossOwnedOutputs`: 11 -> 0.
-- `sharedSurfaceOutputs`: 0 -> 11.
-- `sharedSurfaceMetadataFindings`: 0 -> 0.
-
-Remaining follow-up actions:
-
-- None for the sync-helper ownership classification.
-
-## n8n Workflow Sync Pack Reference Declaration Pass
-
-Classification rule: short pack metadata, agent metadata, safety references, and local-only template examples may publish from `curated_output_for_ai/`; full runtime helper detail remains in the declared local templates and exact/helper sources.
+Classification rule: import/export sync helpers and sanitizer helpers are n8n workflow toolkit assets, not Secure CI/CD published surfaces. Retired Secure CI/CD source copies may remain for provenance, but they must not own or declare generated n8n helper outputs.
 
 Files reviewed:
 
-| Source file | Published output | Classification | Outcome | Reason |
-| --- | --- | --- | --- | --- |
-| `_projects/n8n/workflow-templates/curated_output_for_ai/agents/openai.yaml` | `skills/n8n-workflow-sync/agents/openai.yaml` | `curated_agent_metadata` | Became curated. | Skill-local OpenAI display metadata; not runtime instructions. |
-| `_projects/n8n/workflow-templates/curated_output_for_ai/packs/n8n-workflow-sync/README.md` | `skills/n8n-workflow-sync/packs/n8n-workflow-sync/README.md` | `curated_pack_readme` | Became curated. | Short pack README and safety notes; `pack.json` remains generated metadata. |
-| `_projects/n8n/workflow-templates/curated_output_for_ai/overviews/credential-safety.md` | `skills/n8n-workflow-sync/references/credential-safety.md` | `curated_reference` | Became curated. | Skill-level credential safety checklist; n8n-specific binding detail remains in the nested reference. |
-| `_projects/n8n/workflow-templates/curated_output_for_ai/overviews/import-export-flow.md` | `skills/n8n-workflow-sync/references/import-export-flow.md` | `curated_reference` | Became curated. | Short consumer-repo import/export review checklist; live helper detail remains in templates. |
-| `_projects/n8n/workflow-templates/curated_output_for_ai/overviews/n8n-credential-safety.md` | `skills/n8n-workflow-sync/references/n8n/credential-safety.md` | `curated_reference` | Became curated. | n8n-specific local credential binding safety note, distinct from the root checklist. |
-| `_projects/n8n/workflow-templates/curated_output_for_ai/overviews/workflow-template-hygiene.md` | `skills/n8n-workflow-sync/references/workflow-template-hygiene.md` | `curated_reference` | Became curated. | Short reusable-template hygiene checklist. |
-| `_projects/n8n/workflow-templates/curated_output_for_ai/templates/n8n/workflow-policy/credential-migration-map-example.md` | `skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md` | `curated_template_example` | Became curated. | Generic local-only credential migration map example; actual maps stay ignored in `.n8n-local/`. |
+- `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/*`
+- `skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/*`
+- `skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json`
 
-Pack manifest and audit outcome:
+Chosen outcome: rehome source ownership under `n8n.workflow-toolkit`.
 
-- Every n8n workflow-sync pack-installed reference/manual target from this pass is now declared by `_projects/n8n/workflow-templates/toolkit.project.json`.
-- No n8n workflow-sync file remains in `packInstalledUndeclared`.
-- No file was removed in this pass; the root and nested credential-safety references were retained with distinct scopes.
+The helpers now publish from `_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/` and `_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/`. The reusable workflow JSON template now publishes from `_projects/n8n/workflow-toolkit/_main/workflow-templates/error-handling/global-error-handler.template.json`.
+
+The old `skills/n8n-workflow-sync/` generated surface and its pack were removed. No compatibility shim was kept. `_projects/cicd/secure-installer/_main/templates/n8n/**` remains only as retired provenance for the original source material, and `_projects/cicd/secure-installer/toolkit.project.json` no longer declares n8n helper outputs.
 
 Audit baseline changes:
 
-- `declaredOutputFiles`: 111 -> 118.
-- `undeclaredPublishedFiles`: 51 -> 44.
-- `packInstalledUndeclared`: 21 -> 14.
-- `boundaryRecipeOutputs`: 111 -> 118.
+- `publishedFiles`: 188 -> 160.
+- `declaredOutputFiles`: 144 -> 143.
+- `packInstalledFiles`: 101 -> 74.
+- `sharedSurfaceOutputs`: 11 -> 0.
+- `boundaryRecipeOutputs`: 144 -> 143.
 - `crossOwnedOutputs`: 0 -> 0.
 - `sharedSurfaceMetadataFindings`: 0 -> 0.
 - `suspiciousPublishedSurfaces`: 0 -> 0.
+- `duplicateProjectContentGroups`: 0 -> 0.
 - `boundaryRecipeFindings`: 0 -> 0.
 - `curatedDirectoryFindings`: 0 -> 0.
 
 Remaining follow-up actions:
 
-- None for n8n workflow-sync pack-installed reference declarations.
+- None for n8n workflow helper ownership.
 
 ## n8n Platform Reference Boundary Review
 
@@ -230,7 +214,7 @@ Files reviewed:
 
 | Source file | Published output(s) | Current recipe before review | Classification | Reason | Recommended action |
 | --- | --- | --- | --- | --- | --- |
-| `_projects/n8n/workflow-templates/curated_output_for_ai/playbooks/workflow-sync.md` | `skills/n8n-workflow-sync/references/n8n/workflow-sync.md` | `curated`, `fidelity: exact` | `allowed_overview_or_safety_wrapper` | Short safety wrapper for credential-safe repo/live workflow sync; helper detail remains in local references and templates. | Moved to `curated_output_for_ai/overviews/workflow-sync.md`, changed recipe notes to call it an overview/safety wrapper, and regenerated the published reference. |
+| `_projects/n8n/workflow-toolkit/curated_output_for_ai/references/workflow-sync.md` | `skills/n8n-workflow-helper-scripts/references/workflow-sync.md` | `curated`, `fidelity: reviewed_reference` | `allowed_overview_or_safety_wrapper` | Short safety wrapper for credential-safe repo/live workflow sync; helper detail remains in local templates. | Supersedes the earlier workflow-sync playbook path after the n8n workflow toolkit reshape. |
 | `_projects/cicd/secure-installer/curated_output_for_ai/playbooks/secure-cicd-installer.md` | `skills/secure-cicd-installer/references/secure-cicd-installer.md` | `curated`, `fidelity: exact` | `allowed_overview_or_safety_wrapper` | Short CI/CD safety wrapper and router; the full copyable CI/CD prompt is already extracted from `_main/README.md`. | Moved to `curated_output_for_ai/overviews/secure-cicd-installer.md`, changed recipe notes to call it an overview/safety wrapper, and regenerated the published reference. |
 | `_projects/n8n/local-setup/curated_output_for_ai/playbooks/local-setup.md` | None | None | `obsolete_or_duplicate` | Unpublished curated source that duplicated the shape of full-fidelity local setup references now copied from `_main`. | Removed the unused curated file. No preserved `_main` source was deleted. |
 
@@ -271,8 +255,9 @@ Project modules:
 
 - `_projects/cicd/secure-installer`
 - `_projects/design/ui-ux-pro-max`
+- `_projects/meta/context-preserving-ai-publisher`
 - `_projects/n8n/local-setup`
-- `_projects/n8n/workflow-templates`
+- `_projects/n8n/workflow-toolkit`
 
 Inventory audited:
 
@@ -289,8 +274,10 @@ Inventory audited:
 Current skill folders:
 
 - `skills/knowledge-index-updater/`
+- `skills/context-preserving-ai-publisher/`
 - `skills/n8n-local-setup/`
-- `skills/n8n-workflow-sync/`
+- `skills/n8n-workflow-helper-scripts/`
+- `skills/n8n-workflow-templates/`
 - `skills/secure-cicd-installer/`
 - `skills/ui-ux-secure-frontend-design/`
 - `skills/windows-localhost-workflows/`
@@ -302,8 +289,9 @@ Declared full-fidelity or deterministic generated surfaces include:
 - `skills/n8n-local-setup/templates/mcp-configs/*-mcp-config.md`, via exact copy recipes.
 - `skills/n8n-local-setup/references/n8n/*.md` required setup guides, via exact copy recipes from `_main/*.md`.
 - `skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md`, `opencode.md`, and `antigravity.md`, via exact copy recipes from `_main/*.md`.
-- `skills/n8n-workflow-sync/templates/sanitizer/*`, via linked/source-locked sanitizer helper surfaces.
-- `skills/n8n-workflow-sync/templates/sync-helpers/*`, via Secure CI/CD-owned linked/copy recipes.
+- `skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/*`, via exact copy from workflow-toolkit `_main`.
+- `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/*`, via exact copy from workflow-toolkit `_main`.
+- `skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json`, via JSON recipe from workflow-toolkit `_main`.
 - `skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/*` and `data/**`, via exact copy recipes from the preserved local-only subset.
 
 Summary or reviewed-entrypoint surfaces include:
@@ -328,7 +316,7 @@ Declared MCP project outputs:
 - `mcp/projects/secure-cicd-installer.md`
 - `mcp/projects/ui-ux-pro-max.md`
 - `mcp/projects/n8n-local-setup.md`
-- `mcp/projects/n8n-workflow-templates.md`
+- `mcp/projects/n8n-workflow-toolkit.md`
 - `mcp/registry/projects.registry.json`
 
 Manual MCP surfaces not currently declared by project sync recipes include `mcp/README.md`, `mcp/installer-mcp/**`, `mcp/registry-mcp/**`, `mcp/references/**`, and every registry JSON except `mcp/registry/projects.registry.json`.
@@ -430,7 +418,7 @@ Follow-up PR: declare the manual UI/UX instruction surfaces as linked with expli
 
 ## Undeclared published files
 
-After the n8n workflow-sync pack reference declaration pass, 44 tracked `skills/` or `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
+After the n8n workflow toolkit reshape, 44 tracked `skills/` or `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
 
 Major groups:
 
@@ -458,11 +446,11 @@ Source file(s):
 - `_projects/cicd/secure-installer/SOURCE-LOCK.json`
 - `_projects/cicd/secure-installer/toolkit.project.json`
 Published file(s):
-- `skills/n8n-workflow-sync/templates/sync-helpers/**`
+- `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/**`
 Problem:
-The Secure CI/CD project retains n8n sync helper source provenance from `weijunswj/ai-cicd-installer`, while the outputs belong in the `n8n-workflow-sync` skill surface. The n8n workflow-sync pack also installs that folder.
+The Secure CI/CD project retains n8n sync helper source provenance from `weijunswj/ai-cicd-installer`, while the outputs now belong in the `n8n-workflow-helper-scripts` skill surface.
 Resolution:
-The helpers remain under `cicd.secure-installer` for source provenance and are explicitly declared as shared-surface outputs owned by `n8n.workflow-templates`. The audit now reports them under `sharedSurfaceOutputs` and still reports any undeclared cross-owned output under `crossOwnedOutputs`.
+The helpers are rehomed into `_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/` and are declared by `n8n.workflow-toolkit`. The retired Secure CI/CD `_main/templates/n8n/**` copies remain provenance-only, with no shared-surface output declarations.
 
 Finding:
 Severity: low
@@ -494,7 +482,7 @@ unknown: none
 
 1. Are `_projects/**/_main/**` files complete enough to rebuild all skills/MCP surfaces?
 
-No. They are complete enough for several exact surfaces, including n8n agent rules, n8n MCP configs, n8n sanitizer helpers, n8n sync helpers, UI/UX generator scripts/data, and the Secure CI/CD prompt after this PR. They are not complete enough to rebuild all current skill/MCP surfaces because many manual surfaces live only under `skills/` or `mcp/`.
+No. They are complete enough for several exact surfaces, including n8n agent rules, n8n MCP configs, n8n workflow helper scripts, the global-error-handler workflow template, UI/UX generator scripts/data, and the Secure CI/CD prompt after this PR. They are not complete enough to rebuild all current skill/MCP surfaces because many manual surfaces live only under `skills/` or `mcp/`.
 
 2. Are original old repos still needed?
 
@@ -532,8 +520,9 @@ Completed fixes:
 - Add the deterministic published-surface audit command and baseline check.
 - Restore full-fidelity `n8n-local-setup` runtime references inside the copyable skill folder.
 - Declare the remaining Secure CI/CD pack-installed status/policy/GitHub Actions template files and pack README as curated generated outputs.
-- Explicitly classify the n8n sync helpers as shared-surface outputs owned by `n8n.workflow-templates` while retaining Secure CI/CD source provenance.
-- Declare the n8n workflow-sync pack-installed agent metadata, pack README, short references, and workflow-policy example as generated curated outputs.
+- Rehome n8n sanitizer and import/export sync helpers under `n8n.workflow-toolkit`.
+- Split the former workflow-sync published surface into `skills/n8n-workflow-helper-scripts/` and `skills/n8n-workflow-templates/`.
+- Remove the obsolete `skills/n8n-workflow-sync/` generated surface and pack.
 
 Recommended follow-up fixes:
 
@@ -548,8 +537,9 @@ Recommended follow-up fixes:
 4. PR 4: Secure CI/CD remaining template declaration pass for status, source update policy, GitHub Actions notes, and pack README. Done in `codex/declare-secure-cicd-remaining-templates`.
 5. PR 5: Cross-owned n8n sync helper ownership cleanup. Done by explicit shared-surface metadata.
 6. PR 6: n8n workflow-sync pack reference declaration pass. Done in `codex/declare-n8n-workflow-sync-references`.
-7. PR 7: MCP registry/spec ownership cleanup.
-8. PR 8: UI/UX linked/manual surface provenance cleanup.
+7. PR 7: n8n workflow toolkit reshape. Done in `codex/reshape-n8n-workflow-toolkit`.
+8. PR 8: MCP registry/spec ownership cleanup.
+9. PR 9: UI/UX linked/manual surface provenance cleanup.
 
 ## Validation evidence
 
@@ -575,6 +565,6 @@ Audit commands run:
 - Declared output/undeclared surface inventory via `node` script using `repo/scripts/sync-toolkit-projects.cjs`.
 - Source/published Markdown size heuristic script.
 - Prompt/template grep checks for `Copy this prompt`, `You are my AI coding agent`, `Manual step needed`, `Do not commit`, `Do not push`, `Do not deploy`, and `Troubleshooting`.
-- Cross-ownership grep checks for `output` paths, `root_surface_path`, `skills/n8n-workflow-sync/templates/sync-helpers`, and `_main/templates/n8n`.
+- Cross-ownership grep checks for `output` paths, `root_surface_path`, workflow helper-script outputs, and `_main/templates/n8n`.
 - Duplicate-content hash audit across `_projects`, excluding `_generated`.
 

@@ -10,8 +10,8 @@ function classify(filePath) {
   const lower = String(filePath || '').toLowerCase();
   const isN8nHelperTemplate =
     (
-      lower.startsWith('skills/n8n-workflow-sync/templates/sync-helpers/') ||
-      lower.startsWith('skills/n8n-workflow-sync/templates/sanitizer/')
+      lower.startsWith('skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/') ||
+      lower.startsWith('skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/')
     ) &&
     (lower.endsWith('.md') || lower.endsWith('.ps1') || lower.endsWith('.cmd') || lower.endsWith('.cjs') || lower.endsWith('.js'));
   if (isN8nHelperTemplate) return 'manual';

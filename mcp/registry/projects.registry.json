@@ -7,7 +7,7 @@
     "project": {
       "name": "Secure CI/CD Installer",
       "category": "cicd",
-      "summary": "Approval-gated CI/CD installer guidance, GitHub Actions hardening notes, status templates, and n8n helper scripts."
+      "summary": "Approval-gated CI/CD installer guidance, GitHub Actions hardening notes, and status templates."
     },
     "surface": {
       "publish_as": "both",
@@ -26,17 +26,6 @@
     "main_path": "_projects/cicd/secure-installer/_main",
     "root_surfaces": [
       "mcp/projects/secure-cicd-installer.md",
-      "skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd",
-      "skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd",
-      "skills/n8n-workflow-sync/templates/sync-helpers/README.md",
-      "skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs",
-      "skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1",
-      "skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1",
-      "skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1",
-      "skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs",
-      "skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs",
-      "skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs",
-      "skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs",
       "skills/secure-cicd-installer/README.md",
       "skills/secure-cicd-installer/SKILL.md",
       "skills/secure-cicd-installer/packs/secure-cicd/README.md",
@@ -195,48 +184,47 @@
     ]
   },
   {
-    "id": "n8n.workflow-templates",
+    "id": "n8n.workflow-toolkit",
     "category": "n8n",
-    "name": "workflow-templates",
-    "title": "n8n Workflow Templates",
+    "name": "workflow-toolkit",
+    "title": "n8n Workflow Toolkit",
     "project": {
-      "name": "n8n Workflow Templates",
+      "name": "n8n Workflow Toolkit",
       "category": "n8n",
-      "summary": "Reusable n8n workflow template hygiene guidance, sanitizer helpers, and safe repo/live workflow sync conventions."
+      "summary": "Reusable n8n workflow helper scripts and public generic workflow templates with separate published skill boundaries."
     },
     "surface": {
       "publish_as": "both",
       "skill": {
         "status": "published",
-        "path": "skills/n8n-workflow-sync",
-        "summary": "Helps an agent review, sanitize, validate, and plan n8n workflow import/export sync safely."
+        "path": "skills/n8n-workflow-helper-scripts",
+        "summary": "Helps an agent review, copy, and use n8n helper-script templates safely."
       },
       "mcp": {
         "status": "published",
-        "path": "mcp/projects/n8n-workflow-templates.md",
-        "summary": "Spec-only MCP notes for future deterministic workflow-template validation and routing tools."
+        "path": "mcp/projects/n8n-workflow-toolkit.md",
+        "summary": "Spec-only MCP notes for future deterministic workflow toolkit validation and routing tools."
       }
     },
-    "module_path": "_projects/n8n/workflow-templates",
-    "main_path": "_projects/n8n/workflow-templates/_main",
+    "module_path": "_projects/n8n/workflow-toolkit",
+    "main_path": "_projects/n8n/workflow-toolkit/_main",
     "root_surfaces": [
-      "mcp/projects/n8n-workflow-templates.md",
-      "skills/n8n-workflow-sync/README.md",
-      "skills/n8n-workflow-sync/SKILL.md",
-      "skills/n8n-workflow-sync/agents/openai.yaml",
-      "skills/n8n-workflow-sync/packs/n8n-workflow-sync/README.md",
-      "skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json",
-      "skills/n8n-workflow-sync/references/credential-safety.md",
-      "skills/n8n-workflow-sync/references/import-export-flow.md",
-      "skills/n8n-workflow-sync/references/n8n/credential-safety.md",
-      "skills/n8n-workflow-sync/references/n8n/workflow-sync.md",
-      "skills/n8n-workflow-sync/references/workflow-template-hygiene.md",
-      "skills/n8n-workflow-sync/templates/sanitizer/- sanitise-n8n-template.cmd",
-      "skills/n8n-workflow-sync/templates/sanitizer/README.md",
-      "skills/n8n-workflow-sync/templates/sanitizer/prepare-n8n-template.js",
-      "skills/n8n-workflow-sync/templates/sanitizer/sanitise-n8n-template.ps1",
-      "skills/n8n-workflow-sync/templates/workflow-policy/README.md",
-      "skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md"
+      "mcp/projects/n8n-workflow-toolkit.md",
+      "skills/n8n-workflow-helper-scripts/README.md",
+      "skills/n8n-workflow-helper-scripts/SKILL.md",
+      "skills/n8n-workflow-helper-scripts/references/credential-safety.md",
+      "skills/n8n-workflow-helper-scripts/references/import-export-flow.md",
+      "skills/n8n-workflow-helper-scripts/references/n8n-credential-safety.md",
+      "skills/n8n-workflow-helper-scripts/references/workflow-sync.md",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/README.md",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/README.md",
+      "skills/n8n-workflow-templates/README.md",
+      "skills/n8n-workflow-templates/SKILL.md",
+      "skills/n8n-workflow-templates/templates/README.md",
+      "skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json"
     ]
   }
 ]

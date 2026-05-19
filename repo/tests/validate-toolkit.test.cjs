@@ -126,7 +126,8 @@ test('skill discovery includes migrated skills', () => {
   assert.ok(skills.includes('skills/context-preserving-ai-publisher'));
   assert.ok(skills.includes('skills/ui-ux-secure-frontend-design'));
   assert.ok(skills.includes('skills/windows-localhost-workflows'));
-  assert.ok(skills.includes('skills/n8n-workflow-sync'));
+  assert.ok(skills.includes('skills/n8n-workflow-helper-scripts'));
+  assert.ok(skills.includes('skills/n8n-workflow-templates'));
   assert.ok(skills.includes('skills/n8n-local-setup'));
   assert.ok(skills.includes('skills/secure-cicd-installer'));
   assert.ok(skills.includes('skills/knowledge-index-updater'));
@@ -146,7 +147,7 @@ test('project registry includes the initial project modules', () => {
     'design.ui-ux-pro-max',
     'meta.context-preserving-ai-publisher',
     'n8n.local-setup',
-    'n8n.workflow-templates'
+    'n8n.workflow-toolkit'
   ]);
   for (const entry of registry) {
     assert.ok(entry.project?.summary, entry.id);
@@ -576,7 +577,7 @@ test('auto-sync generated output path scope is explicit', () => {
     'README.md',
     'AGENTS.md',
     'mcp/registry/projects.registry.json',
-    'skills/n8n-workflow-sync/templates/sync-helpers/README.md'
+    'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md'
   ]) {
     assert.equal(validator.isAutoSyncGeneratedOutputPath(rel), true, rel);
   }
@@ -604,7 +605,7 @@ test('project modules use _projects/_main with no mandatory exports tree', () =>
 
   for (const rel of [
     '_projects/n8n/local-setup',
-    '_projects/n8n/workflow-templates',
+    '_projects/n8n/workflow-toolkit',
     '_projects/cicd/secure-installer',
     '_projects/design/ui-ux-pro-max'
   ]) {
@@ -767,18 +768,19 @@ test('internal AI-facing surfaces are generated from declared project output', (
     ['n8n.local-setup', 'skills/n8n-local-setup/README.md', 'curated_output_for_ai/skills/n8n-local-setup/README.md'],
     ['n8n.local-setup', 'mcp/projects/n8n-local-setup.md', 'curated_output_for_ai/mcp/n8n-local-setup.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/README.md', 'curated_output_for_ai/templates/mcp-configs/README.md'],
-    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-sync/SKILL.md'],
-    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/README.md', 'curated_output_for_ai/skills/n8n-workflow-sync/README.md'],
-    ['n8n.workflow-templates', 'mcp/projects/n8n-workflow-templates.md', 'curated_output_for_ai/mcp/n8n-workflow-templates.md'],
-    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/references/n8n/workflow-sync.md', 'curated_output_for_ai/overviews/workflow-sync.md'],
-    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/templates/sanitizer/README.md', 'curated_output_for_ai/templates/n8n/sanitizer/README.md'],
-    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/templates/workflow-policy/README.md', 'curated_output_for_ai/templates/n8n/workflow-policy/README.md'],
+    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-helper-scripts/SKILL.md'],
+    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/README.md', 'curated_output_for_ai/skills/n8n-workflow-helper-scripts/README.md'],
+    ['n8n.workflow-toolkit', 'skills/n8n-workflow-templates/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-templates/SKILL.md'],
+    ['n8n.workflow-toolkit', 'skills/n8n-workflow-templates/README.md', 'curated_output_for_ai/skills/n8n-workflow-templates/README.md'],
+    ['n8n.workflow-toolkit', 'mcp/projects/n8n-workflow-toolkit.md', 'curated_output_for_ai/mcp/n8n-workflow-toolkit.md'],
+    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/references/workflow-sync.md', 'curated_output_for_ai/references/workflow-sync.md'],
+    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/README.md', 'curated_output_for_ai/templates/helper-scripts/sanitizer/README.md'],
+    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md', 'curated_output_for_ai/templates/helper-scripts/import-export-sync/README.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/SKILL.md', 'curated_output_for_ai/skills/secure-cicd-installer/SKILL.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/README.md', 'curated_output_for_ai/skills/secure-cicd-installer/README.md'],
     ['cicd.secure-installer', 'mcp/projects/secure-cicd-installer.md', 'curated_output_for_ai/mcp/secure-cicd-installer.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/references/secure-cicd-installer.md', 'curated_output_for_ai/overviews/secure-cicd-installer.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/templates/cicd/README.md', 'curated_output_for_ai/templates/cicd/README.md'],
-    ['cicd.secure-installer', 'skills/n8n-workflow-sync/templates/sync-helpers/README.md', 'curated_output_for_ai/templates/n8n/sync-helpers/README.md']
   ];
   const expectedExactCopies = [
     ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/local-setup.md', '_main/1. local setup.md'],
@@ -793,7 +795,6 @@ test('internal AI-facing surfaces are generated from declared project output', (
   const expectedJson = [
     ['n8n.local-setup', 'skills/n8n-local-setup/packs/codex-n8n-local/pack.json', 'curated_output_for_ai/packs/codex-n8n-local/pack.json'],
     ['n8n.local-setup', 'skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json', 'curated_output_for_ai/packs/claude-code-n8n-local/pack.json'],
-    ['n8n.workflow-templates', 'skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json', 'curated_output_for_ai/packs/n8n-workflow-sync/pack.json'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/packs/secure-cicd/pack.json', 'curated_output_for_ai/packs/secure-cicd/pack.json']
   ];
 
@@ -813,7 +814,7 @@ test('internal AI-facing surfaces are generated from declared project output', (
     assert.equal(output?.source, source, outputPath);
   }
 
-  for (const projectId of ['n8n.local-setup', 'n8n.workflow-templates', 'cicd.secure-installer']) {
+  for (const projectId of ['n8n.local-setup', 'n8n.workflow-toolkit', 'cicd.secure-installer']) {
     for (const output of manifests.get(projectId).outputs || []) {
       if (output.kind !== 'linked') continue;
       assert.match(output.notes || '', /(source-locked|Toolkit-only)/, output.output);
@@ -832,8 +833,8 @@ test('curated Markdown outputs carry curated-source notices', () => {
       '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md'
     ],
     [
-      'skills/n8n-workflow-sync/templates/sync-helpers/README.md',
-      '_projects/cicd/secure-installer/curated_output_for_ai/templates/n8n/sync-helpers/README.md'
+      'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md',
+      '_projects/n8n/workflow-toolkit/curated_output_for_ai/templates/helper-scripts/import-export-sync/README.md'
     ]
   ]) {
     const text = fs.readFileSync(path.join(repoRoot, outputPath), 'utf8').replace(/\r\n/g, '\n');
@@ -866,10 +867,6 @@ test('curated JSON pack outputs match deterministic source formatting', () => {
     [
       '_projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/pack.json',
       'skills/n8n-local-setup/packs/codex-n8n-local/pack.json'
-    ],
-    [
-      '_projects/n8n/workflow-templates/curated_output_for_ai/packs/n8n-workflow-sync/pack.json',
-      'skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json'
     ],
     [
       '_projects/cicd/secure-installer/curated_output_for_ai/packs/secure-cicd/pack.json',
@@ -914,11 +911,11 @@ test('source-lock audit passes and catches exact-copy drift for retired sources'
   assert.equal(result.status, 0, result.stderr);
 
   const cwd = tempCopy();
-  const lock = readJsonFile(path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json'));
+  const lock = readJsonFile(path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json'));
   assert.equal(lock.source_lifecycle, 'retired_after_migration');
   assert.equal(lock.source_update_policy, 'none');
   assert.equal(lock.public_attribution_required, false);
-  const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-templates', '_main', 'scripts', 'prepare-n8n-template.js');
+  const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'sanitizer', 'prepare-n8n-template.js');
   fs.appendFileSync(copiedFile, '\nDrift test\n');
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
@@ -926,9 +923,9 @@ test('source-lock audit passes and catches exact-copy drift for retired sources'
 });
 
 test('source-lock audit rejects toolkit-local source_path provenance rewrites', () => {
-  for (const sourcePath of ['skills/n8n-workflow-sync/templates/sync-helpers/README.md', 'repo/scripts/example.cjs', '_projects/n8n/local-setup/_main/README.md']) {
+  for (const sourcePath of ['skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md', 'repo/scripts/example.cjs', '_projects/n8n/local-setup/_main/README.md']) {
     const cwd = tempCopy();
-    const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+    const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
     const lock = readJsonFile(lockPath);
     lock.files[0].source_path = sourcePath;
     writeJsonFile(lockPath, lock);
@@ -941,11 +938,11 @@ test('source-lock audit rejects toolkit-local source_path provenance rewrites', 
 
 test('source-lock audit requires local paths to stay in their topology namespaces', () => {
   let cwd = tempCopy();
-  let lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+  let lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
   let lock = readJsonFile(lockPath);
   lock.files[0].mode = 'adapted';
   lock.files[0].notes = 'Topology namespace regression test.';
-  lock.files[0].project_path = 'skills/n8n-workflow-sync/templates/sync-helpers/README.md';
+  lock.files[0].project_path = 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md';
   delete lock.files[0].source_blob_sha;
   writeJsonFile(lockPath, lock);
   let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
@@ -953,11 +950,12 @@ test('source-lock audit requires local paths to stay in their topology namespace
   assert.match(result.stderr, /project_path must point under _projects\//);
 
   cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
   lock = readJsonFile(lockPath);
-  let rootSurfaceEntry = lock.files.find((entry) => entry.root_surface_path);
+  let rootSurfaceEntry = lock.files[0];
   rootSurfaceEntry.mode = 'adapted';
   rootSurfaceEntry.notes = 'Topology namespace regression test.';
+  delete rootSurfaceEntry.project_path;
   rootSurfaceEntry.root_surface_path = 'repo/scripts/validate-toolkit.cjs';
   delete rootSurfaceEntry.source_blob_sha;
   writeJsonFile(lockPath, lock);
@@ -966,7 +964,7 @@ test('source-lock audit requires local paths to stay in their topology namespace
   assert.match(result.stderr, /root_surface_path must point under skills\/ or mcp\//);
 
   cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
   lock = readJsonFile(lockPath);
   lock.files[0].mode = 'adapted';
   lock.files[0].notes = 'Topology traversal regression test.';
@@ -978,11 +976,12 @@ test('source-lock audit requires local paths to stay in their topology namespace
   assert.match(result.stderr, /project_path must not contain \.\. path segments/);
 
   cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-templates', 'SOURCE-LOCK.json');
+  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
   lock = readJsonFile(lockPath);
-  rootSurfaceEntry = lock.files.find((entry) => entry.root_surface_path);
+  rootSurfaceEntry = lock.files[0];
   rootSurfaceEntry.mode = 'adapted';
   rootSurfaceEntry.notes = 'Topology traversal regression test.';
+  delete rootSurfaceEntry.project_path;
   rootSurfaceEntry.root_surface_path = 'skills/../repo/scripts/validate-toolkit.cjs';
   delete rootSurfaceEntry.source_blob_sha;
   writeJsonFile(lockPath, lock);
@@ -1117,7 +1116,7 @@ test('internal curated Markdown files carry the curated review note', () => {
   ];
   for (const projectDir of [
     '_projects/n8n/local-setup/curated_output_for_ai',
-    '_projects/n8n/workflow-templates/curated_output_for_ai',
+    '_projects/n8n/workflow-toolkit/curated_output_for_ai',
     '_projects/cicd/secure-installer/curated_output_for_ai'
   ]) {
     const files = fs.readdirSync(path.join(repoRoot, projectDir), { recursive: true })
@@ -1247,7 +1246,7 @@ test('validator rejects obvious secret-looking strings', () => {
 });
 
 test('safe-source-update classifies n8n helper templates as manual and workflow JSON as blocked', () => {
-  assert.equal(safeSourceUpdate.classify('skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs'), 'manual');
-  assert.equal(safeSourceUpdate.classify('skills/n8n-workflow-sync/templates/sanitizer/sanitise-n8n-template.ps1'), 'manual');
+  assert.equal(safeSourceUpdate.classify('skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/compare-n8n-workflow-credentials.cjs'), 'manual');
+  assert.equal(safeSourceUpdate.classify('skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1'), 'manual');
   assert.equal(safeSourceUpdate.classify('n8n-workflows/customer-workflow.json'), 'blocked');
 });

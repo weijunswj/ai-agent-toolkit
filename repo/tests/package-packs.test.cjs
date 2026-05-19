@@ -34,7 +34,7 @@ test('every pack has valid pack manifest and existing install paths', () => {
       if (pack.isDirectory() && fs.existsSync(manifest)) packFiles.push(manifest);
     }
   }
-  assert.equal(packFiles.length, 6);
+  assert.equal(packFiles.length, 5);
   for (const file of packFiles) {
     const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(pack.requires_approval, true);
@@ -58,9 +58,9 @@ test('package-packs writes full pack metadata in non-check mode', () => {
   const result = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 
-  const sourcePack = JSON.parse(fs.readFileSync(path.join(cwd, 'skills', 'n8n-workflow-sync', 'packs', 'n8n-workflow-sync', 'pack.json'), 'utf8'));
-  const packagedPackPath = path.join(cwd, '_dist', 'packs', 'n8n-workflow-sync', 'pack.json');
-  const installPlanPath = path.join(cwd, '_dist', 'packs', 'n8n-workflow-sync', 'install-plan.json');
+  const sourcePack = JSON.parse(fs.readFileSync(path.join(cwd, 'skills', 'secure-cicd-installer', 'packs', 'secure-cicd', 'pack.json'), 'utf8'));
+  const packagedPackPath = path.join(cwd, '_dist', 'packs', 'secure-cicd', 'pack.json');
+  const installPlanPath = path.join(cwd, '_dist', 'packs', 'secure-cicd', 'install-plan.json');
   assert.equal(fs.existsSync(packagedPackPath), true);
   assert.equal(fs.existsSync(installPlanPath), true);
 
@@ -73,6 +73,6 @@ test('package-packs writes full pack metadata in non-check mode', () => {
     assert.deepEqual(generated.writes_denied, sourcePack.writes_denied);
     assert.equal(generated.risk_level, sourcePack.risk_level);
     assert.deepEqual(generated.notes, sourcePack.notes);
-    assert.equal(generated.path, 'skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json');
+    assert.equal(generated.path, 'skills/secure-cicd-installer/packs/secure-cicd/pack.json');
   }
 });

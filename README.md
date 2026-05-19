@@ -36,7 +36,7 @@ Use [`repo/`](repo/) for scripts, tests, docs, validation, and CI support.
 | Project | What it does | Full guide | Surface | Skill | MCP |
 |---|---|---|---|---|---|
 | Local n8n Setup | Local n8n setup, MCP config, tunneling, and agent-rule templates. | [`_projects/n8n/local-setup/_main/`](_projects/n8n/local-setup/_main/) | both | [`skills/n8n-local-setup/`](skills/n8n-local-setup/) | [`mcp/projects/n8n-local-setup.md`](mcp/projects/n8n-local-setup.md) |
-| n8n Workflow Templates | Credential-safe workflow template hygiene, sanitizer tooling, and repo/live sync guidance. | [`_projects/n8n/workflow-templates/_main/`](_projects/n8n/workflow-templates/_main/) | both | [`skills/n8n-workflow-sync/`](skills/n8n-workflow-sync/) | [`mcp/projects/n8n-workflow-templates.md`](mcp/projects/n8n-workflow-templates.md) |
+| n8n Workflow Toolkit | Credential-safe helper scripts and public generic workflow templates with separate skill boundaries. | [`_projects/n8n/workflow-toolkit/_main/`](_projects/n8n/workflow-toolkit/_main/) | both | [`skills/n8n-workflow-helper-scripts/`](skills/n8n-workflow-helper-scripts/) | [`mcp/projects/n8n-workflow-toolkit.md`](mcp/projects/n8n-workflow-toolkit.md) |
 | Secure CI/CD Installer | Approval-gated CI/CD setup, GitHub Actions safety, and status templates. | [`_projects/cicd/secure-installer/_main/`](_projects/cicd/secure-installer/_main/) | both | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) | [`mcp/projects/secure-cicd-installer.md`](mcp/projects/secure-cicd-installer.md) |
 | UI/UX Pro Max Design | Third-party-attributed UI/UX design source, local generator data, and frontend design guidance. | [`_projects/design/ui-ux-pro-max/_main/`](_projects/design/ui-ux-pro-max/_main/) | both | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) | [`mcp/projects/ui-ux-pro-max.md`](mcp/projects/ui-ux-pro-max.md) |
 
@@ -49,7 +49,8 @@ Required runtime context should live inside the skill folder in local files such
 | Skill | What it helps with | Folder |
 |---|---|---|
 | n8n Local Setup | Safe local n8n setup, MCP config selection, tunnels, and platform agent rules. | [`skills/n8n-local-setup/`](skills/n8n-local-setup/) |
-| n8n Workflow Sync | Safe workflow import/export planning, sanitation, credential safety, and helper templates. | [`skills/n8n-workflow-sync/`](skills/n8n-workflow-sync/) |
+| n8n Workflow Helper Scripts | Safe workflow import/export planning, sanitation, credential safety, validation, compare, prepare, and sync helpers. | [`skills/n8n-workflow-helper-scripts/`](skills/n8n-workflow-helper-scripts/) |
+| n8n Workflow Templates | Public generic inactive n8n workflow JSON templates. | [`skills/n8n-workflow-templates/`](skills/n8n-workflow-templates/) |
 | Secure CI/CD Installer | Secure CI/CD planning, approval-gated templates, and status tracking. | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) |
 | Context-Preserving AI Publisher | Bootstrap or maintain manifest-driven AI-facing repo surfaces without context drift. | [`skills/context-preserving-ai-publisher/`](skills/context-preserving-ai-publisher/) |
 | Secure UI/UX Frontend Design | Frontend design, review, accessibility, responsiveness, privacy, and security guardrails. | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) |

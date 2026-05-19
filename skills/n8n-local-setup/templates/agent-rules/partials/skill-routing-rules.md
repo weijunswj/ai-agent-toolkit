@@ -10,9 +10,11 @@ Use `ui-ux-secure-frontend-design` for design systems, landing pages, SaaS dashb
 
 Use `windows-localhost-workflows` for starting, relaunching, verifying, and troubleshooting local Windows dev servers.
 
-## n8n Workflow Sync
+## n8n Workflow Toolkit
 
-Use `n8n-workflow-sync` for safe n8n workflow template sanitation, repo/live sync planning, credential binding hygiene, and import/export review.
+Use `n8n-workflow-helper-scripts` for safe n8n workflow sanitation, repo/live sync planning, credential binding hygiene, and import/export review.
+
+Use `n8n-workflow-templates` for selecting, reviewing, or copying public generic inactive n8n workflow JSON templates.
 
 ## Secure CI/CD
 
