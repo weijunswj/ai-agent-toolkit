@@ -1,9 +1,8 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0.."
 
 :run_import
-powershell -ExecutionPolicy Bypass -File scripts\import-n8n-workflows-live.ps1 %*
+powershell -ExecutionPolicy Bypass -File "%~dp0import-n8n-workflows-live.ps1" %*
 set "LAST_EXIT=%ERRORLEVEL%"
 
 echo.

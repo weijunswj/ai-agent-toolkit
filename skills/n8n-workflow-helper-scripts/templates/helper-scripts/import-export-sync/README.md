@@ -31,6 +31,10 @@ Live import/export helper entry points are not run from this toolkit repo during
 - `- export-n8n-workflows-live.cmd`
 - `- import-n8n-workflows-live.cmd`
 
+## Wrapper Working Directory
+
+The `.cmd` wrappers invoke their co-located PowerShell scripts with `%~dp0<name>.ps1` and do not change directory themselves. The PowerShell scripts resolve and set their working directory from their script location.
+
 ## Intended Scoped Writes
 
 In a reviewed consumer repo, these helpers may write:

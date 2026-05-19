@@ -7,7 +7,7 @@
     "project": {
       "name": "Secure CI/CD Installer",
       "category": "cicd",
-      "summary": "Approval-gated CI/CD installer guidance, GitHub Actions hardening notes, status templates, and n8n helper scripts."
+      "summary": "Approval-gated CI/CD installer guidance, GitHub Actions hardening notes, and status templates."
     },
     "surface": {
       "publish_as": "both",

@@ -31,4 +31,8 @@ Both folders must remain ignored and uncommitted. Review sanitized outputs befor
 - `- sanitise-n8n-template.cmd`
 - `prepare-n8n-template.js`
 
+## Wrapper Working Directory
+
+The `.cmd` wrapper invokes the co-located PowerShell script with `%~dp0sanitise-n8n-template.ps1` and does not change directory itself. The PowerShell script resolves and sets its working directory from its script location.
+
 Use `-DryRun` with the PowerShell script to confirm paths without writing sanitized template files.

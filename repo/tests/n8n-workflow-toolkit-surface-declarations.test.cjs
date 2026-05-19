@@ -68,6 +68,30 @@ const helperScriptOutputs = [
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1'
 ];
 
+const cmdWrapperCases = [
+  {
+    sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/- export-n8n-workflows-live.cmd',
+    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- export-n8n-workflows-live.cmd',
+    ps1Name: 'export-n8n-workflows-live.ps1',
+    oldScriptPath: 'scripts\\export-n8n-workflows-live.ps1'
+  },
+  {
+    sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/- import-n8n-workflows-live.cmd',
+    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- import-n8n-workflows-live.cmd',
+    ps1Name: 'import-n8n-workflows-live.ps1',
+    oldScriptPath: 'scripts\\import-n8n-workflows-live.ps1'
+  },
+  {
+    sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/- sanitise-n8n-template.cmd',
+    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/- sanitise-n8n-template.cmd',
+    ps1Name: 'sanitise-n8n-template.ps1',
+    oldScriptPath: 'scripts\\sanitise-n8n-template.ps1'
+  }
+];
+
+const wrapperAdaptationNote =
+  'Wrapper path adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script.';
+
 function readJson(relPath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relPath), 'utf8'));
 }
@@ -139,6 +163,33 @@ test('n8n workflow toolkit surface recipes have explicit audit classifications',
     .map((entry) => entry.path)
     .filter((entryPath) => entryPath.startsWith('skills/n8n-workflow-helper-scripts/') || entryPath.startsWith('skills/n8n-workflow-templates/'));
   assert.deepEqual(findings, []);
+});
+
+test('n8n workflow toolkit cmd wrappers invoke co-located PowerShell scripts', () => {
+  for (const wrapper of cmdWrapperCases) {
+    for (const relPath of [wrapper.sourcePath, wrapper.outputPath]) {
+      const wrapperText = readText(relPath);
+      assert.equal(wrapperText.includes(wrapper.oldScriptPath), false, relPath);
+      assert.equal(
+        wrapperText.includes(`powershell -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %*`),
+        true,
+        relPath
+      );
+      assert.equal(/^cd\s+\/d\s+"%~dp0\.\."/im.test(wrapperText), false, relPath);
+    }
+  }
+});
+
+test('n8n workflow toolkit cmd wrapper source locks document path adaptation', () => {
+  const sourceLock = readJson('_projects/n8n/workflow-toolkit/SOURCE-LOCK.json');
+  const lockEntriesByProjectPath = new Map(sourceLock.files.map((entry) => [entry.project_path, entry]));
+
+  for (const wrapper of cmdWrapperCases) {
+    const entry = lockEntriesByProjectPath.get(wrapper.sourcePath);
+    assert.ok(entry, wrapper.sourcePath);
+    assert.equal(entry.mode, 'adapted', wrapper.sourcePath);
+    assert.equal(entry.notes, wrapperAdaptationNote, wrapper.sourcePath);
+  }
 });
 
 test('n8n workflow toolkit has no pack-installed or cross-owned leftovers', () => {

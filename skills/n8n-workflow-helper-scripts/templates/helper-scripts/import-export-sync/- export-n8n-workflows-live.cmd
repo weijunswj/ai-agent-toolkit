@@ -1,9 +1,8 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0.."
 
 :run_export
-powershell -ExecutionPolicy Bypass -File scripts\export-n8n-workflows-live.ps1 %*
+powershell -ExecutionPolicy Bypass -File "%~dp0export-n8n-workflows-live.ps1" %*
 set "LAST_EXIT=%ERRORLEVEL%"
 
 echo.
