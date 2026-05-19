@@ -40,9 +40,11 @@ Use this instruction-only skill when the user wants to plan, review, or document
 
 ## References
 
-- `references/credential-safety.md`
-- `references/import-export-flow.md`
-- `references/workflow-template-hygiene.md`
+- `references/n8n/workflow-sync.md`: overview and sync boundary.
+- `references/credential-safety.md`: skill-level credential safety checklist.
+- `references/n8n/credential-safety.md`: n8n local binding metadata safety.
+- `references/import-export-flow.md`: consumer-repo import/export review flow.
+- `references/workflow-template-hygiene.md`: reusable template hygiene checklist.
 
 ## Output
 

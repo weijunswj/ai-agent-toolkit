@@ -1,10 +1,4 @@
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: n8n.workflow-templates
-Source: _projects/n8n/workflow-templates/curated_output_for_ai/overviews/workflow-template-hygiene.md
-Update the curated output and run sync.
--->
-<!--
 Curated AI-facing source.
 Project: n8n.workflow-templates
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.

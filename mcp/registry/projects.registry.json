@@ -171,13 +171,20 @@
       "mcp/projects/n8n-workflow-templates.md",
       "skills/n8n-workflow-sync/README.md",
       "skills/n8n-workflow-sync/SKILL.md",
+      "skills/n8n-workflow-sync/agents/openai.yaml",
+      "skills/n8n-workflow-sync/packs/n8n-workflow-sync/README.md",
       "skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json",
+      "skills/n8n-workflow-sync/references/credential-safety.md",
+      "skills/n8n-workflow-sync/references/import-export-flow.md",
+      "skills/n8n-workflow-sync/references/n8n/credential-safety.md",
       "skills/n8n-workflow-sync/references/n8n/workflow-sync.md",
+      "skills/n8n-workflow-sync/references/workflow-template-hygiene.md",
       "skills/n8n-workflow-sync/templates/sanitizer/- sanitise-n8n-template.cmd",
       "skills/n8n-workflow-sync/templates/sanitizer/README.md",
       "skills/n8n-workflow-sync/templates/sanitizer/prepare-n8n-template.js",
       "skills/n8n-workflow-sync/templates/sanitizer/sanitise-n8n-template.ps1",
-      "skills/n8n-workflow-sync/templates/workflow-policy/README.md"
+      "skills/n8n-workflow-sync/templates/workflow-policy/README.md",
+      "skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md"
     ]
   }
 ]
