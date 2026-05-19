@@ -51,6 +51,7 @@ Required runtime context should live inside the skill folder in local files such
 | n8n Local Setup | Safe local n8n setup, MCP config selection, tunnels, and platform agent rules. | [`skills/n8n-local-setup/`](skills/n8n-local-setup/) |
 | n8n Workflow Sync | Safe workflow import/export planning, sanitation, credential safety, and helper templates. | [`skills/n8n-workflow-sync/`](skills/n8n-workflow-sync/) |
 | Secure CI/CD Installer | Secure CI/CD planning, approval-gated templates, and status tracking. | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) |
+| Context-Preserving AI Publisher | Bootstrap or maintain manifest-driven AI-facing repo surfaces without context drift. | [`skills/context-preserving-ai-publisher/`](skills/context-preserving-ai-publisher/) |
 | Secure UI/UX Frontend Design | Frontend design, review, accessibility, responsiveness, privacy, and security guardrails. | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) |
 | Windows Localhost Workflows | Start, verify, and troubleshoot localhost development services on Windows. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
 | Knowledge Index Updater | Maintain a Notion/GitHub knowledge index without duplicate rows. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |

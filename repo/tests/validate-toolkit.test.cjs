@@ -241,6 +241,10 @@ test('README is a user-facing map with the contract in the appendix', () => {
   assert.ok(text.indexOf('<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->') > text.indexOf('## Appendix: Source-of-Truth Contract'));
   assert.match(text, /`skills\/<skill-name>\/`/);
   assert.match(text, /`mcp\/`/);
+  const skillRegistry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'skills.registry.json'), 'utf8'));
+  for (const entry of skillRegistry) {
+    assert.ok(text.includes(`](${entry.path})`), `${entry.path} missing from README skills table`);
+  }
   assert.doesNotMatch(text, /(^|[^A-Za-z0-9_])for_ai\//);
   for (const surface of ['packs', 'playbooks', 'templates', 'registries', 'registry', 'tools']) {
     assert.doesNotMatch(text, new RegExp(`\\|\\s+\`?${surface}/?\`?\\s+\\|`, 'i'));
