@@ -925,7 +925,7 @@ test('source-lock audit passes and catches exact-copy drift for retired sources'
 });
 
 test('source-lock audit rejects toolkit-local source_path provenance rewrites', () => {
-  for (const sourcePath of ['skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md', 'repo/scripts/example.cjs', '_projects/n8n/local-setup/_main/README.md']) {
+  for (const sourcePath of ['repo/scripts/example.cjs', '_projects/n8n/local-setup/_main/README.md']) {
     const cwd = tempCopy();
     const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
     const lock = readJsonFile(lockPath);
@@ -936,6 +936,16 @@ test('source-lock audit rejects toolkit-local source_path provenance rewrites', 
     assert.notEqual(result.status, 0, sourcePath);
     assert.match(result.stderr, /source_path must stay upstream-provenance, not toolkit-local/);
   }
+
+  const cwd = tempCopy();
+  const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
+  const lock = readJsonFile(lockPath);
+  lock.files[0].source_path = 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md';
+  writeJsonFile(lockPath, lock);
+
+  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /root-surface source_path is allowed only for retired same-repo migrations/);
 });
 
 test('source-lock audit requires local paths to stay in their topology namespaces', () => {
