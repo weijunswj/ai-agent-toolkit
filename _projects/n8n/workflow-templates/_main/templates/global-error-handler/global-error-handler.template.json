@@ -1,9 +1,9 @@
 {
-  "name": "00 Error Handler",
+  "name": "Global Error Handler",
   "nodes": [
     {
       "parameters": {
-        "content": "# TEMPLATE: 00 Error Handler\n\nThis workflow is a reusable n8n error-handler template.\n\n\n### Main path:\nError Trigger -> Build Error Row -> Google Sheets log / Email alert / Optional Telegram user notice.\n\n\n### Optional example path:\nManual Trigger -> Build Failure Payload -> Stop And Error.\n\n- The manual branch is only a caller-example / testing reference. It is not part of the live Error Trigger path.\n\n\n### Before use:\n\n- Attach Google Sheets, SMTP, and Telegram credentials.\n- Replace placeholder Sheet ID, Sheet name, sender email, and recipient email.\n- Set this workflow as the Error Workflow in caller workflow settings.\n- Activate only after testing.",
+        "content": "# TEMPLATE: Global Error Handler\n\nThis workflow is a reusable n8n error-handler template.\n\n\n### Main path:\nError Trigger -> Build Error Row -> Google Sheets log / Email alert / Optional Telegram user notice.\n\n\n### Optional example path:\nManual Trigger -> Build Failure Payload -> Stop And Error.\n\n- The manual branch is only a caller-example / testing reference. It is not part of the live Error Trigger path.\n\n\n### Before use:\n\n- Attach Google Sheets, SMTP, and Telegram credentials.\n- Replace placeholder Sheet ID, Sheet name, sender email, and recipient email.\n- Set this workflow as the Error Workflow in caller workflow settings.\n- Activate only after testing.",
         "height": 448,
         "width": 768,
         "color": 7
@@ -32,7 +32,7 @@
     },
     {
       "parameters": {
-        "content": "# PLACEHOLDER TRIGGER\n\n- **You MUST set 00 Error Handler under Settings -> Error Workflow (to notify when this one errors)**\n\n- This is how a separate workflow should trigger this error handler workflow.\n\n- **This placeholder trigger is only an example. Update `firstNodeJson('Build Telegram Brief')` and the contact lookup fields to match the caller workflow.**\n  - i.e. const brief = firstNodeJson('Build Telegram Brief');\n  - i.e. const contact_id = get(brief, ['contact_id', 'telegram_chat_id', 'chatId'], get(input, ['contact_id', 'telegram_chat_id', 'chatId'], get(error, ['contact_id', 'telegram_chat_id', 'chatId'], null)));\n\n- Map channel-specific IDs into generic `contact_id`.\n  - For Telegram workflows, pass Telegram chat ID as `contact_id`.\n  - For email workflows, pass email address as `contact_id`.\n  - For CRM workflows, pass CRM/contact/user ID as `contact_id`.",
+        "content": "# PLACEHOLDER TRIGGER\n\n- **You MUST set Global Error Handler under Settings -> Error Workflow (to notify when this one errors)**\n\n- This is how a separate workflow should trigger this error handler workflow.\n\n- **This placeholder trigger is only an example. Update `firstNodeJson('Build Telegram Brief')` and the contact lookup fields to match the caller workflow.**\n  - i.e. const brief = firstNodeJson('Build Telegram Brief');\n  - i.e. const contact_id = get(brief, ['contact_id', 'telegram_chat_id', 'chatId'], get(input, ['contact_id', 'telegram_chat_id', 'chatId'], get(error, ['contact_id', 'telegram_chat_id', 'chatId'], null)));\n\n- Map channel-specific IDs into generic `contact_id`.\n  - For Telegram workflows, pass Telegram chat ID as `contact_id`.\n  - For email workflows, pass email address as `contact_id`.\n  - For CRM workflows, pass CRM/contact/user ID as `contact_id`.",
         "height": 504,
         "width": 772
       },

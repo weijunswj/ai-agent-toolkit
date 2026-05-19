@@ -1,0 +1,59 @@
+{
+  "id": "category.project-name",
+  "category": "category",
+  "name": "project-name",
+  "title": "Project Title",
+  "module_path": "_projects/category/project-name",
+  "main_path": "_projects/category/project-name/_main",
+  "outputs": [
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/project-skill/SKILL.md",
+      "output": "skills/project-skill/SKILL.md",
+      "notes": "Published skill router generated from reviewed adapter source.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/reference.md",
+      "output": "skills/project-skill/references/reference.md",
+      "notes": "Full reference copied from source without summarisation.",
+      "fidelity": "exact"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/project-skill/SKILL.md",
+      "skills/project-skill/references/reference.md"
+    ],
+    "denied": [
+      ".env*",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "Project Title",
+    "category": "category",
+    "summary": "Short project summary."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/project-skill",
+      "summary": "Short skill summary."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

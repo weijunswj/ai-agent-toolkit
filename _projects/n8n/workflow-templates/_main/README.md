@@ -41,7 +41,7 @@ templates/<category>/<workflow-name>.template.json
 Example:
 
 ```txt
-templates/error-handling/00-error-handler.template.json
+templates/global-error-handler/global-error-handler.template.json
 ```
 
 ## What gets sanitised

@@ -123,12 +123,19 @@ test('JSON registries parse in the current repo', () => {
 
 test('skill discovery includes migrated skills', () => {
   const skills = validator.skillDirs();
+  assert.ok(skills.includes('skills/context-preserving-ai-publisher'));
   assert.ok(skills.includes('skills/ui-ux-secure-frontend-design'));
   assert.ok(skills.includes('skills/windows-localhost-workflows'));
   assert.ok(skills.includes('skills/n8n-workflow-sync'));
   assert.ok(skills.includes('skills/n8n-local-setup'));
   assert.ok(skills.includes('skills/secure-cicd-installer'));
   assert.ok(skills.includes('skills/knowledge-index-updater'));
+
+  const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'skills.registry.json'), 'utf8'));
+  const registryPaths = registry.map((entry) => entry.path.replace(/\/$/, ''));
+  for (const skill of skills) {
+    assert.ok(registryPaths.includes(skill), `${skill} missing from skills registry`);
+  }
 });
 
 test('project registry includes the initial project modules', () => {
@@ -137,6 +144,7 @@ test('project registry includes the initial project modules', () => {
   assert.deepEqual(ids, [
     'cicd.secure-installer',
     'design.ui-ux-pro-max',
+    'meta.context-preserving-ai-publisher',
     'n8n.local-setup',
     'n8n.workflow-templates'
   ]);
@@ -233,6 +241,10 @@ test('README is a user-facing map with the contract in the appendix', () => {
   assert.ok(text.indexOf('<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->') > text.indexOf('## Appendix: Source-of-Truth Contract'));
   assert.match(text, /`skills\/<skill-name>\/`/);
   assert.match(text, /`mcp\/`/);
+  const skillRegistry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'skills.registry.json'), 'utf8'));
+  for (const entry of skillRegistry) {
+    assert.ok(text.includes(`](${entry.path})`), `${entry.path} missing from README skills table`);
+  }
   assert.doesNotMatch(text, /(^|[^A-Za-z0-9_])for_ai\//);
   for (const surface of ['packs', 'playbooks', 'templates', 'registries', 'registry', 'tools']) {
     assert.doesNotMatch(text, new RegExp(`\\|\\s+\`?${surface}/?\`?\\s+\\|`, 'i'));
@@ -906,7 +918,7 @@ test('source-lock audit passes and catches exact-copy drift for retired sources'
   assert.equal(lock.source_lifecycle, 'retired_after_migration');
   assert.equal(lock.source_update_policy, 'none');
   assert.equal(lock.public_attribution_required, false);
-  const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-templates', '_main', 'README.md');
+  const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-templates', '_main', 'scripts', 'prepare-n8n-template.js');
   fs.appendFileSync(copiedFile, '\nDrift test\n');
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
