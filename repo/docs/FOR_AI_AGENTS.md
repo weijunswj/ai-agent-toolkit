@@ -53,6 +53,10 @@ Product repos own product code, product workflows, product config, and customer 
 
 If historical source provenance needs review, use [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md). Do not claim provenance from a source that was not inspected.
 
+## Validation Strategy
+
+Prefer targeted validation while iterating. Before final reporting, run the required full validation suite. If full validation fails, inspect the failing area and rerun the narrow relevant command before retrying the full suite.
+
 ## Final Report Style
 
 Report:

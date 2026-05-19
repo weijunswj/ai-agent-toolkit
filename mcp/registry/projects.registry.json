@@ -172,6 +172,7 @@
       "skills/context-preserving-ai-publisher/references/examples.md",
       "skills/context-preserving-ai-publisher/references/maintenance-mode.md",
       "skills/context-preserving-ai-publisher/references/source-to-surface-decision-tree.md",
+      "skills/context-preserving-ai-publisher/references/validation-strategy.md",
       "skills/context-preserving-ai-publisher/templates/agent-task-brief.template.md",
       "skills/context-preserving-ai-publisher/templates/audit-triage.template.md",
       "skills/context-preserving-ai-publisher/templates/ci/generated-surface-check.template.yml",

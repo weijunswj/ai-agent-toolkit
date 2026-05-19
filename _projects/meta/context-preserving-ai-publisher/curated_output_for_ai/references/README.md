@@ -14,6 +14,7 @@ Use these references on demand:
 - [Source-to-surface decision tree](source-to-surface-decision-tree.md)
 - [Bootstrap mode](bootstrap-mode.md)
 - [Maintenance mode](maintenance-mode.md)
+- [Validation strategy](validation-strategy.md)
 - [Audit and baseline workflow](audit-and-baseline-workflow.md)
 - [Deletion policy](deletion-policy.md)
 - [Enforcement model](enforcement-model.md)

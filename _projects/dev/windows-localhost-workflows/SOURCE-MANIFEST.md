@@ -3,16 +3,21 @@
 ## Preserved In `_main/`
 
 - `source-provenance.md`
+- `skill/README.md`
+- `skill/SKILL.md`
+- `skill/agents/openai.yaml`
 
-The preserved file records that this module adopts first-party standalone skill material that already lived under the root `skills/` surface.
+`_main/skill/**` contains the canonical full standalone skill source promoted from the existing root `skills/windows-localhost-workflows/` folder in the pinned source commit.
 
 ## AI-Facing Surfaces
 
-- `skills/windows-localhost-workflows/SKILL.md` is generated from project-owned curated AI output.
-- `skills/windows-localhost-workflows/README.md` is generated from project-owned curated AI output.
-- `skills/windows-localhost-workflows/agents/openai.yaml` is generated from project-owned curated AI output.
+- `skills/windows-localhost-workflows/README.md` is generated from `_main/skill/README.md`.
+- `skills/windows-localhost-workflows/SKILL.md` is generated from `_main/skill/SKILL.md`.
+- `skills/windows-localhost-workflows/agents/openai.yaml` is generated from `_main/skill/agents/openai.yaml`.
 
-The curated source files mirror the existing standalone skill content so this PR changes ownership and generated-surface declaration without redesigning the skill.
+The published skill outputs are deterministic copies from `_main/skill/**`. Markdown outputs receive the standard generated notice required by the sync system; the underlying standalone skill content is preserved in `_main/skill/**`.
+
+`curated_output_for_ai/**`, if present in the future, is reserved for short adapter, index, wrapper, or metadata surfaces. It is not the canonical home for the full skill instructions.
 
 ## Link Shims
 

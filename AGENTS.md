@@ -111,6 +111,8 @@ Keep the topology simple:
 
 ## Validation
 
+For expensive validation work, follow `repo/docs/VALIDATION-STRATEGY.md`: use targeted checks while developing, then run full validation before final PR-ready reporting. Do not loop `npm run validate:all` repeatedly when a narrower failing check can be isolated.
+
 Before reporting completion, run the relevant checks:
 
 ```powershell

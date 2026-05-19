@@ -7,32 +7,32 @@
   "main_path": "_projects/knowledge/knowledge-index-updater/_main",
   "outputs": [
     {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/knowledge-index-updater/SKILL.md",
-      "output": "skills/knowledge-index-updater/SKILL.md",
-      "notes": "Published skill generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/knowledge-index-updater/README.md",
+      "kind": "copy",
+      "source": "_main/skill/README.md",
       "output": "skills/knowledge-index-updater/README.md",
-      "notes": "Published skill README generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
+      "notes": "Former standalone skill README copied from preserved _main skill source.",
+      "fidelity": "exact"
     },
     {
-      "kind": "curated",
-      "source": "curated_output_for_ai/agents/claude.md",
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
+      "output": "skills/knowledge-index-updater/SKILL.md",
+      "notes": "Former standalone skill entrypoint copied from preserved _main skill source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/claude.md",
       "output": "skills/knowledge-index-updater/agents/claude.md",
-      "notes": "Claude platform note generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
+      "notes": "Former standalone Claude platform note copied from preserved _main skill source.",
+      "fidelity": "exact"
     },
     {
-      "kind": "curated",
-      "source": "curated_output_for_ai/agents/openai.yaml",
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
       "output": "skills/knowledge-index-updater/agents/openai.yaml",
-      "notes": "OpenAI platform metadata generated from project-owned curated AI output.",
-      "fidelity": "generated_metadata"
+      "notes": "Former standalone OpenAI platform metadata copied from preserved _main skill source.",
+      "fidelity": "exact"
     }
   ],
   "writes": {

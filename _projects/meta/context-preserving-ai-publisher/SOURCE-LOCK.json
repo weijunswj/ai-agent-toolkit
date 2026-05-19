@@ -46,6 +46,12 @@
     },
     {
       "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/validation-strategy.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/validation-strategy.md",
+      "notes": "First-party generic validation cadence source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
       "source_path": "context-preserving-ai-publisher/audit-and-baseline-workflow.md",
       "project_path": "_projects/meta/context-preserving-ai-publisher/_main/audit-and-baseline-workflow.md",
       "notes": "First-party generic source, not an exact copy of repo docs."

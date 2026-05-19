@@ -16,7 +16,7 @@ The current audit finds:
 - 8 current skill folders.
 - 25 tracked files under `mcp/`.
 - 187 tracked published-surface files under `skills/` and `mcp/`.
-- 150 expanded declared/generated project outputs after the standalone skill declaration pass.
+- 151 expanded declared/generated project outputs after the standalone skill declaration and validation-strategy reference pass.
 - 37 tracked published-surface files still manually present and not declared by project sync recipes.
 - 14 files covered by a pack install path but still not individually declared by project sync recipes.
 - 0 unresolved cross-owned outputs.
@@ -34,16 +34,22 @@ The former orphan root skill folders are now owned by focused project modules:
 - `_projects/knowledge/knowledge-index-updater/` owns `skills/knowledge-index-updater/`.
 - `_projects/dev/windows-localhost-workflows/` owns `skills/windows-localhost-workflows/`.
 
-The existing skill entrypoints and platform metadata were moved into project-owned curated source and regenerated into the published `skills/` folders. The previous detailed Knowledge Index README is preserved under `_projects/knowledge/knowledge-index-updater/_main/standalone-skill-readme.md`, while the generated published README is now a concise install/use index because the full workflow remains in `SKILL.md`.
+The existing standalone skill folders are promoted into `_main/skill/**` and regenerated into the published `skills/` folders through exact `copy` recipes. Markdown outputs receive the standard generated notice, while `_main/skill/**` preserves the former standalone skill content exactly.
 
 Audit baseline movement from the previous baseline:
 
 - `projects`: 5 to 7.
 - `publishedFiles`: 160 to 187 after refreshing the baseline against the current tracked `skills/` and `mcp/` files.
-- `declaredOutputFiles`: 143 to 150.
+- `declaredOutputFiles`: 143 to 151.
 - `undeclaredPublishedFiles`: 44 to 37.
-- `boundaryRecipeOutputs`: 143 to 150.
+- `boundaryRecipeOutputs`: 143 to 151.
 - `crossOwnedOutputs`, `sharedSurfaceOutputs`, `sharedSurfaceMetadataFindings`, `suspiciousPublishedSurfaces`, `duplicateProjectContentGroups`, `boundaryRecipeFindings`, and `curatedDirectoryFindings`: stayed 0.
+
+Amendment movement from the prior PR #29 baseline:
+
+- `declaredOutputFiles`: 150 to 151.
+- `boundaryRecipeOutputs`: 150 to 151.
+- `boundaryRecipeFindings`: stayed 0 after recognising promoted `_main/skill/**` standalone skill sources as full-fidelity copies.
 
 Remaining follow-up actions:
 
@@ -93,14 +99,14 @@ This audit now classifies every expanded `toolkit.project.json` output recipe ag
 
 Summary counts from `npm run audit:surfaces:check`:
 
-- 150 expanded recipe outputs classified.
-- 83 `main_full_fidelity` outputs.
-- 3 `curated_agent_metadata` outputs.
-- 11 `curated_index` outputs, including short reviewed overviews/safety wrappers.
+- 151 expanded recipe outputs classified.
+- 91 `main_full_fidelity` outputs.
+- 0 `curated_agent_metadata` outputs.
+- 9 `curated_index` outputs, including short reviewed overviews/safety wrappers.
 - 4 `curated_metadata` outputs.
 - 1 `curated_pack_readme` output.
 - 7 `curated_reference` outputs.
-- 7 `curated_router` outputs.
+- 5 `curated_router` outputs.
 - 15 `curated_shim` outputs.
 - 3 `curated_spec` outputs.
 - 2 `curated_template` outputs.
@@ -318,8 +324,9 @@ Declared full-fidelity or deterministic generated surfaces include:
 - `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/*`, via exact copy from workflow-toolkit `_main`.
 - `skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json`, via JSON recipe from workflow-toolkit `_main`.
 - `skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/*` and `data/**`, via exact copy recipes from the preserved local-only subset.
-- `skills/knowledge-index-updater/SKILL.md`, `README.md`, and `agents/**`, via curated recipes from the knowledge module.
-- `skills/windows-localhost-workflows/SKILL.md`, `README.md`, and `agents/**`, via curated recipes from the dev module.
+- `skills/knowledge-index-updater/SKILL.md`, `README.md`, and `agents/**`, via exact copy recipes from `_projects/knowledge/knowledge-index-updater/_main/skill/**`.
+- `skills/windows-localhost-workflows/SKILL.md`, `README.md`, and `agents/**`, via exact copy recipes from `_projects/dev/windows-localhost-workflows/_main/skill/**`.
+- `skills/context-preserving-ai-publisher/references/validation-strategy.md`, via exact copy from `_projects/meta/context-preserving-ai-publisher/_main/validation-strategy.md`.
 
 Summary or reviewed-entrypoint surfaces include:
 

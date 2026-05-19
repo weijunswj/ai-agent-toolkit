@@ -64,6 +64,13 @@
     },
     {
       "kind": "copy",
+      "source": "_main/validation-strategy.md",
+      "output": "skills/context-preserving-ai-publisher/references/validation-strategy.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
       "source": "_main/audit-and-baseline-workflow.md",
       "output": "skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md",
       "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
@@ -199,6 +206,7 @@
       "skills/context-preserving-ai-publisher/references/source-to-surface-decision-tree.md",
       "skills/context-preserving-ai-publisher/references/bootstrap-mode.md",
       "skills/context-preserving-ai-publisher/references/maintenance-mode.md",
+      "skills/context-preserving-ai-publisher/references/validation-strategy.md",
       "skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md",
       "skills/context-preserving-ai-publisher/references/deletion-policy.md",
       "skills/context-preserving-ai-publisher/references/enforcement-model.md",
