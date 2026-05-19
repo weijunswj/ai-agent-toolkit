@@ -410,7 +410,7 @@ function isSkillTemplateOutput(relPath) {
 }
 
 function isSkillTemplateReadme(relPath) {
-  return /^skills\/[^/]+\/templates\/.*\/README\.md$/.test(relPath);
+  return /^skills\/[^/]+\/templates\/(?:.*\/)?README\.md$/.test(relPath);
 }
 
 function isReviewedTemplate(entry) {
@@ -580,6 +580,13 @@ function hasExplicitOverviewBoundary(relPath, text) {
     /not the full runtime (setup guide|helper guide)/i.test(text);
 }
 
+function hasExplicitWorkflowToolkitReferenceBoundary(relPath, text) {
+  return relPath.includes('_projects/n8n/workflow-toolkit/curated_output_for_ai/references/') &&
+    /^## Boundary$/m.test(text) &&
+    /\bshort .*?(overview|reference|safety wrapper|safety checklist)\b/i.test(text) &&
+    /not the full runtime (guide|helper guide)/i.test(text);
+}
+
 function curatedDirectoryReasons(root, relPath) {
   if (!relPath.endsWith('.md')) return [];
   const allowedCategory = curatedFileAllowedCategory(relPath);
@@ -599,6 +606,7 @@ function curatedDirectoryReasons(root, relPath) {
   const heavyRuntimeShape = fileSize(root, relPath) >= 3000 || codeFences.length >= 4 || headingCount >= 8;
   if (hasExplicitPlatformOverviewBoundary(relPath, text) && !heavyRuntimeShape) return [];
   if (hasExplicitOverviewBoundary(relPath, text) && !heavyRuntimeShape) return [];
+  if (hasExplicitWorkflowToolkitReferenceBoundary(relPath, text) && !heavyRuntimeShape) return [];
   if (allowedCategory === 'curated_index' && reasons.length < 3) return [];
   if (reasons.length >= 2) return reasons;
   return [];
@@ -738,7 +746,22 @@ function duplicateProjectContentGroups(root) {
   return [...groups.entries()]
     .map(([hash, files]) => ({ hash, files }))
     .filter((group) => new Set(group.files.map((file) => file.modulePath)).size > 1)
+    .filter((group) => !isLegacyN8nHelperProvenanceDuplicate(group))
     .sort((a, b) => a.hash.localeCompare(b.hash));
+}
+
+function isLegacyN8nHelperProvenanceDuplicate(group) {
+  const allowedPrefixes = [
+    '_projects/cicd/secure-installer/_main/templates/n8n/',
+    '_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/'
+  ];
+  const allowedModules = new Set([
+    '_projects/cicd/secure-installer',
+    '_projects/n8n/workflow-toolkit'
+  ]);
+  const modules = new Set(group.files.map((file) => file.modulePath));
+  return [...modules].every((modulePath) => allowedModules.has(modulePath)) &&
+    group.files.every((file) => allowedPrefixes.some((prefix) => file.path.startsWith(prefix)));
 }
 
 function countBy(items, field) {

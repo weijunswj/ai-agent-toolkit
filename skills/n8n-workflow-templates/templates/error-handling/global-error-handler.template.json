@@ -1,0 +1,518 @@
+{
+  "name": "Global Error Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# TEMPLATE: Global Error Handler\n\nThis workflow is a reusable n8n error-handler template.\n\n\n### Main path:\nError Trigger -> Build Error Row -> Google Sheets log / Email alert / Optional Telegram user notice.\n\n\n### Optional example path:\nManual Trigger -> Build Failure Payload -> Stop And Error.\n\n- The manual branch is only a caller-example / testing reference. It is not part of the live Error Trigger path.\n\n\n### Before use:\n\n- Attach Google Sheets, SMTP, and Telegram credentials.\n- Replace placeholder Sheet ID, Sheet name, sender email, and recipient email.\n- Set this workflow as the Error Workflow in caller workflow settings.\n- Activate only after testing.",
+        "height": 448,
+        "width": 768,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -672,
+        -480
+      ],
+      "id": "f1aded9c-4f42-41c1-9b7f-21a2d86ac465",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst input = item && item.json && typeof item.json === 'object' ? item.json : {};\n\nfunction firstNodeJson(name) {\n  try {\n    const item = $(name).first();\n    return item && item.json && typeof item.json === 'object' ? item.json : {};\n  } catch (error) {\n    return {};\n  }\n}\n\nfunction get(source, keys, fallback = null) {\n  for (const key of keys) {\n    const val = source[key];\n    if (val !== undefined && val !== null && val !== '') return val;\n  }\n  return fallback;\n}\n\nconst brief = firstNodeJson('Build Telegram Brief');\nconst workflow = $workflow;\nconst error = (input.error && typeof input.error === 'object') ? input.error : {};\n\nconst error_type = get(input, ['error_type'], get(error, ['error_type'], 'workflow_error'));\nconst error_message = get(input, ['error_message', 'error'], get(error, ['error_message', 'error'], null)) ?? 'unknown';\nconst last_node_executed = $prevNode.name ?? null;\nconst failure_feedback_enabled = get(input, ['failure_feedback_enabled'], get(error, ['failure_feedback_enabled'], get(brief, ['failure_feedback_enabled'], true)));\n\nconst contact_id = get(\n  brief,\n  ['contact_id', 'telegram_chat_id', 'chatId'],\n  get(input, ['contact_id', 'telegram_chat_id', 'chatId'], get(error, ['contact_id', 'telegram_chat_id', 'chatId'], null))\n);\n\nconst payload = {\n  contact_id,\n  error_type,\n  error_message,\n  error_workflow_name: workflow.name,\n  last_node_executed,\n  failure_feedback_enabled,\n};\n\npayload.payload_json = JSON.stringify(payload);\n\nreturn [{ json: payload }];"
+      },
+      "id": "2460f001-3718-41b6-940b-01423346d42a",
+      "name": "Build Failure Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# PLACEHOLDER TRIGGER\n\n- **You MUST set Global Error Handler under Settings -> Error Workflow (to notify when this one errors)**\n\n- This is how a separate workflow should trigger this error handler workflow.\n\n- **This placeholder trigger is only an example. Update `firstNodeJson('Build Telegram Brief')` and the contact lookup fields to match the caller workflow.**\n  - i.e. const brief = firstNodeJson('Build Telegram Brief');\n  - i.e. const contact_id = get(brief, ['contact_id', 'telegram_chat_id', 'chatId'], get(input, ['contact_id', 'telegram_chat_id', 'chatId'], get(error, ['contact_id', 'telegram_chat_id', 'chatId'], null)));\n\n- Map channel-specific IDs into generic `contact_id`.\n  - For Telegram workflows, pass Telegram chat ID as `contact_id`.\n  - For email workflows, pass email address as `contact_id`.\n  - For CRM workflows, pass CRM/contact/user ID as `contact_id`.",
+        "height": 504,
+        "width": 772
+      },
+      "id": "e4f12bae-7026-44ed-9b37-da995702b7c5",
+      "name": "Error Sheet Logging1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -672,
+        -32
+      ]
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -576,
+        304
+      ],
+      "id": "929ac432-5b7e-479c-bf1e-8424ae8ab760",
+      "name": "When clicking \"Execute workflow\""
+    },
+    {
+      "parameters": {},
+      "id": "4db8161a-9db0-414c-9f8e-8b9981f1bce8",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        144,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# Error Intake\n\n- Starts when n8n sends an error payload through this workflow's Error Trigger.\n- Maps the incoming error payload into shared fields for sheet logging, email alerts, and optional Telegram feedback.\n- Captures execution details such as `execution_id`, `execution_url`, and `last_node_executed` when available.\n- Telegram feedback can be sent only when the payload includes both `contact_id` and `failure_feedback_enabled`.",
+        "height": 852,
+        "width": 472,
+        "color": 5
+      },
+      "id": "64052f58-a44b-43bd-82ec-f9be7beadfb7",
+      "name": "Error Intake",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        96,
+        -432
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Error Sheet Logging\n\n- Appends one row to the configured Google Sheet for each mapped error item.\n- Logs timestamp, source workflow, error type, error message, contact ID, execution details, payload JSON and failed node\n- Uses the upstream `error_type` value when available; this workflow does not classify error categories itself.\n- Sheet logging is configured to retry on failure, then continue without blocking the email or Telegram branches.\n\n**Required manual configuration:**\n\n- Append Error Row\n  - `documentId`: Google Sheet used for error logs.\n  - `sheetName`: Sheet tab used for error logs.",
+        "height": 856,
+        "width": 468,
+        "color": 3
+      },
+      "id": "630988ff-5b40-4e41-868b-22711f90bd45",
+      "name": "Error Sheet Logging",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        576,
+        -432
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "logged_date",
+              "value": "={{ $now.setZone('Asia/Singapore').toFormat('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "logged_time",
+              "value": "={{ $now.setZone('Asia/Singapore').toFormat('HH:mm:ss') }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "contact_id",
+              "value": "={{ $json.execution?.error?.context?.metadata?.contact_id || $json.execution?.error?.contact_id || $json.contact_id || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "error_type",
+              "value": "={{ $json.execution?.error?.context?.metadata?.error_type || $json.error_type || $json.execution?.error?.name || $json.trigger?.error?.name || 'workflow_error' }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "error_message",
+              "value": "={{ $json.execution?.error?.context?.metadata?.error_message || $json.error_message || $json.execution?.error?.message || $json.trigger?.error?.message || 'Unknown workflow error' }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "error_workflow_name",
+              "value": "={{ $json.execution?.error?.context?.metadata?.error_workflow_name || $json.error_workflow_name || $json.workflow?.name || 'Unknown workflow' }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "last_node_executed",
+              "value": "={{ $json.execution?.error?.context?.metadata?.last_node_executed || $json.last_node_executed || $json.execution?.lastNodeExecuted || $json.trigger?.error?.node?.name || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "execution_id",
+              "value": "={{ $json.execution?.id || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "execution_url",
+              "value": "={{ $json.execution?.url || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "payload_json",
+              "value": "={{ $json.payload_json || JSON.stringify($json) }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_ERROR_ROW_ID__",
+              "name": "failure_feedback_enabled",
+              "value": "={{ $json.execution?.error?.context?.metadata?.failure_feedback_enabled ?? $json.failure_feedback_enabled ?? true }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "805a8f09-e750-4a46-8932-7136c99a7737",
+      "name": "Build Error Row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        368,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_APPEND_ERROR_ROW_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_APPEND_ERROR_ROW_SHEETNAME__",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "logged_date": "={{ $json.logged_date }}",
+            "logged_time": "={{ $json.logged_time }}",
+            "contact_id": "={{ $json.contact_id }}",
+            "error_type": "={{ $json.error_type }}",
+            "error_message": "={{ $json.error_message }}",
+            "last_node_executed": "={{ $json.last_node_executed }}",
+            "execution_id": "={{ $json.execution_id }}",
+            "execution_url": "={{ $json.execution_url }}",
+            "payload_json": "={{ $json.payload_json }}",
+            "error_workflow_name": "={{ $json.error_workflow_name }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "logged_date",
+              "displayName": "logged_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "logged_time",
+              "displayName": "logged_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_id",
+              "displayName": "contact_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "error_type",
+              "displayName": "error_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "error_workflow_name",
+              "displayName": "error_workflow_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_node_executed",
+              "displayName": "last_node_executed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "execution_url",
+              "displayName": "execution_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "payload_json",
+              "displayName": "payload_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "fcba6ca5-799f-4a7e-8e5c-3045553562d8",
+      "name": "Append Error Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        752,
+        -16
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Error Alert\n\n- Sends an email alert for each mapped error item from `Build Error Row`.\n- Uses the same mapped fields as the Google Sheet log and Telegram feedback condition.\n- Runs in parallel with sheet logging, so admin alerts do not depend on a successful sheet append.\n- Email sending is configured to continue on error.\n- Sends an optional Telegram failure notice when `contact_id` is present and `failure_feedback_enabled` is true.\n\n**Required manual configuration:**\n\n- Send Error Email\n  - `fromEmail`: Sender address for error alerts.\n  - `toEmail`: Recipient address for error alerts.",
+        "height": 856,
+        "width": 464,
+        "color": 4
+      },
+      "id": "a6b0d020-1453-4372-a950-fc5e180025da",
+      "name": "Error Email Alert",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1056,
+        -432
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "__SET_SEND_ERROR_EMAIL_EMAIL__",
+        "toEmail": "__SET_SEND_ERROR_EMAIL_EMAIL__",
+        "subject": "=[ ERROR ALERT ] {{ $json.error_workflow_name || $json.error_type || 'n8n workflow error' }} / {{ $json.logged_date }} - {{ $json.logged_time }}",
+        "html": "=<p><strong>Error Time:</strong> {{ $json.logged_date }} - {{ $json.logged_time }}</p>\n<p><strong>Contact ID:</strong> {{ $json.contact_id }}</p>\n<p><strong>Error Type:</strong> {{ $json.error_type }}</p>\n<p><strong>Error Message:</strong> {{ $json.error_message }}</p>\n<p><strong>Last Node Executed:</strong> {{ $json.last_node_executed }}</p>\n<p><strong>Execution ID:</strong> {{ $json.execution_id }}</p>\n<p><strong>Execution URL:</strong> {{ $json.execution_url }}</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "6bbdb2e0-2ebb-47b1-9c14-5994f3a9bdcb",
+      "name": "Send Error Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1232,
+        128
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "201-has-user-chat-condition",
+              "leftValue": "={{ $json.contact_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "rightValue": true
+            },
+            {
+              "id": "__SET_HAS_USER_CHAT_FAILURE_FEEDBACK_ID__",
+              "leftValue": "={{ $json.failure_feedback_enabled }}",
+              "rightValue": "=true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d5c276dc-fb9e-42a9-a159-8a14553b68f6",
+      "name": "Has User Chat Failure Feedback",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        752,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.contact_id }}",
+        "text": "={{ (() => {\n  const escapeHtml = (value) => String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n  const message = 'Sorry, something went wrong. Please try again later. Contact support if this keeps happening.';\n  return '<b>ERROR</b>\\n' + escapeHtml(message);\n})() }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "92bc0089-d246-48cb-a2a6-d3441fe40681",
+      "name": "Send User Failure Notice",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1232,
+        304
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "errorType": "errorObject",
+        "errorObject": "={{ $json }}"
+      },
+      "id": "ae333cdf-5f24-4749-89b5-cb1bd2a3c20e",
+      "name": "Stop Failure With Context",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        304
+      ],
+      "executeOnce": true
+    }
+  ],
+  "connections": {
+    "Build Failure Payload": {
+      "main": [
+        [
+          {
+            "node": "Stop Failure With Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking \"Execute workflow\"": {
+      "main": [
+        [
+          {
+            "node": "Build Failure Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Error Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Error Row": {
+      "main": [
+        [
+          {
+            "node": "Append Error Row",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Error Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Has User Chat Failure Feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has User Chat Failure Feedback": {
+      "main": [
+        [
+          {
+            "node": "Send User Failure Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

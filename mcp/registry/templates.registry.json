@@ -10,19 +10,19 @@
     "path": "skills/n8n-local-setup/templates/mcp-configs/"
   },
   {
-    "id": "n8n-sync-helpers",
-    "title": "n8n Sync Helpers",
-    "path": "skills/n8n-workflow-sync/templates/sync-helpers/"
+    "id": "n8n-import-export-sync-helpers",
+    "title": "n8n Import Export Sync Helpers",
+    "path": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/"
   },
   {
-    "id": "n8n-sanitizer",
-    "title": "n8n Sanitizer",
-    "path": "skills/n8n-workflow-sync/templates/sanitizer/"
+    "id": "n8n-sanitizer-helpers",
+    "title": "n8n Sanitizer Helpers",
+    "path": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/"
   },
   {
-    "id": "n8n-workflow-policy",
-    "title": "n8n Workflow Policy",
-    "path": "skills/n8n-workflow-sync/templates/workflow-policy/"
+    "id": "n8n-workflow-templates",
+    "title": "n8n Workflow Templates",
+    "path": "skills/n8n-workflow-templates/templates/"
   },
   {
     "id": "cicd-templates",

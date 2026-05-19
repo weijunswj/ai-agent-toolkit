@@ -112,9 +112,9 @@ Inspected:
 
 - `README.md`
 - `.gitignore`
-- `skills/n8n-workflow-sync/templates/sync-helpers/*.cjs`
-- `skills/n8n-workflow-sync/templates/sync-helpers/*.ps1`
-- `skills/n8n-workflow-sync/templates/sync-helpers/*.cmd`
+- `templates/n8n/*.cjs`
+- `templates/n8n/*.ps1`
+- `templates/n8n/*.cmd`
 - `repo/docs/n8n/n8n-credential-migration-map.example.json`
 - `repo/tests/n8n-helper-scripts.test.js`
 
@@ -122,8 +122,8 @@ Migrated:
 
 - Security-first CI/CD installer concepts into `skills/secure-cicd-installer/references/secure-cicd-installer.md`.
 - Prompt and status template material into `skills/secure-cicd-installer/templates/cicd/`.
-- n8n helper-template scripts into `skills/n8n-workflow-sync/templates/sync-helpers/`.
-- Credential migration-map example into `skills/n8n-workflow-sync/templates/workflow-policy/`.
+- n8n helper-template scripts into `_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/`, published as `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/`.
+- Credential migration-map concepts into n8n workflow helper safety references; live/local binding files remain ignored and are not published as reusable template data.
 - Test concepts into toolkit tests.
 - Reusable n8n helper tests into `repo/tests/n8n-helper-scripts.test.cjs`.
 
@@ -149,7 +149,7 @@ Lifecycle:
 - Historical migration input only.
 - Not an active upstream dependency.
 - Not watched by source-watch planning.
-- May be archived or deleted because `_projects/n8n/workflow-templates/_main/` is canonical.
+- May be archived or deleted because `_projects/n8n/workflow-toolkit/_main/` is canonical.
 - SOURCE-LOCK file hashes remain local provenance and drift checks.
 
 Inspected:
@@ -160,13 +160,14 @@ Inspected:
 - `repo/scripts/sanitise-n8n-template.ps1`
 - `repo/scripts/prepare-n8n-template.js`
 - `repo/scripts/- sanitise-n8n-template.cmd`
-- `_projects/n8n/workflow-templates/_main/templates/global-error-handler/global-error-handler.template.json`
+- `_projects/n8n/workflow-toolkit/_main/workflow-templates/error-handling/global-error-handler.template.json`
 
 Migrated:
 
-- Sanitizer workflow and staging-folder rules into `skills/n8n-workflow-sync/templates/workflow-policy/README.md`.
-- Sanitizer scripts into `skills/n8n-workflow-sync/templates/sanitizer/`.
-- Template hygiene guidance into the n8n workflow sync skill references.
+- Sanitizer workflow and staging-folder rules into `skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/README.md`.
+- Sanitizer scripts into `skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/`.
+- Template hygiene guidance into `skills/n8n-workflow-templates/templates/README.md`.
+- `global-error-handler.template.json` into `skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json`.
 - Dry-run and sanitizer smoke test coverage into `repo/tests/n8n-helper-scripts.test.cjs`.
 
 Intentionally not migrated:
@@ -174,9 +175,10 @@ Intentionally not migrated:
 - `.to-sanitise/`.
 - `.sanitised/`.
 
-Skipped for safety:
+Safety review:
 
-- `_projects/n8n/workflow-templates/_main/templates/global-error-handler/global-error-handler.template.json` was not migrated in v1 because it is a full workflow JSON with Code, Google Sheets, email, and Telegram behavior.
+- `global-error-handler.template.json` remains the intended reviewed template name and is published only as an inactive, generic, credential-free workflow template.
+- No live import/export JSON, credential bindings, webhook IDs, credential IDs, `.env`, `.n8n-local`, `.tmp`, private keys, or product/customer data were migrated.
 
 Remaining:
 

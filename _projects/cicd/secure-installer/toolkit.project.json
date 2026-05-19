@@ -85,111 +85,6 @@
       "output": "skills/secure-cicd-installer/packs/secure-cicd/README.md",
       "notes": "Skill-local pack README generated from project-owned curated AI output.",
       "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "linked",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "linked",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "linked",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "copy",
-      "source": "_main/templates/n8n/export-n8n-workflows-live.ps1",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1",
-      "notice": false,
-      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "copy",
-      "source": "_main/templates/n8n/import-n8n-workflows-live.ps1",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1",
-      "notice": false,
-      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "linked",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "linked",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "linked",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "linked",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs",
-      "notes": "AI-facing helper is toolkit-adapted and source-locked.",
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "copy",
-      "source": "_main/templates/n8n/validate-n8n-workflows.cjs",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs",
-      "notice": false,
-      "fidelity": "exact",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it is used with n8n workflow sync materials."
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/templates/n8n/sync-helpers/README.md",
-      "output": "skills/n8n-workflow-sync/templates/sync-helpers/README.md",
-      "notes": "AI-facing helper documentation generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint",
-      "shared_surface": true,
-      "surface_owner_project": "n8n.workflow-templates",
-      "shared_surface_reason": "n8n workflow sync helper documentation retained in cicd.secure-installer for ai-cicd-installer source provenance, but published into the n8n workflow sync skill because it documents the n8n workflow sync helpers."
     }
   ],
   "writes": {
@@ -205,17 +100,6 @@
       "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md",
       "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
       "skills/secure-cicd-installer/packs/secure-cicd/README.md",
-      "skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd",
-      "skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd",
-      "skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs",
-      "skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1",
-      "skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1",
-      "skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1",
-      "skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs",
-      "skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs",
-      "skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs",
-      "skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs",
-      "skills/n8n-workflow-sync/templates/sync-helpers/README.md",
       "mcp/registry/projects.registry.json"
     ],
     "denied": [

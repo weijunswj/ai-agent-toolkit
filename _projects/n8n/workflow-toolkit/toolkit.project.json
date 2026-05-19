@@ -1,0 +1,193 @@
+{
+  "id": "n8n.workflow-toolkit",
+  "category": "n8n",
+  "name": "workflow-toolkit",
+  "title": "n8n Workflow Toolkit",
+  "module_path": "_projects/n8n/workflow-toolkit",
+  "main_path": "_projects/n8n/workflow-toolkit/_main",
+  "outputs": [
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-workflow-helper-scripts/SKILL.md",
+      "output": "skills/n8n-workflow-helper-scripts/SKILL.md",
+      "notes": "Published helper-script skill generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-workflow-helper-scripts/README.md",
+      "output": "skills/n8n-workflow-helper-scripts/README.md",
+      "notes": "Published helper-script skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/workflow-sync.md",
+      "output": "skills/n8n-workflow-helper-scripts/references/workflow-sync.md",
+      "notes": "Short helper-script workflow sync reference and safety wrapper generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/credential-safety.md",
+      "output": "skills/n8n-workflow-helper-scripts/references/credential-safety.md",
+      "notes": "Short helper-script credential safety reference generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/import-export-flow.md",
+      "output": "skills/n8n-workflow-helper-scripts/references/import-export-flow.md",
+      "notes": "Short helper-script import/export flow reference generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/n8n-credential-safety.md",
+      "output": "skills/n8n-workflow-helper-scripts/references/n8n-credential-safety.md",
+      "notes": "Short n8n local credential binding safety reference generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/helper-scripts/README.md",
+      "output": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/README.md",
+      "notes": "AI-facing helper-script template index generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/helper-scripts/sanitizer/README.md",
+      "output": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/README.md",
+      "notes": "AI-facing sanitizer helper documentation generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/helper-scripts/sanitizer",
+      "output": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer",
+      "notes": "Sanitizer helper scripts copied exactly from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/helper-scripts/import-export-sync/README.md",
+      "output": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md",
+      "notes": "AI-facing import/export sync helper documentation generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/helper-scripts/import-export-sync",
+      "output": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync",
+      "notes": "Import/export sync helper scripts copied exactly from preserved n8n workflow toolkit source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-workflow-templates/SKILL.md",
+      "output": "skills/n8n-workflow-templates/SKILL.md",
+      "notes": "Published workflow-template skill generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-workflow-templates/README.md",
+      "output": "skills/n8n-workflow-templates/README.md",
+      "notes": "Published workflow-template skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/workflow-templates/README.md",
+      "output": "skills/n8n-workflow-templates/templates/README.md",
+      "notes": "Workflow-template index and safety checklist generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "json",
+      "source": "_main/workflow-templates/error-handling/global-error-handler.template.json",
+      "output": "skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json",
+      "notes": "Reviewed generic inactive workflow JSON template generated from preserved source JSON.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/mcp/n8n-workflow-toolkit.md",
+      "output": "mcp/projects/n8n-workflow-toolkit.md",
+      "notes": "Published MCP doc generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/n8n-workflow-helper-scripts/SKILL.md",
+      "skills/n8n-workflow-helper-scripts/README.md",
+      "skills/n8n-workflow-helper-scripts/references/workflow-sync.md",
+      "skills/n8n-workflow-helper-scripts/references/credential-safety.md",
+      "skills/n8n-workflow-helper-scripts/references/import-export-flow.md",
+      "skills/n8n-workflow-helper-scripts/references/n8n-credential-safety.md",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/README.md",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/README.md",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/- sanitise-n8n-template.cmd",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/prepare-n8n-template.js",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- export-n8n-workflows-live.cmd",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- import-n8n-workflows-live.cmd",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/export-n8n-workflows-live.ps1",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/n8n-workflow-sync-menu.ps1",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/sync-n8n-live-exports.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/prepare-n8n-live-import.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/compare-n8n-workflow-credentials.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/should-import-n8n-workflow.cjs",
+      "skills/n8n-workflow-templates/SKILL.md",
+      "skills/n8n-workflow-templates/README.md",
+      "skills/n8n-workflow-templates/templates/README.md",
+      "skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json",
+      "mcp/projects/n8n-workflow-toolkit.md",
+      "mcp/registry/projects.registry.json"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      ".to-sanitise/**",
+      ".sanitised/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "n8n Workflow Toolkit",
+    "category": "n8n",
+    "summary": "Reusable n8n workflow helper scripts and public generic workflow templates with separate published skill boundaries."
+  },
+  "surface": {
+    "publish_as": "both",
+    "skill": {
+      "status": "published",
+      "path": "skills/n8n-workflow-helper-scripts",
+      "summary": "Helps an agent review, copy, and use n8n helper-script templates safely."
+    },
+    "mcp": {
+      "status": "published",
+      "path": "mcp/projects/n8n-workflow-toolkit.md",
+      "summary": "Spec-only MCP notes for future deterministic workflow toolkit validation and routing tools."
+    }
+  }
+}

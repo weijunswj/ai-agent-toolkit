@@ -17,7 +17,8 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 
 - Use `ui-ux-secure-frontend-design` for frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review.
 - Use `windows-localhost-workflows` for starting, relaunching, verifying, or debugging local Windows dev servers.
-- Use `n8n-workflow-sync` for safe n8n workflow import/export hygiene, template sanitation, credential safety, and repo/live sync planning.
+- Use `n8n-workflow-helper-scripts` for safe n8n workflow import/export hygiene, template sanitation, credential safety, and repo/live sync planning.
+- Use `n8n-workflow-templates` when the task is specifically about public generic inactive n8n workflow JSON templates.
 - Use secure CI/CD materials when asked to plan or template GitHub Actions, CI security gates, or CI/CD installer prompts.
 
 ## Install Safety

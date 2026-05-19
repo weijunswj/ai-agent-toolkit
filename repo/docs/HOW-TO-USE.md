@@ -13,7 +13,7 @@ Use [_projects/](../../_projects/) when you need the preserved source context be
 Start with:
 
 - [Local n8n Setup](../../_projects/n8n/local-setup/)
-- [n8n Workflow Templates](../../_projects/n8n/workflow-templates/)
+- [n8n Workflow Toolkit](../../_projects/n8n/workflow-toolkit/)
 - [Secure CI/CD Installer](../../_projects/cicd/secure-installer/)
 - [UI/UX Pro Max Design](../../_projects/design/ui-ux-pro-max/)
 
@@ -51,9 +51,9 @@ Templates are published material. Review them before copying into a consumer rep
 
 - [Agent rule templates](../../skills/n8n-local-setup/templates/agent-rules/) contain generated `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` outputs.
 - [MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) contain MCP setup examples.
-- [n8n sync helpers](../../skills/n8n-workflow-sync/templates/sync-helpers/) contain n8n helper-template sources.
-- [n8n sanitizer](../../skills/n8n-workflow-sync/templates/sanitizer/) contains sanitizer tooling.
-- [n8n workflow policy](../../skills/n8n-workflow-sync/templates/workflow-policy/) contains reusable workflow hygiene notes.
+- [n8n import/export sync helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/) contain n8n import/export, validation, compare, prepare, and sync helper templates.
+- [n8n sanitizer helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/) contain sanitizer tooling.
+- [n8n workflow templates](../../skills/n8n-workflow-templates/templates/) contain public generic inactive workflow JSON templates.
 - [CI/CD templates](../../skills/secure-cicd-installer/templates/cicd/) contain CI/CD installer prompts and status templates.
 
 Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/-%20build-agent-rule-templates.cmd) regenerate only the three agent-rule files under [agent-rule templates](../../skills/n8n-local-setup/templates/agent-rules/).

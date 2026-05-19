@@ -10,19 +10,6 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
 const syncScript = path.join(repoRoot, 'repo', 'scripts', 'sync-toolkit-projects.cjs');
-const approvedN8nSyncHelpers = [
-  'skills/n8n-workflow-sync/templates/sync-helpers/- export-n8n-workflows-live.cmd',
-  'skills/n8n-workflow-sync/templates/sync-helpers/- import-n8n-workflows-live.cmd',
-  'skills/n8n-workflow-sync/templates/sync-helpers/README.md',
-  'skills/n8n-workflow-sync/templates/sync-helpers/compare-n8n-workflow-credentials.cjs',
-  'skills/n8n-workflow-sync/templates/sync-helpers/export-n8n-workflows-live.ps1',
-  'skills/n8n-workflow-sync/templates/sync-helpers/import-n8n-workflows-live.ps1',
-  'skills/n8n-workflow-sync/templates/sync-helpers/n8n-workflow-sync-menu.ps1',
-  'skills/n8n-workflow-sync/templates/sync-helpers/prepare-n8n-live-import.cjs',
-  'skills/n8n-workflow-sync/templates/sync-helpers/should-import-n8n-workflow.cjs',
-  'skills/n8n-workflow-sync/templates/sync-helpers/sync-n8n-live-exports.cjs',
-  'skills/n8n-workflow-sync/templates/sync-helpers/validate-n8n-workflows.cjs'
-];
 
 function tempCopy() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-surface-audit-'));
@@ -49,7 +36,7 @@ function runAuditJson(cwd = repoRoot) {
 function addCrossOwnedOutputFixture(cwd, metadata = {}) {
   const projectDir = path.join(cwd, '_projects', 'cicd', 'secure-installer');
   const sourceRel = 'curated_output_for_ai/templates/n8n/sync-helpers/new-cross-owned-helper.md';
-  const outputRel = 'skills/n8n-workflow-sync/templates/sync-helpers/new-cross-owned-helper.md';
+  const outputRel = 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/new-cross-owned-helper.md';
   const sourcePath = path.join(projectDir, sourceRel);
   const outputPath = path.join(cwd, outputRel);
   fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
@@ -84,26 +71,14 @@ test('audit-published-surfaces detects pack-installed undeclared files', () => {
   assert.ok(paths.includes('skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md'));
 });
 
-test('audit-published-surfaces classifies approved n8n sync helpers as shared-surface outputs', () => {
+test('audit-published-surfaces has no n8n shared-surface helper leftovers', () => {
   const report = runAuditJson();
-  const crossOwned = report.issues.crossOwnedOutputs.map((entry) => entry.output);
-  const shared = report.issues.sharedSurfaceOutputs;
-  const sharedOutputs = shared.map((entry) => entry.output);
 
   assert.equal(report.summary.crossOwnedOutputs, 0);
-  assert.equal(report.summary.sharedSurfaceOutputs, approvedN8nSyncHelpers.length);
+  assert.equal(report.summary.sharedSurfaceOutputs, 0);
   assert.equal(report.summary.sharedSurfaceMetadataFindings, 0);
-  for (const output of approvedN8nSyncHelpers) {
-    assert.equal(crossOwned.includes(output), false, output);
-    assert.ok(sharedOutputs.includes(output), output);
-  }
-  for (const entry of shared) {
-    assert.equal(entry.projectId, 'cicd.secure-installer');
-    assert.equal(entry.targetProjectId, 'n8n.workflow-templates');
-    assert.equal(entry.surfaceOwnerProject, 'n8n.workflow-templates');
-    assert.match(entry.sharedSurfaceReason, /ai-cicd-installer source provenance/);
-    assert.match(entry.sharedSurfaceReason, /n8n workflow sync skill/);
-  }
+  assert.deepEqual(report.issues.crossOwnedOutputs, []);
+  assert.deepEqual(report.issues.sharedSurfaceOutputs, []);
 });
 
 test('audit-published-surfaces classifies curated boundary recipes', () => {
@@ -111,14 +86,15 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
   assert.ok(report.summary.boundaryRecipeOutputs > 0);
   for (const classification of [
     'main_full_fidelity',
-    'curated_agent_metadata',
     'curated_router',
     'curated_index',
     'curated_reference',
     'curated_metadata',
+    'curated_pack_readme',
     'curated_shim',
     'curated_spec',
-    'curated_template_example',
+    'curated_template',
+    'curated_template_index',
     'linked_exception'
   ]) {
     assert.ok(report.boundaryClassifications[classification] > 0, classification);
@@ -154,6 +130,19 @@ test('n8n local setup platform overviews declare their curated boundary', () => 
   }
 });
 
+test('n8n workflow toolkit curated references declare their boundary', () => {
+  for (const relPath of [
+    '_projects/n8n/workflow-toolkit/curated_output_for_ai/references/credential-safety.md',
+    '_projects/n8n/workflow-toolkit/curated_output_for_ai/references/import-export-flow.md',
+    '_projects/n8n/workflow-toolkit/curated_output_for_ai/references/workflow-sync.md'
+  ]) {
+    const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/\r\n/g, '\n');
+    assert.match(text, /^## Boundary$/m, relPath);
+    assert.match(text, /short .*?(overview|reference|safety wrapper|safety checklist)/i, relPath);
+    assert.match(text, /not the full runtime (guide|helper guide)/i, relPath);
+  }
+});
+
 test('audit-published-surfaces detects new undeclared published files in a temp copy', () => {
   const cwd = tempCopy();
   const newFile = path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'n8n', 'new-audit-fixture.md');
@@ -181,14 +170,14 @@ test('audit-published-surfaces --check fails when a new cross-owned output lacks
 
   const result = runAudit(['--check'], cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, new RegExp(`new cross-owned output: cicd\\.secure-installer -> n8n\\.workflow-templates: ${outputRel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(result.stderr, new RegExp(`new cross-owned output: cicd\\.secure-installer -> n8n\\.workflow-toolkit: ${outputRel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 });
 
 test('audit-published-surfaces rejects shared-surface metadata without a reason', () => {
   const cwd = tempCopy();
   const outputRel = addCrossOwnedOutputFixture(cwd, {
     shared_surface: true,
-    surface_owner_project: 'n8n.workflow-templates'
+    surface_owner_project: 'n8n.workflow-toolkit'
   });
 
   const report = runAuditJson(cwd);
@@ -289,6 +278,60 @@ test('audit-published-surfaces keeps reviewed templates under runtime-heft check
   const result = runAudit(['--check'], cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /new boundary recipe finding: skills\/n8n-local-setup\/templates\/agent-rules\/new-runtime-template\.md/);
+});
+
+test('audit-published-surfaces still detects project duplicate content outside the n8n provenance exception', () => {
+  const cwd = tempCopy();
+  const source = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync', 'validate-n8n-workflows.cjs');
+  const target = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'duplicate-validate-n8n-workflows.cjs');
+  fs.copyFileSync(source, target);
+
+  const report = runAuditJson(cwd);
+  assert.ok(report.issues.duplicateProjectContentGroups.some((group) =>
+    group.files.some((file) => file.path === '_projects/n8n/local-setup/_main/duplicate-validate-n8n-workflows.cjs')
+  ));
+});
+
+test('audit-published-surfaces still flags runtime-heavy n8n workflow toolkit reference fixtures', () => {
+  const cwd = tempCopy();
+  const projectDir = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit');
+  const sourcePath = path.join(projectDir, 'curated_output_for_ai', 'references', 'new-runtime-reference.md');
+  fs.writeFileSync(sourcePath, [
+    '<!--',
+    'Curated AI-facing source.',
+    'Project: n8n.workflow-toolkit',
+    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+    '-->',
+    '',
+    '# New Runtime Reference',
+    '',
+    '## Boundary',
+    '',
+    'This is a short workflow sync safety wrapper. It is not the full runtime guide.',
+    '',
+    '## Setup',
+    '',
+    '```powershell',
+    'npm install',
+    '```',
+    '',
+    '```powershell',
+    'npm run build',
+    '```',
+    '',
+    '```powershell',
+    'npm run validate',
+    '```',
+    '',
+    '```powershell',
+    'npm run deploy',
+    '```',
+    ''
+  ].join('\n'), 'utf8');
+
+  const result = runAudit(['--check'], cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /new curated directory boundary finding: _projects\/n8n\/workflow-toolkit\/curated_output_for_ai\/references\/new-runtime-reference\.md/);
 });
 
 test('audit-published-surfaces still flags runtime-heavy platform overview fixtures', () => {

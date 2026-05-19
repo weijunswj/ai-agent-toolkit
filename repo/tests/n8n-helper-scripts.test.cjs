@@ -6,16 +6,16 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const { comparableWorkflow } = require(path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sync-helpers', 'should-import-n8n-workflow.cjs'));
-const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sync-helpers', 'prepare-n8n-live-import.cjs'));
+const { comparableWorkflow } = require(path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync', 'should-import-n8n-workflow.cjs'));
+const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync', 'prepare-n8n-live-import.cjs'));
 
-const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sync-helpers');
-const sourceScriptDir = path.join(repoRoot, '_projects', 'cicd', 'secure-installer', '_main', 'templates', 'n8n');
+const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync');
+const sourceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync');
 const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
 const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');
-const sanitizerScript = path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sanitizer', 'prepare-n8n-template.js');
-const sanitizerPs1 = path.join(repoRoot, 'skills', 'n8n-workflow-sync', 'templates', 'sanitizer', 'sanitise-n8n-template.ps1');
+const sanitizerScript = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer', 'prepare-n8n-template.js');
+const sanitizerPs1 = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer', 'sanitise-n8n-template.ps1');
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-helper-test-'));
@@ -267,7 +267,7 @@ test('sanitise-n8n-template.ps1 dry-run creates staging folders but writes no sa
   const shell = findPowerShell();
   const cwd = tempDir();
   fs.writeFileSync(path.join(cwd, '.gitignore'), '.to-sanitise/\n.sanitised/\n');
-  const localSanitizerDir = path.join(cwd, 'templates', 'n8n', 'sanitizer');
+  const localSanitizerDir = path.join(cwd, 'scripts');
   fs.cpSync(path.dirname(sanitizerPs1), localSanitizerDir, { recursive: true });
   const localSanitizerPs1 = path.join(localSanitizerDir, 'sanitise-n8n-template.ps1');
 
