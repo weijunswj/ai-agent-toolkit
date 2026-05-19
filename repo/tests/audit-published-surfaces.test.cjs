@@ -81,7 +81,6 @@ test('audit-published-surfaces runs successfully on the current repo', () => {
 test('audit-published-surfaces detects pack-installed undeclared files', () => {
   const report = runAuditJson();
   const paths = report.issues.packInstalledUndeclared.map((entry) => entry.path);
-  assert.ok(paths.includes('skills/n8n-workflow-sync/references/credential-safety.md'));
   assert.ok(paths.includes('skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md'));
 });
 
@@ -112,11 +111,14 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
   assert.ok(report.summary.boundaryRecipeOutputs > 0);
   for (const classification of [
     'main_full_fidelity',
+    'curated_agent_metadata',
     'curated_router',
     'curated_index',
+    'curated_reference',
     'curated_metadata',
     'curated_shim',
     'curated_spec',
+    'curated_template_example',
     'linked_exception'
   ]) {
     assert.ok(report.boundaryClassifications[classification] > 0, classification);

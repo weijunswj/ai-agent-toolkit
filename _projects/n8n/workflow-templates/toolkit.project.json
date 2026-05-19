@@ -22,6 +22,13 @@
     },
     {
       "kind": "curated",
+      "source": "curated_output_for_ai/agents/openai.yaml",
+      "output": "skills/n8n-workflow-sync/agents/openai.yaml",
+      "notes": "Skill-local OpenAI agent metadata generated from project-owned curated AI output.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "curated",
       "source": "curated_output_for_ai/mcp/n8n-workflow-templates.md",
       "output": "mcp/projects/n8n-workflow-templates.md",
       "notes": "Published MCP doc generated from project-owned curated AI output.",
@@ -32,6 +39,34 @@
       "source": "curated_output_for_ai/overviews/workflow-sync.md",
       "output": "skills/n8n-workflow-sync/references/n8n/workflow-sync.md",
       "notes": "Short skill-local operating overview and safety wrapper generated from project-owned curated AI output; full runtime helper detail lives in local references and templates.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/overviews/credential-safety.md",
+      "output": "skills/n8n-workflow-sync/references/credential-safety.md",
+      "notes": "Short skill-local credential safety reference generated from project-owned curated AI output; n8n-specific binding detail lives in references/n8n/credential-safety.md.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/overviews/import-export-flow.md",
+      "output": "skills/n8n-workflow-sync/references/import-export-flow.md",
+      "notes": "Short skill-local import/export flow reference generated from project-owned curated AI output; live helper detail remains in local templates.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/overviews/n8n-credential-safety.md",
+      "output": "skills/n8n-workflow-sync/references/n8n/credential-safety.md",
+      "notes": "Short skill-local n8n credential binding safety reference generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/overviews/workflow-template-hygiene.md",
+      "output": "skills/n8n-workflow-sync/references/workflow-template-hygiene.md",
+      "notes": "Short skill-local workflow template hygiene reference generated from project-owned curated AI output.",
       "fidelity": "reviewed_entrypoint"
     },
     {
@@ -67,25 +102,46 @@
       "fidelity": "reviewed_entrypoint"
     },
     {
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/n8n/workflow-policy/credential-migration-map-example.md",
+      "output": "skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md",
+      "notes": "AI-facing reviewed template example for local-only credential migration mapping.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
       "kind": "json",
       "source": "curated_output_for_ai/packs/n8n-workflow-sync/pack.json",
       "output": "skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json",
       "notes": "Skill-local pack generated from project-owned curated AI output.",
       "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/packs/n8n-workflow-sync/README.md",
+      "output": "skills/n8n-workflow-sync/packs/n8n-workflow-sync/README.md",
+      "notes": "Skill-local pack README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     }
   ],
   "writes": {
     "allowed": [
       "skills/n8n-workflow-sync/SKILL.md",
       "skills/n8n-workflow-sync/README.md",
+      "skills/n8n-workflow-sync/agents/openai.yaml",
       "mcp/projects/n8n-workflow-templates.md",
       "skills/n8n-workflow-sync/references/n8n/workflow-sync.md",
+      "skills/n8n-workflow-sync/references/credential-safety.md",
+      "skills/n8n-workflow-sync/references/import-export-flow.md",
+      "skills/n8n-workflow-sync/references/n8n/credential-safety.md",
+      "skills/n8n-workflow-sync/references/workflow-template-hygiene.md",
       "skills/n8n-workflow-sync/templates/sanitizer/README.md",
       "skills/n8n-workflow-sync/templates/sanitizer/- sanitise-n8n-template.cmd",
       "skills/n8n-workflow-sync/templates/sanitizer/prepare-n8n-template.js",
       "skills/n8n-workflow-sync/templates/sanitizer/sanitise-n8n-template.ps1",
       "skills/n8n-workflow-sync/templates/workflow-policy/README.md",
+      "skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md",
       "skills/n8n-workflow-sync/packs/n8n-workflow-sync/pack.json",
+      "skills/n8n-workflow-sync/packs/n8n-workflow-sync/README.md",
       "mcp/registry/projects.registry.json"
     ],
     "denied": [

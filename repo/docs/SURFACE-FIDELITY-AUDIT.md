@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Branch: `codex/surface-fidelity-audit`
-Latest update: 2026-05-19 (`codex/declare-secure-cicd-remaining-templates`)
+Latest update: 2026-05-19 (`codex/declare-n8n-workflow-sync-references`)
 
 ## Executive summary
 
@@ -16,15 +16,15 @@ The broader audit found:
 - 6 current skill folders.
 - 25 tracked files under `mcp/`.
 - 162 tracked published-surface files under `skills/` and `mcp/`.
-- 111 expanded declared/generated project outputs after the Secure CI/CD template declaration pass.
-- 51 tracked published-surface files still manually present and not declared by project sync recipes.
-- 21 files covered by a pack install path but still not individually declared by project sync recipes.
+- 118 expanded declared/generated project outputs after the n8n workflow-sync pack reference declaration pass.
+- 44 tracked published-surface files still manually present and not declared by project sync recipes.
+- 14 files covered by a pack install path but still not individually declared by project sync recipes.
 - 0 unresolved cross-owned outputs after the n8n sync helper shared-surface review.
 - 11 declared shared-surface outputs for n8n sync helpers retained under Secure CI/CD provenance.
 - 0 suspicious source/output size findings remain.
 - 0 exact duplicate-content groups across `_projects`, excluding generated previews.
 
-The highest remaining risks are now n8n workflow-sync pack-installed reference ownership, manual MCP registry/spec surfaces, and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue, Secure CI/CD remaining template declaration issue, and n8n sync helper shared-surface ownership issue have been addressed.
+The highest remaining risks are now manual MCP registry/spec surfaces and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue, Secure CI/CD remaining template declaration issue, n8n sync helper shared-surface ownership issue, and n8n workflow-sync pack-installed reference declaration issue have been addressed.
 
 ## Deterministic audit command
 
@@ -49,15 +49,18 @@ This audit now classifies every expanded `toolkit.project.json` output recipe ag
 
 Summary counts from `npm run audit:surfaces:check`:
 
-- 111 expanded recipe outputs classified.
+- 118 expanded recipe outputs classified.
 - 49 `main_full_fidelity` outputs.
-- 10 `curated_index` outputs, including short reviewed overviews/safety wrappers.
+- 8 `curated_index` outputs, including short reviewed overviews/safety wrappers.
+- 1 `curated_agent_metadata` output.
 - 5 `curated_metadata` outputs.
-- 1 `curated_pack_readme` output.
+- 2 `curated_pack_readme` outputs.
+- 6 `curated_reference` outputs.
 - 3 `curated_router` outputs.
 - 15 `curated_shim` outputs.
 - 3 `curated_spec` outputs.
 - 2 `curated_template` outputs.
+- 1 `curated_template_example` output.
 - 6 `curated_template_index` outputs.
 - 17 `linked_exception` outputs.
 - 0 `suspicious_curated_runtime` outputs.
@@ -80,14 +83,17 @@ Allowed curated-output categories:
 - Skill README and local README/index files.
 - Pack manifests and generated metadata.
 - Pack READMEs when they are short skill-local pack indexes.
+- Agent metadata such as `agents/openai.yaml`.
 - MCP project/spec summaries.
 - Reference-link compatibility shims.
+- Short reviewed skill-local references that do not replace full runtime helper guides.
 - Small reviewed template snippets and template indexes that do not replace full runtime instructions.
+- Small reviewed template examples for local-only policy inputs.
 - Small reviewed overview, safety wrapper, packaging, and adapter text that is not a lossy substitute for required runtime instructions.
 
 Recommended fixes:
 
-- Continue resolving the remaining pack-installed undeclared findings in focused PRs. Do not broaden this pass into n8n workflow-sync ownership, MCP registry/spec ownership, or UI/UX provenance cleanup.
+- Continue resolving the remaining pack-installed undeclared findings in focused PRs. Do not broaden later passes into MCP registry/spec ownership or UI/UX provenance cleanup at the same time.
 
 Follow-up PRs are still needed for non-playbook findings outside Secure CI/CD. The playbook-specific recipe findings and Secure CI/CD remaining template findings are resolved.
 
@@ -155,7 +161,44 @@ Audit baseline changes:
 Remaining follow-up actions:
 
 - None for the sync-helper ownership classification.
-- The n8n workflow-sync pack-installed undeclared reference files remain a separate follow-up.
+
+## n8n Workflow Sync Pack Reference Declaration Pass
+
+Classification rule: short pack metadata, agent metadata, safety references, and local-only template examples may publish from `curated_output_for_ai/`; full runtime helper detail remains in the declared local templates and exact/helper sources.
+
+Files reviewed:
+
+| Source file | Published output | Classification | Outcome | Reason |
+| --- | --- | --- | --- | --- |
+| `_projects/n8n/workflow-templates/curated_output_for_ai/agents/openai.yaml` | `skills/n8n-workflow-sync/agents/openai.yaml` | `curated_agent_metadata` | Became curated. | Skill-local OpenAI display metadata; not runtime instructions. |
+| `_projects/n8n/workflow-templates/curated_output_for_ai/packs/n8n-workflow-sync/README.md` | `skills/n8n-workflow-sync/packs/n8n-workflow-sync/README.md` | `curated_pack_readme` | Became curated. | Short pack README and safety notes; `pack.json` remains generated metadata. |
+| `_projects/n8n/workflow-templates/curated_output_for_ai/overviews/credential-safety.md` | `skills/n8n-workflow-sync/references/credential-safety.md` | `curated_reference` | Became curated. | Skill-level credential safety checklist; n8n-specific binding detail remains in the nested reference. |
+| `_projects/n8n/workflow-templates/curated_output_for_ai/overviews/import-export-flow.md` | `skills/n8n-workflow-sync/references/import-export-flow.md` | `curated_reference` | Became curated. | Short consumer-repo import/export review checklist; live helper detail remains in templates. |
+| `_projects/n8n/workflow-templates/curated_output_for_ai/overviews/n8n-credential-safety.md` | `skills/n8n-workflow-sync/references/n8n/credential-safety.md` | `curated_reference` | Became curated. | n8n-specific local credential binding safety note, distinct from the root checklist. |
+| `_projects/n8n/workflow-templates/curated_output_for_ai/overviews/workflow-template-hygiene.md` | `skills/n8n-workflow-sync/references/workflow-template-hygiene.md` | `curated_reference` | Became curated. | Short reusable-template hygiene checklist. |
+| `_projects/n8n/workflow-templates/curated_output_for_ai/templates/n8n/workflow-policy/credential-migration-map-example.md` | `skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md` | `curated_template_example` | Became curated. | Generic local-only credential migration map example; actual maps stay ignored in `.n8n-local/`. |
+
+Pack manifest and audit outcome:
+
+- Every n8n workflow-sync pack-installed reference/manual target from this pass is now declared by `_projects/n8n/workflow-templates/toolkit.project.json`.
+- No n8n workflow-sync file remains in `packInstalledUndeclared`.
+- No file was removed in this pass; the root and nested credential-safety references were retained with distinct scopes.
+
+Audit baseline changes:
+
+- `declaredOutputFiles`: 111 -> 118.
+- `undeclaredPublishedFiles`: 51 -> 44.
+- `packInstalledUndeclared`: 21 -> 14.
+- `boundaryRecipeOutputs`: 111 -> 118.
+- `crossOwnedOutputs`: 0 -> 0.
+- `sharedSurfaceMetadataFindings`: 0 -> 0.
+- `suspiciousPublishedSurfaces`: 0 -> 0.
+- `boundaryRecipeFindings`: 0 -> 0.
+- `curatedDirectoryFindings`: 0 -> 0.
+
+Remaining follow-up actions:
+
+- None for n8n workflow-sync pack-installed reference declarations.
 
 ## n8n Platform Reference Boundary Review
 
@@ -387,7 +430,7 @@ Follow-up PR: declare the manual UI/UX instruction surfaces as linked with expli
 
 ## Undeclared published files
 
-After the Secure CI/CD template declaration pass, 51 tracked `skills/` or `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
+After the n8n workflow-sync pack reference declaration pass, 44 tracked `skills/` or `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
 
 Major groups:
 
@@ -395,17 +438,11 @@ Major groups:
 - Manual registries: `mcp/registry/consumers.registry.json`, `packs.registry.json`, `playbooks.registry.json`, `skills.registry.json`, `source-repos.registry.json`, `templates.registry.json`, `tools.registry.json`.
 - Skills with no `_projects` module: `skills/knowledge-index-updater/**`, `skills/windows-localhost-workflows/**`.
 - n8n local setup remaining manual indexes: pack READMEs and `templates/agent-rules/README.md`. Required runtime references are now recipe-declared.
-- n8n workflow sync compatibility/reference surfaces not recipe-declared: `skills/n8n-workflow-sync/references/credential-safety.md`, `import-export-flow.md`, `workflow-template-hygiene.md`, `references/n8n/credential-safety.md`, `templates/workflow-policy/credential-migration-map-example.md`, pack README, and `agents/openai.yaml`.
 - UI/UX manual surfaces: skill README/install/license files, examples, instruction references, frontend-design pack, pack READMEs, OpenAI agent metadata, and generator tests.
 
 Pack-covered but undeclared files were found in these install surfaces:
 
 ```text
-skills/n8n-workflow-sync/references/credential-safety.md
-skills/n8n-workflow-sync/references/import-export-flow.md
-skills/n8n-workflow-sync/references/n8n/credential-safety.md
-skills/n8n-workflow-sync/references/workflow-template-hygiene.md
-skills/n8n-workflow-sync/templates/workflow-policy/credential-migration-map-example.md
 skills/ui-ux-secure-frontend-design/**
 ```
 
@@ -471,7 +508,7 @@ For retired internal sources, no routine old-repo dependency is needed; `SOURCE-
 
 4. Which surfaces currently rely on manually maintained files?
 
-Manual surfaces include the 51 undeclared files listed by group above, plus linked outputs by design. The largest manual buckets are registry/spec MCP docs, `knowledge-index-updater`, `windows-localhost-workflows`, UI/UX instruction references, and several workflow-sync pack-installed references.
+Manual surfaces include the 44 undeclared files listed by group above, plus linked outputs by design. The largest manual buckets are registry/spec MCP docs, `knowledge-index-updater`, `windows-localhost-workflows`, and UI/UX instruction references.
 
 5. Which current generated outputs should be replaced by exact source extraction?
 
@@ -496,6 +533,7 @@ Completed fixes:
 - Restore full-fidelity `n8n-local-setup` runtime references inside the copyable skill folder.
 - Declare the remaining Secure CI/CD pack-installed status/policy/GitHub Actions template files and pack README as curated generated outputs.
 - Explicitly classify the n8n sync helpers as shared-surface outputs owned by `n8n.workflow-templates` while retaining Secure CI/CD source provenance.
+- Declare the n8n workflow-sync pack-installed agent metadata, pack README, short references, and workflow-policy example as generated curated outputs.
 
 Recommended follow-up fixes:
 
@@ -509,8 +547,9 @@ Recommended follow-up fixes:
 3. PR 3: n8n local setup fidelity pass. Publish full local references or declare short files as non-runtime overviews. Done for required runtime references.
 4. PR 4: Secure CI/CD remaining template declaration pass for status, source update policy, GitHub Actions notes, and pack README. Done in `codex/declare-secure-cicd-remaining-templates`.
 5. PR 5: Cross-owned n8n sync helper ownership cleanup. Done by explicit shared-surface metadata.
-6. PR 6: MCP registry/spec ownership cleanup.
-7. PR 7: UI/UX linked/manual surface provenance cleanup.
+6. PR 6: n8n workflow-sync pack reference declaration pass. Done in `codex/declare-n8n-workflow-sync-references`.
+7. PR 7: MCP registry/spec ownership cleanup.
+8. PR 8: UI/UX linked/manual surface provenance cleanup.
 
 ## Validation evidence
 

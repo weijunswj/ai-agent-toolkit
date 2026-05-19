@@ -378,6 +378,10 @@ function isPackReadme(relPath) {
   return /^skills\/[^/]+\/packs\/[^/]+\/README\.md$/.test(relPath);
 }
 
+function isAgentMetadata(relPath) {
+  return /^skills\/[^/]+\/agents\/[^/]+\.(md|ya?ml)$/.test(relPath);
+}
+
 function isMcpSpec(relPath) {
   return relPath.startsWith('mcp/');
 }
@@ -414,6 +418,16 @@ function isReviewedTemplate(entry) {
   return /\btemplate\b/i.test(`${entry.notes} ${entry.fidelity}`);
 }
 
+function isReviewedTemplateExample(entry) {
+  return isReviewedTemplate(entry) && /\bexample\b/i.test(`${entry.path} ${entry.notes}`);
+}
+
+function isReviewedReference(entry) {
+  if (!isSkillReferenceOutput(entry.path)) return false;
+  return /\b(short|skill-local|reviewed|safety)\b/i.test(`${entry.notes} ${entry.fidelity}`) &&
+    /\breference\b/i.test(`${entry.notes} ${entry.fidelity}`);
+}
+
 function boundaryMarkerHits(text) {
   return boundaryHeadingMarkers.filter((marker) => new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
 }
@@ -431,9 +445,11 @@ function recipeBoundaryReasons(root, entry) {
     isSkillReadme(entry.path) ||
     isPackManifest(entry.path) ||
     isPackReadme(entry.path) ||
+    isAgentMetadata(entry.path) ||
     isMcpSpec(entry.path) ||
     isReferenceShim(entry) ||
     isSkillTemplateReadme(entry.path) ||
+    isReviewedReference(entry) ||
     reviewedTemplate ||
     isIndexLike(entry) ||
     isOverviewLike(entry);
@@ -483,10 +499,15 @@ function classifyBoundaryRecipe(root, entry) {
   if (hasCuratedSource) {
     if (isReferenceShim(entry)) return 'curated_shim';
     if (isPackManifest(entry.path) || entry.kind === 'json') return 'curated_metadata';
+    if (isAgentMetadata(entry.path)) return 'curated_agent_metadata';
     if (isSkillRouter(entry.path)) return 'curated_router';
     if (isMcpSpec(entry.path)) return 'curated_spec';
     if (isPackReadme(entry.path)) return 'curated_pack_readme';
     if (isSkillTemplateReadme(entry.path)) return 'curated_template_index';
+    if (isReviewedReference(entry)) return 'curated_reference';
+    if (isReviewedTemplateExample(entry)) {
+      return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_template_example';
+    }
     if (isReviewedTemplate(entry)) {
       return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_template';
     }
@@ -532,6 +553,8 @@ function boundaryRecipes(root, entries) {
 
 function curatedFileAllowedCategory(relPath) {
   if (relPath.endsWith('/SKILL.md')) return 'curated_router';
+  if (/\/curated_output_for_ai\/agents\/[^/]+\.(md|ya?ml)$/.test(relPath)) return 'curated_agent_metadata';
+  if (/\/curated_output_for_ai\/overviews\/.*\.md$/.test(relPath)) return 'curated_index';
   if (/\/curated_output_for_ai\/templates\/.*\/README\.md$/.test(relPath)) return 'curated_template_index';
   if (/\/curated_output_for_ai\/templates\/.*\.md$/.test(relPath)) return 'curated_template';
   if (/\/curated_output_for_ai\/packs\/[^/]+\/README\.md$/.test(relPath)) return 'curated_pack_readme';
@@ -548,6 +571,13 @@ function hasExplicitPlatformOverviewBoundary(relPath, text) {
     /\bshort platform (overview|router)\b/i.test(text) &&
     /not the full runtime setup guide/i.test(text) &&
     /full-fidelity references and templates/i.test(text);
+}
+
+function hasExplicitOverviewBoundary(relPath, text) {
+  return relPath.includes('/curated_output_for_ai/overviews/') &&
+    /^## Boundary$/m.test(text) &&
+    /\bshort .*?(overview|reference|safety wrapper|safety checklist)\b/i.test(text) &&
+    /not the full runtime (setup guide|helper guide)/i.test(text);
 }
 
 function curatedDirectoryReasons(root, relPath) {
@@ -568,6 +598,7 @@ function curatedDirectoryReasons(root, relPath) {
   if (curatedRuntimePathWords.test(relPath)) reasons.push('path looks like guide, setup, workflow, prompt, template, reference, or playbook');
   const heavyRuntimeShape = fileSize(root, relPath) >= 3000 || codeFences.length >= 4 || headingCount >= 8;
   if (hasExplicitPlatformOverviewBoundary(relPath, text) && !heavyRuntimeShape) return [];
+  if (hasExplicitOverviewBoundary(relPath, text) && !heavyRuntimeShape) return [];
   if (allowedCategory === 'curated_index' && reasons.length < 3) return [];
   if (reasons.length >= 2) return reasons;
   return [];

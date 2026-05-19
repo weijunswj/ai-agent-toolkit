@@ -9,7 +9,11 @@
     "_projects/n8n/workflow-templates/_main/",
     "skills/n8n-workflow-sync/",
     "skills/n8n-workflow-sync/references/n8n/workflow-sync.md",
+    "skills/n8n-workflow-sync/references/credential-safety.md",
+    "skills/n8n-workflow-sync/references/import-export-flow.md",
     "skills/n8n-workflow-sync/templates/sync-helpers/",
+    "skills/n8n-workflow-sync/references/n8n/credential-safety.md",
+    "skills/n8n-workflow-sync/references/workflow-template-hygiene.md",
     "skills/n8n-workflow-sync/templates/sanitizer/"
   ],
   "suitable_for": [
