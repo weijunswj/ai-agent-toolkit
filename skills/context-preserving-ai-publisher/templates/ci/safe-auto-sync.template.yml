@@ -1,0 +1,49 @@
+name: Safe Generated Surface Auto Sync
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  auto-sync:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          path: trusted
+
+      - name: Check out guarded PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          path: pr
+
+      - name: Sync deterministic generated surfaces
+        run: |
+          <trusted sync command with explicit workspace target>
+
+      - name: Static generated surface checks
+        run: |
+          <trusted sync check command with explicit workspace target>
+          git -C pr diff --check
+
+      - name: Commit generated surfaces
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          <guard branch freshness>
+          <stage only approved generated paths>
+          <commit generated surfaces if changed>
+          <push without force>

@@ -1,0 +1,28 @@
+name: Generated Surface Check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  generated-surface-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check generated surfaces
+        run: |
+          <sync check command>
+          <audit check command>
+          git diff --check

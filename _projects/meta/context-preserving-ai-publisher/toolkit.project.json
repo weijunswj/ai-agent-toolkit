@@ -1,0 +1,256 @@
+{
+  "id": "meta.context-preserving-ai-publisher",
+  "category": "meta",
+  "name": "context-preserving-ai-publisher",
+  "title": "Context-Preserving AI Publisher",
+  "module_path": "_projects/meta/context-preserving-ai-publisher",
+  "main_path": "_projects/meta/context-preserving-ai-publisher/_main",
+  "outputs": [
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/context-preserving-ai-publisher/SKILL.md",
+      "output": "skills/context-preserving-ai-publisher/SKILL.md",
+      "notes": "Published skill router generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/context-preserving-ai-publisher/README.md",
+      "output": "skills/context-preserving-ai-publisher/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/README.md",
+      "output": "skills/context-preserving-ai-publisher/references/README.md",
+      "notes": "Short skill-local reference index generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/agent-agnostic-principles.md",
+      "output": "skills/context-preserving-ai-publisher/references/agent-agnostic-principles.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/context-drift-model.md",
+      "output": "skills/context-preserving-ai-publisher/references/context-drift-model.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/source-to-surface-decision-tree.md",
+      "output": "skills/context-preserving-ai-publisher/references/source-to-surface-decision-tree.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/bootstrap-mode.md",
+      "output": "skills/context-preserving-ai-publisher/references/bootstrap-mode.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/maintenance-mode.md",
+      "output": "skills/context-preserving-ai-publisher/references/maintenance-mode.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/audit-and-baseline-workflow.md",
+      "output": "skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/deletion-policy.md",
+      "output": "skills/context-preserving-ai-publisher/references/deletion-policy.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/enforcement-model.md",
+      "output": "skills/context-preserving-ai-publisher/references/enforcement-model.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/examples.md",
+      "output": "skills/context-preserving-ai-publisher/references/examples.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/agent-task-brief.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/agent-task-brief.template.md",
+      "notes": "Reusable starter template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/audit-triage.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/audit-triage.template.md",
+      "notes": "Reusable starter template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/source-to-surface-decision.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/source-to-surface-decision.template.md",
+      "notes": "Reusable starter template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/pr-summary.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/pr-summary.template.md",
+      "notes": "Reusable starter template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/repo-docs/source-of-truth.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/repo-docs/source-of-truth.template.md",
+      "notes": "Reusable starter repo-doc template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/repo-docs/project-module-standard.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md",
+      "notes": "Reusable starter repo-doc template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/repo-docs/surface-fidelity-audit.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/repo-docs/surface-fidelity-audit.template.md",
+      "notes": "Reusable starter repo-doc template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/repo-docs/deletion-policy.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/repo-docs/deletion-policy.template.md",
+      "notes": "Reusable starter repo-doc template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/repo-docs/agent-routing.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/repo-docs/agent-routing.template.md",
+      "notes": "Reusable starter repo-doc template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/project-module/toolkit.project.template.json",
+      "output": "skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json",
+      "notes": "Reusable starter project manifest template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/project-module/SOURCE-MANIFEST.template.md",
+      "output": "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-MANIFEST.template.md",
+      "notes": "Reusable starter project source-manifest template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/project-module/SOURCE-LOCK.template.json",
+      "output": "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json",
+      "notes": "Reusable starter project source-lock template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/ci/generated-surface-check.template.yml",
+      "output": "skills/context-preserving-ai-publisher/templates/ci/generated-surface-check.template.yml",
+      "notes": "Reusable starter generated-surface check workflow template copied from preserved source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/ci/safe-auto-sync.template.yml",
+      "output": "skills/context-preserving-ai-publisher/templates/ci/safe-auto-sync.template.yml",
+      "notes": "Reusable starter safe generated-output auto-sync workflow template copied from preserved source.",
+      "fidelity": "exact"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/context-preserving-ai-publisher/SKILL.md",
+      "skills/context-preserving-ai-publisher/README.md",
+      "skills/context-preserving-ai-publisher/references/README.md",
+      "skills/context-preserving-ai-publisher/references/agent-agnostic-principles.md",
+      "skills/context-preserving-ai-publisher/references/context-drift-model.md",
+      "skills/context-preserving-ai-publisher/references/source-to-surface-decision-tree.md",
+      "skills/context-preserving-ai-publisher/references/bootstrap-mode.md",
+      "skills/context-preserving-ai-publisher/references/maintenance-mode.md",
+      "skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md",
+      "skills/context-preserving-ai-publisher/references/deletion-policy.md",
+      "skills/context-preserving-ai-publisher/references/enforcement-model.md",
+      "skills/context-preserving-ai-publisher/references/examples.md",
+      "skills/context-preserving-ai-publisher/templates/agent-task-brief.template.md",
+      "skills/context-preserving-ai-publisher/templates/audit-triage.template.md",
+      "skills/context-preserving-ai-publisher/templates/source-to-surface-decision.template.md",
+      "skills/context-preserving-ai-publisher/templates/pr-summary.template.md",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/source-of-truth.template.md",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/surface-fidelity-audit.template.md",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/deletion-policy.template.md",
+      "skills/context-preserving-ai-publisher/templates/repo-docs/agent-routing.template.md",
+      "skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json",
+      "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-MANIFEST.template.md",
+      "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json",
+      "skills/context-preserving-ai-publisher/templates/ci/generated-surface-check.template.yml",
+      "skills/context-preserving-ai-publisher/templates/ci/safe-auto-sync.template.yml",
+      "mcp/registry/projects.registry.json"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "Context-Preserving AI Publisher",
+    "category": "meta",
+    "summary": "Generic agent-agnostic methodology, references, and templates for source-traceable AI-facing repo publishing without context drift."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/context-preserving-ai-publisher",
+      "summary": "Helps agents bootstrap or maintain manifest-driven AI-facing repo surfaces while preserving source context, local law, and audit integrity."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

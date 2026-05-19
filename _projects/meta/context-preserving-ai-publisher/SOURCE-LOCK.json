@@ -1,0 +1,156 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "main",
+  "source_commit": "5926dce8886650a2d03336394cf66528307ca641",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party generic source authored in this project module. Entries are adapted from the toolkit architecture, not exact copies of repo docs, and are not watched as an external upstream.",
+  "files": [
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/README.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/README.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/agent-agnostic-principles.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/agent-agnostic-principles.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/context-drift-model.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/context-drift-model.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/source-to-surface-decision-tree.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/source-to-surface-decision-tree.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/bootstrap-mode.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/bootstrap-mode.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/maintenance-mode.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/maintenance-mode.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/audit-and-baseline-workflow.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/audit-and-baseline-workflow.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/deletion-policy.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/deletion-policy.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/enforcement-model.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/enforcement-model.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/examples.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/examples.md",
+      "notes": "First-party generic source, not an exact copy of repo docs."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/agent-task-brief.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/agent-task-brief.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/audit-triage.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/audit-triage.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/source-to-surface-decision.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/source-to-surface-decision.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/pr-summary.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/pr-summary.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/repo-docs/source-of-truth.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/repo-docs/source-of-truth.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/repo-docs/surface-fidelity-audit.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/repo-docs/surface-fidelity-audit.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/repo-docs/deletion-policy.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/repo-docs/deletion-policy.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/repo-docs/agent-routing.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/repo-docs/agent-routing.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/project-module/toolkit.project.template.json",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/project-module/SOURCE-MANIFEST.template.md",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/project-module/SOURCE-MANIFEST.template.md",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/project-module/SOURCE-LOCK.template.json",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/ci/generated-surface-check.template.yml",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/ci/generated-surface-check.template.yml",
+      "notes": "Reusable starter template authored for this module."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "context-preserving-ai-publisher/templates/ci/safe-auto-sync.template.yml",
+      "project_path": "_projects/meta/context-preserving-ai-publisher/_main/templates/ci/safe-auto-sync.template.yml",
+      "notes": "Reusable starter template authored for this module."
+    }
+  ]
+}

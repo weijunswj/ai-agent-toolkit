@@ -123,6 +123,7 @@ test('JSON registries parse in the current repo', () => {
 
 test('skill discovery includes migrated skills', () => {
   const skills = validator.skillDirs();
+  assert.ok(skills.includes('skills/context-preserving-ai-publisher'));
   assert.ok(skills.includes('skills/ui-ux-secure-frontend-design'));
   assert.ok(skills.includes('skills/windows-localhost-workflows'));
   assert.ok(skills.includes('skills/n8n-workflow-sync'));
@@ -137,6 +138,7 @@ test('project registry includes the initial project modules', () => {
   assert.deepEqual(ids, [
     'cicd.secure-installer',
     'design.ui-ux-pro-max',
+    'meta.context-preserving-ai-publisher',
     'n8n.local-setup',
     'n8n.workflow-templates'
   ]);
