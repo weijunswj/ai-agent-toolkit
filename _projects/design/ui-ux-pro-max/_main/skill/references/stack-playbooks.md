@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/references/stack-playbooks.md
-Update the project source and run sync.
--->
 # Stack Playbooks
 
 Use these notes when the target stack is known. Prefer the project's existing conventions over new dependencies.

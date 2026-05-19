@@ -1,0 +1,44 @@
+{
+  "id": "design-system-generator",
+  "title": "Design System Generator",
+  "description": "Optional local-only design-system search and recommendation tooling.",
+  "status": "ready",
+  "risk_level": "medium",
+  "source_refs": [
+    "_projects/design/ui-ux-pro-max/",
+    "_projects/design/ui-ux-pro-max/_main/",
+    "nextlevelbuilder/ui-ux-pro-max-skill:MIT-safe-subset"
+  ],
+  "suitable_for": [
+    "Codex",
+    "Claude Code"
+  ],
+  "installs": [
+    "skills/ui-ux-secure-frontend-design/tools/design-system-generator/"
+  ],
+  "writes_allowed": [
+    "declared generated toolkit outputs from _projects/design/ui-ux-pro-max/toolkit.project.json",
+    "skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/** only when explicitly requested"
+  ],
+  "writes_denied": [
+    ".env*",
+    ".n8n-local/**",
+    ".tmp/**",
+    "node_modules/**",
+    "dist/**",
+    "_dist/**",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*credential*",
+    "*.zip",
+    "*.tgz"
+  ],
+  "requires_approval": true,
+  "run_commands": false,
+  "notes": [
+    "Optional local-only Python tooling.",
+    "Installer must preview writes and must not execute the tool during installation."
+  ]
+}

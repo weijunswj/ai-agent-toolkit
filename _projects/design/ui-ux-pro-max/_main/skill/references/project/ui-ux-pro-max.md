@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/references/project/ui-ux-pro-max.md
-Update the project source and run sync.
--->
 # UI/UX Pro Max Design Module
 
 The UI/UX Pro Max design module keeps design intelligence in two separate surfaces:

@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/INSTALL.md
-Update the project source and run sync.
--->
 # Install Secure UI/UX Frontend Design
 
 This repository location is a template/source location. It is not necessarily the final runtime location used by ChatGPT, Codex, Claude, Claude Code, or an n8n skills repository.

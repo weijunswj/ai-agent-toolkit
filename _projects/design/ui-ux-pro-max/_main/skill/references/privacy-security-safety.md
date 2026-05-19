@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/references/privacy-security-safety.md
-Update the project source and run sync.
--->
 # Privacy, Security, and Safety Gates
 
 Use these gates before implementing or approving frontend changes on high-risk surfaces.

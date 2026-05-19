@@ -7,33 +7,101 @@
   "main_path": "_projects/design/ui-ux-pro-max/_main",
   "outputs": [
     {
-      "kind": "linked",
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
       "output": "skills/ui-ux-secure-frontend-design/SKILL.md",
-      "notes": "Published skill maintained in the published surface. Review when _main/ changes.",
       "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/README.md",
+      "output": "skills/ui-ux-secure-frontend-design/README.md",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/INSTALL.md",
+      "output": "skills/ui-ux-secure-frontend-design/INSTALL.md",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/LICENSE-THIRD-PARTY-NOTES.md",
+      "output": "skills/ui-ux-secure-frontend-design/LICENSE-THIRD-PARTY-NOTES.md",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
+      "output": "skills/ui-ux-secure-frontend-design/agents/openai.yaml",
+      "notice": false,
+      "fidelity": "generated_metadata"
     },
     {
       "kind": "linked",
       "output": "mcp/projects/ui-ux-pro-max.md",
-      "notes": "Published MCP doc maintained in the published surface. Review when _main/ changes.",
+      "notes": "MCP project note remains linked in this PR because the pass is limited to UI/UX skill-folder ownership findings, not MCP cleanup.",
       "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "linked",
-      "output": "skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md",
-      "notes": "Skill-local reference maintained in the published surface. Review when _main/ changes.",
+      "kind": "copy",
+      "source": "_main/skill/references/component-patterns.md",
+      "output": "skills/ui-ux-secure-frontend-design/references/component-patterns.md",
       "fidelity": "exact"
     },
     {
-      "kind": "linked",
-      "output": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md",
-      "notes": "AI-facing tool README maintained in the published surface with toolkit safety context.",
+      "kind": "copy",
+      "source": "_main/skill/references/design-system-workflow.md",
+      "output": "skills/ui-ux-secure-frontend-design/references/design-system-workflow.md",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/references/frontend-quality-rubric.md",
+      "output": "skills/ui-ux-secure-frontend-design/references/frontend-quality-rubric.md",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/references/privacy-security-safety.md",
+      "output": "skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/references/project/ui-ux-pro-max.md",
+      "output": "skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md",
       "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "linked",
+      "kind": "copy",
+      "source": "_main/skill/references/stack-playbooks.md",
+      "output": "skills/ui-ux-secure-frontend-design/references/stack-playbooks.md",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/examples/prompts.md",
+      "output": "skills/ui-ux-secure-frontend-design/examples/prompts.md",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/tools/design-system-generator/README.md",
+      "output": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
       "output": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
-      "notes": "AI-facing third-party attribution maintained in the published surface.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/tools/design-system-generator/tests/test_local_only.py",
+      "output": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/test_local_only.py",
+      "notice": false,
       "fidelity": "exact"
     },
     {
@@ -58,23 +126,57 @@
       "fidelity": "exact"
     },
     {
-      "kind": "linked",
+      "kind": "copy",
+      "source": "_main/skill/packs/design-system-generator/README.md",
+      "output": "skills/ui-ux-secure-frontend-design/packs/design-system-generator/README.md",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/packs/design-system-generator/pack.json",
       "output": "skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json",
-      "notes": "Skill-local pack maintained in the published surface.",
+      "notice": false,
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/packs/frontend-design-skill/README.md",
+      "output": "skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/README.md",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/packs/frontend-design-skill/pack.json",
+      "output": "skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/pack.json",
+      "notice": false,
       "fidelity": "generated_metadata"
     }
   ],
   "writes": {
     "allowed": [
       "skills/ui-ux-secure-frontend-design/SKILL.md",
+      "skills/ui-ux-secure-frontend-design/README.md",
+      "skills/ui-ux-secure-frontend-design/INSTALL.md",
+      "skills/ui-ux-secure-frontend-design/LICENSE-THIRD-PARTY-NOTES.md",
+      "skills/ui-ux-secure-frontend-design/agents/openai.yaml",
       "mcp/projects/ui-ux-pro-max.md",
+      "skills/ui-ux-secure-frontend-design/references/component-patterns.md",
+      "skills/ui-ux-secure-frontend-design/references/design-system-workflow.md",
+      "skills/ui-ux-secure-frontend-design/references/frontend-quality-rubric.md",
+      "skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md",
       "skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md",
+      "skills/ui-ux-secure-frontend-design/references/stack-playbooks.md",
+      "skills/ui-ux-secure-frontend-design/examples/prompts.md",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/test_local_only.py",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/design_system.py",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/data",
+      "skills/ui-ux-secure-frontend-design/packs/design-system-generator/README.md",
       "skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json",
+      "skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/README.md",
+      "skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/pack.json",
       "mcp/registry/projects.registry.json",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/**"
     ],
