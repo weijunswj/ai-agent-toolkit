@@ -130,6 +130,12 @@ test('skill discovery includes migrated skills', () => {
   assert.ok(skills.includes('skills/n8n-local-setup'));
   assert.ok(skills.includes('skills/secure-cicd-installer'));
   assert.ok(skills.includes('skills/knowledge-index-updater'));
+
+  const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'skills.registry.json'), 'utf8'));
+  const registryPaths = registry.map((entry) => entry.path.replace(/\/$/, ''));
+  for (const skill of skills) {
+    assert.ok(registryPaths.includes(skill), `${skill} missing from skills registry`);
+  }
 });
 
 test('project registry includes the initial project modules', () => {

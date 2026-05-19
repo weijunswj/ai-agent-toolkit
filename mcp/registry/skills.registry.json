@@ -130,6 +130,36 @@
     ]
   },
   {
+    "id": "context-preserving-ai-publisher",
+    "title": "Context-Preserving AI Publisher",
+    "category": "repo-maintenance",
+    "path": "skills/context-preserving-ai-publisher/",
+    "purpose": "Bootstrap or maintain manifest-driven AI-facing repo surfaces without context drift.",
+    "supported_platforms": [
+      "ChatGPT",
+      "Codex",
+      "Claude",
+      "Claude Code",
+      "Gemini",
+      "Cursor",
+      "Windsurf",
+      "Roo/Cline"
+    ],
+    "auto_use_triggers": [
+      "AI-facing repo surfaces",
+      "source-to-surface publishing",
+      "project manifest",
+      "context drift",
+      "source fidelity audit"
+    ],
+    "risk_level": "medium",
+    "instruction_only": true,
+    "source_refs": [
+      "_projects/meta/context-preserving-ai-publisher/",
+      "skills/context-preserving-ai-publisher/"
+    ]
+  },
+  {
     "id": "knowledge-index-updater",
     "title": "Knowledge Index Updater",
     "category": "portfolio",
