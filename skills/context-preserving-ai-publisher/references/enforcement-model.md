@@ -1,7 +1,7 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
-Project: meta.context-preserving-ai-publisher
-Source: _projects/meta/context-preserving-ai-publisher/_main/enforcement-model.md
+Project: repo-methodology.context-preserving-ai-publisher
+Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/enforcement-model.md
 Update the project source and run sync.
 -->
 # Enforcement Model
@@ -17,6 +17,7 @@ Docs should explain:
 - Published surface purpose.
 - Manifest contract.
 - Validation commands.
+- Validation strategy for targeted iteration and final full checks.
 - Deletion policy.
 - Live-system and credential boundaries.
 - Baseline update policy.
@@ -52,6 +53,10 @@ It should not use AI to summarise or rewrite source during normal publishing.
 ## Audit Layer
 
 Audits should verify that the manifest and generated surfaces stay honest. Start small, then add checks as the repo discovers failure modes.
+
+## Validation Strategy Layer
+
+Use targeted validation while editing and full repo validation before final reporting. See `validation-strategy.md` for the generic cadence, and follow local repo law when it is stricter or more specific.
 
 ## CI Layer
 

@@ -1,7 +1,7 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
-Project: meta.context-preserving-ai-publisher
-Source: _projects/meta/context-preserving-ai-publisher/_main/audit-and-baseline-workflow.md
+Project: repo-methodology.context-preserving-ai-publisher
+Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/audit-and-baseline-workflow.md
 Update the project source and run sync.
 -->
 # Audit And Baseline Workflow
@@ -24,6 +24,8 @@ Use audits to detect:
 ## Running Audits
 
 Prefer the target repo's documented commands. If no commands exist, add small deterministic checks before adding broad automation.
+
+Use `validation-strategy.md` for validation cadence: targeted checks during iteration, full final validation before completion.
 
 A good audit command should:
 

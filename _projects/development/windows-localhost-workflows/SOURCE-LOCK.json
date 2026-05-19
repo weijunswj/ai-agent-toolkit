@@ -1,0 +1,33 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "main",
+  "source_commit": "bba29eb2dc1b46400a82fa5c7009457ba3cfcac3",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party standalone skill material promoted into _main/skill/** from real root-skill paths in the pinned source commit. _main/source-provenance.md is newly authored for this module and documented in SOURCE-MANIFEST.md rather than represented as an upstream source_path.",
+  "files": [
+    {
+      "mode": "exact",
+      "source_path": "skills/windows-localhost-workflows/README.md",
+      "project_path": "_projects/development/windows-localhost-workflows/_main/skill/README.md",
+      "source_blob_sha": "c9c2f0c47e3f46a8ca83f3575da42719ee619c8b",
+      "notes": "Former standalone skill README promoted exactly into _main/skill."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/windows-localhost-workflows/SKILL.md",
+      "project_path": "_projects/development/windows-localhost-workflows/_main/skill/SKILL.md",
+      "source_blob_sha": "34bd16887f3d3aea62ec9dfd4bad48664959e0d2",
+      "notes": "Former standalone skill entrypoint promoted exactly into _main/skill."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/windows-localhost-workflows/agents/openai.yaml",
+      "project_path": "_projects/development/windows-localhost-workflows/_main/skill/agents/openai.yaml",
+      "source_blob_sha": "57c8b6d98ca2770a46d27036200f6a6bf9a2c465",
+      "notes": "Former standalone OpenAI platform metadata promoted exactly into _main/skill."
+    }
+  ]
+}

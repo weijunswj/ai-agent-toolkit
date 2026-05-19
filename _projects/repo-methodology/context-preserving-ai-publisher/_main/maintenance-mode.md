@@ -25,7 +25,7 @@ Use this skill as a method, not as a replacement for those files.
 5. Make the smallest change in the source of truth.
 6. Run deterministic sync.
 7. Run the repo's check command for generated freshness.
-8. Run targeted audits and tests.
+8. Run targeted audits and tests. Use `validation-strategy.md` for the iteration cadence.
 9. Review generated diffs for unrelated churn.
 10. Update an audit baseline only after confirming every movement is intentional.
 
@@ -36,6 +36,7 @@ Use this skill as a method, not as a replacement for those files.
 - Do not edit generated outputs directly when the manifest says they are generated.
 - Do not add broad routing through this skill unless the repo maintainers ask for it.
 - Do not clean up unrelated audit findings in the same focused change.
+- Do not repeat full-suite validation while still iterating when a narrow failing check can isolate the issue.
 
 ## When To Ask For Confirmation
 

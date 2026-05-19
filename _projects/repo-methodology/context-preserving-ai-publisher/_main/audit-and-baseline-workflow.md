@@ -19,6 +19,8 @@ Use audits to detect:
 
 Prefer the target repo's documented commands. If no commands exist, add small deterministic checks before adding broad automation.
 
+Use `validation-strategy.md` for validation cadence: targeted checks during iteration, full final validation before completion.
+
 A good audit command should:
 
 - Read local files only.

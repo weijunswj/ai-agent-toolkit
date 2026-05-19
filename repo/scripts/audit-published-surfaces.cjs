@@ -370,6 +370,15 @@ function isSkillReadme(relPath) {
   return /^skills\/[^/]+\/README\.md$/.test(relPath);
 }
 
+function isPromotedStandaloneSkillSource(entry) {
+  const root = skillRoot(entry.path);
+  if (!root || entry.kind !== 'copy') return false;
+  const skillRelativePath = entry.path.slice(root.length + 1);
+  if (!skillRelativePath) return false;
+  const expectedSuffix = `/_main/skill/${skillRelativePath}`;
+  return sourcePathsForEntry(entry).every((source) => source.endsWith(expectedSuffix));
+}
+
 function isPackManifest(relPath) {
   return /\/packs\/[^/]+\/pack\.json$/.test(relPath);
 }
@@ -484,6 +493,7 @@ function recipeBoundaryReasons(root, entry) {
 
 function mainAdapterReasons(entry) {
   const reasons = [];
+  if (isPromotedStandaloneSkillSource(entry)) return reasons;
   if (isSkillRouter(entry.path) || isSkillReadme(entry.path) || isMcpSpec(entry.path) || isPackManifest(entry.path)) {
     reasons.push('main source is publishing an adapter, index, spec, or metadata surface');
   }

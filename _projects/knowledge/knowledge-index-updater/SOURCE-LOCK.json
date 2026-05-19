@@ -6,41 +6,35 @@
   "source_role": "migration_provenance_only",
   "source_update_policy": "none",
   "public_attribution_required": false,
-  "notes": "First-party standalone skill material adopted into a project module from real root-skill paths in the pinned source commit. _main/source-provenance.md is newly authored for this module and documented in SOURCE-MANIFEST.md rather than represented as an upstream source_path.",
+  "notes": "First-party standalone skill material promoted into _main/skill/** from real root-skill paths in the pinned source commit. _main/source-provenance.md is newly authored for this module and documented in SOURCE-MANIFEST.md rather than represented as an upstream source_path.",
   "files": [
     {
       "mode": "exact",
       "source_path": "skills/knowledge-index-updater/README.md",
-      "project_path": "_projects/knowledge/knowledge-index-updater/_main/standalone-skill-readme.md",
+      "project_path": "_projects/knowledge/knowledge-index-updater/_main/skill/README.md",
       "source_blob_sha": "2edbbfeb5d6ede6a1ac5fee4ba3e8ebfd6d95125",
-      "notes": "Former standalone skill README preserved exactly in _main while the generated published README becomes a concise index."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "skills/knowledge-index-updater/README.md",
-      "project_path": "_projects/knowledge/knowledge-index-updater/curated_output_for_ai/skills/knowledge-index-updater/README.md",
-      "notes": "Concise published README adapted from the former standalone README; the full runtime workflow remains in SKILL.md and the former detailed README is preserved exactly in _main."
+      "notes": "Former standalone skill README promoted exactly into _main/skill."
     },
     {
       "mode": "exact",
       "source_path": "skills/knowledge-index-updater/SKILL.md",
-      "project_path": "_projects/knowledge/knowledge-index-updater/curated_output_for_ai/skills/knowledge-index-updater/SKILL.md",
+      "project_path": "_projects/knowledge/knowledge-index-updater/_main/skill/SKILL.md",
       "source_blob_sha": "9618539a818b8249469f3563e6c05107d1357942",
-      "notes": "Former standalone skill entrypoint moved into project-owned curated source without content edits."
+      "notes": "Former standalone skill entrypoint promoted exactly into _main/skill."
     },
     {
       "mode": "exact",
       "source_path": "skills/knowledge-index-updater/agents/claude.md",
-      "project_path": "_projects/knowledge/knowledge-index-updater/curated_output_for_ai/agents/claude.md",
+      "project_path": "_projects/knowledge/knowledge-index-updater/_main/skill/agents/claude.md",
       "source_blob_sha": "7dfab377a8a6f4f8e6d1ee33e8d6de30b87cb82f",
-      "notes": "Former standalone Claude agent note moved into project-owned curated source without content edits."
+      "notes": "Former standalone Claude platform note promoted exactly into _main/skill."
     },
     {
       "mode": "exact",
       "source_path": "skills/knowledge-index-updater/agents/openai.yaml",
-      "project_path": "_projects/knowledge/knowledge-index-updater/curated_output_for_ai/agents/openai.yaml",
+      "project_path": "_projects/knowledge/knowledge-index-updater/_main/skill/agents/openai.yaml",
       "source_blob_sha": "bcd6129aed13cf9ab8ad1478b0249ab737732eb3",
-      "notes": "Former standalone OpenAI agent metadata moved into project-owned curated source without content edits."
+      "notes": "Former standalone OpenAI platform metadata promoted exactly into _main/skill."
     }
   ]
 }

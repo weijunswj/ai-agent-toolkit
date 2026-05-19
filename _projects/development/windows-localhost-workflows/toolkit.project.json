@@ -1,31 +1,31 @@
 {
-  "id": "dev.windows-localhost-workflows",
-  "category": "dev",
+  "id": "development.windows-localhost-workflows",
+  "category": "development",
   "name": "windows-localhost-workflows",
   "title": "Windows Localhost Workflows",
-  "module_path": "_projects/dev/windows-localhost-workflows",
-  "main_path": "_projects/dev/windows-localhost-workflows/_main",
+  "module_path": "_projects/development/windows-localhost-workflows",
+  "main_path": "_projects/development/windows-localhost-workflows/_main",
   "outputs": [
     {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/windows-localhost-workflows/SKILL.md",
-      "output": "skills/windows-localhost-workflows/SKILL.md",
-      "notes": "Published skill generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/windows-localhost-workflows/README.md",
+      "kind": "copy",
+      "source": "_main/skill/README.md",
       "output": "skills/windows-localhost-workflows/README.md",
-      "notes": "Published skill README generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
+      "notes": "Former standalone skill README copied from preserved _main skill source.",
+      "fidelity": "exact"
     },
     {
-      "kind": "curated",
-      "source": "curated_output_for_ai/agents/openai.yaml",
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
+      "output": "skills/windows-localhost-workflows/SKILL.md",
+      "notes": "Former standalone skill entrypoint copied from preserved _main skill source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
       "output": "skills/windows-localhost-workflows/agents/openai.yaml",
-      "notes": "OpenAI platform metadata generated from project-owned curated AI output.",
-      "fidelity": "generated_metadata"
+      "notes": "Former standalone OpenAI platform metadata copied from preserved _main skill source.",
+      "fidelity": "exact"
     }
   ],
   "writes": {
@@ -53,7 +53,7 @@
   "ci_live_actions": false,
   "project": {
     "name": "Windows Localhost Workflows",
-    "category": "dev",
+    "category": "development",
     "summary": "Reusable AI skill for starting, verifying, and troubleshooting localhost development workflows on Windows."
   },
   "surface": {

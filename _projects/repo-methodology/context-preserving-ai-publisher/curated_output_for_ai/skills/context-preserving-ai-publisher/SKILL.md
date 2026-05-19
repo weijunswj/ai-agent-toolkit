@@ -5,7 +5,7 @@ description: Use when creating or maintaining source-traceable AI-facing repo su
 
 <!--
 Curated AI-facing source.
-Project: meta.context-preserving-ai-publisher
+Project: repo-methodology.context-preserving-ai-publisher
 Review rule: Keep this skill agent-agnostic. Do not copy this toolkit repo's local law into the generic workflow.
 
 Published-surface source note: This file is authored as a published-surface source; relative links are intended to resolve after sync at skills/context-preserving-ai-publisher/SKILL.md.
@@ -30,7 +30,7 @@ When local repo law conflicts with this generic skill, local law wins.
 4. Use `references/source-to-surface-decision-tree.md` to choose source location and recipe.
 5. Edit the source of truth, not generated outputs, unless the local manifest explicitly marks an output as linked.
 6. Run the repo's deterministic sync/check commands.
-7. Run the smallest relevant audits and tests.
+7. Run the smallest relevant audits and tests; use `references/validation-strategy.md` for validation cadence.
 8. Update audit baselines only after reviewing exact count movement.
 9. Report changed files, copied source outputs, curated adapters, baseline movement, validation, and remaining risks.
 
@@ -51,6 +51,7 @@ When local repo law conflicts with this generic skill, local law wins.
 - `references/source-to-surface-decision-tree.md`: recipe and ownership choices.
 - `references/bootstrap-mode.md`: starting architecture in a new repo.
 - `references/maintenance-mode.md`: working inside an existing local contract.
+- `references/validation-strategy.md`: targeted iteration checks and full final validation.
 - `references/audit-and-baseline-workflow.md`: audit and baseline handling.
 - `references/deletion-policy.md`: deletion and retirement checks.
 - `references/enforcement-model.md`: docs, manifests, sync, audit, and CI.

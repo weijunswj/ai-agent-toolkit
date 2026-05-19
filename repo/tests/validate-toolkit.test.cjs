@@ -145,11 +145,11 @@ test('project registry includes the project modules', () => {
   assert.deepEqual(ids, [
     'cicd.secure-installer',
     'design.ui-ux-pro-max',
-    'dev.windows-localhost-workflows',
+    'development.windows-localhost-workflows',
     'knowledge.knowledge-index-updater',
-    'meta.context-preserving-ai-publisher',
     'n8n.local-setup',
-    'n8n.workflow-toolkit'
+    'n8n.workflow-toolkit',
+    'repo-methodology.context-preserving-ai-publisher'
   ]);
   for (const entry of registry) {
     assert.ok(entry.project?.summary, entry.id);
@@ -792,7 +792,15 @@ test('internal AI-facing surfaces are generated from declared project output', (
     ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/vps-hosting.md', '_main/4. vps hosting.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md', '_main/5. extra - claude code integration.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md', '_main/6. extra - opencode integration.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md', '_main/7. extra - antigravity integration.md']
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md', '_main/7. extra - antigravity integration.md'],
+    ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/README.md', '_main/skill/README.md'],
+    ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/SKILL.md', '_main/skill/SKILL.md'],
+    ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/agents/claude.md', '_main/skill/agents/claude.md'],
+    ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/agents/openai.yaml', '_main/skill/agents/openai.yaml'],
+    ['development.windows-localhost-workflows', 'skills/windows-localhost-workflows/README.md', '_main/skill/README.md'],
+    ['development.windows-localhost-workflows', 'skills/windows-localhost-workflows/SKILL.md', '_main/skill/SKILL.md'],
+    ['development.windows-localhost-workflows', 'skills/windows-localhost-workflows/agents/openai.yaml', '_main/skill/agents/openai.yaml'],
+    ['repo-methodology.context-preserving-ai-publisher', 'skills/context-preserving-ai-publisher/references/validation-strategy.md', '_main/validation-strategy.md']
   ];
   const expectedJson = [
     ['n8n.local-setup', 'skills/n8n-local-setup/packs/codex-n8n-local/pack.json', 'curated_output_for_ai/packs/codex-n8n-local/pack.json'],

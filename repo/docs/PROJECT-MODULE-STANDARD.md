@@ -25,6 +25,19 @@ _projects/<category>/<project>/
 
 Do not use `original/` or `derived/` as standard folder names. Do not create empty curated folders just to satisfy a schema. Do not add curated copies unless a declared sync recipe consumes them.
 
+## Top-Level Categories
+
+Current `_projects/` categories are:
+
+- `cicd/` for CI/CD and GitHub Actions safety material.
+- `design/` for UI/UX and frontend design material.
+- `development/` for general development workflow helpers.
+- `knowledge/` for knowledge-base and index-maintenance skills.
+- `n8n/` for n8n setup, workflow helper scripts, and workflow templates.
+- `repo-methodology/` for source-preserving repo publishing, generated-surface discipline, audit strategy, and anti-drift methodology.
+
+Keep specialised domains such as `cicd/` and `n8n/` first-class when that improves navigation.
+
 ## Curated Output Boundaries
 
 Use `_projects/**/_main/**` directly when publishing full working instructions, prompts, templates, setup guides, troubleshooting notes, examples, or other runtime-critical material.

@@ -8,6 +8,7 @@
 - `source-to-surface-decision-tree.md`
 - `bootstrap-mode.md`
 - `maintenance-mode.md`
+- `validation-strategy.md`
 - `audit-and-baseline-workflow.md`
 - `deletion-policy.md`
 - `enforcement-model.md`

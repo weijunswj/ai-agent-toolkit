@@ -100,6 +100,15 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     assert.ok(report.boundaryClassifications[classification] > 0, classification);
   }
   assert.equal(report.boundaryClassifications.suspicious_curated_runtime || 0, 0);
+  for (const outputPath of [
+    'skills/knowledge-index-updater/README.md',
+    'skills/knowledge-index-updater/SKILL.md',
+    'skills/windows-localhost-workflows/README.md',
+    'skills/windows-localhost-workflows/SKILL.md'
+  ]) {
+    const entry = report.boundaryRecipes.find((item) => item.path === outputPath);
+    assert.equal(entry?.classification, 'main_full_fidelity', outputPath);
+  }
   assert.deepEqual(report.issues.boundaryRecipeFindings, []);
 });
 

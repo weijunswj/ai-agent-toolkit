@@ -11,6 +11,7 @@ The method is agent-agnostic. It can be used by ChatGPT, Claude, Codex, Gemini, 
 - Manifest/routing contract: exact declarations of which source publishes to which output.
 - Portable generated surfaces: copyable skills, MCP docs, templates, packs, references, or equivalent local repo surfaces.
 - Local law/docs: repo-specific rules, validation policy, commands, and audit expectations.
+- Validation strategy: targeted iteration checks plus final full validation.
 - Deterministic publishing: scripts copy, extract, concatenate, or generate outputs without AI summarisation.
 - Audits: checks for undeclared outputs, lossy surfaces, ownership confusion, broken provenance, unsafe deletion, and stale baselines.
 
@@ -19,3 +20,5 @@ The method is agent-agnostic. It can be used by ChatGPT, Claude, Codex, Gemini, 
 Use bootstrap mode when a repo does not yet have a source-to-surface architecture.
 
 Use maintenance mode when a repo already has local docs, manifests, generated outputs, or validation. In maintenance mode, the local repo law wins over these generic templates.
+
+For validation cadence, see `validation-strategy.md`.

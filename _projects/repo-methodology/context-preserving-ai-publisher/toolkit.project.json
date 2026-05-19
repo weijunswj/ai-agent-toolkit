@@ -1,10 +1,10 @@
 {
-  "id": "meta.context-preserving-ai-publisher",
-  "category": "meta",
+  "id": "repo-methodology.context-preserving-ai-publisher",
+  "category": "repo-methodology",
   "name": "context-preserving-ai-publisher",
   "title": "Context-Preserving AI Publisher",
-  "module_path": "_projects/meta/context-preserving-ai-publisher",
-  "main_path": "_projects/meta/context-preserving-ai-publisher/_main",
+  "module_path": "_projects/repo-methodology/context-preserving-ai-publisher",
+  "main_path": "_projects/repo-methodology/context-preserving-ai-publisher/_main",
   "outputs": [
     {
       "kind": "curated",
@@ -59,6 +59,13 @@
       "kind": "copy",
       "source": "_main/maintenance-mode.md",
       "output": "skills/context-preserving-ai-publisher/references/maintenance-mode.md",
+      "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/validation-strategy.md",
+      "output": "skills/context-preserving-ai-publisher/references/validation-strategy.md",
       "notes": "Full methodology reference copied from preserved source into the copyable skill folder.",
       "fidelity": "exact"
     },
@@ -199,6 +206,7 @@
       "skills/context-preserving-ai-publisher/references/source-to-surface-decision-tree.md",
       "skills/context-preserving-ai-publisher/references/bootstrap-mode.md",
       "skills/context-preserving-ai-publisher/references/maintenance-mode.md",
+      "skills/context-preserving-ai-publisher/references/validation-strategy.md",
       "skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md",
       "skills/context-preserving-ai-publisher/references/deletion-policy.md",
       "skills/context-preserving-ai-publisher/references/enforcement-model.md",
@@ -239,7 +247,7 @@
   "ci_live_actions": false,
   "project": {
     "name": "Context-Preserving AI Publisher",
-    "category": "meta",
+    "category": "repo-methodology",
     "summary": "Generic agent-agnostic methodology, references, and templates for source-traceable AI-facing repo publishing without context drift."
   },
   "surface": {

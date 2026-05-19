@@ -4,10 +4,10 @@ description: update, clean, and maintain a personal notion knowledge index that 
 ---
 
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
+Generated from toolkit project source. Do not edit directly.
 Project: knowledge.knowledge-index-updater
-Source: _projects/knowledge/knowledge-index-updater/curated_output_for_ai/skills/knowledge-index-updater/SKILL.md
-Update the curated output and run sync.
+Source: _projects/knowledge/knowledge-index-updater/_main/skill/SKILL.md
+Update the project source and run sync.
 -->
 # Knowledge Index Updater
 
