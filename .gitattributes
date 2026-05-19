@@ -3,9 +3,15 @@
 
 # Project _main/ folders preserve upstream source bytes for SOURCE-LOCK audits.
 _projects/**/_main/** -text
+_projects/n8n/workflow-toolkit/_main/README.md -text whitespace=cr-at-eol
 
 # Exact source-locked helper copies preserve upstream source bytes too.
-skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs -text whitespace=cr-at-eol
+skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/*.cmd -text whitespace=cr-at-eol
+skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/*.js -text whitespace=cr-at-eol
+skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/*.ps1 -text whitespace=cr-at-eol
+skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/*.cmd -text whitespace=cr-at-eol
+skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/*.cjs -text whitespace=cr-at-eol
+skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/*.ps1 -text whitespace=cr-at-eol
 
 # Generated CI workflow templates are compared byte-for-byte by sync checks.
 skills/context-preserving-ai-publisher/templates/ci/*.yml text eol=lf
