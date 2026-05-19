@@ -15,26 +15,30 @@ This repo keeps reusable AI-agent material in a source-first layout. Full source
 
 ## Quick Start
 
-- Full guide: open `_projects/<category>/<project>/_main/`.
-- Install a skill: copy the whole `skills/<skill-name>/` folder into your agent's skills directory.
-- MCP material: open [`mcp/`](mcp/) for current status, specs, registries, and notes.
-- Maintenance work: start with [`repo/docs/`](repo/docs/) and the validation commands below.
+| What you want| How to get it |
+|---|---|
+| Full guide | Open `_projects/<category>/<project>/_main/`. |
+| Install a skill | Copy the whole `skills/<skill-name>/` folder into your agent's skills directory. |
+| MCP material | Open [`mcp/`](mcp/) for current status, specs, registries, and notes. |
+| Maintenance work | Start with [`repo/docs/`](repo/docs/) and the validation commands below. |
 
 ## Terms
 
-- **Project:** The source/provenance area where the real material is maintained.
-- **Skill:** A copyable AI-agent folder with instructions, references, templates, metadata, and helper files.
-- **MCP:** A spec/registry area for future tool/server discovery. It is design/spec-only unless a specific subfolder says otherwise.
-- **Generated surface:** A published file under [`skills/`](skills/) or [`mcp/`](mcp/) that is rebuilt from project source by a deterministic sync script.
+| Term | What it means |
+|---|---|
+| Project | The source/provenance area where the real material is maintained.
+| Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files.
+| MCP | A spec/registry area for future tool/server discovery. It is design/spec-only unless a specific subfolder says otherwise.
+| Generated surface | A published file under [`skills/`](skills/) or [`mcp/`](mcp/) that is rebuilt from project source by a deterministic sync script.
 
 ## Project Categories
 
-- `cicd/` = CI/CD and GitHub Actions safety material.
-- `design/` = UI/UX and frontend design material.
-- `development/` = general development workflow helpers.
-- `knowledge/` = knowledge-base and index-maintenance skills.
-- `n8n/` = n8n setup, workflow helper scripts, and workflow templates.
-- `repo-methodology/` = how this toolkit preserves source truth, generates skills/MCP surfaces, and prevents context drift.
+- **[`cicd/`](_projects/cicd/):** CI/CD and GitHub Actions safety material.
+- **[`design/`](_projects/design/):** UI/UX and frontend design material.
+- **[`development/`](_projects/development/):** General development workflow helpers.
+- **[`knowledge/`](_projects/knowledge/):** Knowledge-base and index-maintenance skills.
+- **[`n8n/`](_projects/n8n/) =** n8n setup, workflow helper scripts, and workflow templates.
+- **[`repo-methodology/`](_projects/repo-methodology/) =** How this toolkit preserves source truth, generates skills/MCP surfaces, and prevents context drift.
 
 ## Projects
 
