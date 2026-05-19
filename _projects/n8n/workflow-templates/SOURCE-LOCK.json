@@ -8,10 +8,11 @@
   "public_attribution_required": false,
   "files": [
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "README.md",
       "project_path": "_projects/n8n/workflow-templates/_main/README.md",
-      "source_blob_sha": "220d5ee42e4cd71456a24879d2a6a417a1cf242d"
+      "source_blob_sha": "220d5ee42e4cd71456a24879d2a6a417a1cf242d",
+      "notes": "Local preserved README keeps retired source guidance but updates the example template path after renaming 00-error-handler to global-error-handler."
     },
     {
       "mode": "exact",
@@ -53,10 +54,11 @@
       "notes": "AI-facing sanitizer wrapper keeps toolkit-relative command paths."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/00-error-handler/00-error-handler.template.json",
-      "project_path": "_projects/n8n/workflow-templates/_main/templates/00-error-handler/00-error-handler.template.json",
-      "source_blob_sha": "e8287b96a3f6e75c33552354f64472e7b7384d51"
+      "project_path": "_projects/n8n/workflow-templates/_main/templates/global-error-handler/global-error-handler.template.json",
+      "source_blob_sha": "e8287b96a3f6e75c33552354f64472e7b7384d51",
+      "notes": "Renamed local template path and visible workflow copy from 00 Error Handler to Global Error Handler."
     }
   ]
 }

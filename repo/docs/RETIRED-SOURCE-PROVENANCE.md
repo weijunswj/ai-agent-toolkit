@@ -160,7 +160,7 @@ Inspected:
 - `repo/scripts/sanitise-n8n-template.ps1`
 - `repo/scripts/prepare-n8n-template.js`
 - `repo/scripts/- sanitise-n8n-template.cmd`
-- `_projects/n8n/workflow-templates/_main/templates/00-error-handler/00-error-handler.template.json`
+- `_projects/n8n/workflow-templates/_main/templates/global-error-handler/global-error-handler.template.json`
 
 Migrated:
 
@@ -176,7 +176,7 @@ Intentionally not migrated:
 
 Skipped for safety:
 
-- `_projects/n8n/workflow-templates/_main/templates/00-error-handler/00-error-handler.template.json` was not migrated in v1 because it is a full workflow JSON with Code, Google Sheets, email, and Telegram behavior.
+- `_projects/n8n/workflow-templates/_main/templates/global-error-handler/global-error-handler.template.json` was not migrated in v1 because it is a full workflow JSON with Code, Google Sheets, email, and Telegram behavior.
 
 Remaining:
 
