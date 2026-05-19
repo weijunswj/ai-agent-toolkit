@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/README.md
-Update the project source and run sync.
--->
 # Secure UI/UX Frontend Design
 
 This skill helps an AI agent create, review, and improve frontend web interfaces with a design-system-first workflow and security-first guardrails.

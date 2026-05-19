@@ -1,10 +1,4 @@
 <!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/tools/design-system-generator/README.md
-Update the project source and run sync.
--->
-<!--
 Maintained inside the UI/UX frontend design skill as local helper tooling.
 Project: design.ui-ux-pro-max
 Canonical source material: _projects/design/ui-ux-pro-max/_main/

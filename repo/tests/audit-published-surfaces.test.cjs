@@ -66,9 +66,13 @@ test('audit-published-surfaces runs successfully on the current repo', () => {
 });
 
 test('audit-published-surfaces detects pack-installed undeclared files', () => {
-  const report = runAuditJson();
+  const cwd = tempCopy();
+  const fixturePath = path.join(cwd, 'skills', 'ui-ux-secure-frontend-design', 'references', 'new-pack-undeclared-fixture.md');
+  fs.writeFileSync(fixturePath, '# New pack undeclared fixture\n\nThis file is installed by the skill pack but not declared by the project manifest.\n', 'utf8');
+
+  const report = runAuditJson(cwd);
   const paths = report.issues.packInstalledUndeclared.map((entry) => entry.path);
-  assert.ok(paths.includes('skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md'));
+  assert.ok(paths.includes('skills/ui-ux-secure-frontend-design/references/new-pack-undeclared-fixture.md'));
 });
 
 test('audit-published-surfaces has no n8n shared-surface helper leftovers', () => {

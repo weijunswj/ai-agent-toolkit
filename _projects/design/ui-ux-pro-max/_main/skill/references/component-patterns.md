@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/references/component-patterns.md
-Update the project source and run sync.
--->
 # Component Patterns
 
 Use these patterns as implementation planning guidance. Reuse existing project components before inventing new ones.

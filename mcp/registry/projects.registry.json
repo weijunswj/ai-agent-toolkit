@@ -65,14 +65,28 @@
     "main_path": "_projects/design/ui-ux-pro-max/_main",
     "root_surfaces": [
       "mcp/projects/ui-ux-pro-max.md",
+      "skills/ui-ux-secure-frontend-design/INSTALL.md",
+      "skills/ui-ux-secure-frontend-design/LICENSE-THIRD-PARTY-NOTES.md",
+      "skills/ui-ux-secure-frontend-design/README.md",
       "skills/ui-ux-secure-frontend-design/SKILL.md",
+      "skills/ui-ux-secure-frontend-design/agents/openai.yaml",
+      "skills/ui-ux-secure-frontend-design/examples/prompts.md",
+      "skills/ui-ux-secure-frontend-design/packs/design-system-generator/README.md",
       "skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json",
+      "skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/README.md",
+      "skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/pack.json",
+      "skills/ui-ux-secure-frontend-design/references/component-patterns.md",
+      "skills/ui-ux-secure-frontend-design/references/design-system-workflow.md",
+      "skills/ui-ux-secure-frontend-design/references/frontend-quality-rubric.md",
+      "skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md",
       "skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md",
+      "skills/ui-ux-secure-frontend-design/references/stack-playbooks.md",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/data",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py",
-      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/design_system.py"
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/design_system.py",
+      "skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/test_local_only.py"
     ]
   },
   {

@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/LICENSE-THIRD-PARTY-NOTES.md
-Update the project source and run sync.
--->
 # License and Third-Party Notes
 
 This skill was inspired by the public UI/UX Pro Max workflow idea:

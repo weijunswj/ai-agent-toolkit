@@ -71,6 +71,32 @@ Audit baseline movement recorded with this cleanup:
 - `declared_generated`: 88 to 89.
 - `projects`, `declaredOutputFiles`, `undeclaredPublishedFiles`, `boundaryRecipeOutputs`, `boundaryRecipeFindings`, and `curatedDirectoryFindings` stayed unchanged.
 
+## UI/UX Skill Ownership Pass
+
+The remaining UI/UX pack-installed ownership findings were resolved without attempting MCP registry or MCP reference cleanup.
+
+The current `skills/ui-ux-secure-frontend-design/**` files covered by the skill-local packs were promoted into `_projects/design/ui-ux-pro-max/_main/skill/**` as canonical project-owned source:
+
+- Skill entry and install docs: `SKILL.md`, `README.md`, `INSTALL.md`, `LICENSE-THIRD-PARTY-NOTES.md`, and `agents/openai.yaml`.
+- Skill examples and references: `examples/prompts.md`, `references/component-patterns.md`, `references/design-system-workflow.md`, `references/frontend-quality-rubric.md`, `references/privacy-security-safety.md`, `references/project/ui-ux-pro-max.md`, and `references/stack-playbooks.md`.
+- Skill-local packs: `packs/design-system-generator/README.md`, `packs/design-system-generator/pack.json`, `packs/frontend-design-skill/README.md`, and `packs/frontend-design-skill/pack.json`.
+- Tool-local documentation and test: `tools/design-system-generator/README.md`, `tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md`, and `tools/design-system-generator/tests/test_local_only.py`.
+
+These outputs now publish through deterministic `copy` recipes from `_main/skill/**`. The existing generator scripts and CSV data continue to publish from `_main/src/ui-ux-pro-max/**`. Markdown outputs receive the standard generated notice; the canonical `_main/skill/**` source files do not.
+
+The UI/UX MCP project note `mcp/projects/ui-ux-pro-max.md` remains linked because this pass is limited to skill-folder ownership findings and deliberately does not broaden into MCP cleanup.
+
+Audit baseline movement:
+
+- `declaredOutputFiles`: 151 to 165.
+- `undeclaredPublishedFiles`: 37 to 23.
+- `packInstalledUndeclared`: 14 to 0.
+- `boundaryRecipeOutputs`: 151 to 165.
+- `pack_installed_declared`: 60 to 74.
+- `linked_exception`: 7 to 2.
+- `main_full_fidelity`: 91 to 110.
+- `publishedFiles`, `projects`, `packInstalledFiles`, `crossOwnedOutputs`, `sharedSurfaceOutputs`, `sharedSurfaceMetadataFindings`, `suspiciousPublishedSurfaces`, `duplicateProjectContentGroups`, `boundaryRecipeFindings`, and `curatedDirectoryFindings` stayed unchanged.
+
 ## n8n Workflow Toolkit Reshape
 
 The former `_projects/n8n/workflow-templates/` module mixed sanitizer scripts, import/export sync helpers, workflow-template JSON, and workflow-sync published surfaces. It is now reshaped as `_projects/n8n/workflow-toolkit/` with project id `n8n.workflow-toolkit`.

@@ -888,18 +888,35 @@ test('curated JSON pack outputs match deterministic source formatting', () => {
   }
 });
 
-test('third-party UI UX project remains a linked special case', () => {
+test('third-party UI UX project owns skill surfaces and leaves MCP linked', () => {
   const manifests = manifestsById();
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'curated_output_for_ai')), false);
+  assert.equal(
+    manifestOutput(manifests.get('design.ui-ux-pro-max'), 'mcp/projects/ui-ux-pro-max.md')?.kind,
+    'linked',
+    'mcp/projects/ui-ux-pro-max.md'
+  );
+  for (const [outputPath, sourcePath] of [
+    ['skills/ui-ux-secure-frontend-design/SKILL.md', '_main/skill/SKILL.md'],
+    ['skills/ui-ux-secure-frontend-design/README.md', '_main/skill/README.md'],
+    ['skills/ui-ux-secure-frontend-design/agents/openai.yaml', '_main/skill/agents/openai.yaml'],
+    ['skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md', '_main/skill/references/project/ui-ux-pro-max.md'],
+    ['skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md', '_main/skill/tools/design-system-generator/README.md'],
+    ['skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md', '_main/skill/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md'],
+    ['skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json', '_main/skill/packs/design-system-generator/pack.json'],
+    ['skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/pack.json', '_main/skill/packs/frontend-design-skill/pack.json']
+  ]) {
+    const output = manifestOutput(manifests.get('design.ui-ux-pro-max'), outputPath);
+    assert.equal(output?.kind, 'copy', outputPath);
+    assert.equal(output?.source, sourcePath, outputPath);
+  }
   for (const outputPath of [
     'skills/ui-ux-secure-frontend-design/SKILL.md',
-    'mcp/projects/ui-ux-pro-max.md',
     'skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md',
     'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md',
-    'skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
-    'skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json'
+    'skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md'
   ]) {
-    assert.equal(manifestOutput(manifests.get('design.ui-ux-pro-max'), outputPath)?.kind, 'linked', outputPath);
+    assert.match(fs.readFileSync(path.join(repoRoot, outputPath), 'utf8'), /Generated from toolkit project source/, outputPath);
   }
 });
 

@@ -1,0 +1,43 @@
+{
+  "id": "frontend-design-skill",
+  "title": "Frontend Design Skill",
+  "description": "Instruction-only secure UI/UX frontend design skill.",
+  "status": "ready",
+  "risk_level": "low",
+  "source_refs": [
+    "skills/ui-ux-secure-frontend-design/",
+    "nextlevelbuilder/ui-ux-pro-max-skill:inspiration-only"
+  ],
+  "suitable_for": [
+    "Codex",
+    "Claude Code",
+    "ChatGPT web",
+    "Claude web"
+  ],
+  "installs": [
+    "skills/ui-ux-secure-frontend-design/"
+  ],
+  "writes_allowed": [
+    "agent skills folder selected by the user"
+  ],
+  "writes_denied": [
+    ".env*",
+    ".n8n-local/**",
+    ".tmp/**",
+    "node_modules/**",
+    "dist/**",
+    "_dist/**",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*credential*",
+    "*.zip",
+    "*.tgz"
+  ],
+  "requires_approval": true,
+  "run_commands": false,
+  "notes": [
+    "Instruction-only. No scripts or dependencies are installed."
+  ]
+}

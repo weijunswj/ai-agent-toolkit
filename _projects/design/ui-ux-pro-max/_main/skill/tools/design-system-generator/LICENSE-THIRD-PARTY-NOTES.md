@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md
-Update the project source and run sync.
--->
 # Third-Party Notes
 
 This optional local-only tool includes a safe subset adapted from:
