@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: knowledge.knowledge-index-updater
-Source: _projects/knowledge/knowledge-index-updater/curated_output_for_ai/skills/knowledge-index-updater/README.md
-Update the curated output and run sync.
--->
 # Knowledge Index Updater
 
 This skill maintains a clean Notion Knowledge Index backed by Notion pages and GitHub repos.

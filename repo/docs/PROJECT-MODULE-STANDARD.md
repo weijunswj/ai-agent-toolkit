@@ -125,6 +125,8 @@ The sync script never uses AI, never summarises, never executes project scripts,
 
 Each project module has a `SOURCE-LOCK.json` file. Exact-copy entries pin the expected Git blob SHA for preserved files. Adapted or excluded entries must say so explicitly with notes. AI-facing helper/tool surfaces may also be listed with `root_surface_path` when they intentionally mirror or adapt upstream material.
 
+`source_path` must point to a real path in the pinned upstream source. For retired same-repo migrations from former root published surfaces, `skills/**` or `mcp/**` may be the real pinned source path. Do not invent placeholder source paths for newly authored provenance notes; document those notes in `SOURCE-MANIFEST.md` instead.
+
 Each lock also declares source lifecycle metadata:
 
 - `source_lifecycle`: `active` or `retired_after_migration`.

@@ -1,0 +1,11 @@
+interface:
+  display_name: Windows Localhost Workflows
+  short_description: Start and debug localhost workflows on Windows.
+  primary_color: '#2563EB'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: true

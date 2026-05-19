@@ -19,11 +19,13 @@ const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT ||
 const allowedSourceLifecycles = new Set(['active', 'retired_after_migration']);
 const allowedSourceRoles = new Set(['migration_provenance_only', 'third_party_attribution_source']);
 const allowedSourceUpdatePolicies = new Set(['none', 'manual_review_required']);
-// These prefixes are reserved toolkit-local namespaces.
-// SOURCE-LOCK source_path values must describe upstream repo paths,
-// not toolkit-local layout paths. Upstream sources using these
-// prefixes should be rejected or normalised through a reviewed migration.
-const toolkitLocalSourcePathPrefixes = ['_projects/', 'skills/', 'mcp/', 'repo/'];
+// These prefixes are reserved toolkit-local source/maintenance namespaces.
+// SOURCE-LOCK source_path values must usually describe upstream repo paths,
+// not toolkit-local layout paths. A narrow exception exists for retired
+// same-repo migrations from former root published surfaces, where skills/
+// or mcp/ is the real pinned upstream path.
+const toolkitLocalSourcePathPrefixes = ['_projects/', 'repo/'];
+const sameRepoRootSurfaceSourcePathPrefixes = ['skills/', 'mcp/'];
 const rootSurfacePathPrefixes = ['skills/', 'mcp/'];
 
 function slash(value) {
@@ -108,9 +110,20 @@ function validateLifecycleMetadata(lock, relPath, errors) {
   }
 }
 
-function validateSourcePathProvenance(file, relPath, label, errors) {
+function isSameRepoRetiredRootSurfaceSource(lock, normalizedSourcePath) {
+  return lock.source_repo === 'weijunswj/ai-agent-toolkit' &&
+    lock.source_lifecycle === 'retired_after_migration' &&
+    sameRepoRootSurfaceSourcePathPrefixes.some((prefix) => normalizedSourcePath.startsWith(prefix));
+}
+
+function validateSourcePathProvenance(lock, file, relPath, label, errors) {
   if (!file.source_path) return;
   const normalized = String(file.source_path).replace(/\\/g, '/');
+  if (sameRepoRootSurfaceSourcePathPrefixes.some((prefix) => normalized === prefix.slice(0, -1) || normalized.startsWith(prefix))) {
+    if (isSameRepoRetiredRootSurfaceSource(lock, normalized)) return;
+    errors.push(`${relPath} root-surface source_path is allowed only for retired same-repo migrations: ${label} uses ${file.source_path}`);
+    return;
+  }
   for (const prefix of toolkitLocalSourcePathPrefixes) {
     if (normalized === prefix.slice(0, -1) || normalized.startsWith(prefix)) {
       errors.push(`${relPath} source_path must stay upstream-provenance, not toolkit-local: ${label} uses ${file.source_path}`);
@@ -177,7 +190,7 @@ function validateLock(lock, relPath, errors) {
     const localPath = file.project_path || file.root_surface_path;
     const label = localPath || file.source_path || '<unknown>';
     if (!file.source_path) errors.push(`${relPath} entry missing source_path: ${label}`);
-    validateSourcePathProvenance(file, relPath, label, errors);
+    validateSourcePathProvenance(lock, file, relPath, label, errors);
     validateLocalPathTopology(file, relPath, label, errors);
     if (file.project_path && file.root_surface_path) errors.push(`${relPath} entry must not set both project_path and root_surface_path: ${label}`);
 

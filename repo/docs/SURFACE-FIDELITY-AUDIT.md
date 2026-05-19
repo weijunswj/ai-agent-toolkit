@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Branch: `codex/surface-fidelity-audit`
-Latest update: 2026-05-19 (`codex/reshape-n8n-workflow-toolkit`)
+Latest update: 2026-05-19 (`codex/declare-standalone-knowledge-localhost-skills`)
 
 ## Executive summary
 
@@ -12,12 +12,12 @@ The confirmed Secure CI/CD prompt truncation was real. Before this PR, `skills/s
 
 The current audit finds:
 
-- 5 project modules under `_projects/`.
-- 7 current skill folders.
+- 7 project modules under `_projects/`.
+- 8 current skill folders.
 - 25 tracked files under `mcp/`.
-- 160 tracked published-surface files under `skills/` and `mcp/`.
-- 143 expanded declared/generated project outputs after the n8n workflow toolkit reshape.
-- 44 tracked published-surface files still manually present and not declared by project sync recipes.
+- 187 tracked published-surface files under `skills/` and `mcp/`.
+- 150 expanded declared/generated project outputs after the standalone skill declaration pass.
+- 37 tracked published-surface files still manually present and not declared by project sync recipes.
 - 14 files covered by a pack install path but still not individually declared by project sync recipes.
 - 0 unresolved cross-owned outputs.
 - 0 declared shared-surface outputs.
@@ -25,7 +25,29 @@ The current audit finds:
 - 0 suspicious source/output size findings.
 - 0 exact duplicate-content groups across `_projects`, excluding generated previews and the explicit retired Secure CI/CD n8n helper provenance copies now owned by `n8n.workflow-toolkit`.
 
-The highest remaining risks are now manual MCP registry/spec surfaces and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue, Secure CI/CD remaining template declaration issue, n8n sync helper shared-surface ownership issue, and n8n workflow-sync pack-installed reference declaration issue have been addressed.
+The highest remaining risks are now manual MCP registry/spec surfaces and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue, Secure CI/CD remaining template declaration issue, n8n sync helper shared-surface ownership issue, n8n workflow-sync pack-installed reference issue, and standalone knowledge/localhost skill ownership issue have been addressed.
+
+## Standalone Skill Declaration Pass
+
+The former orphan root skill folders are now owned by focused project modules:
+
+- `_projects/knowledge/knowledge-index-updater/` owns `skills/knowledge-index-updater/`.
+- `_projects/dev/windows-localhost-workflows/` owns `skills/windows-localhost-workflows/`.
+
+The existing skill entrypoints and platform metadata were moved into project-owned curated source and regenerated into the published `skills/` folders. The previous detailed Knowledge Index README is preserved under `_projects/knowledge/knowledge-index-updater/_main/standalone-skill-readme.md`, while the generated published README is now a concise install/use index because the full workflow remains in `SKILL.md`.
+
+Audit baseline movement from the previous baseline:
+
+- `projects`: 5 to 7.
+- `publishedFiles`: 160 to 187 after refreshing the baseline against the current tracked `skills/` and `mcp/` files.
+- `declaredOutputFiles`: 143 to 150.
+- `undeclaredPublishedFiles`: 44 to 37.
+- `boundaryRecipeOutputs`: 143 to 150.
+- `crossOwnedOutputs`, `sharedSurfaceOutputs`, `sharedSurfaceMetadataFindings`, `suspiciousPublishedSurfaces`, `duplicateProjectContentGroups`, `boundaryRecipeFindings`, and `curatedDirectoryFindings`: stayed 0.
+
+Remaining follow-up actions:
+
+- None for `knowledge-index-updater` or `windows-localhost-workflows`.
 
 ## n8n Workflow Toolkit Reshape
 
@@ -71,13 +93,14 @@ This audit now classifies every expanded `toolkit.project.json` output recipe ag
 
 Summary counts from `npm run audit:surfaces:check`:
 
-- 143 expanded recipe outputs classified.
+- 150 expanded recipe outputs classified.
 - 83 `main_full_fidelity` outputs.
-- 9 `curated_index` outputs, including short reviewed overviews/safety wrappers.
+- 3 `curated_agent_metadata` outputs.
+- 11 `curated_index` outputs, including short reviewed overviews/safety wrappers.
 - 4 `curated_metadata` outputs.
 - 1 `curated_pack_readme` output.
 - 7 `curated_reference` outputs.
-- 5 `curated_router` outputs.
+- 7 `curated_router` outputs.
 - 15 `curated_shim` outputs.
 - 3 `curated_spec` outputs.
 - 2 `curated_template` outputs.
@@ -254,7 +277,9 @@ The skill router now points agents to local skill-folder references for runtime 
 Project modules:
 
 - `_projects/cicd/secure-installer`
+- `_projects/dev/windows-localhost-workflows`
 - `_projects/design/ui-ux-pro-max`
+- `_projects/knowledge/knowledge-index-updater`
 - `_projects/meta/context-preserving-ai-publisher`
 - `_projects/n8n/local-setup`
 - `_projects/n8n/workflow-toolkit`
@@ -293,6 +318,8 @@ Declared full-fidelity or deterministic generated surfaces include:
 - `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/*`, via exact copy from workflow-toolkit `_main`.
 - `skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json`, via JSON recipe from workflow-toolkit `_main`.
 - `skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/*` and `data/**`, via exact copy recipes from the preserved local-only subset.
+- `skills/knowledge-index-updater/SKILL.md`, `README.md`, and `agents/**`, via curated recipes from the knowledge module.
+- `skills/windows-localhost-workflows/SKILL.md`, `README.md`, and `agents/**`, via curated recipes from the dev module.
 
 Summary or reviewed-entrypoint surfaces include:
 
@@ -418,13 +445,12 @@ Follow-up PR: declare the manual UI/UX instruction surfaces as linked with expli
 
 ## Undeclared published files
 
-After the n8n workflow toolkit reshape, 44 tracked `skills/` or `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
+After the standalone skill declaration pass, 37 tracked `skills/` or `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
 
 Major groups:
 
 - MCP repo-level/spec surfaces: `mcp/README.md`, `mcp/installer-mcp/**`, `mcp/registry-mcp/**`, `mcp/references/**`.
 - Manual registries: `mcp/registry/consumers.registry.json`, `packs.registry.json`, `playbooks.registry.json`, `skills.registry.json`, `source-repos.registry.json`, `templates.registry.json`, `tools.registry.json`.
-- Skills with no `_projects` module: `skills/knowledge-index-updater/**`, `skills/windows-localhost-workflows/**`.
 - n8n local setup remaining manual indexes: pack READMEs and `templates/agent-rules/README.md`. Required runtime references are now recipe-declared.
 - UI/UX manual surfaces: skill README/install/license files, examples, instruction references, frontend-design pack, pack READMEs, OpenAI agent metadata, and generator tests.
 
@@ -496,7 +522,7 @@ For retired internal sources, no routine old-repo dependency is needed; `SOURCE-
 
 4. Which surfaces currently rely on manually maintained files?
 
-Manual surfaces include the 44 undeclared files listed by group above, plus linked outputs by design. The largest manual buckets are registry/spec MCP docs, `knowledge-index-updater`, `windows-localhost-workflows`, and UI/UX instruction references.
+Manual surfaces include the 37 undeclared files listed by group above, plus linked outputs by design. The largest manual buckets are registry/spec MCP docs and UI/UX instruction references.
 
 5. Which current generated outputs should be replaced by exact source extraction?
 
@@ -523,6 +549,7 @@ Completed fixes:
 - Rehome n8n sanitizer and import/export sync helpers under `n8n.workflow-toolkit`.
 - Split the former workflow-sync published surface into `skills/n8n-workflow-helper-scripts/` and `skills/n8n-workflow-templates/`.
 - Remove the obsolete `skills/n8n-workflow-sync/` generated surface and pack.
+- Declare `skills/knowledge-index-updater/` and `skills/windows-localhost-workflows/` as project-owned generated skill surfaces.
 
 Recommended follow-up fixes:
 

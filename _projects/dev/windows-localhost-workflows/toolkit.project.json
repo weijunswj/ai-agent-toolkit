@@ -1,0 +1,71 @@
+{
+  "id": "dev.windows-localhost-workflows",
+  "category": "dev",
+  "name": "windows-localhost-workflows",
+  "title": "Windows Localhost Workflows",
+  "module_path": "_projects/dev/windows-localhost-workflows",
+  "main_path": "_projects/dev/windows-localhost-workflows/_main",
+  "outputs": [
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/windows-localhost-workflows/SKILL.md",
+      "output": "skills/windows-localhost-workflows/SKILL.md",
+      "notes": "Published skill generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/windows-localhost-workflows/README.md",
+      "output": "skills/windows-localhost-workflows/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/agents/openai.yaml",
+      "output": "skills/windows-localhost-workflows/agents/openai.yaml",
+      "notes": "OpenAI platform metadata generated from project-owned curated AI output.",
+      "fidelity": "generated_metadata"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/windows-localhost-workflows/SKILL.md",
+      "skills/windows-localhost-workflows/README.md",
+      "skills/windows-localhost-workflows/agents/openai.yaml",
+      "mcp/registry/projects.registry.json"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "Windows Localhost Workflows",
+    "category": "dev",
+    "summary": "Reusable AI skill for starting, verifying, and troubleshooting localhost development workflows on Windows."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/windows-localhost-workflows",
+      "summary": "Helps agents find the correct local launch command, handle Windows startup failures, and verify localhost services with logs and HTTP checks."
+    },
+    "mcp": {
+      "status": "not_applicable",
+      "summary": "No MCP surface is published for this standalone skill."
+    }
+  }
+}
