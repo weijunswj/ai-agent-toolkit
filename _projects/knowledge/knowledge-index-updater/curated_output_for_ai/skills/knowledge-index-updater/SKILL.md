@@ -3,12 +3,6 @@ name: knowledge-index-updater
 description: update, clean, and maintain a personal notion knowledge index that consolidates notion pages, github repositories, guides, references, and portfolio items. use when the user asks to create or update a one-stop shop, merge notion and github duplicates, use notion key and github key url columns as clickable identity fields, categorise entries, generate short descriptions, create the default grouped category view, schedule daily checks, or mark missing/stale knowledge items without deleting them. supports chatgpt, codex, claude, and claude code where those platforms expose compatible skill loading and required connectors.
 ---
 
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: knowledge.knowledge-index-updater
-Source: _projects/knowledge/knowledge-index-updater/curated_output_for_ai/skills/knowledge-index-updater/SKILL.md
-Update the curated output and run sync.
--->
 # Knowledge Index Updater
 
 ## Overview

@@ -3,12 +3,6 @@ name: windows-localhost-workflows
 description: start, relaunch, verify, and troubleshoot localhost development workflows on windows. use when an ai coding agent needs to get a local web app, api server, or development service running on localhost, verify it with logs and an http health check, or debug windows startup failures involving powershell scripts, execution policy, corepack, package managers, spawn eperm, port conflicts, detached background launch, or empty log files. supports chatgpt, codex, claude, and claude code where shell access is available.
 ---
 
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: dev.windows-localhost-workflows
-Source: _projects/dev/windows-localhost-workflows/curated_output_for_ai/skills/windows-localhost-workflows/SKILL.md
-Update the curated output and run sync.
--->
 # Windows Localhost Workflows
 
 ## Overview

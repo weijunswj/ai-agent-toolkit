@@ -76,6 +76,67 @@
     ]
   },
   {
+    "id": "dev.windows-localhost-workflows",
+    "category": "dev",
+    "name": "windows-localhost-workflows",
+    "title": "Windows Localhost Workflows",
+    "project": {
+      "name": "Windows Localhost Workflows",
+      "category": "dev",
+      "summary": "Reusable AI skill for starting, verifying, and troubleshooting localhost development workflows on Windows."
+    },
+    "surface": {
+      "publish_as": "skill",
+      "skill": {
+        "status": "published",
+        "path": "skills/windows-localhost-workflows",
+        "summary": "Helps agents find the correct local launch command, handle Windows startup failures, and verify localhost services with logs and HTTP checks."
+      },
+      "mcp": {
+        "status": "not_applicable",
+        "summary": "No MCP surface is published for this standalone skill."
+      }
+    },
+    "module_path": "_projects/dev/windows-localhost-workflows",
+    "main_path": "_projects/dev/windows-localhost-workflows/_main",
+    "root_surfaces": [
+      "skills/windows-localhost-workflows/README.md",
+      "skills/windows-localhost-workflows/SKILL.md",
+      "skills/windows-localhost-workflows/agents/openai.yaml"
+    ]
+  },
+  {
+    "id": "knowledge.knowledge-index-updater",
+    "category": "knowledge",
+    "name": "knowledge-index-updater",
+    "title": "Knowledge Index Updater",
+    "project": {
+      "name": "Knowledge Index Updater",
+      "category": "knowledge",
+      "summary": "Reusable AI skill for maintaining a lightweight Notion Knowledge Index backed by Notion and GitHub source keys."
+    },
+    "surface": {
+      "publish_as": "skill",
+      "skill": {
+        "status": "published",
+        "path": "skills/knowledge-index-updater",
+        "summary": "Helps agents create, update, de-duplicate, and schedule checks for a Notion Knowledge Index using Notion and GitHub identity keys."
+      },
+      "mcp": {
+        "status": "not_applicable",
+        "summary": "No MCP surface is published for this standalone skill."
+      }
+    },
+    "module_path": "_projects/knowledge/knowledge-index-updater",
+    "main_path": "_projects/knowledge/knowledge-index-updater/_main",
+    "root_surfaces": [
+      "skills/knowledge-index-updater/README.md",
+      "skills/knowledge-index-updater/SKILL.md",
+      "skills/knowledge-index-updater/agents/claude.md",
+      "skills/knowledge-index-updater/agents/openai.yaml"
+    ]
+  },
+  {
     "id": "meta.context-preserving-ai-publisher",
     "category": "meta",
     "name": "context-preserving-ai-publisher",

@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: knowledge.knowledge-index-updater
-Source: _projects/knowledge/knowledge-index-updater/curated_output_for_ai/agents/claude.md
-Update the curated output and run sync.
--->
 # Claude Notes
 
 Copy the whole `knowledge-index-updater` skill folder into the Claude skills location supported by the target account or workspace.

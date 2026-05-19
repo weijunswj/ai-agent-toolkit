@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: dev.windows-localhost-workflows
-Source: _projects/dev/windows-localhost-workflows/curated_output_for_ai/skills/windows-localhost-workflows/README.md
-Update the curated output and run sync.
--->
 # Windows Localhost Workflows
 
 This skill helps an AI coding agent start, relaunch, verify, and troubleshoot localhost development apps on Windows.

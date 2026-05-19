@@ -1,0 +1,18 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "codex/reshape-n8n-workflow-toolkit",
+  "source_commit": "bba29eb2dc1b46400a82fa5c7009457ba3cfcac3",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party standalone skill material adopted into a project module. Curated AI-facing files mirror the former root-level skill surface and are not watched as an external upstream.",
+  "files": [
+    {
+      "mode": "adapted",
+      "source_path": "standalone-skills/windows-localhost-workflows/source-provenance.md",
+      "project_path": "_projects/dev/windows-localhost-workflows/_main/source-provenance.md",
+      "notes": "Provenance note authored for this module during migration from an undeclared root-level skill surface."
+    }
+  ]
+}

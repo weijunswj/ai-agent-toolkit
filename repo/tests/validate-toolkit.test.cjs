@@ -139,12 +139,14 @@ test('skill discovery includes migrated skills', () => {
   }
 });
 
-test('project registry includes the initial project modules', () => {
+test('project registry includes the project modules', () => {
   const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'projects.registry.json'), 'utf8'));
   const ids = registry.map((entry) => entry.id).sort();
   assert.deepEqual(ids, [
     'cicd.secure-installer',
     'design.ui-ux-pro-max',
+    'dev.windows-localhost-workflows',
+    'knowledge.knowledge-index-updater',
     'meta.context-preserving-ai-publisher',
     'n8n.local-setup',
     'n8n.workflow-toolkit'
