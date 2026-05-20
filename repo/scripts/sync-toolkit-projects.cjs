@@ -41,11 +41,11 @@ const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
 const agentRuleProjectId = 'n8n.local-setup';
-const agentRulePartialSources = [
+const agentRuleSourcePartialSources = [
   '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md',
-  '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md',
-  'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'
+  '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
 ];
+const agentRuleSkillRoutingSource = 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md';
 const agentRuleSourceTemplates = [
   {
     source: '_main/templates/agent-rules/AGENTS.template.md',
@@ -98,6 +98,9 @@ const agentRuleSourceTemplates = [
     ]
   }
 ];
+const agentRulePublishedTemplateOutputs = new Set(agentRuleSourceTemplates.map((spec) => (
+  spec.output.replace('_projects/n8n/local-setup/_main/templates/agent-rules/', 'skills/n8n-local-setup/templates/agent-rules/')
+)));
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -363,7 +366,7 @@ function agentRuleSourceTemplateNotice() {
     '<!--',
     'Generated from toolkit project source. Do not edit directly.',
     'Project: n8n.local-setup',
-    ...agentRulePartialSources.map((relPath) => `Source: ${relPath}`),
+    ...agentRuleSourcePartialSources.map((relPath) => `Source: ${relPath}`),
     'Update the project source and run sync.',
     '-->',
     ''
@@ -401,7 +404,7 @@ function expectedAgentRuleSourceTemplate(spec) {
   }
 
   const payloadParts = [];
-  for (const source of agentRulePartialSources) {
+  for (const source of agentRuleSourcePartialSources) {
     payloadParts.push(readText(source).trimEnd());
   }
 
@@ -430,7 +433,7 @@ function validateAgentRuleSourceTemplates(errors, projects) {
   const declaredTemplates = declaredAgentRuleSourceTemplates(projects);
   if (!declaredTemplates.length) return;
 
-  for (const source of agentRulePartialSources) {
+  for (const source of agentRuleSourcePartialSources) {
     if (!fs.existsSync(resolveRel(source))) fail(errors, `Missing agent-rule partial source: ${source}`);
   }
   if (errors.length) return;
@@ -444,6 +447,24 @@ function validateAgentRuleSourceTemplates(errors, projects) {
       fail(errors, `Stale source-side agent-rule template: ${spec.output}`);
     }
   }
+}
+
+function isPublishedAgentRuleTemplate(project, output, rels) {
+  return project.id === agentRuleProjectId &&
+    output.kind === 'copy' &&
+    rels.length === 1 &&
+    agentRulePublishedTemplateOutputs.has(output.output) &&
+    agentRuleSourceTemplates.some((spec) => spec.output === rels[0]);
+}
+
+function addSkillRoutingToAgentRuleTemplate(text, outputPath) {
+  const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const closingFence = '\n````````\n';
+  if (!normalized.endsWith(closingFence)) {
+    throw new Error(`agent-rule template missing closing 8-backtick fence: ${outputPath}`);
+  }
+  const payload = readText(agentRuleSkillRoutingSource).trimEnd();
+  return `${normalized.slice(0, -closingFence.length)}\n\n${payload}${closingFence}`;
 }
 
 function addMarkdownNotice(text, project, relPaths) {
@@ -490,6 +511,9 @@ function expectedTextOutput(project, output, rels) {
   }
 
   const raw = readText(rels[0]);
+  if (isPublishedAgentRuleTemplate(project, output, rels)) {
+    return addMarkdownNotice(addSkillRoutingToAgentRuleTemplate(raw, output.output), project, [rels[0], agentRuleSkillRoutingSource]);
+  }
   if (output.kind === 'json' || path.extname(output.output).toLowerCase() === '.json') {
     return JSON.stringify(JSON.parse(raw), null, 2) + '\n';
   }
@@ -624,6 +648,9 @@ function validateAndSync() {
   const projects = projectFiles.map((file) => validateProjectShape(errors, file)).filter(Boolean);
   if (errors.length) return { errors, projects, expanded: [] };
 
+  validateAgentRuleSourceTemplates(errors, projects);
+  if (errors.length) return { errors, projects, expanded: [] };
+
   const linked = linkedOutputSet(projects);
   const expanded = [];
   for (const project of projects) {
@@ -635,9 +662,6 @@ function validateAndSync() {
       }
     }
   }
-  if (errors.length) return { errors, projects, expanded };
-
-  validateAgentRuleSourceTemplates(errors, projects);
   if (errors.length) return { errors, projects, expanded };
 
   syncExpanded(expanded, errors);

@@ -3,7 +3,6 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $TemplatesDir = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\agent-rules'
 $ProjectMainPartialsDir = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials'
-$ToolkitPartialsDir = Join-Path $RepoRoot 'skills\n8n-local-setup\templates\agent-rules\partials'
 
 $PartialSources = @(
   @{
@@ -15,11 +14,6 @@ $PartialSources = @(
     Name = 'n8n-mcp-rules.md'
     Path = Join-Path $ProjectMainPartialsDir 'n8n-mcp-rules.md'
     Rel = '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
-  },
-  @{
-    Name = 'skill-routing-rules.md'
-    Path = Join-Path $ToolkitPartialsDir 'skill-routing-rules.md'
-    Rel = 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'
   }
 )
 

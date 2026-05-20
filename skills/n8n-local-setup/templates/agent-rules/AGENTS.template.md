@@ -2,6 +2,7 @@
 Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
 Source: _projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md
+Source: skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md
 Update the project source and run sync.
 -->
 <!--
@@ -9,7 +10,6 @@ Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
 Source: _projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md
 Source: _projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md
-Source: skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md
 Update the project source and run sync.
 -->
 # AGENTS.template.md AI coding agent and n8n MCP workflow rules
