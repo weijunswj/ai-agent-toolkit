@@ -317,10 +317,11 @@ test('curated playbook recipes are not full runtime skill references', () => {
   assert.deepEqual(offenders, []);
 });
 
-test('validation workflow checks source-of-truth contract drift read-only', () => {
+test('validation workflow runs canonical full validation read-only', () => {
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'validate.yml'));
-  assert.match(workflow, /node repo\/scripts\/sync-repo-doc-contract\.cjs --check/);
+  assert.match(workflow, /^\s*run:\s+npm run validate:all\s*$/m);
   assert.doesNotMatch(workflow, /sync-repo-doc-contract\.cjs --write/);
+  assert.doesNotMatch(workflow, /^\s*node repo\/scripts\//m);
   assert.match(workflow, /^permissions:\n  contents: read$/m);
 });
 
@@ -516,7 +517,8 @@ test('auto-sync generated surfaces workflow keeps privileged preflight before ch
     ['persisted checkout credentials are forbidden', (text) => text.replace('persist-credentials: false', 'persist-credentials: true'), /must not use persisted checkout credentials/],
     ['base-sha git diff changed-file detection is forbidden', (text) => text.replace("gh api --paginate \\", 'git diff --name-only "$BASE_SHA" HEAD\n          gh api --paginate \\'), /must not compute PR changed files with git diff against the PR branch/],
     ['PR files API is required', (text) => text.replace('gh api --paginate \\', 'echo no api \\'), /must query PR changed files before checkout/],
-    ['github token is not exposed to sync or validation', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'GH_TOKEN="${{ github.token }}" node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write'), /must expose github.token only to preflight and final push steps/]
+    ['github token is not exposed to sync or validation', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'GH_TOKEN="${{ github.token }}" node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write'), /must expose github.token only to preflight and final push steps/],
+    ['should_sync gates checkout and writeback', (text) => text.replace("        if: steps.preflight.outputs.should_sync == 'true'\n        uses: actions/checkout@v4", '        uses: actions/checkout@v4'), /must skip checkout and writeback steps when preflight should_sync is false/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
@@ -559,7 +561,7 @@ test('auto-sync generated surfaces workflow blocks unsafe preflight paths', () =
     ['.github path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', 'repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for \.github/],
     ['repo scripts path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), new RegExp('missing forbidden preflight path rejection for repo/' + 'scripts')],
     ['repo tests path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/scripts/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for repo\/tests/],
-    ['_main path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for _projects\/\*\*\/_main/],
+    ['_main skip is required', (text) => text.replace('Auto-sync skipped: this PR includes _projects/**/_main/** source/provenance changes. Generated outputs must be committed by the author/Codex and verified by npm run validate:all.', 'Auto-sync did something else.'), /preflight must skip _projects\/\*\*\/_main\/\*\* PRs/],
     ['lockfile path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for package\/lockfile changes/]
   ];
 

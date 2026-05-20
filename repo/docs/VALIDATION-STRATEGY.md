@@ -4,6 +4,18 @@ Use validation in two phases: fast targeted checks while editing, then full fina
 
 Targeted validation is an iteration strategy, not a quality downgrade. Final full validation remains mandatory before reporting PR-ready completion.
 
+## Canonical Merge Gate
+
+For this repo, the canonical full validation command is:
+
+```bash
+npm run validate:all
+```
+
+The read-only PR and `main` validation workflow must call that command directly instead of duplicating a partial checklist. `validate:all` is the required merge gate.
+
+Do not run `--write` commands in the required validation workflow.
+
 ## Fast Targeted Checks
 
 Use narrow checks while actively editing so failures are easy to localise:
@@ -34,6 +46,14 @@ Run surface and audit checks after changing:
 - generated registries
 
 For generated surfaces, run sync first, then check freshness and audit movement.
+
+## Auto-Sync Is Convenience Only
+
+Generated-surface auto-sync is optional convenience writeback for narrow deterministic generated-output updates. It is not the merge gate and must not replace `npm run validate:all`.
+
+Auto-sync should skip cleanly when a PR includes `_projects/**/_main/**` source or provenance changes. In that case, the author or Codex must commit any needed generated outputs, source-lock or provenance updates, and audit baseline updates before the PR passes validation.
+
+CI should catch missed `_main` follow-up work by failing read-only validation, not by silently mutating source/provenance PRs.
 
 ## Full Final Validation
 

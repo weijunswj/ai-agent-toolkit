@@ -37,7 +37,9 @@ The JSON registries under `mcp/registry/` are the published discovery surface. G
 
 ## Guarded Generated Auto-Sync
 
-The `Auto-sync generated toolkit surfaces` workflow is only a deterministic generated-output writeback helper. Its privileged workflow definition runs from the base/default branch, then writes only to eligible same-repo PR branches targeting `main`.
+The `Auto-sync generated toolkit surfaces` workflow is only a deterministic generated-output writeback helper. It is optional convenience, not the merge gate. The required merge gate is the normal read-only validation workflow running `npm run validate:all`.
+
+The privileged workflow definition runs from the base/default branch, then writes only to eligible same-repo PR branches targeting `main`.
 
 - Fork PRs are never written to.
 - `main` is never written to.
@@ -48,7 +50,8 @@ The `Auto-sync generated toolkit surfaces` workflow is only a deterministic gene
 - The workflow only runs deterministic sync/check/validator scripts from the protected base revision. The PR checkout is treated as data and passed to those scripts through an explicit workspace target.
 - The workflow stages and snapshots generated output after sync, then rechecks the index/workspace before commit so validation cannot add files to the writeback diff.
 - The workflow pins the PR checkout to the event head SHA, refuses stale queued runs if the PR head changed, verifies the remote PR branch before pushing, and never force pushes.
-- If eligible source/routing/contract edits are mixed with forbidden workflow, maintenance-script, test, docs, package, lockfile, or preserved-source path changes, the workflow fails instead of pushing.
+- If a PR includes `_projects/**/_main/**` source/provenance changes, auto-sync skips successfully without checking out, writing, committing, or pushing. The author or Codex must commit any required generated outputs, source-lock/provenance updates, and audit baseline updates, then pass `npm run validate:all`.
+- If a writeback-eligible PR is mixed with forbidden workflow, maintenance-script, test, docs, package, lockfile, or other unsafe paths, the workflow fails instead of pushing.
 
 ## Skill-Local Packs
 

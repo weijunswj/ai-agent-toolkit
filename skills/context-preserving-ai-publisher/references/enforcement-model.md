@@ -58,9 +58,11 @@ Audits should verify that the manifest and generated surfaces stay honest. Start
 
 Use targeted validation while editing and full repo validation before final reporting. See `validation-strategy.md` for the generic cadence, and follow local repo law when it is stricter or more specific.
 
+For this toolkit repo, `npm run validate:all` is the canonical full validation command and required merge gate.
+
 ## CI Layer
 
-CI should run read-only checks for normal PRs. If the repo supports generated-output writeback, keep it narrow:
+CI should run the canonical full validation command as the read-only PR and default-branch gate. If the repo supports generated-output writeback, keep it narrow and optional:
 
 - Same-repo PR branches only.
 - Never on the default branch.
@@ -68,6 +70,7 @@ CI should run read-only checks for normal PRs. If the repo supports generated-ou
 - No live-system actions.
 - No secret exposure to PR-controlled scripts.
 - Diff checks before committing generated output.
+- Skip source/provenance `_main` PRs instead of treating auto-sync as a merge gate.
 
 ## Human Review Layer
 
