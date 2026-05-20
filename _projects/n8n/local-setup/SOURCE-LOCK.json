@@ -122,10 +122,11 @@
       "source_blob_sha": "31502fdc926cc1c4c9343945afd4dd477d1f7278"
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/partials/ai-coding-agent-execution.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md",
-      "source_blob_sha": "33361f156446e64eb501c5fbc769e5ccab478236"
+      "source_blob_sha": "33361f156446e64eb501c5fbc769e5ccab478236",
+      "notes": "Toolkit-adapted after migration to strengthen generic AI coding agent planning, validation, repair, and progress-tracking rules."
     },
     {
       "mode": "exact",

@@ -135,6 +135,16 @@ Enough direction usually includes several of:
 - A concrete patch or replacement text.
 - A clear instruction to continue an already-scoped task.
 
+When proceeding on a non-lightweight task, create a short working checklist before editing. Cover:
+
+- Goal.
+- Likely files or areas.
+- Minimal implementation steps.
+- Validation plan.
+- Known risks.
+
+Keep the checklist in the conversation or working notes. Do not create repo task files unless the repo already has a documented convention and the current task explicitly benefits from it.
+
 If a non-lightweight task has only a broad goal, create a short local plan and ask for confirmation before editing.
 
 Do not reuse confirmation from a previous user turn to authorise a new non-lightweight task.
@@ -191,7 +201,7 @@ Use this default budget:
 - Do not dump huge files into the conversation.
 - Do not run expensive commands when a cheaper targeted command answers the question.
 - Do not rerun the same failing validation unless something changed.
-- After two failed repair attempts, stop and report the blocker, evidence, and best next move.
+- After two failed repair attempts, stop. Report the blocker, evidence, and best next move. Do not keep randomly patching.
 
 Prefer deterministic checks over model guessing:
 
@@ -222,12 +232,16 @@ Before editing:
 - Inspect relevant files first.
 - Identify the smallest safe change.
 - Identify the validation command.
+- For non-lightweight work, prepare the short checklist described above before editing.
 
 During editing:
 
 - Keep the diff narrow.
 - Avoid unrelated cleanup.
 - Avoid broad rewrites unless specifically requested.
+- Prefer the simplest maintainable fix that solves the problem.
+- Fix obvious bugs discovered while working only when they are clearly inside the current task scope.
+- Do not expand into unrelated refactors, unrelated cleanup, live-system changes, or destructive actions without explicit user direction.
 - Preserve public interfaces unless the task requires changing them.
 - Add or update tests when changing contracts, parsers, validators, merge logic, repair logic, error handling, or business logic.
 - Do not weaken tests, validation, QA, guardrails, schema checks, or error handling just to make a task pass.
@@ -236,10 +250,18 @@ During editing:
 After editing:
 
 - Run relevant validation when practical.
+- Do not report a task as complete unless you have run the relevant validation successfully, inspected the relevant generated diff or output, or clearly stated why validation could not be run.
+- Before finalising a non-lightweight fix, ask internally: Is this the simplest maintainable fix? Is this over-engineered? Did I touch only what was necessary? Would this be clear to the next maintainer?
 - If validation fails, make one targeted repair and rerun the relevant validation.
-- If validation still fails after a second repair, stop and report the blocker.
+- If validation still fails after a second repair attempt, stop. Report the blocker, evidence, and best next move instead of randomly patching.
 - If validation cannot be run, state why.
 - Review the diff for unrelated changes before reporting completion.
+
+After user corrections:
+
+- If the correction reveals a reusable repo rule and the change is within scope, update the appropriate durable repo doc, partial, validation rule, or checklist.
+- Do not create generic `tasks/todo.md`, `tasks/lessons.md`, or other persistent task-management files by default.
+- If no durable repo rule should change, acknowledge the correction and apply it going forward in the current task.
 
 ## Generated files and templates
 
@@ -277,6 +299,8 @@ If validation is skipped, clearly say why.
 ## Communication style
 
 For long tasks, give short progress updates only at meaningful checkpoints.
+
+Track progress with a short checklist in the response or working notes when it helps. Do not create permanent todo or lesson files unless the repo documents that pattern and the current task explicitly benefits from it.
 
 Do not narrate every command.
 
