@@ -801,8 +801,9 @@ function workflowRunCommands(stepText) {
 
 const shellEnvAssignmentPrefix = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"\n]*"|'[^'\n]*'|[^\s#;]+)\s+)*`;
 const shellCommandStartPrefix = String.raw`^\s*(?:run:\s*)?(?:env\s+)?${shellEnvAssignmentPrefix}`;
-const npmValidateAllCommandPattern = new RegExp(`${shellCommandStartPrefix}npm(?:\\.cmd)?\\s+run\\s+validate:all\\b`, 'm');
-const packageManagerCommandPattern = new RegExp(`${shellCommandStartPrefix}(?:npm|pnpm|yarn)(?:\\.cmd)?(?:\\s|$)`, 'm');
+const packageManagerCommandPrefix = String.raw`(?:[^\s#;]+/)?`;
+const npmValidateAllCommandPattern = new RegExp(`${shellCommandStartPrefix}${packageManagerCommandPrefix}npm(?:\\.cmd)?\\s+run\\s+validate:all\\b`, 'm');
+const packageManagerCommandPattern = new RegExp(`${shellCommandStartPrefix}${packageManagerCommandPrefix}(?:npm|pnpm|yarn)(?:\\.cmd)?(?:\\s|$)`, 'm');
 
 function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const permissions = workflowPermissionLines(text) || [];
