@@ -199,6 +199,13 @@
       "fidelity": "reviewed_entrypoint"
     },
     {
+      "kind": "curated",
+      "source": "curated_output_for_ai/packs/codex-n8n-local/README.md",
+      "output": "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
+      "notes": "Skill-local pack README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
       "kind": "json",
       "source": "curated_output_for_ai/packs/codex-n8n-local/pack.json",
       "output": "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
@@ -206,11 +213,25 @@
       "fidelity": "generated_metadata"
     },
     {
+      "kind": "curated",
+      "source": "curated_output_for_ai/packs/claude-code-n8n-local/README.md",
+      "output": "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
+      "notes": "Skill-local pack README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
       "kind": "json",
       "source": "curated_output_for_ai/packs/claude-code-n8n-local/pack.json",
       "output": "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
       "notes": "Published install pack generated from project-owned curated AI output.",
       "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/templates/agent-rules/README.md",
+      "output": "skills/n8n-local-setup/templates/agent-rules/README.md",
+      "notes": "Skill-local agent-rule template index generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     }
   ],
   "writes": {
@@ -241,8 +262,11 @@
       "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/README.md",
+      "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
+      "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
+      "skills/n8n-local-setup/templates/agent-rules/README.md",
       "mcp/registry/projects.registry.json"
     ],
     "denied": [

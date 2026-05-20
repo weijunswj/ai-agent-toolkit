@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Branch: `codex/surface-fidelity-audit`
-Latest update: 2026-05-19 (`codex/declare-standalone-knowledge-localhost-skills`)
+Latest update: 2026-05-20 (`codex/declare-n8n-local-skill-surfaces`)
 
 ## Executive summary
 
@@ -15,17 +15,17 @@ The current audit finds:
 - 7 project modules under `_projects/`.
 - 8 current skill folders.
 - 25 tracked files under `mcp/`.
-- 187 tracked published-surface files under `skills/` and `mcp/`.
-- 151 expanded declared/generated project outputs after the standalone skill declaration and validation-strategy reference pass.
-- 37 tracked published-surface files still manually present and not declared by project sync recipes.
-- 14 files covered by a pack install path but still not individually declared by project sync recipes.
+- 188 tracked published-surface files under `skills/` and `mcp/`.
+- 168 expanded declared/generated project outputs after the n8n local setup skill surface declaration pass.
+- 20 tracked published-surface files still manually present and not declared by project sync recipes.
+- 0 files covered by a pack install path but still not individually declared by project sync recipes.
 - 0 unresolved cross-owned outputs.
 - 0 declared shared-surface outputs.
 - 0 shared-surface metadata findings.
 - 0 suspicious source/output size findings.
 - 0 exact duplicate-content groups across `_projects`, excluding generated previews and the explicit retired Secure CI/CD n8n helper provenance copies now owned by `n8n.workflow-toolkit`.
 
-The highest remaining risks are now manual MCP registry/spec surfaces and UI/UX manual surface provenance. The `n8n-local-setup` runtime reference portability issue, Secure CI/CD remaining template declaration issue, n8n sync helper shared-surface ownership issue, n8n workflow-sync pack-installed reference issue, and standalone knowledge/localhost skill ownership issue have been addressed.
+The remaining manual surfaces are MCP repo-level/spec files and registry files. The `n8n-local-setup` runtime reference portability issue, remaining n8n local setup skill-side indexes, Secure CI/CD remaining template declaration issue, n8n sync helper shared-surface ownership issue, n8n workflow-sync pack-installed reference issue, UI/UX skill-side ownership issue, and standalone knowledge/localhost skill ownership issue have been addressed.
 
 ## Standalone Skill Declaration Pass
 
@@ -97,6 +97,29 @@ Audit baseline movement:
 - `main_full_fidelity`: 91 to 110.
 - `publishedFiles`, `projects`, `packInstalledFiles`, `crossOwnedOutputs`, `sharedSurfaceOutputs`, `sharedSurfaceMetadataFindings`, `suspiciousPublishedSurfaces`, `duplicateProjectContentGroups`, `boundaryRecipeFindings`, and `curatedDirectoryFindings` stayed unchanged.
 
+## n8n Local Setup Skill Surface Declaration Pass
+
+The last three manually present `n8n-local-setup` skill-side files are now declared project outputs:
+
+- `skills/n8n-local-setup/packs/claude-code-n8n-local/README.md`
+- `skills/n8n-local-setup/packs/codex-n8n-local/README.md`
+- `skills/n8n-local-setup/templates/agent-rules/README.md`
+
+Their reviewed source now lives under `_projects/n8n/local-setup/curated_output_for_ai/packs/**` and `_projects/n8n/local-setup/curated_output_for_ai/templates/agent-rules/README.md`.
+
+These files are short skill-local indexes and pack READMEs, not full runtime setup guides. They therefore use curated `reviewed_entrypoint` recipes. Full local setup, upgrade, tunneling, hosting, platform, MCP config, and generated agent-rule bodies continue to publish from preserved `_main` source or exact concat/copy recipes.
+
+Audit baseline movement:
+
+- `undeclaredPublishedFiles`: 23 to 20.
+- `declaredOutputFiles`: 165 to 168.
+- `boundaryRecipeOutputs`: 165 to 168.
+- `curated_pack_readme`: 1 to 3.
+- `curated_template_index`: 7 to 8.
+- `packInstalledUndeclared`, `crossOwnedOutputs`, `sharedSurfaceOutputs`, `sharedSurfaceMetadataFindings`, `suspiciousPublishedSurfaces`, `boundaryRecipeFindings`, and `curatedDirectoryFindings`: stayed 0.
+
+The remaining 20 undeclared published files are MCP repo-level/spec and registry surfaces. This pass intentionally leaves them for a later MCP-ready registry cleanup PR.
+
 ## n8n Workflow Toolkit Reshape
 
 The former `_projects/n8n/workflow-templates/` module mixed sanitizer scripts, import/export sync helpers, workflow-template JSON, and workflow-sync published surfaces. It is now reshaped as `_projects/n8n/workflow-toolkit/` with project id `n8n.workflow-toolkit`.
@@ -141,19 +164,19 @@ This audit now classifies every expanded `toolkit.project.json` output recipe ag
 
 Summary counts from `npm run audit:surfaces:check`:
 
-- 151 expanded recipe outputs classified.
-- 91 `main_full_fidelity` outputs.
+- 168 expanded recipe outputs classified.
+- 110 `main_full_fidelity` outputs.
 - 0 `curated_agent_metadata` outputs.
 - 9 `curated_index` outputs, including short reviewed overviews/safety wrappers.
 - 4 `curated_metadata` outputs.
-- 1 `curated_pack_readme` output.
+- 3 `curated_pack_readme` outputs.
 - 7 `curated_reference` outputs.
 - 5 `curated_router` outputs.
 - 15 `curated_shim` outputs.
 - 3 `curated_spec` outputs.
 - 2 `curated_template` outputs.
-- 7 `curated_template_index` outputs.
-- 7 `linked_exception` outputs.
+- 8 `curated_template_index` outputs.
+- 2 `linked_exception` outputs.
 - 0 `suspicious_curated_runtime` outputs.
 - 0 `suspicious_main_adapter` outputs.
 - 0 curated-directory heuristic findings.
@@ -494,23 +517,21 @@ Follow-up PR: declare the manual UI/UX instruction surfaces as linked with expli
 
 ## Undeclared published files
 
-After the standalone skill declaration pass, 37 tracked `skills/` or `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
+After the n8n local setup skill surface declaration pass, 20 tracked `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
 
 Major groups:
 
 - MCP repo-level/spec surfaces: `mcp/README.md`, `mcp/installer-mcp/**`, `mcp/registry-mcp/**`, `mcp/references/**`.
 - Manual registries: `mcp/registry/consumers.registry.json`, `packs.registry.json`, `playbooks.registry.json`, `skills.registry.json`, `source-repos.registry.json`, `templates.registry.json`, `tools.registry.json`.
-- n8n local setup remaining manual indexes: pack READMEs and `templates/agent-rules/README.md`. Required runtime references are now recipe-declared.
-- UI/UX manual surfaces: skill README/install/license files, examples, instruction references, frontend-design pack, pack READMEs, OpenAI agent metadata, and generator tests.
 
 Pack-covered but undeclared files were found in these install surfaces:
 
 ```text
-skills/ui-ux-secure-frontend-design/**
+none
 ```
 
 Recommended fix:
-Create one or more follow-up PRs that either declare these as linked surfaces with reasons, or move reviewed source into `_projects/**/curated_output_for_ai/` and generate them. Do not bulk rewrite content without checking fidelity against source.
+Plan a later MCP-ready registry cleanup PR. This pass intentionally did not rename `mcp/`, change MCP registry semantics, or broaden into manual MCP surface ownership.
 
 ## Cross-project ownership issues
 

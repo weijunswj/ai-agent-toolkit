@@ -4,16 +4,16 @@
   "summary": {
     "projects": 7,
     "publishedFiles": 188,
-    "declaredOutputFiles": 165,
+    "declaredOutputFiles": 168,
     "packInstalledFiles": 74,
-    "undeclaredPublishedFiles": 23,
+    "undeclaredPublishedFiles": 20,
     "packInstalledUndeclared": 0,
     "crossOwnedOutputs": 0,
     "sharedSurfaceOutputs": 0,
     "sharedSurfaceMetadataFindings": 0,
     "suspiciousPublishedSurfaces": 0,
     "duplicateProjectContentGroups": 0,
-    "boundaryRecipeOutputs": 165,
+    "boundaryRecipeOutputs": 168,
     "boundaryRecipeFindings": 0,
     "curatedDirectoryFindings": 0
   },
@@ -38,10 +38,7 @@
       "mcp/registry/skills.registry.json",
       "mcp/registry/source-repos.registry.json",
       "mcp/registry/templates.registry.json",
-      "mcp/registry/tools.registry.json",
-      "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
-      "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
-      "skills/n8n-local-setup/templates/agent-rules/README.md"
+      "mcp/registry/tools.registry.json"
     ],
     "packInstalledUndeclared": [],
     "crossOwnedOutputs": [],
