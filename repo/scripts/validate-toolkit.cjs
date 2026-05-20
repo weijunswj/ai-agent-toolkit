@@ -928,19 +928,21 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
   const requiredPreflightPathBlocks = [
     { label: '.github', token: '.github/*' },
+    { label: 'repo/docs', token: 'repo/docs/*' },
     { label: 'repo/scripts', token: 'repo/scripts/*' },
     { label: 'repo/tests', token: 'repo/tests/*' },
     { label: '_projects/**/_main', token: '_projects/*/_main/*' },
     { label: 'package/lockfile changes', token: 'package.json|package-lock.json|pnpm-lock.yaml|yarn.lock' }
   ];
   for (const { label, token } of requiredPreflightPathBlocks) {
-    if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing forbidden preflight path rejection for ${label}`);
+    if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight skip handling for ${label}`);
   }
-  const mainSkipMessage = 'Auto-sync skipped: this PR includes _projects/**/_main/** source/provenance changes. Generated outputs must be committed by the author/Codex and verified by npm run validate:all.';
-  if (!preflightSection.includes(mainSkipMessage) ||
+  const unsafeSkipMessage = 'Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate';
+  if (!preflightSection.includes(unsafeSkipMessage) ||
+      !preflightSection.includes('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.') ||
       !preflightSection.includes('should_sync=false') ||
       !preflightSection.includes('should_sync=true')) {
-    fail(errors, `${entry.relPath} preflight must skip _projects/**/_main/** PRs and set should_sync before writeback`);
+    fail(errors, `${entry.relPath} preflight must skip unsafe maintenance/source PRs and set should_sync before writeback`);
   }
 
   if (!text.includes('Forbidden post-sync change outside generated output scope') ||
