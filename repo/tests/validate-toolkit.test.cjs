@@ -490,9 +490,12 @@ test('auto-sync generated surfaces workflow keeps static checks narrow', () => {
 
 test('auto-sync generated surfaces workflow rejects PR-controlled test execution', () => {
   const staticCheckAnchor = '/usr/bin/git -C "$PR_ROOT" diff --cached --check';
+  const preflightAnchor = '          if [[ "$HEAD_REPO_FULL_NAME" != "$REPOSITORY_FULL_NAME" ]]; then';
   const cases = [
     ['validate:all is forbidden', (text) => text.replace(staticCheckAnchor, `npm run validate:all\n          ${staticCheckAnchor}`), /must not run npm run validate:all/],
+    ['env-prefixed validate:all is forbidden', (text) => text.replace(preflightAnchor, `          GH_TOKEN=placeholder npm run validate:all\n${preflightAnchor}`), /must not run npm run validate:all/],
     ['npm command is forbidden', (text) => text.replace(staticCheckAnchor, `npm ci\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
+    ['env-prefixed npm command is forbidden', (text) => text.replace(preflightAnchor, `          NODE_ENV=test npm ci\n${preflightAnchor}`), /must not run npm, pnpm, or yarn/],
     ['pnpm command is forbidden', (text) => text.replace(staticCheckAnchor, `pnpm test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
     ['yarn command is forbidden', (text) => text.replace(staticCheckAnchor, `yarn test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
     ['node test command is forbidden', (text) => text.replace(staticCheckAnchor, `node --test repo/tests/*.test.cjs\n          ${staticCheckAnchor}`), /must not run generated Node test suites/],

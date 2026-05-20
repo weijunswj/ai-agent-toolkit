@@ -799,6 +799,11 @@ function workflowRunCommands(stepText) {
     .filter(Boolean);
 }
 
+const shellEnvAssignmentPrefix = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"\n]*"|'[^'\n]*'|[^\s#;]+)\s+)*`;
+const shellCommandStartPrefix = String.raw`^\s*(?:run:\s*)?(?:env\s+)?${shellEnvAssignmentPrefix}`;
+const npmValidateAllCommandPattern = new RegExp(`${shellCommandStartPrefix}npm(?:\\.cmd)?\\s+run\\s+validate:all\\b`, 'm');
+const packageManagerCommandPattern = new RegExp(`${shellCommandStartPrefix}(?:npm|pnpm|yarn)(?:\\.cmd)?(?:\\s|$)`, 'm');
+
 function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const permissions = workflowPermissionLines(text) || [];
   const expectedPermissions = ['contents: write', 'pull-requests: read'];
@@ -887,10 +892,10 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (/(^|\s)(?:\/usr\/bin\/)?git\s+(?!-C\s+"\$PR_ROOT")/m.test(text)) {
     fail(errors, `${entry.relPath} git commands must explicitly target the PR workspace with /usr/bin/git -C "$PR_ROOT"`);
   }
-  if (/^\s*npm\s+run\s+validate:all\b/m.test(text)) {
+  if (npmValidateAllCommandPattern.test(text)) {
     fail(errors, `${entry.relPath} must not run npm run validate:all in the privileged writeback workflow`);
   }
-  if (/^\s*(?:npm|pnpm|yarn)(?:\.cmd)?(?:\s|$)/m.test(text)) {
+  if (packageManagerCommandPattern.test(text)) {
     fail(errors, `${entry.relPath} must not run npm, pnpm, or yarn in the privileged writeback workflow`);
   }
   if (/\bnode\s+--test\b/.test(text)) {
