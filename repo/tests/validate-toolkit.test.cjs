@@ -561,13 +561,17 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
   }
 });
 
-test('auto-sync generated surfaces workflow blocks unsafe preflight paths', () => {
+test('auto-sync generated surfaces workflow skips unsafe preflight paths before writeback', () => {
   const cases = [
-    ['.github path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', 'repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for \.github/],
-    ['repo scripts path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), new RegExp('missing forbidden preflight path rejection for repo/' + 'scripts')],
-    ['repo tests path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/scripts/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for repo\/tests/],
-    ['_main skip is required', (text) => text.replace('Auto-sync skipped: this PR includes _projects/**/_main/** source/provenance changes. Generated outputs must be committed by the author/Codex and verified by npm run validate:all.', 'Auto-sync did something else.'), /preflight must skip _projects\/\*\*\/_main\/\*\* PRs/],
-    ['lockfile path guard is required', (text) => text.replace('.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '.github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|.gitignore|.gitattributes)'), /missing forbidden preflight path rejection for package\/lockfile changes/]
+    ['repo docs skip is required', (text) => text.replace('repo/docs/*|', ''), /missing unsafe preflight skip handling for repo\/docs/],
+    ['_main skip is required', (text) => text.replace('_projects/*/_main/*|', ''), /missing unsafe preflight skip handling for _projects\/\*\*\/_main/],
+    ['.github skip is required', (text) => text.replace('.github/*|', ''), /missing unsafe preflight skip handling for \.github/],
+    ['repo scripts skip is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight skip handling for repo/' + 'scripts')],
+    ['repo tests skip is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight skip handling for repo\/tests/],
+    ['lockfile skip is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight skip handling for package\/lockfile changes/],
+    ['clear skip notice is required', (text) => text.replace('Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate', 'Auto-sync did something else'), /preflight must skip unsafe maintenance\/source PRs/],
+    ['skip must rely on validate:all gate', (text) => text.replace('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.', 'Generated outputs will be checked here.'), /preflight must skip unsafe maintenance\/source PRs/],
+    ['skip must set should_sync false', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"', 'echo "should_sync=true" >> "$GITHUB_OUTPUT"'), /preflight must skip unsafe maintenance\/source PRs/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
