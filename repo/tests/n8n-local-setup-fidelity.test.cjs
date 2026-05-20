@@ -110,7 +110,7 @@ test('n8n local setup pack-installed references are declared by project recipes'
   assert.deepEqual(unresolved, []);
 });
 
-test('codex n8n local pack installs local setup link shims', () => {
+test('codex n8n local pack installs inert agent template and remaining local setup link shims', () => {
   const pack = JSON.parse(readText(repoRoot, 'skills/n8n-local-setup/packs/codex-n8n-local/pack.json'));
   for (const expectedPath of [
     'skills/n8n-local-setup/references/n8n/1. local setup.md',
@@ -118,20 +118,22 @@ test('codex n8n local pack installs local setup link shims', () => {
     'skills/n8n-local-setup/references/n8n/3a. docker compose + ngrok.md',
     'skills/n8n-local-setup/references/n8n/4. vps hosting.md',
     'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md',
-    'skills/n8n-local-setup/references/n8n/templates/AGENTS.md',
+    'skills/n8n-local-setup/references/n8n/templates/agent-rules/AGENTS.template.md',
     'skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md',
+    'skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md',
     'skills/n8n-local-setup/references/n8n/vps-hosting.md'
   ]) {
     assert.ok(pack.installs.includes(expectedPath), expectedPath);
   }
 });
 
-test('claude n8n local pack installs Claude guide link shims', () => {
+test('claude n8n local pack installs inert agent template and remaining Claude guide link shims', () => {
   const pack = JSON.parse(readText(repoRoot, 'skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json'));
   for (const expectedPath of [
     'skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md',
-    'skills/n8n-local-setup/references/ai-agent-platforms/templates/CLAUDE.md',
-    'skills/n8n-local-setup/references/ai-agent-platforms/templates/claude-mcp-config.md'
+    'skills/n8n-local-setup/references/ai-agent-platforms/templates/agent-rules/CLAUDE.template.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/templates/claude-mcp-config.md',
+    'skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md'
   ]) {
     assert.ok(pack.installs.includes(expectedPath), expectedPath);
   }

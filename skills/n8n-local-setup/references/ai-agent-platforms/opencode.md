@@ -63,7 +63,8 @@ npx --version
 
 ### Follow the OpenCode AGENTS.md Setup guide:
 
-* [templates/AGENTS.md](./templates/AGENTS.md)
+* Copy or merge [templates/agent-rules/AGENTS.template.md](./templates/agent-rules/AGENTS.template.md) into the target repo root as `AGENTS.md`.
+* If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 ## 4. Create The Global OpenCode MCP Config
 

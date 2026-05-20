@@ -675,9 +675,10 @@ test('validator rejects network, shell, and package-install strings in design ge
 });
 
 test('generated agent-rule templates are normal Markdown, not one giant fenced block', () => {
-  for (const file of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
+  for (const file of ['AGENTS.template.md', 'CLAUDE.template.md', 'GEMINI.template.md']) {
     const text = fs.readFileSync(path.join(repoRoot, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', file), 'utf8').replace(/\r\n/g, '\n');
     assert.doesNotMatch(text, /Use this generated template[^\n]*\n\n```md\n# AI coding agent execution preferences/);
+    assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/agent-rules\/[A-Z]+\.template\.md/);
     assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials/);
     assert.match(text, /skills\/n8n-local-setup\/templates\/agent-rules\/partials\/skill-routing-rules\.md/);
     assert.doesNotMatch(text, /^- skills\/n8n-local-setup\/templates\/agent-rules\/partials/m);
@@ -701,6 +702,15 @@ test('root agent-rule partials are declared linked surfaces when present', () =>
     }
   }
   assert.equal(linkedOutputs.has('skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'), true);
+});
+
+test('validator rejects active agent instruction filenames inside skill folders', () => {
+  const cwd = tempCopy();
+  const activePath = path.join(cwd, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', 'AGENTS.md');
+  fs.writeFileSync(activePath, '# Active nested rules fixture\n');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Skill folder must use inert agent-rule template filenames: skills\/n8n-local-setup\/templates\/agent-rules\/AGENTS\.md/);
 });
 
 test('validator rejects broken relative links in non-_main Markdown files', () => {
@@ -731,13 +741,13 @@ test('validator rejects README links to absent optional folders', () => {
   assert.match(result.stderr, /links to missing path: _projects\/n8n\/local-setup\/_generated/);
 });
 
-test('changing declared _main partials makes generated agent rules stale', () => {
+test('changing assembled _main agent-rule templates makes published skill copies stale', () => {
   const cwd = tempCopy();
-  const partial = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials', 'n8n-mcp-rules.md');
-  fs.appendFileSync(partial, '\n\n<!-- drift test -->\n');
+  const template = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'agent-rules', 'AGENTS.template.md');
+  fs.appendFileSync(template, '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/agent-rules\/AGENTS\.md/);
+  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/agent-rules\/AGENTS\.template\.md/);
 });
 
 test('changing declared _main MCP config source makes root MCP config stale', () => {

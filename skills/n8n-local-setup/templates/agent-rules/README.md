@@ -12,13 +12,23 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Agent Rule Templates
 
-This folder contains generated copy-paste rules for AI coding agents.
+This folder contains generated copy-paste rule templates for AI coding agents.
+
+The files in this skill folder are intentionally inert templates. They use `.template.md` filenames so they are not mistaken for active nested repo instructions while the skill is copied or inspected.
 
 Generated files:
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- `GEMINI.md`
+- `AGENTS.template.md`
+- `CLAUDE.template.md`
+- `GEMINI.template.md`
+
+Install them only when the user explicitly wants those agent rules in a target repo:
+
+- Copy or merge `AGENTS.template.md` into the target repo root as `AGENTS.md` for Codex or OpenCode.
+- Copy or merge `CLAUDE.template.md` into the target repo root as `CLAUDE.md` for Claude Code.
+- Copy or merge `GEMINI.template.md` into the target repo root as `GEMINI.md` for Gemini CLI or Antigravity.
+
+If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 Source partials are declared in the local n8n setup project manifest:
 
@@ -26,16 +36,17 @@ Source partials are declared in the local n8n setup project manifest:
 - [_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md](/_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md)
 - [skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md](partials/skill-routing-rules.md)
 
-The preserved original project templates remain under [_projects/n8n/local-setup/_main/templates/](/_projects/n8n/local-setup/_main/templates/). They are archival source, not the AI-facing template generation source.
+The assembled source-side templates live under [_projects/n8n/local-setup/_main/templates/agent-rules/](/_projects/n8n/local-setup/_main/templates/agent-rules/). The preserved original project templates remain under [_projects/n8n/local-setup/_main/templates/](/_projects/n8n/local-setup/_main/templates/). They are archival source, not the AI-facing template generation source.
 
 Regenerate with:
 
 ```powershell
-pwsh -NoProfile -File ../../../../repo/scripts/build-agent-rule-templates.ps1
+npm run build:agent-rules
+node repo/scripts/sync-toolkit-projects.cjs --write
 ```
 
 Generated outputs must stay deterministic. Do not edit them directly.
 
 Generated outputs are normal Markdown files. They are not wrapped in a single giant code fence, because the n8n rules contain their own fenced examples.
 
-The generated-template CI workflow may auto-commit only these three generated files back to a same-repo pull request branch. It must not auto-commit on `main` or touch unrelated files.
+The generated-template CI workflow is check-only. Future narrow writeback can be added separately if it stages only the expected generated template files and preserves the normal `npm run validate:all` merge gate.

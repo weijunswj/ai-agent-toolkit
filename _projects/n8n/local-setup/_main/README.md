@@ -45,7 +45,7 @@ Important:
 ## Recommended beginner flow
 
 1. Follow [1. Local Setup](./1.%20local%20setup.md).
-2. Copy the shared AGENTS rules template from [templates/AGENTS.md](./templates/AGENTS.md).
+2. Copy or merge the shared AGENTS rules template from [templates/agent-rules/AGENTS.template.md](./templates/agent-rules/AGENTS.template.md) into the target repo root as `AGENTS.md`.
 3. Copy the Codex MCP config from [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
 4. Restart Codex.
 5. Run the smoke tests in the local setup guide.
@@ -60,10 +60,12 @@ Important:
 
 | Tool | Copy-paste path |
 | --- | --- |
-| Codex | Copy [templates/AGENTS.md](./templates/AGENTS.md), then copy [templates/codex-mcp-config.md](./templates/codex-mcp-config.md). |
-| Claude Code | Copy [templates/CLAUDE.md](./templates/CLAUDE.md), then run the commands from [templates/claude-mcp-config.md](./templates/claude-mcp-config.md). |
-| OpenCode | Copy [templates/AGENTS.md](./templates/AGENTS.md), then copy [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md). |
-| Antigravity | Copy [templates/GEMINI.md](./templates/GEMINI.md), then copy [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md). |
+| Codex | Copy or merge [templates/agent-rules/AGENTS.template.md](./templates/agent-rules/AGENTS.template.md) into the target repo root as `AGENTS.md`, then copy [templates/codex-mcp-config.md](./templates/codex-mcp-config.md). |
+| Claude Code | Copy or merge [templates/agent-rules/CLAUDE.template.md](./templates/agent-rules/CLAUDE.template.md) into the target repo root as `CLAUDE.md`, then run the commands from [templates/claude-mcp-config.md](./templates/claude-mcp-config.md). |
+| OpenCode | Copy or merge [templates/agent-rules/AGENTS.template.md](./templates/agent-rules/AGENTS.template.md) into the target repo root as `AGENTS.md`, then copy [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md). |
+| Antigravity | Copy or merge [templates/agent-rules/GEMINI.template.md](./templates/agent-rules/GEMINI.template.md) into the target repo root as `GEMINI.md`, then copy [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md). |
+
+If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 ---
 
@@ -84,23 +86,21 @@ Generated rule templates are composed like this:
 
 | Generated template | Source partials |
 | --- | --- |
-| [AGENTS.md](./templates/AGENTS.md) | `ai-coding-agent-execution.md` + `n8n-mcp-rules.md` |
-| [CLAUDE.md](./templates/CLAUDE.md) | `ai-coding-agent-execution.md` + `n8n-mcp-rules.md` |
-| [GEMINI.md](./templates/GEMINI.md) | `ai-coding-agent-execution.md` + `n8n-mcp-rules.md` |
+| [AGENTS.template.md](./templates/agent-rules/AGENTS.template.md) | `ai-coding-agent-execution.md` + `n8n-mcp-rules.md` + skill routing rules |
+| [CLAUDE.template.md](./templates/agent-rules/CLAUDE.template.md) | `ai-coding-agent-execution.md` + `n8n-mcp-rules.md` + skill routing rules |
+| [GEMINI.template.md](./templates/agent-rules/GEMINI.template.md) | `ai-coding-agent-execution.md` + `n8n-mcp-rules.md` + skill routing rules |
+To regenerate locally from the toolkit repo root, run `npm run build:agent-rules`, then `node repo/scripts/sync-toolkit-projects.cjs --write`.
 
-To regenerate locally, run [scripts/build-templates.ps1](./scripts/build-templates.ps1) or [scripts/- build-templates.cmd](./scripts/-%20build-templates.cmd).
-
-GitHub Actions is also set up to regenerate rule templates automatically on PR branches when source partials or the template generator change.
-
+GitHub Actions is also set up to regenerate rule templates and check the expected generated files on PR branches when source partials or the template generator change. It is check-only.
 | Template | Use when |
 | --- | --- |
 | [Codex MCP config](./templates/codex-mcp-config.md) | You want Codex to connect to `n8n_docs` and `n8n_live`. |
-| [AGENTS rules](./templates/AGENTS.md) | You want AI coding-agent execution rules and n8n MCP workflow rules for Codex or OpenCode. |
+| [AGENTS rules template](./templates/agent-rules/AGENTS.template.md) | You want AI coding-agent execution rules and n8n MCP workflow rules for Codex or OpenCode. Copy or merge it into the target repo root as `AGENTS.md`. |
 | [Claude MCP config](./templates/claude-mcp-config.md) | You want Claude Code to connect to `n8n_docs` and `n8n_live`. |
-| [CLAUDE rules](./templates/CLAUDE.md) | You want AI coding-agent execution rules and n8n MCP workflow rules for Claude Code. |
+| [CLAUDE rules template](./templates/agent-rules/CLAUDE.template.md) | You want AI coding-agent execution rules and n8n MCP workflow rules for Claude Code. Copy or merge it into the target repo root as `CLAUDE.md`. |
 | [OpenCode MCP config](./templates/opencode-mcp-config.md) | You want OpenCode to connect to `n8n_docs` and approval-gated `n8n_live`. |
 | [Antigravity MCP config](./templates/antigravity-mcp-config.md) | You want Antigravity to connect to `n8n_docs` and `n8n_live`. |
-| [GEMINI rules](./templates/GEMINI.md) | You want AI coding-agent execution rules and n8n MCP workflow rules for Antigravity or Gemini CLI. |
+| [GEMINI rules template](./templates/agent-rules/GEMINI.template.md) | You want AI coding-agent execution rules and n8n MCP workflow rules for Antigravity or Gemini CLI. Copy or merge it into the target repo root as `GEMINI.md`. |
 
 ## Scripts
 
@@ -108,8 +108,7 @@ GitHub Actions is also set up to regenerate rule templates automatically on PR b
 | --- | --- |
 | [start-n8n-ngrok.bat](./scripts/windows/start-n8n-ngrok.bat) | You want the simplest local n8n with a temporary public ngrok URL for webhook testing. |
 | `start-n8n-compose-ngrok.bat` from [3a. Docker Compose + ngrok](./3a.%20docker%20compose%20%2B%20ngrok.md) | You want n8n managed by Docker Compose while still auto-reading the ngrok URL. |
-| [build-templates.ps1](./scripts/build-templates.ps1) | You changed template partials and want to regenerate `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`. |
-| [- build-templates.cmd](./scripts/-%20build-templates.cmd) | You want a double-clickable CMD wrapper for the template generator. |
+| `npm run build:agent-rules` | You changed template partials and want to regenerate `AGENTS.template.md`, `CLAUDE.template.md`, and `GEMINI.template.md`. |
 
 The normal ngrok script:
 
@@ -141,7 +140,7 @@ There is intentionally no separate local upgrade script. The local PowerShell bl
 If you are lazy and just want the safest normal path:
 
 1. Open [1. Local Setup](./1.%20local%20setup.md).
-2. Use [templates/AGENTS.md](./templates/AGENTS.md).
+2. Copy or merge [templates/agent-rules/AGENTS.template.md](./templates/agent-rules/AGENTS.template.md) into the target repo root as `AGENTS.md`.
 3. Use [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
 4. Ignore Claude Code, OpenCode, and Antigravity until Codex works.
 5. Ignore tunnelling until you actually need external webhooks.

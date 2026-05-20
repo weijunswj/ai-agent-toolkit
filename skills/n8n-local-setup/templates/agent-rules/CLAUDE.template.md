@@ -1,14 +1,24 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
+Source: _projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md
+Update the project source and run sync.
+-->
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: n8n.local-setup
 Source: _projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md
 Source: _projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md
 Source: skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md
 Update the project source and run sync.
 -->
-# CLAUDE.md AI Coding Agent Rules
+# CLAUDE.md AI Coding Agent Rules Template
 
 Use this generated template for Claude Code.
+
+This template is inert while it keeps the `.template.md` filename. Copy or merge it into a target repo root as `CLAUDE.md` only when the user explicitly wants those agent rules installed.
+
+If the target repo already has `CLAUDE.md`, do not overwrite it. Produce a merge/diff plan instead.
 
 # AI coding agent execution preferences
 

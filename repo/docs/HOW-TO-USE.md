@@ -49,14 +49,14 @@ For Codex or Claude Code, copy the whole skill folder into that tool's supported
 
 Templates are published material. Review them before copying into a consumer repo, and follow generated notices back to `_main/` or `curated_output_for_ai/` when editing toolkit-owned sources.
 
-- [Agent rule templates](../../skills/n8n-local-setup/templates/agent-rules/) contain generated `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` outputs.
+- [Agent rule templates](../../skills/n8n-local-setup/templates/agent-rules/) contain generated inert `AGENTS.template.md`, `CLAUDE.template.md`, and `GEMINI.template.md` outputs.
 - [MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) contain MCP setup examples.
 - [n8n import/export sync helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/) contain n8n import/export, validation, compare, prepare, and sync helper templates.
 - [n8n sanitizer helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/) contain sanitizer tooling.
 - [n8n workflow templates](../../skills/n8n-workflow-templates/templates/) contain public generic inactive workflow JSON templates.
 - [CI/CD templates](../../skills/secure-cicd-installer/templates/cicd/) contain CI/CD installer prompts and status templates.
 
-Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/-%20build-agent-rule-templates.cmd) regenerate only the three agent-rule files under [agent-rule templates](../../skills/n8n-local-setup/templates/agent-rules/).
+Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/-%20build-agent-rule-templates.cmd) regenerate the three source-side assembled agent-rule templates under `_projects/n8n/local-setup/_main/templates/agent-rules/`; toolkit sync publishes inert skill copies under [agent-rule templates](../../skills/n8n-local-setup/templates/agent-rules/).
 
 n8n helper templates may write scoped local outputs after they are copied into a reviewed consumer repo: `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders. Keep those local folders ignored.
 
@@ -76,7 +76,7 @@ Until the installer MCP exists, use packs as review checklists:
 Use:
 
 - [Codex reference](../../skills/n8n-local-setup/references/ai-agent-platforms/codex.md)
-- [Codex agent rules](../../skills/n8n-local-setup/templates/agent-rules/AGENTS.md)
+- [Codex agent rules template](../../skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md)
 - [Codex MCP config](../../skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md)
 - [Local n8n setup source module](../../_projects/n8n/local-setup/)
 
@@ -87,7 +87,7 @@ Keep live n8n tokens in user environment variables, not repo files.
 Use:
 
 - [Claude Code reference](../../skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md)
-- [Claude Code agent rules](../../skills/n8n-local-setup/templates/agent-rules/CLAUDE.md)
+- [Claude Code agent rules template](../../skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md)
 - [Claude Code MCP config](../../skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md)
 - [Claude Code source guide](../../_projects/n8n/local-setup/_main/5.%20extra%20-%20claude%20code%20integration.md)
 

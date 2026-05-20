@@ -126,39 +126,24 @@
       "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "concat",
-      "sources": [
-        "_main/templates/partials/ai-coding-agent-execution.md",
-        "_main/templates/partials/n8n-mcp-rules.md",
-        "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md"
-      ],
-      "output": "skills/n8n-local-setup/templates/agent-rules/AGENTS.md",
-      "title": "AGENTS.md AI Coding Agent Rules",
-      "intro": "Use this generated template for Codex or OpenCode.",
+      "kind": "copy",
+      "source": "_main/templates/agent-rules/AGENTS.template.md",
+      "output": "skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md",
+      "notes": "Inert Codex/OpenCode agent-rule template copied from the source-side assembled template.",
       "fidelity": "exact"
     },
     {
-      "kind": "concat",
-      "sources": [
-        "_main/templates/partials/ai-coding-agent-execution.md",
-        "_main/templates/partials/n8n-mcp-rules.md",
-        "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md"
-      ],
-      "output": "skills/n8n-local-setup/templates/agent-rules/CLAUDE.md",
-      "title": "CLAUDE.md AI Coding Agent Rules",
-      "intro": "Use this generated template for Claude Code.",
+      "kind": "copy",
+      "source": "_main/templates/agent-rules/CLAUDE.template.md",
+      "output": "skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md",
+      "notes": "Inert Claude Code agent-rule template copied from the source-side assembled template.",
       "fidelity": "exact"
     },
     {
-      "kind": "concat",
-      "sources": [
-        "_main/templates/partials/ai-coding-agent-execution.md",
-        "_main/templates/partials/n8n-mcp-rules.md",
-        "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md"
-      ],
-      "output": "skills/n8n-local-setup/templates/agent-rules/GEMINI.md",
-      "title": "GEMINI.md AI Coding Agent Rules",
-      "intro": "Use this generated template for Antigravity or Gemini CLI.",
+      "kind": "copy",
+      "source": "_main/templates/agent-rules/GEMINI.template.md",
+      "output": "skills/n8n-local-setup/templates/agent-rules/GEMINI.template.md",
+      "notes": "Inert Gemini/Antigravity agent-rule template copied from the source-side assembled template.",
       "fidelity": "exact"
     },
     {
@@ -253,9 +238,9 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
       "skills/n8n-local-setup/references",
-      "skills/n8n-local-setup/templates/agent-rules/AGENTS.md",
-      "skills/n8n-local-setup/templates/agent-rules/CLAUDE.md",
-      "skills/n8n-local-setup/templates/agent-rules/GEMINI.md",
+      "skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md",
+      "skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md",
+      "skills/n8n-local-setup/templates/agent-rules/GEMINI.template.md",
       "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
