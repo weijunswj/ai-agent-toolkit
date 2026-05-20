@@ -40,6 +40,7 @@ const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
 const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']);
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
+const agentRuleProjectId = 'n8n.local-setup';
 const agentRulePartialSources = [
   '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md',
   '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md',
@@ -47,18 +48,21 @@ const agentRulePartialSources = [
 ];
 const agentRuleSourceTemplates = [
   {
+    source: '_main/templates/agent-rules/AGENTS.template.md',
     output: '_projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md',
     title: 'AGENTS.md AI Coding Agent Rules Template',
     audience: 'Codex or OpenCode',
     destination: 'AGENTS.md'
   },
   {
+    source: '_main/templates/agent-rules/CLAUDE.template.md',
     output: '_projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md',
     title: 'CLAUDE.md AI Coding Agent Rules Template',
     audience: 'Claude Code',
     destination: 'CLAUDE.md'
   },
   {
+    source: '_main/templates/agent-rules/GEMINI.template.md',
     output: '_projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md',
     title: 'GEMINI.md AI Coding Agent Rules Template',
     audience: 'Antigravity or Gemini CLI',
@@ -356,13 +360,27 @@ function expectedAgentRuleSourceTemplate(spec) {
   return agentRuleSourceTemplateNotice() + bodyParts.join('\n').trimEnd() + '\n';
 }
 
-function validateAgentRuleSourceTemplates(errors) {
+function declaredAgentRuleSourceTemplates(projects) {
+  const project = projects.find((candidate) => candidate.id === agentRuleProjectId);
+  if (!project) return [];
+
+  const declaredSources = new Set();
+  for (const output of project.outputs || []) {
+    if (typeof output.source === 'string') declaredSources.add(slash(path.normalize(output.source)));
+  }
+  return agentRuleSourceTemplates.filter((spec) => declaredSources.has(spec.source));
+}
+
+function validateAgentRuleSourceTemplates(errors, projects) {
+  const declaredTemplates = declaredAgentRuleSourceTemplates(projects);
+  if (!declaredTemplates.length) return;
+
   for (const source of agentRulePartialSources) {
     if (!fs.existsSync(resolveRel(source))) fail(errors, `Missing agent-rule partial source: ${source}`);
   }
   if (errors.length) return;
 
-  for (const spec of agentRuleSourceTemplates) {
+  for (const spec of declaredTemplates) {
     if (!fs.existsSync(resolveRel(spec.output))) {
       fail(errors, `Missing source-side agent-rule template: ${spec.output}`);
       continue;
@@ -564,7 +582,7 @@ function validateAndSync() {
   }
   if (errors.length) return { errors, projects, expanded };
 
-  validateAgentRuleSourceTemplates(errors);
+  validateAgentRuleSourceTemplates(errors, projects);
   if (errors.length) return { errors, projects, expanded };
 
   syncExpanded(expanded, errors);

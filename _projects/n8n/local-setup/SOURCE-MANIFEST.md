@@ -27,7 +27,6 @@
 - AI-facing skill, MCP doc, MCP config README, and pack surfaces are generated from `curated_output_for_ai/`.
 - Skill-local pack README files and the agent-rule template index are short curated AI-facing sources under `curated_output_for_ai/packs/**` and `curated_output_for_ai/templates/agent-rules/README.md`.
 - `skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md` remains a linked toolkit-only partial.
-- The original `_main/templates/AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` files remain retired migration provenance for the preserved source project, not the current published skill template filenames.
 
 ## Excluded
 

@@ -779,6 +779,34 @@ test('changing declared agent-rule partials makes source-side templates stale', 
   }
 });
 
+test('agent-rule source-template freshness check is scoped to declared modules', () => {
+  const cwd = tempCopy();
+  fs.rmSync(path.join(cwd, '_projects', 'n8n', 'local-setup'), { recursive: true, force: true });
+
+  const result = spawnSync(process.execPath, [syncScript, '--write'], { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('agent-rule source-template freshness check is scoped to declared template outputs', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  const agentRuleOutputs = new Set([
+    'skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md',
+    'skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md',
+    'skills/n8n-local-setup/templates/agent-rules/GEMINI.template.md',
+    'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'
+  ]);
+
+  manifest.outputs = manifest.outputs.filter((output) => !agentRuleOutputs.has(output.output));
+  manifest.writes.allowed = manifest.writes.allowed.filter((output) => !agentRuleOutputs.has(output));
+  writeJsonFile(manifestPath, manifest);
+  fs.rmSync(path.join(cwd, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', 'partials', 'skill-routing-rules.md'), { force: true });
+
+  const result = spawnSync(process.execPath, [syncScript, '--write'], { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('changing declared _main MCP config source makes root MCP config stale', () => {
   const cwd = tempCopy();
   const source = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'codex-mcp-config.md');

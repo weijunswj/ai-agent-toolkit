@@ -488,18 +488,15 @@ Fixed in the Secure CI/CD template declaration pass. Reviewed source copies now 
 Finding:
 Severity: medium
 Source file(s):
-- `_projects/n8n/local-setup/_main/templates/AGENTS.md`
-- `_projects/n8n/local-setup/_main/templates/CLAUDE.md`
-- `_projects/n8n/local-setup/_main/templates/GEMINI.md`
 - `_projects/n8n/local-setup/_main/templates/partials/*.md`
+- `skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md`
+- `_projects/n8n/local-setup/_main/templates/agent-rules/*.template.md`
 Published file(s):
-- `skills/n8n-local-setup/templates/agent-rules/AGENTS.md`
-- `skills/n8n-local-setup/templates/agent-rules/CLAUDE.md`
-- `skills/n8n-local-setup/templates/agent-rules/GEMINI.md`
+- `skills/n8n-local-setup/templates/agent-rules/*.template.md`
 Problem:
-The generated agent-rule templates are full-fidelity for the declared partial sources, but they intentionally differ from the preserved original full templates by dropping install wrapper prose and adding skill routing. This appears intentional, not truncation, but should stay documented as transformed exact concat, not an exact copy of the original preserved template files.
+The agent-rule templates are intentionally assembled from partial sources into source-side inert `.template.md` files, then copied into the published skill folder. The old active-name template docs were retired after migration and are no longer preserved in active `_main` source paths.
 Recommended fix:
-No immediate code change. Keep the concat recipes and tests. Consider documenting the transform in the audit/manifest if confusion persists.
+Fixed in the inert agent-rule template migration and cleanup passes. Keep the source-first flow documented as partials -> `_main/templates/agent-rules/*.template.md` -> `skills/n8n-local-setup/templates/agent-rules/*.template.md`.
 
 Finding:
 Severity: medium
