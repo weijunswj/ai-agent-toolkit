@@ -48,10 +48,11 @@
       "notes": "Wrapper path adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/compare-n8n-workflow-credentials.cjs",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/compare-n8n-workflow-credentials.cjs",
-      "source_blob_sha": "e08a2877950c780602d0aa95c3fd18f895d66ed5"
+      "source_blob_sha": "e08a2877950c780602d0aa95c3fd18f895d66ed5",
+      "notes": "Toolkit-adapted after migration to ignore stale node-ID credential bindings when both node name and node type differ."
     },
     {
       "mode": "exact",
@@ -74,10 +75,11 @@
       "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a"
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/prepare-n8n-live-import.cjs",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/prepare-n8n-live-import.cjs",
-      "source_blob_sha": "993af3fa2d0109a3c0f96557c4a546f0051b375c"
+      "source_blob_sha": "993af3fa2d0109a3c0f96557c4a546f0051b375c",
+      "notes": "Toolkit-adapted after migration to skip stale node-ID credential bindings when both node name and node type differ."
     },
     {
       "mode": "exact",

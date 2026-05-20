@@ -14,6 +14,7 @@ const sourceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolki
 const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
 const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');
+const compareCredentialsScript = path.join(scriptDir, 'compare-n8n-workflow-credentials.cjs');
 const sanitizerScript = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer', 'prepare-n8n-template.js');
 const sanitizerPs1 = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer', 'sanitise-n8n-template.ps1');
 
@@ -408,6 +409,8 @@ test('generated n8n helper scripts are fresh copies of project source', () => {
   for (const fileName of [
     'export-n8n-workflows-live.ps1',
     'import-n8n-workflows-live.ps1',
+    'prepare-n8n-live-import.cjs',
+    'compare-n8n-workflow-credentials.cjs',
     'validate-n8n-workflows.cjs',
   ]) {
     assert.equal(readText(path.join(scriptDir, fileName)), readText(path.join(sourceScriptDir, fileName)), fileName);
@@ -659,6 +662,80 @@ test('prepare-n8n-live-import.cjs restores credentials by node ID', () => {
   const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
 
   assert.deepEqual(prepared.nodes[0].credentials, { httpHeaderAuth: { id: 'cred_1', name: 'Local Credential' } });
+});
+
+test('prepare-n8n-live-import.cjs skips stale node ID binding when node name and type changed', () => {
+  const cwd = tempDir();
+  const workflowPath = path.join(cwd, 'n8n-workflows', 'workflow.json');
+  const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
+  const outputPath = path.join(cwd, '.tmp', 'prepared.json');
+  writeJson(workflowPath, safeWorkflow({
+    nodes: [{
+      id: 'reused_node_id',
+      name: 'Notify Main Error Handler',
+      type: 'n8n-nodes-base.executeWorkflow',
+      typeVersion: 1,
+      position: [0, 0],
+      parameters: {},
+    }],
+  }));
+  writeJson(bindingsPath, {
+    version: 2,
+    workflows: [{
+      workflowFile: 'n8n-workflows/workflow.json',
+      workflowId: 'wf_safe',
+      workflowName: 'Safe Generic Workflow',
+      nodes: [{
+        nodeId: 'reused_node_id',
+        nodeName: 'Upsert Conversation Failed',
+        nodeType: 'n8n-nodes-base.googleSheets',
+        credentials: { googleSheetsOAuth2Api: { id: 'cred_1', name: 'Sheets Credential' } },
+      }],
+    }],
+  });
+
+  const result = runNode(prepareScript, [workflowPath, bindingsPath, outputPath], { cwd });
+
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+  assert.equal('credentials' in prepared.nodes[0], false);
+  assert.match(result.stderr + result.stdout, /Skipped 1 binding\(s\) with no matching node: Upsert Conversation Failed/);
+});
+
+test('compare-n8n-workflow-credentials.cjs ignores stale node ID binding when replacement node has no credentials', () => {
+  const cwd = tempDir();
+  const repoWorkflowPath = path.join(cwd, 'n8n-workflows', 'workflow.json');
+  const liveWorkflowPath = path.join(cwd, '.tmp', 'live-workflow.json');
+  const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
+  const replacementNode = {
+    id: 'reused_node_id',
+    name: 'Notify Main Error Handler',
+    type: 'n8n-nodes-base.executeWorkflow',
+    typeVersion: 1,
+    position: [0, 0],
+    parameters: {},
+  };
+  writeJson(repoWorkflowPath, safeWorkflow({ nodes: [replacementNode] }));
+  writeJson(liveWorkflowPath, safeWorkflow({ nodes: [replacementNode] }));
+  writeJson(bindingsPath, {
+    version: 2,
+    workflows: [{
+      workflowFile: 'n8n-workflows/workflow.json',
+      workflowId: 'wf_safe',
+      workflowName: 'Safe Generic Workflow',
+      nodes: [{
+        nodeId: 'reused_node_id',
+        nodeName: 'Upsert Conversation Failed',
+        nodeType: 'n8n-nodes-base.googleSheets',
+        credentials: { googleSheetsOAuth2Api: { id: 'cred_1', name: 'Sheets Credential' } },
+      }],
+    }],
+  });
+
+  const result = runNode(compareCredentialsScript, [repoWorkflowPath, liveWorkflowPath, bindingsPath], { cwd });
+
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal(result.stdout.trim(), 'MATCH');
 });
 
 test('prepare-n8n-live-import.cjs restores live webhookId from matching live workflow node', () => {
