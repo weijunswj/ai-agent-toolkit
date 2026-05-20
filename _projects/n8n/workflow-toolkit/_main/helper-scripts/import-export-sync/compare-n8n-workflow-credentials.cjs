@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { selectBindingsWithMeta } = require('./prepare-n8n-live-import.cjs');
+const { selectBindingsWithMeta, isStaleNodeIdBinding } = require('./prepare-n8n-live-import.cjs');
 
 function usage() {
   console.error('Usage: node scripts/compare-n8n-workflow-credentials.cjs <repo-workflow.json> <live-workflow.json> [bindings.json]');
@@ -41,6 +41,31 @@ function nodeKey(node) {
   return `${node.name || ''}\u0000${node.type || ''}`;
 }
 
+function bindingForRepoNode(bindingById, bindingByNameType, repoNode) {
+  const idBinding = bindingById.get(repoNode.id);
+  if (idBinding && !isStaleNodeIdBinding(idBinding, repoNode)) {
+    return idBinding;
+  }
+
+  return bindingByNameType.get(nodeKey(repoNode));
+}
+
+function liveNodeForRepoNode(liveById, liveByNameType, repoNode) {
+  const idNode = liveById.get(repoNode.id);
+  if (
+    idNode &&
+    !isStaleNodeIdBinding({
+      nodeId: idNode.id,
+      nodeName: idNode.name,
+      nodeType: idNode.type,
+    }, repoNode)
+  ) {
+    return idNode;
+  }
+
+  return liveByNameType.get(nodeKey(repoNode));
+}
+
 function statusForCredentialDrift(repoWorkflow, liveWorkflow, bindingsPath, repoWorkflowPath) {
   if (!fs.existsSync(bindingsPath)) {
     return 'UNKNOWN';
@@ -74,8 +99,8 @@ function statusForCredentialDrift(repoWorkflow, liveWorkflow, bindingsPath, repo
   }
 
   for (const repoNode of repoWorkflow.nodes || []) {
-    const expectedBinding = bindingById.get(repoNode.id) || bindingByNameType.get(nodeKey(repoNode));
-    const liveNode = liveById.get(repoNode.id) || liveByNameType.get(nodeKey(repoNode));
+    const expectedBinding = bindingForRepoNode(bindingById, bindingByNameType, repoNode);
+    const liveNode = liveNodeForRepoNode(liveById, liveByNameType, repoNode);
     const expectedCredentials = expectedBinding ? expectedBinding.credentials : undefined;
     const liveCredentials = liveNode ? liveNode.credentials : undefined;
 

@@ -159,7 +159,9 @@ This repo has a source layer and a published layer.
 - Auto-sync may run only deterministic sync/check/validator scripts from the protected base revision, with the PR checkout treated as data and passed through an explicit workspace target.
 - Auto-sync must stage and snapshot generated output after sync and recheck the index/workspace before commit so validation cannot add files to the writeback diff.
 - Auto-sync must pin the PR checkout to the event head SHA, refuse stale queued runs if the PR head changed, and refuse non-force pushes if the PR branch moved after checkout.
-- If a PR mixes eligible source/routing/contract edits with forbidden workflow, maintenance-script, test, docs, package, lockfile, or preserved-source paths, auto-sync must fail instead of pushing.
+- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required full validation gate for PRs and `main`.
+- If a PR includes `_projects/**/_main/**` source/provenance changes, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or Codex must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then pass `npm run validate:all`.
+- If a writeback-eligible PR mixes eligible source/routing/contract edits with forbidden workflow, maintenance-script, test, docs, package, lockfile, or other unsafe paths, auto-sync must fail instead of pushing.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 - A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
 - Required runtime context for a skill or MCP surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.

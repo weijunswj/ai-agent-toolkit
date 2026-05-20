@@ -27,6 +27,8 @@ Prefer the target repo's documented commands. If no commands exist, add small de
 
 Use `validation-strategy.md` for validation cadence: targeted checks during iteration, full final validation before completion.
 
+For this toolkit repo, `npm run validate:all` is the canonical full validation command and required merge gate.
+
 A good audit command should:
 
 - Read local files only.
@@ -45,6 +47,8 @@ Update a baseline only when all of these are true:
 - The movement is caused by the current intentional change.
 - No new undeclared, cross-owned, suspicious, or boundary findings were introduced accidentally.
 - The PR summary records the exact movement.
+
+For `_projects/**/_main/**` source or provenance PRs, do not rely on privileged auto-sync to bless or repair the change. The author or Codex must update source-lock or provenance metadata when needed, regenerate declared outputs, update inspected audit baselines when needed, and pass the full validation command. Read-only CI should fail when those steps are missed.
 
 ## PR Reporting
 

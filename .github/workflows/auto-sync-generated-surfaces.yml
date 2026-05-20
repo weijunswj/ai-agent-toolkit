@@ -56,15 +56,6 @@ jobs:
             exit 1
           fi
 
-          current_head_sha="$(
-            gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq '.head.sha'
-          )"
-
-          if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then
-            echo "::error::PR head changed after this workflow was queued; refusing stale auto-sync writeback."
-            exit 1
-          fi
-
           changed_file_count="$(
             gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq '.changed_files'
           )"
@@ -84,6 +75,25 @@ jobs:
               "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}/files" \
               --jq '.[].filename'
           )
+
+          for path in "${changed_files[@]}"; do
+            case "$path" in
+              _projects/*/_main/*)
+                echo "::notice::Auto-sync skipped: this PR includes _projects/**/_main/** source/provenance changes. Generated outputs must be committed by the author/Codex and verified by npm run validate:all."
+                echo "should_sync=false" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+          done
+
+          current_head_sha="$(
+            gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq '.head.sha'
+          )"
+
+          if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then
+            echo "::error::PR head changed after this workflow was queued; refusing stale auto-sync writeback."
+            exit 1
+          fi
 
           eligible=false
           for path in "${changed_files[@]}"; do
@@ -114,7 +124,10 @@ jobs:
             exit 1
           fi
 
+          echo "should_sync=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout trusted base revision
+        if: steps.preflight.outputs.should_sync == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}
@@ -124,6 +137,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout PR head commit
+        if: steps.preflight.outputs.should_sync == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -133,6 +147,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify checked-out PR commit
+        if: steps.preflight.outputs.should_sync == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -143,16 +158,19 @@ jobs:
           fi
 
       - name: Set up Node.js
+        if: steps.preflight.outputs.should_sync == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - name: Sync deterministic generated surfaces
+        if: steps.preflight.outputs.should_sync == 'true'
         run: |
           node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write
           node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write
 
       - name: Guard, stage, and snapshot generated write scope
+        if: steps.preflight.outputs.should_sync == 'true'
         id: post_sync
         shell: bash
         run: |
@@ -222,7 +240,7 @@ jobs:
           echo "expected_index_tree=${expected_index_tree}" >> "$GITHUB_OUTPUT"
 
       - name: Static generated surface checks
-        if: steps.post_sync.outputs.has_changes == 'true'
+        if: steps.preflight.outputs.should_sync == 'true' && steps.post_sync.outputs.has_changes == 'true'
         run: |
           node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check
           node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check
@@ -230,7 +248,7 @@ jobs:
           /usr/bin/git -C "$PR_ROOT" diff --check
 
       - name: Final pre-commit workspace recheck
-        if: steps.post_sync.outputs.has_changes == 'true'
+        if: steps.preflight.outputs.should_sync == 'true' && steps.post_sync.outputs.has_changes == 'true'
         shell: bash
         env:
           EXPECTED_INDEX_TREE: ${{ steps.post_sync.outputs.expected_index_tree }}
@@ -276,7 +294,7 @@ jobs:
           done
 
       - name: Commit generated surfaces
-        if: steps.post_sync.outputs.has_changes == 'true'
+        if: steps.preflight.outputs.should_sync == 'true' && steps.post_sync.outputs.has_changes == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -287,7 +305,7 @@ jobs:
           /usr/bin/git -C "$PR_ROOT" commit --no-verify -m "chore: sync generated toolkit surfaces"
 
       - name: Push generated surfaces
-        if: steps.post_sync.outputs.has_changes == 'true'
+        if: steps.preflight.outputs.should_sync == 'true' && steps.post_sync.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

@@ -799,6 +799,12 @@ function workflowRunCommands(stepText) {
     .filter(Boolean);
 }
 
+const shellEnvAssignmentPrefix = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"\n]*"|'[^'\n]*'|[^\s#;]+)\s+)*`;
+const shellCommandStartPrefix = String.raw`^\s*(?:run:\s*)?(?:env\s+)?${shellEnvAssignmentPrefix}`;
+const packageManagerCommandPrefix = String.raw`(?:[^\s#;]+/)?`;
+const npmValidateAllCommandPattern = new RegExp(`${shellCommandStartPrefix}${packageManagerCommandPrefix}npm(?:\\.cmd)?\\s+run\\s+validate:all\\b`, 'm');
+const packageManagerCommandPattern = new RegExp(`${shellCommandStartPrefix}${packageManagerCommandPrefix}(?:npm|pnpm|yarn)(?:\\.cmd)?(?:\\s|$)`, 'm');
+
 function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const permissions = workflowPermissionLines(text) || [];
   const expectedPermissions = ['contents: write', 'pull-requests: read'];
@@ -887,10 +893,10 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   if (/(^|\s)(?:\/usr\/bin\/)?git\s+(?!-C\s+"\$PR_ROOT")/m.test(text)) {
     fail(errors, `${entry.relPath} git commands must explicitly target the PR workspace with /usr/bin/git -C "$PR_ROOT"`);
   }
-  if (/\bnpm\s+run\s+validate:all\b/.test(text)) {
+  if (npmValidateAllCommandPattern.test(text)) {
     fail(errors, `${entry.relPath} must not run npm run validate:all in the privileged writeback workflow`);
   }
-  if (/^\s*(?:npm|pnpm|yarn)(?:\.cmd)?(?:\s|$)/m.test(text)) {
+  if (packageManagerCommandPattern.test(text)) {
     fail(errors, `${entry.relPath} must not run npm, pnpm, or yarn in the privileged writeback workflow`);
   }
   if (/\bnode\s+--test\b/.test(text)) {
@@ -930,6 +936,12 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   for (const { label, token } of requiredPreflightPathBlocks) {
     if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing forbidden preflight path rejection for ${label}`);
   }
+  const mainSkipMessage = 'Auto-sync skipped: this PR includes _projects/**/_main/** source/provenance changes. Generated outputs must be committed by the author/Codex and verified by npm run validate:all.';
+  if (!preflightSection.includes(mainSkipMessage) ||
+      !preflightSection.includes('should_sync=false') ||
+      !preflightSection.includes('should_sync=true')) {
+    fail(errors, `${entry.relPath} preflight must skip _projects/**/_main/** PRs and set should_sync before writeback`);
+  }
 
   if (!text.includes('Forbidden post-sync change outside generated output scope') ||
       !/git\s+-C\s+"\$PR_ROOT"\s+diff\s+--name-only/.test(text) ||
@@ -952,6 +964,24 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const verifyCheckoutStep = workflowStepText(steps, 'Verify checked-out PR commit');
   const verifyCheckoutIndex = text.indexOf('- name: Verify checked-out PR commit');
   const syncIndex = text.indexOf('- name: Sync deterministic generated surfaces');
+  const gatedAfterPreflightSteps = [
+    'Checkout trusted base revision',
+    'Checkout PR head commit',
+    'Verify checked-out PR commit',
+    'Set up Node.js',
+    'Sync deterministic generated surfaces',
+    'Guard, stage, and snapshot generated write scope',
+    'Static generated surface checks',
+    'Final pre-commit workspace recheck',
+    'Commit generated surfaces',
+    'Push generated surfaces'
+  ];
+  for (const stepName of gatedAfterPreflightSteps) {
+    const stepText = workflowStepText(steps, stepName);
+    if (!stepText.includes("if: steps.preflight.outputs.should_sync == 'true'")) {
+      fail(errors, `${entry.relPath} must skip checkout and writeback steps when preflight should_sync is false`);
+    }
+  }
 
   if (!verifyCheckoutStep.includes('/usr/bin/git -C "$PR_ROOT" rev-parse HEAD') ||
       !verifyCheckoutStep.includes('"$checked_out_sha" != "$HEAD_SHA"') ||
