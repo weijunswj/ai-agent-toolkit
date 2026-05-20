@@ -28,7 +28,7 @@ Source partials are declared in the local n8n setup project manifest:
 
 - [_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md](/_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md)
 - [_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md](/_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md)
-- [skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md](/skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md)
+- [skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md](partials/skill-routing-rules.md)
 
 The assembled source-side templates live under [_projects/n8n/local-setup/_main/templates/agent-rules/](/_projects/n8n/local-setup/_main/templates/agent-rules/). The preserved original project templates remain under [_projects/n8n/local-setup/_main/templates/](/_projects/n8n/local-setup/_main/templates/). They are archival source, not the AI-facing template generation source.
 
