@@ -693,6 +693,15 @@ function validateAgentRuleSources(errors) {
   }
 }
 
+function validateNoActiveAgentInstructionFilesInSkills(errors) {
+  for (const entry of listFiles()) {
+    if (!entry.relPath.startsWith('skills/')) continue;
+    if (/\/(?:AGENTS|CLAUDE|GEMINI)\.md$/.test(entry.relPath)) {
+      fail(errors, `Skill folder must use inert agent-rule template filenames: ${entry.relPath}`);
+    }
+  }
+}
+
 function validateStaleReferences(errors) {
   const roots = new Set(staleReferenceRoots);
   for (const entry of listFiles()) {
@@ -1253,6 +1262,7 @@ function runValidation() {
   validateSourceLocks(errors);
   validateSkillPortability(errors);
   validateAgentRuleSources(errors);
+  validateNoActiveAgentInstructionFilesInSkills(errors);
   validateNoOldForAiReferences(errors);
   validateStaleReferences(errors);
   validateSecretStrings(errors);

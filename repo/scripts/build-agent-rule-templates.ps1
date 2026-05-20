@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
-$TemplatesDir = Join-Path $RepoRoot 'skills\n8n-local-setup\templates\agent-rules'
+$TemplatesDir = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\agent-rules'
 $ProjectMainPartialsDir = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials'
 $ToolkitPartialsDir = Join-Path $RepoRoot 'skills\n8n-local-setup\templates\agent-rules\partials'
 
@@ -50,13 +50,18 @@ function Write-GeneratedTemplate {
   param(
     [Parameter(Mandatory = $true)] [string] $FileName,
     [Parameter(Mandatory = $true)] [string] $Title,
-    [Parameter(Mandatory = $true)] [string] $Audience
+    [Parameter(Mandatory = $true)] [string] $Audience,
+    [Parameter(Mandatory = $true)] [string] $DestinationFile
   )
 
   $bodyParts = @(
     "# $Title",
     "",
-    "Use this generated template for $Audience."
+    "Use this generated template for $Audience.",
+    "",
+    "This template is inert while it keeps the ``.template.md`` filename. Copy or merge it into a target repo root as ``$DestinationFile`` only when the user explicitly wants those agent rules installed.",
+    "",
+    "If the target repo already has ``$DestinationFile``, do not overwrite it. Produce a merge/diff plan instead."
   )
 
   foreach ($partial in $PartialSources) {
@@ -67,11 +72,12 @@ function Write-GeneratedTemplate {
   $content = (New-GeneratedNotice) + (($bodyParts -join "`n").TrimEnd()) + "`n"
   $target = Join-Path $TemplatesDir $FileName
   $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+  [System.IO.Directory]::CreateDirectory($TemplatesDir) | Out-Null
   [System.IO.File]::WriteAllText($target, $content, $utf8NoBom)
 }
 
-Write-GeneratedTemplate -FileName 'AGENTS.md' -Title 'AGENTS.md AI Coding Agent Rules' -Audience 'Codex or OpenCode'
-Write-GeneratedTemplate -FileName 'CLAUDE.md' -Title 'CLAUDE.md AI Coding Agent Rules' -Audience 'Claude Code'
-Write-GeneratedTemplate -FileName 'GEMINI.md' -Title 'GEMINI.md AI Coding Agent Rules' -Audience 'Antigravity or Gemini CLI'
+Write-GeneratedTemplate -FileName 'AGENTS.template.md' -Title 'AGENTS.md AI Coding Agent Rules Template' -Audience 'Codex or OpenCode' -DestinationFile 'AGENTS.md'
+Write-GeneratedTemplate -FileName 'CLAUDE.template.md' -Title 'CLAUDE.md AI Coding Agent Rules Template' -Audience 'Claude Code' -DestinationFile 'CLAUDE.md'
+Write-GeneratedTemplate -FileName 'GEMINI.template.md' -Title 'GEMINI.md AI Coding Agent Rules Template' -Audience 'Antigravity or Gemini CLI' -DestinationFile 'GEMINI.md'
 
-Write-Host 'Generated skills/n8n-local-setup/templates/agent-rules/AGENTS.md, CLAUDE.md, and GEMINI.md.'
+Write-Host 'Generated _projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md, CLAUDE.template.md, and GEMINI.template.md.'

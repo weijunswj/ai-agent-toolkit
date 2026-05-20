@@ -10,7 +10,7 @@ if not "%EXIT_CODE%"=="0" (
   exit /b %EXIT_CODE%
 )
 
-echo Agent rule template generation complete.
+echo Source-side agent rule template generation complete.
 pause
 endlocal
 

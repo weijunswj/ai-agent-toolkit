@@ -58,7 +58,8 @@ npx --version
 
 ### Follow the Gemini GEMINI.md Setup guide:
 
-* [templates/GEMINI.md](./templates/GEMINI.md)
+* Copy or merge [templates/agent-rules/GEMINI.template.md](./templates/agent-rules/GEMINI.template.md) into the target repo root as `GEMINI.md`.
+* If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 ## 4. Create The Global Antigravity MCP Config
 

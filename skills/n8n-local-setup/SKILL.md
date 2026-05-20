@@ -34,7 +34,7 @@ Use this skill when the user needs to set up or explain local n8n, agent rules, 
 
 ## Common Outputs
 
-- Codex rules: [templates/agent-rules/AGENTS.md](templates/agent-rules/AGENTS.md)
+- Codex rules template: [templates/agent-rules/AGENTS.template.md](templates/agent-rules/AGENTS.template.md)
 - Codex MCP config: [templates/mcp-configs/codex-mcp-config.md](templates/mcp-configs/codex-mcp-config.md)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
 - Upgrade reference: [references/n8n/upgrading.md](references/n8n/upgrading.md)

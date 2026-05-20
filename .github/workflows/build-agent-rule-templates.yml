@@ -3,6 +3,7 @@ name: Build agent rule templates
 on:
   pull_request:
     paths:
+      - _projects/n8n/local-setup/_main/templates/partials/**
       - skills/n8n-local-setup/templates/agent-rules/partials/**
       - repo/scripts/build-agent-rule-templates.ps1
       - repo/scripts/- build-agent-rule-templates.cmd
@@ -11,6 +12,7 @@ on:
     branches:
       - main
     paths:
+      - _projects/n8n/local-setup/_main/templates/partials/**
       - skills/n8n-local-setup/templates/agent-rules/partials/**
       - repo/scripts/build-agent-rule-templates.ps1
       - repo/scripts/- build-agent-rule-templates.cmd
@@ -31,7 +33,22 @@ jobs:
 
       - name: Regenerate templates
         shell: pwsh
-        run: ./repo/scripts/build-agent-rule-templates.ps1
+        run: |
+          ./repo/scripts/build-agent-rule-templates.ps1
+          node repo/scripts/sync-toolkit-projects.cjs --write
 
       - name: Verify generated files are current
-        run: git diff --exit-code -- skills/n8n-local-setup/templates/agent-rules/AGENTS.md skills/n8n-local-setup/templates/agent-rules/CLAUDE.md skills/n8n-local-setup/templates/agent-rules/GEMINI.md
+        run: |
+          git diff --exit-code -- \
+            _projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md \
+            _projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md \
+            _projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md \
+            skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md \
+            skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md \
+            skills/n8n-local-setup/templates/agent-rules/GEMINI.template.md
+
+      - name: Verify active skill template names are absent
+        run: |
+          test ! -e skills/n8n-local-setup/templates/agent-rules/AGENTS.md
+          test ! -e skills/n8n-local-setup/templates/agent-rules/CLAUDE.md
+          test ! -e skills/n8n-local-setup/templates/agent-rules/GEMINI.md

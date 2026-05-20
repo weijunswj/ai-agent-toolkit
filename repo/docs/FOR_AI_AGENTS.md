@@ -44,7 +44,7 @@ Never commit or install:
 
 Scoped writes are allowed only when the relevant template or helper is being run intentionally:
 
-- [Agent-rule generator](../scripts/build-agent-rule-templates.ps1) may regenerate only [AGENTS.md](../../skills/n8n-local-setup/templates/agent-rules/AGENTS.md), [CLAUDE.md](../../skills/n8n-local-setup/templates/agent-rules/CLAUDE.md), and [GEMINI.md](../../skills/n8n-local-setup/templates/agent-rules/GEMINI.md).
+- [Agent-rule generator](../scripts/build-agent-rule-templates.ps1) may regenerate only the source-side assembled templates under `_projects/n8n/local-setup/_main/templates/agent-rules/*.template.md`. Toolkit sync may then publish inert skill copies under `skills/n8n-local-setup/templates/agent-rules/*.template.md`.
 - n8n sanitizer templates may write ignored `.to-sanitise/**` and `.sanitised/**` staging folders.
 - n8n sync helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, and ignored `.n8n-local/**` in a consumer repo after review.
 

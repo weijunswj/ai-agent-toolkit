@@ -8,10 +8,11 @@
   "public_attribution_required": false,
   "files": [
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "1. local setup.md",
       "project_path": "_projects/n8n/local-setup/_main/1. local setup.md",
-      "source_blob_sha": "21fc8896290d5026e7ee6d6e0eb8dc9ac7b86453"
+      "source_blob_sha": "21fc8896290d5026e7ee6d6e0eb8dc9ac7b86453",
+      "notes": "Toolkit-adapted after migration to route Codex agent-rule setup to inert AGENTS.template.md and avoid active nested instruction filenames in skill copies."
     },
     {
       "mode": "exact",
@@ -38,28 +39,32 @@
       "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2"
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "5. extra - claude code integration.md",
       "project_path": "_projects/n8n/local-setup/_main/5. extra - claude code integration.md",
-      "source_blob_sha": "14be7374a3aec75047a3aa9c26f6c8d503213eac"
+      "source_blob_sha": "14be7374a3aec75047a3aa9c26f6c8d503213eac",
+      "notes": "Toolkit-adapted after migration to route Claude Code agent-rule setup to inert CLAUDE.template.md and avoid active nested instruction filenames in skill copies."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "6. extra - opencode integration.md",
       "project_path": "_projects/n8n/local-setup/_main/6. extra - opencode integration.md",
-      "source_blob_sha": "405c3c99570139146b490ea05c1be5653ac01a7f"
+      "source_blob_sha": "405c3c99570139146b490ea05c1be5653ac01a7f",
+      "notes": "Toolkit-adapted after migration to route OpenCode agent-rule setup to inert AGENTS.template.md and avoid active nested instruction filenames in skill copies."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "7. extra - antigravity integration.md",
       "project_path": "_projects/n8n/local-setup/_main/7. extra - antigravity integration.md",
-      "source_blob_sha": "caf052593cf9da3999d281486e24dde953b7eb3f"
+      "source_blob_sha": "caf052593cf9da3999d281486e24dde953b7eb3f",
+      "notes": "Toolkit-adapted after migration to route Gemini/Antigravity agent-rule setup to inert GEMINI.template.md and avoid active nested instruction filenames in skill copies."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "README.md",
       "project_path": "_projects/n8n/local-setup/_main/README.md",
-      "source_blob_sha": "54e708cb93c4056be2dddfc425da7b548528b8bd"
+      "source_blob_sha": "54e708cb93c4056be2dddfc425da7b548528b8bd",
+      "notes": "Toolkit-adapted after migration to document source-side assembled .template.md files and safe copy/merge into target repo root active filenames."
     },
     {
       "mode": "exact",
