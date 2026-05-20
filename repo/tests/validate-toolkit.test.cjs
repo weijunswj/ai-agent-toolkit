@@ -741,13 +741,42 @@ test('validator rejects README links to absent optional folders', () => {
   assert.match(result.stderr, /links to missing path: _projects\/n8n\/local-setup\/_generated/);
 });
 
-test('changing assembled _main agent-rule templates makes published skill copies stale', () => {
+test('changing assembled _main agent-rule templates makes source-side templates stale', () => {
   const cwd = tempCopy();
   const template = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'agent-rules', 'AGENTS.template.md');
   fs.appendFileSync(template, '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale source-side agent-rule template: _projects\/n8n\/local-setup\/_main\/templates\/agent-rules\/AGENTS\.template\.md/);
+});
+
+test('changing published agent-rule template copies makes skill copies stale', () => {
+  const cwd = tempCopy();
+  const template = path.join(cwd, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', 'AGENTS.template.md');
+  fs.appendFileSync(template, '\n\n<!-- drift test -->\n');
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/agent-rules\/AGENTS\.template\.md/);
+});
+
+test('changing declared agent-rule partials makes source-side templates stale', () => {
+  const cases = [
+    path.join('_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials', 'ai-coding-agent-execution.md'),
+    path.join('_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials', 'n8n-mcp-rules.md'),
+    path.join('skills', 'n8n-local-setup', 'templates', 'agent-rules', 'partials', 'skill-routing-rules.md')
+  ];
+
+  for (const partialRel of cases) {
+    const cwd = tempCopy();
+    fs.appendFileSync(path.join(cwd, partialRel), '\n\n<!-- drift test -->\n');
+    const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+    assert.notEqual(result.status, 0, partialRel);
+    assert.match(
+      result.stderr,
+      /Stale source-side agent-rule template: _projects\/n8n\/local-setup\/_main\/templates\/agent-rules\/AGENTS\.template\.md/,
+      partialRel
+    );
+  }
 });
 
 test('changing declared _main MCP config source makes root MCP config stale', () => {

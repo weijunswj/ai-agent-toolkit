@@ -40,6 +40,31 @@ const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
 const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']);
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
+const agentRulePartialSources = [
+  '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md',
+  '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md',
+  'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'
+];
+const agentRuleSourceTemplates = [
+  {
+    output: '_projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md',
+    title: 'AGENTS.md AI Coding Agent Rules Template',
+    audience: 'Codex or OpenCode',
+    destination: 'AGENTS.md'
+  },
+  {
+    output: '_projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md',
+    title: 'CLAUDE.md AI Coding Agent Rules Template',
+    audience: 'Claude Code',
+    destination: 'CLAUDE.md'
+  },
+  {
+    output: '_projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md',
+    title: 'GEMINI.md AI Coding Agent Rules Template',
+    audience: 'Antigravity or Gemini CLI',
+    destination: 'GEMINI.md'
+  }
+];
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -300,6 +325,54 @@ function generatedNotice(project, relPaths) {
   ].join('\n');
 }
 
+function agentRuleSourceTemplateNotice() {
+  return [
+    '<!--',
+    'Generated from toolkit project source. Do not edit directly.',
+    'Project: n8n.local-setup',
+    ...agentRulePartialSources.map((relPath) => `Source: ${relPath}`),
+    'Update the project source and run sync.',
+    '-->',
+    ''
+  ].join('\n');
+}
+
+function expectedAgentRuleSourceTemplate(spec) {
+  const bodyParts = [
+    `# ${spec.title}`,
+    '',
+    `Use this generated template for ${spec.audience}.`,
+    '',
+    `This template is inert while it keeps the \`.template.md\` filename. Copy or merge it into a target repo root as \`${spec.destination}\` only when the user explicitly wants those agent rules installed.`,
+    '',
+    `If the target repo already has \`${spec.destination}\`, do not overwrite it. Produce a merge/diff plan instead.`
+  ];
+
+  for (const source of agentRulePartialSources) {
+    bodyParts.push('');
+    bodyParts.push(readText(source).trimEnd());
+  }
+
+  return agentRuleSourceTemplateNotice() + bodyParts.join('\n').trimEnd() + '\n';
+}
+
+function validateAgentRuleSourceTemplates(errors) {
+  for (const source of agentRulePartialSources) {
+    if (!fs.existsSync(resolveRel(source))) fail(errors, `Missing agent-rule partial source: ${source}`);
+  }
+  if (errors.length) return;
+
+  for (const spec of agentRuleSourceTemplates) {
+    if (!fs.existsSync(resolveRel(spec.output))) {
+      fail(errors, `Missing source-side agent-rule template: ${spec.output}`);
+      continue;
+    }
+    if (readText(spec.output) !== expectedAgentRuleSourceTemplate(spec)) {
+      fail(errors, `Stale source-side agent-rule template: ${spec.output}`);
+    }
+  }
+}
+
 function addMarkdownNotice(text, project, relPaths) {
   const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const notice = generatedNotice(project, relPaths);
@@ -489,6 +562,9 @@ function validateAndSync() {
       }
     }
   }
+  if (errors.length) return { errors, projects, expanded };
+
+  validateAgentRuleSourceTemplates(errors);
   if (errors.length) return { errors, projects, expanded };
 
   syncExpanded(expanded, errors);
