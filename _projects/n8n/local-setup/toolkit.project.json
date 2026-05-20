@@ -129,27 +129,27 @@
       "kind": "copy",
       "source": "_main/templates/agent-rules/AGENTS.template.md",
       "output": "skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md",
-      "notes": "Inert Codex/OpenCode agent-rule template copied from the source-side assembled template.",
-      "fidelity": "exact"
+      "notes": "Published inert Codex/OpenCode agent-rule template generated from the source-side assembled template plus skill-local routing rules.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "copy",
       "source": "_main/templates/agent-rules/CLAUDE.template.md",
       "output": "skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md",
-      "notes": "Inert Claude Code agent-rule template copied from the source-side assembled template.",
-      "fidelity": "exact"
+      "notes": "Published inert Claude Code agent-rule template generated from the source-side assembled template plus skill-local routing rules.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "copy",
       "source": "_main/templates/agent-rules/GEMINI.template.md",
       "output": "skills/n8n-local-setup/templates/agent-rules/GEMINI.template.md",
-      "notes": "Inert Gemini/Antigravity agent-rule template copied from the source-side assembled template.",
-      "fidelity": "exact"
+      "notes": "Published inert Gemini/Antigravity agent-rule template generated from the source-side assembled template plus skill-local routing rules.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "linked",
       "output": "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md",
-      "notes": "Toolkit-only partial maintained in the published surface and included by concat recipes.",
+      "notes": "Toolkit-only partial maintained in the published surface and included only in published skill templates.",
       "fidelity": "exact"
     },
     {

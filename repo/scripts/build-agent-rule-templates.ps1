@@ -3,7 +3,6 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $TemplatesDir = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\agent-rules'
 $ProjectMainPartialsDir = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials'
-$ToolkitPartialsDir = Join-Path $RepoRoot 'skills\n8n-local-setup\templates\agent-rules\partials'
 
 $PartialSources = @(
   @{
@@ -15,11 +14,6 @@ $PartialSources = @(
     Name = 'n8n-mcp-rules.md'
     Path = Join-Path $ProjectMainPartialsDir 'n8n-mcp-rules.md'
     Rel = '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
-  },
-  @{
-    Name = 'skill-routing-rules.md'
-    Path = Join-Path $ToolkitPartialsDir 'skill-routing-rules.md'
-    Rel = 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'
   }
 )
 
@@ -51,7 +45,9 @@ function Write-GeneratedTemplate {
     [Parameter(Mandatory = $true)] [string] $FileName,
     [Parameter(Mandatory = $true)] [string] $Title,
     [Parameter(Mandatory = $true)] [string] $Audience,
-    [Parameter(Mandatory = $true)] [string] $DestinationFile
+    [Parameter(Mandatory = $true)] [string] $DestinationFile,
+    [Parameter(Mandatory = $true)] [string] $InstallSubject,
+    [Parameter(Mandatory = $true)] [hashtable[]] $InstallExamples
   )
 
   $bodyParts = @(
@@ -59,15 +55,43 @@ function Write-GeneratedTemplate {
     "",
     "Use this generated template for $Audience.",
     "",
-    "This template is inert while it keeps the ``.template.md`` filename. Copy or merge it into a target repo root as ``$DestinationFile`` only when the user explicitly wants those agent rules installed.",
+    "This file is inert while it keeps the ``.template.md`` filename. It is safe to keep inside a skill folder because it is not named ``$DestinationFile``.",
     "",
-    "If the target repo already has ``$DestinationFile``, do not overwrite it. Produce a merge/diff plan instead."
+    "Copy or merge the fenced payload into the target repo root as ``$DestinationFile`` only when the user explicitly wants $InstallSubject installed.",
+    "",
+    "If the target repo already has ``$DestinationFile``, do not overwrite it. Merge manually or produce a diff/merge plan."
   )
 
-  foreach ($partial in $PartialSources) {
+  foreach ($example in $InstallExamples) {
     $bodyParts += ""
-    $bodyParts += Read-Partial $partial
+    $bodyParts += "## $($example.Heading)"
+    $bodyParts += ""
+    $bodyParts += "Copy or merge the fenced payload into:"
+    $bodyParts += ""
+    $bodyParts += '```text'
+    $bodyParts += $example.Path
+    $bodyParts += '```'
+    $bodyParts += ""
+    $bodyParts += "Or create it with PowerShell:"
+    $bodyParts += ""
+    $bodyParts += '```text'
+    foreach ($command in $example.Commands) {
+      $bodyParts += $command
+    }
+    $bodyParts += '```'
   }
+
+  $payloadParts = @()
+  foreach ($partial in $PartialSources) {
+    $payloadParts += Read-Partial $partial
+  }
+
+  $bodyParts += ""
+  $bodyParts += "---"
+  $bodyParts += ""
+  $bodyParts += '````````md'
+  $bodyParts += (($payloadParts -join "`n`n").TrimEnd())
+  $bodyParts += '````````'
 
   $content = (New-GeneratedNotice) + (($bodyParts -join "`n").TrimEnd()) + "`n"
   $target = Join-Path $TemplatesDir $FileName
@@ -76,8 +100,31 @@ function Write-GeneratedTemplate {
   [System.IO.File]::WriteAllText($target, $content, $utf8NoBom)
 }
 
-Write-GeneratedTemplate -FileName 'AGENTS.template.md' -Title 'AGENTS.md AI Coding Agent Rules Template' -Audience 'Codex or OpenCode' -DestinationFile 'AGENTS.md'
-Write-GeneratedTemplate -FileName 'CLAUDE.template.md' -Title 'CLAUDE.md AI Coding Agent Rules Template' -Audience 'Claude Code' -DestinationFile 'CLAUDE.md'
-Write-GeneratedTemplate -FileName 'GEMINI.template.md' -Title 'GEMINI.md AI Coding Agent Rules Template' -Audience 'Antigravity or Gemini CLI' -DestinationFile 'GEMINI.md'
+Write-GeneratedTemplate -FileName 'AGENTS.template.md' -Title 'AGENTS.template.md AI coding agent and n8n MCP workflow rules' -Audience 'Codex or OpenCode' -DestinationFile 'AGENTS.md' -InstallSubject 'Codex/OpenCode rules' -InstallExamples @(
+  @{
+    Heading = 'Codex global rules example'
+    Path = 'C:\Users\<your-user>\.codex\AGENTS.md'
+    Commands = @('mkdir $HOME\.codex -Force', 'notepad $HOME\.codex\AGENTS.md')
+  },
+  @{
+    Heading = 'OpenCode global rules example'
+    Path = 'C:\Users\<your-user>\.config\opencode\AGENTS.md'
+    Commands = @('mkdir $HOME\.config\opencode -Force', 'notepad $HOME\.config\opencode\AGENTS.md')
+  }
+)
+Write-GeneratedTemplate -FileName 'CLAUDE.template.md' -Title 'CLAUDE.template.md AI coding agent and n8n MCP workflow rules' -Audience 'Claude Code' -DestinationFile 'CLAUDE.md' -InstallSubject 'Claude Code rules' -InstallExamples @(
+  @{
+    Heading = 'Claude Code global rules example'
+    Path = 'C:\Users\<your-user>\.claude\CLAUDE.md'
+    Commands = @('mkdir $HOME\.claude -Force', 'notepad $HOME\.claude\CLAUDE.md')
+  }
+)
+Write-GeneratedTemplate -FileName 'GEMINI.template.md' -Title 'GEMINI.template.md AI coding agent and n8n MCP workflow rules' -Audience 'Gemini CLI or Antigravity' -DestinationFile 'GEMINI.md' -InstallSubject 'Gemini CLI/Antigravity rules' -InstallExamples @(
+  @{
+    Heading = 'Gemini CLI and Antigravity global rules example'
+    Path = 'C:\Users\<your-user>\.gemini\GEMINI.md'
+    Commands = @('mkdir $HOME\.gemini -Force', 'notepad $HOME\.gemini\GEMINI.md')
+  }
+)
 
 Write-Host 'Generated _projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md, CLAUDE.template.md, and GEMINI.template.md.'
