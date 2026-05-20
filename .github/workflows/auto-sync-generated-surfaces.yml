@@ -78,8 +78,8 @@ jobs:
 
           for path in "${changed_files[@]}"; do
             case "$path" in
-              _projects/*/_main/*)
-                echo "::notice::Auto-sync skipped: this PR includes _projects/**/_main/** source/provenance changes. Generated outputs must be committed by the author/Codex and verified by npm run validate:all."
+              _projects/*/_main/*|repo/docs/*|repo/scripts/*|repo/tests/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
+                echo "::notice::Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate: ${path}. Generated outputs must be committed by the author/Codex and verified by npm run validate:all."
                 echo "should_sync=false" >> "$GITHUB_OUTPUT"
                 exit 0
                 ;;
@@ -98,18 +98,12 @@ jobs:
           eligible=false
           for path in "${changed_files[@]}"; do
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json)
                 eligible=true
                 ;;
             esac
 
             case "$path" in
-              repo/docs/partials/source-of-truth-contract.md)
-                ;;
-              .github/*|repo/scripts/*|repo/tests/*|repo/docs/*|_projects/*/_main/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
-                echo "::error file=$path::Auto-sync refuses unsafe PR path: $path"
-                exit 1
-                ;;
               _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|README.md|AGENTS.md|skills/*|mcp/*)
                 ;;
               *)
