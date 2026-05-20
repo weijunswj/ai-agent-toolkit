@@ -6,14 +6,49 @@ Source: _projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md
 Source: skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md
 Update the project source and run sync.
 -->
-# AGENTS.md AI Coding Agent Rules Template
+# AGENTS.template.md AI coding agent and n8n MCP workflow rules
 
 Use this generated template for Codex or OpenCode.
 
-This template is inert while it keeps the `.template.md` filename. Copy or merge it into a target repo root as `AGENTS.md` only when the user explicitly wants those agent rules installed.
+This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `AGENTS.md`.
 
-If the target repo already has `AGENTS.md`, do not overwrite it. Produce a merge/diff plan instead.
+Copy or merge the fenced payload into the target repo root as `AGENTS.md` only when the user explicitly wants Codex/OpenCode rules installed.
 
+If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+
+## Codex global rules example
+
+Copy or merge the fenced payload into:
+
+```text
+C:\Users\<your-user>\.codex\AGENTS.md
+```
+
+Or create it with PowerShell:
+
+```text
+mkdir $HOME\.codex -Force
+notepad $HOME\.codex\AGENTS.md
+```
+
+## OpenCode global rules example
+
+Copy or merge the fenced payload into:
+
+```text
+C:\Users\<your-user>\.config\opencode\AGENTS.md
+```
+
+Or create it with PowerShell:
+
+```text
+mkdir $HOME\.config\opencode -Force
+notepad $HOME\.config\opencode\AGENTS.md
+```
+
+---
+
+````````md
 # AI coding agent execution preferences
 
 ## Core role
@@ -681,3 +716,4 @@ Use secure CI/CD materials for GitHub Actions setup, CI security gates, safe dep
 ## Safety
 
 Do not use a skill as permission to mutate live systems, write secrets, run live n8n actions, or install templates without review.
+````````

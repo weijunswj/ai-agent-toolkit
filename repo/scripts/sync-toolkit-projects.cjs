@@ -50,23 +50,52 @@ const agentRuleSourceTemplates = [
   {
     source: '_main/templates/agent-rules/AGENTS.template.md',
     output: '_projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md',
-    title: 'AGENTS.md AI Coding Agent Rules Template',
+    title: 'AGENTS.template.md AI coding agent and n8n MCP workflow rules',
     audience: 'Codex or OpenCode',
-    destination: 'AGENTS.md'
+    destination: 'AGENTS.md',
+    installSubject: 'Codex/OpenCode rules',
+    installExamples: [
+      {
+        heading: 'Codex global rules example',
+        path: 'C:\\Users\\<your-user>\\.codex\\AGENTS.md',
+        commands: ['mkdir $HOME\\.codex -Force', 'notepad $HOME\\.codex\\AGENTS.md']
+      },
+      {
+        heading: 'OpenCode global rules example',
+        path: 'C:\\Users\\<your-user>\\.config\\opencode\\AGENTS.md',
+        commands: ['mkdir $HOME\\.config\\opencode -Force', 'notepad $HOME\\.config\\opencode\\AGENTS.md']
+      }
+    ]
   },
   {
     source: '_main/templates/agent-rules/CLAUDE.template.md',
     output: '_projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md',
-    title: 'CLAUDE.md AI Coding Agent Rules Template',
+    title: 'CLAUDE.template.md AI coding agent and n8n MCP workflow rules',
     audience: 'Claude Code',
-    destination: 'CLAUDE.md'
+    destination: 'CLAUDE.md',
+    installSubject: 'Claude Code rules',
+    installExamples: [
+      {
+        heading: 'Claude Code global rules example',
+        path: 'C:\\Users\\<your-user>\\.claude\\CLAUDE.md',
+        commands: ['mkdir $HOME\\.claude -Force', 'notepad $HOME\\.claude\\CLAUDE.md']
+      }
+    ]
   },
   {
     source: '_main/templates/agent-rules/GEMINI.template.md',
     output: '_projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md',
-    title: 'GEMINI.md AI Coding Agent Rules Template',
-    audience: 'Antigravity or Gemini CLI',
-    destination: 'GEMINI.md'
+    title: 'GEMINI.template.md AI coding agent and n8n MCP workflow rules',
+    audience: 'Gemini CLI or Antigravity',
+    destination: 'GEMINI.md',
+    installSubject: 'Gemini CLI/Antigravity rules',
+    installExamples: [
+      {
+        heading: 'Gemini CLI and Antigravity global rules example',
+        path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
+        commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
+      }
+    ]
   }
 ];
 
@@ -347,15 +376,41 @@ function expectedAgentRuleSourceTemplate(spec) {
     '',
     `Use this generated template for ${spec.audience}.`,
     '',
-    `This template is inert while it keeps the \`.template.md\` filename. Copy or merge it into a target repo root as \`${spec.destination}\` only when the user explicitly wants those agent rules installed.`,
+    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because it is not named \`${spec.destination}\`.`,
     '',
-    `If the target repo already has \`${spec.destination}\`, do not overwrite it. Produce a merge/diff plan instead.`
+    `Copy or merge the fenced payload into the target repo root as \`${spec.destination}\` only when the user explicitly wants ${spec.installSubject} installed.`,
+    '',
+    `If the target repo already has \`${spec.destination}\`, do not overwrite it. Merge manually or produce a diff/merge plan.`
   ];
 
-  for (const source of agentRulePartialSources) {
+  for (const example of spec.installExamples) {
     bodyParts.push('');
-    bodyParts.push(readText(source).trimEnd());
+    bodyParts.push(`## ${example.heading}`);
+    bodyParts.push('');
+    bodyParts.push('Copy or merge the fenced payload into:');
+    bodyParts.push('');
+    bodyParts.push('```text');
+    bodyParts.push(example.path);
+    bodyParts.push('```');
+    bodyParts.push('');
+    bodyParts.push('Or create it with PowerShell:');
+    bodyParts.push('');
+    bodyParts.push('```text');
+    for (const command of example.commands) bodyParts.push(command);
+    bodyParts.push('```');
   }
+
+  const payloadParts = [];
+  for (const source of agentRulePartialSources) {
+    payloadParts.push(readText(source).trimEnd());
+  }
+
+  bodyParts.push('');
+  bodyParts.push('---');
+  bodyParts.push('');
+  bodyParts.push('````````md');
+  bodyParts.push(payloadParts.join('\n\n').trimEnd());
+  bodyParts.push('````````');
 
   return agentRuleSourceTemplateNotice() + bodyParts.join('\n').trimEnd() + '\n';
 }
