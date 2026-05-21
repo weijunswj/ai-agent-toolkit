@@ -40,67 +40,78 @@ const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
 const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']);
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
-const agentRuleProjectId = 'n8n.local-setup';
-const agentRuleSourcePartialSources = [
-  '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md',
-  '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
-];
-const agentRuleSkillRoutingSource = 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md';
-const agentRuleSourceTemplates = [
+const agentRuleTemplateSpecDefinitions = [
   {
-    source: '_main/templates/agent-rules/AGENTS.template.md',
-    output: '_projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md',
-    title: 'AGENTS.template.md AI coding agent and n8n MCP workflow rules',
-    audience: 'Codex or OpenCode',
-    destination: 'AGENTS.md',
-    installSubject: 'Codex/OpenCode rules',
-    installExamples: [
+    projectId: 'n8n.local-setup',
+    partialSources: [
       {
-        heading: 'Codex global rules example',
-        path: 'C:\\Users\\<your-user>\\.codex\\AGENTS.md',
-        commands: ['mkdir $HOME\\.codex -Force', 'notepad $HOME\\.codex\\AGENTS.md']
+        name: 'ai-coding-agent-execution.md',
+        rel: '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md'
       },
       {
-        heading: 'OpenCode global rules example',
-        path: 'C:\\Users\\<your-user>\\.config\\opencode\\AGENTS.md',
-        commands: ['mkdir $HOME\\.config\\opencode -Force', 'notepad $HOME\\.config\\opencode\\AGENTS.md']
+        name: 'n8n-mcp-rules.md',
+        rel: '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
       }
-    ]
-  },
-  {
-    source: '_main/templates/agent-rules/CLAUDE.template.md',
-    output: '_projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md',
-    title: 'CLAUDE.template.md AI coding agent and n8n MCP workflow rules',
-    audience: 'Claude Code',
-    destination: 'CLAUDE.md',
-    installSubject: 'Claude Code rules',
-    installExamples: [
+    ],
+    skillRoutingSource: 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md',
+    templates: [
       {
-        heading: 'Claude Code global rules example',
-        path: 'C:\\Users\\<your-user>\\.claude\\CLAUDE.md',
-        commands: ['mkdir $HOME\\.claude -Force', 'notepad $HOME\\.claude\\CLAUDE.md']
-      }
-    ]
-  },
-  {
-    source: '_main/templates/agent-rules/GEMINI.template.md',
-    output: '_projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md',
-    title: 'GEMINI.template.md AI coding agent and n8n MCP workflow rules',
-    audience: 'Gemini CLI or Antigravity',
-    destination: 'GEMINI.md',
-    installSubject: 'Gemini CLI/Antigravity rules',
-    installExamples: [
+        source: '_main/templates/agent-rules/AGENTS.template.md',
+        output: '_projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md',
+        title: 'AGENTS.template.md AI coding agent and n8n MCP workflow rules',
+        audience: 'Codex or OpenCode',
+        destination: 'AGENTS.md',
+        installSubject: 'Codex/OpenCode rules',
+        installExamples: [
+          {
+            heading: 'Codex global rules example',
+            path: 'C:\\Users\\<your-user>\\.codex\\AGENTS.md',
+            commands: ['mkdir $HOME\\.codex -Force', 'notepad $HOME\\.codex\\AGENTS.md']
+          },
+          {
+            heading: 'OpenCode global rules example',
+            path: 'C:\\Users\\<your-user>\\.config\\opencode\\AGENTS.md',
+            commands: ['mkdir $HOME\\.config\\opencode -Force', 'notepad $HOME\\.config\\opencode\\AGENTS.md']
+          }
+        ]
+      },
       {
-        heading: 'Gemini CLI and Antigravity global rules example',
-        path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
-        commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
+        source: '_main/templates/agent-rules/CLAUDE.template.md',
+        output: '_projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md',
+        title: 'CLAUDE.template.md AI coding agent and n8n MCP workflow rules',
+        audience: 'Claude Code',
+        destination: 'CLAUDE.md',
+        installSubject: 'Claude Code rules',
+        installExamples: [
+          {
+            heading: 'Claude Code global rules example',
+            path: 'C:\\Users\\<your-user>\\.claude\\CLAUDE.md',
+            commands: ['mkdir $HOME\\.claude -Force', 'notepad $HOME\\.claude\\CLAUDE.md']
+          }
+        ]
+      },
+      {
+        source: '_main/templates/agent-rules/GEMINI.template.md',
+        output: '_projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md',
+        title: 'GEMINI.template.md AI coding agent and n8n MCP workflow rules',
+        audience: 'Gemini CLI or Antigravity',
+        destination: 'GEMINI.md',
+        installSubject: 'Gemini CLI/Antigravity rules',
+        installExamples: [
+          {
+            heading: 'Gemini CLI and Antigravity global rules example',
+            path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
+            commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
+          }
+        ]
       }
     ]
   }
 ];
-const agentRulePublishedTemplateOutputs = new Set(agentRuleSourceTemplates.map((spec) => (
-  spec.output.replace('_projects/n8n/local-setup/_main/templates/agent-rules/', 'skills/n8n-local-setup/templates/agent-rules/')
-)));
+
+function agentRuleTemplateSpecs() {
+  return JSON.parse(JSON.stringify(agentRuleTemplateSpecDefinitions));
+}
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -361,32 +372,32 @@ function generatedNotice(project, relPaths) {
   ].join('\n');
 }
 
-function agentRuleSourceTemplateNotice() {
+function agentRuleSourceTemplateNotice(spec) {
   return [
     '<!--',
     'Generated from toolkit project source. Do not edit directly.',
-    'Project: n8n.local-setup',
-    ...agentRuleSourcePartialSources.map((relPath) => `Source: ${relPath}`),
+    `Project: ${spec.projectId}`,
+    ...spec.partialSources.map((source) => `Source: ${source.rel}`),
     'Update the project source and run sync.',
     '-->',
     ''
   ].join('\n');
 }
 
-function expectedAgentRuleSourceTemplate(spec) {
+function expectedAgentRuleSourceTemplate(spec, template) {
   const bodyParts = [
-    `# ${spec.title}`,
+    `# ${template.title}`,
     '',
-    `Use this generated template for ${spec.audience}.`,
+    `Use this generated template for ${template.audience}.`,
     '',
-    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because it is not named \`${spec.destination}\`.`,
+    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because it is not named \`${template.destination}\`.`,
     '',
-    `Copy or merge the fenced payload into the target repo root as \`${spec.destination}\` only when the user explicitly wants ${spec.installSubject} installed.`,
+    `Copy or merge the fenced payload into the target repo root as \`${template.destination}\` only when the user explicitly wants ${template.installSubject} installed.`,
     '',
-    `If the target repo already has \`${spec.destination}\`, do not overwrite it. Merge manually or produce a diff/merge plan.`
+    `If the target repo already has \`${template.destination}\`, do not overwrite it. Merge manually or produce a diff/merge plan.`
   ];
 
-  for (const example of spec.installExamples) {
+  for (const example of template.installExamples) {
     bodyParts.push('');
     bodyParts.push(`## ${example.heading}`);
     bodyParts.push('');
@@ -404,8 +415,8 @@ function expectedAgentRuleSourceTemplate(spec) {
   }
 
   const payloadParts = [];
-  for (const source of agentRuleSourcePartialSources) {
-    payloadParts.push(readText(source).trimEnd());
+  for (const source of spec.partialSources) {
+    payloadParts.push(readText(source.rel).trimEnd());
   }
 
   bodyParts.push('');
@@ -415,55 +426,113 @@ function expectedAgentRuleSourceTemplate(spec) {
   bodyParts.push(payloadParts.join('\n\n').trimEnd());
   bodyParts.push('````````');
 
-  return agentRuleSourceTemplateNotice() + bodyParts.join('\n').trimEnd() + '\n';
+  return agentRuleSourceTemplateNotice(spec) + bodyParts.join('\n').trimEnd() + '\n';
+}
+
+function agentRuleSpecSourceIsProjectScoped(project, source) {
+  const rel = typeof source === 'string' ? source : source.rel;
+  if (!rel.startsWith('_projects/')) return true;
+  return rel.startsWith(`${project.module_path}/`);
+}
+
+function validateAgentRuleRootSurfaceSource(errors, spec, linked, rel) {
+  if (!rel) return;
+  if (!isRootSurfacePath(rel)) {
+    fail(errors, `${spec.projectId} agent-rule root-surface source must stay under skills/ or mcp/: ${rel}`);
+  } else if (!linked.has(rel)) {
+    fail(errors, `${spec.projectId} agent-rule root-surface source must be declared linked: ${rel}`);
+  }
+}
+
+function validateAgentRuleSpecSources(errors, spec, project, linked) {
+  if (!project) {
+    fail(errors, `${spec.projectId} agent-rule spec project is not declared`);
+    return;
+  }
+  for (const source of spec.partialSources) {
+    if (source.rel.startsWith('_projects/') && !agentRuleSpecSourceIsProjectScoped(project, source)) {
+      fail(errors, `${spec.projectId} agent-rule partial source must stay within its project: ${source.rel}`);
+    } else if (isRootSurfacePath(source.rel)) {
+      validateAgentRuleRootSurfaceSource(errors, spec, linked, source.rel);
+    } else if (!source.rel.startsWith('_projects/')) {
+      fail(errors, `${spec.projectId} agent-rule partial source must be project source or linked root surface: ${source.rel}`);
+    }
+  }
+  validateAgentRuleRootSurfaceSource(errors, spec, linked, spec.skillRoutingSource);
 }
 
 function declaredAgentRuleSourceTemplates(projects) {
-  const project = projects.find((candidate) => candidate.id === agentRuleProjectId);
-  if (!project) return [];
+  const projectById = new Map(projects.map((project) => [project.id, project]));
+  const declared = [];
+  for (const spec of agentRuleTemplateSpecDefinitions) {
+    const project = projectById.get(spec.projectId);
+    if (!project) continue;
 
-  const declaredSources = new Set();
-  for (const output of project.outputs || []) {
-    if (typeof output.source === 'string') declaredSources.add(slash(path.normalize(output.source)));
+    const declaredSources = new Set();
+    for (const output of project.outputs || []) {
+      if (typeof output.source === 'string') declaredSources.add(slash(path.normalize(output.source)));
+    }
+
+    for (const template of spec.templates) {
+      if (declaredSources.has(template.source)) declared.push({ spec, template });
+    }
   }
-  return agentRuleSourceTemplates.filter((spec) => declaredSources.has(spec.source));
+  return declared;
 }
 
-function validateAgentRuleSourceTemplates(errors, projects) {
+function validateAgentRuleSourceTemplates(errors, projects, linked) {
+  const projectById = new Map(projects.map((project) => [project.id, project]));
   const declaredTemplates = declaredAgentRuleSourceTemplates(projects);
   if (!declaredTemplates.length) return;
 
-  for (const source of agentRuleSourcePartialSources) {
-    if (!fs.existsSync(resolveRel(source))) fail(errors, `Missing agent-rule partial source: ${source}`);
+  const specsWithDeclaredTemplates = new Set(declaredTemplates.map(({ spec }) => spec));
+  for (const spec of specsWithDeclaredTemplates) {
+    const project = projectById.get(spec.projectId);
+    validateAgentRuleSpecSources(errors, spec, project, linked);
   }
   if (errors.length) return;
 
-  for (const spec of declaredTemplates) {
-    if (!fs.existsSync(resolveRel(spec.output))) {
-      fail(errors, `Missing source-side agent-rule template: ${spec.output}`);
+  const specsWithMissingPartials = new Set();
+  for (const spec of specsWithDeclaredTemplates) {
+    for (const source of spec.partialSources) {
+      if (!fs.existsSync(resolveRel(source.rel))) {
+        specsWithMissingPartials.add(spec);
+        fail(errors, `Missing agent-rule partial source: ${source.rel}`);
+      }
+    }
+    if (spec.skillRoutingSource && !fs.existsSync(resolveRel(spec.skillRoutingSource))) {
+      fail(errors, `Missing agent-rule root-surface source: ${spec.skillRoutingSource}`);
+    }
+  }
+
+  for (const { spec, template } of declaredTemplates) {
+    if (specsWithMissingPartials.has(spec)) continue;
+    if (!fs.existsSync(resolveRel(template.output))) {
+      fail(errors, `Missing source-side agent-rule template: ${template.output}`);
       continue;
     }
-    if (readText(spec.output) !== expectedAgentRuleSourceTemplate(spec)) {
-      fail(errors, `Stale source-side agent-rule template: ${spec.output}`);
+    if (readText(template.output) !== expectedAgentRuleSourceTemplate(spec, template)) {
+      fail(errors, `Stale source-side agent-rule template: ${template.output}`);
     }
   }
 }
 
-function isPublishedAgentRuleTemplate(project, output, rels) {
-  return project.id === agentRuleProjectId &&
-    output.kind === 'copy' &&
-    rels.length === 1 &&
-    agentRulePublishedTemplateOutputs.has(output.output) &&
-    agentRuleSourceTemplates.some((spec) => spec.output === rels[0]);
+function publishedAgentRuleTemplateSpec(project, output, rels) {
+  if (output.kind !== 'copy' || rels.length !== 1) return null;
+  const spec = agentRuleTemplateSpecDefinitions.find((candidate) => candidate.projectId === project.id);
+  if (!spec?.skillRoutingSource) return null;
+  const template = spec.templates.find((candidate) => candidate.output === rels[0]);
+  if (!template) return null;
+  return { spec, template };
 }
 
-function addSkillRoutingToAgentRuleTemplate(text, outputPath) {
+function addSkillRoutingToAgentRuleTemplate(text, outputPath, skillRoutingSource) {
   const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const closingFence = '\n````````\n';
   if (!normalized.endsWith(closingFence)) {
     throw new Error(`agent-rule template missing closing 8-backtick fence: ${outputPath}`);
   }
-  const payload = readText(agentRuleSkillRoutingSource).trimEnd();
+  const payload = readText(skillRoutingSource).trimEnd();
   return `${normalized.slice(0, -closingFence.length)}\n\n${payload}${closingFence}`;
 }
 
@@ -511,8 +580,13 @@ function expectedTextOutput(project, output, rels) {
   }
 
   const raw = readText(rels[0]);
-  if (isPublishedAgentRuleTemplate(project, output, rels)) {
-    return addMarkdownNotice(addSkillRoutingToAgentRuleTemplate(raw, output.output), project, [rels[0], agentRuleSkillRoutingSource]);
+  const publishedAgentRule = publishedAgentRuleTemplateSpec(project, output, rels);
+  if (publishedAgentRule) {
+    return addMarkdownNotice(
+      addSkillRoutingToAgentRuleTemplate(raw, output.output, publishedAgentRule.spec.skillRoutingSource),
+      project,
+      [rels[0], publishedAgentRule.spec.skillRoutingSource]
+    );
   }
   if (output.kind === 'json' || path.extname(output.output).toLowerCase() === '.json') {
     return JSON.stringify(JSON.parse(raw), null, 2) + '\n';
@@ -648,9 +722,6 @@ function validateAndSync() {
   const projects = projectFiles.map((file) => validateProjectShape(errors, file)).filter(Boolean);
   if (errors.length) return { errors, projects, expanded: [] };
 
-  validateAgentRuleSourceTemplates(errors, projects);
-  if (errors.length) return { errors, projects, expanded: [] };
-
   const linked = linkedOutputSet(projects);
   const expanded = [];
   for (const project of projects) {
@@ -663,6 +734,9 @@ function validateAndSync() {
     }
   }
   if (errors.length) return { errors, projects, expanded };
+
+  validateAgentRuleSourceTemplates(errors, projects, linked);
+  if (errors.length && mode === 'write') return { errors, projects, expanded };
 
   syncExpanded(expanded, errors);
 
@@ -696,6 +770,7 @@ module.exports = {
   validateAndSync,
   discoverProjectFiles,
   projectManifests,
+  agentRuleTemplateSpecs,
   generatedNotice,
   addMarkdownNotice
 };
