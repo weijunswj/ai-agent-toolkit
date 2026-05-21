@@ -3,8 +3,8 @@ name: Build agent rule templates
 on:
   pull_request:
     paths:
+      - _projects/development/ai-coding-agent-rules/_main/templates/partials/**
       - _projects/n8n/local-setup/_main/templates/partials/**
-      - skills/n8n-local-setup/templates/agent-rules/partials/**
       - repo/scripts/build-agent-rule-templates.ps1
       - repo/scripts/- build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
@@ -12,8 +12,8 @@ on:
     branches:
       - main
     paths:
+      - _projects/development/ai-coding-agent-rules/_main/templates/partials/**
       - _projects/n8n/local-setup/_main/templates/partials/**
-      - skills/n8n-local-setup/templates/agent-rules/partials/**
       - repo/scripts/build-agent-rule-templates.ps1
       - repo/scripts/- build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
@@ -40,15 +40,18 @@ jobs:
       - name: Verify generated files are current
         run: |
           git diff --exit-code -- \
-            _projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md \
-            _projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md \
-            _projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md \
-            skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md \
-            skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md \
-            skills/n8n-local-setup/templates/agent-rules/GEMINI.template.md
+            _projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md \
+            _projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md \
+            _projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md \
+            _projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md \
+            skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md \
+            skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md \
+            skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md \
+            skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md
 
       - name: Verify active skill template names are absent
         run: |
-          test ! -e skills/n8n-local-setup/templates/agent-rules/AGENTS.md
-          test ! -e skills/n8n-local-setup/templates/agent-rules/CLAUDE.md
-          test ! -e skills/n8n-local-setup/templates/agent-rules/GEMINI.md
+          find skills/ai-coding-agent-rules skills/n8n-local-setup \
+            -type f \( -name 'AGENTS.md' -o -name 'CLAUDE.md' -o -name 'GEMINI.md' \) \
+            -print | tee /tmp/active-agent-rule-files.txt
+          test ! -s /tmp/active-agent-rule-files.txt

@@ -53,6 +53,10 @@ function readTextFile(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function secureCicdPromptFromReadme(rootDir = repoRoot) {
   const readme = readTextFile(path.join(rootDir, '_projects', 'cicd', 'secure-installer', '_main', 'README.md'));
   const start = '# Copy this prompt into your AI coding agent';
@@ -327,6 +331,42 @@ test('validation workflow runs canonical full validation read-only', () => {
   assert.doesNotMatch(workflow, /sync-repo-doc-contract\.cjs --write/);
   assert.doesNotMatch(workflow, /^\s*node repo\/scripts\//m);
   assert.match(workflow, /^permissions:\n  contents: read$/m);
+});
+
+test('build agent rule templates workflow tracks and verifies split template outputs', () => {
+  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'build-agent-rule-templates.yml'));
+  const watchedPaths = [
+    '_projects/development/ai-coding-agent-rules/_main/templates/partials/**',
+    '_projects/n8n/local-setup/_main/templates/partials/**',
+    'repo/scripts/build-agent-rule-templates.ps1',
+    'repo/scripts/- build-agent-rule-templates.cmd',
+    '.github/workflows/build-agent-rule-templates.yml'
+  ];
+  const verifiedPaths = [
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md',
+    '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md',
+    'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md',
+    'skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md'
+  ];
+
+  for (const rel of watchedPaths) {
+    assert.match(workflow, new RegExp(`- ${escapeRegExp(rel)}`), rel);
+  }
+  for (const rel of verifiedPaths) {
+    assert.match(workflow, new RegExp(`\\b${escapeRegExp(rel)}\\b`), rel);
+  }
+
+  assert.doesNotMatch(workflow, /skills\/n8n-local-setup\/templates\/agent-rules\/partials/);
+  assert.doesNotMatch(workflow, /_projects\/n8n\/local-setup\/_main\/templates\/agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
+  assert.doesNotMatch(workflow, /skills\/n8n-local-setup\/templates\/agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
+  assert.match(workflow, /find skills\/ai-coding-agent-rules skills\/n8n-local-setup/);
+  for (const activeName of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
+    assert.match(workflow, new RegExp(`-name '${escapeRegExp(activeName)}'`), activeName);
+  }
 });
 
 test('auto-sync generated surfaces workflow is accepted by validation', () => {
