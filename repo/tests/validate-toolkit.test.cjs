@@ -53,6 +53,10 @@ function readTextFile(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function secureCicdPromptFromReadme(rootDir = repoRoot) {
   const readme = readTextFile(path.join(rootDir, '_projects', 'cicd', 'secure-installer', '_main', 'README.md'));
   const start = '# Copy this prompt into your AI coding agent';
@@ -327,6 +331,42 @@ test('validation workflow runs canonical full validation read-only', () => {
   assert.doesNotMatch(workflow, /sync-repo-doc-contract\.cjs --write/);
   assert.doesNotMatch(workflow, /^\s*node repo\/scripts\//m);
   assert.match(workflow, /^permissions:\n  contents: read$/m);
+});
+
+test('build agent rule templates workflow tracks and verifies split template outputs', () => {
+  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'build-agent-rule-templates.yml'));
+  const watchedPaths = [
+    '_projects/development/ai-coding-agent-rules/_main/templates/partials/**',
+    '_projects/n8n/local-setup/_main/templates/partials/**',
+    'repo/scripts/build-agent-rule-templates.ps1',
+    'repo/scripts/- build-agent-rule-templates.cmd',
+    '.github/workflows/build-agent-rule-templates.yml'
+  ];
+  const verifiedPaths = [
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md',
+    '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md',
+    'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md',
+    'skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md'
+  ];
+
+  for (const rel of watchedPaths) {
+    assert.match(workflow, new RegExp(`- ${escapeRegExp(rel)}`), rel);
+  }
+  for (const rel of verifiedPaths) {
+    assert.match(workflow, new RegExp(`\\b${escapeRegExp(rel)}\\b`), rel);
+  }
+
+  assert.doesNotMatch(workflow, /skills\/n8n-local-setup\/templates\/agent-rules\/partials/);
+  assert.doesNotMatch(workflow, /_projects\/n8n\/local-setup\/_main\/templates\/agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
+  assert.doesNotMatch(workflow, /skills\/n8n-local-setup\/templates\/agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
+  assert.match(workflow, /find skills\/ai-coding-agent-rules skills\/n8n-local-setup/);
+  for (const activeName of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
+    assert.match(workflow, new RegExp(`-name '${escapeRegExp(activeName)}'`), activeName);
+  }
 });
 
 test('auto-sync generated surfaces workflow is accepted by validation', () => {
@@ -713,6 +753,7 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
       assert.match(text, /\n````````\n$/);
       assert.match(text, new RegExp(`Copy or merge the fenced payload into the target repo root as \`${spec.destination}\``));
       assert.match(text, new RegExp(`If the target repo already has \`${spec.destination}\`, do not overwrite it\\. Merge manually or produce a diff/merge plan\\.`));
+      assert.match(text, /Or create it with PowerShell:/);
       assert.match(text, /This file is inert while it keeps the `\.template\.md` filename/);
       for (const label of spec.labels) assert.match(text, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
       for (const installPath of spec.paths) assert.match(text, new RegExp(installPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -732,9 +773,23 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
     assert.equal((text.match(/^````````$/gm) || []).length, 1, addOnPath);
     assert.match(text, /\n````````md\n# n8n MCP workflow rules\n/);
     assert.match(text, /n8n MCP workflow rules add-on/);
+    assert.match(text, /This is an n8n-specific add-on\. It does not include the generic AI coding agent baseline rules\./);
+    assert.match(text, /First install or copy the generic baseline rules from:/);
+    assert.match(text, /skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md/);
+    assert.match(text, /skills\/ai-coding-agent-rules\/templates\/agent-rules\/CLAUDE\.template\.md/);
+    assert.match(text, /skills\/ai-coding-agent-rules\/templates\/agent-rules\/GEMINI\.template\.md/);
+    assert.match(text, /\[skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md\]\(\/skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md\)/);
+    assert.match(text, /\[skills\/ai-coding-agent-rules\/templates\/agent-rules\/CLAUDE\.template\.md\]\(\/skills\/ai-coding-agent-rules\/templates\/agent-rules\/CLAUDE\.template\.md\)/);
+    assert.match(text, /\[skills\/ai-coding-agent-rules\/templates\/agent-rules\/GEMINI\.template\.md\]\(\/skills\/ai-coding-agent-rules\/templates\/agent-rules\/GEMINI\.template\.md\)/);
+    assert.doesNotMatch(text, /CLAUDE\.template\.m\]/);
+    assert.match(text, /Then merge the fenced payload from this file under the generic rules in the same active instruction file\./);
+    assert.match(text, /Do not use this add-on alone to create a fresh active instruction file\./);
     assert.match(text, /`AGENTS\.md`, `CLAUDE\.md`, or `GEMINI\.md`/);
     assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials\/n8n-mcp-rules\.md/);
     assert.match(text, /\n```md\n# SECTION NAME\n/);
+    assert.doesNotMatch(text, /Or create it with PowerShell/);
+    assert.doesNotMatch(text, /Copy or merge the fenced payload into the target repo root as `AGENTS\.md`, `CLAUDE\.md`, or `GEMINI\.md`/);
+    assert.doesNotMatch(text, /Copy or merge the fenced payload into:\n\n```text\nTarget repo root AGENTS\.md, CLAUDE\.md, or GEMINI\.md/);
     assert.doesNotMatch(text, /\n# AI coding agent execution preferences\n/);
     assert.doesNotMatch(text, /\n# Skill Routing Rules\n/);
   }
@@ -823,6 +878,12 @@ test('agent-rule template freshness is driven by project-scoped specs', () => {
   assert.deepEqual(n8nSpec.templates.map((template) => template.source), ['_main/templates/agent-rules/n8n-mcp-rules.template.md']);
   assert.deepEqual(n8nSpec.templates.map((template) => template.output), ['_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md']);
   assert.deepEqual(n8nSpec.templates.map((template) => template.destination), ['AGENTS.md, CLAUDE.md, or GEMINI.md']);
+  assert.equal(n8nSpec.templates[0].installMode, 'add_on');
+  assert.deepEqual(n8nSpec.templates[0].baselineTemplatePaths, [
+    'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md'
+  ]);
 });
 
 test('changing assembled _main agent-rule templates makes source-side templates stale', () => {
