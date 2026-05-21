@@ -48,6 +48,8 @@ Denied writes include:
 
 CI must not run live actions, import/export n8n workflows, activate/deactivate workflows, mutate credentials, install packages from project modules, or execute scripts merely because they exist under `_projects/**/_main/`.
 
+Privileged generated-surface writeback may run only trusted deterministic maintenance scripts from the protected base revision against the PR checkout. The narrow agent-rule exception may regenerate declared source-side agent-rule templates from declared partials, then publish their generated skill copies.
+
 ## Sync Enforcement
 
 [repo/scripts/sync-toolkit-projects.cjs](../scripts/sync-toolkit-projects.cjs) validates project shape, export declarations, root-output paths, write policy fields, forbidden files, and stale generated outputs.

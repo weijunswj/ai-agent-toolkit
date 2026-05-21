@@ -1,6 +1,14 @@
+param(
+  [string] $Workspace = ''
+)
+
 $ErrorActionPreference = 'Stop'
 
-$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+if ($Workspace) {
+  $RepoRoot = (Resolve-Path -LiteralPath $Workspace).Path
+} else {
+  $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+}
 
 $AgentRuleTemplateSpecs = @(
   @{
@@ -87,6 +95,11 @@ $AgentRuleTemplateSpecs = @(
         DestinationDisplay = '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
         ActiveNameText = 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
         InstallMode = 'add_on'
+        SourceBaselineTemplatePaths = @(
+          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md'
+        )
         BaselineTemplatePaths = @(
           'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
           'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
@@ -124,12 +137,42 @@ function New-GeneratedNotice {
   return ($notice -join "`n")
 }
 
-function Format-RepoRootLink {
+function Get-RelativePath {
   param(
-    [Parameter(Mandatory = $true)] [string] $RelPath
+    [Parameter(Mandatory = $true)] [string] $FromFile,
+    [Parameter(Mandatory = $true)] [string] $ToFile
   )
 
-  return "[$RelPath](/$RelPath)"
+  $fromParts = @($FromFile.Replace('\', '/').Split('/') | Where-Object { $_ -ne '' })
+  $toParts = @($ToFile.Replace('\', '/').Split('/') | Where-Object { $_ -ne '' })
+  $fromDirs = if ($fromParts.Count -gt 1) { @($fromParts[0..($fromParts.Count - 2)]) } else { @() }
+
+  $common = 0
+  while ($common -lt $fromDirs.Count -and $common -lt $toParts.Count -and $fromDirs[$common] -eq $toParts[$common]) {
+    $common += 1
+  }
+
+  $resultParts = @()
+  for ($i = $common; $i -lt $fromDirs.Count; $i += 1) {
+    $resultParts += '..'
+  }
+  for ($i = $common; $i -lt $toParts.Count; $i += 1) {
+    $resultParts += $toParts[$i]
+  }
+
+  if ($resultParts.Count -eq 0) {
+    return $toParts[-1]
+  }
+  return ($resultParts -join '/')
+}
+
+function Format-RelativeMarkdownLink {
+  param(
+    [Parameter(Mandatory = $true)] [string] $FromFile,
+    [Parameter(Mandatory = $true)] [string] $ToFile
+  )
+
+  return "[$ToFile]($(Get-RelativePath -FromFile $FromFile -ToFile $ToFile))"
 }
 
 function Write-GeneratedTemplate {
@@ -150,13 +193,15 @@ function Write-GeneratedTemplate {
   )
 
   if ($Template.ContainsKey('InstallMode') -and $Template.InstallMode -eq 'add_on') {
+    $outputRelPath = "$($Spec.SourceSideOutputDir)/$($Template.FileName)"
+    $baselineTemplatePaths = if ($Template.ContainsKey('SourceBaselineTemplatePaths')) { @($Template.SourceBaselineTemplatePaths) } else { @($Template.BaselineTemplatePaths) }
     $bodyParts += ""
     $bodyParts += "This is an n8n-specific add-on. It does not include the generic AI coding agent baseline rules."
     $bodyParts += ""
     $bodyParts += "First install or copy the generic baseline rules from:"
     $bodyParts += ""
-    foreach ($baselinePath in @($Template.BaselineTemplatePaths)) {
-      $bodyParts += "- $(Format-RepoRootLink $baselinePath)"
+    foreach ($baselinePath in $baselineTemplatePaths) {
+      $bodyParts += "- $(Format-RelativeMarkdownLink -FromFile $outputRelPath -ToFile $baselinePath)"
     }
     $bodyParts += ""
     $bodyParts += "Then merge the fenced payload from this file under the generic rules in the same active instruction file."

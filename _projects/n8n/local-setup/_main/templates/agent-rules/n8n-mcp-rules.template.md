@@ -14,9 +14,9 @@ This is an n8n-specific add-on. It does not include the generic AI coding agent 
 
 First install or copy the generic baseline rules from:
 
-- [skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md](/skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md)
-- [skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md](/skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md)
-- [skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md](/skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md)
+- [_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md](../../../../../development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md)
+- [_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md](../../../../../development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md)
+- [_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md](../../../../../development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md)
 
 Then merge the fenced payload from this file under the generic rules in the same active instruction file.
 

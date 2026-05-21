@@ -297,6 +297,12 @@ function fail(errors, message) {
 }
 
 const autoSyncGeneratedSurfacesWorkflowPath = '.github/workflows/auto-sync-generated-surfaces.yml';
+const autoSyncGeneratedAgentRuleTemplateOutputs = [
+  '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md',
+  '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md'
+];
 
 function isAutoSyncGeneratedOutputPath(relPath) {
   const rel = slash(relPath);
@@ -304,7 +310,8 @@ function isAutoSyncGeneratedOutputPath(relPath) {
     rel === 'README.md' ||
     rel === 'AGENTS.md' ||
     rel.startsWith('skills/') ||
-    rel.startsWith('mcp/')
+    rel.startsWith('mcp/') ||
+    autoSyncGeneratedAgentRuleTemplateOutputs.includes(rel)
   );
 }
 
@@ -947,6 +954,20 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   for (const { label, token } of requiredPreflightPathBlocks) {
     if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight skip handling for ${label}`);
   }
+  const autoSyncAgentRulePartialInputs = [
+    '_projects/development/ai-coding-agent-rules/_main/templates/partials/*',
+    '_projects/n8n/local-setup/_main/templates/partials/*'
+  ];
+  for (const token of autoSyncAgentRulePartialInputs) {
+    if (!preflightSection.includes(token)) {
+      fail(errors, `${entry.relPath} must allow agent-rule partial changes as auto-sync eligible inputs`);
+    }
+  }
+  for (const token of autoSyncGeneratedAgentRuleTemplateOutputs) {
+    if (!preflightSection.includes(token)) {
+      fail(errors, `${entry.relPath} must allow generated source-side agent-rule templates in the guarded PR file set`);
+    }
+  }
   const unsafeSkipMessage = 'Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate';
   if (!preflightSection.includes(unsafeSkipMessage) ||
       !preflightSection.includes('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.') ||
@@ -961,11 +982,11 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       !/git\s+-C\s+"\$PR_ROOT"\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
     fail(errors, `${entry.relPath} missing post-sync changed-path validation`);
   }
-  if (!text.includes('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)')) {
-    fail(errors, `${entry.relPath} missing forbidden post-sync path rejection`);
-  }
-  if (!text.includes('README.md|AGENTS.md|skills/*|mcp/*)')) {
+  if (!text.includes('README.md|AGENTS.md|skills/*|mcp/*')) {
     fail(errors, `${entry.relPath} missing approved generated output path allowlist`);
+  }
+  for (const token of autoSyncGeneratedAgentRuleTemplateOutputs) {
+    if (!text.includes(token)) fail(errors, `${entry.relPath} missing generated source-side agent-rule template allowlist entry: ${token}`);
   }
 
   const postSyncStep = workflowStepText(steps, 'Guard, stage, and snapshot generated write scope');
@@ -994,6 +1015,23 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       fail(errors, `${entry.relPath} must skip checkout and writeback steps when preflight should_sync is false`);
     }
   }
+  const generatedOutputGuardText = `${postSyncStep}\n${finalRecheckStep}`;
+  const forbiddenGeneratedOutputAllowlistTokens = [
+    '_projects/*',
+    'repo/*',
+    '.github/*',
+    'package.json',
+    'package-lock.json',
+    'pnpm-lock.yaml',
+    'yarn.lock',
+    '.gitignore',
+    '.gitattributes'
+  ];
+  for (const token of forbiddenGeneratedOutputAllowlistTokens) {
+    if (generatedOutputGuardText.includes(token)) {
+      fail(errors, `${entry.relPath} must not allow broad generated output paths in post-sync guards: ${token}`);
+    }
+  }
 
   if (!verifyCheckoutStep.includes('/usr/bin/git -C "$PR_ROOT" rev-parse HEAD') ||
       !verifyCheckoutStep.includes('"$checked_out_sha" != "$HEAD_SHA"') ||
@@ -1005,6 +1043,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const trustedWorkspaceCommands = [
+    'pwsh -NoProfile -File "$TRUSTED_ROOT/repo/scripts/build-agent-rule-templates.ps1" -Workspace "$PR_ROOT"',
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write',
     'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write',
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check',
@@ -1038,8 +1077,8 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} final recheck must compare the staged index tree snapshot`);
   }
   if (!finalRecheckStep.includes('/usr/bin/git -C "$PR_ROOT" diff --cached --name-only') ||
-      !finalRecheckStep.includes('README.md|AGENTS.md|skills/*|mcp/*)') ||
-      !finalRecheckStep.includes('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)')) {
+      !finalRecheckStep.includes('README.md|AGENTS.md|skills/*|mcp/*') ||
+      autoSyncGeneratedAgentRuleTemplateOutputs.some((token) => !finalRecheckStep.includes(token))) {
     fail(errors, `${entry.relPath} final recheck must reject staged paths outside generated output scope`);
   }
   const expectedStaticCheckCommands = [
@@ -1055,7 +1094,8 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const gitAddLines = (text.match(/^\s*(?:\/usr\/bin\/)?git(?:\s+-C\s+"\$PR_ROOT")?\s+add .+$/gm) || []).map((line) => line.trim());
-  if (gitAddLines.length !== 1 || gitAddLines[0] !== '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp') {
+  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
+  if (gitAddLines.length !== 1 || gitAddLines[0] !== expectedGitAddLine) {
     fail(errors, `${entry.relPath} must commit only approved generated output paths`);
   }
   if (/git(?:\s+-C\s+"\$PR_ROOT")?\s+add\b/.test(commitStep)) {

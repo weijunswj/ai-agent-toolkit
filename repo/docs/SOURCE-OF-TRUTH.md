@@ -43,14 +43,14 @@ The privileged workflow definition runs from the base/default branch, then write
 
 - Fork PRs are never written to.
 - `main` is never written to.
-- The workflow only republishes declared generated/synced outputs such as `README.md`, `AGENTS.md`, `skills/**`, and `mcp/**`.
-- It does not update sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
+- The workflow only republishes declared generated/synced outputs such as `README.md`, `AGENTS.md`, `skills/**`, `mcp/**`, and the source-side agent-rule templates generated from declared agent-rule partials.
+- It does not update other sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
 - Because the workflow is privileged, it does not run generated test suites, PR-controlled generated executable code, or full repo validation against raw PR heads; full validation remains covered by normal read-only CI.
 - The privileged static checks are limited to generated-surface freshness checks and git diff checks before committing generated output, which avoids blocking otherwise valid behind-main PR branches.
-- The workflow only runs deterministic sync/check/validator scripts from the protected base revision. The PR checkout is treated as data and passed to those scripts through an explicit workspace target.
+- The workflow only runs deterministic generation, sync, check, or validator scripts from the protected base revision. The PR checkout is treated as data and passed to those scripts through an explicit workspace target.
 - The workflow stages and snapshots generated output after sync, then rechecks the index/workspace before commit so validation cannot add files to the writeback diff.
 - The workflow pins the PR checkout to the event head SHA, refuses stale queued runs if the PR head changed, verifies the remote PR branch before pushing, and never force pushes.
-- If a PR includes `_projects/**/_main/**` source/provenance changes, auto-sync skips successfully without checking out, writing, committing, or pushing. The author or Codex must commit any required generated outputs, source-lock/provenance updates, and audit baseline updates, then pass `npm run validate:all`.
+- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync skips successfully without checking out, writing, committing, or pushing. The author or Codex must commit any required generated outputs, source-lock/provenance updates, and audit baseline updates, then pass `npm run validate:all`.
 - If a writeback-eligible PR is mixed with forbidden workflow, maintenance-script, test, docs, package, lockfile, or other unsafe paths, the workflow fails instead of pushing.
 
 ## Skill-Local Packs

@@ -429,9 +429,9 @@ test('auto-sync generated surfaces workflow rejects forbidden events and missing
     ['head main guard is required', (text) => text.replaceAll("github.event.pull_request.head.ref != 'main'", 'true'), /missing head\.ref != main guard/],
     ['oversized PR file-list guard is required', (text) => text.replace('if (( changed_file_count > 3000 )); then', 'if false; then'), /preflight must reject PRs with more than 3000 changed files/],
     ['post-sync changed-path validation is required', (text) => text.replaceAll('Forbidden post-sync change outside generated output scope', 'Removed post-sync guard'), /missing post-sync changed-path validation/],
-    ['_projects post-sync writes stay rejected', (text) => text.replaceAll('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', 'repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
-    ['repo post-sync writes stay rejected', (text) => text.replaceAll('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/],
-    ['.github post-sync writes stay rejected', (text) => text.replaceAll('_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|repo/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /missing forbidden post-sync path rejection/]
+    ['_projects wildcard output scope stays rejected', (text) => text.replaceAll('README.md|AGENTS.md|skills/*|mcp/*|', 'README.md|AGENTS.md|skills/*|mcp/*|_projects/*|'), /must not allow broad generated output paths/],
+    ['repo output scope stays rejected', (text) => text.replaceAll('README.md|AGENTS.md|skills/*|mcp/*|', 'README.md|AGENTS.md|skills/*|mcp/*|repo/*|'), /must not allow broad generated output paths/],
+    ['.github output scope stays rejected', (text) => text.replaceAll('README.md|AGENTS.md|skills/*|mcp/*|', 'README.md|AGENTS.md|skills/*|mcp/*|.github/*|'), /must not allow broad generated output paths/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
@@ -589,7 +589,7 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
     ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
     ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
     ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
-    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)', '_projects/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)'), /final recheck must reject staged paths outside generated output scope/],
+    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md', '_projects/n8n/local-setup/_main/templates/agent-rules/other.template.md'), /final recheck must reject staged paths outside generated output scope/],
     ['commit step resets dangerous git environment', (text) => text.replace('unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /commit step must reset dangerous git environment state/],
     ['push step resets dangerous git environment', (text) => replaceLast(text, 'unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /push step must reset dangerous git environment state/]
   ];
@@ -613,6 +613,8 @@ test('auto-sync generated surfaces workflow skips unsafe preflight paths before 
     ['repo scripts skip is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight skip handling for repo/' + 'scripts')],
     ['repo tests skip is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight skip handling for repo\/tests/],
     ['lockfile skip is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight skip handling for package\/lockfile changes/],
+    ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/templates/partials/*', '_projects/blocked/_main/templates/partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
+    ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
     ['clear skip notice is required', (text) => text.replace('Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate', 'Auto-sync did something else'), /preflight must skip unsafe maintenance\/source PRs/],
     ['skip must rely on validate:all gate', (text) => text.replace('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.', 'Generated outputs will be checked here.'), /preflight must skip unsafe maintenance\/source PRs/],
     ['skip must set should_sync false', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"', 'echo "should_sync=true" >> "$GITHUB_OUTPUT"'), /preflight must skip unsafe maintenance\/source PRs/]
@@ -633,6 +635,10 @@ test('auto-sync generated output path scope is explicit', () => {
   for (const rel of [
     'README.md',
     'AGENTS.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md',
+    '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md',
     'mcp/registry/projects.registry.json',
     'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md'
   ]) {
@@ -643,6 +649,7 @@ test('auto-sync generated output path scope is explicit', () => {
     '_projects/foo/toolkit.project.json',
     '_projects/foo/curated_output_for_ai/file.md',
     '_projects/foo/_main/file.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/partials/ai-coding-agent-execution.md',
     'repo/' + 'scr' + 'ipts/anything.cjs',
     '.github/workflows/anything.yml',
     'package.json',
@@ -764,10 +771,18 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
   }
 
   const addOnPaths = [
-    path.join(repoRoot, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'agent-rules', 'n8n-mcp-rules.template.md'),
-    path.join(repoRoot, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', 'n8n-mcp-rules.template.md')
+    {
+      path: path.join(repoRoot, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'agent-rules', 'n8n-mcp-rules.template.md'),
+      baselinePrefix: '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules',
+      baselineHrefPrefix: '../../../../../development/ai-coding-agent-rules/_main/templates/agent-rules'
+    },
+    {
+      path: path.join(repoRoot, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', 'n8n-mcp-rules.template.md'),
+      baselinePrefix: 'skills/ai-coding-agent-rules/templates/agent-rules',
+      baselineHrefPrefix: '../../../ai-coding-agent-rules/templates/agent-rules'
+    }
   ];
-  for (const addOnPath of addOnPaths) {
+  for (const { path: addOnPath, baselinePrefix, baselineHrefPrefix } of addOnPaths) {
     const text = fs.readFileSync(addOnPath, 'utf8').replace(/\r\n/g, '\n');
     assert.equal((text.match(/^````````md$/gm) || []).length, 1, addOnPath);
     assert.equal((text.match(/^````````$/gm) || []).length, 1, addOnPath);
@@ -775,12 +790,10 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
     assert.match(text, /n8n MCP workflow rules add-on/);
     assert.match(text, /This is an n8n-specific add-on\. It does not include the generic AI coding agent baseline rules\./);
     assert.match(text, /First install or copy the generic baseline rules from:/);
-    assert.match(text, /skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md/);
-    assert.match(text, /skills\/ai-coding-agent-rules\/templates\/agent-rules\/CLAUDE\.template\.md/);
-    assert.match(text, /skills\/ai-coding-agent-rules\/templates\/agent-rules\/GEMINI\.template\.md/);
-    assert.match(text, /\[skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md\]\(\/skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md\)/);
-    assert.match(text, /\[skills\/ai-coding-agent-rules\/templates\/agent-rules\/CLAUDE\.template\.md\]\(\/skills\/ai-coding-agent-rules\/templates\/agent-rules\/CLAUDE\.template\.md\)/);
-    assert.match(text, /\[skills\/ai-coding-agent-rules\/templates\/agent-rules\/GEMINI\.template\.md\]\(\/skills\/ai-coding-agent-rules\/templates\/agent-rules\/GEMINI\.template\.md\)/);
+    assert.match(text, new RegExp(`\\[${baselinePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/AGENTS\\.template\\.md\\]\\(${baselineHrefPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/AGENTS\\.template\\.md\\)`));
+    assert.match(text, new RegExp(`\\[${baselinePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/CLAUDE\\.template\\.md\\]\\(${baselineHrefPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/CLAUDE\\.template\\.md\\)`));
+    assert.match(text, new RegExp(`\\[${baselinePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/GEMINI\\.template\\.md\\]\\(${baselineHrefPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/GEMINI\\.template\\.md\\)`));
+    assert.doesNotMatch(text, /\]\(\/skills\/ai-coding-agent-rules\//);
     assert.doesNotMatch(text, /CLAUDE\.template\.m\]/);
     assert.match(text, /Then merge the fenced payload from this file under the generic rules in the same active instruction file\./);
     assert.match(text, /Do not use this add-on alone to create a fresh active instruction file\./);
@@ -883,6 +896,11 @@ test('agent-rule template freshness is driven by project-scoped specs', () => {
     'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
     'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
     'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md'
+  ]);
+  assert.deepEqual(n8nSpec.templates[0].sourceBaselineTemplatePaths, [
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md'
   ]);
 });
 

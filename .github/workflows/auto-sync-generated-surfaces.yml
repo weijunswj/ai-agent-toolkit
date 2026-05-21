@@ -7,6 +7,8 @@ on:
     paths:
       - "_projects/**/curated_output_for_ai/**"
       - "_projects/**/toolkit.project.json"
+      - "_projects/development/ai-coding-agent-rules/_main/templates/partials/**"
+      - "_projects/n8n/local-setup/_main/templates/partials/**"
       - "repo/docs/partials/source-of-truth-contract.md"
 
 permissions:
@@ -78,6 +80,12 @@ jobs:
 
           for path in "${changed_files[@]}"; do
             case "$path" in
+              _projects/development/ai-coding-agent-rules/_main/templates/partials/*|_projects/n8n/local-setup/_main/templates/partials/*|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md|_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md)
+                continue
+                ;;
+            esac
+
+            case "$path" in
               _projects/*/_main/*|repo/docs/*|repo/scripts/*|repo/tests/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
                 echo "::notice::Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate: ${path}. Generated outputs must be committed by the author/Codex and verified by npm run validate:all."
                 echo "should_sync=false" >> "$GITHUB_OUTPUT"
@@ -98,13 +106,13 @@ jobs:
           eligible=false
           for path in "${changed_files[@]}"; do
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|_projects/development/ai-coding-agent-rules/_main/templates/partials/*|_projects/n8n/local-setup/_main/templates/partials/*)
                 eligible=true
                 ;;
             esac
 
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|README.md|AGENTS.md|skills/*|mcp/*)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|_projects/development/ai-coding-agent-rules/_main/templates/partials/*|_projects/n8n/local-setup/_main/templates/partials/*|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md|_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md|README.md|AGENTS.md|skills/*|mcp/*)
                 ;;
               *)
                 echo "::error file=$path::Auto-sync only runs on deterministic source/routing/contract and generated surface paths: $path"
@@ -160,6 +168,7 @@ jobs:
       - name: Sync deterministic generated surfaces
         if: steps.preflight.outputs.should_sync == 'true'
         run: |
+          pwsh -NoProfile -File "$TRUSTED_ROOT/repo/scripts/build-agent-rule-templates.ps1" -Workspace "$PR_ROOT"
           node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write
           node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write
 
@@ -186,14 +195,7 @@ jobs:
 
           for path in "${dirty_files[@]}"; do
             case "$path" in
-              _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
-                echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
-                exit 1
-                ;;
-            esac
-
-            case "$path" in
-              README.md|AGENTS.md|skills/*|mcp/*)
+              README.md|AGENTS.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md|_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
@@ -202,7 +204,7 @@ jobs:
             esac
           done
 
-          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp
+          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp _projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md _projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md _projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md _projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md
 
           mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           if [[ "${#staged_files[@]}" -eq 0 ]]; then
@@ -213,14 +215,7 @@ jobs:
 
           for path in "${staged_files[@]}"; do
             case "$path" in
-              _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
-                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
-                exit 1
-                ;;
-            esac
-
-            case "$path" in
-              README.md|AGENTS.md|skills/*|mcp/*)
+              README.md|AGENTS.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md|_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
@@ -271,14 +266,7 @@ jobs:
           mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           for path in "${staged_files[@]}"; do
             case "$path" in
-              _projects/*|repo/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
-                echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
-                exit 1
-                ;;
-            esac
-
-            case "$path" in
-              README.md|AGENTS.md|skills/*|mcp/*)
+              README.md|AGENTS.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md|_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"

@@ -42,7 +42,7 @@ Their copied `_projects/**/_main/` files are canonical. SOURCE-LOCK hashes remai
 
 Allowed scoped writes:
 
-- Agent-rule generation may write only the generated agent-rule template outputs.
+- Agent-rule generation may write only the generated source-side and published agent-rule template outputs.
 - n8n sanitizer helpers may write ignored staging folders.
 - n8n sync helpers may write reviewed consumer repo workflow JSON plus ignored local `.tmp/**` and `.n8n-local/**`.
 
