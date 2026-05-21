@@ -68,7 +68,6 @@ Inspected:
 - `skills/n8n-local-setup/templates/agent-rules/GEMINI.md`
 - `skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md`
 - `_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md`
-- `_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md`
 - `skills/n8n-local-setup/templates/mcp-configs/*-mcp-config.md`
 - `repo/scripts/build-templates.ps1`
 - `.github/workflows/build-templates.yml`
