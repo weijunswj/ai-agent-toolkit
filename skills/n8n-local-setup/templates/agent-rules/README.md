@@ -12,31 +12,27 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Agent Rule Templates
 
-This folder contains generated copy-paste rule templates for AI coding agents.
+This folder contains the generated n8n-specific add-on rule template for AI coding agents.
 
 The files in this skill folder are intentionally inert templates. They use `.template.md` filenames so they are not mistaken for active nested repo instructions while the skill is copied or inspected.
 
-Generated files:
+Generated file:
 
-- `AGENTS.template.md`
-- `CLAUDE.template.md`
-- `GEMINI.template.md`
+- `n8n-mcp-rules.template.md`
 
-Install them only when the user explicitly wants those agent rules in a target repo:
+Install it only after generic AI coding agent rules from `skills/ai-coding-agent-rules` are installed or merged in a target repo:
 
-- Copy or merge `AGENTS.template.md` into the target repo root as `AGENTS.md` for Codex or OpenCode.
-- Copy or merge `CLAUDE.template.md` into the target repo root as `CLAUDE.md` for Claude Code.
-- Copy or merge `GEMINI.template.md` into the target repo root as `GEMINI.md` for Gemini CLI or Antigravity.
+- Merge `n8n-mcp-rules.template.md` into the target repo root `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`.
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
+Generic AI coding agent rule templates live in `skills/ai-coding-agent-rules/templates/agent-rules/`.
+
 Source partials are declared in the local n8n setup project manifest:
 
-- [_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md](/_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md)
 - [_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md](/_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md)
-- [skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md](partials/skill-routing-rules.md)
 
-The assembled source-side templates live under [_projects/n8n/local-setup/_main/templates/agent-rules/](/_projects/n8n/local-setup/_main/templates/agent-rules/). The preserved original project templates remain under [_projects/n8n/local-setup/_main/templates/](/_projects/n8n/local-setup/_main/templates/). They are archival source, not the AI-facing template generation source.
+The assembled source-side add-on template lives under [_projects/n8n/local-setup/_main/templates/agent-rules/](/_projects/n8n/local-setup/_main/templates/agent-rules/).
 
 Regenerate with:
 

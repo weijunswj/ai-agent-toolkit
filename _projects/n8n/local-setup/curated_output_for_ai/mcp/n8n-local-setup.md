@@ -12,7 +12,8 @@ Project identity: `n8n.local-setup`
 
 - Project module: [_projects/n8n/local-setup/](../../_projects/n8n/local-setup/)
 - Preserved source files: [_projects/n8n/local-setup/_main/](../../_projects/n8n/local-setup/_main/)
-- Codex rules template: [skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md](../../skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md)
+- Generic AI coding agent rules skill: [skills/ai-coding-agent-rules/](../../skills/ai-coding-agent-rules/)
+- n8n rules add-on: [skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md](../../skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md)
 - Codex MCP config: [skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md](../../skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md)
 - Pack: [skills/n8n-local-setup/packs/codex-n8n-local/pack.json](../../skills/n8n-local-setup/packs/codex-n8n-local/pack.json)
 

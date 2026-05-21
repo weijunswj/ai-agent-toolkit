@@ -1,0 +1,19 @@
+{
+  "source_repo": "weijunswj/codex-n8n-local-setup",
+  "source_ref": "main",
+  "source_commit": "04a1a5d9dbd5411ca89cee5840e238c3c8654a55",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "Generic AI coding agent execution rules were rehomed from n8n.local-setup into this development module. The toolkit skill-routing partial was moved exactly from a same-repo linked root surface and is documented in SOURCE-MANIFEST.md rather than represented as an upstream source_path in this retired n8n source lock.",
+  "files": [
+    {
+      "mode": "adapted",
+      "source_path": "templates/partials/ai-coding-agent-execution.md",
+      "project_path": "_projects/development/ai-coding-agent-rules/_main/templates/partials/ai-coding-agent-execution.md",
+      "source_blob_sha": "33361f156446e64eb501c5fbc769e5ccab478236",
+      "notes": "Moved exactly from _projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md during the source-ownership split. It remains toolkit-adapted relative to the retired upstream source."
+    }
+  ]
+}

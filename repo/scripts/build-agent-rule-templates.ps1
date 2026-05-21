@@ -4,27 +4,27 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 
 $AgentRuleTemplateSpecs = @(
   @{
-    ProjectId = 'n8n.local-setup'
-    SourceSideOutputDir = '_projects/n8n/local-setup/_main/templates/agent-rules'
+    ProjectId = 'development.ai-coding-agent-rules'
+    SourceSideOutputDir = '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules'
     PartialSources = @(
       @{
         Name = 'ai-coding-agent-execution.md'
-        Path = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials\ai-coding-agent-execution.md'
-        Rel = '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md'
+        Path = Join-Path $RepoRoot '_projects\development\ai-coding-agent-rules\_main\templates\partials\ai-coding-agent-execution.md'
+        Rel = '_projects/development/ai-coding-agent-rules/_main/templates/partials/ai-coding-agent-execution.md'
       },
       @{
-        Name = 'n8n-mcp-rules.md'
-        Path = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials\n8n-mcp-rules.md'
-        Rel = '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
+        Name = 'toolkit-skill-routing.md'
+        Path = Join-Path $RepoRoot '_projects\development\ai-coding-agent-rules\_main\templates\partials\toolkit-skill-routing.md'
+        Rel = '_projects/development/ai-coding-agent-rules/_main/templates/partials/toolkit-skill-routing.md'
       }
     )
     Templates = @(
       @{
         FileName = 'AGENTS.template.md'
-        Title = 'AGENTS.template.md AI coding agent and n8n MCP workflow rules'
+        Title = 'AGENTS.template.md AI coding agent rules'
         Audience = 'Codex or OpenCode'
         DestinationFile = 'AGENTS.md'
-        InstallSubject = 'Codex/OpenCode rules'
+        InstallSubject = 'generic Codex/OpenCode rules'
         InstallExamples = @(
           @{
             Heading = 'Codex global rules example'
@@ -40,10 +40,10 @@ $AgentRuleTemplateSpecs = @(
       },
       @{
         FileName = 'CLAUDE.template.md'
-        Title = 'CLAUDE.template.md AI coding agent and n8n MCP workflow rules'
+        Title = 'CLAUDE.template.md AI coding agent rules'
         Audience = 'Claude Code'
         DestinationFile = 'CLAUDE.md'
-        InstallSubject = 'Claude Code rules'
+        InstallSubject = 'generic Claude Code rules'
         InstallExamples = @(
           @{
             Heading = 'Claude Code global rules example'
@@ -54,15 +54,47 @@ $AgentRuleTemplateSpecs = @(
       },
       @{
         FileName = 'GEMINI.template.md'
-        Title = 'GEMINI.template.md AI coding agent and n8n MCP workflow rules'
+        Title = 'GEMINI.template.md AI coding agent rules'
         Audience = 'Gemini CLI or Antigravity'
         DestinationFile = 'GEMINI.md'
-        InstallSubject = 'Gemini CLI/Antigravity rules'
+        InstallSubject = 'generic Gemini CLI/Antigravity rules'
         InstallExamples = @(
           @{
             Heading = 'Gemini CLI and Antigravity global rules example'
             Path = 'C:\Users\<your-user>\.gemini\GEMINI.md'
             Commands = @('mkdir $HOME\.gemini -Force', 'notepad $HOME\.gemini\GEMINI.md')
+          }
+        )
+      }
+    )
+  },
+  @{
+    ProjectId = 'n8n.local-setup'
+    SourceSideOutputDir = '_projects/n8n/local-setup/_main/templates/agent-rules'
+    PartialSources = @(
+      @{
+        Name = 'n8n-mcp-rules.md'
+        Path = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials\n8n-mcp-rules.md'
+        Rel = '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
+      }
+    )
+    Templates = @(
+      @{
+        FileName = 'n8n-mcp-rules.template.md'
+        Title = 'n8n-mcp-rules.template.md n8n MCP workflow rules add-on'
+        Audience = 'Codex, OpenCode, Claude Code, Gemini CLI, or Antigravity after generic agent rules are installed'
+        DestinationFile = 'AGENTS.md, CLAUDE.md, or GEMINI.md'
+        DestinationDisplay = '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
+        ActiveNameText = 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
+        InstallSubject = 'n8n-specific workflow and MCP safety rules'
+        InstallExamples = @(
+          @{
+            Heading = 'Add-on install example'
+            Path = 'Target repo root AGENTS.md, CLAUDE.md, or GEMINI.md'
+            Commands = @(
+              'Open the target instruction file.',
+              'Merge the fenced payload under the generic AI coding agent rules.'
+            )
           }
         )
       }
@@ -103,16 +135,19 @@ function Write-GeneratedTemplate {
     [Parameter(Mandatory = $true)] [hashtable] $Template
   )
 
+  $destinationDisplay = if ($Template.ContainsKey('DestinationDisplay')) { $Template.DestinationDisplay } else { "``$($Template.DestinationFile)``" }
+  $activeNameText = if ($Template.ContainsKey('ActiveNameText')) { $Template.ActiveNameText } else { "it is not named $destinationDisplay" }
+
   $bodyParts = @(
     "# $($Template.Title)",
     "",
     "Use this generated template for $($Template.Audience).",
     "",
-    "This file is inert while it keeps the ``.template.md`` filename. It is safe to keep inside a skill folder because it is not named ``$($Template.DestinationFile)``.",
+    "This file is inert while it keeps the ``.template.md`` filename. It is safe to keep inside a skill folder because $activeNameText.",
     "",
-    "Copy or merge the fenced payload into the target repo root as ``$($Template.DestinationFile)`` only when the user explicitly wants $($Template.InstallSubject) installed.",
+    "Copy or merge the fenced payload into the target repo root as $destinationDisplay only when the user explicitly wants $($Template.InstallSubject) installed.",
     "",
-    "If the target repo already has ``$($Template.DestinationFile)``, do not overwrite it. Merge manually or produce a diff/merge plan."
+    "If the target repo already has $destinationDisplay, do not overwrite it. Merge manually or produce a diff/merge plan."
   )
 
   foreach ($example in @($Template.InstallExamples)) {
@@ -160,4 +195,4 @@ foreach ($spec in $AgentRuleTemplateSpecs) {
   }
 }
 
-Write-Host 'Generated _projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md, CLAUDE.template.md, and GEMINI.template.md.'
+Write-Host 'Generated generic AI coding agent templates and n8n MCP add-on template.'

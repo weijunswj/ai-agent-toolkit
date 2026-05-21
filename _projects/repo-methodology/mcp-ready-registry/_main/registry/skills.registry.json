@@ -1,5 +1,34 @@
 [
   {
+    "id": "ai-coding-agent-rules",
+    "title": "AI Coding Agent Rules",
+    "category": "development",
+    "path": "skills/ai-coding-agent-rules/",
+    "purpose": "Generic execution-first AI coding agent rules and toolkit skill-routing templates for AGENTS.md, CLAUDE.md, and GEMINI.md.",
+    "supported_platforms": [
+      "ChatGPT",
+      "Codex",
+      "Claude",
+      "Claude Code",
+      "Gemini",
+      "Antigravity",
+      "OpenCode"
+    ],
+    "auto_use_triggers": [
+      "agent rules",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
+      "AI coding agent rules"
+    ],
+    "risk_level": "medium",
+    "instruction_only": true,
+    "source_refs": [
+      "_projects/development/ai-coding-agent-rules/",
+      "skills/ai-coding-agent-rules/"
+    ]
+  },
+  {
     "id": "ui-ux-secure-frontend-design",
     "title": "Secure UI/UX Frontend Design",
     "category": "design",
@@ -111,7 +140,7 @@
     "title": "n8n Local Setup",
     "category": "automation",
     "path": "skills/n8n-local-setup/",
-    "purpose": "Safe local n8n setup, MCP config routing, tunneling choices, and platform-specific agent rule setup.",
+    "purpose": "Safe local n8n setup, MCP config routing, tunneling choices, and n8n-specific agent rule add-on setup.",
     "supported_platforms": [
       "ChatGPT",
       "Codex",
@@ -128,7 +157,8 @@
     "instruction_only": true,
     "source_refs": [
       "_projects/n8n/local-setup/",
-      "skills/n8n-local-setup/"
+      "skills/n8n-local-setup/",
+      "skills/ai-coding-agent-rules/"
     ]
   },
   {

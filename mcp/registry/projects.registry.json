@@ -90,6 +90,38 @@
     ]
   },
   {
+    "id": "development.ai-coding-agent-rules",
+    "category": "development",
+    "name": "ai-coding-agent-rules",
+    "title": "AI Coding Agent Rules",
+    "project": {
+      "name": "AI Coding Agent Rules",
+      "category": "development",
+      "summary": "Generic execution-first AI coding agent rules and toolkit skill-routing templates for common agent instruction files."
+    },
+    "surface": {
+      "publish_as": "skill",
+      "skill": {
+        "status": "published",
+        "path": "skills/ai-coding-agent-rules",
+        "summary": "Provides inert AGENTS, CLAUDE, and GEMINI templates for installing generic AI coding agent execution and toolkit skill-routing rules."
+      },
+      "mcp": {
+        "status": "not_applicable",
+        "summary": "No MCP surface is published for this standalone rules skill."
+      }
+    },
+    "module_path": "_projects/development/ai-coding-agent-rules",
+    "main_path": "_projects/development/ai-coding-agent-rules/_main",
+    "root_surfaces": [
+      "skills/ai-coding-agent-rules/README.md",
+      "skills/ai-coding-agent-rules/SKILL.md",
+      "skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md",
+      "skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md",
+      "skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md"
+    ]
+  },
+  {
     "id": "development.windows-localhost-workflows",
     "category": "development",
     "name": "windows-localhost-workflows",
@@ -158,14 +190,14 @@
     "project": {
       "name": "Local n8n Setup",
       "category": "n8n",
-      "summary": "Preserved local n8n setup guides plus copyable agent templates for Codex, Claude Code, OpenCode, Antigravity, tunneling, and MCP configuration."
+      "summary": "Preserved local n8n setup guides plus copyable n8n MCP add-on, platform, tunneling, and MCP configuration templates."
     },
     "surface": {
       "publish_as": "both",
       "skill": {
         "status": "published",
         "path": "skills/n8n-local-setup",
-        "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and agent-rule templates without running live actions by default."
+        "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and n8n-specific agent-rule add-on templates without running live actions by default."
       },
       "mcp": {
         "status": "published",
@@ -197,11 +229,8 @@
       "skills/n8n-local-setup/references/n8n/tunnelling.md",
       "skills/n8n-local-setup/references/n8n/upgrading.md",
       "skills/n8n-local-setup/references/n8n/vps-hosting.md",
-      "skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md",
-      "skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md",
-      "skills/n8n-local-setup/templates/agent-rules/GEMINI.template.md",
       "skills/n8n-local-setup/templates/agent-rules/README.md",
-      "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md",
+      "skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md",
       "skills/n8n-local-setup/templates/mcp-configs/README.md",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
