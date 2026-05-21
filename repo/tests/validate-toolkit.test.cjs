@@ -675,16 +675,56 @@ test('validator rejects network, shell, and package-install strings in design ge
   assert.match(result.stderr, /Design generator script contains forbidden local-only token/);
 });
 
-test('generated agent-rule templates are normal Markdown, not one giant fenced block', () => {
-  for (const file of ['AGENTS.template.md', 'CLAUDE.template.md', 'GEMINI.template.md']) {
-    const text = fs.readFileSync(path.join(repoRoot, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', file), 'utf8').replace(/\r\n/g, '\n');
-    assert.doesNotMatch(text, /Use this generated template[^\n]*\n\n```md\n# AI coding agent execution preferences/);
-    assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/agent-rules\/[A-Z]+\.template\.md/);
-    assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials/);
-    assert.match(text, /skills\/n8n-local-setup\/templates\/agent-rules\/partials\/skill-routing-rules\.md/);
-    assert.doesNotMatch(text, /^- skills\/n8n-local-setup\/templates\/agent-rules\/partials/m);
-    assert.match(text, /\n# AI coding agent execution preferences\n/);
-    assert.match(text, /\n```md\n# SECTION NAME\n/);
+test('generated agent-rule templates include install wrappers and 8-backtick payload fences', () => {
+  const specs = [
+    {
+      file: 'AGENTS.template.md',
+      destination: 'AGENTS.md',
+      labels: ['Codex', 'OpenCode'],
+      paths: ['C:\\Users\\<your-user>\\.codex\\AGENTS.md', 'C:\\Users\\<your-user>\\.config\\opencode\\AGENTS.md']
+    },
+    {
+      file: 'CLAUDE.template.md',
+      destination: 'CLAUDE.md',
+      labels: ['Claude Code'],
+      paths: ['C:\\Users\\<your-user>\\.claude\\CLAUDE.md']
+    },
+    {
+      file: 'GEMINI.template.md',
+      destination: 'GEMINI.md',
+      labels: ['Gemini CLI', 'Antigravity'],
+      paths: ['C:\\Users\\<your-user>\\.gemini\\GEMINI.md']
+    }
+  ];
+  const sourceDir = path.join(repoRoot, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'agent-rules');
+  const skillDir = path.join(repoRoot, 'skills', 'n8n-local-setup', 'templates', 'agent-rules');
+
+  for (const rootDir of [sourceDir, skillDir]) {
+    const isSkillTemplate = rootDir === skillDir;
+    for (const spec of specs) {
+      const text = fs.readFileSync(path.join(rootDir, spec.file), 'utf8').replace(/\r\n/g, '\n');
+      const openingFences = text.match(/^````````md$/gm) || [];
+      const closingFences = text.match(/^````````$/gm) || [];
+      assert.equal(openingFences.length, 1, spec.file);
+      assert.equal(closingFences.length, 1, spec.file);
+      assert.match(text, /\n````````md\n# AI coding agent execution preferences\n/);
+      assert.match(text, /\n````````\n$/);
+      assert.match(text, new RegExp(`Copy or merge the fenced payload into the target repo root as \`${spec.destination}\``));
+      assert.match(text, new RegExp(`If the target repo already has \`${spec.destination}\`, do not overwrite it\\. Merge manually or produce a diff/merge plan\\.`));
+      assert.match(text, /This file is inert while it keeps the `\.template\.md` filename/);
+      for (const label of spec.labels) assert.match(text, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      for (const installPath of spec.paths) assert.match(text, new RegExp(installPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials/);
+      if (isSkillTemplate) {
+        assert.match(text, /skills\/n8n-local-setup\/templates\/agent-rules\/partials\/skill-routing-rules\.md/);
+        assert.match(text, /\n# Skill Routing Rules\n/);
+      } else {
+        assert.doesNotMatch(text, /skills\/n8n-local-setup\/templates\/agent-rules\/partials\/skill-routing-rules\.md/);
+        assert.doesNotMatch(text, /\n# Skill Routing Rules\n/);
+      }
+      assert.doesNotMatch(text, /^- skills\/n8n-local-setup\/templates\/agent-rules\/partials/m);
+      assert.match(text, /\n```md\n# SECTION NAME\n/);
+    }
   }
 });
 
@@ -760,11 +800,10 @@ test('changing published agent-rule template copies makes skill copies stale', (
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/agent-rules\/AGENTS\.template\.md/);
 });
 
-test('changing declared agent-rule partials makes source-side templates stale', () => {
+test('changing declared agent-rule source partials makes source-side templates stale', () => {
   const cases = [
     path.join('_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials', 'ai-coding-agent-execution.md'),
-    path.join('_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials', 'n8n-mcp-rules.md'),
-    path.join('skills', 'n8n-local-setup', 'templates', 'agent-rules', 'partials', 'skill-routing-rules.md')
+    path.join('_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials', 'n8n-mcp-rules.md')
   ];
 
   for (const partialRel of cases) {
@@ -778,6 +817,14 @@ test('changing declared agent-rule partials makes source-side templates stale', 
       partialRel
     );
   }
+});
+
+test('changing skill-routing partial makes published agent-rule templates stale', () => {
+  const cwd = tempCopy();
+  fs.appendFileSync(path.join(cwd, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', 'partials', 'skill-routing-rules.md'), '\n\n<!-- drift test -->\n');
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/agent-rules\/AGENTS\.template\.md/);
 });
 
 test('agent-rule source-template freshness check is scoped to declared modules', () => {

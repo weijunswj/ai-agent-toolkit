@@ -3,17 +3,36 @@ Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
 Source: _projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md
 Source: _projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md
-Source: skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md
 Update the project source and run sync.
 -->
-# GEMINI.md AI Coding Agent Rules Template
+# GEMINI.template.md AI coding agent and n8n MCP workflow rules
 
-Use this generated template for Antigravity or Gemini CLI.
+Use this generated template for Gemini CLI or Antigravity.
 
-This template is inert while it keeps the `.template.md` filename. Copy or merge it into a target repo root as `GEMINI.md` only when the user explicitly wants those agent rules installed.
+This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `GEMINI.md`.
 
-If the target repo already has `GEMINI.md`, do not overwrite it. Produce a merge/diff plan instead.
+Copy or merge the fenced payload into the target repo root as `GEMINI.md` only when the user explicitly wants Gemini CLI/Antigravity rules installed.
 
+If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+
+## Gemini CLI and Antigravity global rules example
+
+Copy or merge the fenced payload into:
+
+```text
+C:\Users\<your-user>\.gemini\GEMINI.md
+```
+
+Or create it with PowerShell:
+
+```text
+mkdir $HOME\.gemini -Force
+notepad $HOME\.gemini\GEMINI.md
+```
+
+---
+
+````````md
 # AI coding agent execution preferences
 
 ## Core role
@@ -655,29 +674,4 @@ Do not build workflows where untrusted input can directly decide:
 - Which production table, workflow, or record to delete.
 
 When building AI workflows, prefer explicit allowlists, structured outputs, validation nodes, guardrails, and human confirmation before risky tool calls.
-
-# Skill Routing Rules
-
-Use installed skills only when they clearly match the task and improve correctness.
-
-## Frontend Design
-
-Use `ui-ux-secure-frontend-design` for design systems, landing pages, SaaS dashboards, forms, accessibility, responsive polish, privacy-safe UX, and frontend implementation review.
-
-## Localhost
-
-Use `windows-localhost-workflows` for starting, relaunching, verifying, and troubleshooting local Windows dev servers.
-
-## n8n Workflow Toolkit
-
-Use `n8n-workflow-helper-scripts` for safe n8n workflow sanitation, repo/live sync planning, credential binding hygiene, and import/export review.
-
-Use `n8n-workflow-templates` for selecting, reviewing, or copying public generic inactive n8n workflow JSON templates.
-
-## Secure CI/CD
-
-Use secure CI/CD materials for GitHub Actions setup, CI security gates, safe deployment planning, and `CURRENT_CICD_STATUS.md` style tracking.
-
-## Safety
-
-Do not use a skill as permission to mutate live systems, write secrets, run live n8n actions, or install templates without review.
+````````
