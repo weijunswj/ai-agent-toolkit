@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.mcp-ready-registry
-Source: _projects/repo-methodology/mcp-ready-registry/_main/registry-mcp/README.md
-Update the project source and run sync.
--->
 # Registry MCP
 
 The registry MCP is future design/spec-only material for a possible read-only server that could discover toolkit metadata.

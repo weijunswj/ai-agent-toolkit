@@ -1,6 +1,14 @@
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: repo-methodology.mcp-ready-registry
+Source: _projects/repo-methodology/mcp-ready-registry/_main/references/installer-mcp.md
+Update the project source and run sync.
+-->
 # Installer MCP
 
-The installer MCP is future-facing in v1. It is intended to install only pack-defined files after explicit approval.
+The installer MCP is future-facing in v1. It is design/spec-only material for a possible installer that would install only pack-defined files after explicit approval.
+
+This is MCP-ready registry and design/spec material. It is not a runnable MCP server.
 
 ## Intended Flow
 

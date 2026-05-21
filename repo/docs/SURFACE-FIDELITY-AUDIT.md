@@ -2,30 +2,32 @@
 
 Date: 2026-05-18
 Branch: `codex/surface-fidelity-audit`
-Latest update: 2026-05-20 (`codex/declare-n8n-local-skill-surfaces`)
+Latest update: 2026-05-21 (`codex/mcp-ready-registry-ownership`)
 
 ## Executive summary
 
 The audit found repo-wide fidelity risk, but not a reason to wipe or rebuild the repo in one uncontrolled change.
 
-The confirmed Secure CI/CD prompt truncation was real. Before this PR, `skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md` was a short 30-line prompt while `_projects/cicd/secure-installer/_main/README.md` preserves a full prompt under `# Copy this prompt into your AI coding agent`. This PR fixes that by adding an exact deterministic `extract` recipe and regenerating the published prompt from the preserved source section.
+The confirmed Secure CI/CD prompt truncation was real. Before the Secure CI/CD prompt pass, `skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md` was a short 30-line prompt while `_projects/cicd/secure-installer/_main/README.md` preserves a full prompt under `# Copy this prompt into your AI coding agent`. That pass fixed the issue by adding an exact deterministic `extract` recipe and regenerating the published prompt from the preserved source section.
 
 The current audit finds:
 
-- 7 project modules under `_projects/`.
+- 8 project modules under `_projects/`.
 - 8 current skill folders.
 - 25 tracked files under `mcp/`.
 - 188 tracked published-surface files under `skills/` and `mcp/`.
-- 168 expanded declared/generated project outputs after the n8n local setup skill surface declaration pass.
-- 20 tracked published-surface files still manually present and not declared by project sync recipes.
+- 188 expanded declared/generated project outputs after the MCP-ready registry ownership pass.
+- 0 tracked published-surface files still manually present and not declared by project sync recipes.
 - 0 files covered by a pack install path but still not individually declared by project sync recipes.
 - 0 unresolved cross-owned outputs.
 - 0 declared shared-surface outputs.
 - 0 shared-surface metadata findings.
 - 0 suspicious source/output size findings.
 - 0 exact duplicate-content groups across `_projects`, excluding generated previews and the explicit retired Secure CI/CD n8n helper provenance copies now owned by `n8n.workflow-toolkit`.
+- 0 curated output boundary recipe findings.
+- 0 curated directory boundary findings.
 
-The remaining manual surfaces are MCP repo-level/spec files and registry files. The `n8n-local-setup` runtime reference portability issue, remaining n8n local setup skill-side indexes, Secure CI/CD remaining template declaration issue, n8n sync helper shared-surface ownership issue, n8n workflow-sync pack-installed reference issue, UI/UX skill-side ownership issue, and standalone knowledge/localhost skill ownership issue have been addressed.
+The MCP-ready registry docs/specs/metadata are now source-owned by `_projects/repo-methodology/mcp-ready-registry/`. The `n8n-local-setup` runtime reference portability issue, remaining n8n local setup skill-side indexes, Secure CI/CD remaining template declaration issue, n8n sync helper shared-surface ownership issue, n8n workflow-sync pack-installed reference issue, UI/UX skill-side ownership issue, standalone knowledge/localhost skill ownership issue, and repo-level MCP-ready registry ownership issue have been addressed.
 
 ## Standalone Skill Declaration Pass
 
@@ -118,7 +120,58 @@ Audit baseline movement:
 - `curated_template_index`: 7 to 8.
 - `packInstalledUndeclared`, `crossOwnedOutputs`, `sharedSurfaceOutputs`, `sharedSurfaceMetadataFindings`, `suspiciousPublishedSurfaces`, `boundaryRecipeFindings`, and `curatedDirectoryFindings`: stayed 0.
 
-The remaining 20 undeclared published files are MCP repo-level/spec and registry surfaces. This pass intentionally leaves them for a later MCP-ready registry cleanup PR.
+The remaining 20 undeclared published files at that point were MCP repo-level/spec and registry surfaces. They are resolved by the MCP-ready registry ownership pass below.
+
+## MCP-Ready Registry Ownership Pass
+
+The repo-level MCP-ready registry docs/specs and registry metadata are now owned by a dedicated project module:
+
+- `_projects/repo-methodology/mcp-ready-registry/`
+
+This module owns MCP-ready registry/design/spec material only. It does not ship a runnable MCP server, npm package, CLI, server entrypoint, network service, API integration, or executable MCP tools.
+
+The 20 formerly undeclared files became declared outputs:
+
+- `mcp/README.md`
+- `mcp/installer-mcp/README.md`
+- `mcp/installer-mcp/SECURITY.md`
+- `mcp/installer-mcp/SPEC.md`
+- `mcp/references/README.md`
+- `mcp/references/installer-mcp.md`
+- `mcp/references/local-mcp-setup.md`
+- `mcp/references/mcp-security.md`
+- `mcp/references/registry-mcp.md`
+- `mcp/registry-mcp/README.md`
+- `mcp/registry-mcp/SECURITY.md`
+- `mcp/registry-mcp/SPEC.md`
+- `mcp/registry/README.md`
+- `mcp/registry/consumers.registry.json`
+- `mcp/registry/packs.registry.json`
+- `mcp/registry/playbooks.registry.json`
+- `mcp/registry/skills.registry.json`
+- `mcp/registry/source-repos.registry.json`
+- `mcp/registry/templates.registry.json`
+- `mcp/registry/tools.registry.json`
+
+Markdown docs publish through deterministic `copy` recipes from `_main/`. Registry JSON files publish through deterministic `json` recipes. `mcp/registry/projects.registry.json` remains generated by toolkit project sync from all project manifests and is not owned by this module.
+
+Why this is MCP-ready registry/design/spec material, not a runnable MCP server:
+
+- `mcp/registry/**` is machine-readable metadata for future discovery and installer flows.
+- `mcp/registry-mcp/**` and `mcp/installer-mcp/**` are future design/spec-only docs.
+- `mcp/references/**` are supporting operator notes.
+- `mcp/projects/**` remains project-specific MCP notes owned by each project module.
+
+Audit baseline movement:
+
+- `projects`: 7 to 8.
+- `declaredOutputFiles`: 168 to 188.
+- `undeclaredPublishedFiles`: 20 to 0.
+- `boundaryRecipeOutputs`: 168 to 188.
+- `main_full_fidelity`: 110 to 130.
+- `packInstalledUndeclared`, `crossOwnedOutputs`, `sharedSurfaceOutputs`, `sharedSurfaceMetadataFindings`, `suspiciousPublishedSurfaces`, `boundaryRecipeFindings`, and `curatedDirectoryFindings`: stayed 0.
+
+No skill-side surfaces remain undeclared. No real MCP runtime/server/package/CLI was added.
 
 ## n8n Workflow Toolkit Reshape
 
@@ -164,8 +217,8 @@ This audit now classifies every expanded `toolkit.project.json` output recipe ag
 
 Summary counts from `npm run audit:surfaces:check`:
 
-- 168 expanded recipe outputs classified.
-- 110 `main_full_fidelity` outputs.
+- 188 expanded recipe outputs classified.
+- 130 `main_full_fidelity` outputs.
 - 0 `curated_agent_metadata` outputs.
 - 9 `curated_index` outputs, including short reviewed overviews/safety wrappers.
 - 4 `curated_metadata` outputs.
@@ -207,7 +260,7 @@ Allowed curated-output categories:
 
 Recommended fixes:
 
-- Continue resolving the remaining pack-installed undeclared findings in focused PRs. Do not broaden later passes into MCP registry/spec ownership or UI/UX provenance cleanup at the same time.
+- Keep future skill and MCP-ready registry surface changes declared by project recipes in the same PR that adds or changes the published output.
 
 Follow-up PRs are still needed for non-playbook findings outside Secure CI/CD. The playbook-specific recipe findings and Secure CI/CD remaining template findings are resolved.
 
@@ -380,7 +433,7 @@ Current skill folders:
 
 Declared full-fidelity or deterministic generated surfaces include:
 
-- `skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md` after this PR, via exact extract from `_main/README.md`.
+- `skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md` after the Secure CI/CD prompt pass, via exact extract from `_main/README.md`.
 - `skills/n8n-local-setup/templates/agent-rules/AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`, via exact concat recipes from declared partials.
 - `skills/n8n-local-setup/templates/mcp-configs/*-mcp-config.md`, via exact copy recipes.
 - `skills/n8n-local-setup/references/n8n/*.md` required setup guides, via exact copy recipes from `_main/*.md`.
@@ -412,13 +465,33 @@ MCP surface areas audited:
 
 Declared MCP project outputs:
 
+- `mcp/README.md`
+- `mcp/installer-mcp/README.md`
+- `mcp/installer-mcp/SECURITY.md`
+- `mcp/installer-mcp/SPEC.md`
+- `mcp/registry-mcp/README.md`
+- `mcp/registry-mcp/SECURITY.md`
+- `mcp/registry-mcp/SPEC.md`
+- `mcp/references/README.md`
+- `mcp/references/installer-mcp.md`
+- `mcp/references/local-mcp-setup.md`
+- `mcp/references/mcp-security.md`
+- `mcp/references/registry-mcp.md`
+- `mcp/registry/README.md`
+- `mcp/registry/consumers.registry.json`
+- `mcp/registry/packs.registry.json`
+- `mcp/registry/playbooks.registry.json`
+- `mcp/registry/skills.registry.json`
+- `mcp/registry/source-repos.registry.json`
+- `mcp/registry/templates.registry.json`
+- `mcp/registry/tools.registry.json`
 - `mcp/projects/secure-cicd-installer.md`
 - `mcp/projects/ui-ux-pro-max.md`
 - `mcp/projects/n8n-local-setup.md`
 - `mcp/projects/n8n-workflow-toolkit.md`
 - `mcp/registry/projects.registry.json`
 
-Manual MCP surfaces not currently declared by project sync recipes include `mcp/README.md`, `mcp/installer-mcp/**`, `mcp/registry-mcp/**`, `mcp/references/**`, and every registry JSON except `mcp/registry/projects.registry.json`.
+No MCP-ready registry, MCP reference, MCP design/spec, or MCP registry JSON surface remains undeclared. Project-specific MCP notes under `mcp/projects/**` remain owned by their project modules. `mcp/registry/projects.registry.json` remains generated from project manifests by toolkit sync.
 
 ## Confirmed fidelity failures
 
@@ -431,7 +504,7 @@ Published file(s):
 Problem:
 The preserved README contains a long copy-ready prompt under `# Copy this prompt into your AI coding agent`, but the published prompt had been reduced to a short high-level summary. The pack manifest installs this prompt, so consumers would receive the truncated behavior.
 Recommended fix:
-Fixed in this PR. The prompt is now generated by an exact `extract` recipe from `_main/README.md`, declared in `toolkit.project.json`, regenerated into the skill folder, and covered by tests that fail on future truncation or source drift.
+Fixed in the Secure CI/CD prompt pass. The prompt is now generated by an exact `extract` recipe from `_main/README.md`, declared in `toolkit.project.json`, regenerated into the skill folder, and covered by tests that fail on future truncation or source drift.
 
 Finding:
 Severity: resolved high
@@ -514,12 +587,7 @@ Follow-up PR: declare the manual UI/UX instruction surfaces as linked with expli
 
 ## Undeclared published files
 
-After the n8n local setup skill surface declaration pass, 20 tracked `mcp/` files remain outside expanded project sync outputs. These are not necessarily wrong, but they are manual surfaces from the perspective of this audit.
-
-Major groups:
-
-- MCP repo-level/spec surfaces: `mcp/README.md`, `mcp/installer-mcp/**`, `mcp/registry-mcp/**`, `mcp/references/**`.
-- Manual registries: `mcp/registry/consumers.registry.json`, `packs.registry.json`, `playbooks.registry.json`, `skills.registry.json`, `source-repos.registry.json`, `templates.registry.json`, `tools.registry.json`.
+No tracked `skills/` or `mcp/` files remain outside expanded project sync outputs or the generated project registry flow.
 
 Pack-covered but undeclared files were found in these install surfaces:
 
@@ -528,7 +596,7 @@ none
 ```
 
 Recommended fix:
-Plan a later MCP-ready registry cleanup PR. This pass intentionally did not rename `mcp/`, change MCP registry semantics, or broaden into manual MCP surface ownership.
+None for undeclared published files. Future PRs should keep new `skills/` and `mcp/` outputs source-owned through project modules.
 
 ## Cross-project ownership issues
 
@@ -575,7 +643,7 @@ unknown: none
 
 1. Are `_projects/**/_main/**` files complete enough to rebuild all skills/MCP surfaces?
 
-No. They are complete enough for several exact surfaces, including n8n agent rules, n8n MCP configs, n8n workflow helper scripts, the global-error-handler workflow template, UI/UX generator scripts/data, and the Secure CI/CD prompt after this PR. They are not complete enough to rebuild all current skill/MCP surfaces because many manual surfaces live only under `skills/` or `mcp/`.
+Yes through declared project recipes and the generated project registry flow. Some published entrypoints intentionally use reviewed `curated_output_for_ai/` source or rare linked outputs, but no tracked `skills/` or `mcp/` file remains undeclared.
 
 2. Are original old repos still needed?
 
@@ -589,11 +657,11 @@ For retired internal sources, no routine old-repo dependency is needed; `SOURCE-
 
 4. Which surfaces currently rely on manually maintained files?
 
-Manual surfaces include the 37 undeclared files listed by group above, plus linked outputs by design. The largest manual buckets are registry/spec MCP docs and UI/UX instruction references.
+No undeclared published files remain in the current audit baseline. The remaining directly maintained surfaces are the explicitly declared linked exceptions, such as the UI/UX MCP project note.
 
 5. Which current generated outputs should be replaced by exact source extraction?
 
-- Secure CI/CD prompt: done in this PR.
+- Secure CI/CD prompt: done in the Secure CI/CD prompt pass.
 - n8n local setup detailed guides: done. Required runtime guides are exact copy outputs in `skills/n8n-local-setup/references/`.
 - Secure CI/CD status/deployment/security policy snippets: done in the Secure CI/CD template declaration pass. They are reviewed curated templates; the full prompt remains exact-extracted from `_main/README.md`.
 
@@ -617,10 +685,10 @@ Completed fixes:
 - Split the former workflow-sync published surface into `skills/n8n-workflow-helper-scripts/` and `skills/n8n-workflow-templates/`.
 - Remove the obsolete `skills/n8n-workflow-sync/` generated surface and pack.
 - Declare `skills/knowledge-index-updater/` and `skills/windows-localhost-workflows/` as project-owned generated skill surfaces.
+- Declare repo-level MCP-ready registry docs/specs and registry metadata through `_projects/repo-methodology/mcp-ready-registry/`.
 
 Recommended follow-up fixes:
 
-- Bring manual MCP registry/spec surfaces under project modules or a deterministic shared surface plan.
 - Clarify UI/UX skill manual surface ownership and attribution in recipes.
 
 ## Recommended PR sequence
@@ -632,7 +700,7 @@ Recommended follow-up fixes:
 5. PR 5: Cross-owned n8n sync helper ownership cleanup. Done by explicit shared-surface metadata.
 6. PR 6: n8n workflow-sync pack reference declaration pass. Done in `codex/declare-n8n-workflow-sync-references`.
 7. PR 7: n8n workflow toolkit reshape. Done in `codex/reshape-n8n-workflow-toolkit`.
-8. PR 8: MCP registry/spec ownership cleanup.
+8. PR 8: MCP-ready registry ownership cleanup. Done in `codex/mcp-ready-registry-ownership`.
 9. PR 9: UI/UX linked/manual surface provenance cleanup.
 
 ## Validation evidence

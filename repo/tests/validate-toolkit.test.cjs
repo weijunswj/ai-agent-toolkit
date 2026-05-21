@@ -149,7 +149,8 @@ test('project registry includes the project modules', () => {
     'knowledge.knowledge-index-updater',
     'n8n.local-setup',
     'n8n.workflow-toolkit',
-    'repo-methodology.context-preserving-ai-publisher'
+    'repo-methodology.context-preserving-ai-publisher',
+    'repo-methodology.mcp-ready-registry'
   ]);
   for (const entry of registry) {
     assert.ok(entry.project?.summary, entry.id);

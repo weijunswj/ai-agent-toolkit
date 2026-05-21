@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: repo-methodology.mcp-ready-registry
+Source: _projects/repo-methodology/mcp-ready-registry/_main/references/mcp-security.md
+Update the project source and run sync.
+-->
 # MCP Security
 
 MCP tools can expose powerful capabilities. Treat write, shell, live-service, and credential-adjacent tools as high risk.

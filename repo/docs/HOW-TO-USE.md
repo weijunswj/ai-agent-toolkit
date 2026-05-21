@@ -1,6 +1,6 @@
 # How To Use
 
-This repo is a reusable toolkit for AI-agent work. It gives humans and agents a stable place to find preserved project modules, copyable skills, MCP specs/tools, and maintenance scripts.
+This repo is a reusable toolkit for AI-agent work. It gives humans and agents a stable place to find preserved project modules, copyable skills, MCP-ready registry/design/spec metadata, and maintenance scripts.
 
 ## Use Project Modules
 
@@ -101,7 +101,9 @@ Do not automate ChatGPT web or Claude web with cookies, sessions, browser automa
 
 ## MCP
 
-The MCP surface is design/spec-only in v1. Use [mcp/](../../mcp/) for status, project specs, and read-only discovery metadata.
+The MCP surface is MCP-ready registry and design/spec material in v1. Use [mcp/](../../mcp/) for status, project specs, and read-only discovery metadata.
+
+No runnable MCP server, package, CLI, or executable MCP tools are shipped from this repo today.
 
 If a target AI platform does not support MCP, use the JSON registries and docs manually.
 

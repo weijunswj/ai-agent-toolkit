@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.mcp-ready-registry
-Source: _projects/repo-methodology/mcp-ready-registry/_main/references/README.md
-Update the project source and run sync.
--->
 # MCP References
 
 MCP reference docs explain local setup, future registry discovery, future installer behavior, and security policy.

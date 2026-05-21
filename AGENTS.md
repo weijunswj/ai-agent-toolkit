@@ -11,7 +11,7 @@ This repo has a source layer and a published layer.
 - `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source material. Curated files may be AI-assisted, but they are source files and must be reviewed before publishing.
 - `_projects/**/toolkit.project.json` is the routing contract. It declares which `_main/` or `curated_output_for_ai/` files publish to `skills/` and `mcp/` outputs.
 - `skills/` contains copyable AI-agent skill folders. The whole skill folder is the install unit.
-- `mcp/` contains MCP specs, command/tool notes, registries, and status documentation.
+- `mcp/` contains MCP-ready registry, design/spec docs, metadata, and status documentation for future MCP usage.
 - Generated `skills/` and `mcp/` files must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
 - `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
 - Publish declared outputs with:

@@ -1,6 +1,12 @@
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: repo-methodology.mcp-ready-registry
+Source: _projects/repo-methodology/mcp-ready-registry/_main/registry/README.md
+Update the project source and run sync.
+-->
 # Registry
 
-Registries are JSON-only source-of-truth files for toolkit discovery.
+Registries are JSON-only MCP-ready registry metadata files for toolkit discovery.
 
 Files:
 

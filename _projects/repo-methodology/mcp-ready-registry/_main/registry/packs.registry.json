@@ -1,0 +1,27 @@
+[
+  {
+    "id": "frontend-design-skill",
+    "title": "Frontend Design Skill",
+    "path": "skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/pack.json"
+  },
+  {
+    "id": "design-system-generator",
+    "title": "Design System Generator",
+    "path": "skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json"
+  },
+  {
+    "id": "codex-n8n-local",
+    "title": "Codex n8n Local",
+    "path": "skills/n8n-local-setup/packs/codex-n8n-local/pack.json"
+  },
+  {
+    "id": "claude-code-n8n-local",
+    "title": "Claude Code n8n Local",
+    "path": "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json"
+  },
+  {
+    "id": "secure-cicd",
+    "title": "Secure CI/CD",
+    "path": "skills/secure-cicd-installer/packs/secure-cicd/pack.json"
+  }
+]
