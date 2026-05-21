@@ -51,49 +51,67 @@ const agentRuleTemplateSpecDefinitions = [
       {
         name: 'n8n-mcp-rules.md',
         rel: '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
-      },
-      {
-        name: 'skill-routing-rules.md',
-        rel: 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'
       }
     ],
+    skillRoutingSource: 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md',
     templates: [
       {
         source: '_main/templates/agent-rules/AGENTS.template.md',
         output: '_projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md',
-        title: 'AGENTS.md AI Coding Agent Rules Template',
+        title: 'AGENTS.template.md AI coding agent and n8n MCP workflow rules',
         audience: 'Codex or OpenCode',
         destination: 'AGENTS.md',
-        installGuidance: [
-          'This template is inert while it keeps the `.template.md` filename. Copy or merge it into a target repo root as `{destination}` only when the user explicitly wants those agent rules installed.',
-          'If the target repo already has `{destination}`, do not overwrite it. Produce a merge/diff plan instead.'
+        installSubject: 'Codex/OpenCode rules',
+        installExamples: [
+          {
+            heading: 'Codex global rules example',
+            path: 'C:\\Users\\<your-user>\\.codex\\AGENTS.md',
+            commands: ['mkdir $HOME\\.codex -Force', 'notepad $HOME\\.codex\\AGENTS.md']
+          },
+          {
+            heading: 'OpenCode global rules example',
+            path: 'C:\\Users\\<your-user>\\.config\\opencode\\AGENTS.md',
+            commands: ['mkdir $HOME\\.config\\opencode -Force', 'notepad $HOME\\.config\\opencode\\AGENTS.md']
+          }
         ]
       },
       {
         source: '_main/templates/agent-rules/CLAUDE.template.md',
         output: '_projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md',
-        title: 'CLAUDE.md AI Coding Agent Rules Template',
+        title: 'CLAUDE.template.md AI coding agent and n8n MCP workflow rules',
         audience: 'Claude Code',
         destination: 'CLAUDE.md',
-        installGuidance: [
-          'This template is inert while it keeps the `.template.md` filename. Copy or merge it into a target repo root as `{destination}` only when the user explicitly wants those agent rules installed.',
-          'If the target repo already has `{destination}`, do not overwrite it. Produce a merge/diff plan instead.'
+        installSubject: 'Claude Code rules',
+        installExamples: [
+          {
+            heading: 'Claude Code global rules example',
+            path: 'C:\\Users\\<your-user>\\.claude\\CLAUDE.md',
+            commands: ['mkdir $HOME\\.claude -Force', 'notepad $HOME\\.claude\\CLAUDE.md']
+          }
         ]
       },
       {
         source: '_main/templates/agent-rules/GEMINI.template.md',
         output: '_projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md',
-        title: 'GEMINI.md AI Coding Agent Rules Template',
-        audience: 'Antigravity or Gemini CLI',
+        title: 'GEMINI.template.md AI coding agent and n8n MCP workflow rules',
+        audience: 'Gemini CLI or Antigravity',
         destination: 'GEMINI.md',
-        installGuidance: [
-          'This template is inert while it keeps the `.template.md` filename. Copy or merge it into a target repo root as `{destination}` only when the user explicitly wants those agent rules installed.',
-          'If the target repo already has `{destination}`, do not overwrite it. Produce a merge/diff plan instead.'
+        installSubject: 'Gemini CLI/Antigravity rules',
+        installExamples: [
+          {
+            heading: 'Gemini CLI and Antigravity global rules example',
+            path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
+            commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
+          }
         ]
       }
     ]
   }
 ];
+
+function agentRuleTemplateSpecs() {
+  return JSON.parse(JSON.stringify(agentRuleTemplateSpecDefinitions));
+}
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -371,42 +389,76 @@ function expectedAgentRuleSourceTemplate(spec, template) {
     `# ${template.title}`,
     '',
     `Use this generated template for ${template.audience}.`,
-    ''
+    '',
+    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because it is not named \`${template.destination}\`.`,
+    '',
+    `Copy or merge the fenced payload into the target repo root as \`${template.destination}\` only when the user explicitly wants ${template.installSubject} installed.`,
+    '',
+    `If the target repo already has \`${template.destination}\`, do not overwrite it. Merge manually or produce a diff/merge plan.`
   ];
-  const installGuidance = template.installGuidance || [];
-  installGuidance.forEach((line, index) => {
-    bodyParts.push(line.replaceAll('{destination}', template.destination));
-    if (index < installGuidance.length - 1) bodyParts.push('');
-  });
 
-  for (const source of spec.partialSources) {
+  for (const example of template.installExamples) {
     bodyParts.push('');
-    bodyParts.push(readText(source.rel).trimEnd());
+    bodyParts.push(`## ${example.heading}`);
+    bodyParts.push('');
+    bodyParts.push('Copy or merge the fenced payload into:');
+    bodyParts.push('');
+    bodyParts.push('```text');
+    bodyParts.push(example.path);
+    bodyParts.push('```');
+    bodyParts.push('');
+    bodyParts.push('Or create it with PowerShell:');
+    bodyParts.push('');
+    bodyParts.push('```text');
+    for (const command of example.commands) bodyParts.push(command);
+    bodyParts.push('```');
   }
+
+  const payloadParts = [];
+  for (const source of spec.partialSources) {
+    payloadParts.push(readText(source.rel).trimEnd());
+  }
+
+  bodyParts.push('');
+  bodyParts.push('---');
+  bodyParts.push('');
+  bodyParts.push('````````md');
+  bodyParts.push(payloadParts.join('\n\n').trimEnd());
+  bodyParts.push('````````');
 
   return agentRuleSourceTemplateNotice(spec) + bodyParts.join('\n').trimEnd() + '\n';
 }
 
-function agentRuleTemplateSpecs() {
-  return JSON.parse(JSON.stringify(agentRuleTemplateSpecDefinitions));
-}
-
 function agentRuleSpecSourceIsProjectScoped(project, source) {
-  const rel = source.rel;
+  const rel = typeof source === 'string' ? source : source.rel;
   if (!rel.startsWith('_projects/')) return true;
   return rel.startsWith(`${project.module_path}/`);
 }
 
+function validateAgentRuleRootSurfaceSource(errors, spec, linked, rel) {
+  if (!rel) return;
+  if (!isRootSurfacePath(rel)) {
+    fail(errors, `${spec.projectId} agent-rule root-surface source must stay under skills/ or mcp/: ${rel}`);
+  } else if (!linked.has(rel)) {
+    fail(errors, `${spec.projectId} agent-rule root-surface source must be declared linked: ${rel}`);
+  }
+}
+
 function validateAgentRuleSpecSources(errors, spec, project, linked) {
+  if (!project) {
+    fail(errors, `${spec.projectId} agent-rule spec project is not declared`);
+    return;
+  }
   for (const source of spec.partialSources) {
     if (source.rel.startsWith('_projects/') && !agentRuleSpecSourceIsProjectScoped(project, source)) {
       fail(errors, `${spec.projectId} agent-rule partial source must stay within its project: ${source.rel}`);
-    } else if (isRootSurfacePath(source.rel) && !linked.has(source.rel)) {
-      fail(errors, `${spec.projectId} agent-rule root-surface partial must be declared linked: ${source.rel}`);
-    } else if (!source.rel.startsWith('_projects/') && !isRootSurfacePath(source.rel)) {
+    } else if (isRootSurfacePath(source.rel)) {
+      validateAgentRuleRootSurfaceSource(errors, spec, linked, source.rel);
+    } else if (!source.rel.startsWith('_projects/')) {
       fail(errors, `${spec.projectId} agent-rule partial source must be project source or linked root surface: ${source.rel}`);
     }
   }
+  validateAgentRuleRootSurfaceSource(errors, spec, linked, spec.skillRoutingSource);
 }
 
 function declaredAgentRuleSourceTemplates(projects) {
@@ -448,6 +500,9 @@ function validateAgentRuleSourceTemplates(errors, projects, linked) {
         fail(errors, `Missing agent-rule partial source: ${source.rel}`);
       }
     }
+    if (spec.skillRoutingSource && !fs.existsSync(resolveRel(spec.skillRoutingSource))) {
+      fail(errors, `Missing agent-rule root-surface source: ${spec.skillRoutingSource}`);
+    }
   }
 
   for (const { spec, template } of declaredTemplates) {
@@ -460,6 +515,25 @@ function validateAgentRuleSourceTemplates(errors, projects, linked) {
       fail(errors, `Stale source-side agent-rule template: ${template.output}`);
     }
   }
+}
+
+function publishedAgentRuleTemplateSpec(project, output, rels) {
+  if (output.kind !== 'copy' || rels.length !== 1) return null;
+  const spec = agentRuleTemplateSpecDefinitions.find((candidate) => candidate.projectId === project.id);
+  if (!spec?.skillRoutingSource) return null;
+  const template = spec.templates.find((candidate) => candidate.output === rels[0]);
+  if (!template) return null;
+  return { spec, template };
+}
+
+function addSkillRoutingToAgentRuleTemplate(text, outputPath, skillRoutingSource) {
+  const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const closingFence = '\n````````\n';
+  if (!normalized.endsWith(closingFence)) {
+    throw new Error(`agent-rule template missing closing 8-backtick fence: ${outputPath}`);
+  }
+  const payload = readText(skillRoutingSource).trimEnd();
+  return `${normalized.slice(0, -closingFence.length)}\n\n${payload}${closingFence}`;
 }
 
 function addMarkdownNotice(text, project, relPaths) {
@@ -506,6 +580,14 @@ function expectedTextOutput(project, output, rels) {
   }
 
   const raw = readText(rels[0]);
+  const publishedAgentRule = publishedAgentRuleTemplateSpec(project, output, rels);
+  if (publishedAgentRule) {
+    return addMarkdownNotice(
+      addSkillRoutingToAgentRuleTemplate(raw, output.output, publishedAgentRule.spec.skillRoutingSource),
+      project,
+      [rels[0], publishedAgentRule.spec.skillRoutingSource]
+    );
+  }
   if (output.kind === 'json' || path.extname(output.output).toLowerCase() === '.json') {
     return JSON.stringify(JSON.parse(raw), null, 2) + '\n';
   }

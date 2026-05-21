@@ -9,46 +9,61 @@ $AgentRuleTemplateSpecs = @(
     PartialSources = @(
       @{
         Name = 'ai-coding-agent-execution.md'
+        Path = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials\ai-coding-agent-execution.md'
         Rel = '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md'
       },
       @{
         Name = 'n8n-mcp-rules.md'
+        Path = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials\n8n-mcp-rules.md'
         Rel = '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
-      },
-      @{
-        Name = 'skill-routing-rules.md'
-        Rel = 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'
       }
     )
     Templates = @(
       @{
         FileName = 'AGENTS.template.md'
-        Title = 'AGENTS.md AI Coding Agent Rules Template'
+        Title = 'AGENTS.template.md AI coding agent and n8n MCP workflow rules'
         Audience = 'Codex or OpenCode'
         DestinationFile = 'AGENTS.md'
-        InstallGuidance = @(
-          'This template is inert while it keeps the `.template.md` filename. Copy or merge it into a target repo root as `{destination}` only when the user explicitly wants those agent rules installed.',
-          'If the target repo already has `{destination}`, do not overwrite it. Produce a merge/diff plan instead.'
+        InstallSubject = 'Codex/OpenCode rules'
+        InstallExamples = @(
+          @{
+            Heading = 'Codex global rules example'
+            Path = 'C:\Users\<your-user>\.codex\AGENTS.md'
+            Commands = @('mkdir $HOME\.codex -Force', 'notepad $HOME\.codex\AGENTS.md')
+          },
+          @{
+            Heading = 'OpenCode global rules example'
+            Path = 'C:\Users\<your-user>\.config\opencode\AGENTS.md'
+            Commands = @('mkdir $HOME\.config\opencode -Force', 'notepad $HOME\.config\opencode\AGENTS.md')
+          }
         )
       },
       @{
         FileName = 'CLAUDE.template.md'
-        Title = 'CLAUDE.md AI Coding Agent Rules Template'
+        Title = 'CLAUDE.template.md AI coding agent and n8n MCP workflow rules'
         Audience = 'Claude Code'
         DestinationFile = 'CLAUDE.md'
-        InstallGuidance = @(
-          'This template is inert while it keeps the `.template.md` filename. Copy or merge it into a target repo root as `{destination}` only when the user explicitly wants those agent rules installed.',
-          'If the target repo already has `{destination}`, do not overwrite it. Produce a merge/diff plan instead.'
+        InstallSubject = 'Claude Code rules'
+        InstallExamples = @(
+          @{
+            Heading = 'Claude Code global rules example'
+            Path = 'C:\Users\<your-user>\.claude\CLAUDE.md'
+            Commands = @('mkdir $HOME\.claude -Force', 'notepad $HOME\.claude\CLAUDE.md')
+          }
         )
       },
       @{
         FileName = 'GEMINI.template.md'
-        Title = 'GEMINI.md AI Coding Agent Rules Template'
-        Audience = 'Antigravity or Gemini CLI'
+        Title = 'GEMINI.template.md AI coding agent and n8n MCP workflow rules'
+        Audience = 'Gemini CLI or Antigravity'
         DestinationFile = 'GEMINI.md'
-        InstallGuidance = @(
-          'This template is inert while it keeps the `.template.md` filename. Copy or merge it into a target repo root as `{destination}` only when the user explicitly wants those agent rules installed.',
-          'If the target repo already has `{destination}`, do not overwrite it. Produce a merge/diff plan instead.'
+        InstallSubject = 'Gemini CLI/Antigravity rules'
+        InstallExamples = @(
+          @{
+            Heading = 'Gemini CLI and Antigravity global rules example'
+            Path = 'C:\Users\<your-user>\.gemini\GEMINI.md'
+            Commands = @('mkdir $HOME\.gemini -Force', 'notepad $HOME\.gemini\GEMINI.md')
+          }
         )
       }
     )
@@ -56,7 +71,7 @@ $AgentRuleTemplateSpecs = @(
 )
 
 function Read-Partial($Source) {
-  $path = Join-Path $RepoRoot $Source.Rel
+  $path = $Source.Path
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "Missing partial: $path"
   }
@@ -92,25 +107,50 @@ function Write-GeneratedTemplate {
     "# $($Template.Title)",
     "",
     "Use this generated template for $($Template.Audience).",
-    ""
+    "",
+    "This file is inert while it keeps the ``.template.md`` filename. It is safe to keep inside a skill folder because it is not named ``$($Template.DestinationFile)``.",
+    "",
+    "Copy or merge the fenced payload into the target repo root as ``$($Template.DestinationFile)`` only when the user explicitly wants $($Template.InstallSubject) installed.",
+    "",
+    "If the target repo already has ``$($Template.DestinationFile)``, do not overwrite it. Merge manually or produce a diff/merge plan."
   )
-  for ($index = 0; $index -lt $Template.InstallGuidance.Count; $index++) {
-    $bodyParts += $Template.InstallGuidance[$index].Replace('{destination}', $Template.DestinationFile)
-    if ($index -lt ($Template.InstallGuidance.Count - 1)) {
-      $bodyParts += ""
-    }
-  }
 
-  foreach ($partial in $Spec.PartialSources) {
+  foreach ($example in @($Template.InstallExamples)) {
     $bodyParts += ""
-    $bodyParts += Read-Partial $partial
+    $bodyParts += "## $($example.Heading)"
+    $bodyParts += ""
+    $bodyParts += "Copy or merge the fenced payload into:"
+    $bodyParts += ""
+    $bodyParts += '```text'
+    $bodyParts += $example.Path
+    $bodyParts += '```'
+    $bodyParts += ""
+    $bodyParts += "Or create it with PowerShell:"
+    $bodyParts += ""
+    $bodyParts += '```text'
+    foreach ($command in @($example.Commands)) {
+      $bodyParts += $command
+    }
+    $bodyParts += '```'
   }
 
-  $content = (New-GeneratedNotice -Spec $Spec) + (($bodyParts -join "`n").TrimEnd()) + "`n"
-  $templatesDir = Join-Path $RepoRoot $Spec.SourceSideOutputDir
-  $target = Join-Path $templatesDir $Template.FileName
+  $payloadParts = @()
+  foreach ($partial in $Spec.PartialSources) {
+    $payloadParts += Read-Partial $partial
+  }
+
+  $bodyParts += ""
+  $bodyParts += "---"
+  $bodyParts += ""
+  $bodyParts += '````````md'
+  $bodyParts += (($payloadParts -join "`n`n").TrimEnd())
+  $bodyParts += '````````'
+
+  $content = (New-GeneratedNotice $Spec) + (($bodyParts -join "`n").TrimEnd()) + "`n"
+  $targetDir = Join-Path $RepoRoot $Spec.SourceSideOutputDir
+  $target = Join-Path $targetDir $Template.FileName
   $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-  [System.IO.Directory]::CreateDirectory($templatesDir) | Out-Null
+  [System.IO.Directory]::CreateDirectory($targetDir) | Out-Null
   [System.IO.File]::WriteAllText($target, $content, $utf8NoBom)
 }
 

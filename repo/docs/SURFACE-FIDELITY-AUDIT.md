@@ -567,9 +567,9 @@ Source file(s):
 Published file(s):
 - `skills/n8n-local-setup/templates/agent-rules/*.template.md`
 Problem:
-The agent-rule templates are intentionally assembled from partial sources into source-side inert `.template.md` files, then copied into the published skill folder. The old active-name template docs were retired after migration and are no longer preserved in active `_main` source paths.
+The agent-rule templates are intentionally assembled from `_main` partial sources into source-side inert `.template.md` files. Published skill copies add the skill-local routing partial so the `_projects` source-side templates stay aligned with the original active-name source scope. The old active-name template docs were retired after migration and are no longer preserved in active `_main` source paths.
 Recommended fix:
-Fixed in the inert agent-rule template migration and cleanup passes. Keep the source-first flow documented as partials -> `_main/templates/agent-rules/*.template.md` -> `skills/n8n-local-setup/templates/agent-rules/*.template.md`.
+Fixed in the inert agent-rule template migration and cleanup passes. Keep the source-first flow documented as `_main` partials -> `_main/templates/agent-rules/*.template.md` -> published `skills/n8n-local-setup/templates/agent-rules/*.template.md` with skill-local routing.
 
 Finding:
 Severity: medium
