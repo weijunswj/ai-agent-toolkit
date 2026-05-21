@@ -1,0 +1,132 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "main",
+  "source_commit": "479ecbe3174b6016d58aff3ed7a8234a5c3e69c7",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party toolkit-authored MCP-ready registry material promoted from the former manually maintained mcp/ published surface. Entries are adapted into this project module and are not watched as an external upstream.",
+  "files": [
+    {
+      "mode": "adapted",
+      "source_path": "mcp/README.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/README.md",
+      "notes": "Promoted first-party MCP-ready registry overview from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/installer-mcp/README.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/installer-mcp/README.md",
+      "notes": "Promoted first-party future installer MCP design note from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/installer-mcp/SECURITY.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/installer-mcp/SECURITY.md",
+      "notes": "Promoted first-party future installer MCP security note from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/installer-mcp/SPEC.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/installer-mcp/SPEC.md",
+      "notes": "Promoted first-party future installer MCP spec from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry-mcp/README.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry-mcp/README.md",
+      "notes": "Promoted first-party future registry MCP design note from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry-mcp/SECURITY.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry-mcp/SECURITY.md",
+      "notes": "Promoted first-party future registry MCP security note from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry-mcp/SPEC.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry-mcp/SPEC.md",
+      "notes": "Promoted first-party future registry MCP spec from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/references/README.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/references/README.md",
+      "notes": "Promoted first-party MCP reference index from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/references/installer-mcp.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/references/installer-mcp.md",
+      "notes": "Promoted first-party future installer MCP reference from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/references/local-mcp-setup.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/references/local-mcp-setup.md",
+      "notes": "Promoted first-party local MCP setup reference from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/references/mcp-security.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/references/mcp-security.md",
+      "notes": "Promoted first-party MCP security reference from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/references/registry-mcp.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/references/registry-mcp.md",
+      "notes": "Promoted first-party future registry MCP reference from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry/README.md",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry/README.md",
+      "notes": "Promoted first-party MCP registry metadata index from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry/consumers.registry.json",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry/consumers.registry.json",
+      "notes": "Promoted first-party registry metadata from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry/packs.registry.json",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry/packs.registry.json",
+      "notes": "Promoted first-party registry metadata from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry/playbooks.registry.json",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry/playbooks.registry.json",
+      "notes": "Promoted first-party legacy/manual discovery registry metadata from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry/skills.registry.json",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry/skills.registry.json",
+      "notes": "Promoted first-party registry metadata from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry/source-repos.registry.json",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry/source-repos.registry.json",
+      "notes": "Promoted first-party source-repo registry metadata from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry/templates.registry.json",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry/templates.registry.json",
+      "notes": "Promoted first-party registry metadata from the former root MCP surface."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "mcp/registry/tools.registry.json",
+      "project_path": "_projects/repo-methodology/mcp-ready-registry/_main/registry/tools.registry.json",
+      "notes": "Promoted first-party registry metadata from the former root MCP surface."
+    }
+  ]
+}

@@ -1,8 +1,14 @@
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: repo-methodology.mcp-ready-registry
+Source: _projects/repo-methodology/mcp-ready-registry/_main/registry-mcp/SPEC.md
+Update the project source and run sync.
+-->
 # Registry MCP Spec
 
-Status: future design only.
+Status: future design/spec-only. This is MCP-ready registry material, not a runnable MCP server.
 
-## Tools
+## Candidate Future Tools
 
 - `list_skills`
 - `search_skills`

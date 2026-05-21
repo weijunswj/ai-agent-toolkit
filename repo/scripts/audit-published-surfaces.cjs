@@ -494,6 +494,13 @@ function recipeBoundaryReasons(root, entry) {
 function mainAdapterReasons(entry) {
   const reasons = [];
   if (isPromotedStandaloneSkillSource(entry)) return reasons;
+  if (
+    entry.projectId === 'repo-methodology.mcp-ready-registry' &&
+    entry.path.startsWith('mcp/') &&
+    sourcePathsForEntry(entry).every((source) => source.startsWith('_projects/repo-methodology/mcp-ready-registry/_main/'))
+  ) {
+    return reasons;
+  }
   if (isSkillRouter(entry.path) || isSkillReadme(entry.path) || isMcpSpec(entry.path) || isPackManifest(entry.path)) {
     reasons.push('main source is publishing an adapter, index, spec, or metadata surface');
   }

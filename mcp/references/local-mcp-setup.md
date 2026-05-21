@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: repo-methodology.mcp-ready-registry
+Source: _projects/repo-methodology/mcp-ready-registry/_main/references/local-mcp-setup.md
+Update the project source and run sync.
+-->
 # Local MCP Setup
 
 Use local MCP setup when an AI agent needs structured access to local documentation or a local service.

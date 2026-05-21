@@ -1,6 +1,12 @@
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: repo-methodology.mcp-ready-registry
+Source: _projects/repo-methodology/mcp-ready-registry/_main/installer-mcp/SPEC.md
+Update the project source and run sync.
+-->
 # Installer MCP Spec
 
-Status: future design only.
+Status: future design/spec-only. This is MCP-ready registry material, not a runnable MCP server.
 
 ## Flow
 

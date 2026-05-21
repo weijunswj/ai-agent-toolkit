@@ -14,8 +14,8 @@ The compact shared contract lives in [source-of-truth-contract.md](partials/sour
 - CI/CD installer guides and templates.
 - Optional local-only tools.
 - Pack manifests.
-- Registry metadata.
-- MCP design specs.
+- MCP-ready registry metadata.
+- MCP design/spec docs.
 
 ## Product-Owned
 
@@ -33,7 +33,7 @@ Do not move product-owned assets into this toolkit.
 
 ## Registries
 
-The JSON registries under `mcp/registry/` are the published discovery surface. Generated registries should be refreshed from project manifests with `node repo/scripts/sync-toolkit-projects.cjs --write`.
+The JSON registries under `mcp/registry/` are the published MCP-ready registry discovery surface. Generated registries should be refreshed from project manifests with `node repo/scripts/sync-toolkit-projects.cjs --write`.
 
 ## Guarded Generated Auto-Sync
 

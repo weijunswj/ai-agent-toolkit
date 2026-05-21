@@ -11,7 +11,7 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 | Template | Copy-safe source material inside the relevant skill folder. |
 | Pack | Approval-gated bundle manifest inside the relevant skill folder under `packs/`. |
 | MCP registry data | JSON discovery metadata under `mcp/registry/`. |
-| MCP | Future server design under `mcp/`. |
+| MCP | MCP-ready registry, design/spec docs, and metadata under `mcp/`; no runnable server is shipped today. |
 
 ## Project Categories
 

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "agent-rules",
+    "title": "Agent Rule Templates",
+    "path": "skills/n8n-local-setup/templates/agent-rules/"
+  },
+  {
+    "id": "mcp-configs",
+    "title": "MCP Config Templates",
+    "path": "skills/n8n-local-setup/templates/mcp-configs/"
+  },
+  {
+    "id": "n8n-import-export-sync-helpers",
+    "title": "n8n Import Export Sync Helpers",
+    "path": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/"
+  },
+  {
+    "id": "n8n-sanitizer-helpers",
+    "title": "n8n Sanitizer Helpers",
+    "path": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/"
+  },
+  {
+    "id": "n8n-workflow-templates",
+    "title": "n8n Workflow Templates",
+    "path": "skills/n8n-workflow-templates/templates/"
+  },
+  {
+    "id": "cicd-templates",
+    "title": "CI/CD Templates",
+    "path": "skills/secure-cicd-installer/templates/cicd/"
+  },
+  {
+    "id": "github-actions-docs",
+    "title": "GitHub Actions Docs",
+    "path": "skills/secure-cicd-installer/templates/github-actions/README.md"
+  },
+  {
+    "id": "design-system-generator",
+    "title": "Design System Generator Tool",
+    "path": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/"
+  }
+]

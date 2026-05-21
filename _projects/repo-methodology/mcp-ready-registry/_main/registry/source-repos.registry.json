@@ -1,0 +1,11 @@
+[
+  {
+    "id": "ui-ux-pro-max-skill",
+    "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+    "role": "external MIT source for the UI/UX Pro Max design module and optional local-only design generator subset",
+    "risk": "third-party",
+    "review_policy": "manual_review_required",
+    "last_reviewed": "2026-05-16",
+    "status": "attribution required"
+  }
+]

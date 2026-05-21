@@ -1,8 +1,16 @@
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: repo-methodology.mcp-ready-registry
+Source: _projects/repo-methodology/mcp-ready-registry/_main/references/registry-mcp.md
+Update the project source and run sync.
+-->
 # Registry MCP
 
-The registry MCP is future-facing in v1. It is designed as a read-only discovery server over this repo's JSON registries.
+The registry MCP is future-facing in v1. It is design/spec-only material for a possible read-only discovery server over this repo's JSON registries.
 
-## Intended Use
+This is MCP-ready registry and design/spec material. It is not a runnable MCP server.
+
+## Candidate Future Use
 
 - List skills.
 - Search skills.

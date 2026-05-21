@@ -1,16 +1,16 @@
 # AI Agent Toolkit
 
-A practical toolkit of reusable AI-agent skills, preserved source projects, and MCP design/registry material.
+A practical toolkit of reusable AI-agent skills, preserved source projects, and MCP-ready registry/design/spec metadata.
 
 ## What this repo is
 
-This repo keeps reusable AI-agent material in a source-first layout. Full source stays under `_projects/`, copyable agent skills publish under `skills/`, MCP design and registry material lives under `mcp/`, and repo maintenance lives under `repo/`.
+This repo keeps reusable AI-agent material in a source-first layout. Full source stays under `_projects/`, copyable agent skills publish under `skills/`, MCP-ready registry, design/spec docs, and metadata live under `mcp/`, and repo maintenance lives under `repo/`.
 
 ## Pick What You Need
 
 - If you want the full original guide or source context, open `_projects/<category>/<project>/_main/`.
 - If you want something an AI agent can copy and use, open [`skills/<skill-name>/`](skills/).
-- If you want future MCP/spec/registry information, open [`mcp/`](mcp/).
+- If you want MCP-ready registry/design/spec information for future MCP usage, open [`mcp/`](mcp/).
 - If you are maintaining this repo, open [`repo/`](repo/) for docs, scripts, tests, and validation.
 
 ## Quick Start
@@ -19,7 +19,7 @@ This repo keeps reusable AI-agent material in a source-first layout. Full source
 |---|---|
 | Full guide | Open `_projects/<category>/<project>/_main/`. |
 | Install a skill | Copy the whole `skills/<skill-name>/` folder into your agent's skills directory. |
-| MCP material | Open [`mcp/`](mcp/) for current status, specs, registries, and notes. |
+| MCP-ready registry material | Open [`mcp/`](mcp/) for current status, design/spec docs, registries, and notes. |
 | Maintenance work | Start with [`repo/docs/`](repo/docs/) and the validation commands below. |
 
 ## Terms
@@ -28,7 +28,7 @@ This repo keeps reusable AI-agent material in a source-first layout. Full source
 |---|---|
 | Project | The source/provenance area where the real material is maintained.
 | Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files.
-| MCP | A spec/registry area for future tool/server discovery. It is design/spec-only unless a specific subfolder says otherwise.
+| MCP | MCP-ready registry, design/spec docs, and metadata for future MCP usage. No runnable server is shipped today.
 | Generated surface | A published file under [`skills/`](skills/) or [`mcp/`](mcp/) that is rebuilt from project source by a deterministic sync script.
 
 ## Project Categories
@@ -51,6 +51,7 @@ Open a project when you need the maintained source behind a skill or MCP note.
 | [Secure CI/CD Installer](_projects/cicd/secure-installer/) | Helps plan CI/CD changes with approval gates and safety status tracking. | The full installer prompt, CI/CD status templates, GitHub Actions notes, and safety policy source. | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) and [`mcp/projects/secure-cicd-installer.md`](mcp/projects/secure-cicd-installer.md) |
 | [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Provides frontend design guidance and a local design-system generator. | Third-party-attributed design source, local CSV data, generator scripts, and attribution notes. | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) and [`mcp/projects/ui-ux-pro-max.md`](mcp/projects/ui-ux-pro-max.md) |
 | [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Helps maintain source-traceable skills, MCP notes, templates, manifests, and audit baselines. | Generic publishing methodology, source-to-surface decision rules, validation guidance, and starter templates. | [`skills/context-preserving-ai-publisher/`](skills/context-preserving-ai-publisher/) |
+| [MCP-Ready Registry](_projects/repo-methodology/mcp-ready-registry/) | Owns the repo-level MCP-ready registry and future design/spec surface. | MCP-ready registry metadata, operator references, and future registry/installer MCP design docs. | [`mcp/`](mcp/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Helps an agent start and prove Windows localhost dev services are reachable. | The full standalone skill source for launch discovery, port checks, logs, background start, and HTTP verification. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
 | [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Helps maintain a Notion/GitHub knowledge index without duplicate rows. | The full standalone skill source for schema setup, source matching, duplicate handling, and daily updater behavior. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |
 
@@ -73,14 +74,14 @@ Required runtime context should live inside the skill folder in local files such
 
 ## MCP
 
-The MCP area is currently design/spec/registry material. It does not ship a runnable MCP server unless a specific subfolder says otherwise.
+The MCP area is currently MCP-ready registry, design/spec docs, and metadata. It does not ship a runnable MCP server, package, CLI, or executable MCP tools today.
 
 | MCP area | Status | What it is for |
 |---|---|---|
 | [`mcp/registry-mcp/`](mcp/registry-mcp/) | Design/spec-only | Future read-only discovery and query design over JSON registries. |
 | [`mcp/installer-mcp/`](mcp/installer-mcp/) | Design/spec-only | Future approval-gated installation design for skill-local pack manifests. |
 | [`mcp/projects/`](mcp/projects/) | Project notes | Short project-specific MCP specs, safety notes, and boundaries. |
-| [`mcp/registry/`](mcp/registry/) | Machine-readable metadata | JSON project, skill, pack, template, and source metadata for future discovery. |
+| [`mcp/registry/`](mcp/registry/) | MCP-ready registry metadata | JSON project, skill, pack, template, and source metadata for future discovery. |
 | [`mcp/references/`](mcp/references/) | Supporting docs | Registry, installer, MCP setup, and security reference material. |
 
 No MCP commands are runnable from this repo today. The specs describe future tools only:
@@ -101,7 +102,7 @@ No MCP commands are runnable from this repo today. The specs describe future too
 |---|---|
 | [`_projects/`](_projects/) | You want full preserved project guides/source material. |
 | [`skills/`](skills/) | You want copyable agent skills. |
-| [`mcp/`](mcp/) | You want MCP specs/tools/commands. |
+| [`mcp/`](mcp/) | You want MCP-ready registry, design/spec docs, and metadata. |
 | [`repo/`](repo/) | You are maintaining this toolkit. |
 
 ## For Maintainers
@@ -144,7 +145,7 @@ This repo has a source layer and a published layer.
 - `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source material. Curated files may be AI-assisted, but they are source files and must be reviewed before publishing.
 - `_projects/**/toolkit.project.json` is the routing contract. It declares which `_main/` or `curated_output_for_ai/` files publish to `skills/` and `mcp/` outputs.
 - `skills/` contains copyable AI-agent skill folders. The whole skill folder is the install unit.
-- `mcp/` contains MCP specs, command/tool notes, registries, and status documentation.
+- `mcp/` contains MCP-ready registry, design/spec docs, metadata, and status documentation for future MCP usage.
 - Generated `skills/` and `mcp/` files must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
 - `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
 - Publish declared outputs with:

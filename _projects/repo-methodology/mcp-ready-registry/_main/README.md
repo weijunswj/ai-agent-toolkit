@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.mcp-ready-registry
-Source: _projects/repo-methodology/mcp-ready-registry/_main/README.md
-Update the project source and run sync.
--->
 # MCP-Ready Registry
 
 This folder is the toolkit MCP-ready registry, design/spec docs, and metadata surface.
