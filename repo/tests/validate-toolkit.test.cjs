@@ -13,6 +13,7 @@ const syncScript = path.join(repoRoot, 'repo', 'scripts', 'sync-toolkit-projects
 const contractScript = path.join(repoRoot, 'repo', 'scripts', 'sync-repo-doc-contract.cjs');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs');
 const validator = require(validateScript);
+const projectSync = require(syncScript);
 const safeSourceUpdate = require(path.join(repoRoot, 'repo', 'scripts', 'safe-source-update.cjs'));
 const sourceWatcher = require(path.join(repoRoot, 'repo', 'scripts', 'watch-project-sources.cjs'));
 
@@ -742,6 +743,30 @@ test('validator rejects README links to absent optional folders', () => {
   assert.match(result.stderr, /links to missing path: _projects\/n8n\/local-setup\/_generated/);
 });
 
+test('agent-rule template freshness is driven by project-scoped specs', () => {
+  const specs = projectSync.agentRuleTemplateSpecs();
+  assert.deepEqual(specs.map((spec) => spec.projectId), ['n8n.local-setup']);
+
+  const [spec] = specs;
+  assert.deepEqual(spec.partialSources.map((source) => source.rel), [
+    '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md',
+    '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md',
+    'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md'
+  ]);
+  assert.deepEqual(spec.templates.map((template) => template.source), [
+    '_main/templates/agent-rules/AGENTS.template.md',
+    '_main/templates/agent-rules/CLAUDE.template.md',
+    '_main/templates/agent-rules/GEMINI.template.md'
+  ]);
+  assert.deepEqual(spec.templates.map((template) => template.output), [
+    '_projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md',
+    '_projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md',
+    '_projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md'
+  ]);
+  assert.deepEqual(spec.templates.map((template) => template.destination), ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']);
+  assert.equal(spec.templates.every((template) => Array.isArray(template.installGuidance) && template.installGuidance.length === 2), true);
+});
+
 test('changing assembled _main agent-rule templates makes source-side templates stale', () => {
   const cwd = tempCopy();
   const template = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'agent-rules', 'AGENTS.template.md');
@@ -749,6 +774,7 @@ test('changing assembled _main agent-rule templates makes source-side templates 
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale source-side agent-rule template: _projects\/n8n\/local-setup\/_main\/templates\/agent-rules\/AGENTS\.template\.md/);
+  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/agent-rules\/AGENTS\.template\.md/);
 });
 
 test('changing published agent-rule template copies makes skill copies stale', () => {
