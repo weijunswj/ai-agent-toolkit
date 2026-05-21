@@ -124,6 +124,11 @@ const agentRuleTemplateSpecDefinitions = [
         destinationDisplay: '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`',
         activeNameText: 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`',
         installMode: 'add_on',
+        sourceBaselineTemplatePaths: [
+          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md'
+        ],
         baselineTemplatePaths: [
           'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
           'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
@@ -417,11 +422,14 @@ function templateActiveNameText(template) {
   return template.activeNameText || `it is not named ${templateDestinationDisplay(template)}`;
 }
 
-function repoRootMarkdownLink(relPath) {
-  return `[${relPath}](/${relPath})`;
+function relativeMarkdownLink(fromRelPath, targetRelPath) {
+  const href = path.posix.relative(path.posix.dirname(fromRelPath), targetRelPath);
+  return `[${targetRelPath}](${href || path.posix.basename(targetRelPath)})`;
 }
 
-function expectedAgentRuleSourceTemplate(spec, template) {
+function expectedAgentRuleTemplate(spec, template, options = {}) {
+  const outputPath = options.outputPath || template.output;
+  const baselinePaths = options.baselinePaths || template.sourceBaselineTemplatePaths || template.baselineTemplatePaths || [];
   const destinationDisplay = templateDestinationDisplay(template);
   const bodyParts = [
     `# ${template.title}`,
@@ -437,7 +445,7 @@ function expectedAgentRuleSourceTemplate(spec, template) {
     bodyParts.push('');
     bodyParts.push('First install or copy the generic baseline rules from:');
     bodyParts.push('');
-    for (const baselinePath of template.baselineTemplatePaths) bodyParts.push(`- ${repoRootMarkdownLink(baselinePath)}`);
+    for (const baselinePath of baselinePaths) bodyParts.push(`- ${relativeMarkdownLink(outputPath, baselinePath)}`);
     bodyParts.push('');
     bodyParts.push('Then merge the fenced payload from this file under the generic rules in the same active instruction file.');
     bodyParts.push('');
@@ -481,6 +489,10 @@ function expectedAgentRuleSourceTemplate(spec, template) {
   bodyParts.push('````````');
 
   return agentRuleSourceTemplateNotice(spec) + bodyParts.join('\n').trimEnd() + '\n';
+}
+
+function expectedAgentRuleSourceTemplate(spec, template) {
+  return expectedAgentRuleTemplate(spec, template);
 }
 
 function agentRuleSpecSourceIsProjectScoped(project, source) {
@@ -580,6 +592,15 @@ function publishedAgentRuleTemplateSpec(project, output, rels) {
   return { spec, template };
 }
 
+function publishedAddOnAgentRuleTemplateSpec(project, output, rels) {
+  if (output.kind !== 'copy' || rels.length !== 1) return null;
+  const spec = agentRuleTemplateSpecDefinitions.find((candidate) => candidate.projectId === project.id);
+  if (!spec) return null;
+  const template = spec.templates.find((candidate) => candidate.output === rels[0] && candidate.installMode === 'add_on');
+  if (!template) return null;
+  return { spec, template };
+}
+
 function addSkillRoutingToAgentRuleTemplate(text, outputPath, skillRoutingSource) {
   const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const closingFence = '\n````````\n';
@@ -640,6 +661,17 @@ function expectedTextOutput(project, output, rels) {
       addSkillRoutingToAgentRuleTemplate(raw, output.output, publishedAgentRule.spec.skillRoutingSource),
       project,
       [rels[0], publishedAgentRule.spec.skillRoutingSource]
+    );
+  }
+  const publishedAddOnAgentRule = publishedAddOnAgentRuleTemplateSpec(project, output, rels);
+  if (publishedAddOnAgentRule) {
+    return addMarkdownNotice(
+      expectedAgentRuleTemplate(publishedAddOnAgentRule.spec, publishedAddOnAgentRule.template, {
+        outputPath: output.output,
+        baselinePaths: publishedAddOnAgentRule.template.baselineTemplatePaths
+      }),
+      project,
+      rels[0]
     );
   }
   if (output.kind === 'json' || path.extname(output.output).toLowerCase() === '.json') {
