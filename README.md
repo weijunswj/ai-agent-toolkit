@@ -52,6 +52,7 @@ Open a project when you need the maintained source behind a skill or MCP note.
 | [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Provides frontend design guidance and a local design-system generator. | Third-party-attributed design source, local CSV data, generator scripts, and attribution notes. | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) and [`mcp/projects/ui-ux-pro-max.md`](mcp/projects/ui-ux-pro-max.md) |
 | [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Helps maintain source-traceable skills, MCP notes, templates, manifests, and audit baselines. | Generic publishing methodology, source-to-surface decision rules, validation guidance, and starter templates. | [`skills/context-preserving-ai-publisher/`](skills/context-preserving-ai-publisher/) |
 | [MCP-Ready Registry](_projects/repo-methodology/mcp-ready-registry/) | Owns the repo-level MCP-ready registry and future design/spec surface. | MCP-ready registry metadata, operator references, and future registry/installer MCP design docs. | [`mcp/`](mcp/) |
+| [AI Coding Agent Rules](_projects/development/ai-coding-agent-rules/) | Provides generic execution-first AI coding agent rules. | Generic agent execution, toolkit skill-routing partials, and inert AGENTS/CLAUDE/GEMINI templates. | [`skills/ai-coding-agent-rules/`](skills/ai-coding-agent-rules/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Helps an agent start and prove Windows localhost dev services are reachable. | The full standalone skill source for launch discovery, port checks, logs, background start, and HTTP verification. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
 | [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Helps maintain a Notion/GitHub knowledge index without duplicate rows. | The full standalone skill source for schema setup, source matching, duplicate handling, and daily updater behavior. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |
 
@@ -63,6 +64,7 @@ Required runtime context should live inside the skill folder in local files such
 
 | Skill | Use this when you want to... | Folder |
 |---|---|---|
+| AI Coding Agent Rules | Install generic execution-first agent rules for Codex/OpenCode, Claude Code, Gemini CLI, or Antigravity. | [`skills/ai-coding-agent-rules/`](skills/ai-coding-agent-rules/) |
 | n8n Local Setup | Set up local n8n, choose MCP config, handle tunnels, or install platform-specific agent rules. | [`skills/n8n-local-setup/`](skills/n8n-local-setup/) |
 | n8n Workflow Helper Scripts | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. | [`skills/n8n-workflow-helper-scripts/`](skills/n8n-workflow-helper-scripts/) |
 | n8n Workflow Templates | Start from a ready-to-review public inactive n8n workflow JSON template, such as the global error handler. | [`skills/n8n-workflow-templates/`](skills/n8n-workflow-templates/) |

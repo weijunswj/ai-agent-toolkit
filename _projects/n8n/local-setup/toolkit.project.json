@@ -127,29 +127,9 @@
     },
     {
       "kind": "copy",
-      "source": "_main/templates/agent-rules/AGENTS.template.md",
-      "output": "skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md",
-      "notes": "Published inert Codex/OpenCode agent-rule template generated from the source-side assembled template plus skill-local routing rules.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "copy",
-      "source": "_main/templates/agent-rules/CLAUDE.template.md",
-      "output": "skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md",
-      "notes": "Published inert Claude Code agent-rule template generated from the source-side assembled template plus skill-local routing rules.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "copy",
-      "source": "_main/templates/agent-rules/GEMINI.template.md",
-      "output": "skills/n8n-local-setup/templates/agent-rules/GEMINI.template.md",
-      "notes": "Published inert Gemini/Antigravity agent-rule template generated from the source-side assembled template plus skill-local routing rules.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "linked",
-      "output": "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md",
-      "notes": "Toolkit-only partial maintained in the published surface and included only in published skill templates.",
+      "source": "_main/templates/agent-rules/n8n-mcp-rules.template.md",
+      "output": "skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md",
+      "notes": "Published inert n8n-specific add-on template generated from the n8n MCP workflow rules partial.",
       "fidelity": "exact"
     },
     {
@@ -238,10 +218,7 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
       "skills/n8n-local-setup/references",
-      "skills/n8n-local-setup/templates/agent-rules/AGENTS.template.md",
-      "skills/n8n-local-setup/templates/agent-rules/CLAUDE.template.md",
-      "skills/n8n-local-setup/templates/agent-rules/GEMINI.template.md",
-      "skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md",
+      "skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
@@ -275,14 +252,14 @@
   "project": {
     "name": "Local n8n Setup",
     "category": "n8n",
-    "summary": "Preserved local n8n setup guides plus copyable agent templates for Codex, Claude Code, OpenCode, Antigravity, tunneling, and MCP configuration."
+    "summary": "Preserved local n8n setup guides plus copyable n8n MCP add-on, platform, tunneling, and MCP configuration templates."
   },
   "surface": {
     "publish_as": "both",
     "skill": {
       "status": "published",
       "path": "skills/n8n-local-setup",
-      "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and agent-rule templates without running live actions by default."
+      "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and n8n-specific agent-rule add-on templates without running live actions by default."
     },
     "mcp": {
       "status": "published",

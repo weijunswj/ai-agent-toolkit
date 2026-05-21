@@ -1,0 +1,87 @@
+{
+  "id": "development.ai-coding-agent-rules",
+  "category": "development",
+  "name": "ai-coding-agent-rules",
+  "title": "AI Coding Agent Rules",
+  "module_path": "_projects/development/ai-coding-agent-rules",
+  "main_path": "_projects/development/ai-coding-agent-rules/_main",
+  "outputs": [
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/SKILL.md",
+      "output": "skills/ai-coding-agent-rules/SKILL.md",
+      "notes": "Published skill entrypoint generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/README.md",
+      "output": "skills/ai-coding-agent-rules/README.md",
+      "notes": "Published skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/agent-rules/AGENTS.template.md",
+      "output": "skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md",
+      "notes": "Published inert Codex/OpenCode generic AI coding agent rule template generated from source-side assembled template.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/agent-rules/CLAUDE.template.md",
+      "output": "skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md",
+      "notes": "Published inert Claude Code generic AI coding agent rule template generated from source-side assembled template.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/agent-rules/GEMINI.template.md",
+      "output": "skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md",
+      "notes": "Published inert Gemini/Antigravity generic AI coding agent rule template generated from source-side assembled template.",
+      "fidelity": "exact"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/ai-coding-agent-rules/SKILL.md",
+      "skills/ai-coding-agent-rules/README.md",
+      "skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md",
+      "skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md",
+      "skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md",
+      "mcp/registry/projects.registry.json"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "AI Coding Agent Rules",
+    "category": "development",
+    "summary": "Generic execution-first AI coding agent rules and toolkit skill-routing templates for common agent instruction files."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/ai-coding-agent-rules",
+      "summary": "Provides inert AGENTS, CLAUDE, and GEMINI templates for installing generic AI coding agent execution and toolkit skill-routing rules."
+    },
+    "mcp": {
+      "status": "not_applicable",
+      "summary": "No MCP surface is published for this standalone rules skill."
+    }
+  }
+}

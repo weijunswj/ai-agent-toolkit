@@ -83,10 +83,14 @@ const expectedFiles = [
   'mcp/registry/source-repos.registry.json',
   'mcp/registry/consumers.registry.json',
   '_projects/n8n/local-setup/SOURCE-LOCK.json',
+  '_projects/development/ai-coding-agent-rules/SOURCE-LOCK.json',
   '_projects/n8n/workflow-toolkit/SOURCE-LOCK.json',
   '_projects/cicd/secure-installer/SOURCE-LOCK.json',
   '_projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
-  'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md',
+  'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
+  'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
+  'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md',
+  'skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md',
   'repo/scripts/build-agent-rule-templates.ps1',
   'repo/scripts/- build-agent-rule-templates.cmd',
   'repo/scripts/validate-toolkit.cjs',
@@ -110,6 +114,8 @@ const expectedDirs = [
   '_projects',
   '_projects/n8n/local-setup',
   '_projects/n8n/local-setup/_main',
+  '_projects/development/ai-coding-agent-rules',
+  '_projects/development/ai-coding-agent-rules/_main',
   '_projects/n8n/workflow-toolkit',
   '_projects/n8n/workflow-toolkit/_main',
   '_projects/cicd/secure-installer',
@@ -117,6 +123,7 @@ const expectedDirs = [
   '_projects/design/ui-ux-pro-max',
   '_projects/design/ui-ux-pro-max/_main',
   'skills/ui-ux-secure-frontend-design',
+  'skills/ai-coding-agent-rules',
   'skills/windows-localhost-workflows',
   'skills/n8n-workflow-helper-scripts',
   'skills/n8n-workflow-templates',
@@ -126,8 +133,8 @@ const expectedDirs = [
   'skills/n8n-local-setup/references/ai-agent-platforms',
   'mcp/references',
   'skills/n8n-local-setup/references/n8n',
+  'skills/ai-coding-agent-rules/templates/agent-rules',
   'skills/n8n-local-setup/templates/agent-rules',
-  'skills/n8n-local-setup/templates/agent-rules/partials',
   'skills/n8n-local-setup/templates/mcp-configs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer',
@@ -681,15 +688,9 @@ function validateSkillPortability(errors) {
 }
 
 function validateAgentRuleSources(errors) {
-  const linkedOutputs = new Set();
-  for (const manifest of projectManifests()) {
-    for (const output of manifest.outputs || []) {
-      if (output.kind === 'linked') linkedOutputs.add(output.output);
-    }
-  }
-  const rootPartialFiles = listFiles().filter((entry) => entry.relPath.startsWith('skills/n8n-local-setup/templates/agent-rules/partials/'));
+  const rootPartialFiles = listFiles().filter((entry) => /\/templates\/agent-rules\/partials\//.test(entry.relPath));
   for (const entry of rootPartialFiles) {
-    if (!linkedOutputs.has(entry.relPath)) fail(errors, `Root agent-rule partial is an unmanaged duplicate: ${entry.relPath}`);
+    if (entry.relPath.startsWith('skills/')) fail(errors, `Agent-rule partials must stay in project _main source, not published skill folders: ${entry.relPath}`);
   }
 }
 

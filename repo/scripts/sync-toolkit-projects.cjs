@@ -42,26 +42,25 @@ const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applica
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
 const agentRuleTemplateSpecDefinitions = [
   {
-    projectId: 'n8n.local-setup',
+    projectId: 'development.ai-coding-agent-rules',
     partialSources: [
       {
         name: 'ai-coding-agent-execution.md',
-        rel: '_projects/n8n/local-setup/_main/templates/partials/ai-coding-agent-execution.md'
+        rel: '_projects/development/ai-coding-agent-rules/_main/templates/partials/ai-coding-agent-execution.md'
       },
       {
-        name: 'n8n-mcp-rules.md',
-        rel: '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
+        name: 'toolkit-skill-routing.md',
+        rel: '_projects/development/ai-coding-agent-rules/_main/templates/partials/toolkit-skill-routing.md'
       }
     ],
-    skillRoutingSource: 'skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md',
     templates: [
       {
         source: '_main/templates/agent-rules/AGENTS.template.md',
-        output: '_projects/n8n/local-setup/_main/templates/agent-rules/AGENTS.template.md',
-        title: 'AGENTS.template.md AI coding agent and n8n MCP workflow rules',
+        output: '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
+        title: 'AGENTS.template.md AI coding agent rules',
         audience: 'Codex or OpenCode',
         destination: 'AGENTS.md',
-        installSubject: 'Codex/OpenCode rules',
+        installSubject: 'generic Codex/OpenCode rules',
         installExamples: [
           {
             heading: 'Codex global rules example',
@@ -77,11 +76,11 @@ const agentRuleTemplateSpecDefinitions = [
       },
       {
         source: '_main/templates/agent-rules/CLAUDE.template.md',
-        output: '_projects/n8n/local-setup/_main/templates/agent-rules/CLAUDE.template.md',
-        title: 'CLAUDE.template.md AI coding agent and n8n MCP workflow rules',
+        output: '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
+        title: 'CLAUDE.template.md AI coding agent rules',
         audience: 'Claude Code',
         destination: 'CLAUDE.md',
-        installSubject: 'Claude Code rules',
+        installSubject: 'generic Claude Code rules',
         installExamples: [
           {
             heading: 'Claude Code global rules example',
@@ -92,16 +91,47 @@ const agentRuleTemplateSpecDefinitions = [
       },
       {
         source: '_main/templates/agent-rules/GEMINI.template.md',
-        output: '_projects/n8n/local-setup/_main/templates/agent-rules/GEMINI.template.md',
-        title: 'GEMINI.template.md AI coding agent and n8n MCP workflow rules',
+        output: '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md',
+        title: 'GEMINI.template.md AI coding agent rules',
         audience: 'Gemini CLI or Antigravity',
         destination: 'GEMINI.md',
-        installSubject: 'Gemini CLI/Antigravity rules',
+        installSubject: 'generic Gemini CLI/Antigravity rules',
         installExamples: [
           {
             heading: 'Gemini CLI and Antigravity global rules example',
             path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
             commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
+          }
+        ]
+      }
+    ]
+  },
+  {
+    projectId: 'n8n.local-setup',
+    partialSources: [
+      {
+        name: 'n8n-mcp-rules.md',
+        rel: '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
+      }
+    ],
+    templates: [
+      {
+        source: '_main/templates/agent-rules/n8n-mcp-rules.template.md',
+        output: '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md',
+        title: 'n8n-mcp-rules.template.md n8n MCP workflow rules add-on',
+        audience: 'Codex, OpenCode, Claude Code, Gemini CLI, or Antigravity after generic agent rules are installed',
+        destination: 'AGENTS.md, CLAUDE.md, or GEMINI.md',
+        destinationDisplay: '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`',
+        activeNameText: 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`',
+        installSubject: 'n8n-specific workflow and MCP safety rules',
+        installExamples: [
+          {
+            heading: 'Add-on install example',
+            path: 'Target repo root AGENTS.md, CLAUDE.md, or GEMINI.md',
+            commands: [
+              'Open the target instruction file.',
+              'Merge the fenced payload under the generic AI coding agent rules.'
+            ]
           }
         ]
       }
@@ -384,17 +414,26 @@ function agentRuleSourceTemplateNotice(spec) {
   ].join('\n');
 }
 
+function templateDestinationDisplay(template) {
+  return template.destinationDisplay || `\`${template.destination}\``;
+}
+
+function templateActiveNameText(template) {
+  return template.activeNameText || `it is not named ${templateDestinationDisplay(template)}`;
+}
+
 function expectedAgentRuleSourceTemplate(spec, template) {
+  const destinationDisplay = templateDestinationDisplay(template);
   const bodyParts = [
     `# ${template.title}`,
     '',
     `Use this generated template for ${template.audience}.`,
     '',
-    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because it is not named \`${template.destination}\`.`,
+    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because ${templateActiveNameText(template)}.`,
     '',
-    `Copy or merge the fenced payload into the target repo root as \`${template.destination}\` only when the user explicitly wants ${template.installSubject} installed.`,
+    `Copy or merge the fenced payload into the target repo root as ${destinationDisplay} only when the user explicitly wants ${template.installSubject} installed.`,
     '',
-    `If the target repo already has \`${template.destination}\`, do not overwrite it. Merge manually or produce a diff/merge plan.`
+    `If the target repo already has ${destinationDisplay}, do not overwrite it. Merge manually or produce a diff/merge plan.`
   ];
 
   for (const example of template.installExamples) {

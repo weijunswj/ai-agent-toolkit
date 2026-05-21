@@ -63,7 +63,8 @@ npx --version
 
 ### Follow the OpenCode AGENTS.md Setup guide:
 
-* Copy or merge [templates/agent-rules/AGENTS.template.md](./templates/agent-rules/AGENTS.template.md) into the target repo root as `AGENTS.md`.
+* Install or copy generic AI coding agent rules from `skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md`, then copy or merge them into the target repo root as `AGENTS.md`.
+* Merge the n8n-specific add-on from [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md) into the same `AGENTS.md`.
 * If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 ## 4. Create The Global OpenCode MCP Config

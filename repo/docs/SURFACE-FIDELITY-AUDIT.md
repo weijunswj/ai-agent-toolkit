@@ -561,15 +561,17 @@ Fixed in the Secure CI/CD template declaration pass. Reviewed source copies now 
 Finding:
 Severity: medium
 Source file(s):
-- `_projects/n8n/local-setup/_main/templates/partials/*.md`
-- `skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md`
-- `_projects/n8n/local-setup/_main/templates/agent-rules/*.template.md`
+- `_projects/development/ai-coding-agent-rules/_main/templates/partials/*.md`
+- `_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/*.template.md`
+- `_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md`
+- `_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md`
 Published file(s):
-- `skills/n8n-local-setup/templates/agent-rules/*.template.md`
+- `skills/ai-coding-agent-rules/templates/agent-rules/*.template.md`
+- `skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md`
 Problem:
-The agent-rule templates are intentionally assembled from `_main` partial sources into source-side inert `.template.md` files. Published skill copies add the skill-local routing partial so the `_projects` source-side templates stay aligned with the original active-name source scope. The old active-name template docs were retired after migration and are no longer preserved in active `_main` source paths.
+The agent-rule templates are intentionally assembled from project-local `_main` partial sources into source-side inert `.template.md` files. Generic execution and toolkit skill-routing rules now belong to `development.ai-coding-agent-rules`. n8n local setup owns only the n8n MCP workflow safety add-on.
 Recommended fix:
-Fixed in the inert agent-rule template migration and cleanup passes. Keep the source-first flow documented as `_main` partials -> `_main/templates/agent-rules/*.template.md` -> published `skills/n8n-local-setup/templates/agent-rules/*.template.md` with skill-local routing.
+Fixed in the inert template migration, cleanup, and AI coding agent rules split passes. Keep each source-first flow project-local: generic partials generate `skills/ai-coding-agent-rules/templates/agent-rules/*.template.md`, and the n8n partial generates `skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md`.
 
 Finding:
 Severity: medium
