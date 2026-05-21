@@ -417,6 +417,10 @@ function templateActiveNameText(template) {
   return template.activeNameText || `it is not named ${templateDestinationDisplay(template)}`;
 }
 
+function repoRootMarkdownLink(relPath) {
+  return `[${relPath}](/${relPath})`;
+}
+
 function expectedAgentRuleSourceTemplate(spec, template) {
   const destinationDisplay = templateDestinationDisplay(template);
   const bodyParts = [
@@ -433,7 +437,7 @@ function expectedAgentRuleSourceTemplate(spec, template) {
     bodyParts.push('');
     bodyParts.push('First install or copy the generic baseline rules from:');
     bodyParts.push('');
-    for (const baselinePath of template.baselineTemplatePaths) bodyParts.push(`- ${baselinePath}`);
+    for (const baselinePath of template.baselineTemplatePaths) bodyParts.push(`- ${repoRootMarkdownLink(baselinePath)}`);
     bodyParts.push('');
     bodyParts.push('Then merge the fenced payload from this file under the generic rules in the same active instruction file.');
     bodyParts.push('');

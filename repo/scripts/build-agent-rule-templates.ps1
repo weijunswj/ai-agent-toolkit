@@ -124,6 +124,14 @@ function New-GeneratedNotice {
   return ($notice -join "`n")
 }
 
+function Format-RepoRootLink {
+  param(
+    [Parameter(Mandatory = $true)] [string] $RelPath
+  )
+
+  return "[$RelPath](/$RelPath)"
+}
+
 function Write-GeneratedTemplate {
   param(
     [Parameter(Mandatory = $true)] [hashtable] $Spec,
@@ -148,7 +156,7 @@ function Write-GeneratedTemplate {
     $bodyParts += "First install or copy the generic baseline rules from:"
     $bodyParts += ""
     foreach ($baselinePath in @($Template.BaselineTemplatePaths)) {
-      $bodyParts += "- $baselinePath"
+      $bodyParts += "- $(Format-RepoRootLink $baselinePath)"
     }
     $bodyParts += ""
     $bodyParts += "Then merge the fenced payload from this file under the generic rules in the same active instruction file."

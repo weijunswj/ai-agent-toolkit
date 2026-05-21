@@ -778,6 +778,10 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
     assert.match(text, /skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md/);
     assert.match(text, /skills\/ai-coding-agent-rules\/templates\/agent-rules\/CLAUDE\.template\.md/);
     assert.match(text, /skills\/ai-coding-agent-rules\/templates\/agent-rules\/GEMINI\.template\.md/);
+    assert.match(text, /\[skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md\]\(\/skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md\)/);
+    assert.match(text, /\[skills\/ai-coding-agent-rules\/templates\/agent-rules\/CLAUDE\.template\.md\]\(\/skills\/ai-coding-agent-rules\/templates\/agent-rules\/CLAUDE\.template\.md\)/);
+    assert.match(text, /\[skills\/ai-coding-agent-rules\/templates\/agent-rules\/GEMINI\.template\.md\]\(\/skills\/ai-coding-agent-rules\/templates\/agent-rules\/GEMINI\.template\.md\)/);
+    assert.doesNotMatch(text, /CLAUDE\.template\.m\]/);
     assert.match(text, /Then merge the fenced payload from this file under the generic rules in the same active instruction file\./);
     assert.match(text, /Do not use this add-on alone to create a fresh active instruction file\./);
     assert.match(text, /`AGENTS\.md`, `CLAUDE\.md`, or `GEMINI\.md`/);
