@@ -123,16 +123,11 @@ const agentRuleTemplateSpecDefinitions = [
         destination: 'AGENTS.md, CLAUDE.md, or GEMINI.md',
         destinationDisplay: '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`',
         activeNameText: 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`',
-        installSubject: 'n8n-specific workflow and MCP safety rules',
-        installExamples: [
-          {
-            heading: 'Add-on install example',
-            path: 'Target repo root AGENTS.md, CLAUDE.md, or GEMINI.md',
-            commands: [
-              'Open the target instruction file.',
-              'Merge the fenced payload under the generic AI coding agent rules.'
-            ]
-          }
+        installMode: 'add_on',
+        baselineTemplatePaths: [
+          'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
+          'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
+          'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md'
         ]
       }
     ]
@@ -429,28 +424,44 @@ function expectedAgentRuleSourceTemplate(spec, template) {
     '',
     `Use this generated template for ${template.audience}.`,
     '',
-    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because ${templateActiveNameText(template)}.`,
-    '',
-    `Copy or merge the fenced payload into the target repo root as ${destinationDisplay} only when the user explicitly wants ${template.installSubject} installed.`,
-    '',
-    `If the target repo already has ${destinationDisplay}, do not overwrite it. Merge manually or produce a diff/merge plan.`
+    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because ${templateActiveNameText(template)}.`
   ];
 
-  for (const example of template.installExamples) {
+  if (template.installMode === 'add_on') {
     bodyParts.push('');
-    bodyParts.push(`## ${example.heading}`);
+    bodyParts.push('This is an n8n-specific add-on. It does not include the generic AI coding agent baseline rules.');
     bodyParts.push('');
-    bodyParts.push('Copy or merge the fenced payload into:');
+    bodyParts.push('First install or copy the generic baseline rules from:');
     bodyParts.push('');
-    bodyParts.push('```text');
-    bodyParts.push(example.path);
-    bodyParts.push('```');
+    for (const baselinePath of template.baselineTemplatePaths) bodyParts.push(`- ${baselinePath}`);
     bodyParts.push('');
-    bodyParts.push('Or create it with PowerShell:');
+    bodyParts.push('Then merge the fenced payload from this file under the generic rules in the same active instruction file.');
     bodyParts.push('');
-    bodyParts.push('```text');
-    for (const command of example.commands) bodyParts.push(command);
-    bodyParts.push('```');
+    bodyParts.push('Do not use this add-on alone to create a fresh active instruction file.');
+    bodyParts.push('');
+    bodyParts.push(`If the target repo already has ${destinationDisplay}, do not overwrite it. Merge manually or produce a diff/merge plan.`);
+  } else {
+    bodyParts.push('');
+    bodyParts.push(`Copy or merge the fenced payload into the target repo root as ${destinationDisplay} only when the user explicitly wants ${template.installSubject} installed.`);
+    bodyParts.push('');
+    bodyParts.push(`If the target repo already has ${destinationDisplay}, do not overwrite it. Merge manually or produce a diff/merge plan.`);
+
+    for (const example of template.installExamples) {
+      bodyParts.push('');
+      bodyParts.push(`## ${example.heading}`);
+      bodyParts.push('');
+      bodyParts.push('Copy or merge the fenced payload into:');
+      bodyParts.push('');
+      bodyParts.push('```text');
+      bodyParts.push(example.path);
+      bodyParts.push('```');
+      bodyParts.push('');
+      bodyParts.push('Or create it with PowerShell:');
+      bodyParts.push('');
+      bodyParts.push('```text');
+      for (const command of example.commands) bodyParts.push(command);
+      bodyParts.push('```');
+    }
   }
 
   const payloadParts = [];

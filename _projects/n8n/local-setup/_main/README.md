@@ -45,7 +45,7 @@ Important:
 ## Recommended beginner flow
 
 1. Follow [1. Local Setup](./1.%20local%20setup.md).
-2. Install or copy generic AI coding agent rules from `skills/ai-coding-agent-rules`; copy or merge `AGENTS.template.md` into the target repo root as `AGENTS.md`.
+2. Install or copy generic AI coding agent rules from the source-side generic templates, such as [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md), into the target repo root as `AGENTS.md`.
 3. Merge the n8n add-on rules from [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md) into the same active rules file.
 4. Copy the Codex MCP config from [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
 5. Restart Codex.
@@ -61,10 +61,10 @@ Important:
 
 | Tool | Copy-paste path |
 | --- | --- |
-| Codex | Install generic rules from `skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md`, merge [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md), then copy [templates/codex-mcp-config.md](./templates/codex-mcp-config.md). |
-| Claude Code | Install generic rules from `skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md`, merge [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md), then run the commands from [templates/claude-mcp-config.md](./templates/claude-mcp-config.md). |
-| OpenCode | Install generic rules from `skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md`, merge [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md), then copy [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md). |
-| Antigravity | Install generic rules from `skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md`, merge [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md), then copy [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md). |
+| Codex | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md), merge [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md), then copy [templates/codex-mcp-config.md](./templates/codex-mcp-config.md). |
+| Claude Code | Install generic rules from [CLAUDE.template.md](../../../development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md), merge [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md), then run the commands from [templates/claude-mcp-config.md](./templates/claude-mcp-config.md). |
+| OpenCode | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md), merge [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md), then copy [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md). |
+| Antigravity | Install generic rules from [GEMINI.template.md](../../../development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md), merge [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md), then copy [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md). |
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
@@ -82,7 +82,7 @@ Generated templates should not be edited directly; edit the source partials firs
 | [Codex MCP config](./templates/codex-mcp-config.md) | You want to change Codex MCP server config. This file is not generated from partials. |
 | [Antigravity MCP config](./templates/antigravity-mcp-config.md) | You want to change Antigravity MCP server config. This file is not generated from partials. |
 
-Generic AI coding agent execution and toolkit skill-routing rules are owned by `skills/ai-coding-agent-rules`.
+Generic AI coding agent execution and toolkit skill-routing rules are owned by [_projects/development/ai-coding-agent-rules/](../../../development/ai-coding-agent-rules/).
 
 Generated n8n add-on templates are composed like this:
 
@@ -138,7 +138,7 @@ There is intentionally no separate local upgrade script. The local PowerShell bl
 If you are lazy and just want the safest normal path:
 
 1. Open [1. Local Setup](./1.%20local%20setup.md).
-2. Install generic rules from `skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md`.
+2. Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md).
 3. Merge [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md) into the same `AGENTS.md`.
 4. Use [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
 5. Ignore Claude Code, OpenCode, and Antigravity until Codex works.

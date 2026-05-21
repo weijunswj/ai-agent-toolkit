@@ -86,16 +86,11 @@ $AgentRuleTemplateSpecs = @(
         DestinationFile = 'AGENTS.md, CLAUDE.md, or GEMINI.md'
         DestinationDisplay = '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
         ActiveNameText = 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
-        InstallSubject = 'n8n-specific workflow and MCP safety rules'
-        InstallExamples = @(
-          @{
-            Heading = 'Add-on install example'
-            Path = 'Target repo root AGENTS.md, CLAUDE.md, or GEMINI.md'
-            Commands = @(
-              'Open the target instruction file.',
-              'Merge the fenced payload under the generic AI coding agent rules.'
-            )
-          }
+        InstallMode = 'add_on'
+        BaselineTemplatePaths = @(
+          'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
+          'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
+          'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md'
         )
       }
     )
@@ -143,30 +138,48 @@ function Write-GeneratedTemplate {
     "",
     "Use this generated template for $($Template.Audience).",
     "",
-    "This file is inert while it keeps the ``.template.md`` filename. It is safe to keep inside a skill folder because $activeNameText.",
-    "",
-    "Copy or merge the fenced payload into the target repo root as $destinationDisplay only when the user explicitly wants $($Template.InstallSubject) installed.",
-    "",
-    "If the target repo already has $destinationDisplay, do not overwrite it. Merge manually or produce a diff/merge plan."
+    "This file is inert while it keeps the ``.template.md`` filename. It is safe to keep inside a skill folder because $activeNameText."
   )
 
-  foreach ($example in @($Template.InstallExamples)) {
+  if ($Template.ContainsKey('InstallMode') -and $Template.InstallMode -eq 'add_on') {
     $bodyParts += ""
-    $bodyParts += "## $($example.Heading)"
+    $bodyParts += "This is an n8n-specific add-on. It does not include the generic AI coding agent baseline rules."
     $bodyParts += ""
-    $bodyParts += "Copy or merge the fenced payload into:"
+    $bodyParts += "First install or copy the generic baseline rules from:"
     $bodyParts += ""
-    $bodyParts += '```text'
-    $bodyParts += $example.Path
-    $bodyParts += '```'
-    $bodyParts += ""
-    $bodyParts += "Or create it with PowerShell:"
-    $bodyParts += ""
-    $bodyParts += '```text'
-    foreach ($command in @($example.Commands)) {
-      $bodyParts += $command
+    foreach ($baselinePath in @($Template.BaselineTemplatePaths)) {
+      $bodyParts += "- $baselinePath"
     }
-    $bodyParts += '```'
+    $bodyParts += ""
+    $bodyParts += "Then merge the fenced payload from this file under the generic rules in the same active instruction file."
+    $bodyParts += ""
+    $bodyParts += "Do not use this add-on alone to create a fresh active instruction file."
+    $bodyParts += ""
+    $bodyParts += "If the target repo already has $destinationDisplay, do not overwrite it. Merge manually or produce a diff/merge plan."
+  } else {
+    $bodyParts += ""
+    $bodyParts += "Copy or merge the fenced payload into the target repo root as $destinationDisplay only when the user explicitly wants $($Template.InstallSubject) installed."
+    $bodyParts += ""
+    $bodyParts += "If the target repo already has $destinationDisplay, do not overwrite it. Merge manually or produce a diff/merge plan."
+
+    foreach ($example in @($Template.InstallExamples)) {
+      $bodyParts += ""
+      $bodyParts += "## $($example.Heading)"
+      $bodyParts += ""
+      $bodyParts += "Copy or merge the fenced payload into:"
+      $bodyParts += ""
+      $bodyParts += '```text'
+      $bodyParts += $example.Path
+      $bodyParts += '```'
+      $bodyParts += ""
+      $bodyParts += "Or create it with PowerShell:"
+      $bodyParts += ""
+      $bodyParts += '```text'
+      foreach ($command in @($example.Commands)) {
+        $bodyParts += $command
+      }
+      $bodyParts += '```'
+    }
   }
 
   $payloadParts = @()

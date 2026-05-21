@@ -10,24 +10,19 @@ Use this generated template for Codex, OpenCode, Claude Code, Gemini CLI, or Ant
 
 This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`.
 
-Copy or merge the fenced payload into the target repo root as `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` only when the user explicitly wants n8n-specific workflow and MCP safety rules installed.
+This is an n8n-specific add-on. It does not include the generic AI coding agent baseline rules.
+
+First install or copy the generic baseline rules from:
+
+- skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md
+- skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md
+- skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md
+
+Then merge the fenced payload from this file under the generic rules in the same active instruction file.
+
+Do not use this add-on alone to create a fresh active instruction file.
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
-
-## Add-on install example
-
-Copy or merge the fenced payload into:
-
-```text
-Target repo root AGENTS.md, CLAUDE.md, or GEMINI.md
-```
-
-Or create it with PowerShell:
-
-```text
-Open the target instruction file.
-Merge the fenced payload under the generic AI coding agent rules.
-```
 
 ---
 
