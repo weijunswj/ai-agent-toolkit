@@ -49,15 +49,15 @@ For Codex or Claude Code, copy the whole skill folder into that tool's supported
 
 Templates are published material. Review them before copying into a consumer repo, and follow generated notices back to `_main/` or `curated_output_for_ai/` when editing toolkit-owned sources.
 
-- [Generic agent rule templates](../../skills/ai-coding-agent-rules/) contain generated inert `AGENTS.template.md`, `CLAUDE.template.md`, and `GEMINI.template.md` outputs.
-- [n8n agent rule add-on](../../skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md) contains n8n workflow and MCP safety rules for merging after the generic baseline.
+- [Generic agent rule templates](../../skills/ai-coding-agent-rules/) contain generated inert baseline templates, optional toolkit skill-routing add-on, and one-shot baseline plus toolkit skill-routing convenience templates.
+- [n8n agent rule templates](../../skills/n8n-local-setup/agent-rules/) contain the n8n workflow/MCP add-on plus one-shot baseline, toolkit skill-routing, and n8n rule convenience templates.
 - [MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) contain MCP setup examples.
 - [n8n import/export sync helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/) contain n8n import/export, validation, compare, prepare, and sync helper templates.
 - [n8n sanitizer helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/) contain sanitizer tooling.
 - [n8n workflow templates](../../skills/n8n-workflow-templates/templates/) contain public generic inactive workflow JSON templates.
 - [CI/CD templates](../../skills/secure-cicd-installer/templates/cicd/) contain CI/CD installer prompts and status templates.
 
-Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/_build-agent-rule-templates.cmd) regenerate the generic source-side templates under `_projects/development/ai-coding-agent-rules/_main/` and the n8n add-on under `_projects/n8n/local-setup/_main/agent-rules/`; toolkit sync publishes inert skill copies.
+Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/_build-agent-rule-templates.cmd) regenerate project-pure source-side baseline/add-on templates under `_projects/development/ai-coding-agent-rules/_main/` and the n8n add-on under `_projects/n8n/local-setup/_main/agent-rules/`; toolkit sync publishes inert skill copies and published-only one-shot convenience templates.
 
 n8n helper templates may write scoped local outputs after they are copied into a reviewed consumer repo: `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders. Keep those local folders ignored.
 

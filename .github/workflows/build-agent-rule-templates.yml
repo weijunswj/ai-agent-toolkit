@@ -5,6 +5,7 @@ on:
     paths:
       - _projects/development/ai-coding-agent-rules/_main/_partials/**
       - _projects/n8n/local-setup/_main/_partials/**
+      - repo/scripts/agent-rule-template-specs.json
       - repo/scripts/build-agent-rule-templates.ps1
       - repo/scripts/_build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
@@ -14,6 +15,7 @@ on:
     paths:
       - _projects/development/ai-coding-agent-rules/_main/_partials/**
       - _projects/n8n/local-setup/_main/_partials/**
+      - repo/scripts/agent-rule-template-specs.json
       - repo/scripts/build-agent-rule-templates.ps1
       - repo/scripts/_build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
@@ -48,8 +50,14 @@ jobs:
             skills/ai-coding-agent-rules/AGENTS.template.md \
             skills/ai-coding-agent-rules/CLAUDE.template.md \
             skills/ai-coding-agent-rules/GEMINI.template.md \
+            skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md \
+            skills/ai-coding-agent-rules/CLAUDE.with-toolkit-skills.template.md \
+            skills/ai-coding-agent-rules/GEMINI.with-toolkit-skills.template.md \
             skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md \
-            skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md
+            skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md \
+            skills/n8n-local-setup/agent-rules/AGENTS.n8n-full.template.md \
+            skills/n8n-local-setup/agent-rules/CLAUDE.n8n-full.template.md \
+            skills/n8n-local-setup/agent-rules/GEMINI.n8n-full.template.md
 
       - name: Verify active skill template names are absent
         run: |

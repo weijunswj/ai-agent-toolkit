@@ -10,132 +10,115 @@ if ($Workspace) {
   $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 }
 
-$AgentRuleTemplateSpecs = @(
-  @{
-    ProjectId = 'development.ai-coding-agent-rules'
-    SourceSideOutputDir = '_projects/development/ai-coding-agent-rules/_main'
-    PartialSources = @(
-      @{
-        Name = 'ai-coding-agent-execution.md'
-        Path = Join-Path $RepoRoot '_projects\development\ai-coding-agent-rules\_main\_partials\ai-coding-agent-execution.md'
-        Rel = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md'
-      }
-    )
-    Templates = @(
-      @{
-        FileName = 'AGENTS.template.md'
-        Title = 'AGENTS.template.md AI coding agent rules'
-        Audience = 'Codex or OpenCode'
-        DestinationFile = 'AGENTS.md'
-        InstallSubject = 'generic Codex/OpenCode rules'
-        InstallExamples = @(
-          @{
-            Heading = 'Codex global rules example'
-            Path = 'C:\Users\<your-user>\.codex\AGENTS.md'
-            Commands = @('mkdir $HOME\.codex -Force', 'notepad $HOME\.codex\AGENTS.md')
-          },
-          @{
-            Heading = 'OpenCode global rules example'
-            Path = 'C:\Users\<your-user>\.config\opencode\AGENTS.md'
-            Commands = @('mkdir $HOME\.config\opencode -Force', 'notepad $HOME\.config\opencode\AGENTS.md')
-          }
-        )
-      },
-      @{
-        FileName = 'CLAUDE.template.md'
-        Title = 'CLAUDE.template.md AI coding agent rules'
-        Audience = 'Claude Code'
-        DestinationFile = 'CLAUDE.md'
-        InstallSubject = 'generic Claude Code rules'
-        InstallExamples = @(
-          @{
-            Heading = 'Claude Code global rules example'
-            Path = 'C:\Users\<your-user>\.claude\CLAUDE.md'
-            Commands = @('mkdir $HOME\.claude -Force', 'notepad $HOME\.claude\CLAUDE.md')
-          }
-        )
-      },
-      @{
-        FileName = 'GEMINI.template.md'
-        Title = 'GEMINI.template.md AI coding agent rules'
-        Audience = 'Gemini CLI or Antigravity'
-        DestinationFile = 'GEMINI.md'
-        InstallSubject = 'generic Gemini CLI/Antigravity rules'
-        InstallExamples = @(
-          @{
-            Heading = 'Gemini CLI and Antigravity global rules example'
-            Path = 'C:\Users\<your-user>\.gemini\GEMINI.md'
-            Commands = @('mkdir $HOME\.gemini -Force', 'notepad $HOME\.gemini\GEMINI.md')
-          }
-        )
-      }
-    )
-  },
-  @{
-    ProjectId = 'development.ai-coding-agent-rules'
-    SourceSideOutputDir = '_projects/development/ai-coding-agent-rules/_main'
-    PartialSources = @(
-      @{
-        Name = 'toolkit-skill-routing.md'
-        Path = Join-Path $RepoRoot '_projects\development\ai-coding-agent-rules\_main\_partials\toolkit-skill-routing.md'
-        Rel = '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md'
-      }
-    )
-    Templates = @(
-      @{
-        FileName = 'TOOLKIT-SKILL-ROUTING.template.md'
-        Title = 'TOOLKIT-SKILL-ROUTING.template.md optional toolkit skill-routing add-on'
-        Audience = 'Codex, OpenCode, Claude Code, Gemini CLI, or Antigravity when this toolkit''s skills folders are installed or copied'
-        DestinationFile = 'AGENTS.md, CLAUDE.md, or GEMINI.md'
-        DestinationDisplay = '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
-        ActiveNameText = 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
-        InstallMode = 'toolkit_add_on'
-        SourceBaselineTemplatePaths = @(
-          '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-          '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-          '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
-        )
-        BaselineTemplatePaths = @(
-          'skills/ai-coding-agent-rules/AGENTS.template.md',
-          'skills/ai-coding-agent-rules/CLAUDE.template.md',
-          'skills/ai-coding-agent-rules/GEMINI.template.md'
-        )
-      }
-    )
-  },
-  @{
-    ProjectId = 'n8n.local-setup'
-    SourceSideOutputDir = '_projects/n8n/local-setup/_main/agent-rules'
-    PartialSources = @(
-      @{
-        Name = 'n8n-mcp-rules.md'
-        Path = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\_partials\n8n-mcp-rules.md'
-        Rel = '_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md'
-      }
-    )
-    Templates = @(
-      @{
-        FileName = 'n8n-mcp-rules.template.md'
-        Title = 'n8n-mcp-rules.template.md n8n MCP workflow rules add-on'
-        Audience = 'Codex, OpenCode, Claude Code, Gemini CLI, or Antigravity after generic agent rules are installed'
-        DestinationFile = 'AGENTS.md, CLAUDE.md, or GEMINI.md'
-        DestinationDisplay = '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
-        ActiveNameText = 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
-        InstallMode = 'add_on'
-        SourceBaselineTemplatePaths = @(
-          '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-          '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-          '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
-        )
-        BaselineTemplatePaths = @(
-          'skills/ai-coding-agent-rules/AGENTS.template.md',
-          'skills/ai-coding-agent-rules/CLAUDE.template.md',
-          'skills/ai-coding-agent-rules/GEMINI.template.md'
-        )
-      }
-    )
+$SpecFile = Join-Path $PSScriptRoot 'agent-rule-template-specs.json'
+$SpecDocument = Get-Content -LiteralPath $SpecFile -Raw | ConvertFrom-Json
+
+function Test-JsonProperty {
+  param(
+    [Parameter(Mandatory = $true)] $Object,
+    [Parameter(Mandatory = $true)] [string] $Name
+  )
+
+  return $null -ne $Object.PSObject.Properties[$Name]
+}
+
+function Get-JsonPropertyValue {
+  param(
+    [Parameter(Mandatory = $true)] $Object,
+    [Parameter(Mandatory = $true)] [string] $Name
+  )
+
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property) {
+    return $null
   }
-)
+  return $property.Value
+}
+
+function Convert-InstallExample {
+  param(
+    [Parameter(Mandatory = $true)] $ExampleDefinition
+  )
+
+  return @{
+    Heading = $ExampleDefinition.heading
+    Path = $ExampleDefinition.path
+    Commands = @($ExampleDefinition.commands)
+  }
+}
+
+function Convert-TemplateDefinition {
+  param(
+    [Parameter(Mandatory = $true)] $TemplateDefinition
+  )
+
+  $template = @{
+    FileName = $TemplateDefinition.fileName
+    Title = $TemplateDefinition.title
+    Audience = $TemplateDefinition.audience
+    DestinationFile = $TemplateDefinition.destination
+  }
+
+  foreach ($key in @('destinationDisplay', 'activeNameText', 'installSubject', 'installMode')) {
+    if (Test-JsonProperty -Object $TemplateDefinition -Name $key) {
+      $pascalKey = ($key.Substring(0, 1).ToUpperInvariant() + $key.Substring(1))
+      if ($key -eq 'destinationDisplay') { $pascalKey = 'DestinationDisplay' }
+      if ($key -eq 'activeNameText') { $pascalKey = 'ActiveNameText' }
+      if ($key -eq 'installSubject') { $pascalKey = 'InstallSubject' }
+      if ($key -eq 'installMode') { $pascalKey = 'InstallMode' }
+      $template[$pascalKey] = Get-JsonPropertyValue -Object $TemplateDefinition -Name $key
+    }
+  }
+
+  if (Test-JsonProperty -Object $TemplateDefinition -Name 'installExamples') {
+    $template.InstallExamples = @($TemplateDefinition.installExamples | ForEach-Object { Convert-InstallExample $_ })
+  }
+  if (Test-JsonProperty -Object $TemplateDefinition -Name 'output') {
+    $template.Output = $TemplateDefinition.output
+  }
+  if (Test-JsonProperty -Object $TemplateDefinition -Name 'publishedOutput') {
+    $template.PublishedOutput = $TemplateDefinition.publishedOutput
+  }
+  if (Test-JsonProperty -Object $TemplateDefinition -Name 'sourceBaselineTemplatePaths') {
+    $template.SourceBaselineTemplatePaths = @($TemplateDefinition.sourceBaselineTemplatePaths)
+  }
+  if (Test-JsonProperty -Object $TemplateDefinition -Name 'baselineTemplatePaths') {
+    $template.BaselineTemplatePaths = @($TemplateDefinition.baselineTemplatePaths)
+  }
+
+  return $template
+}
+
+function Convert-AgentRuleTemplateSpec {
+  param(
+    [Parameter(Mandatory = $true)] $SpecDefinition
+  )
+
+  $partialSources = @()
+  foreach ($sourceId in @($SpecDefinition.payloadSources)) {
+    $source = Get-JsonPropertyValue -Object $SpecDocument.partialSources -Name $sourceId
+    if ($null -eq $source) {
+      throw "Unknown agent-rule partial source id: $sourceId"
+    }
+    $partialSources += @{
+      Name = $source.name
+      Path = Join-Path $RepoRoot $source.rel
+      Rel = $source.rel
+    }
+  }
+
+  $spec = @{
+    ProjectId = $SpecDefinition.projectId
+    PartialSources = @($partialSources)
+    Templates = @($SpecDefinition.templates | ForEach-Object { Convert-TemplateDefinition $_ })
+  }
+  if (Test-JsonProperty -Object $SpecDefinition -Name 'sourceSideOutputDir') {
+    $spec.SourceSideOutputDir = $SpecDefinition.sourceSideOutputDir
+  }
+  return $spec
+}
+
+$AgentRuleTemplateSpecs = @($SpecDocument.templateSpecs | ForEach-Object { Convert-AgentRuleTemplateSpec $_ })
 
 function Read-Partial($Source) {
   $path = $Source.Path
@@ -208,6 +191,19 @@ function Write-GeneratedTemplate {
     [Parameter(Mandatory = $true)] [hashtable] $Template
   )
 
+  if (-not $Template.ContainsKey('Output') -or [string]::IsNullOrWhiteSpace($Template.Output)) {
+    return
+  }
+  if (-not $Spec.ContainsKey('SourceSideOutputDir') -or [string]::IsNullOrWhiteSpace($Spec.SourceSideOutputDir)) {
+    throw "Source-side agent-rule template $($Template.FileName) has output but no sourceSideOutputDir."
+  }
+
+  $normalizedOutput = $Template.Output.Replace('\', '/')
+  $normalizedOutputDir = $Spec.SourceSideOutputDir.Replace('\', '/').TrimEnd('/')
+  if (-not $normalizedOutput.StartsWith("$normalizedOutputDir/")) {
+    throw "Source-side agent-rule template $($Template.FileName) output must stay under $($Spec.SourceSideOutputDir): $($Template.Output)"
+  }
+
   $destinationDisplay = if ($Template.ContainsKey('DestinationDisplay')) { $Template.DestinationDisplay } else { "``$($Template.DestinationFile)``" }
   $activeNameText = if ($Template.ContainsKey('ActiveNameText')) { $Template.ActiveNameText } else { "it is not named $destinationDisplay" }
 
@@ -220,7 +216,7 @@ function Write-GeneratedTemplate {
   )
 
   if ($Template.ContainsKey('InstallMode') -and ($Template.InstallMode -eq 'add_on' -or $Template.InstallMode -eq 'toolkit_add_on')) {
-    $outputRelPath = "$($Spec.SourceSideOutputDir)/$($Template.FileName)"
+    $outputRelPath = $Template.Output
     $baselineTemplatePaths = if ($Template.ContainsKey('SourceBaselineTemplatePaths')) { @($Template.SourceBaselineTemplatePaths) } else { @($Template.BaselineTemplatePaths) }
     $bodyParts += ""
     if ($Template.InstallMode -eq 'toolkit_add_on') {
@@ -291,8 +287,8 @@ function Write-GeneratedTemplate {
   $bodyParts += '````````'
 
   $content = (New-GeneratedNotice $Spec) + (($bodyParts -join "`n").TrimEnd()) + "`n"
-  $targetDir = Join-Path $RepoRoot $Spec.SourceSideOutputDir
-  $target = Join-Path $targetDir $Template.FileName
+  $target = Join-Path $RepoRoot $Template.Output
+  $targetDir = Split-Path -Parent $target
   $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
   [System.IO.Directory]::CreateDirectory($targetDir) | Out-Null
   [System.IO.File]::WriteAllText($target, $content, $utf8NoBom)
@@ -304,4 +300,4 @@ foreach ($spec in $AgentRuleTemplateSpecs) {
   }
 }
 
-Write-Host 'Generated generic AI coding agent templates, optional toolkit skill-routing add-on, and n8n MCP add-on template.'
+Write-Host 'Generated agent-rule templates from shared template specs.'
