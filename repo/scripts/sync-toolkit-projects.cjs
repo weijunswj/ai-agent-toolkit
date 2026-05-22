@@ -690,6 +690,14 @@ function applyTextRewrites(text, output) {
   return rewritten;
 }
 
+function finalizeTextOutput(text, project, output, relPaths) {
+  const rewritten = applyTextRewrites(text, output);
+  if (path.extname(output.output).toLowerCase() === '.md' && output.notice !== false) {
+    return addMarkdownNotice(rewritten, project, relPaths);
+  }
+  return rewritten.trimEnd() + '\n';
+}
+
 function expectedTextOutput(project, output, rels) {
   if (output.kind === 'extract') {
     const raw = readText(rels[0]);
@@ -698,10 +706,7 @@ function expectedTextOutput(project, output, rels) {
     const endIndex = raw.indexOf(output.end, startIndex + output.start.length);
     if (endIndex === -1) throw new Error(`${project.id} extract end marker not found in ${rels[0]}: ${output.output}`);
     const extracted = raw.slice(startIndex, endIndex).trimEnd() + '\n';
-    if (path.extname(output.output).toLowerCase() === '.md' && output.notice !== false) {
-      return addMarkdownNotice(extracted, project, rels[0]);
-    }
-    return extracted;
+    return finalizeTextOutput(extracted, project, output, rels[0]);
   }
 
   if (output.kind === 'concat') {
@@ -718,37 +723,35 @@ function expectedTextOutput(project, output, rels) {
       bodyParts.push(readText(rel).trimEnd());
       bodyParts.push('');
     }
-    return addMarkdownNotice(bodyParts.join('\n').trimEnd() + '\n', project, rels);
+    return finalizeTextOutput(bodyParts.join('\n').trimEnd() + '\n', project, output, rels);
   }
 
   const raw = readText(rels[0]);
   const publishedAgentRule = publishedAgentRuleTemplateSpec(project, output, rels);
   if (publishedAgentRule) {
-    return addMarkdownNotice(
+    return finalizeTextOutput(
       addSkillRoutingToAgentRuleTemplate(raw, output.output, publishedAgentRule.spec.skillRoutingSource),
       project,
+      output,
       [rels[0], publishedAgentRule.spec.skillRoutingSource]
     );
   }
   const publishedAddOnAgentRule = publishedAddOnAgentRuleTemplateSpec(project, output, rels);
   if (publishedAddOnAgentRule) {
-    return addMarkdownNotice(
+    return finalizeTextOutput(
       expectedAgentRuleTemplate(publishedAddOnAgentRule.spec, publishedAddOnAgentRule.template, {
         outputPath: output.output,
         baselinePaths: publishedAddOnAgentRule.template.baselineTemplatePaths
       }),
       project,
+      output,
       rels[0]
     );
   }
   if (output.kind === 'json' || path.extname(output.output).toLowerCase() === '.json') {
-    return JSON.stringify(JSON.parse(raw), null, 2) + '\n';
+    return applyTextRewrites(JSON.stringify(JSON.parse(raw), null, 2) + '\n', output).trimEnd() + '\n';
   }
-  const rewrittenRaw = applyTextRewrites(raw, output);
-  if (path.extname(output.output).toLowerCase() === '.md' && output.notice !== false) {
-    return addMarkdownNotice(rewrittenRaw, project, rels[0]);
-  }
-  return rewrittenRaw.trimEnd() + '\n';
+  return finalizeTextOutput(raw, project, output, rels[0]);
 }
 
 function expandRecipe(project, output, linked) {

@@ -1037,6 +1037,42 @@ test('changing declared _main MCP config source makes root MCP config stale', ()
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/mcp-configs\/codex-mcp-config\.md/);
 });
 
+test('sync applies text_rewrites to extract outputs', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'cicd', 'secure-installer', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  const outputPath = 'skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md';
+  const output = manifest.outputs.find((entry) => entry.output === outputPath);
+  assert.equal(output?.kind, 'extract');
+
+  output.text_rewrites = [{ from: 'Manual step needed', to: 'Manual step required' }];
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: skills\/secure-cicd-installer\/templates\/cicd\/secure-cicd-prompt\.md/);
+});
+
+test('sync applies text_rewrites to concat outputs', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  const outputPath = 'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md';
+  const output = manifest.outputs.find((entry) => entry.output === outputPath);
+  assert.equal(output?.kind, 'copy');
+  assert.equal(output?.source, '_main/templates/codex-mcp-config.md');
+
+  output.kind = 'concat';
+  output.sources = [output.source];
+  delete output.source;
+  output.text_rewrites = [{ from: '# Codex MCP Config', to: '# Codex MCP Config Rewrite Fixture' }];
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/mcp-configs\/codex-mcp-config\.md/);
+});
+
 test('Secure CI/CD prompt preserves the full source prompt', () => {
   const manifests = manifestsById();
   const outputPath = 'skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md';
