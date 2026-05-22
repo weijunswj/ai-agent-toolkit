@@ -22,6 +22,7 @@ The source-side generic inert templates under `_main/` are generated from `_part
 
 - `skills/ai-coding-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
 - `skills/ai-coding-agent-rules/AGENTS.template.md`, `CLAUDE.template.md`, and `GEMINI.template.md` are generated from `_main/*.template.md`.
+- `skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md`, `CLAUDE.with-toolkit-skills.template.md`, and `GEMINI.with-toolkit-skills.template.md` are published-only convenience templates generated directly from the generic baseline and toolkit skill-routing partial specs.
 - `skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md` is generated from `_main/TOOLKIT-SKILL-ROUTING.template.md`.
 
 The published templates intentionally use inert `.template.md` filenames so the skill folder does not ship active nested `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` instruction files.

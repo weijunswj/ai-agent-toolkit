@@ -190,6 +190,33 @@
     },
     {
       "kind": "copy",
+      "source": "_main/agent-rules/n8n-mcp-rules.template.md",
+      "output": "skills/n8n-local-setup/agent-rules/AGENTS.n8n-full.template.md",
+      "agent_rule_template": "AGENTS.n8n-full.template.md",
+      "notes": "Published-only inert Codex/OpenCode n8n full one-shot template generated directly from generic baseline, toolkit skill-routing, and n8n MCP workflow rule partial specs.",
+      "fidelity": "exact",
+      "notice": false
+    },
+    {
+      "kind": "copy",
+      "source": "_main/agent-rules/n8n-mcp-rules.template.md",
+      "output": "skills/n8n-local-setup/agent-rules/CLAUDE.n8n-full.template.md",
+      "agent_rule_template": "CLAUDE.n8n-full.template.md",
+      "notes": "Published-only inert Claude Code n8n full one-shot template generated directly from generic baseline, toolkit skill-routing, and n8n MCP workflow rule partial specs.",
+      "fidelity": "exact",
+      "notice": false
+    },
+    {
+      "kind": "copy",
+      "source": "_main/agent-rules/n8n-mcp-rules.template.md",
+      "output": "skills/n8n-local-setup/agent-rules/GEMINI.n8n-full.template.md",
+      "agent_rule_template": "GEMINI.n8n-full.template.md",
+      "notes": "Published-only inert Gemini/Antigravity n8n full one-shot template generated directly from generic baseline, toolkit skill-routing, and n8n MCP workflow rule partial specs.",
+      "fidelity": "exact",
+      "notice": false
+    },
+    {
+      "kind": "copy",
       "source": "_main/templates/antigravity-mcp-config.md",
       "output": "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "fidelity": "exact"
@@ -275,6 +302,9 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
       "skills/n8n-local-setup/references",
       "skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md",
+      "skills/n8n-local-setup/agent-rules/AGENTS.n8n-full.template.md",
+      "skills/n8n-local-setup/agent-rules/CLAUDE.n8n-full.template.md",
+      "skills/n8n-local-setup/agent-rules/GEMINI.n8n-full.template.md",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
