@@ -18,7 +18,7 @@
       "source_path": "README.md",
       "project_path": "_projects/cicd/secure-installer/_main/README.md",
       "source_blob_sha": "e7a0296d4f3b55c24211573e756942d006477cae",
-      "notes": "Local wrapper filename references were updated after replacing dash-prefixed CMD entrypoints with underscore-prefixed entrypoints."
+      "notes": "Local wrapper filename references were updated after replacing dash-prefixed CMD entrypoints with underscore-prefixed entrypoints. The deleted standalone helper-script repository URL was replaced with the toolkit n8n workflow helper scripts package link in the extracted public prompt."
     },
     {
       "mode": "adapted",

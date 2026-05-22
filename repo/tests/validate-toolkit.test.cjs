@@ -1614,6 +1614,18 @@ test('validator rejects retired internal repos as active public source-watch tar
   assert.match(result.stderr, /retired internal repo must not be listed as active source-watch target/);
 });
 
+test('validator reports malformed source locks without aborting other diagnostics', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', 'SOURCE-LOCK.json'), '{ invalid json\n');
+  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'bad-export-source.md'), `Source: ${'projects/design/ui-ux-pro-max/' + 'exports/tools/readme.md'}\n`);
+
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /FAIL: _projects\/n8n\/local-setup\/SOURCE-LOCK\.json is not valid JSON:/);
+  assert.match(result.stderr, /Stale project exports path reference/);
+  assert.doesNotMatch(result.stderr, /SyntaxError/);
+});
+
 test('source-lock audit rejects active third-party sources without manual review metadata', () => {
   const cwd = tempCopy();
   const lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');

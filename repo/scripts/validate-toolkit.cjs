@@ -176,12 +176,6 @@ const registryFiles = [
   'mcp/registry/consumers.registry.json'
 ];
 
-const retiredInternalSourceRepos = new Set([
-  'weijunswj/codex-n8n-local-setup',
-  'weijunswj/ai-cicd-installer',
-  'weijunswj/n8n-workflow-templates'
-]);
-
 const activeThirdPartySources = new Map([
   ['nextlevelbuilder/ui-ux-pro-max-skill', {
     risk: 'third-party',
@@ -287,6 +281,27 @@ function readText(relPath) {
 
 function readJson(relPath) {
   return JSON.parse(readText(relPath));
+}
+
+function retiredInternalSourceReposFromLocks() {
+  const repos = new Set();
+  for (const lockPath of sourceLockAudit.discoverLockFiles()) {
+    let lock;
+    try {
+      lock = readJson(lockPath);
+    } catch {
+      // validateSourceLocks reports malformed lock files with normal FAIL diagnostics.
+      continue;
+    }
+    if (
+      lock.source_lifecycle === 'retired_after_migration' &&
+      lock.source_role === 'migration_provenance_only' &&
+      typeof lock.source_repo === 'string'
+    ) {
+      repos.add(lock.source_repo);
+    }
+  }
+  return repos;
 }
 
 function isIgnoredWalkDir(name) {
@@ -426,6 +441,7 @@ function validateRootTopology(errors) {
 }
 
 function validateSourceRepoRegistry(errors) {
+  const retiredInternalSourceRepos = retiredInternalSourceReposFromLocks();
   let registry;
   try {
     registry = readJson('mcp/registry/source-repos.registry.json');
