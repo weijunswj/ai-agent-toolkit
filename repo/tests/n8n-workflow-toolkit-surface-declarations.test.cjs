@@ -63,8 +63,6 @@ const helperScriptOutputs = [
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/should-import-n8n-workflow.cjs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/sync-n8n-live-exports.cjs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance/README.md',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance/delete-archived-n8n-workflows.cjs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/_sanitise-n8n-template.cmd',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/prepare-n8n-template.js',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1'
