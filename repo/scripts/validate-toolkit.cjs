@@ -286,7 +286,13 @@ function readJson(relPath) {
 function retiredInternalSourceReposFromLocks() {
   const repos = new Set();
   for (const lockPath of sourceLockAudit.discoverLockFiles()) {
-    const lock = readJson(lockPath);
+    let lock;
+    try {
+      lock = readJson(lockPath);
+    } catch {
+      // validateSourceLocks reports malformed lock files with normal FAIL diagnostics.
+      continue;
+    }
     if (
       lock.source_lifecycle === 'retired_after_migration' &&
       lock.source_role === 'migration_provenance_only' &&
