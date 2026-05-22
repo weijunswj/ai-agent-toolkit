@@ -28,6 +28,13 @@
       "fidelity": "reviewed_entrypoint"
     },
     {
+      "kind": "copy",
+      "source": "_main/references/archived-workflow-cleanup.md",
+      "output": "skills/n8n-workflow-helper-scripts/references/archived-workflow-cleanup.md",
+      "notes": "MCP-first archived workflow cleanup runbook copied from first-party n8n workflow toolkit source.",
+      "fidelity": "exact"
+    },
+    {
       "kind": "curated",
       "source": "curated_output_for_ai/references/credential-safety.md",
       "output": "skills/n8n-workflow-helper-scripts/references/credential-safety.md",
@@ -131,6 +138,7 @@
       "skills/n8n-workflow-helper-scripts/SKILL.md",
       "skills/n8n-workflow-helper-scripts/README.md",
       "skills/n8n-workflow-helper-scripts/references/workflow-sync.md",
+      "skills/n8n-workflow-helper-scripts/references/archived-workflow-cleanup.md",
       "skills/n8n-workflow-helper-scripts/references/credential-safety.md",
       "skills/n8n-workflow-helper-scripts/references/import-export-flow.md",
       "skills/n8n-workflow-helper-scripts/references/n8n-credential-safety.md",

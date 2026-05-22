@@ -8,6 +8,14 @@ Local helper scripts for cautious n8n workflow cleanup.
 
 This is a local Node.js script, not an n8n workflow.
 
+## MCP-first recommendation
+
+When an AI agent has n8n MCP tools available, use MCP read/list tools first to review archived workflow candidates.
+
+Use this REST API script only as a fallback when MCP tools are unavailable or cannot safely back up and delete workflows.
+
+Do not use REST API fallback unless the user explicitly confirms API fallback.
+
 ### Required Environment Variables
 
 ```powershell

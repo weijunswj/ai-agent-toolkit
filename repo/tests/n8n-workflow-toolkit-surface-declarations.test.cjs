@@ -70,6 +70,13 @@ const helperScriptOutputs = [
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1'
 ];
 
+const mainReferenceOutputs = [
+  [
+    'skills/n8n-workflow-helper-scripts/references/archived-workflow-cleanup.md',
+    '_main/references/archived-workflow-cleanup.md'
+  ]
+];
+
 const cmdWrapperCases = [
   {
     sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/- export-n8n-workflows-live.cmd',
@@ -133,6 +140,14 @@ test('n8n workflow toolkit publishes helper-script and template surfaces from de
     assert.ok(allowedWrites.has(outputPath), outputPath);
   }
 
+  for (const [outputPath, sourcePath] of mainReferenceOutputs) {
+    const output = outputs.get(outputPath);
+    assert.ok(output, outputPath);
+    assert.equal(output.kind, 'copy', outputPath);
+    assert.equal(output.source, sourcePath, outputPath);
+    assert.ok(allowedWrites.has(outputPath), outputPath);
+  }
+
   const workflowTemplate = outputs.get('skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json');
   assert.equal(workflowTemplate?.kind, 'json');
   assert.equal(workflowTemplate?.source, '_main/workflow-templates/error-handling/global-error-handler.template.json');
@@ -150,6 +165,13 @@ test('n8n workflow toolkit surface recipes have explicit audit classifications',
   }
 
   for (const outputPath of helperScriptOutputs) {
+    const recipe = recipes.get(outputPath);
+    assert.ok(recipe, outputPath);
+    assert.equal(recipe.classification, 'main_full_fidelity', outputPath);
+    assert.deepEqual(recipe.reasons, [], outputPath);
+  }
+
+  for (const [outputPath] of mainReferenceOutputs) {
     const recipe = recipes.get(outputPath);
     assert.ok(recipe, outputPath);
     assert.equal(recipe.classification, 'main_full_fidelity', outputPath);
@@ -221,6 +243,32 @@ test('n8n workflow toolkit curated Markdown outputs carry generated notices', ()
       new RegExp(`Source: _projects/n8n/workflow-toolkit/${sourcePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
       outputPath
     );
+  }
+});
+
+test('archived workflow cleanup docs describe MCP-first fallback boundaries', () => {
+  const maintenanceSource = readText('_projects/n8n/workflow-toolkit/_main/helper-scripts/workflow-maintenance/README.md');
+  const maintenancePublished = readText('skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance/README.md');
+  const mcpSource = readText('_projects/n8n/workflow-toolkit/curated_output_for_ai/mcp/n8n-workflow-toolkit.md');
+  const mcpPublished = readText('mcp/projects/n8n-workflow-toolkit.md');
+  const referenceSource = readText('_projects/n8n/workflow-toolkit/_main/references/archived-workflow-cleanup.md');
+  const referencePublished = readText('skills/n8n-workflow-helper-scripts/references/archived-workflow-cleanup.md');
+
+  for (const text of [maintenanceSource, maintenancePublished]) {
+    assert.match(text, /## MCP-first recommendation/);
+    assert.match(text, /use MCP read\/list tools first to review archived workflow candidates/i);
+    assert.match(text, /Do not use REST API fallback unless the user explicitly confirms API fallback\./);
+    assert.match(text, /node delete-archived-n8n-workflows\.cjs/);
+    assert.match(text, /node delete-archived-n8n-workflows\.cjs --delete --confirm "DELETE ARCHIVED WORKFLOWS"/);
+  }
+
+  for (const text of [mcpSource, mcpPublished, referenceSource, referencePublished]) {
+    assert.match(text, /MCP-first/);
+    assert.match(text, /REST API fallback/);
+    assert.match(text, /explicitly confirms API fallback/);
+    assert.match(text, /Do not use REST API fallback automatically\./);
+    assert.doesNotMatch(text, /runnable MCP server/i);
+    assert.doesNotMatch(text, /REST script is an MCP tool/i);
   }
 });
 

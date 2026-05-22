@@ -6,11 +6,13 @@
 - `helper-scripts/sanitizer/**`
 - `helper-scripts/import-export-sync/**`
 - `helper-scripts/workflow-maintenance/**`
+- `references/archived-workflow-cleanup.md`
 - `workflow-templates/**`
 
 ## AI-Facing Surfaces
 
 - `skills/n8n-workflow-helper-scripts/` is generated from reviewed curated entrypoints plus exact copied helper scripts from `_main/helper-scripts/**`.
+- `skills/n8n-workflow-helper-scripts/references/archived-workflow-cleanup.md` is copied from first-party `_main` MCP-first cleanup guidance. It documents that the REST API archived workflow cleanup script is a user-confirmed fallback when n8n MCP tools are unavailable or insufficient.
 - `skills/n8n-workflow-templates/` is generated from reviewed curated entrypoints plus reviewed workflow JSON templates from `_main/workflow-templates/**`.
 - `mcp/projects/n8n-workflow-toolkit.md` is generated from reviewed curated MCP notes.
 - Import/export sync helper scripts were rehomed from Secure CI/CD shared-surface ownership into this n8n workflow toolkit project. The older Secure CI/CD `_main/templates/n8n/**` files remain preserved provenance-only material for now.

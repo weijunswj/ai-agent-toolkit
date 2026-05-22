@@ -31,5 +31,16 @@ It owns sanitizer helpers, import/export sync helpers, validation, compare, prep
 
 - [Sanitizer helpers](templates/helper-scripts/sanitizer/)
 - [Import/export sync helpers](templates/helper-scripts/import-export-sync/)
+- [Workflow maintenance helpers](templates/helper-scripts/workflow-maintenance/)
+
+## Archived Workflow Cleanup
+
+For archived workflow cleanup, use the [archived workflow cleanup runbook](references/archived-workflow-cleanup.md).
+
+Prefer n8n MCP tools first for read-only candidate review when MCP is available.
+
+Use the local REST API cleanup script only as a fallback when MCP tools are unavailable or cannot safely back up and delete workflows.
+
+Do not use REST API fallback unless the user explicitly confirms API fallback.
 
 Review these helpers before copying them into a consumer repo.

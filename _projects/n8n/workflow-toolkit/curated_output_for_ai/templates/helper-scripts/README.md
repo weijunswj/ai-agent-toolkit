@@ -18,6 +18,8 @@ This folder groups review-required n8n helper-script templates.
 
 Do not run live import/export or destructive maintenance helpers from this toolkit repo or in CI.
 
+For archived workflow cleanup, prefer n8n MCP read/list tools first when MCP is available. Use REST API fallback only when MCP tools are unavailable or insufficient and the user explicitly confirms API fallback.
+
 When copied into a reviewed consumer repo, these helpers may write only their documented local paths, such as `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, ignored `.to-sanitise/**`, and ignored `.sanitised/**`.
 
 Workflow maintenance helpers may also write ignored `.n8n-workflow-backups/**` before destructive cleanup when explicitly confirmed.

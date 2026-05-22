@@ -34,3 +34,19 @@ Project identity: `n8n.workflow-toolkit`
 ## Live Action Restrictions
 
 Live n8n import/export, execution, activation, deactivation, publish, unpublish, archive, delete, and credential actions are `explicit_confirmation_only`. CI live actions are disabled.
+
+## MCP-first runbook
+
+Archived workflow cleanup is MCP-first when n8n MCP tools are available.
+
+Use n8n MCP read/list tools first to review archived workflow candidates. The review must exclude active workflows, published workflows, and non-archived workflows, and it must make no changes.
+
+Live archive/delete operations require explicit confirmation in the current turn. Before deleting any workflow, identify the target environment, candidate count, candidate workflow IDs and names, and whether full workflow JSON backups can be captured first.
+
+Do not delete if full workflow backup/read is unavailable or unclear.
+
+REST API fallback exists as a local helper script under `skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance/delete-archived-n8n-workflows.cjs`.
+
+Use REST API fallback only when n8n MCP tools are unavailable, insufficient, or cannot safely back up workflows before delete. Do not use REST API fallback automatically.
+
+REST API fallback must be user-confirmed. Do not use REST API fallback unless the user explicitly confirms API fallback. The fallback script remains dry-run by default, and destructive mode still requires `--delete --confirm "DELETE ARCHIVED WORKFLOWS"` exactly.
