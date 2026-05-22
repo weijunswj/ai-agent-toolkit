@@ -137,6 +137,7 @@ const expectedDirs = [
   'skills/n8n-local-setup/templates/agent-rules',
   'skills/n8n-local-setup/templates/mcp-configs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync',
+  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer',
   'skills/n8n-workflow-templates/templates/error-handling',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator',
@@ -222,6 +223,7 @@ const allowedExecutablePrefixes = [
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/',
+  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance/',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/'
 ];
 

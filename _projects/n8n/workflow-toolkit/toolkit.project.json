@@ -84,6 +84,13 @@
       "fidelity": "exact"
     },
     {
+      "kind": "copy",
+      "source": "_main/helper-scripts/workflow-maintenance",
+      "output": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance",
+      "notes": "Workflow maintenance helper scripts copied exactly from first-party n8n workflow toolkit source.",
+      "fidelity": "exact"
+    },
+    {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/n8n-workflow-templates/SKILL.md",
       "output": "skills/n8n-workflow-templates/SKILL.md",
@@ -145,6 +152,9 @@
       "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/prepare-n8n-live-import.cjs",
       "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/compare-n8n-workflow-credentials.cjs",
       "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/should-import-n8n-workflow.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance/README.md",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance/delete-archived-n8n-workflows.cjs",
       "skills/n8n-workflow-templates/SKILL.md",
       "skills/n8n-workflow-templates/README.md",
       "skills/n8n-workflow-templates/templates/README.md",
