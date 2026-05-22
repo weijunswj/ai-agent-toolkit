@@ -1051,6 +1051,53 @@ test('agent-rule template freshness is driven by project-scoped specs', () => {
   ]);
 });
 
+test('trusted sync script loads agent-rule template specs from explicit workspace', () => {
+  const cwd = tempCopy();
+  const specPath = path.join(cwd, 'repo', 'scripts', 'agent-rule-template-specs.json');
+  const specDocument = readJsonFile(specPath);
+  const withToolkitSpec = specDocument.templateSpecs.find((spec) => spec.id === 'generic-with-toolkit-skills');
+  const agentsTemplate = withToolkitSpec.templates.find((template) => template.fileName === 'AGENTS.with-toolkit-skills.template.md');
+  agentsTemplate.title = 'AGENTS.with-toolkit-skills.template.md workspace-specific title';
+  writeJsonFile(specPath, specDocument);
+
+  const result = spawnSync(process.execPath, [syncScript, '--workspace', cwd, '--check'], { cwd: os.tmpdir(), encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: skills\/ai-coding-agent-rules\/AGENTS\.with-toolkit-skills\.template\.md/);
+});
+
+test('trusted sync rejects traversal partials in published-only agent-rule specs before expansion', () => {
+  const cwd = tempCopy();
+  const specPath = path.join(cwd, 'repo', 'scripts', 'agent-rule-template-specs.json');
+  const specDocument = readJsonFile(specPath);
+  specDocument.partialSources.workspaceTraversal = {
+    name: 'workspace-traversal.md',
+    rel: '../outside.md'
+  };
+  const withToolkitSpec = specDocument.templateSpecs.find((spec) => spec.id === 'generic-with-toolkit-skills');
+  withToolkitSpec.payloadSources = ['workspaceTraversal'];
+  writeJsonFile(specPath, specDocument);
+
+  const result = spawnSync(process.execPath, [syncScript, '--workspace', cwd, '--check'], { cwd: os.tmpdir(), encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /agent-rule partial source must not traverse outside workspace/);
+  assert.doesNotMatch(result.stderr, /Stale generated output/);
+});
+
+test('trusted sync rejects traversal published outputs in published-only agent-rule specs before expansion', () => {
+  const cwd = tempCopy();
+  const specPath = path.join(cwd, 'repo', 'scripts', 'agent-rule-template-specs.json');
+  const specDocument = readJsonFile(specPath);
+  const withToolkitSpec = specDocument.templateSpecs.find((spec) => spec.id === 'generic-with-toolkit-skills');
+  const agentsTemplate = withToolkitSpec.templates.find((template) => template.fileName === 'AGENTS.with-toolkit-skills.template.md');
+  agentsTemplate.publishedOutput = 'skills/../AGENTS.with-toolkit-skills.template.md';
+  writeJsonFile(specPath, specDocument);
+
+  const result = spawnSync(process.execPath, [syncScript, '--workspace', cwd, '--check'], { cwd: os.tmpdir(), encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /agent-rule published output must not traverse outside workspace/);
+  assert.doesNotMatch(result.stderr, /Stale generated output/);
+});
+
 test('changing assembled _main agent-rule templates makes source-side templates stale', () => {
   const cwd = tempCopy();
   const template = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'AGENTS.template.md');
