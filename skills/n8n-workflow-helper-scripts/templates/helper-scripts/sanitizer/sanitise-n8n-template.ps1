@@ -48,7 +48,7 @@ function Get-OutputFileName($InputFile) {
 }
 
 Write-Section "n8n template sanitiser"
-Write-Host ("Run from   : scripts\sanitise-n8n-template.cmd")
+Write-Host ("Run from   : scripts\_sanitise-n8n-template.cmd")
 Write-Host ("Input dir  : {0}" -f $InputDir)
 Write-Host ("Output dir : {0}" -f $OutputDir)
 Write-Host ("Mode       : {0}" -f ($(if ($DryRun) { "Dry run" } else { "Overwrite sanitised templates" })))
@@ -79,7 +79,7 @@ if (-not $workflowFiles -or $workflowFiles.Count -eq 0) {
   Write-Host "  $InputDir"
   Write-Host ""
   Write-Host "Then go into the scripts folder and run:"
-  Write-Host "  sanitise-n8n-template.cmd"
+  Write-Host "  _sanitise-n8n-template.cmd"
   exit 0
 }
 

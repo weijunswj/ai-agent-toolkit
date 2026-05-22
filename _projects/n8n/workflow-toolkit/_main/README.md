@@ -15,7 +15,7 @@ Simple repo for turning raw n8n exports into reusable workflow templates.
 3. Run:
 
    ```bat
-   sanitise-n8n-template.cmd
+   _sanitise-n8n-template.cmd
    ```
 
 4. Your cleaned template will appear here:

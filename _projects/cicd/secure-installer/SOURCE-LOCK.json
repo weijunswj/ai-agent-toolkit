@@ -14,22 +14,25 @@
       "source_blob_sha": "633437a227a6604872d7bfcd11400b4acf79cffc"
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "README.md",
       "project_path": "_projects/cicd/secure-installer/_main/README.md",
-      "source_blob_sha": "e7a0296d4f3b55c24211573e756942d006477cae"
+      "source_blob_sha": "e7a0296d4f3b55c24211573e756942d006477cae",
+      "notes": "Local wrapper filename references were updated after replacing dash-prefixed CMD entrypoints with underscore-prefixed entrypoints."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/n8n/- export-n8n-workflows-live.cmd",
-      "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/- export-n8n-workflows-live.cmd",
-      "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66"
+      "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/_export-n8n-workflows-live.cmd",
+      "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66",
+      "notes": "Wrapper path and console formatting adapted after migration to use underscore-prefixed entrypoints and clearer colored retry output."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/n8n/- import-n8n-workflows-live.cmd",
-      "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/- import-n8n-workflows-live.cmd",
-      "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898"
+      "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/_import-n8n-workflows-live.cmd",
+      "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898",
+      "notes": "Wrapper path and console formatting adapted after migration to use underscore-prefixed entrypoints and clearer colored retry output."
     },
     {
       "mode": "exact",

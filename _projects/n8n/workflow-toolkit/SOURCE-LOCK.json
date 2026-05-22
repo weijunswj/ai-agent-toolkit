@@ -8,18 +8,18 @@
   "public_attribution_required": false,
   "files": [
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "README.md",
       "project_path": "_projects/n8n/workflow-toolkit/_main/README.md",
       "source_blob_sha": "0c2e919a43c25fae191691fa501c7d18d3f61e8f",
-      "notes": "Moved without content edits from the retired n8n workflow templates source."
+      "notes": "Local wrapper filename references were updated after replacing dash-prefixed CMD entrypoints with underscore-prefixed entrypoints."
     },
     {
       "mode": "adapted",
       "source_path": "scripts/- sanitise-n8n-template.cmd",
-      "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/- sanitise-n8n-template.cmd",
+      "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/_sanitise-n8n-template.cmd",
       "source_blob_sha": "0ed27a6b98c45ae3695e662ded246c1a8739a974",
-      "notes": "Wrapper path adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script."
+      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with clearer colored retry output."
     },
     {
       "mode": "exact",
@@ -28,24 +28,25 @@
       "source_blob_sha": "4d09cc76a158a5edb56f9cf8e05c54a502fb4ad6"
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "scripts/sanitise-n8n-template.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/sanitise-n8n-template.ps1",
-      "source_blob_sha": "725541965ed49dabc04d4c2af93bff1b9e141384"
+      "source_blob_sha": "725541965ed49dabc04d4c2af93bff1b9e141384",
+      "notes": "Local wrapper filename references were updated after replacing dash-prefixed CMD entrypoints with underscore-prefixed entrypoints."
     },
     {
       "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/- export-n8n-workflows-live.cmd",
-      "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/- export-n8n-workflows-live.cmd",
+      "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd",
       "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66",
-      "notes": "Wrapper path adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script."
+      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with clearer colored retry output."
     },
     {
       "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/- import-n8n-workflows-live.cmd",
-      "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/- import-n8n-workflows-live.cmd",
+      "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd",
       "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898",
-      "notes": "Wrapper path adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script."
+      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with clearer colored retry output."
     },
     {
       "mode": "adapted",
@@ -69,10 +70,11 @@
       "notes": "Exact helper source rehomed from Secure CI/CD provenance into the n8n workflow toolkit project."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/n8n-workflow-sync-menu.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/n8n-workflow-sync-menu.ps1",
-      "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a"
+      "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a",
+      "notes": "RestartContainerAfterImport menu guidance adapted to recommend the existing auto-restart option for local Docker imports when restart warnings appear."
     },
     {
       "mode": "adapted",

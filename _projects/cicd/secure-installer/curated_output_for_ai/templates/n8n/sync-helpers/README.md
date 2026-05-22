@@ -22,8 +22,8 @@ Live import/export helper entry points are not run from this toolkit repo during
 - `prepare-n8n-live-import.cjs`
 - `compare-n8n-workflow-credentials.cjs`
 - `should-import-n8n-workflow.cjs`
-- `- export-n8n-workflows-live.cmd`
-- `- import-n8n-workflows-live.cmd`
+- `_export-n8n-workflows-live.cmd`
+- `_import-n8n-workflows-live.cmd`
 
 ## Intended Scoped Writes
 

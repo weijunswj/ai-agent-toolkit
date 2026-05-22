@@ -53,8 +53,8 @@ const curatedMappings = [
 ];
 
 const helperScriptOutputs = [
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- export-n8n-workflows-live.cmd',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- import-n8n-workflows-live.cmd',
+  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd',
+  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/compare-n8n-workflow-credentials.cjs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/export-n8n-workflows-live.ps1',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1',
@@ -65,34 +65,34 @@ const helperScriptOutputs = [
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance/README.md',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance/delete-archived-n8n-workflows.cjs',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/- sanitise-n8n-template.cmd',
+  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/_sanitise-n8n-template.cmd',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/prepare-n8n-template.js',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1'
 ];
 
 const cmdWrapperCases = [
   {
-    sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/- export-n8n-workflows-live.cmd',
-    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- export-n8n-workflows-live.cmd',
+    sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd',
+    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd',
     ps1Name: 'export-n8n-workflows-live.ps1',
     oldScriptPath: 'scripts\\export-n8n-workflows-live.ps1'
   },
   {
-    sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/- import-n8n-workflows-live.cmd',
-    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- import-n8n-workflows-live.cmd',
+    sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd',
+    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd',
     ps1Name: 'import-n8n-workflows-live.ps1',
     oldScriptPath: 'scripts\\import-n8n-workflows-live.ps1'
   },
   {
-    sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/- sanitise-n8n-template.cmd',
-    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/- sanitise-n8n-template.cmd',
+    sourcePath: '_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/_sanitise-n8n-template.cmd',
+    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/_sanitise-n8n-template.cmd',
     ps1Name: 'sanitise-n8n-template.ps1',
     oldScriptPath: 'scripts\\sanitise-n8n-template.ps1'
   }
 ];
 
 const wrapperAdaptationNote =
-  'Wrapper path adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script.';
+  'Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with clearer colored retry output.';
 
 function readJson(relPath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relPath), 'utf8'));
@@ -172,11 +172,23 @@ test('n8n workflow toolkit cmd wrappers invoke co-located PowerShell scripts', (
     for (const relPath of [wrapper.sourcePath, wrapper.outputPath]) {
       const wrapperText = readText(relPath);
       assert.equal(wrapperText.includes(wrapper.oldScriptPath), false, relPath);
-      assert.equal(
-        wrapperText.includes(`powershell -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %*`),
-        true,
-        relPath
-      );
+      if (wrapper.ps1Name === 'import-n8n-workflows-live.ps1') {
+        assert.equal(
+          wrapperText.includes(`powershell -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %* %RESTART_ARG%`),
+          true,
+          relPath
+        );
+        assert.match(wrapperText, /Auto-restart n8n container if restart warning is true\? \[Y\/N\]: /, relPath);
+        assert.match(wrapperText, /-RestartContainerAfterImport/, relPath);
+      } else {
+        assert.equal(
+          wrapperText.includes(`powershell -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %*`),
+          true,
+          relPath
+        );
+      }
+      assert.match(wrapperText, /call :status Cyan "== n8n .+ =="/, relPath);
+      assert.match(wrapperText, /powershell -NoProfile -Command "Write-Host \$env:AAT_STATUS_MESSAGE -ForegroundColor \$env:AAT_STATUS_COLOR"/, relPath);
       assert.equal(/^cd\s+\/d\s+"%~dp0\.\."/im.test(wrapperText), false, relPath);
     }
   }

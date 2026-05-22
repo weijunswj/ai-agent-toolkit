@@ -57,7 +57,7 @@ Templates are published material. Review them before copying into a consumer rep
 - [n8n workflow templates](../../skills/n8n-workflow-templates/templates/) contain public generic inactive workflow JSON templates.
 - [CI/CD templates](../../skills/secure-cicd-installer/templates/cicd/) contain CI/CD installer prompts and status templates.
 
-Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/-%20build-agent-rule-templates.cmd) regenerate the generic source-side templates under `_projects/development/ai-coding-agent-rules/_main/` and the n8n add-on under `_projects/n8n/local-setup/_main/agent-rules/`; toolkit sync publishes inert skill copies.
+Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/_build-agent-rule-templates.cmd) regenerate the generic source-side templates under `_projects/development/ai-coding-agent-rules/_main/` and the n8n add-on under `_projects/n8n/local-setup/_main/agent-rules/`; toolkit sync publishes inert skill copies.
 
 n8n helper templates may write scoped local outputs after they are copied into a reviewed consumer repo: `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders. Keep those local folders ignored.
 

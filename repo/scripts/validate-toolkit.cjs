@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const docContractSync = require('./sync-repo-doc-contract.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
@@ -93,7 +94,7 @@ const expectedFiles = [
   'skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md',
   'skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md',
   'repo/scripts/build-agent-rule-templates.ps1',
-  'repo/scripts/- build-agent-rule-templates.cmd',
+  'repo/scripts/_build-agent-rule-templates.cmd',
   'repo/scripts/validate-toolkit.cjs',
   'repo/scripts/sync-toolkit-projects.cjs',
   'repo/scripts/audit-project-source-locks.cjs',
@@ -198,6 +199,14 @@ const allowedRootEntries = new Set([
   'skills'
 ]);
 
+const ignoredLocalDirs = new Set([
+  '.n8n-local',
+  '.tmp',
+  '.to-sanitise',
+  '.sanitised',
+  '.n8n-workflow-backups'
+]);
+
 const staleReferenceRoots = [
   'README.md',
   'AGENTS.md',
@@ -276,7 +285,7 @@ function readJson(relPath) {
 }
 
 function isIgnoredWalkDir(name) {
-  return name === '.git' || name === '__pycache__';
+  return name === '.git' || name === '__pycache__' || ignoredLocalDirs.has(name);
 }
 
 function walk(dir = root, entries = []) {
@@ -336,7 +345,7 @@ function validateForbiddenFiles(errors) {
     const lower = rel.toLowerCase();
 
     if (entry.dirent.isDirectory()) {
-      if (['.n8n-local', '.tmp', '.to-sanitise', '.sanitised', '.n8n-workflow-backups', '_dist', 'dist', 'node_modules', 'coverage'].includes(name)) {
+      if (['_dist', 'dist', 'node_modules', 'coverage'].includes(name)) {
         fail(errors, `Forbidden directory present: ${rel}`);
       }
       continue;
@@ -352,6 +361,22 @@ function validateForbiddenFiles(errors) {
     if (['.pem', '.key', '.p12', '.pfx'].some((ext) => lower.endsWith(ext))) fail(errors, `Private key/certificate file present: ${rel}`);
     if (name === 'id_rsa' || name === 'id_ed25519') fail(errors, `Private SSH key present: ${rel}`);
     if (name.toLowerCase() === packYamlText) fail(errors, `${packYamlText} is not allowed: ${rel}`);
+  }
+}
+
+function listGitTrackedFiles() {
+  if (!fs.existsSync(path.join(root, '.git'))) return [];
+  const result = spawnSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' });
+  if (result.status !== 0) return [];
+  return result.stdout.split('\0').filter(Boolean).map(slash);
+}
+
+function validateTrackedLocalRuntimeFiles(errors) {
+  for (const rel of listGitTrackedFiles()) {
+    const segments = rel.split('/');
+    if (segments.some((segment) => ignoredLocalDirs.has(segment))) {
+      fail(errors, `Tracked local runtime file is not allowed: ${rel}`);
+    }
   }
 }
 
@@ -388,6 +413,7 @@ function validateJsonRegistries(errors) {
 
 function validateRootTopology(errors) {
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (ignoredLocalDirs.has(entry.name)) continue;
     if (!allowedRootEntries.has(entry.name)) {
       fail(errors, `Unexpected root entry: ${entry.name}`);
     }
@@ -1293,6 +1319,7 @@ function runValidation() {
   assertExpectedFiles(errors);
   validateRootTopology(errors);
   validateForbiddenFiles(errors);
+  validateTrackedLocalRuntimeFiles(errors);
   validateJsonRegistries(errors);
   validateSourceRepoRegistry(errors);
   validatePacks(errors);
