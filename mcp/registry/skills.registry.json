@@ -4,7 +4,7 @@
     "title": "AI Coding Agent Rules",
     "category": "development",
     "path": "skills/ai-coding-agent-rules/",
-    "purpose": "Generic execution-first AI coding agent rules and toolkit skill-routing templates for AGENTS.md, CLAUDE.md, and GEMINI.md.",
+    "purpose": "Generic execution-first AI coding agent rule templates plus optional toolkit skill-routing for AGENTS.md, CLAUDE.md, and GEMINI.md.",
     "supported_platforms": [
       "ChatGPT",
       "Codex",

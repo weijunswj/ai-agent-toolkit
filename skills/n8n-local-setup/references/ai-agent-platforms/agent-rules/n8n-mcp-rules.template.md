@@ -8,4 +8,4 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 This inert compatibility shim exists so full-fidelity copied source links keep working inside the copyable skill folder.
 
-Use [templates/agent-rules/n8n-mcp-rules.template.md](../../../../templates/agent-rules/n8n-mcp-rules.template.md).
+Use [agent-rules/n8n-mcp-rules.template.md](../../../agent-rules/n8n-mcp-rules.template.md).

@@ -8,7 +8,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 Instruction-only skill for installing generic execution-first AI coding agent rules.
 
-The copied skill folder includes inert templates under `templates/agent-rules/`:
+The copied skill folder includes inert generic baseline templates:
 
 - `AGENTS.template.md` for Codex or OpenCode.
 - `CLAUDE.template.md` for Claude Code.
@@ -16,7 +16,9 @@ The copied skill folder includes inert templates under `templates/agent-rules/`:
 
 Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Never overwrite existing `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`; produce a merge or diff plan instead.
 
-For n8n-specific workflow and MCP safety rules, install `skills/n8n-local-setup` and use its `templates/agent-rules/n8n-mcp-rules.template.md` add-on after the generic baseline.
+`TOOLKIT-SKILL-ROUTING.template.md` is optional. Use it only when the target environment has this toolkit's `skills/` folders installed or copied. Do not use it as a standalone replacement for the generic baseline; merge it under the generic baseline in the same active instruction file.
+
+For n8n-specific workflow and MCP safety rules, install the generic baseline first, then merge the n8n add-on from `skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md`.
 
 The `SKILL.md` file is an AI-facing published surface generated from [_projects/development/ai-coding-agent-rules/curated_output_for_ai/](../../_projects/development/ai-coding-agent-rules/curated_output_for_ai/). Update the curated source, then run:
 

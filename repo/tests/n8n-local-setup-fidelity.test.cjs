@@ -72,6 +72,14 @@ function stripGeneratedNotices(text) {
   return remaining.trimEnd() + '\n';
 }
 
+function applyTextRewrites(text, output) {
+  let rewritten = text;
+  for (const rewrite of output.text_rewrites || []) {
+    rewritten = rewritten.split(rewrite.from).join(rewrite.to);
+  }
+  return rewritten;
+}
+
 function localSetupManifest(root = repoRoot) {
   return JSON.parse(readText(root, '_projects/n8n/local-setup/toolkit.project.json'));
 }
@@ -95,11 +103,31 @@ test('n8n local setup restored references are declared copy outputs', () => {
 });
 
 test('n8n local setup restored references preserve full source guide bodies', () => {
+  const manifest = localSetupManifest();
   for (const expected of restoredReferences) {
     const source = readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`).trimEnd() + '\n';
+    const recipe = manifest.outputs.find((entry) => entry.output === expected.output);
     const output = stripGeneratedNotices(readText(repoRoot, expected.output));
-    assert.equal(output, source, expected.output);
+    assert.equal(output, applyTextRewrites(source, recipe), expected.output);
   }
+});
+
+test('n8n copied setup references use portable published baseline template links', () => {
+  for (const relPath of [
+    'skills/n8n-local-setup/references/n8n/local-setup.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'
+  ]) {
+    const text = readText(repoRoot, relPath);
+    assert.doesNotMatch(text, /\/_projects\/development\/ai-coding-agent-rules\/_main\//, relPath);
+    assert.doesNotMatch(text, /\.\.\/\.\.\/\.\.\/development\/ai-coding-agent-rules\/_main\//, relPath);
+  }
+
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/n8n/local-setup.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/CLAUDE\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/GEMINI\.template\.md/);
 });
 
 test('n8n local setup pack-installed references are declared by project recipes', () => {
@@ -118,10 +146,10 @@ test('codex n8n local pack installs inert agent template and remaining local set
     'skills/n8n-local-setup/references/n8n/3a. docker compose + ngrok.md',
     'skills/n8n-local-setup/references/n8n/4. vps hosting.md',
     'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md',
-    'skills/n8n-local-setup/references/n8n/templates/agent-rules/n8n-mcp-rules.template.md',
+    'skills/n8n-local-setup/references/n8n/agent-rules/n8n-mcp-rules.template.md',
     'skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md',
-    'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
-    'skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md',
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md',
     'skills/n8n-local-setup/references/n8n/vps-hosting.md'
   ]) {
     assert.ok(pack.installs.includes(expectedPath), expectedPath);
@@ -132,10 +160,10 @@ test('claude n8n local pack installs inert agent template and remaining Claude g
   const pack = JSON.parse(readText(repoRoot, 'skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json'));
   for (const expectedPath of [
     'skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md',
-    'skills/n8n-local-setup/references/ai-agent-platforms/templates/agent-rules/n8n-mcp-rules.template.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/agent-rules/n8n-mcp-rules.template.md',
     'skills/n8n-local-setup/references/ai-agent-platforms/templates/claude-mcp-config.md',
-    'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
-    'skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md'
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md'
   ]) {
     assert.ok(pack.installs.includes(expectedPath), expectedPath);
   }

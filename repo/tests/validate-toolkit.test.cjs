@@ -336,21 +336,23 @@ test('validation workflow runs canonical full validation read-only', () => {
 test('build agent rule templates workflow tracks and verifies split template outputs', () => {
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'build-agent-rule-templates.yml'));
   const watchedPaths = [
-    '_projects/development/ai-coding-agent-rules/_main/templates/partials/**',
-    '_projects/n8n/local-setup/_main/templates/partials/**',
+    '_projects/development/ai-coding-agent-rules/_main/_partials/**',
+    '_projects/n8n/local-setup/_main/_partials/**',
     'repo/scripts/build-agent-rule-templates.ps1',
     'repo/scripts/- build-agent-rule-templates.cmd',
     '.github/workflows/build-agent-rule-templates.yml'
   ];
   const verifiedPaths = [
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md',
-    '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md',
-    'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md',
-    'skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md'
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md',
+    '_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md',
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md',
+    'skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md'
   ];
 
   for (const rel of watchedPaths) {
@@ -361,6 +363,9 @@ test('build agent rule templates workflow tracks and verifies split template out
   }
 
   assert.doesNotMatch(workflow, /skills\/n8n-local-setup\/templates\/agent-rules\/partials/);
+  assert.doesNotMatch(workflow, /_main\/templates\/partials/);
+  assert.doesNotMatch(workflow, /skills\/ai-coding-agent-rules\/templates\/agent-rules/);
+  assert.doesNotMatch(workflow, /skills\/n8n-local-setup\/templates\/agent-rules/);
   assert.doesNotMatch(workflow, /_projects\/n8n\/local-setup\/_main\/templates\/agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
   assert.doesNotMatch(workflow, /skills\/n8n-local-setup\/templates\/agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
   assert.match(workflow, /find skills\/ai-coding-agent-rules skills\/n8n-local-setup/);
@@ -589,7 +594,7 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
     ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
     ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
     ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
-    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md', '_projects/n8n/local-setup/_main/templates/agent-rules/other.template.md'), /final recheck must reject staged paths outside generated output scope/],
+    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md', '_projects/n8n/local-setup/_main/agent-rules/other.template.md'), /final recheck must reject staged paths outside generated output scope/],
     ['commit step resets dangerous git environment', (text) => text.replace('unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /commit step must reset dangerous git environment state/],
     ['push step resets dangerous git environment', (text) => replaceLast(text, 'unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /push step must reset dangerous git environment state/]
   ];
@@ -613,8 +618,8 @@ test('auto-sync generated surfaces workflow skips unsafe preflight paths before 
     ['repo scripts skip is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight skip handling for repo/' + 'scripts')],
     ['repo tests skip is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight skip handling for repo\/tests/],
     ['lockfile skip is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight skip handling for package\/lockfile changes/],
-    ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/templates/partials/*', '_projects/blocked/_main/templates/partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
-    ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
+    ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/_partials/*', '_projects/blocked/_main/_partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
+    ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
     ['clear skip notice is required', (text) => text.replace('Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate', 'Auto-sync did something else'), /preflight must skip unsafe maintenance\/source PRs/],
     ['skip must rely on validate:all gate', (text) => text.replace('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.', 'Generated outputs will be checked here.'), /preflight must skip unsafe maintenance\/source PRs/],
     ['skip must set should_sync false', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"', 'echo "should_sync=true" >> "$GITHUB_OUTPUT"'), /preflight must skip unsafe maintenance\/source PRs/]
@@ -635,10 +640,11 @@ test('auto-sync generated output path scope is explicit', () => {
   for (const rel of [
     'README.md',
     'AGENTS.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md',
-    '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md',
+    '_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md',
     'mcp/registry/projects.registry.json',
     'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md'
   ]) {
@@ -649,7 +655,7 @@ test('auto-sync generated output path scope is explicit', () => {
     '_projects/foo/toolkit.project.json',
     '_projects/foo/curated_output_for_ai/file.md',
     '_projects/foo/_main/file.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/partials/ai-coding-agent-execution.md',
+    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
     'repo/' + 'scr' + 'ipts/anything.cjs',
     '.github/workflows/anything.yml',
     'package.json',
@@ -746,8 +752,8 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
       paths: ['C:\\Users\\<your-user>\\.gemini\\GEMINI.md']
     }
   ];
-  const genericSourceDir = path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'agent-rules');
-  const genericSkillDir = path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'templates', 'agent-rules');
+  const genericSourceDir = path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main');
+  const genericSkillDir = path.join(repoRoot, 'skills', 'ai-coding-agent-rules');
 
   for (const rootDir of [genericSourceDir, genericSkillDir]) {
     for (const spec of genericSpecs) {
@@ -764,22 +770,44 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
       assert.match(text, /This file is inert while it keeps the `\.template\.md` filename/);
       for (const label of spec.labels) assert.match(text, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
       for (const installPath of spec.paths) assert.match(text, new RegExp(installPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-      assert.match(text, /_projects\/development\/ai-coding-agent-rules\/_main\/templates\/partials/);
-      assert.match(text, /\n# Skill Routing Rules\n/);
-      assert.doesNotMatch(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials\/n8n-mcp-rules\.md/);
+      assert.match(text, /_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md/);
+      assert.doesNotMatch(text, /toolkit-skill-routing\.md/);
+      assert.doesNotMatch(text, /\n# Skill Routing Rules\n/);
+      assert.doesNotMatch(text, /_projects\/n8n\/local-setup\/_main\/_partials\/n8n-mcp-rules\.md/);
+      assert.doesNotMatch(text, /templates\/agent-rules/);
     }
+  }
+
+  const toolkitAddOnPaths = [
+    path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'TOOLKIT-SKILL-ROUTING.template.md'),
+    path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'TOOLKIT-SKILL-ROUTING.template.md')
+  ];
+  for (const addOnPath of toolkitAddOnPaths) {
+    const text = fs.readFileSync(addOnPath, 'utf8').replace(/\r\n/g, '\n');
+    assert.equal((text.match(/^````````md$/gm) || []).length, 1, addOnPath);
+    assert.equal((text.match(/^````````$/gm) || []).length, 1, addOnPath);
+    assert.match(text, /optional toolkit skill-routing add-on/);
+    assert.match(text, /This optional add-on contains toolkit skill-routing rules only\./);
+    assert.match(text, /Use it only when the target environment has this toolkit's `skills\/` folders installed or copied\./);
+    assert.match(text, /Do not use it as a standalone replacement for generic AGENTS\/CLAUDE\/GEMINI rules\./);
+    assert.match(text, /Then merge the fenced payload from this file under the generic baseline in the same active instruction file\./);
+    assert.match(text, /Do not overwrite existing active instruction files\./);
+    assert.match(text, /_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/toolkit-skill-routing\.md/);
+    assert.match(text, /\n# Skill Routing Rules\n/);
+    assert.doesNotMatch(text, /\n# AI coding agent execution preferences\n/);
+    assert.doesNotMatch(text, /_projects\/n8n\/local-setup\/_main\/_partials\/n8n-mcp-rules\.md/);
   }
 
   const addOnPaths = [
     {
-      path: path.join(repoRoot, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'agent-rules', 'n8n-mcp-rules.template.md'),
-      baselinePrefix: '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules',
-      baselineHrefPrefix: '../../../../../development/ai-coding-agent-rules/_main/templates/agent-rules'
+      path: path.join(repoRoot, '_projects', 'n8n', 'local-setup', '_main', 'agent-rules', 'n8n-mcp-rules.template.md'),
+      baselinePrefix: '_projects/development/ai-coding-agent-rules/_main',
+      baselineHrefPrefix: '../../../../development/ai-coding-agent-rules/_main'
     },
     {
-      path: path.join(repoRoot, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', 'n8n-mcp-rules.template.md'),
-      baselinePrefix: 'skills/ai-coding-agent-rules/templates/agent-rules',
-      baselineHrefPrefix: '../../../ai-coding-agent-rules/templates/agent-rules'
+      path: path.join(repoRoot, 'skills', 'n8n-local-setup', 'agent-rules', 'n8n-mcp-rules.template.md'),
+      baselinePrefix: 'skills/ai-coding-agent-rules',
+      baselineHrefPrefix: '../../ai-coding-agent-rules'
     }
   ];
   for (const { path: addOnPath, baselinePrefix, baselineHrefPrefix } of addOnPaths) {
@@ -798,39 +826,42 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
     assert.match(text, /Then merge the fenced payload from this file under the generic rules in the same active instruction file\./);
     assert.match(text, /Do not use this add-on alone to create a fresh active instruction file\./);
     assert.match(text, /`AGENTS\.md`, `CLAUDE\.md`, or `GEMINI\.md`/);
-    assert.match(text, /_projects\/n8n\/local-setup\/_main\/templates\/partials\/n8n-mcp-rules\.md/);
+    assert.match(text, /_projects\/n8n\/local-setup\/_main\/_partials\/n8n-mcp-rules\.md/);
     assert.match(text, /\n```md\n# SECTION NAME\n/);
     assert.doesNotMatch(text, /Or create it with PowerShell/);
     assert.doesNotMatch(text, /Copy or merge the fenced payload into the target repo root as `AGENTS\.md`, `CLAUDE\.md`, or `GEMINI\.md`/);
     assert.doesNotMatch(text, /Copy or merge the fenced payload into:\n\n```text\nTarget repo root AGENTS\.md, CLAUDE\.md, or GEMINI\.md/);
     assert.doesNotMatch(text, /\n# AI coding agent execution preferences\n/);
     assert.doesNotMatch(text, /\n# Skill Routing Rules\n/);
+    assert.doesNotMatch(text, /templates\/agent-rules/);
   }
 });
 
-test('generic agent-rule partials live in project source, not skill partial folders', () => {
+test('generic agent-rule partials live in project _partials folders, not skill folders', () => {
   const skillPartialFiles = [];
   for (const skillDir of ['skills/ai-coding-agent-rules', 'skills/n8n-local-setup']) {
-    const partialsDir = path.join(repoRoot, skillDir, 'templates', 'agent-rules', 'partials');
+    const partialsDir = path.join(repoRoot, skillDir, '_partials');
     if (!fs.existsSync(partialsDir)) continue;
     for (const entry of fs.readdirSync(partialsDir, { recursive: true })) {
-      if (fs.statSync(path.join(partialsDir, entry)).isFile()) skillPartialFiles.push(path.join(skillDir, 'templates', 'agent-rules', 'partials', entry).replace(/\\/g, '/'));
+      if (fs.statSync(path.join(partialsDir, entry)).isFile()) skillPartialFiles.push(path.join(skillDir, '_partials', entry).replace(/\\/g, '/'));
     }
   }
   assert.deepEqual(skillPartialFiles, []);
   assert.equal(
-    fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'partials', 'toolkit-skill-routing.md')),
+    fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'toolkit-skill-routing.md')),
     true
   );
+  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'partials')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials')), false);
 });
 
 test('validator rejects active agent instruction filenames inside skill folders', () => {
   const cwd = tempCopy();
-  const activePath = path.join(cwd, 'skills', 'n8n-local-setup', 'templates', 'agent-rules', 'AGENTS.md');
+  const activePath = path.join(cwd, 'skills', 'n8n-local-setup', 'agent-rules', 'AGENTS.md');
   fs.writeFileSync(activePath, '# Active nested rules fixture\n');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Skill folder must use inert agent-rule template filenames: skills\/n8n-local-setup\/templates\/agent-rules\/AGENTS\.md/);
+  assert.match(result.stderr, /Skill folder must use inert agent-rule template filenames: skills\/n8n-local-setup\/agent-rules\/AGENTS\.md/);
 });
 
 test('validator rejects broken relative links in non-_main Markdown files', () => {
@@ -863,50 +894,56 @@ test('validator rejects README links to absent optional folders', () => {
 
 test('agent-rule template freshness is driven by project-scoped specs', () => {
   const specs = projectSync.agentRuleTemplateSpecs();
-  assert.deepEqual(specs.map((spec) => spec.projectId), ['development.ai-coding-agent-rules', 'n8n.local-setup']);
+  assert.deepEqual(specs.map((spec) => spec.projectId), ['development.ai-coding-agent-rules', 'development.ai-coding-agent-rules', 'n8n.local-setup']);
 
-  const [genericSpec, n8nSpec] = specs;
+  const [genericSpec, toolkitAddOnSpec, n8nSpec] = specs;
   assert.deepEqual(genericSpec.partialSources.map((source) => source.rel), [
-    '_projects/development/ai-coding-agent-rules/_main/templates/partials/ai-coding-agent-execution.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/partials/toolkit-skill-routing.md'
+    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md'
   ]);
   assert.equal(genericSpec.skillRoutingSource, undefined);
   assert.deepEqual(genericSpec.templates.map((template) => template.source), [
-    '_main/templates/agent-rules/AGENTS.template.md',
-    '_main/templates/agent-rules/CLAUDE.template.md',
-    '_main/templates/agent-rules/GEMINI.template.md'
+    '_main/AGENTS.template.md',
+    '_main/CLAUDE.template.md',
+    '_main/GEMINI.template.md'
   ]);
   assert.deepEqual(genericSpec.templates.map((template) => template.output), [
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md'
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
   ]);
   assert.deepEqual(genericSpec.templates.map((template) => template.destination), ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']);
   assert.equal(genericSpec.templates.every((template) => template.installSubject && Array.isArray(template.installExamples)), true);
 
+  assert.deepEqual(toolkitAddOnSpec.partialSources.map((source) => source.rel), [
+    '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md'
+  ]);
+  assert.deepEqual(toolkitAddOnSpec.templates.map((template) => template.source), ['_main/TOOLKIT-SKILL-ROUTING.template.md']);
+  assert.deepEqual(toolkitAddOnSpec.templates.map((template) => template.output), ['_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md']);
+  assert.equal(toolkitAddOnSpec.templates[0].installMode, 'toolkit_add_on');
+
   assert.deepEqual(n8nSpec.partialSources.map((source) => source.rel), [
-    '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
+    '_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md'
   ]);
   assert.equal(n8nSpec.skillRoutingSource, undefined);
-  assert.deepEqual(n8nSpec.templates.map((template) => template.source), ['_main/templates/agent-rules/n8n-mcp-rules.template.md']);
-  assert.deepEqual(n8nSpec.templates.map((template) => template.output), ['_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md']);
+  assert.deepEqual(n8nSpec.templates.map((template) => template.source), ['_main/agent-rules/n8n-mcp-rules.template.md']);
+  assert.deepEqual(n8nSpec.templates.map((template) => template.output), ['_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md']);
   assert.deepEqual(n8nSpec.templates.map((template) => template.destination), ['AGENTS.md, CLAUDE.md, or GEMINI.md']);
   assert.equal(n8nSpec.templates[0].installMode, 'add_on');
   assert.deepEqual(n8nSpec.templates[0].baselineTemplatePaths, [
-    'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md'
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/GEMINI.template.md'
   ]);
   assert.deepEqual(n8nSpec.templates[0].sourceBaselineTemplatePaths, [
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md'
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
   ]);
 });
 
 test('changing assembled _main agent-rule templates makes source-side templates stale', () => {
   const cwd = tempCopy();
-  const template = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'agent-rules', 'AGENTS.template.md');
+  const template = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'AGENTS.template.md');
   fs.writeFileSync(
     template,
     readTextFile(template).replace(
@@ -916,24 +953,24 @@ test('changing assembled _main agent-rule templates makes source-side templates 
   );
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale source-side agent-rule template: _projects\/development\/ai-coding-agent-rules\/_main\/templates\/agent-rules\/AGENTS\.template\.md/);
-  assert.match(result.stderr, /Stale generated output: skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md/);
+  assert.match(result.stderr, /Stale source-side agent-rule template: _projects\/development\/ai-coding-agent-rules\/_main\/AGENTS\.template\.md/);
+  assert.match(result.stderr, /Stale generated output: skills\/ai-coding-agent-rules\/AGENTS\.template\.md/);
 });
 
 test('changing published agent-rule template copies makes skill copies stale', () => {
   const cwd = tempCopy();
-  const template = path.join(cwd, 'skills', 'ai-coding-agent-rules', 'templates', 'agent-rules', 'AGENTS.template.md');
+  const template = path.join(cwd, 'skills', 'ai-coding-agent-rules', 'AGENTS.template.md');
   fs.appendFileSync(template, '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/ai-coding-agent-rules\/templates\/agent-rules\/AGENTS\.template\.md/);
+  assert.match(result.stderr, /Stale generated output: skills\/ai-coding-agent-rules\/AGENTS\.template\.md/);
 });
 
 test('changing declared agent-rule source partials makes source-side templates stale', () => {
   const cases = [
-    path.join('_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'partials', 'ai-coding-agent-execution.md'),
-    path.join('_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'partials', 'toolkit-skill-routing.md'),
-    path.join('_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials', 'n8n-mcp-rules.md')
+    path.join('_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md'),
+    path.join('_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'toolkit-skill-routing.md'),
+    path.join('_projects', 'n8n', 'local-setup', '_main', '_partials', 'n8n-mcp-rules.md')
   ];
 
   for (const partialRel of cases) {
@@ -942,27 +979,26 @@ test('changing declared agent-rule source partials makes source-side templates s
     const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
     assert.notEqual(result.status, 0, partialRel);
     if (partialRel.includes('development')) {
-      assert.match(
-        result.stderr,
-        /Stale source-side agent-rule template: _projects\/development\/ai-coding-agent-rules\/_main\/templates\/agent-rules\/AGENTS\.template\.md/,
-        partialRel
-      );
+      const expected = partialRel.includes('toolkit-skill-routing.md')
+        ? /Stale source-side agent-rule template: _projects\/development\/ai-coding-agent-rules\/_main\/TOOLKIT-SKILL-ROUTING\.template\.md/
+        : /Stale source-side agent-rule template: _projects\/development\/ai-coding-agent-rules\/_main\/AGENTS\.template\.md/;
+      assert.match(result.stderr, expected, partialRel);
     } else {
       assert.match(
         result.stderr,
-        /Stale source-side agent-rule template: _projects\/n8n\/local-setup\/_main\/templates\/agent-rules\/n8n-mcp-rules\.template\.md/,
+        /Stale source-side agent-rule template: _projects\/n8n\/local-setup\/_main\/agent-rules\/n8n-mcp-rules\.template\.md/,
         partialRel
       );
     }
   }
 });
 
-test('changing toolkit skill-routing partial makes generic source-side agent-rule templates stale', () => {
+test('changing toolkit skill-routing partial makes optional toolkit add-on stale', () => {
   const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'partials', 'toolkit-skill-routing.md'), '\n\n<!-- drift test -->\n');
+  fs.appendFileSync(path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'toolkit-skill-routing.md'), '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale source-side agent-rule template: _projects\/development\/ai-coding-agent-rules\/_main\/templates\/agent-rules\/AGENTS\.template\.md/);
+  assert.match(result.stderr, /Stale source-side agent-rule template: _projects\/development\/ai-coding-agent-rules\/_main\/TOOLKIT-SKILL-ROUTING\.template\.md/);
 });
 
 test('agent-rule source-template freshness check is scoped to declared modules', () => {
@@ -978,9 +1014,10 @@ test('agent-rule source-template freshness check is scoped to declared template 
   const manifestPath = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json');
   const manifest = readJsonFile(manifestPath);
   const agentRuleOutputs = new Set([
-    'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md'
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md'
   ]);
 
   manifest.outputs = manifest.outputs.filter((output) => !agentRuleOutputs.has(output.output));
@@ -995,6 +1032,42 @@ test('changing declared _main MCP config source makes root MCP config stale', ()
   const cwd = tempCopy();
   const source = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'codex-mcp-config.md');
   fs.appendFileSync(source, '\n\n<!-- drift test -->\n');
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/mcp-configs\/codex-mcp-config\.md/);
+});
+
+test('sync applies text_rewrites to extract outputs', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'cicd', 'secure-installer', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  const outputPath = 'skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md';
+  const output = manifest.outputs.find((entry) => entry.output === outputPath);
+  assert.equal(output?.kind, 'extract');
+
+  output.text_rewrites = [{ from: 'Manual step needed', to: 'Manual step required' }];
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stale generated output: skills\/secure-cicd-installer\/templates\/cicd\/secure-cicd-prompt\.md/);
+});
+
+test('sync applies text_rewrites to concat outputs', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  const outputPath = 'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md';
+  const output = manifest.outputs.find((entry) => entry.output === outputPath);
+  assert.equal(output?.kind, 'copy');
+  assert.equal(output?.source, '_main/templates/codex-mcp-config.md');
+
+  output.kind = 'concat';
+  output.sources = [output.source];
+  delete output.source;
+  output.text_rewrites = [{ from: '# Codex MCP Config', to: '# Codex MCP Config Rewrite Fixture' }];
+  writeJsonFile(manifestPath, manifest);
+
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/templates\/mcp-configs\/codex-mcp-config\.md/);

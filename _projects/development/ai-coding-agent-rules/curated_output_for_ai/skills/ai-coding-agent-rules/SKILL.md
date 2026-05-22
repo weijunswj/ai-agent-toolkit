@@ -1,6 +1,6 @@
 ---
 name: ai-coding-agent-rules
-description: Install or explain generic AI coding agent execution rules and toolkit skill-routing templates for Codex/OpenCode AGENTS.md, Claude Code CLAUDE.md, and Gemini CLI or Antigravity GEMINI.md files. Use when a user wants reusable baseline coding-agent rules, inert instruction templates, or a safe merge plan for existing agent instruction files.
+description: Install or explain generic AI coding agent execution rules and the optional toolkit skill-routing add-on for Codex/OpenCode AGENTS.md, Claude Code CLAUDE.md, and Gemini CLI or Antigravity GEMINI.md files. Use when a user wants reusable baseline coding-agent rules, inert instruction templates, or a safe merge plan for existing agent instruction files.
 ---
 
 <!--
@@ -15,10 +15,12 @@ Use this skill when the user wants generic execution-first AI coding agent rules
 
 ## Core Rules
 
-- Use the inert templates in [templates/agent-rules/](templates/agent-rules/) as copy or merge sources.
+- Use the inert templates in this skill folder as copy or merge sources.
 - Copy or merge `AGENTS.template.md` into `AGENTS.md` for Codex or OpenCode.
 - Copy or merge `CLAUDE.template.md` into `CLAUDE.md` for Claude Code.
 - Copy or merge `GEMINI.template.md` into `GEMINI.md` for Gemini CLI or Antigravity.
+- Use `TOOLKIT-SKILL-ROUTING.template.md` only as an optional add-on when the target environment has this toolkit's `skills/` folders installed or copied.
+- Do not use `TOOLKIT-SKILL-ROUTING.template.md` as a standalone replacement for the generic baseline.
 - Never overwrite an existing active instruction file. Read it first and produce a merge or diff plan.
 - Keep the `.template.md` files inert inside the skill folder. Do not rename them inside `skills/**`.
 
@@ -27,4 +29,5 @@ Use this skill when the user wants generic execution-first AI coding agent rules
 1. Identify the target agent platform and target active instruction filename.
 2. Read the matching inert template when exact copy-ready content matters.
 3. If the target active file already exists, compare the current file with the template and propose a minimal merge.
-4. Keep domain add-ons separate. For n8n workflow and MCP safety rules, use the `n8n-local-setup` add-on template after the generic baseline.
+4. Keep optional add-ons separate. Merge `TOOLKIT-SKILL-ROUTING.template.md` only after the generic baseline when toolkit skills are available.
+5. For n8n workflow and MCP safety rules, use `skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md` after the generic baseline.

@@ -1,13 +1,13 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md
+Source: _projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md
 Update the project source and run sync.
 -->
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md
+Source: _projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md
 Update the project source and run sync.
 -->
 # n8n-mcp-rules.template.md n8n MCP workflow rules add-on
@@ -20,9 +20,9 @@ This is an n8n-specific add-on. It does not include the generic AI coding agent 
 
 First install or copy the generic baseline rules from:
 
-- [skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md](../../../ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md)
-- [skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md](../../../ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md)
-- [skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md](../../../ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md)
+- [skills/ai-coding-agent-rules/AGENTS.template.md](../../ai-coding-agent-rules/AGENTS.template.md)
+- [skills/ai-coding-agent-rules/CLAUDE.template.md](../../ai-coding-agent-rules/CLAUDE.template.md)
+- [skills/ai-coding-agent-rules/GEMINI.template.md](../../ai-coding-agent-rules/GEMINI.template.md)
 
 Then merge the fenced payload from this file under the generic rules in the same active instruction file.
 

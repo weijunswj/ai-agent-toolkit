@@ -77,9 +77,9 @@ Migrated:
 
 - Platform setup guidance into `skills/n8n-local-setup/references/ai-agent-platforms/`.
 - n8n local setup, upgrade, tunnelling, Docker Compose + ngrok, VPS, workflow sync, and credential safety guidance into `skills/n8n-local-setup/references/n8n/`.
-- Generic AI coding agent execution rules into `_projects/development/ai-coding-agent-rules/_main/templates/partials/ai-coding-agent-execution.md`.
-- Toolkit skill-routing rules into `_projects/development/ai-coding-agent-rules/_main/templates/partials/toolkit-skill-routing.md`.
-- n8n MCP workflow safety rules into `_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md`; the n8n local setup skill now publishes only the n8n add-on template from this source.
+- Generic AI coding agent execution rules into `_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md`.
+- Toolkit skill-routing rules into `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`.
+- n8n MCP workflow safety rules into `_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md`; the n8n local setup skill now publishes only the n8n add-on template from this source.
 - MCP config templates into `skills/n8n-local-setup/templates/mcp-configs/`.
 - Deterministic agent-rule generator into `repo/scripts/build-agent-rule-templates.ps1`.
 - CMD generator wrapper into `repo/scripts/- build-agent-rule-templates.cmd`.

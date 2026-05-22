@@ -2,22 +2,27 @@
 
 ## Preserved In `_main/`
 
-- `templates/partials/ai-coding-agent-execution.md`
-- `templates/partials/toolkit-skill-routing.md`
-- `templates/agent-rules/AGENTS.template.md`
-- `templates/agent-rules/CLAUDE.template.md`
-- `templates/agent-rules/GEMINI.template.md`
+- `_partials/ai-coding-agent-execution.md`
+- `_partials/toolkit-skill-routing.md`
+- `AGENTS.template.md`
+- `CLAUDE.template.md`
+- `GEMINI.template.md`
+- `TOOLKIT-SKILL-ROUTING.template.md`
+- `README.md`
 
-`templates/partials/ai-coding-agent-execution.md` was moved exactly from the former n8n local setup project source path. Do not rewrite or shorten it during this source-ownership split.
+`_partials/ai-coding-agent-execution.md` was moved exactly from the former n8n local setup project source path. Do not rewrite or shorten it during this source-ownership split.
 
-`templates/partials/toolkit-skill-routing.md` was moved exactly from the former linked root surface `skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md` and renamed to make the generic ownership clear.
+`_partials/toolkit-skill-routing.md` was moved exactly from the former n8n skill-routing partial surface and renamed to make the generic ownership clear.
 
-The source-side inert templates under `_main/templates/agent-rules/` are generated from those partials by `npm run build:agent-rules`.
+The source-side generic inert templates under `_main/` are generated from `_partials/ai-coding-agent-execution.md` by `npm run build:agent-rules`.
+
+`TOOLKIT-SKILL-ROUTING.template.md` is generated from `_partials/toolkit-skill-routing.md` as an optional add-on. It is not part of the default generic `AGENTS.template.md`, `CLAUDE.template.md`, or `GEMINI.template.md` baseline.
 
 ## AI-Facing Surfaces
 
 - `skills/ai-coding-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
-- `skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md`, `CLAUDE.template.md`, and `GEMINI.template.md` are generated from `_main/templates/agent-rules/*.template.md`.
+- `skills/ai-coding-agent-rules/AGENTS.template.md`, `CLAUDE.template.md`, and `GEMINI.template.md` are generated from `_main/*.template.md`.
+- `skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md` is generated from `_main/TOOLKIT-SKILL-ROUTING.template.md`.
 
 The published templates intentionally use inert `.template.md` filenames so the skill folder does not ship active nested `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` instruction files.
 

@@ -247,8 +247,8 @@ test('audit-published-surfaces --check fails when a new curated runtime recipe i
 test('audit-published-surfaces keeps reviewed templates under runtime-heft checks', () => {
   const cwd = tempCopy();
   const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
-  const sourceRel = 'curated_output_for_ai/templates/agent-rules/new-runtime-template.md';
-  const outputRel = 'skills/n8n-local-setup/templates/agent-rules/new-runtime-template.md';
+  const sourceRel = 'curated_output_for_ai/agent-rules/new-runtime-template.md';
+  const outputRel = 'skills/n8n-local-setup/agent-rules/new-runtime-template.md';
   const sourcePath = path.join(projectDir, sourceRel);
   const outputPath = path.join(cwd, outputRel);
   fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
@@ -290,7 +290,7 @@ test('audit-published-surfaces keeps reviewed templates under runtime-heft check
 
   const result = runAudit(['--check'], cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /new boundary recipe finding: skills\/n8n-local-setup\/templates\/agent-rules\/new-runtime-template\.md/);
+  assert.match(result.stderr, /new boundary recipe finding: skills\/n8n-local-setup\/agent-rules\/new-runtime-template\.md/);
 });
 
 test('audit-published-surfaces still detects project duplicate content outside the n8n provenance exception', () => {
