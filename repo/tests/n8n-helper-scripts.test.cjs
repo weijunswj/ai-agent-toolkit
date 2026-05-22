@@ -11,6 +11,8 @@ const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repo
 
 const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync');
 const sourceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync');
+const maintenanceScriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'workflow-maintenance');
+const sourceMaintenanceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'workflow-maintenance');
 const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
 const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');
@@ -414,6 +416,12 @@ test('generated n8n helper scripts are fresh copies of project source', () => {
     'validate-n8n-workflows.cjs',
   ]) {
     assert.equal(readText(path.join(scriptDir, fileName)), readText(path.join(sourceScriptDir, fileName)), fileName);
+  }
+
+  for (const fileName of [
+    'delete-archived-n8n-workflows.cjs',
+  ]) {
+    assert.equal(readText(path.join(maintenanceScriptDir, fileName)), readText(path.join(sourceMaintenanceScriptDir, fileName)), fileName);
   }
 });
 
