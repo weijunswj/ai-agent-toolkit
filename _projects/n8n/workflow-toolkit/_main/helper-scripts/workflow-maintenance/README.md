@@ -40,7 +40,8 @@ Destructive delete requires both flags exactly. Before each delete, the script w
 Backup filenames use:
 
 ```text
-YYYY-MM-DD_HHMM_<workflow-name-or-id>_before-delete.json
+YYYY-MM-DD_HHMM_<workflow-name>_<workflow-id>_before-delete.json
+YYYY-MM-DD_HHMM_<workflow-id>_before-delete.json
 ```
 
 ### Safety Notes

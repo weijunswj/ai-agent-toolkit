@@ -268,7 +268,14 @@ async function fetchAllWorkflows(fetchImpl, apiRoot, apiKey) {
 
 function writeJsonFile(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n');
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
+}
+
+function backupFileName(timestamp, workflow, id) {
+  const safeId = sanitizeFileName(id);
+  const rawName = typeof workflow.name === 'string' ? workflow.name.trim() : '';
+  if (!rawName) return `${timestamp}_${safeId}_before-delete.json`;
+  return `${timestamp}_${sanitizeFileName(rawName)}_${safeId}_before-delete.json`;
 }
 
 async function backupAndDeleteWorkflow(context, workflow, timestamp) {
@@ -294,7 +301,7 @@ async function backupAndDeleteWorkflow(context, workflow, timestamp) {
   const backupPath = path.join(
     context.cwd,
     BACKUP_DIR,
-    `${timestamp}_${sanitizeFileName(name || id)}_before-delete.json`
+    backupFileName(timestamp, fullWorkflow, id)
   );
 
   try {

@@ -227,9 +227,71 @@ test('backup happens before delete in destructive mode', async () => {
 
   assert.equal(result.exitCode, 0);
   assert.deepEqual(harness.calls.map((call) => call.method), ['GET', 'GET', 'DELETE']);
-  const backupFile = path.join(cwd, '.n8n-workflow-backups', '2026-05-22_1405_Delete_Me_before-delete.json');
+  const backupFile = path.join(cwd, '.n8n-workflow-backups', '2026-05-22_1405_Delete_Me_wf_delete_before-delete.json');
   assert.equal(fs.existsSync(backupFile), true);
   assert.equal(JSON.parse(fs.readFileSync(backupFile, 'utf8')).id, 'wf_delete');
+});
+
+test('same-name workflows produce distinct backup files in destructive mode', async () => {
+  const cwd = tempDir();
+  const harness = createHarness([
+    createJsonResponse({
+      data: [
+        workflow({ id: 'wf_same_1', name: 'Same Name', archived: true }),
+        workflow({ id: 'wf_same_2', name: 'Same Name', archived: true }),
+      ],
+    }),
+    createJsonResponse({ id: 'wf_same_1', name: 'Same Name', active: false, published: false, archived: true }),
+    createJsonResponse({ success: true }),
+    createJsonResponse({ id: 'wf_same_2', name: 'Same Name', active: false, published: false, archived: true }),
+    createJsonResponse({ success: true }),
+  ]);
+
+  const result = await harness.runWith({
+    cwd,
+    argv: ['--delete', '--confirm', 'DELETE ARCHIVED WORKFLOWS'],
+  });
+
+  assert.equal(result.exitCode, 0);
+  const firstBackup = path.join(cwd, '.n8n-workflow-backups', '2026-05-22_1405_Same_Name_wf_same_1_before-delete.json');
+  const secondBackup = path.join(cwd, '.n8n-workflow-backups', '2026-05-22_1405_Same_Name_wf_same_2_before-delete.json');
+  assert.equal(fs.existsSync(firstBackup), true);
+  assert.equal(fs.existsSync(secondBackup), true);
+  assert.equal(JSON.parse(fs.readFileSync(firstBackup, 'utf8')).id, 'wf_same_1');
+  assert.equal(JSON.parse(fs.readFileSync(secondBackup, 'utf8')).id, 'wf_same_2');
+});
+
+test('existing backup collision prevents delete for that workflow and continues others', async () => {
+  const cwd = tempDir();
+  const backupDir = path.join(cwd, '.n8n-workflow-backups');
+  fs.mkdirSync(backupDir, { recursive: true });
+  const collisionBackup = path.join(backupDir, '2026-05-22_1405_Collision_wf_collision_before-delete.json');
+  fs.writeFileSync(collisionBackup, '{"id":"existing"}\n');
+  const harness = createHarness([
+    createJsonResponse({
+      data: [
+        workflow({ id: 'wf_collision', name: 'Collision', archived: true }),
+        workflow({ id: 'wf_ok', name: 'No Collision', archived: true }),
+      ],
+    }),
+    createJsonResponse({ id: 'wf_collision', name: 'Collision', active: false, published: false, archived: true }),
+    createJsonResponse({ id: 'wf_ok', name: 'No Collision', active: false, published: false, archived: true }),
+    createJsonResponse({ success: true }),
+  ]);
+
+  const result = await harness.runWith({
+    cwd,
+    argv: ['--delete', '--confirm', 'DELETE ARCHIVED WORKFLOWS'],
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.deepEqual(harness.calls.map((call) => call.method), ['GET', 'GET', 'GET', 'DELETE']);
+  assert.equal(fs.readFileSync(collisionBackup, 'utf8'), '{"id":"existing"}\n');
+  assert.equal(fs.existsSync(path.join(backupDir, '2026-05-22_1405_No_Collision_wf_ok_before-delete.json')), true);
+  assert.match(harness.stdout.join('\n'), /Backed up\s+: 1/);
+  assert.match(harness.stdout.join('\n'), /Deleted\s+: 1/);
+  assert.match(harness.stdout.join('\n'), /Failed\s+: 1/);
+  assert.match(harness.stdout.join('\n'), /wf_collision.*Collision.*backup write failed/);
 });
 
 test('individual delete failure is counted and does not stop the whole run', async () => {
