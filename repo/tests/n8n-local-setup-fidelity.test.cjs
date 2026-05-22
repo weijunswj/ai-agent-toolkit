@@ -72,6 +72,14 @@ function stripGeneratedNotices(text) {
   return remaining.trimEnd() + '\n';
 }
 
+function applyTextRewrites(text, output) {
+  let rewritten = text;
+  for (const rewrite of output.text_rewrites || []) {
+    rewritten = rewritten.split(rewrite.from).join(rewrite.to);
+  }
+  return rewritten;
+}
+
 function localSetupManifest(root = repoRoot) {
   return JSON.parse(readText(root, '_projects/n8n/local-setup/toolkit.project.json'));
 }
@@ -95,11 +103,31 @@ test('n8n local setup restored references are declared copy outputs', () => {
 });
 
 test('n8n local setup restored references preserve full source guide bodies', () => {
+  const manifest = localSetupManifest();
   for (const expected of restoredReferences) {
     const source = readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`).trimEnd() + '\n';
+    const recipe = manifest.outputs.find((entry) => entry.output === expected.output);
     const output = stripGeneratedNotices(readText(repoRoot, expected.output));
-    assert.equal(output, source, expected.output);
+    assert.equal(output, applyTextRewrites(source, recipe), expected.output);
   }
+});
+
+test('n8n copied setup references use portable published baseline template links', () => {
+  for (const relPath of [
+    'skills/n8n-local-setup/references/n8n/local-setup.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'
+  ]) {
+    const text = readText(repoRoot, relPath);
+    assert.doesNotMatch(text, /\/_projects\/development\/ai-coding-agent-rules\/_main\//, relPath);
+    assert.doesNotMatch(text, /\.\.\/\.\.\/\.\.\/development\/ai-coding-agent-rules\/_main\//, relPath);
+  }
+
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/n8n/local-setup.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/CLAUDE\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/GEMINI\.template\.md/);
 });
 
 test('n8n local setup pack-installed references are declared by project recipes', () => {

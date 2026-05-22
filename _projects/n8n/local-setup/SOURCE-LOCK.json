@@ -11,7 +11,7 @@
       "mode": "adapted",
       "source_path": "1. local setup.md",
       "project_path": "_projects/n8n/local-setup/_main/1. local setup.md",
-      "source_blob_sha": "21fc8896290d5026e7ee6d6e0eb8dc9ac7b86453",
+      "source_blob_sha": "a08f0b83ed5722b5b8ecbc560f1ccfe89baf4563",
       "notes": "Toolkit-adapted after migration to route Codex agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n add-on template, while avoiding active nested instruction filenames in skill copies."
     },
     {
@@ -42,28 +42,28 @@
       "mode": "adapted",
       "source_path": "5. extra - claude code integration.md",
       "project_path": "_projects/n8n/local-setup/_main/5. extra - claude code integration.md",
-      "source_blob_sha": "14be7374a3aec75047a3aa9c26f6c8d503213eac",
+      "source_blob_sha": "ad785430bd6c1fdbbf441e5c593d4be6e501aa36",
       "notes": "Toolkit-adapted after migration to route Claude Code agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n add-on template, while avoiding active nested instruction filenames in skill copies."
     },
     {
       "mode": "adapted",
       "source_path": "6. extra - opencode integration.md",
       "project_path": "_projects/n8n/local-setup/_main/6. extra - opencode integration.md",
-      "source_blob_sha": "405c3c99570139146b490ea05c1be5653ac01a7f",
+      "source_blob_sha": "8ff55220c401813eddf8cb882717bbc834ac8e75",
       "notes": "Toolkit-adapted after migration to route OpenCode agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n add-on template, while avoiding active nested instruction filenames in skill copies."
     },
     {
       "mode": "adapted",
       "source_path": "7. extra - antigravity integration.md",
       "project_path": "_projects/n8n/local-setup/_main/7. extra - antigravity integration.md",
-      "source_blob_sha": "caf052593cf9da3999d281486e24dde953b7eb3f",
+      "source_blob_sha": "bd611a73f3b9ac035e35c752951f5a845240ad45",
       "notes": "Toolkit-adapted after migration to route Gemini/Antigravity agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n add-on template, while avoiding active nested instruction filenames in skill copies."
     },
     {
       "mode": "adapted",
       "source_path": "README.md",
       "project_path": "_projects/n8n/local-setup/_main/README.md",
-      "source_blob_sha": "54e708cb93c4056be2dddfc425da7b548528b8bd",
+      "source_blob_sha": "19815dff51b90aaef1d5125dff4b2f188ee54436",
       "notes": "Toolkit-adapted after migration to document the generic ai-coding-agent-rules split, the n8n add-on template, and safe copy/merge into target repo root active filenames."
     },
     {

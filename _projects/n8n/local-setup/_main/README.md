@@ -45,7 +45,7 @@ Important:
 ## Recommended beginner flow
 
 1. Follow [1. Local Setup](./1.%20local%20setup.md).
-2. Install or copy generic AI coding agent rules from the source-side generic templates, such as [AGENTS.template.md](/_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md), into the target repo root as `AGENTS.md`.
+2. Install or copy generic AI coding agent rules from the source-side generic templates, such as [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), into the target repo root as `AGENTS.md`.
 3. Merge the n8n add-on rules from [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md) into the same active rules file.
 4. Copy the Codex MCP config from [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
 5. Restart Codex.
@@ -61,10 +61,10 @@ Important:
 
 | Tool | Copy-paste path |
 | --- | --- |
-| Codex | Install generic rules from [AGENTS.template.md](/_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md), merge [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md), then copy [templates/codex-mcp-config.md](./templates/codex-mcp-config.md). |
-| Claude Code | Install generic rules from [CLAUDE.template.md](/_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md), merge [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md), then run the commands from [templates/claude-mcp-config.md](./templates/claude-mcp-config.md). |
-| OpenCode | Install generic rules from [AGENTS.template.md](/_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md), merge [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md), then copy [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md). |
-| Antigravity | Install generic rules from [GEMINI.template.md](/_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md), merge [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md), then copy [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md). |
+| Codex | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), merge [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md), then copy [templates/codex-mcp-config.md](./templates/codex-mcp-config.md). |
+| Claude Code | Install generic rules from [CLAUDE.template.md](../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md), merge [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md), then run the commands from [templates/claude-mcp-config.md](./templates/claude-mcp-config.md). |
+| OpenCode | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), merge [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md), then copy [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md). |
+| Antigravity | Install generic rules from [GEMINI.template.md](../../../development/ai-coding-agent-rules/_main/GEMINI.template.md), merge [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md), then copy [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md). |
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
@@ -138,7 +138,7 @@ There is intentionally no separate local upgrade script. The local PowerShell bl
 If you are lazy and just want the safest normal path:
 
 1. Open [1. Local Setup](./1.%20local%20setup.md).
-2. Install generic rules from [AGENTS.template.md](/_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md).
+2. Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md).
 3. Merge [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md) into the same `AGENTS.md`.
 4. Use [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
 5. Ignore Claude Code, OpenCode, and Antigravity until Codex works.

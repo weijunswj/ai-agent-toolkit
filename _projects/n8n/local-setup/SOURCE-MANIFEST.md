@@ -18,6 +18,7 @@
 
 - `skills/n8n-local-setup/references/n8n/local-setup.md`, `upgrading.md`, `tunnelling.md`, `docker-compose-ngrok.md`, and `vps-hosting.md` are full guide copies generated from `_main/*.md`.
 - `skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md`, `opencode.md`, and `antigravity.md` are full integration guide copies generated from `_main/*.md`.
+- Copied n8n setup and platform guides keep their full source bodies; source-side links to generic baseline agent-rule templates are deterministically rewritten to sibling `skills/ai-coding-agent-rules/` paths in the published skill folder for portability.
 - Platform overview/router/index files that do not have preserved full source guides are generated from `curated_output_for_ai/references/`. The ChatGPT web, Claude web, and Codex platform files are short boundary-reviewed routers, not replacements for full runtime setup guides.
 - Small compatibility shims generated from `curated_output_for_ai/reference-link-shims/` keep original relative links in full-fidelity copied guides resolvable inside the copyable skill folder.
 - `_main/_partials/n8n-mcp-rules.md` is the n8n-specific source component for the source-side add-on template.

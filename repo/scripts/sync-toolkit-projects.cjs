@@ -361,6 +361,17 @@ function validateProjectShape(errors, relPath) {
     if (output.fidelity && !supportedFidelityValues.has(output.fidelity)) {
       fail(errors, `${project.id} unsupported output fidelity: ${output.fidelity}`);
     }
+    if (output.text_rewrites !== undefined) {
+      if (!Array.isArray(output.text_rewrites)) {
+        fail(errors, `${project.id} output text_rewrites must be an array: ${output.output}`);
+      } else {
+        for (const rewrite of output.text_rewrites) {
+          if (!rewrite || typeof rewrite.from !== 'string' || typeof rewrite.to !== 'string') {
+            fail(errors, `${project.id} output text_rewrites entries require from and to strings: ${output.output}`);
+          }
+        }
+      }
+    }
     if (output.kind === 'linked') {
       if (output.source || output.sources) fail(errors, `${project.id} linked output must not set source or sources: ${output.output}`);
       if (!fs.existsSync(resolveRel(output.output))) fail(errors, `${project.id} linked output missing: ${output.output}`);
@@ -667,6 +678,18 @@ function addMarkdownNotice(text, project, relPaths) {
   return normalized.slice(0, frontMatterEnd) + '\n' + notice + normalized.slice(frontMatterEnd).trimStart().trimEnd() + '\n';
 }
 
+function applyTextRewrites(text, output) {
+  if (!Array.isArray(output.text_rewrites) || !output.text_rewrites.length) return text;
+  let rewritten = text;
+  for (const rewrite of output.text_rewrites) {
+    if (!rewrite || typeof rewrite.from !== 'string' || typeof rewrite.to !== 'string') {
+      throw new Error(`${output.output} text_rewrites entries require from and to strings`);
+    }
+    rewritten = rewritten.split(rewrite.from).join(rewrite.to);
+  }
+  return rewritten;
+}
+
 function expectedTextOutput(project, output, rels) {
   if (output.kind === 'extract') {
     const raw = readText(rels[0]);
@@ -721,10 +744,11 @@ function expectedTextOutput(project, output, rels) {
   if (output.kind === 'json' || path.extname(output.output).toLowerCase() === '.json') {
     return JSON.stringify(JSON.parse(raw), null, 2) + '\n';
   }
+  const rewrittenRaw = applyTextRewrites(raw, output);
   if (path.extname(output.output).toLowerCase() === '.md' && output.notice !== false) {
-    return addMarkdownNotice(raw, project, rels[0]);
+    return addMarkdownNotice(rewrittenRaw, project, rels[0]);
   }
-  return raw.trimEnd() + '\n';
+  return rewrittenRaw.trimEnd() + '\n';
 }
 
 function expandRecipe(project, output, linked) {
