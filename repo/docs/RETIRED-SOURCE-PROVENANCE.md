@@ -82,7 +82,7 @@ Migrated:
 - n8n MCP workflow safety rules into `_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md`; the n8n local setup skill now publishes only the n8n add-on template from this source.
 - MCP config templates into `skills/n8n-local-setup/templates/mcp-configs/`.
 - Deterministic agent-rule generator into `repo/scripts/build-agent-rule-templates.ps1`.
-- CMD generator wrapper into `repo/scripts/- build-agent-rule-templates.cmd`.
+- CMD generator wrapper into `repo/scripts/_build-agent-rule-templates.cmd`.
 - Scoped generated-template CI behavior into `.github/workflows/build-agent-rule-templates.yml`.
 
 Intentionally not migrated:

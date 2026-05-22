@@ -28,12 +28,22 @@ Live import/export helper entry points are not run from this toolkit repo during
 - `prepare-n8n-live-import.cjs`
 - `compare-n8n-workflow-credentials.cjs`
 - `should-import-n8n-workflow.cjs`
-- `- export-n8n-workflows-live.cmd`
-- `- import-n8n-workflows-live.cmd`
+- `_export-n8n-workflows-live.cmd`
+- `_import-n8n-workflows-live.cmd`
 
 ## Wrapper Working Directory
 
 The `.cmd` wrappers invoke their co-located PowerShell scripts with `%~dp0<name>.ps1` and do not change directory themselves. The PowerShell scripts resolve and set their working directory from their script location.
+
+## Import Restart Warnings
+
+`import-n8n-workflows-live.ps1` may print restart warnings when active or scheduled live workflows were touched. For Docker-backed n8n, pass `-RestartContainerAfterImport` to restart the configured container automatically after a successful import when those warnings exist:
+
+```powershell
+.\import-n8n-workflows-live.ps1 -WorkflowDir n8n-workflows -RestartContainerAfterImport
+```
+
+The direct `_import-n8n-workflows-live.cmd` wrapper prompts whether to enable that switch before each run. The helper never restarts during `-DryRun`, and it does not restart when no imported workflow needs the restart warning.
 
 ## Intended Scoped Writes
 

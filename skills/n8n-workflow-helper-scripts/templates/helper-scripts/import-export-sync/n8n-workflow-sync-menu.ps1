@@ -211,8 +211,8 @@ function Read-SkipCredentialBindingRefresh {
 function Read-RestartContainerAfterImport {
   Write-Section "RestartContainerAfterImport"
   Write-Host "- Meaning: Restart Docker n8n after import when active/scheduled workflows were touched."
-  Write-Host "- Recommended: No by default."
-  Write-Host "- Effect: Runs docker restart <Container>."
+  Write-Host "- Recommended: Yes for local Docker imports when a short n8n restart is acceptable; no for shared or production instances."
+  Write-Host "- Effect: Runs docker restart <Container> only after a successful import when restart warnings exist."
   Write-Host "- Risk: Medium because it interrupts local n8n."
   Write-Host "- Use when: Schedule/cron trigger warning appears and this is local/staging."
   return Read-YesNo "Use -RestartContainerAfterImport?" $true

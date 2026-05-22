@@ -6,7 +6,7 @@ on:
       - _projects/development/ai-coding-agent-rules/_main/_partials/**
       - _projects/n8n/local-setup/_main/_partials/**
       - repo/scripts/build-agent-rule-templates.ps1
-      - repo/scripts/- build-agent-rule-templates.cmd
+      - repo/scripts/_build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
   push:
     branches:
@@ -15,7 +15,7 @@ on:
       - _projects/development/ai-coding-agent-rules/_main/_partials/**
       - _projects/n8n/local-setup/_main/_partials/**
       - repo/scripts/build-agent-rule-templates.ps1
-      - repo/scripts/- build-agent-rule-templates.cmd
+      - repo/scripts/_build-agent-rule-templates.cmd
       - .github/workflows/build-agent-rule-templates.yml
   workflow_dispatch:
 

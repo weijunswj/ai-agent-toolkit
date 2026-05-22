@@ -339,7 +339,7 @@ test('build agent rule templates workflow tracks and verifies split template out
     '_projects/development/ai-coding-agent-rules/_main/_partials/**',
     '_projects/n8n/local-setup/_main/_partials/**',
     'repo/scripts/build-agent-rule-templates.ps1',
-    'repo/scripts/- build-agent-rule-templates.cmd',
+    'repo/scripts/_build-agent-rule-templates.cmd',
     '.github/workflows/build-agent-rule-templates.yml'
   ];
   const verifiedPaths = [
@@ -1597,15 +1597,17 @@ test('validator rejects pack YAML files in temp dirs', () => {
   assert.match(result.stderr, /not allowed/);
 });
 
-test('validator rejects forbidden local files and folders', () => {
+test('validator rejects forbidden files but tolerates ignored local runtime folders', () => {
   const cwd = tempCopy();
   fs.writeFileSync(path.join(cwd, '.env'), 'EXAMPLE=unsafe\n');
   fs.mkdirSync(path.join(cwd, '.n8n-local'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, '.n8n-local', '.env.n8n-archived-workflow-cleanup'), 'N8N_API_KEY="local-secret"\n');
   fs.writeFileSync(path.join(cwd, 'sample.live-export.json'), '{}\n');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Forbidden env file/);
-  assert.match(result.stderr, /Forbidden directory/);
+  assert.doesNotMatch(result.stderr, /Forbidden directory present: \.n8n-local/);
+  assert.doesNotMatch(result.stderr, /Unexpected root entry: \.n8n-local/);
   assert.match(result.stderr, /Live n8n import\/export file/);
 });
 

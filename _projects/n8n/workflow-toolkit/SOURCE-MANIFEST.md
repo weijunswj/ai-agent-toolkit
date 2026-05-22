@@ -5,7 +5,6 @@
 - `README.md`
 - `helper-scripts/sanitizer/**`
 - `helper-scripts/import-export-sync/**`
-- `helper-scripts/workflow-maintenance/**`
 - `workflow-templates/**`
 
 ## AI-Facing Surfaces

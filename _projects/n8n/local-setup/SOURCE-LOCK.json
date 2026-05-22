@@ -67,10 +67,11 @@
       "notes": "Toolkit-adapted after migration to document the generic ai-coding-agent-rules split, the n8n add-on template, and safe copy/merge into target repo root active filenames."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "scripts/- build-templates.cmd",
-      "project_path": "_projects/n8n/local-setup/_main/scripts/- build-templates.cmd",
-      "source_blob_sha": "9cfed9002678d4b1e868f98ce2b3c0eb23887e70"
+      "project_path": "_projects/n8n/local-setup/_main/scripts/_build-templates.cmd",
+      "source_blob_sha": "9cfed9002678d4b1e868f98ce2b3c0eb23887e70",
+      "notes": "Wrapper path and console formatting adapted after migration to use an underscore-prefixed entrypoint and clearer colored status output."
     },
     {
       "mode": "adapted",

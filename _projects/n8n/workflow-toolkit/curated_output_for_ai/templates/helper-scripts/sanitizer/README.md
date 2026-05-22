@@ -22,7 +22,7 @@ Both folders must remain ignored and uncommitted. Review sanitized outputs befor
 ## Entry Points
 
 - `sanitise-n8n-template.ps1`
-- `- sanitise-n8n-template.cmd`
+- `_sanitise-n8n-template.cmd`
 - `prepare-n8n-template.js`
 
 ## Wrapper Working Directory
