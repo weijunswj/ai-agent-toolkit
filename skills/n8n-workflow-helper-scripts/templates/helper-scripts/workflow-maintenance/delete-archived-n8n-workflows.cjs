@@ -55,7 +55,7 @@ function parseClearBoolean(value) {
 
   const normalized = value.trim().toLowerCase();
   if (['true', '1', 'yes', 'archived'].includes(normalized)) return true;
-  if (['false', '0', 'no', 'not_archived', 'not-archived', 'active', ''].includes(normalized)) return false;
+  if (['false', '0', 'no', 'not_archived', 'not-archived', ''].includes(normalized)) return false;
   return null;
 }
 

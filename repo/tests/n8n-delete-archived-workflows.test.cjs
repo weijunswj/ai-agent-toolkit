@@ -200,6 +200,19 @@ test('active workflows are skipped even if archived', async () => {
   assert.doesNotMatch(harness.stdout.join('\n'), /Active Archived\s+\|/);
 });
 
+test('string active status is treated as unsafe and is not deleted', async () => {
+  const harness = createHarness([
+    createJsonResponse({ data: [workflow({ id: 'wf_active_string', name: 'String Active', active: 'active' })] }),
+  ]);
+
+  const result = await harness.runWith({ argv: ['--delete', '--confirm', 'DELETE ARCHIVED WORKFLOWS'] });
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(harness.calls.map((call) => call.method), ['GET']);
+  assert.match(harness.stdout.join('\n'), /Archived candidates\s+: 0/);
+  assert.doesNotMatch(harness.stdout.join('\n'), /String Active\s+\|/);
+});
+
 test('published workflows are skipped even if archived', async () => {
   const harness = createHarness([
     createJsonResponse({ data: [workflow({ id: 'wf_published', name: 'Published Archived', published: true })] }),
