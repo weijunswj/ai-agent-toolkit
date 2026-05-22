@@ -40,7 +40,8 @@ const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
 const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']);
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
-const agentRuleSpecDocument = JSON.parse(fs.readFileSync(path.join(__dirname, 'agent-rule-template-specs.json'), 'utf8'));
+const agentRuleSpecPath = path.join(root, 'repo', 'scripts', 'agent-rule-template-specs.json');
+const agentRuleSpecDocument = JSON.parse(fs.readFileSync(agentRuleSpecPath, 'utf8'));
 
 function hydrateAgentRuleTemplateSpecs() {
   return agentRuleSpecDocument.templateSpecs.map((spec) => ({
@@ -440,6 +441,94 @@ function expectedAgentRuleSourceTemplate(spec, template) {
   return expectedAgentRuleTemplate(spec, template);
 }
 
+function normalizeWorkspaceRel(value) {
+  return path.posix.normalize(value.replace(/\\/g, '/'));
+}
+
+function hasPathTraversal(value) {
+  const slashValue = value.replace(/\\/g, '/');
+  const normalized = normalizeWorkspaceRel(value);
+  return slashValue.split('/').includes('..') || normalized === '..' || normalized.startsWith('../') || normalized.includes('/../');
+}
+
+function isAbsolutePathLike(value) {
+  return path.isAbsolute(value) || path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
+}
+
+function validateAgentRulePartialSource(errors, spec, source) {
+  if (typeof source.rel !== 'string') {
+    fail(errors, `${spec.projectId} agent-rule partial source must be a string`);
+    return;
+  }
+  if (!agentRulePartialSourceRels.has(source.rel)) {
+    fail(errors, `${spec.projectId} agent-rule partial source must be declared in agent-rule-template-specs.json: ${source.rel}`);
+  }
+  let validWorkspacePath = true;
+  if (isAbsolutePathLike(source.rel)) {
+    fail(errors, `${spec.projectId} agent-rule partial source must not be absolute: ${source.rel}`);
+    validWorkspacePath = false;
+  }
+  if (hasPathTraversal(source.rel)) {
+    fail(errors, `${spec.projectId} agent-rule partial source must not traverse outside workspace: ${source.rel}`);
+    validWorkspacePath = false;
+  }
+
+  const normalized = normalizeWorkspaceRel(source.rel);
+  if (!normalized.startsWith('_projects/')) {
+    fail(errors, `${spec.projectId} agent-rule partial source must start with _projects/: ${source.rel}`);
+    validWorkspacePath = false;
+  }
+  if (!normalized.includes('/_main/_partials/')) {
+    fail(errors, `${spec.projectId} agent-rule partial source must stay in project _main/_partials/: ${source.rel}`);
+    validWorkspacePath = false;
+  }
+  if (validWorkspacePath && !fs.existsSync(resolveRel(normalized))) {
+    fail(errors, `Missing agent-rule partial source: ${source.rel}`);
+  }
+}
+
+function validateAgentRuleTemplatePath(errors, spec, template, field, label) {
+  if (!Object.prototype.hasOwnProperty.call(template, field)) return false;
+  const value = template[field];
+  if (typeof value !== 'string' || value.trim() === '') {
+    fail(errors, `${spec.projectId} agent-rule ${label} must be a non-empty string`);
+    return true;
+  }
+  if (isAbsolutePathLike(value)) {
+    fail(errors, `${spec.projectId} agent-rule ${label} must not be absolute: ${value}`);
+  }
+  if (hasPathTraversal(value)) {
+    fail(errors, `${spec.projectId} agent-rule ${label} must not traverse outside workspace: ${value}`);
+  }
+
+  const normalized = normalizeWorkspaceRel(value);
+  if (field === 'output') {
+    if (!normalized.startsWith('_projects/') || !normalized.includes('/_main/')) {
+      fail(errors, `${spec.projectId} agent-rule output must stay under _projects/**/_main/**: ${value}`);
+    }
+  } else if (!approvedOutputPrefixes.some((prefix) => normalized.startsWith(prefix))) {
+    fail(errors, `${spec.projectId} agent-rule published output must stay under skills/ or mcp/: ${value}`);
+  }
+  return true;
+}
+
+function validateAgentRuleTemplateSpecs(errors, projects) {
+  const declaredProjectIds = new Set(projects.map((project) => project.id));
+  for (const spec of agentRuleTemplateSpecDefinitions) {
+    if (!declaredProjectIds.has(spec.projectId)) continue;
+    for (const source of spec.partialSources) {
+      validateAgentRulePartialSource(errors, spec, source);
+    }
+    for (const template of spec.templates) {
+      const hasOutput = validateAgentRuleTemplatePath(errors, spec, template, 'output', 'output');
+      const hasPublishedOutput = validateAgentRuleTemplatePath(errors, spec, template, 'publishedOutput', 'published output');
+      if (!hasOutput && !hasPublishedOutput) {
+        fail(errors, `${spec.projectId} agent-rule template requires output or publishedOutput: ${template.fileName || '<unknown>'}`);
+      }
+    }
+  }
+}
+
 function validateAgentRuleSpecSources(errors, spec, project) {
   if (!project) {
     fail(errors, `${spec.projectId} agent-rule spec project is not declared`);
@@ -716,6 +805,9 @@ function validateAndSync() {
   if (!projectFiles.length) fail(errors, 'No toolkit project modules found under _projects/**/toolkit.project.json');
 
   const projects = projectFiles.map((file) => validateProjectShape(errors, file)).filter(Boolean);
+  if (errors.length) return { errors, projects, expanded: [] };
+
+  validateAgentRuleTemplateSpecs(errors, projects);
   if (errors.length) return { errors, projects, expanded: [] };
 
   const linked = linkedOutputSet(projects);
