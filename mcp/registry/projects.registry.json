@@ -97,14 +97,14 @@
     "project": {
       "name": "AI Coding Agent Rules",
       "category": "development",
-      "summary": "Generic execution-first AI coding agent rules and toolkit skill-routing templates for common agent instruction files."
+      "summary": "Generic execution-first AI coding agent rule templates plus an optional toolkit skill-routing add-on for common agent instruction files."
     },
     "surface": {
       "publish_as": "skill",
       "skill": {
         "status": "published",
         "path": "skills/ai-coding-agent-rules",
-        "summary": "Provides inert AGENTS, CLAUDE, and GEMINI templates for installing generic AI coding agent execution and toolkit skill-routing rules."
+        "summary": "Provides inert AGENTS, CLAUDE, and GEMINI generic baseline templates plus an optional toolkit skill-routing add-on."
       },
       "mcp": {
         "status": "not_applicable",
@@ -114,11 +114,12 @@
     "module_path": "_projects/development/ai-coding-agent-rules",
     "main_path": "_projects/development/ai-coding-agent-rules/_main",
     "root_surfaces": [
+      "skills/ai-coding-agent-rules/AGENTS.template.md",
+      "skills/ai-coding-agent-rules/CLAUDE.template.md",
+      "skills/ai-coding-agent-rules/GEMINI.template.md",
       "skills/ai-coding-agent-rules/README.md",
       "skills/ai-coding-agent-rules/SKILL.md",
-      "skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md",
-      "skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md",
-      "skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md"
+      "skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md"
     ]
   },
   {
@@ -211,6 +212,8 @@
       "mcp/projects/n8n-local-setup.md",
       "skills/n8n-local-setup/README.md",
       "skills/n8n-local-setup/SKILL.md",
+      "skills/n8n-local-setup/agent-rules/README.md",
+      "skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
@@ -229,8 +232,6 @@
       "skills/n8n-local-setup/references/n8n/tunnelling.md",
       "skills/n8n-local-setup/references/n8n/upgrading.md",
       "skills/n8n-local-setup/references/n8n/vps-hosting.md",
-      "skills/n8n-local-setup/templates/agent-rules/README.md",
-      "skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md",
       "skills/n8n-local-setup/templates/mcp-configs/README.md",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",

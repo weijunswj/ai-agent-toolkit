@@ -46,17 +46,13 @@ const agentRuleTemplateSpecDefinitions = [
     partialSources: [
       {
         name: 'ai-coding-agent-execution.md',
-        rel: '_projects/development/ai-coding-agent-rules/_main/templates/partials/ai-coding-agent-execution.md'
-      },
-      {
-        name: 'toolkit-skill-routing.md',
-        rel: '_projects/development/ai-coding-agent-rules/_main/templates/partials/toolkit-skill-routing.md'
+        rel: '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md'
       }
     ],
     templates: [
       {
-        source: '_main/templates/agent-rules/AGENTS.template.md',
-        output: '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
+        source: '_main/AGENTS.template.md',
+        output: '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
         title: 'AGENTS.template.md AI coding agent rules',
         audience: 'Codex or OpenCode',
         destination: 'AGENTS.md',
@@ -75,8 +71,8 @@ const agentRuleTemplateSpecDefinitions = [
         ]
       },
       {
-        source: '_main/templates/agent-rules/CLAUDE.template.md',
-        output: '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
+        source: '_main/CLAUDE.template.md',
+        output: '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
         title: 'CLAUDE.template.md AI coding agent rules',
         audience: 'Claude Code',
         destination: 'CLAUDE.md',
@@ -90,8 +86,8 @@ const agentRuleTemplateSpecDefinitions = [
         ]
       },
       {
-        source: '_main/templates/agent-rules/GEMINI.template.md',
-        output: '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md',
+        source: '_main/GEMINI.template.md',
+        output: '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
         title: 'GEMINI.template.md AI coding agent rules',
         audience: 'Gemini CLI or Antigravity',
         destination: 'GEMINI.md',
@@ -107,17 +103,48 @@ const agentRuleTemplateSpecDefinitions = [
     ]
   },
   {
-    projectId: 'n8n.local-setup',
+    projectId: 'development.ai-coding-agent-rules',
     partialSources: [
       {
-        name: 'n8n-mcp-rules.md',
-        rel: '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
+        name: 'toolkit-skill-routing.md',
+        rel: '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md'
       }
     ],
     templates: [
       {
-        source: '_main/templates/agent-rules/n8n-mcp-rules.template.md',
-        output: '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md',
+        source: '_main/TOOLKIT-SKILL-ROUTING.template.md',
+        output: '_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md',
+        title: 'TOOLKIT-SKILL-ROUTING.template.md optional toolkit skill-routing add-on',
+        audience: "Codex, OpenCode, Claude Code, Gemini CLI, or Antigravity when this toolkit's skills folders are installed or copied",
+        destination: 'AGENTS.md, CLAUDE.md, or GEMINI.md',
+        destinationDisplay: '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`',
+        activeNameText: 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`',
+        installMode: 'toolkit_add_on',
+        sourceBaselineTemplatePaths: [
+          '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
+        ],
+        baselineTemplatePaths: [
+          'skills/ai-coding-agent-rules/AGENTS.template.md',
+          'skills/ai-coding-agent-rules/CLAUDE.template.md',
+          'skills/ai-coding-agent-rules/GEMINI.template.md'
+        ]
+      }
+    ]
+  },
+  {
+    projectId: 'n8n.local-setup',
+    partialSources: [
+      {
+        name: 'n8n-mcp-rules.md',
+        rel: '_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md'
+      }
+    ],
+    templates: [
+      {
+        source: '_main/agent-rules/n8n-mcp-rules.template.md',
+        output: '_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md',
         title: 'n8n-mcp-rules.template.md n8n MCP workflow rules add-on',
         audience: 'Codex, OpenCode, Claude Code, Gemini CLI, or Antigravity after generic agent rules are installed',
         destination: 'AGENTS.md, CLAUDE.md, or GEMINI.md',
@@ -125,14 +152,14 @@ const agentRuleTemplateSpecDefinitions = [
         activeNameText: 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`',
         installMode: 'add_on',
         sourceBaselineTemplatePaths: [
-          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
-          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
-          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md'
+          '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
         ],
         baselineTemplatePaths: [
-          'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
-          'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
-          'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md'
+          'skills/ai-coding-agent-rules/AGENTS.template.md',
+          'skills/ai-coding-agent-rules/CLAUDE.template.md',
+          'skills/ai-coding-agent-rules/GEMINI.template.md'
         ]
       }
     ]
@@ -439,19 +466,35 @@ function expectedAgentRuleTemplate(spec, template, options = {}) {
     `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because ${templateActiveNameText(template)}.`
   ];
 
-  if (template.installMode === 'add_on') {
+  if (template.installMode === 'add_on' || template.installMode === 'toolkit_add_on') {
     bodyParts.push('');
-    bodyParts.push('This is an n8n-specific add-on. It does not include the generic AI coding agent baseline rules.');
-    bodyParts.push('');
-    bodyParts.push('First install or copy the generic baseline rules from:');
+    if (template.installMode === 'toolkit_add_on') {
+      bodyParts.push('This optional add-on contains toolkit skill-routing rules only.');
+      bodyParts.push('');
+      bodyParts.push("Use it only when the target environment has this toolkit's `skills/` folders installed or copied.");
+      bodyParts.push('');
+      bodyParts.push('Do not use it as a standalone replacement for generic AGENTS/CLAUDE/GEMINI rules.');
+      bodyParts.push('');
+      bodyParts.push('First install or copy the generic baseline rules from:');
+    } else {
+      bodyParts.push('This is an n8n-specific add-on. It does not include the generic AI coding agent baseline rules.');
+      bodyParts.push('');
+      bodyParts.push('First install or copy the generic baseline rules from:');
+    }
     bodyParts.push('');
     for (const baselinePath of baselinePaths) bodyParts.push(`- ${relativeMarkdownLink(outputPath, baselinePath)}`);
     bodyParts.push('');
-    bodyParts.push('Then merge the fenced payload from this file under the generic rules in the same active instruction file.');
-    bodyParts.push('');
-    bodyParts.push('Do not use this add-on alone to create a fresh active instruction file.');
-    bodyParts.push('');
-    bodyParts.push(`If the target repo already has ${destinationDisplay}, do not overwrite it. Merge manually or produce a diff/merge plan.`);
+    if (template.installMode === 'toolkit_add_on') {
+      bodyParts.push('Then merge the fenced payload from this file under the generic baseline in the same active instruction file.');
+      bodyParts.push('');
+      bodyParts.push('Do not overwrite existing active instruction files. Merge manually or produce a diff/merge plan.');
+    } else {
+      bodyParts.push('Then merge the fenced payload from this file under the generic rules in the same active instruction file.');
+      bodyParts.push('');
+      bodyParts.push('Do not use this add-on alone to create a fresh active instruction file.');
+      bodyParts.push('');
+      bodyParts.push(`If the target repo already has ${destinationDisplay}, do not overwrite it. Merge manually or produce a diff/merge plan.`);
+    }
   } else {
     bodyParts.push('');
     bodyParts.push(`Copy or merge the fenced payload into the target repo root as ${destinationDisplay} only when the user explicitly wants ${template.installSubject} installed.`);
@@ -594,11 +637,12 @@ function publishedAgentRuleTemplateSpec(project, output, rels) {
 
 function publishedAddOnAgentRuleTemplateSpec(project, output, rels) {
   if (output.kind !== 'copy' || rels.length !== 1) return null;
-  const spec = agentRuleTemplateSpecDefinitions.find((candidate) => candidate.projectId === project.id);
-  if (!spec) return null;
-  const template = spec.templates.find((candidate) => candidate.output === rels[0] && candidate.installMode === 'add_on');
-  if (!template) return null;
-  return { spec, template };
+  for (const spec of agentRuleTemplateSpecDefinitions) {
+    if (spec.projectId !== project.id) continue;
+    const template = spec.templates.find((candidate) => candidate.output === rels[0] && (candidate.installMode === 'add_on' || candidate.installMode === 'toolkit_add_on'));
+    if (template) return { spec, template };
+  }
+  return null;
 }
 
 function addSkillRoutingToAgentRuleTemplate(text, outputPath, skillRoutingSource) {

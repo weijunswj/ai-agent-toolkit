@@ -18,7 +18,7 @@ The copied skill folder includes full-fidelity local setup references under `ref
 
 For generic AI coding agent rules, install `skills/ai-coding-agent-rules`.
 
-For n8n-specific workflow and MCP safety rules, use `templates/agent-rules/n8n-mcp-rules.template.md` from this skill as an add-on after the generic baseline.
+For n8n-specific workflow and MCP safety rules, use `agent-rules/n8n-mcp-rules.template.md` from this skill as an add-on after the generic baseline.
 
 The `SKILL.md` file is an AI-facing published surface generated from [_projects/n8n/local-setup/curated_output_for_ai/](../../_projects/n8n/local-setup/curated_output_for_ai/). Update the curated source, then run:
 

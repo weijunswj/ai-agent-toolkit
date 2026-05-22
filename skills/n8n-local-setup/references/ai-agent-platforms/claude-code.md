@@ -75,8 +75,8 @@ claude --version
 
 ### Follow the Claude Code CLAUDE.md Setup guide:
 
-* Install or copy generic AI coding agent rules from `skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md`, then copy or merge them into the target repo root as `CLAUDE.md`.
-* Merge the n8n-specific add-on from [templates/agent-rules/n8n-mcp-rules.template.md](./templates/agent-rules/n8n-mcp-rules.template.md) into the same `CLAUDE.md`.
+* Install or copy generic AI coding agent rules from [CLAUDE.template.md](/_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md), then copy or merge them into the target repo root as `CLAUDE.md`.
+* Merge the n8n-specific add-on from [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md) into the same `CLAUDE.md`.
 * If the target repo already has `CLAUDE.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 ## 4. Create The Claude Code MCP Config

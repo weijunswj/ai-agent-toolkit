@@ -13,17 +13,12 @@ if ($Workspace) {
 $AgentRuleTemplateSpecs = @(
   @{
     ProjectId = 'development.ai-coding-agent-rules'
-    SourceSideOutputDir = '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules'
+    SourceSideOutputDir = '_projects/development/ai-coding-agent-rules/_main'
     PartialSources = @(
       @{
         Name = 'ai-coding-agent-execution.md'
-        Path = Join-Path $RepoRoot '_projects\development\ai-coding-agent-rules\_main\templates\partials\ai-coding-agent-execution.md'
-        Rel = '_projects/development/ai-coding-agent-rules/_main/templates/partials/ai-coding-agent-execution.md'
-      },
-      @{
-        Name = 'toolkit-skill-routing.md'
-        Path = Join-Path $RepoRoot '_projects\development\ai-coding-agent-rules\_main\templates\partials\toolkit-skill-routing.md'
-        Rel = '_projects/development/ai-coding-agent-rules/_main/templates/partials/toolkit-skill-routing.md'
+        Path = Join-Path $RepoRoot '_projects\development\ai-coding-agent-rules\_main\_partials\ai-coding-agent-execution.md'
+        Rel = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md'
       }
     )
     Templates = @(
@@ -77,13 +72,45 @@ $AgentRuleTemplateSpecs = @(
     )
   },
   @{
+    ProjectId = 'development.ai-coding-agent-rules'
+    SourceSideOutputDir = '_projects/development/ai-coding-agent-rules/_main'
+    PartialSources = @(
+      @{
+        Name = 'toolkit-skill-routing.md'
+        Path = Join-Path $RepoRoot '_projects\development\ai-coding-agent-rules\_main\_partials\toolkit-skill-routing.md'
+        Rel = '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md'
+      }
+    )
+    Templates = @(
+      @{
+        FileName = 'TOOLKIT-SKILL-ROUTING.template.md'
+        Title = 'TOOLKIT-SKILL-ROUTING.template.md optional toolkit skill-routing add-on'
+        Audience = 'Codex, OpenCode, Claude Code, Gemini CLI, or Antigravity when this toolkit''s skills folders are installed or copied'
+        DestinationFile = 'AGENTS.md, CLAUDE.md, or GEMINI.md'
+        DestinationDisplay = '`AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
+        ActiveNameText = 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
+        InstallMode = 'toolkit_add_on'
+        SourceBaselineTemplatePaths = @(
+          '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
+        )
+        BaselineTemplatePaths = @(
+          'skills/ai-coding-agent-rules/AGENTS.template.md',
+          'skills/ai-coding-agent-rules/CLAUDE.template.md',
+          'skills/ai-coding-agent-rules/GEMINI.template.md'
+        )
+      }
+    )
+  },
+  @{
     ProjectId = 'n8n.local-setup'
-    SourceSideOutputDir = '_projects/n8n/local-setup/_main/templates/agent-rules'
+    SourceSideOutputDir = '_projects/n8n/local-setup/_main/agent-rules'
     PartialSources = @(
       @{
         Name = 'n8n-mcp-rules.md'
-        Path = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\templates\partials\n8n-mcp-rules.md'
-        Rel = '_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md'
+        Path = Join-Path $RepoRoot '_projects\n8n\local-setup\_main\_partials\n8n-mcp-rules.md'
+        Rel = '_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md'
       }
     )
     Templates = @(
@@ -96,14 +123,14 @@ $AgentRuleTemplateSpecs = @(
         ActiveNameText = 'it is not named `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`'
         InstallMode = 'add_on'
         SourceBaselineTemplatePaths = @(
-          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
-          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
-          '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md'
+          '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+          '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
         )
         BaselineTemplatePaths = @(
-          'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
-          'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
-          'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md'
+          'skills/ai-coding-agent-rules/AGENTS.template.md',
+          'skills/ai-coding-agent-rules/CLAUDE.template.md',
+          'skills/ai-coding-agent-rules/GEMINI.template.md'
         )
       }
     )
@@ -192,23 +219,39 @@ function Write-GeneratedTemplate {
     "This file is inert while it keeps the ``.template.md`` filename. It is safe to keep inside a skill folder because $activeNameText."
   )
 
-  if ($Template.ContainsKey('InstallMode') -and $Template.InstallMode -eq 'add_on') {
+  if ($Template.ContainsKey('InstallMode') -and ($Template.InstallMode -eq 'add_on' -or $Template.InstallMode -eq 'toolkit_add_on')) {
     $outputRelPath = "$($Spec.SourceSideOutputDir)/$($Template.FileName)"
     $baselineTemplatePaths = if ($Template.ContainsKey('SourceBaselineTemplatePaths')) { @($Template.SourceBaselineTemplatePaths) } else { @($Template.BaselineTemplatePaths) }
     $bodyParts += ""
-    $bodyParts += "This is an n8n-specific add-on. It does not include the generic AI coding agent baseline rules."
-    $bodyParts += ""
-    $bodyParts += "First install or copy the generic baseline rules from:"
+    if ($Template.InstallMode -eq 'toolkit_add_on') {
+      $bodyParts += "This optional add-on contains toolkit skill-routing rules only."
+      $bodyParts += ""
+      $bodyParts += "Use it only when the target environment has this toolkit's ``skills/`` folders installed or copied."
+      $bodyParts += ""
+      $bodyParts += "Do not use it as a standalone replacement for generic AGENTS/CLAUDE/GEMINI rules."
+      $bodyParts += ""
+      $bodyParts += "First install or copy the generic baseline rules from:"
+    } else {
+      $bodyParts += "This is an n8n-specific add-on. It does not include the generic AI coding agent baseline rules."
+      $bodyParts += ""
+      $bodyParts += "First install or copy the generic baseline rules from:"
+    }
     $bodyParts += ""
     foreach ($baselinePath in $baselineTemplatePaths) {
       $bodyParts += "- $(Format-RelativeMarkdownLink -FromFile $outputRelPath -ToFile $baselinePath)"
     }
     $bodyParts += ""
-    $bodyParts += "Then merge the fenced payload from this file under the generic rules in the same active instruction file."
-    $bodyParts += ""
-    $bodyParts += "Do not use this add-on alone to create a fresh active instruction file."
-    $bodyParts += ""
-    $bodyParts += "If the target repo already has $destinationDisplay, do not overwrite it. Merge manually or produce a diff/merge plan."
+    if ($Template.InstallMode -eq 'toolkit_add_on') {
+      $bodyParts += "Then merge the fenced payload from this file under the generic baseline in the same active instruction file."
+      $bodyParts += ""
+      $bodyParts += "Do not overwrite existing active instruction files. Merge manually or produce a diff/merge plan."
+    } else {
+      $bodyParts += "Then merge the fenced payload from this file under the generic rules in the same active instruction file."
+      $bodyParts += ""
+      $bodyParts += "Do not use this add-on alone to create a fresh active instruction file."
+      $bodyParts += ""
+      $bodyParts += "If the target repo already has $destinationDisplay, do not overwrite it. Merge manually or produce a diff/merge plan."
+    }
   } else {
     $bodyParts += ""
     $bodyParts += "Copy or merge the fenced payload into the target repo root as $destinationDisplay only when the user explicitly wants $($Template.InstallSubject) installed."
@@ -261,4 +304,4 @@ foreach ($spec in $AgentRuleTemplateSpecs) {
   }
 }
 
-Write-Host 'Generated generic AI coding agent templates and n8n MCP add-on template.'
+Write-Host 'Generated generic AI coding agent templates, optional toolkit skill-routing add-on, and n8n MCP add-on template.'

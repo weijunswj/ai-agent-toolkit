@@ -112,7 +112,7 @@
     {
       "mode": "exact",
       "source_path": "templates/partials/n8n-mcp-rules.md",
-      "project_path": "_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md",
+      "project_path": "_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md",
       "source_blob_sha": "ed961cd1b9a5ff25b7a077d98fa32f0e8b790e72"
     }
   ]

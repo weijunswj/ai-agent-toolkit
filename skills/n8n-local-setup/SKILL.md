@@ -29,15 +29,15 @@ Use this skill when the user needs to set up or explain local n8n, n8n-specific 
 - Use the local full-fidelity references in [references/n8n/](references/n8n/) for setup, upgrade, tunneling, Docker Compose plus ngrok, and VPS hosting details.
 - Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, and Claude web routing.
 - Use `skills/ai-coding-agent-rules` for generic AI coding agent rules.
-- Use [templates/agent-rules/n8n-mcp-rules.template.md](templates/agent-rules/n8n-mcp-rules.template.md) only as the n8n-specific add-on.
+- Use [agent-rules/n8n-mcp-rules.template.md](agent-rules/n8n-mcp-rules.template.md) only as the n8n-specific add-on.
 - Keep tokens, API keys, webhook secrets, and MCP credentials out of repo files.
 - Do not run live n8n import/export, workflow activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
 - For live n8n work, require explicit current-turn confirmation and identify the target instance first.
 
 ## Common Outputs
 
-- Generic Codex rules template: `skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md`
-- n8n rules add-on: [templates/agent-rules/n8n-mcp-rules.template.md](templates/agent-rules/n8n-mcp-rules.template.md)
+- Generic Codex rules template: `skills/ai-coding-agent-rules/AGENTS.template.md`
+- n8n rules add-on: [agent-rules/n8n-mcp-rules.template.md](agent-rules/n8n-mcp-rules.template.md)
 - Codex MCP config: [templates/mcp-configs/codex-mcp-config.md](templates/mcp-configs/codex-mcp-config.md)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
 - Upgrade reference: [references/n8n/upgrading.md](references/n8n/upgrading.md)

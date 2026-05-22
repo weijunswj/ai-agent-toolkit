@@ -20,13 +20,13 @@ Install it only after generic AI coding agent rules from `skills/ai-coding-agent
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-Generic AI coding agent rule templates live in `skills/ai-coding-agent-rules/templates/agent-rules/`.
+Generic AI coding agent rule templates live in `skills/ai-coding-agent-rules/`.
 
 Source partials are declared in the local n8n setup project manifest:
 
-- [_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md](/_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md)
+- [_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md](/_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md)
 
-The assembled source-side add-on template lives under [_projects/n8n/local-setup/_main/templates/agent-rules/](/_projects/n8n/local-setup/_main/templates/agent-rules/).
+The assembled source-side add-on template lives under [_projects/n8n/local-setup/_main/agent-rules/](/_projects/n8n/local-setup/_main/agent-rules/).
 
 Regenerate with:
 

@@ -127,8 +127,8 @@
     },
     {
       "kind": "copy",
-      "source": "_main/templates/agent-rules/n8n-mcp-rules.template.md",
-      "output": "skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md",
+      "source": "_main/agent-rules/n8n-mcp-rules.template.md",
+      "output": "skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md",
       "notes": "Published inert n8n-specific add-on template generated from the n8n MCP workflow rules partial.",
       "fidelity": "exact"
     },
@@ -193,8 +193,8 @@
     },
     {
       "kind": "curated",
-      "source": "curated_output_for_ai/templates/agent-rules/README.md",
-      "output": "skills/n8n-local-setup/templates/agent-rules/README.md",
+      "source": "curated_output_for_ai/agent-rules/README.md",
+      "output": "skills/n8n-local-setup/agent-rules/README.md",
       "notes": "Skill-local agent-rule template index generated from project-owned curated AI output.",
       "fidelity": "reviewed_entrypoint"
     }
@@ -218,7 +218,7 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
       "skills/n8n-local-setup/references",
-      "skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md",
+      "skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
@@ -228,7 +228,7 @@
       "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
-      "skills/n8n-local-setup/templates/agent-rules/README.md",
+      "skills/n8n-local-setup/agent-rules/README.md",
       "mcp/registry/projects.registry.json"
     ],
     "denied": [

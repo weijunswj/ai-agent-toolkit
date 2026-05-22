@@ -87,10 +87,11 @@ const expectedFiles = [
   '_projects/n8n/workflow-toolkit/SOURCE-LOCK.json',
   '_projects/cicd/secure-installer/SOURCE-LOCK.json',
   '_projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
-  'skills/ai-coding-agent-rules/templates/agent-rules/AGENTS.template.md',
-  'skills/ai-coding-agent-rules/templates/agent-rules/CLAUDE.template.md',
-  'skills/ai-coding-agent-rules/templates/agent-rules/GEMINI.template.md',
-  'skills/n8n-local-setup/templates/agent-rules/n8n-mcp-rules.template.md',
+  'skills/ai-coding-agent-rules/AGENTS.template.md',
+  'skills/ai-coding-agent-rules/CLAUDE.template.md',
+  'skills/ai-coding-agent-rules/GEMINI.template.md',
+  'skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md',
+  'skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md',
   'repo/scripts/build-agent-rule-templates.ps1',
   'repo/scripts/- build-agent-rule-templates.cmd',
   'repo/scripts/validate-toolkit.cjs',
@@ -133,8 +134,7 @@ const expectedDirs = [
   'skills/n8n-local-setup/references/ai-agent-platforms',
   'mcp/references',
   'skills/n8n-local-setup/references/n8n',
-  'skills/ai-coding-agent-rules/templates/agent-rules',
-  'skills/n8n-local-setup/templates/agent-rules',
+  'skills/n8n-local-setup/agent-rules',
   'skills/n8n-local-setup/templates/mcp-configs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/workflow-maintenance',
@@ -300,10 +300,11 @@ function fail(errors, message) {
 
 const autoSyncGeneratedSurfacesWorkflowPath = '.github/workflows/auto-sync-generated-surfaces.yml';
 const autoSyncGeneratedAgentRuleTemplateOutputs = [
-  '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/AGENTS.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/CLAUDE.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/templates/agent-rules/GEMINI.template.md',
-  '_projects/n8n/local-setup/_main/templates/agent-rules/n8n-mcp-rules.template.md'
+  '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md',
+  '_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md'
 ];
 
 function isAutoSyncGeneratedOutputPath(relPath) {
@@ -697,7 +698,7 @@ function validateSkillPortability(errors) {
 }
 
 function validateAgentRuleSources(errors) {
-  const rootPartialFiles = listFiles().filter((entry) => /\/templates\/agent-rules\/partials\//.test(entry.relPath));
+  const rootPartialFiles = listFiles().filter((entry) => /\/_partials\//.test(entry.relPath));
   for (const entry of rootPartialFiles) {
     if (entry.relPath.startsWith('skills/')) fail(errors, `Agent-rule partials must stay in project _main source, not published skill folders: ${entry.relPath}`);
   }
@@ -957,8 +958,8 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight skip handling for ${label}`);
   }
   const autoSyncAgentRulePartialInputs = [
-    '_projects/development/ai-coding-agent-rules/_main/templates/partials/*',
-    '_projects/n8n/local-setup/_main/templates/partials/*'
+    '_projects/development/ai-coding-agent-rules/_main/_partials/*',
+    '_projects/n8n/local-setup/_main/_partials/*'
   ];
   for (const token of autoSyncAgentRulePartialInputs) {
     if (!preflightSection.includes(token)) {
