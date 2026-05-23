@@ -284,6 +284,31 @@ test('sanitise-n8n-template.ps1 dry-run creates staging folders but writes no sa
   assert.equal(fs.readdirSync(path.join(cwd, '.sanitised')).length, 0);
 });
 
+test('sanitise-n8n-template.ps1 resolves co-located stripper script after helper rehome', { skip: !findPowerShell() }, () => {
+  const shell = findPowerShell();
+  const cwd = tempDir();
+  const helperRoot = path.join(cwd, 'helper-scripts');
+  const localSanitizerDir = path.join(helperRoot, 'sanitizer');
+  fs.cpSync(path.dirname(sanitizerPs1), localSanitizerDir, { recursive: true });
+  writeJson(path.join(helperRoot, '.to-sanitise', 'workflow.live-export.json'), safeWorkflow({
+    id: 'wf_live',
+    versionId: 'version_live',
+    tags: [{ id: 'tag_live', name: 'Live' }],
+  }));
+
+  const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(localSanitizerDir, 'sanitise-n8n-template.ps1')], {
+    cwd,
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const outputPath = path.join(helperRoot, '.sanitised', 'workflow.template.json');
+  assert.equal(fs.existsSync(outputPath), true);
+  const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+  assert.equal(Object.prototype.hasOwnProperty.call(prepared, 'versionId'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(prepared, 'tags'), false);
+});
+
 test('validate-n8n-workflows.cjs defaults to n8n-workflows', () => {
   const cwd = tempDir();
   writeJson(path.join(cwd, 'n8n-workflows', 'safe.json'), safeWorkflow());

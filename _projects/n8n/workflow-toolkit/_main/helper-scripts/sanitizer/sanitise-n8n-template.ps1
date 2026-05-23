@@ -24,7 +24,9 @@ $InputDir = ".to-sanitise"
 $OutputDir = ".sanitised"
 $InputDirFull = Join-Path $RepoRoot $InputDir
 $OutputDirFull = Join-Path $RepoRoot $OutputDir
-$StripperScript = Join-Path $RepoRoot "scripts\prepare-n8n-template.js"
+$ScriptFolderName = Split-Path -Leaf $PSScriptRoot
+$WrapperDisplayPath = Join-Path $ScriptFolderName "_sanitise-n8n-template.cmd"
+$StripperScript = Join-Path $PSScriptRoot "prepare-n8n-template.js"
 
 function Write-Section($Title) {
   Write-Host ""
@@ -48,7 +50,7 @@ function Get-OutputFileName($InputFile) {
 }
 
 Write-Section "n8n template sanitiser"
-Write-Host ("Run from   : scripts\_sanitise-n8n-template.cmd")
+Write-Host ("Run from   : {0}" -f $WrapperDisplayPath)
 Write-Host ("Input dir  : {0}" -f $InputDir)
 Write-Host ("Output dir : {0}" -f $OutputDir)
 Write-Host ("Mode       : {0}" -f ($(if ($DryRun) { "Dry run" } else { "Overwrite sanitised templates" })))
@@ -78,7 +80,7 @@ if (-not $workflowFiles -or $workflowFiles.Count -eq 0) {
   Write-Host "Put your non-stripped n8n export JSON here:"
   Write-Host "  $InputDir"
   Write-Host ""
-  Write-Host "Then go into the scripts folder and run:"
+  Write-Host ("Then go into the {0} folder and run:" -f $ScriptFolderName)
   Write-Host "  _sanitise-n8n-template.cmd"
   exit 0
 }
@@ -104,7 +106,7 @@ foreach ($workflowFile in $workflowFiles) {
   }
 
   $nodeArgs = @(
-    "scripts/prepare-n8n-template.js",
+    $StripperScript,
     $workflowFile.FullName,
     $outputFile
   )

@@ -32,7 +32,7 @@
       "source_path": "scripts/sanitise-n8n-template.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/sanitise-n8n-template.ps1",
       "source_blob_sha": "725541965ed49dabc04d4c2af93bff1b9e141384",
-      "notes": "Local wrapper filename references were updated after replacing dash-prefixed CMD entrypoints with underscore-prefixed entrypoints."
+      "notes": "Local wrapper filename references and co-located stripper script resolution were updated after replacing dash-prefixed CMD entrypoints with underscore-prefixed entrypoints and rehoming the helper from the original scripts folder."
     },
     {
       "mode": "adapted",
