@@ -2,20 +2,32 @@
 setlocal EnableExtensions
 
 :run_sanitise
-call :status Cyan "== n8n template sanitise =="
+call :banner "n8n template sanitiser" "Runs sanitise-n8n-template.ps1 from this helper folder."
 powershell -ExecutionPolicy Bypass -File "%~dp0sanitise-n8n-template.ps1" %*
 set "LAST_EXIT=%ERRORLEVEL%"
 
 echo.
 if "%LAST_EXIT%"=="0" (
-  call :status Green "Template sanitise finished successfully."
+  call :status Green "DONE  Template sanitise finished successfully."
 ) else (
-  call :status Red "Template sanitise stopped with exit code %LAST_EXIT%."
+  call :status Red "FAIL  Template sanitise stopped with exit code %LAST_EXIT%."
 )
-choice /C RE /N /M "Press R to run again or E to exit: "
+call :prompt "Press R to run again or E to exit."
+choice /C RE /N /M "> "
 if errorlevel 2 exit /b %LAST_EXIT%
 echo.
 goto run_sanitise
+
+:banner
+call :status DarkCyan "------------------------------------------------------------"
+call :status Cyan "%~1"
+call :status DarkGray "%~2"
+call :status DarkCyan "------------------------------------------------------------"
+exit /b 0
+
+:prompt
+call :status Yellow "%~1"
+exit /b 0
 
 :status
 set "AAT_STATUS_COLOR=%~1"

@@ -25,47 +25,49 @@
       "source_path": "templates/n8n/- export-n8n-workflows-live.cmd",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/_export-n8n-workflows-live.cmd",
       "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66",
-      "notes": "Wrapper path and console formatting adapted after migration to use underscore-prefixed entrypoints and clearer colored retry output."
+      "notes": "Wrapper path and console formatting adapted after migration to use the underscore-prefixed toolkit wrapper, co-located helper script resolution, and framed colored retry output."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/- import-n8n-workflows-live.cmd",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/_import-n8n-workflows-live.cmd",
       "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898",
-      "notes": "Wrapper path and console formatting adapted after migration to use underscore-prefixed entrypoints and clearer colored retry output."
+      "notes": "Wrapper path and console formatting adapted after migration to use the underscore-prefixed toolkit wrapper, co-located helper script resolution, framed colored retry output, and restart-option prompting aligned with the import helper."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/n8n/compare-n8n-workflow-credentials.cjs",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/compare-n8n-workflow-credentials.cjs",
-      "source_blob_sha": "e08a2877950c780602d0aa95c3fd18f895d66ed5"
+      "source_blob_sha": "e08a2877950c780602d0aa95c3fd18f895d66ed5",
+      "notes": "Toolkit-adapted after migration to stay aligned with the n8n workflow-toolkit helper and ignore stale node-ID credential bindings when both node name and node type differ."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/export-n8n-workflows-live.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/export-n8n-workflows-live.ps1",
       "source_blob_sha": "7cef2a3aaa3a60f66fe4ee6c83055c459be56f65",
-      "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules. Also refuses unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
+      "notes": "Toolkit-adapted after migration to stay aligned with the n8n workflow-toolkit helper, make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration, and refuse unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/import-n8n-workflows-live.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/import-n8n-workflows-live.ps1",
       "source_blob_sha": "7c124a2e2b7598bcbab3d75524ea0377008589b0",
-      "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules. Also refuses unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
+      "notes": "Toolkit-adapted after migration to stay aligned with the n8n workflow-toolkit helper, make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration, prevent dry-run hook execution, revalidate prepared workflow JSON after before-live-import hooks with explicit prepared-directory validation before live import execution, and refuse unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/n8n-workflow-sync-menu.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/n8n-workflow-sync-menu.ps1",
       "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a",
-      "notes": "Repo-root resolution was added after migration so .n8n-local command history is maintained at the repo root instead of under helper folders."
+      "notes": "Toolkit-adapted after migration to stay aligned with the n8n workflow-toolkit menu, recommend the existing RestartContainerAfterImport option for local Docker imports when restart warnings appear, and maintain .n8n-local command history at the repo root instead of under helper folders."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/n8n/prepare-n8n-live-import.cjs",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/prepare-n8n-live-import.cjs",
-      "source_blob_sha": "993af3fa2d0109a3c0f96557c4a546f0051b375c"
+      "source_blob_sha": "993af3fa2d0109a3c0f96557c4a546f0051b375c",
+      "notes": "Toolkit-adapted after migration to stay aligned with the n8n workflow-toolkit helper and skip stale node-ID credential bindings when both node name and node type differ."
     },
     {
       "mode": "exact",
@@ -84,7 +86,7 @@
       "source_path": "templates/n8n/validate-n8n-workflows.cjs",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/validate-n8n-workflows.cjs",
       "source_blob_sha": "0447740b535b9babf88babd6c9ff2e508d9fa9be",
-      "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules."
+      "notes": "Toolkit-adapted after migration to stay aligned with the n8n workflow-toolkit helper, make project-local validation-rule autoload opt-in via N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD while preserving explicit N8N_WORKFLOW_VALIDATION_RULES configuration, and add an explicit prepared-import validation flag while keeping default directory-name enforcement strict."
     },
     {
       "mode": "exact",

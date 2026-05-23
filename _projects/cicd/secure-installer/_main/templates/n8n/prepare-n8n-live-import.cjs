@@ -178,6 +178,22 @@ function migrationAllowsBinding(binding, node, migrationMap) {
   );
 }
 
+function isStaleNodeIdBinding(binding, node) {
+  return Boolean(
+    binding &&
+    node &&
+    binding.nodeId &&
+    node.id &&
+    binding.nodeId === node.id &&
+    binding.nodeName &&
+    node.name &&
+    binding.nodeName !== node.name &&
+    binding.nodeType &&
+    node.type &&
+    binding.nodeType !== node.type
+  );
+}
+
 function assertBindingCompatible(binding, node, migrationMap, allowTypeMigration) {
   assertCredentialTypesAllowed(binding, migrationMap, node.name || binding.nodeName || binding.nodeId || '(unknown node)');
 
@@ -234,8 +250,13 @@ function restoreCredentials(workflow, workflowBindings, migrationMap) {
   for (const node of workflow.nodes || []) {
     delete node.credentials;
 
-    let binding = singleMatch(bindingsById.get(node.id), 'node ID', node.name || node.id || '(unknown node)');
+    let binding = null;
     let allowTypeMigration = false;
+    const idBinding = singleMatch(bindingsById.get(node.id), 'node ID', node.name || node.id || '(unknown node)');
+
+    if (idBinding && !isStaleNodeIdBinding(idBinding, node)) {
+      binding = idBinding;
+    }
 
     if (!binding) {
       binding = singleMatch(
@@ -259,7 +280,7 @@ function restoreCredentials(workflow, workflowBindings, migrationMap) {
 
   for (const binding of bindings) {
     const exists = (workflow.nodes || []).some((node) => {
-      if (node.id === binding.nodeId) return true;
+      if (node.id === binding.nodeId && !isStaleNodeIdBinding(binding, node)) return true;
       if (node.name === binding.nodeName && node.type === binding.nodeType) return true;
       return migrationAllowsBinding(binding, node, migrationMap);
     });
@@ -352,5 +373,6 @@ module.exports = {
   selectBindingsWithMeta,
   restoreCredentials,
   restoreLiveWebhookIds,
+  isStaleNodeIdBinding,
   prepareLiveImport: main,
 };

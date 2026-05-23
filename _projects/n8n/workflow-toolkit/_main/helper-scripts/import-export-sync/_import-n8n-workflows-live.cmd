@@ -2,18 +2,19 @@
 setlocal EnableExtensions
 
 :run_import
-call :status Cyan "== n8n workflow import =="
+call :banner "n8n workflow import" "Runs import-n8n-workflows-live.ps1 from this helper folder."
 call :configure_restart %*
 powershell -ExecutionPolicy Bypass -File "%~dp0import-n8n-workflows-live.ps1" %* %RESTART_ARG%
 set "LAST_EXIT=%ERRORLEVEL%"
 
 echo.
 if "%LAST_EXIT%"=="0" (
-  call :status Green "Import finished successfully."
+  call :status Green "DONE  Import finished successfully."
 ) else (
-  call :status Red "Import stopped with exit code %LAST_EXIT%."
+  call :status Red "FAIL  Import stopped with exit code %LAST_EXIT%."
 )
-choice /C RE /N /M "Press R to run again or E to exit: "
+call :prompt "Press R to run again or E to exit."
+choice /C RE /N /M "> "
 if errorlevel 2 exit /b %LAST_EXIT%
 echo.
 goto run_import
@@ -27,16 +28,28 @@ if not "%~1"=="" (
   )
 )
 if defined HAS_RESTART_ARG (
-  call :status Green "Restart warning mode: auto-restart when needed (argument provided)."
+  call :status Green "INFO  Restart warning mode: auto-restart when needed (argument provided)."
   exit /b 0
 )
-choice /C YN /N /M "Auto-restart n8n container if restart warning is true? [Y/N]: "
+call :prompt "Auto-restart n8n container if restart warning is true?"
+choice /C YN /N /M "[Y/N] > "
 if errorlevel 2 (
-  call :status Yellow "Restart warning mode: warn only."
+  call :status Yellow "INFO  Restart warning mode: warn only."
 ) else (
   set "RESTART_ARG=-RestartContainerAfterImport"
-  call :status Green "Restart warning mode: auto-restart when needed."
+  call :status Green "INFO  Restart warning mode: auto-restart when needed."
 )
+exit /b 0
+
+:banner
+call :status DarkCyan "------------------------------------------------------------"
+call :status Cyan "%~1"
+call :status DarkGray "%~2"
+call :status DarkCyan "------------------------------------------------------------"
+exit /b 0
+
+:prompt
+call :status Yellow "%~1"
 exit /b 0
 
 :status

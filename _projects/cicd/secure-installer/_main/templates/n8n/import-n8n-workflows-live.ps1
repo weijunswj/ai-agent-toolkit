@@ -143,6 +143,22 @@ function Resolve-ProjectWorkflowHookScripts {
     }
   }
 
+  if ($env:N8N_WORKFLOW_HOOK_AUTOLOAD -match '^(?i:true|1|yes|on)$') {
+    foreach ($relativePath in @(
+      "scripts/n8n-workflow-hooks.cjs",
+      "scripts/n8n-workflow-hooks.js",
+      "scripts/n8n-workflow-hooks.ps1",
+      ".n8n-local/n8n-workflow-hooks.cjs",
+      ".n8n-local/n8n-workflow-hooks.js",
+      ".n8n-local/n8n-workflow-hooks.ps1",
+      ".n8n-workflow-hooks.cjs",
+      ".n8n-workflow-hooks.js",
+      ".n8n-workflow-hooks.ps1"
+    )) {
+      Add-HookScriptCandidate $relativePath $false
+    }
+  }
+
   $seen = @{}
   $existingScripts = @()
   foreach ($candidate in $candidates) {
@@ -850,7 +866,7 @@ Invoke-ProjectWorkflowHook "before-live-import" @{
 }
 
 Write-Section "Prepared Workflow Re-Validation"
-$preparedValidationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"), $PreparedDirPath)
+$preparedValidationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"), "--allow-prepared-dir", $PreparedDirPath)
 if ($preparedValidationResult.ExitCode -ne 0) {
   throw "Prepared workflow JSON validation failed after before-live-import hook.`n$($preparedValidationResult.Output -join "`n")"
 }

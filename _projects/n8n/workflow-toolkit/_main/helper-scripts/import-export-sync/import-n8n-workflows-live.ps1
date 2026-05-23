@@ -866,7 +866,7 @@ Invoke-ProjectWorkflowHook "before-live-import" @{
 }
 
 Write-Section "Prepared Workflow Re-Validation"
-$preparedValidationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"), $PreparedDirPath)
+$preparedValidationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"), "--allow-prepared-dir", $PreparedDirPath)
 if ($preparedValidationResult.ExitCode -ne 0) {
   throw "Prepared workflow JSON validation failed after before-live-import hook.`n$($preparedValidationResult.Output -join "`n")"
 }
