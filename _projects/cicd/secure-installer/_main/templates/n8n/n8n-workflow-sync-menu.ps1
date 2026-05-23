@@ -29,11 +29,35 @@ function Resolve-RepoRootFromScript {
 
 $RepoRoot = Resolve-RepoRootFromScript
 Set-Location $RepoRoot
+$HelperScriptDir = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$ExportHelperScript = Join-Path $HelperScriptDir "export-n8n-workflows-live.ps1"
+$ImportHelperScript = Join-Path $HelperScriptDir "import-n8n-workflows-live.ps1"
+$ValidateHelperScript = Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"
+
+function Resolve-TrustedHelperPath($Path, $Description) {
+  try {
+    return (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+  } catch {
+    throw "Trusted $Description not found: $Path"
+  }
+}
+
+$TrustedExportHelperScript = Resolve-TrustedHelperPath $ExportHelperScript "export helper"
+$TrustedImportHelperScript = Resolve-TrustedHelperPath $ImportHelperScript "import helper"
+$TrustedValidateHelperScript = Resolve-TrustedHelperPath $ValidateHelperScript "validation helper"
+$NodeCommandPath = $null
 
 $DefaultWorkflowDir = "n8n-workflows"
 $DefaultContainer = "n8n"
 $DefaultBindingsFile = ".n8n-local\n8n-credential-bindings.json"
 $PreviousCommandFile = Join-Path $RepoRoot ".n8n-local\n8n-sync-last-command.json"
+$CommandSchemaVersion = 2
+$ExportCommandName = "Export live workflows to repo"
+$ImportCommandName = "Import repo workflows to live n8n"
+$ValidateCommandName = "Validate repo workflow JSON"
+$UntrustedPreviousCommandMessage = "Saved previous command is not trusted. Clear previous command and rebuild it from the menu."
+$OldPreviousCommandMessage = "Saved previous command is from an older or untrusted format. Clear previous command and rebuild it from the menu."
+$script:CommandTrustFailureMessage = $UntrustedPreviousCommandMessage
 
 function Write-Section($Title) {
   Write-Host ""
@@ -229,8 +253,8 @@ function Read-SkipCredentialBindingRefresh {
 function Read-RestartContainerAfterImport {
   Write-Section "RestartContainerAfterImport"
   Write-Host "- Meaning: Restart Docker n8n after import when active/scheduled workflows were touched."
-  Write-Host "- Recommended: No by default."
-  Write-Host "- Effect: Runs docker restart <Container>."
+  Write-Host "- Recommended: Yes for local Docker imports when a short n8n restart is acceptable; no for shared or production instances."
+  Write-Host "- Effect: Runs docker restart <Container> only after a successful import when restart warnings exist."
   Write-Host "- Risk: Medium because it interrupts local n8n."
   Write-Host "- Use when: Schedule/cron trigger warning appears and this is local/staging."
   return Read-YesNo "Use -RestartContainerAfterImport?" $true
@@ -247,12 +271,155 @@ function Read-CommonSettings {
   }
 }
 
-function New-CommandRecord($CommandName, $Script, [string[]]$Args) {
+function Resolve-CanonicalPathOrNull($Path) {
+  if ($null -eq $Path) {
+    return $null
+  }
+  try {
+    return (Resolve-Path -LiteralPath ([string]$Path) -ErrorAction Stop).Path
+  } catch {
+    return $null
+  }
+}
+
+function Resolve-NodeCommandPath {
+  if (-not [string]::IsNullOrWhiteSpace($script:NodeCommandPath)) {
+    return $script:NodeCommandPath
+  }
+
+  $nodeCommand = Get-Command node -CommandType Application -ErrorAction Stop
+  $nodePath = [string]$nodeCommand.Source
+  if ([string]::IsNullOrWhiteSpace($nodePath)) {
+    $nodePath = [string]$nodeCommand.Path
+  }
+  $script:NodeCommandPath = (Resolve-Path -LiteralPath $nodePath -ErrorAction Stop).Path
+  return $script:NodeCommandPath
+}
+
+function Test-SafeCommandArg($Arg) {
+  if ($null -eq $Arg) {
+    return $false
+  }
+  $value = [string]$Arg
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    return $false
+  }
+  return $value -notmatch '[\x00-\x1F\x7F]'
+}
+
+function Get-RecordArgs($Record) {
+  if ($null -eq $Record -or -not ($Record.PSObject.Properties.Name -contains "args")) {
+    return $null
+  }
+
+  $args = @()
+  foreach ($arg in @($Record.args)) {
+    if (-not (Test-SafeCommandArg $arg)) {
+      return $null
+    }
+    $args += [string]$arg
+  }
+  return [string[]]$args
+}
+
+function Read-MenuArgs($Args, [string[]]$PairOptions, [string[]]$SwitchOptions, [string[]]$RequiredPairs, [hashtable]$AllowedValuesByPair) {
+  $pairs = @{}
+  $switches = @{}
+  for ($index = 0; $index -lt $Args.Count; $index += 1) {
+    $arg = [string]$Args[$index]
+    if ($PairOptions -contains $arg) {
+      if ($pairs.ContainsKey($arg)) {
+        return $null
+      }
+      $index += 1
+      if ($index -ge $Args.Count) {
+        return $null
+      }
+      $value = [string]$Args[$index]
+      if (-not (Test-SafeCommandArg $value)) {
+        return $null
+      }
+      if ($AllowedValuesByPair.ContainsKey($arg) -and -not ($AllowedValuesByPair[$arg] -contains $value)) {
+        return $null
+      }
+      $pairs[$arg] = $value
+      continue
+    }
+
+    if ($SwitchOptions -contains $arg) {
+      if ($switches.ContainsKey($arg)) {
+        return $null
+      }
+      $switches[$arg] = $true
+      continue
+    }
+
+    return $null
+  }
+
+  foreach ($required in $RequiredPairs) {
+    if (-not $pairs.ContainsKey($required)) {
+      return $null
+    }
+  }
+
+  return [PSCustomObject]@{
+    Pairs = $pairs
+    Switches = $switches
+  }
+}
+
+function Test-ExportCommandArgs([string[]]$Args) {
+  $parsed = Read-MenuArgs $Args `
+    @("-WorkflowDir", "-Container", "-BindingsFile", "-Mode", "-MissingLiveMode") `
+    @("-PublishedOnly", "-IncludeArchived", "-PreserveTags", "-DryRun") `
+    @("-WorkflowDir", "-Container", "-BindingsFile", "-Mode", "-MissingLiveMode") `
+    @{
+      "-WorkflowDir" = @($DefaultWorkflowDir)
+      "-Mode" = @("RepoTrackedOnly", "AllLive")
+      "-MissingLiveMode" = @("Fail", "Skip", "Report")
+    }
+  if ($null -eq $parsed) {
+    return $false
+  }
+  if ($parsed.Switches.ContainsKey("-IncludeArchived") -and $parsed.Pairs["-Mode"] -ne "AllLive") {
+    return $false
+  }
+  return $true
+}
+
+function Test-ImportCommandArgs([string[]]$Args) {
+  $parsed = Read-MenuArgs $Args `
+    @("-WorkflowDir", "-Container", "-BindingsFile", "-ArchivedByNameMode", "-ProjectId", "-UserId") `
+    @("-AllowMissingCredentialBindings", "-SkipCredentialBindingRefresh", "-RestartContainerAfterImport", "-DryRun") `
+    @("-WorkflowDir", "-Container", "-BindingsFile", "-ArchivedByNameMode") `
+    @{
+      "-WorkflowDir" = @($DefaultWorkflowDir)
+      "-ArchivedByNameMode" = @("CreateNew", "UpdateArchived", "Block")
+    }
+  if ($null -eq $parsed) {
+    return $false
+  }
+  if ($parsed.Pairs.ContainsKey("-ProjectId") -and $parsed.Pairs.ContainsKey("-UserId")) {
+    return $false
+  }
+  return $true
+}
+
+function Set-CommandTrustFailure($Message) {
+  $script:CommandTrustFailureMessage = $Message
+  return $false
+}
+
+function New-CommandRecord($CommandName, $CommandKind, $Script, [string[]]$Args) {
   [PSCustomObject]@{
+    schemaVersion = $CommandSchemaVersion
+    commandKind = $CommandKind
     commandName = $CommandName
     script = $Script
     args = $Args
     cwd = $RepoRoot
+    helperScriptDir = $HelperScriptDir
     createdAt = (Get-Date).ToUniversalTime().ToString("o")
     lastExitCode = $null
     lastRunAt = $null
@@ -285,6 +452,80 @@ function Load-PreviousCommand {
   return Get-Content -Raw -Path $PreviousCommandFile | ConvertFrom-Json
 }
 
+function Test-TrustedCommandRecord($Record) {
+  $script:CommandTrustFailureMessage = $UntrustedPreviousCommandMessage
+  if ($null -eq $Record) {
+    return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
+  }
+
+  foreach ($propertyName in @("schemaVersion", "commandKind", "commandName", "script", "args", "helperScriptDir")) {
+    if (-not ($Record.PSObject.Properties.Name -contains $propertyName)) {
+      if ($propertyName -eq "schemaVersion" -or $propertyName -eq "commandKind") {
+        return Set-CommandTrustFailure $OldPreviousCommandMessage
+      }
+      return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
+    }
+  }
+
+  try {
+    $recordSchemaVersion = [int]$Record.schemaVersion
+  } catch {
+    return Set-CommandTrustFailure $OldPreviousCommandMessage
+  }
+  if ($recordSchemaVersion -ne $CommandSchemaVersion) {
+    return Set-CommandTrustFailure $OldPreviousCommandMessage
+  }
+
+  $recordHelperScriptDir = Resolve-CanonicalPathOrNull $Record.helperScriptDir
+  if ($recordHelperScriptDir -ne $HelperScriptDir) {
+    return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
+  }
+
+  $recordScript = Resolve-CanonicalPathOrNull $Record.script
+  if ([string]::IsNullOrWhiteSpace($recordScript)) {
+    return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
+  }
+
+  $args = Get-RecordArgs $Record
+  if ($null -eq $args) {
+    return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
+  }
+
+  $commandKind = [string]$Record.commandKind
+  $commandName = [string]$Record.commandName
+
+  if ($commandKind -eq "export") {
+    if ($commandName -ne $ExportCommandName) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    if ($recordScript -ne $TrustedExportHelperScript) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    if (-not (Test-ExportCommandArgs $args)) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    return $true
+  }
+
+  if ($commandKind -eq "import") {
+    if ($commandName -ne $ImportCommandName) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    if ($recordScript -ne $TrustedImportHelperScript) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    if (-not (Test-ImportCommandArgs $args)) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    return $true
+  }
+
+  if ($commandKind -eq "validate") {
+    if ($commandName -ne $ValidateCommandName) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    try {
+      $trustedNodePath = Resolve-NodeCommandPath
+    } catch {
+      return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
+    }
+    if ($recordScript -ne $trustedNodePath) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    if ($args.Count -ne 2) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    $recordValidateScript = Resolve-CanonicalPathOrNull $args[0]
+    if ($recordValidateScript -ne $TrustedValidateHelperScript) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    if (-not (Test-SafeCommandArg $args[1])) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    return $true
+  }
+
+  return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
+}
+
 function Show-PreviousCommand {
   $previous = Load-PreviousCommand
   if ($null -eq $previous) {
@@ -307,6 +548,14 @@ function Command-RequiresConfirmation($Record) {
 }
 
 function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
+  if (-not (Test-TrustedCommandRecord $Record)) {
+    Write-Step "BLOCK" $script:CommandTrustFailureMessage
+    return
+  }
+
+  $args = Get-RecordArgs $Record
+  $recordScript = Resolve-CanonicalPathOrNull $Record.script
+
   Write-Section "Command"
   Write-Host (Get-CommandLine $Record)
 
@@ -323,12 +572,16 @@ function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
     }
   }
 
-  if ($Record.script -match '\.ps1$') {
-    & powershell -ExecutionPolicy Bypass -File $Record.script @($Record.args)
+  if ($Record.commandKind -eq "export" -or $Record.commandKind -eq "import") {
+    & powershell -ExecutionPolicy Bypass -File $recordScript @args
+    $exitCode = $LASTEXITCODE
+  } elseif ($Record.commandKind -eq "validate") {
+    $nodePath = Resolve-NodeCommandPath
+    & $nodePath @args
     $exitCode = $LASTEXITCODE
   } else {
-    & node @($Record.args)
-    $exitCode = $LASTEXITCODE
+    Write-Step "BLOCK" "Unknown trusted command type. Clear previous command and rebuild it from the menu."
+    return
   }
 
   Save-PreviousCommand $Record $exitCode
@@ -358,7 +611,7 @@ function Build-ExportCommand([bool]$DryRunMode) {
   if ($preserveTags) { $args += "-PreserveTags" }
   if ($DryRunMode) { $args += "-DryRun" }
 
-  return New-CommandRecord "Export live workflows to repo" ".\scripts\export-n8n-workflows-live.ps1" $args
+  return New-CommandRecord $ExportCommandName "export" $TrustedExportHelperScript $args
 }
 
 function Build-ImportCommand([bool]$DryRunMode) {
@@ -386,19 +639,24 @@ function Build-ImportCommand([bool]$DryRunMode) {
   if ($restartAfterImport) { $args += "-RestartContainerAfterImport" }
   if ($DryRunMode) { $args += "-DryRun" }
 
-  return New-CommandRecord "Import repo workflows to live n8n" ".\scripts\import-n8n-workflows-live.ps1" $args
+  return New-CommandRecord $ImportCommandName "import" $TrustedImportHelperScript $args
 }
 
 function Build-ValidateCommand {
   Show-CommonSettingExplanations
   $workflowDir = Read-Default "WorkflowDir" $DefaultWorkflowDir
-  return New-CommandRecord "Validate repo workflow JSON" "node" @("scripts/validate-n8n-workflows.cjs", $workflowDir)
+  $nodePath = Resolve-NodeCommandPath
+  return New-CommandRecord $ValidateCommandName "validate" $nodePath @($TrustedValidateHelperScript, $workflowDir)
 }
 
 function Invoke-UsePrevious {
   $previous = Load-PreviousCommand
   if ($null -eq $previous) {
     Write-Step "INFO" "No previous command is saved."
+    return
+  }
+  if (-not (Test-TrustedCommandRecord $previous)) {
+    Write-Step "BLOCK" $script:CommandTrustFailureMessage
     return
   }
   Invoke-CommandRecord $previous ([bool]$Yes)
