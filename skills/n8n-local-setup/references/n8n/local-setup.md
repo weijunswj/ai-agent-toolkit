@@ -44,6 +44,8 @@ npm -v
 ### Paste this whole re-runnable block into PowerShell to pull the image, recreate the container, and start n8n.
 
 * Optional: Set `$WEBHOOK_URL` as your domain URL if you need to ( E.g. `$WEBHOOK_URL = "https://n8n.yourdomain.com/"` ).
+* Local development should bind to loopback (`127.0.0.1`) by default so your n8n container is not exposed to the network.
+* Public access is intentionally out-of-scope here. If you need public access, use the dedicated tunneling/VPS docs and review auth, firewall, HTTPS/tunnel, and credential risks first.
 * `N8N_PROXY_HOPS=1` is included so the same command shape also works when you later move behind a tunnel or reverse proxy.
 
 ```powershell
@@ -66,7 +68,7 @@ docker rm $CONTAINER_NAME 2>$null
 docker volume create $VOLUME_NAME | Out-Null
 
 docker run -d --name $CONTAINER_NAME `
-  -p "${HOST_PORT}:${CONTAINER_PORT}" `
+  -p "127.0.0.1:${HOST_PORT}:${CONTAINER_PORT}" `
   -e "GENERIC_TIMEZONE=$TZ" `
   -e "TZ=$TZ" `
   -e "N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true" `

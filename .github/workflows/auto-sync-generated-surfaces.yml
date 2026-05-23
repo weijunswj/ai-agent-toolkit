@@ -87,7 +87,7 @@ jobs:
 
             case "$path" in
               _projects/*/_main/*|repo/docs/*|repo/scripts/*|repo/tests/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
-                echo "::error file=$path::Auto-sync failed closed: this PR mixes deterministic generated-surface inputs with unsafe paths: ${path}. Generated outputs must be committed by the author/Codex and verified by npm run validate:all."
+                echo "::error file=${path}::Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate: ${path}. Commit generated outputs manually and rely on the normal read-only Validate workflow."
                 exit 1
                 ;;
             esac

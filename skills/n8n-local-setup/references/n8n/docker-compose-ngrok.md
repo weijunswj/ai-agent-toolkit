@@ -156,8 +156,9 @@ services:
     image: docker.n8n.io/n8nio/n8n:stable
     container_name: n8n
     restart: unless-stopped
+    # Bind local n8n to loopback. ngrok provides the public HTTPS endpoint.
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     environment:
       - TZ=Asia/Singapore
       - GENERIC_TIMEZONE=Asia/Singapore
@@ -178,6 +179,8 @@ Important:
 * `container_name: n8n` keeps the same container name.
 * `n8n_data` keeps the same existing Docker volume.
 * `external: true` tells Compose to reuse the existing volume instead of creating a new project-scoped volume.
+* Local Compose + ngrok should bind n8n to loopback; ngrok provides the public HTTPS endpoint.
+* Do not expose the Docker port directly to LAN or public interfaces unless you are deliberately hosting with proper authentication, firewall, and HTTPS safeguards.
 * `WEBHOOK_URL=${WEBHOOK_URL}` lets the helper script write the current ngrok URL into `.env`.
 
 ---
