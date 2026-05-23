@@ -67,7 +67,7 @@ Product repos own product code, product workflows, product config, and customer 
 
 If historical source provenance needs review, use [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md). Do not claim provenance from a source that was not inspected.
 
-For active third-party projects, read `SOURCE-LOCK.json` before discussing upstream tracking. Scheduled source-watch checks must take upstream repo, source ref, locked commit, `source_update_policy`, attribution requirement, allowlisted files, and exact blob pins from the source lock. Retired internal source locks are historical provenance only and are not active update candidates.
+For active third-party projects, read `SOURCE-LOCK.json` before discussing upstream tracking. Scheduled source-watch checks must take upstream repo, source ref, locked commit, `source_update_policy`, attribution requirement, allowlisted files, and exact blob pins from the source lock. Retired internal source locks are historical provenance only and are not active update candidates. Source-watch notification PRs are review prompts only; do not copy upstream files, update pins, execute upstream code, or treat the notification PR as approval to change source.
 
 ## Validation Strategy
 

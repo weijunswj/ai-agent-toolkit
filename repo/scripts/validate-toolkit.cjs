@@ -24,6 +24,10 @@ const registryYamlText = 'reg' + 'istry/*.' + 'yaml';
 const packYamlText = 'pack.' + 'yaml';
 const removedForAiPathPattern = new RegExp('(^|[^A-Za-z0-9_])' + 'for_' + 'ai\\/');
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 const expectedFiles = [
   'README.md',
   'AGENTS.md',
@@ -107,6 +111,7 @@ const expectedFiles = [
   'repo/scripts/audit-project-source-locks.cjs',
   'repo/scripts/audit-published-surfaces.cjs',
   'repo/scripts/watch-project-sources.cjs',
+  'repo/scripts/check-project-source-updates.cjs',
   'repo/scripts/package-skills.cjs',
   'repo/scripts/package-packs.cjs',
   'repo/scripts/audit-skill-portability.cjs',
@@ -116,6 +121,7 @@ const expectedFiles = [
   'repo/docs/published-surface-audit-baseline.json',
   '.github/workflows/auto-sync-generated-surfaces.yml',
   '.github/workflows/source-watch-plan.yml',
+  '.github/workflows/source-watch-pr.yml',
   '.github/workflows/validate.yml'
 ];
 
@@ -328,6 +334,8 @@ function fail(errors, message) {
 }
 
 const autoSyncGeneratedSurfacesWorkflowPath = '.github/workflows/auto-sync-generated-surfaces.yml';
+const sourceWatchPrWorkflowPath = '.github/workflows/source-watch-pr.yml';
+const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.';
 const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
@@ -1180,21 +1188,103 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
 
 function validateWorkflows(errors) {
   const workflowFiles = listFiles().filter((entry) => entry.relPath.startsWith('.github/workflows/') && /\.ya?ml$/i.test(entry.relPath));
+  const scheduledSourceWatchWorkflows = [];
   for (const entry of workflowFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
     const isAutoSyncGeneratedSurfacesWorkflow = entry.relPath === autoSyncGeneratedSurfacesWorkflowPath;
-    const isSourceWatchWorkflow = entry.relPath.endsWith('source-watch-plan.yml');
+    const isSourceWatchPlanWorkflow = entry.relPath === '.github/workflows/source-watch-plan.yml';
+    const isSourceWatchPrWorkflow = entry.relPath === sourceWatchPrWorkflowPath;
     if (!/^permissions:\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
-    if (/contents:\s*write/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
-    if (/pull-requests:\s*write/i.test(text)) fail(errors, `${entry.relPath} uses pull-requests: write`);
-    if (/auto-merge|gh\s+pr\s+merge/i.test(text)) fail(errors, `${entry.relPath} contains forbidden merge behavior`);
-    if (/git\s+commit|git\s+push/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
-    if (isSourceWatchWorkflow && !/^name:\s*Source Watch Advisory Plan\s*$/m.test(text)) {
+    if (/contents:\s*write/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
+    if (/pull-requests:\s*write/i.test(text) && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} uses pull-requests: write`);
+    if (/gh\s+pr\s+merge/i.test(text) || (/auto-merge/i.test(text) && !/No auto-merge is allowed\./.test(text))) {
+      fail(errors, `${entry.relPath} contains forbidden merge behavior`);
+    }
+    if (/git\s+commit|git\s+push/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
+    if (isSourceWatchPlanWorkflow && !/^name:\s*Source Watch Advisory Plan\s*$/m.test(text)) {
       fail(errors, `${entry.relPath} workflow name must be advisory/read-only`);
     }
+    if (isSourceWatchPlanWorkflow && /^\s{2}schedule:\s*$/m.test(text)) {
+      fail(errors, `${entry.relPath} must stay manual-only; scheduled source-watch notifications belong in ${sourceWatchPrWorkflowPath}`);
+    }
+    if (isSourceWatchPrWorkflow) validateSourceWatchPrWorkflow(entry, text, errors);
     if (isAutoSyncGeneratedSurfacesWorkflow) validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors);
-    if (entry.relPath.endsWith('safe-source-update.yml') && !/issues:\s*write/i.test(text)) {
-      fail(errors, `${entry.relPath} should use issues: write for issue summaries`);
+    if (entry.relPath.endsWith('safe-source-update.yml')) {
+      fail(errors, `${entry.relPath} has been retired; source update notifications must use PRs, not issues`);
+    }
+    if (/\bsource[- ]watch\b/i.test(`${entry.relPath}\n${text}`) && /^\s{2}schedule:\s*$/m.test(text)) {
+      scheduledSourceWatchWorkflows.push(entry.relPath);
+    }
+  }
+  if (scheduledSourceWatchWorkflows.length !== 1 || scheduledSourceWatchWorkflows[0] !== sourceWatchPrWorkflowPath) {
+    fail(errors, `${sourceWatchPrWorkflowPath} must be the only scheduled source-watch workflow`);
+  }
+}
+
+function validateSourceWatchPrWorkflow(entry, text, errors) {
+  if (!/^name:\s*Source Watch PR Notifier\s*$/m.test(text)) {
+    fail(errors, `${entry.relPath} workflow name must be Source Watch PR Notifier`);
+  }
+  for (const cron of ['17 3 * * *', '43 9 * * *', '29 15 * * *']) {
+    if (!text.includes(`cron: "${cron}"`)) fail(errors, `${entry.relPath} missing staggered cron ${cron}`);
+  }
+  const permissions = workflowPermissionLines(text) || [];
+  const expectedPermissions = ['contents: write', 'pull-requests: write'];
+  if (permissions.length !== expectedPermissions.length || expectedPermissions.some((permission) => !permissions.includes(permission))) {
+    fail(errors, `${entry.relPath} must grant only contents: write and pull-requests: write`);
+  }
+  if (!/repo\/scripts\/check-project-source-updates\.cjs/.test(text)) {
+    fail(errors, `${entry.relPath} must run check-project-source-updates.cjs`);
+  }
+  if (!/persist-credentials:\s*false/.test(text)) {
+    fail(errors, `${entry.relPath} checkout must set persist-credentials false`);
+  }
+  if (!/GH_TOKEN:\s*\$\{\{ github\.token \}\}/.test(text)) {
+    fail(errors, `${entry.relPath} must scope GH_TOKEN to write/PR steps`);
+  }
+  if (!/git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/.test(text)) {
+    fail(errors, `${entry.relPath} must set authenticated remote immediately before push`);
+  }
+  if (/git\s+push[^\n]*(?:--force|-f\b)/i.test(text)) {
+    fail(errors, `${entry.relPath} must not force-push`);
+  }
+  if (/git\s+push[^\n]*(?:HEAD:)?main\b/i.test(text)) {
+    fail(errors, `${entry.relPath} must not push to main`);
+  }
+  if (/git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i.test(text)) {
+    fail(errors, `${entry.relPath} must only stage the source-watch report, not source files or locks`);
+  }
+  if (/repo\/scripts\/safe-source-update\.cjs|gh\s+issue\s+create/i.test(text)) {
+    fail(errors, `${entry.relPath} must not create source-watch issues`);
+  }
+  if (!/source-watch\/review-active-third-party-updates/.test(text)) {
+    fail(errors, `${entry.relPath} must use the stable source-watch review branch`);
+  }
+  if (!/\[source-watch\] Review active third-party source updates/.test(text)) {
+    fail(errors, `${entry.relPath} must use the stable source-watch review PR title`);
+  }
+  for (const required of [
+    'This PR is a review notification only.',
+    'No source files were updated.',
+    'No SOURCE-LOCK pins were changed.',
+    'No upstream code was executed.',
+    'No auto-merge is allowed.'
+  ]) {
+    if (!text.includes(required)) fail(errors, `${entry.relPath} missing PR safety body text: ${required}`);
+  }
+  const bodyMarker = 'cat > "$PR_BODY" <<\'EOF\'';
+  const markerMatch = text.match(new RegExp(`^([ \\t]*)${escapeRegExp(bodyMarker)}[ \\t]*$`, 'm'));
+  const bodyMatch = text.match(new RegExp(`${escapeRegExp(bodyMarker)}\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*EOF`, 'm'));
+  if (!markerMatch || !bodyMatch) {
+    fail(errors, `${entry.relPath} must write the review PR body with a heredoc`);
+  } else {
+    const yamlBlockIndent = markerMatch[1];
+    const bodyText = bodyMatch[1]
+      .split(/\r?\n/)
+      .map((line) => line.startsWith(yamlBlockIndent) ? line.slice(yamlBlockIndent.length) : line)
+      .join('\n');
+    if (/^ {4,}\S/m.test(bodyText)) {
+      fail(errors, `${entry.relPath} PR body heredoc content must not render as an indented Markdown code block`);
     }
   }
 }
@@ -1268,11 +1358,32 @@ function validateMarkdownLinks(errors) {
 }
 
 function validateSourceWatchTruthfulness(errors) {
+  for (const relPath of [
+    'repo/docs/partials/source-of-truth-contract.md',
+    'AGENTS.md',
+    'README.md',
+    '_projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md',
+    'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+  ]) {
+    if (!existsRel(relPath) || !readText(relPath).includes(sourceWatchPrNotificationRule)) {
+      fail(errors, `${relPath} missing source-watch PR-notification-only rule`);
+    }
+  }
+
   const workflowPath = '.github/workflows/source-watch-plan.yml';
   if (existsRel(workflowPath)) {
     const workflow = readText(workflowPath);
     if (!/^name:\s*Source Watch Advisory Plan\s*$/m.test(workflow)) {
       fail(errors, `${workflowPath} workflow name must be advisory/read-only`);
+    }
+    if (/^\s{2}schedule:\s*$/m.test(workflow)) {
+      fail(errors, `${workflowPath} must stay manual-only; scheduled source-watch notifications belong in ${sourceWatchPrWorkflowPath}`);
+    }
+  }
+  if (existsRel(sourceWatchPrWorkflowPath)) {
+    const workflow = readText(sourceWatchPrWorkflowPath);
+    if (!/^name:\s*Source Watch PR Notifier\s*$/m.test(workflow)) {
+      fail(errors, `${sourceWatchPrWorkflowPath} workflow name must be Source Watch PR Notifier`);
     }
   }
 
@@ -1282,14 +1393,14 @@ function validateSourceWatchTruthfulness(errors) {
     if (rel.startsWith('.github/workflows/')) return true;
     if (rel.startsWith('repo/docs/')) return true;
     if (rel === 'repo/scripts/watch-project-sources.cjs') return true;
+    if (rel === 'repo/scripts/check-project-source-updates.cjs') return true;
     if ((rel.startsWith('skills/') || rel.startsWith('mcp/')) && /\.(md|json|ya?ml)$/i.test(rel)) return true;
     return false;
   });
   const forbiddenClaims = [
-    /\bsource[- ]watch\b[^\n.]{0,180}\b(fetches?|clones?|pulls?)\b[^\n.]*(upstream|repos?|commits?)/i,
+    /\bsource[- ]watch\b[^\n.]{0,180}\b(clones?|pulls?)\b[^\n.]*(upstream|repos?|source files?)/i,
     /\bsource[- ]watch\b[^\n.]{0,180}\b(copies?|syncs?|applies?)\b[^\n.]*(files?|allowlisted|updates?)/i,
     /\bsource[- ]watch\b[^\n.]{0,180}\b(updates?|writes?|modifies?)\b[^\n.]*(SOURCE-LOCK|locks?)/i,
-    /\bsource[- ]watch\b[^\n.]{0,180}\b(creates?|opens?|pushes?)\b[^\n.]*(branches?|PRs?|pull requests?|draft PRs?|commits?)/i,
     /\bsource[- ]watch\b[^\n.]{0,180}\b(runs?|executes?)\b[^\n.]*(live n8n|n8n actions?|imports?|exports?)/i,
     /\bsource[- ]watch\b[^\n.]{0,180}\b(mutates?|changes?|updates?)\b[^\n.]*(credentials?|secrets?|live systems?)/i
   ];
@@ -1319,7 +1430,7 @@ function validateSourceWatchTruthfulness(errors) {
         return !isForbiddenActionNegated(line, actionIndex === -1 ? match.index : actionIndex);
       });
       if (hasUnnegatedForbiddenClaim) {
-        fail(errors, `${entry.relPath} source-watch wording must stay advisory/read-only`);
+        fail(errors, `${entry.relPath} source-watch wording must stay notification-only and source-safe`);
         break;
       }
     }

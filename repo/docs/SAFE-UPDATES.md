@@ -1,22 +1,24 @@
 # Safe Updates
 
-The current source-watch workflow is read-only advisory planning. It renders a plan from SOURCE-LOCK metadata; it does not fetch upstream commits, copy files, update SOURCE-LOCK.json, create branches, create PRs, or mutate live systems.
+The scheduled source-watch notifier is a PR-based human-review notification. It reads SOURCE-LOCK metadata, checks the latest upstream GitHub commit for active third-party sources, and opens or updates one stable review PR only when the upstream commit differs from the locked commit.
 
-Any future source updater is out of scope for this advisory workflow. If one is designed later, it must stay separate from source-watch, require human review, and preserve the validation and safety gates described here.
+The notification PR is not a source update PR. It does not copy upstream files, update SOURCE-LOCK.json, execute upstream code, auto-merge, push to main, or mutate live systems.
 
 This policy does not block intentional, scoped generator/helper writes. It blocks unsafe writes and silent upstream application.
 
 ## Update Flow
 
-Current advisory flow:
+Current scheduled notification flow:
 
 1. Read `_projects/**/SOURCE-LOCK.json`.
 2. Separate active update candidates from retired provenance sources.
 3. Use active third-party source locks to identify upstream repo, source ref, locked commit, update policy, attribution requirement, allowlisted files, and exact blob pins.
-4. Render a source-watch plan.
-5. Run source-lock audit and project sync checks.
+4. Query the GitHub API for the latest commit at the locked source ref.
+5. If no active third-party source changed, write a short summary and do not open a PR.
+6. If an active third-party source changed, write `repo/source-watch/reviews/active-third-party-updates.md` on the stable `source-watch/review-active-third-party-updates` branch and open or update `[source-watch] Review active third-party source updates`.
+7. The PR body and report must say that no source files, SOURCE-LOCK pins, or upstream code were changed or executed, and that no auto-merge is allowed.
 
-Possible future updater flow, if separately approved:
+Separate future source update flow, if a human approves one after reviewing the notification PR:
 
 1. Detect source changes deterministically.
 2. Compare in quarantine.
@@ -49,7 +51,7 @@ Allowed scoped writes:
 
 ## Third-Party Updates
 
-Current source-watch output is advisory only. For any separately approved future updater work, third-party source updates require stricter review:
+Current source-watch output is a review notification only. For any separately approved source update work, third-party source updates require stricter review:
 
 - Strict allowlist.
 - Exact `source_blob_sha` pins for exact and adapted copied files.
@@ -73,7 +75,7 @@ For `nextlevelbuilder/ui-ux-pro-max-skill`, the allowlist is:
 
 Optional AI review is advisory only. It can help summarize a diff, but it cannot approve or apply changes.
 
-GitHub Actions and Codex must not use source-watch as a write mechanism. Optional ChatGPT scheduled review can check upstream notes, explain risk, produce a Codex review prompt, and recommend approve/reject/manual review. It must not apply changes.
+GitHub Actions and Codex must not use source-watch as a source write mechanism. Scheduled source-watch may write only the review notification report and PR metadata. Optional AI review can check upstream notes, explain risk, produce a Codex review prompt, and recommend approve/reject/manual review. It must not apply changes.
 
 GitHub notifications depend on the user's notification settings. Any separately approved future updater work should request the right reviewer through normal GitHub review settings.
 
@@ -84,6 +86,6 @@ GitHub notifications depend on the user's notification settings. Any separately 
 - No direct-to-main source updates.
 - No token printing.
 - No upstream code execution.
-- No network fetching in this advisory workflow.
+- No upstream package installation, code checkout, source copying, or source execution.
 - No product repo destructive actions.
 - No live n8n import/export in CI.

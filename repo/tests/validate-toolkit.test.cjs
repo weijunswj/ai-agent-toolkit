@@ -17,6 +17,8 @@ const projectSync = require(syncScript);
 const safeSourceUpdate = require(path.join(repoRoot, 'repo', 'scripts', 'safe-source-update.cjs'));
 const sourceWatcher = require(path.join(repoRoot, 'repo', 'scripts', 'watch-project-sources.cjs'));
 
+const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.';
+
 function tempCopy() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-validate-'));
   fs.cpSync(repoRoot, target, {
@@ -64,6 +66,20 @@ function generatedPayload(text) {
   assert.equal((normalized.match(/^````````md$/gm) || []).length, 1, 'single opening 8-backtick payload fence');
   assert.equal((normalized.match(/^````````$/gm) || []).length, 1, 'single closing 8-backtick payload fence');
   return match[1];
+}
+
+function sourceWatchPrBodyText(workflow) {
+  const normalized = workflow.replace(/\r\n/g, '\n');
+  const marker = 'cat > "$PR_BODY" <<\'EOF\'';
+  const markerMatch = normalized.match(new RegExp(`^([ \\t]*)${escapeRegExp(marker)}[ \\t]*$`, 'm'));
+  assert.ok(markerMatch, 'source-watch PR body heredoc marker is present');
+  const bodyMatch = normalized.match(new RegExp(`${escapeRegExp(marker)}\\n([\\s\\S]*?)\\n[ \\t]*EOF`, 'm'));
+  assert.ok(bodyMatch, 'source-watch PR body heredoc is present');
+  const yamlBlockIndent = markerMatch[1];
+  return bodyMatch[1]
+    .split('\n')
+    .map((line) => line.startsWith(yamlBlockIndent) ? line.slice(yamlBlockIndent.length) : line)
+    .join('\n');
 }
 
 function secureCicdPromptFromReadme(rootDir = repoRoot) {
@@ -400,6 +416,90 @@ test('validation workflow runs canonical full validation read-only', () => {
   assert.doesNotMatch(workflow, /sync-repo-doc-contract\.cjs --write/);
   assert.doesNotMatch(workflow, /^\s*node repo\/scripts\//m);
   assert.match(workflow, /^permissions:\n  contents: read$/m);
+});
+
+test('source-watch PR notifier uses the stable review-notification PR contract', () => {
+  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.yml'));
+  assert.match(workflow, /^name:\s*Source Watch PR Notifier\s*$/m);
+  for (const cron of ['17 3 * * *', '43 9 * * *', '29 15 * * *']) {
+    assert.ok(workflow.includes(`cron: "${cron}"`), cron);
+  }
+  assert.match(workflow, /^  contents: write$/m);
+  assert.match(workflow, /^  pull-requests: write$/m);
+  assert.doesNotMatch(workflow, /^  issues: write$/m);
+  assert.match(workflow, /repo\/scripts\/check-project-source-updates\.cjs/);
+  assert.match(workflow, /source-watch\/review-active-third-party-updates/);
+  assert.match(workflow, /\[source-watch\] Review active third-party source updates/);
+  assert.match(workflow, /This PR is a review notification only\./);
+  assert.match(workflow, /No auto-merge is allowed\./);
+  assert.equal(sourceWatchPrBodyText(workflow), [
+    'This PR is a review notification only.',
+    'No source files were updated.',
+    'No SOURCE-LOCK pins were changed.',
+    'No upstream code was executed.',
+    'No auto-merge is allowed.',
+    'A human must review upstream changes, attribution/licence impact, allowlist scope, and then ask an AI agent to inspect before any real edits happen.',
+    '',
+    '- [ ] Review upstream diff manually.',
+    '- [ ] Confirm changed files are within allowlist.',
+    '- [ ] Confirm attribution/licence notes still apply.',
+    '- [ ] Confirm no upstream code was executed.',
+    '- [ ] Decide whether a separate update PR should copy/adapt files.',
+    '- [ ] Run npm run validate:all before any real source update merge.'
+  ].join('\n'));
+  assert.match(workflow, /persist-credentials:\s*false/);
+  assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(workflow, /git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
+  assert.match(workflow, /git push origin "HEAD:\$BRANCH"/);
+  assert.doesNotMatch(workflow, /git push origin (?:HEAD:)?main\b/i);
+  assert.doesNotMatch(workflow, /git\s+push[^\n]*(?:--force|-f\b)/i);
+  assert.doesNotMatch(workflow, /git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
+  assert.doesNotMatch(workflow, /gh issue create|safe-source-update\.cjs|gh pr merge|--auto/i);
+});
+
+test('validator rejects source-watch PR notifier issue permission', () => {
+  const cwd = tempCopy();
+  const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
+  const workflow = readTextFile(workflowPath);
+  fs.writeFileSync(workflowPath, workflow.replace('  pull-requests: write\n', '  pull-requests: write\n  issues: write\n'));
+
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /source-watch-pr\.yml must grant only contents: write and pull-requests: write/);
+});
+
+test('source-watch advisory plan is manual-only', () => {
+  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'source-watch-plan.yml'));
+  assert.match(workflow, /^name:\s*Source Watch Advisory Plan\s*$/m);
+  assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(workflow, /^\s{2}schedule:\s*$/m);
+});
+
+test('source-watch PR-notification-only rule is durable and synced', () => {
+  for (const relPath of [
+    'repo/docs/partials/source-of-truth-contract.md',
+    'AGENTS.md',
+    'README.md',
+    '_projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md',
+    'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+  ]) {
+    const text = readTextFile(path.join(repoRoot, relPath));
+    assert.ok(text.includes(sourceWatchPrNotificationRule), relPath);
+  }
+});
+
+test('source-watch PR notifier is the only scheduled source-watch workflow', () => {
+  const workflowDir = path.join(repoRoot, '.github', 'workflows');
+  const workflowFiles = fs.readdirSync(workflowDir)
+    .filter((name) => /\.ya?ml$/i.test(name))
+    .map((name) => `.github/workflows/${name}`);
+  const scheduledSourceWatch = workflowFiles.filter((relPath) => {
+    const text = readTextFile(path.join(repoRoot, relPath));
+    return /source[- ]watch/i.test(`${relPath}\n${text}`) && /^\s{2}schedule:\s*$/m.test(text);
+  });
+
+  assert.deepEqual(scheduledSourceWatch, ['.github/workflows/source-watch-pr.yml']);
+  assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'safe-source-update.yml')), false);
 });
 
 test('build agent rule templates workflow tracks and verifies split template outputs', () => {
@@ -1886,29 +1986,29 @@ test('validator rejects source-watch wording that promises live update actions',
   );
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch wording must stay advisory\/read-only/);
+  assert.match(result.stderr, /source-watch wording must stay notification-only and source-safe/);
 });
 
-test('validator rejects source-watch action claims even with advisory wording', () => {
+test('validator rejects source-watch source-write claims even with advisory wording', () => {
   const cwd = tempCopy();
   fs.writeFileSync(
     path.join(cwd, 'repo', 'docs', 'bad-source-watch-advisory.md'),
-    'Source-watch is advisory but opens draft PRs.\n'
+    'Source-watch is advisory but copies upstream files into review PRs.\n'
   );
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch wording must stay advisory\/read-only/);
+  assert.match(result.stderr, /source-watch wording must stay notification-only and source-safe/);
 });
 
-test('validator allows source-watch action phrases when the action is negated', () => {
+test('validator allows source-watch notification PR wording and negated source-write phrases', () => {
   const cwd = tempCopy();
   fs.writeFileSync(
     path.join(cwd, 'repo', 'docs', 'ok-source-watch-negated.md'),
     [
-      'source-watch does not open PRs.',
+      'source-watch opens or updates a review notification PR.',
       'source-watch will not create branches.',
       'source-watch never mutates credentials.',
-      'source-watch is read-only; it does not fetch upstream repos.'
+      'source-watch does not copy upstream source files.'
     ].join('\n')
   );
   const result = runValidate(cwd);
