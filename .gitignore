@@ -21,7 +21,7 @@ __pycache__/
 *.credential*.json
 *n8n*credential*.json
 *n8n*binding*.json
-!*.example.json
+!_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json
 *.pem
 *.key
 *.p12

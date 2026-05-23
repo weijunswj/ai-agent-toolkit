@@ -160,6 +160,22 @@ test('retired internal locks are ignored and do not call GitHub', async () => {
   });
 });
 
+test('inconsistent active no-update locks fail closed without GitHub calls', async () => {
+  const workspace = tempWorkspace();
+  const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
+  const lock = activeLock(lockedSha);
+  lock.source_update_policy = 'none';
+  writeJson(path.join(workspace, '_projects', 'design', 'example', 'SOURCE-LOCK.json'), lock);
+
+  await withMockGitHub(latestSha, async (apiBaseUrl, requests) => {
+    const result = await runScript(workspace, reportRel, apiBaseUrl);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Unsupported SOURCE-LOCK lifecycle metadata/);
+    assert.deepEqual(requests, []);
+    assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
+  });
+});
+
 test('source update check does not mutate _main content or SOURCE-LOCK pins', async () => {
   const workspace = tempWorkspace();
   const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
