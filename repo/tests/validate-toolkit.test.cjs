@@ -17,6 +17,8 @@ const projectSync = require(syncScript);
 const safeSourceUpdate = require(path.join(repoRoot, 'repo', 'scripts', 'safe-source-update.cjs'));
 const sourceWatcher = require(path.join(repoRoot, 'repo', 'scripts', 'watch-project-sources.cjs'));
 
+const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.';
+
 function tempCopy() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-validate-'));
   fs.cpSync(repoRoot, target, {
@@ -416,6 +418,13 @@ test('source-watch PR notifier uses the stable review-notification PR contract',
   assert.match(workflow, /\[source-watch\] Review active third-party source updates/);
   assert.match(workflow, /This PR is a review notification only\./);
   assert.match(workflow, /No auto-merge is allowed\./);
+  assert.match(workflow, /persist-credentials:\s*false/);
+  assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(workflow, /git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
+  assert.match(workflow, /git push origin "HEAD:\$BRANCH"/);
+  assert.doesNotMatch(workflow, /git push origin (?:HEAD:)?main\b/i);
+  assert.doesNotMatch(workflow, /git\s+push[^\n]*(?:--force|-f\b)/i);
+  assert.doesNotMatch(workflow, /git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
   assert.doesNotMatch(workflow, /gh issue create|safe-source-update\.cjs|gh pr merge|--auto/i);
 });
 
@@ -424,6 +433,33 @@ test('source-watch advisory plan is manual-only', () => {
   assert.match(workflow, /^name:\s*Source Watch Advisory Plan\s*$/m);
   assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/m);
   assert.doesNotMatch(workflow, /^\s{2}schedule:\s*$/m);
+});
+
+test('source-watch PR-notification-only rule is durable and synced', () => {
+  for (const relPath of [
+    'repo/docs/partials/source-of-truth-contract.md',
+    'AGENTS.md',
+    'README.md',
+    '_projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md',
+    'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+  ]) {
+    const text = readTextFile(path.join(repoRoot, relPath));
+    assert.ok(text.includes(sourceWatchPrNotificationRule), relPath);
+  }
+});
+
+test('source-watch PR notifier is the only scheduled source-watch workflow', () => {
+  const workflowDir = path.join(repoRoot, '.github', 'workflows');
+  const workflowFiles = fs.readdirSync(workflowDir)
+    .filter((name) => /\.ya?ml$/i.test(name))
+    .map((name) => `.github/workflows/${name}`);
+  const scheduledSourceWatch = workflowFiles.filter((relPath) => {
+    const text = readTextFile(path.join(repoRoot, relPath));
+    return /source[- ]watch/i.test(`${relPath}\n${text}`) && /^\s{2}schedule:\s*$/m.test(text);
+  });
+
+  assert.deepEqual(scheduledSourceWatch, ['.github/workflows/source-watch-pr.yml']);
+  assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'safe-source-update.yml')), false);
 });
 
 test('build agent rule templates workflow tracks and verifies split template outputs', () => {

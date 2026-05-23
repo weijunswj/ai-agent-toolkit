@@ -331,6 +331,7 @@ function fail(errors, message) {
 
 const autoSyncGeneratedSurfacesWorkflowPath = '.github/workflows/auto-sync-generated-surfaces.yml';
 const sourceWatchPrWorkflowPath = '.github/workflows/source-watch-pr.yml';
+const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.';
 const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
@@ -1183,6 +1184,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
 
 function validateWorkflows(errors) {
   const workflowFiles = listFiles().filter((entry) => entry.relPath.startsWith('.github/workflows/') && /\.ya?ml$/i.test(entry.relPath));
+  const scheduledSourceWatchWorkflows = [];
   for (const entry of workflowFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
     const isAutoSyncGeneratedSurfacesWorkflow = entry.relPath === autoSyncGeneratedSurfacesWorkflowPath;
@@ -1206,6 +1208,12 @@ function validateWorkflows(errors) {
     if (entry.relPath.endsWith('safe-source-update.yml')) {
       fail(errors, `${entry.relPath} has been retired; source update notifications must use PRs, not issues`);
     }
+    if (/\bsource[- ]watch\b/i.test(`${entry.relPath}\n${text}`) && /^\s{2}schedule:\s*$/m.test(text)) {
+      scheduledSourceWatchWorkflows.push(entry.relPath);
+    }
+  }
+  if (scheduledSourceWatchWorkflows.length !== 1 || scheduledSourceWatchWorkflows[0] !== sourceWatchPrWorkflowPath) {
+    fail(errors, `${sourceWatchPrWorkflowPath} must be the only scheduled source-watch workflow`);
   }
 }
 
@@ -1223,6 +1231,24 @@ function validateSourceWatchPrWorkflow(entry, text, errors) {
   }
   if (!/repo\/scripts\/check-project-source-updates\.cjs/.test(text)) {
     fail(errors, `${entry.relPath} must run check-project-source-updates.cjs`);
+  }
+  if (!/persist-credentials:\s*false/.test(text)) {
+    fail(errors, `${entry.relPath} checkout must set persist-credentials false`);
+  }
+  if (!/GH_TOKEN:\s*\$\{\{ github\.token \}\}/.test(text)) {
+    fail(errors, `${entry.relPath} must scope GH_TOKEN to write/PR steps`);
+  }
+  if (!/git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/.test(text)) {
+    fail(errors, `${entry.relPath} must set authenticated remote immediately before push`);
+  }
+  if (/git\s+push[^\n]*(?:--force|-f\b)/i.test(text)) {
+    fail(errors, `${entry.relPath} must not force-push`);
+  }
+  if (/git\s+push[^\n]*(?:HEAD:)?main\b/i.test(text)) {
+    fail(errors, `${entry.relPath} must not push to main`);
+  }
+  if (/git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i.test(text)) {
+    fail(errors, `${entry.relPath} must only stage the source-watch report, not source files or locks`);
   }
   if (/repo\/scripts\/safe-source-update\.cjs|gh\s+issue\s+create/i.test(text)) {
     fail(errors, `${entry.relPath} must not create source-watch issues`);
@@ -1313,6 +1339,18 @@ function validateMarkdownLinks(errors) {
 }
 
 function validateSourceWatchTruthfulness(errors) {
+  for (const relPath of [
+    'repo/docs/partials/source-of-truth-contract.md',
+    'AGENTS.md',
+    'README.md',
+    '_projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md',
+    'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+  ]) {
+    if (!existsRel(relPath) || !readText(relPath).includes(sourceWatchPrNotificationRule)) {
+      fail(errors, `${relPath} missing source-watch PR-notification-only rule`);
+    }
+  }
+
   const workflowPath = '.github/workflows/source-watch-plan.yml';
   if (existsRel(workflowPath)) {
     const workflow = readText(workflowPath);

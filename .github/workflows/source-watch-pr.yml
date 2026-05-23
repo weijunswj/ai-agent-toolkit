@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -49,6 +50,7 @@ jobs:
         if: steps.source_updates.outputs.pr_needed == 'true'
         env:
           BRANCH: source-watch/review-active-third-party-updates
+          GH_TOKEN: ${{ github.token }}
           REPORT_TEMP: ${{ steps.source_updates.outputs.report_temp }}
           REPORT_PATH: repo/source-watch/reviews/active-third-party-updates.md
         run: |
@@ -69,6 +71,7 @@ jobs:
             exit 0
           fi
           git commit -m "Update active third-party source review report"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin "HEAD:$BRANCH"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
