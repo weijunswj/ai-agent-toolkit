@@ -20,6 +20,11 @@ const allowedSourceLifecycles = new Set(['active', 'retired_after_migration']);
 const allowedSourceRoles = new Set(['migration_provenance_only', 'third_party_attribution_source']);
 const allowedSourceUpdatePolicies = new Set(['none', 'manual_review_required']);
 const fullCommitShaPattern = /^[0-9a-f]{40}$/;
+const knownRetiredInternalSourceRepos = new Set([
+  'weijunswj/ai-cicd-installer',
+  'weijunswj/codex-n8n-local-setup',
+  'weijunswj/n8n-workflow-templates'
+]);
 // These prefixes are reserved toolkit-local source/maintenance namespaces.
 // SOURCE-LOCK source_path values must usually describe upstream repo paths,
 // not toolkit-local layout paths. A narrow exception exists for retired
@@ -68,6 +73,22 @@ function discoverLockFiles() {
     .sort();
 }
 
+function isRetiredMigrationLock(lock) {
+  return lock &&
+    lock.source_lifecycle === 'retired_after_migration' &&
+    lock.source_role === 'migration_provenance_only' &&
+    lock.source_update_policy === 'none' &&
+    lock.public_attribution_required === false;
+}
+
+function isActiveThirdPartyAttributionLock(lock) {
+  return lock &&
+    lock.source_lifecycle === 'active' &&
+    lock.source_role === 'third_party_attribution_source' &&
+    lock.source_update_policy === 'manual_review_required' &&
+    lock.public_attribution_required === true;
+}
+
 function validateLifecycleMetadata(lock, relPath, errors) {
   for (const key of ['source_lifecycle', 'source_role', 'source_update_policy', 'public_attribution_required']) {
     if (!(key in lock)) errors.push(`${relPath} missing ${key}`);
@@ -86,6 +107,18 @@ function validateLifecycleMetadata(lock, relPath, errors) {
     errors.push(`${relPath} public_attribution_required must be boolean`);
   }
 
+  if (lock.source_lifecycle === 'active') {
+    if (lock.source_role !== 'third_party_attribution_source') {
+      errors.push(`${relPath} active source must use source_role third_party_attribution_source`);
+    }
+    if (lock.source_update_policy !== 'manual_review_required') {
+      errors.push(`${relPath} active source must use source_update_policy manual_review_required`);
+    }
+    if (lock.public_attribution_required !== true) {
+      errors.push(`${relPath} active source must set public_attribution_required true`);
+    }
+  }
+
   if (lock.source_lifecycle === 'retired_after_migration') {
     if (lock.source_role !== 'migration_provenance_only') {
       errors.push(`${relPath} retired migration source must use source_role migration_provenance_only`);
@@ -96,6 +129,14 @@ function validateLifecycleMetadata(lock, relPath, errors) {
     if (lock.public_attribution_required !== false) {
       errors.push(`${relPath} retired migration source must set public_attribution_required false`);
     }
+  }
+
+  if (lock.source_role === 'migration_provenance_only' && lock.source_lifecycle !== 'retired_after_migration') {
+    errors.push(`${relPath} migration provenance source must use source_lifecycle retired_after_migration`);
+  }
+
+  if (lock.source_update_policy === 'none' && lock.source_lifecycle !== 'retired_after_migration') {
+    errors.push(`${relPath} source_update_policy none is allowed only for retired_after_migration sources`);
   }
 
   if (lock.source_role === 'third_party_attribution_source') {
@@ -116,6 +157,10 @@ function validateLifecycleMetadata(lock, relPath, errors) {
     if (lock.public_attribution_required !== true) {
       errors.push(`${relPath} third-party attribution source must set public_attribution_required true`);
     }
+  }
+
+  if (typeof lock.source_repo === 'string' && knownRetiredInternalSourceRepos.has(lock.source_repo) && !isRetiredMigrationLock(lock)) {
+    errors.push(`${relPath} known retired internal source repo must stay retired_after_migration with migration_provenance_only and source_update_policy none: ${lock.source_repo}`);
   }
 }
 
@@ -263,6 +308,9 @@ module.exports = {
   discoverLockFiles,
   gitBlobSha,
   hashFile,
+  isActiveThirdPartyAttributionLock,
+  isRetiredMigrationLock,
+  knownRetiredInternalSourceRepos,
   normalizeRepoRelativePath,
   validateLifecycleMetadata,
   validateLocalPathTopology,

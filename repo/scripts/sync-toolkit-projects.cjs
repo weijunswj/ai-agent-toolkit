@@ -16,6 +16,7 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 
 const workspaceRoot = workspaceRootFromArgs();
 const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
+const rootReal = fs.realpathSync.native(root);
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 const projectRoot = '_projects';
 const approvedOutputPrefixes = ['skills/', 'mcp/'];
@@ -41,6 +42,9 @@ const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
 const projectVersionPattern = /^\d+\.\d+\.\d+$/;
+const allowedCredentialExampleJsonPaths = new Set([
+  '_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json'
+]);
 const agentRuleSpecPath = path.join(root, 'repo', 'scripts', 'agent-rule-template-specs.json');
 const agentRuleSpecDocument = JSON.parse(fs.readFileSync(agentRuleSpecPath, 'utf8'));
 
@@ -71,12 +75,67 @@ function resolveRel(relPath) {
   return path.join(root, relPath);
 }
 
+function normalizeWorkspaceRel(value) {
+  return path.posix.normalize(String(value).replace(/\\/g, '/'));
+}
+
+function hasPathTraversal(value) {
+  const slashValue = String(value).replace(/\\/g, '/');
+  const normalized = normalizeWorkspaceRel(value);
+  return slashValue.split('/').includes('..') || normalized === '..' || normalized.startsWith('../') || normalized.includes('/../');
+}
+
+function isAbsolutePathLike(value) {
+  return path.isAbsolute(value) || path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
+}
+
+function isInsideRoot(realPath) {
+  const relative = path.relative(rootReal, realPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function safeWorkspacePath(relPath, label, options = {}) {
+  if (typeof relPath !== 'string' || !relPath.trim()) {
+    throw new Error(`${label} must be a non-empty workspace-relative path`);
+  }
+  if (isAbsolutePathLike(relPath) || hasPathTraversal(relPath)) {
+    throw new Error(`Unsafe workspace path for ${label}: ${relPath}`);
+  }
+
+  const normalized = normalizeWorkspaceRel(relPath);
+  const parts = normalized.split('/').filter(Boolean);
+  let current = root;
+  let existing = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    if (!fs.existsSync(current)) {
+      if (options.allowMissing) break;
+      throw new Error(`${label} does not exist: ${normalized}`);
+    }
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Unsafe symlink in ${label}: ${normalized}`);
+    }
+    existing = current;
+  }
+
+  const real = fs.realpathSync.native(existing);
+  if (!isInsideRoot(real)) {
+    throw new Error(`Unsafe path outside workspace for ${label}: ${normalized}`);
+  }
+  return path.join(root, normalized);
+}
+
+function safeExists(relPath, label) {
+  return fs.existsSync(safeWorkspacePath(relPath, label, { allowMissing: true }));
+}
+
 function readText(relPath) {
-  return fs.readFileSync(resolveRel(relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  return fs.readFileSync(safeWorkspacePath(relPath, 'read source'), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 }
 
 function readBuffer(relPath) {
-  return fs.readFileSync(resolveRel(relPath));
+  return fs.readFileSync(safeWorkspacePath(relPath, 'read source'));
 }
 
 function readJson(relPath) {
@@ -84,13 +143,13 @@ function readJson(relPath) {
 }
 
 function writeText(relPath, content) {
-  const full = resolveRel(relPath);
+  const full = safeWorkspacePath(relPath, 'generated output', { allowMissing: true });
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, content.replace(/\r\n/g, '\n'), 'utf8');
 }
 
 function writeBuffer(relPath, content) {
-  const full = resolveRel(relPath);
+  const full = safeWorkspacePath(relPath, 'generated output', { allowMissing: true });
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, content);
 }
@@ -107,11 +166,11 @@ function walk(dir, entries = []) {
 }
 
 function listFiles(relDir) {
-  return walk(resolveRel(relDir)).filter((entry) => entry.dirent.isFile());
+  return walk(safeWorkspacePath(relDir, 'directory source')).filter((entry) => entry.dirent.isFile());
 }
 
 function listFilesIfExists(relDir) {
-  return fs.existsSync(resolveRel(relDir)) ? listFiles(relDir) : [];
+  return safeExists(relDir, 'directory source') ? listFiles(relDir) : [];
 }
 
 function fail(errors, message) {
@@ -153,7 +212,15 @@ function isRootSurfacePath(relPath) {
 }
 
 function validateForbiddenFiles(errors, project) {
-  for (const entry of walk(resolveRel(project.main_path))) {
+  let mainPath;
+  try {
+    mainPath = safeWorkspacePath(project.main_path, 'project main_path');
+  } catch (error) {
+    fail(errors, error.message);
+    return;
+  }
+
+  for (const entry of walk(mainPath)) {
     const rel = entry.relPath;
     const name = path.basename(rel);
     const lower = rel.toLowerCase();
@@ -166,7 +233,7 @@ function validateForbiddenFiles(errors, project) {
     if (name === '.env' || (name.startsWith('.env.') && name !== '.env.example')) fail(errors, `${project.id} forbidden env file in _main/: ${rel}`);
     if (lower.endsWith('.zip') || lower.endsWith('.tgz')) fail(errors, `${project.id} generated package artifact in _main/: ${rel}`);
     if (lower.endsWith('.live-export.json') || lower.endsWith('.live-import.json')) fail(errors, `${project.id} live n8n import/export in _main/: ${rel}`);
-    const safeExampleJson = lower.endsWith('.example.json') || lower.endsWith('-example.json');
+    const safeExampleJson = allowedCredentialExampleJsonPaths.has(lower);
     if (!safeExampleJson && /credential.*\.json$/i.test(name) && !lower.endsWith('package.json')) fail(errors, `${project.id} credential-looking JSON in _main/: ${rel}`);
     if (/binding.*\.json$/i.test(name)) fail(errors, `${project.id} credential binding-looking JSON in _main/: ${rel}`);
     if (['.pem', '.key', '.p12', '.pfx'].some((ext) => lower.endsWith(ext))) fail(errors, `${project.id} private key/certificate in _main/: ${rel}`);
@@ -264,6 +331,9 @@ function validateProjectShape(errors, relPath) {
       fail(errors, `${project.id} unsupported output fidelity: ${output.fidelity}`);
     }
     if (output.text_rewrites !== undefined) {
+      if (output.kind === 'json' || path.extname(output.output).toLowerCase() === '.json') {
+        fail(errors, `${project.id} JSON outputs must not set text_rewrites: ${output.output}`);
+      }
       if (!Array.isArray(output.text_rewrites)) {
         fail(errors, `${project.id} output text_rewrites must be an array: ${output.output}`);
       } else {
@@ -276,7 +346,11 @@ function validateProjectShape(errors, relPath) {
     }
     if (output.kind === 'linked') {
       if (output.source || output.sources) fail(errors, `${project.id} linked output must not set source or sources: ${output.output}`);
-      if (!fs.existsSync(resolveRel(output.output))) fail(errors, `${project.id} linked output missing: ${output.output}`);
+      try {
+        if (!safeExists(output.output, 'linked output')) fail(errors, `${project.id} linked output missing: ${output.output}`);
+      } catch (error) {
+        fail(errors, error.message);
+      }
       continue;
     }
     if (output.kind === 'concat') {
@@ -451,20 +525,6 @@ function expectedAgentRuleSourceTemplate(spec, template) {
   return expectedAgentRuleTemplate(spec, template);
 }
 
-function normalizeWorkspaceRel(value) {
-  return path.posix.normalize(value.replace(/\\/g, '/'));
-}
-
-function hasPathTraversal(value) {
-  const slashValue = value.replace(/\\/g, '/');
-  const normalized = normalizeWorkspaceRel(value);
-  return slashValue.split('/').includes('..') || normalized === '..' || normalized.startsWith('../') || normalized.includes('/../');
-}
-
-function isAbsolutePathLike(value) {
-  return path.isAbsolute(value) || path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
-}
-
 function validateAgentRulePartialSource(errors, spec, source) {
   if (typeof source.rel !== 'string') {
     fail(errors, `${spec.projectId} agent-rule partial source must be a string`);
@@ -492,8 +552,14 @@ function validateAgentRulePartialSource(errors, spec, source) {
     fail(errors, `${spec.projectId} agent-rule partial source must stay in project _main/_partials/: ${source.rel}`);
     validWorkspacePath = false;
   }
-  if (validWorkspacePath && !fs.existsSync(resolveRel(normalized))) {
-    fail(errors, `Missing agent-rule partial source: ${source.rel}`);
+  if (validWorkspacePath) {
+    try {
+      if (!safeExists(normalized, 'agent-rule partial source')) {
+        fail(errors, `Missing agent-rule partial source: ${source.rel}`);
+      }
+    } catch (error) {
+      fail(errors, error.message);
+    }
   }
 }
 
@@ -581,10 +647,15 @@ function validateAgentRuleSourceTemplates(errors, projects) {
   const specsWithMissingPartials = new Set();
   for (const spec of specsWithSourceSideTemplates) {
     for (const source of spec.partialSources) {
-      if (!fs.existsSync(resolveRel(source.rel))) {
+      try {
+        if (safeExists(source.rel, 'agent-rule partial source')) continue;
+      } catch (error) {
         specsWithMissingPartials.add(spec);
-        fail(errors, `Missing agent-rule partial source: ${source.rel}`);
+        fail(errors, error.message);
+        continue;
       }
+      specsWithMissingPartials.add(spec);
+      fail(errors, `Missing agent-rule partial source: ${source.rel}`);
     }
   }
 
@@ -687,7 +758,7 @@ function expectedTextOutput(project, output, rels) {
   }
   const raw = readText(rels[0]);
   if (output.kind === 'json' || path.extname(output.output).toLowerCase() === '.json') {
-    return applyTextRewrites(JSON.stringify(JSON.parse(raw), null, 2) + '\n', output).trimEnd() + '\n';
+    return `${JSON.stringify(JSON.parse(raw), null, 2)}\n`;
   }
   return finalizeTextOutput(raw, project, output, rels[0]);
 }
@@ -696,10 +767,10 @@ function expandRecipe(project, output, linked) {
   if (output.kind === 'linked') return [{ output: output.output, linked: true }];
   const rels = sourceRels(project, output, linked);
   for (const rel of rels) {
-    if (!fs.existsSync(resolveRel(rel))) throw new Error(`${project.id} missing recipe source: ${rel}`);
+    if (!safeExists(rel, 'recipe source')) throw new Error(`${project.id} missing recipe source: ${rel}`);
   }
 
-  if (output.kind === 'copy' && fs.statSync(resolveRel(rels[0])).isDirectory()) {
+  if (output.kind === 'copy' && fs.statSync(safeWorkspacePath(rels[0], 'recipe source')).isDirectory()) {
     return listFiles(rels[0]).map((entry) => {
       const child = slash(path.relative(resolveRel(rels[0]), entry.fullPath));
       return {
@@ -723,23 +794,27 @@ function expandRecipe(project, output, linked) {
 
 function syncExpanded(expanded, errors) {
   for (const item of expanded) {
-    if (item.linked) continue;
-    if (mode === 'write') {
-      if (item.binary) writeBuffer(item.output, readBuffer(item.source));
-      else writeText(item.output, item.text);
-      continue;
-    }
+    try {
+      if (item.linked) continue;
+      if (mode === 'write') {
+        if (item.binary) writeBuffer(item.output, readBuffer(item.source));
+        else writeText(item.output, item.text);
+        continue;
+      }
 
-    if (!fs.existsSync(resolveRel(item.output))) {
-      fail(errors, `Missing generated output: ${item.output}`);
-      continue;
-    }
-    if (item.binary) {
-      const current = readBuffer(item.output);
-      const expected = readBuffer(item.source);
-      if (!current.equals(expected)) fail(errors, `Stale generated output: ${item.output}`);
-    } else if (readText(item.output) !== item.text) {
-      fail(errors, `Stale generated output: ${item.output}`);
+      if (!safeExists(item.output, 'generated output')) {
+        fail(errors, `Missing generated output: ${item.output}`);
+        continue;
+      }
+      if (item.binary) {
+        const current = readBuffer(item.output);
+        const expected = readBuffer(item.source);
+        if (!current.equals(expected)) fail(errors, `Stale generated output: ${item.output}`);
+      } else if (readText(item.output) !== item.text) {
+        fail(errors, `Stale generated output: ${item.output}`);
+      }
+    } catch (error) {
+      fail(errors, error.message);
     }
   }
 }
@@ -846,7 +921,7 @@ function validateAndSync() {
   if (mode === 'write') {
     writeText(registryPath, expectedRegistry);
   } else {
-    const currentRegistry = fs.existsSync(resolveRel(registryPath)) ? readText(registryPath) : null;
+    const currentRegistry = safeExists(registryPath, 'generated output') ? readText(registryPath) : null;
     if (currentRegistry !== expectedRegistry) fail(errors, `Stale generated output: ${registryPath}`);
   }
 
