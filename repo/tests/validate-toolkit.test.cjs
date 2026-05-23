@@ -450,9 +450,9 @@ test('source-watch PR notifier uses the stable review-notification PR contract',
   assert.match(workflow, /persist-credentials:\s*false/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
   assert.match(workflow, /git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
-  assert.match(workflow, /git push origin "HEAD:\$BRANCH"/);
+  assert.match(workflow, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
   assert.doesNotMatch(workflow, /git push origin (?:HEAD:)?main\b/i);
-  assert.doesNotMatch(workflow, /git\s+push[^\n]*(?:--force|-f\b)/i);
+  assert.doesNotMatch(workflow, /git\s+push[^\n]*(?:--force(?!-with-lease)|-f\b)/i);
   assert.doesNotMatch(workflow, /git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
   assert.doesNotMatch(workflow, /gh issue create|safe-source-update\.cjs|gh pr merge|--auto/i);
 });

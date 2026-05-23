@@ -1245,8 +1245,8 @@ function validateSourceWatchPrWorkflow(entry, text, errors) {
   if (!/git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/.test(text)) {
     fail(errors, `${entry.relPath} must set authenticated remote immediately before push`);
   }
-  if (/git\s+push[^\n]*(?:--force|-f\b)/i.test(text)) {
-    fail(errors, `${entry.relPath} must not force-push`);
+  if (/git\s+push[^\n]*(?:--force(?!-with-lease)|-f\b)/i.test(text)) {
+    fail(errors, `${entry.relPath} must not force-push without a lease`);
   }
   if (/git\s+push[^\n]*(?:HEAD:)?main\b/i.test(text)) {
     fail(errors, `${entry.relPath} must not push to main`);
