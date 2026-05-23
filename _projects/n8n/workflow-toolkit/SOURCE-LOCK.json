@@ -56,18 +56,18 @@
       "notes": "Toolkit-adapted after migration to ignore stale node-ID credential bindings when both node name and node type differ."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/export-n8n-workflows-live.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/export-n8n-workflows-live.ps1",
       "source_blob_sha": "e4d3fa06239817e0ac4248f31a31b2fa6ebe2f5d",
-      "notes": "Exact helper source rehomed from Secure CI/CD provenance into the n8n workflow toolkit project."
+      "notes": "Toolkit-adapted after migration to make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/import-n8n-workflows-live.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1",
       "source_blob_sha": "10d37f121e00dfd4d12dd8a9ca59426276fd95ee",
-      "notes": "Exact helper source rehomed from Secure CI/CD provenance into the n8n workflow toolkit project."
+      "notes": "Toolkit-adapted after migration to make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration. Also prevents dry-run hook execution and revalidates prepared workflow JSON after before-live-import hooks before live import execution."
     },
     {
       "mode": "adapted",
@@ -96,11 +96,11 @@
       "source_blob_sha": "e1203399a67cdbee3c07657bffddeb886b6b3c43"
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/validate-n8n-workflows.cjs",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/validate-n8n-workflows.cjs",
       "source_blob_sha": "721d9cd48b8de71b1fa360364b3ca080efdd2237",
-      "notes": "Exact helper source rehomed from Secure CI/CD provenance into the n8n workflow toolkit project."
+      "notes": "Toolkit-adapted after migration to make project-local validation-rule autoload opt-in via N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD while preserving explicit N8N_WORKFLOW_VALIDATION_RULES configuration."
     },
     {
       "mode": "exact",

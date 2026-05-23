@@ -781,14 +781,16 @@ if (-not $bindingsFileExists) {
   Write-Step "WARN" "Credential bindings file is missing. Existing live credentials cannot be restored unless live workflows are exportable first."
 }
 
-Invoke-ProjectWorkflowHook "before-import-validation" @{
-  "archived-by-name-mode" = $ArchivedByNameMode
-  "bindings-file" = $BindingsFilePath
-  "container" = $Container
-  "dry-run" = [string]([bool]$DryRun)
-  "force-import" = [string]([bool]$ForceImport)
-  "prepared-dir" = $PreparedDirPath
-  "workflow-dir" = $WorkflowDirPath
+if (-not $DryRun) {
+  Invoke-ProjectWorkflowHook "before-import-validation" @{
+    "archived-by-name-mode" = $ArchivedByNameMode
+    "bindings-file" = $BindingsFilePath
+    "container" = $Container
+    "dry-run" = [string]([bool]$DryRun)
+    "force-import" = [string]([bool]$ForceImport)
+    "prepared-dir" = $PreparedDirPath
+    "workflow-dir" = $WorkflowDirPath
+  }
 }
 
 $workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath
@@ -862,6 +864,13 @@ Invoke-ProjectWorkflowHook "before-live-import" @{
   "prepared-dir" = $PreparedDirPath
   "workflow-dir" = $WorkflowDirPath
 }
+
+Write-Section "Prepared Workflow Re-Validation"
+$preparedValidationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"), $PreparedDirPath)
+if ($preparedValidationResult.ExitCode -ne 0) {
+  throw "Prepared workflow JSON validation failed after before-live-import hook.`n$($preparedValidationResult.Output -join "`n")"
+}
+Write-Step "VALID" ($preparedValidationResult.StdOut -join "`n")
 
 Write-Section "Import"
 

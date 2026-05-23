@@ -15,6 +15,7 @@ const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
 const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');
 const compareCredentialsScript = path.join(scriptDir, 'compare-n8n-workflow-credentials.cjs');
+const sourceLockAuditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs');
 const sanitizerScript = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer', 'prepare-n8n-template.js');
 const sanitizerPs1 = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer', 'sanitise-n8n-template.ps1');
 
@@ -390,6 +391,88 @@ test('validate-n8n-workflows.cjs does not auto-load project validation rules by 
   assert.doesNotMatch(result.stdout, /Using validation rule scripts[\\/]n8n-workflow-validation-rules\.cjs/);
 });
 
+test('validate-n8n-workflows.cjs loads explicitly configured validation rules', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'generic.json'), safeWorkflow());
+  fs.mkdirSync(path.join(cwd, 'scripts'), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, 'scripts', 'n8n-workflow-validation-rules.cjs'),
+    [
+      'module.exports.validateWorkflow = function validateWorkflow(context) {',
+      "  context.fail(`${context.relative} explicit custom rule failed`);",
+      '};',
+      '',
+    ].join('\n')
+  );
+
+  const result = runNode(validateScript, [], {
+    cwd,
+    env: {
+      N8N_WORKFLOW_VALIDATION_RULES: 'scripts/n8n-workflow-validation-rules.cjs',
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /explicit custom rule failed/);
+  assert.match(result.stdout, /Using validation rule scripts[\\/]n8n-workflow-validation-rules\.cjs/);
+});
+
+test('validate-n8n-workflows.cjs autoloads default validation rules only for exact truthy values', () => {
+  for (const value of ['1', 'true', 'yes', 'on']) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'generic.json'), safeWorkflow());
+    fs.mkdirSync(path.join(cwd, 'scripts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cwd, 'scripts', 'n8n-workflow-validation-rules.cjs'),
+      [
+        'module.exports.validateWorkflow = function validateWorkflow(context) {',
+        "  context.fail(`${context.relative} autoload custom rule failed`);",
+        '};',
+        '',
+      ].join('\n')
+    );
+
+    const result = runNode(validateScript, [], {
+      cwd,
+      env: {
+        N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD: value,
+      },
+    });
+
+    assert.notEqual(result.status, 0, value);
+    assert.match(result.stderr, /autoload custom rule failed/, value);
+    assert.match(result.stdout, /Using validation rule scripts[\\/]n8n-workflow-validation-rules\.cjs/, value);
+  }
+});
+
+test('validate-n8n-workflows.cjs does not autoload default validation rules for partial truthy values', () => {
+  for (const value of ['truex', 'xtrue', 'yesplease', 'only-on']) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'generic.json'), safeWorkflow());
+    fs.mkdirSync(path.join(cwd, 'scripts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cwd, 'scripts', 'n8n-workflow-validation-rules.cjs'),
+      [
+        'module.exports.validateWorkflow = function validateWorkflow(context) {',
+        "  context.fail(`${context.relative} partial autoload rule failed`);",
+        '};',
+        '',
+      ].join('\n')
+    );
+
+    const result = runNode(validateScript, [], {
+      cwd,
+      env: {
+        N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD: value,
+      },
+    });
+
+    assert.equal(result.status, 0, `${value}\n${result.stderr}`);
+    assert.doesNotMatch(result.stderr, /partial autoload rule failed/, value);
+    assert.doesNotMatch(result.stdout, /Using validation rule scripts[\\/]n8n-workflow-validation-rules\.cjs/, value);
+  }
+});
+
 test('validate-n8n-workflows.cjs fails when configured validation rule is missing', () => {
   const cwd = tempDir();
   writeJson(path.join(cwd, 'n8n-workflows', 'generic.json'), safeWorkflow());
@@ -468,6 +551,40 @@ test('PowerShell n8n hooks require configured hook scripts but keep defaults opt
     assert.match(text, /Get-DisplayPath \$script/);
     assert.doesNotMatch(text, /ConvertTo-RepoRelativePath/);
   }
+});
+
+test('PowerShell n8n hook autoload uses exact opt-in matching', () => {
+  for (const fileName of [
+    'export-n8n-workflows-live.ps1',
+    'import-n8n-workflows-live.ps1',
+  ]) {
+    const text = readText(path.join(scriptDir, fileName));
+    const autoloadBlock = text.match(/\$env:N8N_WORKFLOW_HOOK_AUTOLOAD -match '([^']+)'[\s\S]*?Add-HookScriptCandidate \$relativePath \$false/);
+    assert.ok(autoloadBlock, `${fileName} hook autoload block not found`);
+    assert.equal(autoloadBlock[1], '^(?i:true|1|yes|on)$', fileName);
+  }
+});
+
+test('import helper guards before-import-validation hooks during dry-run and revalidates prepared payloads after before-live-import', () => {
+  const text = readText(path.join(scriptDir, 'import-n8n-workflows-live.ps1'));
+
+  assert.match(text, /if \(-not \$DryRun\) \{\s*Invoke-ProjectWorkflowHook "before-import-validation"/);
+  const beforeLiveImportIndex = text.indexOf('Invoke-ProjectWorkflowHook "before-live-import"');
+  const revalidationIndex = text.indexOf('Write-Section "Prepared Workflow Re-Validation"');
+  const importIndex = text.indexOf('Write-Section "Import"');
+  assert.notEqual(beforeLiveImportIndex, -1);
+  assert.notEqual(revalidationIndex, -1);
+  assert.notEqual(importIndex, -1);
+  assert.ok(beforeLiveImportIndex < revalidationIndex, 'prepared revalidation must run after before-live-import hook');
+  assert.ok(revalidationIndex < importIndex, 'prepared revalidation must run before live import');
+  assert.match(text, /validate-n8n-workflows\.cjs"\), \$PreparedDirPath/);
+  assert.match(text, /Prepared workflow JSON validation failed after before-live-import hook/);
+});
+
+test('n8n workflow toolkit source lock audit passes for adapted helper hardening', () => {
+  const result = runNode(sourceLockAuditScript, [], { cwd: repoRoot });
+
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('PowerShell n8n repo root resolver ignores nested gitignore files', () => {
