@@ -17,7 +17,39 @@ if (-not $PSScriptRoot) {
   throw "This script must be run from a .ps1 file."
 }
 
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+function Test-SanitizerRepoRootCandidate($Path) {
+  if (
+    (Test-Path -LiteralPath (Join-Path $Path ".git")) -or
+    (Test-Path -LiteralPath (Join-Path $Path "n8n-workflows"))
+  ) {
+    return $true
+  }
+
+  $gitignorePath = Join-Path $Path ".gitignore"
+  if (Test-Path -LiteralPath $gitignorePath -PathType Leaf) {
+    $gitignore = Get-Content -Raw -Path $gitignorePath
+    return $gitignore -match '(?m)^\.to-sanitise/' -and $gitignore -match '(?m)^\.sanitised/'
+  }
+
+  return $false
+}
+
+function Resolve-RepoRootFromScript {
+  $current = (Resolve-Path $PSScriptRoot).Path
+  while ($true) {
+    if (Test-SanitizerRepoRootCandidate $current) {
+      return $current
+    }
+
+    $parent = Split-Path -Parent $current
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
+      throw "Could not resolve repo root from $PSScriptRoot. Run this helper from inside a Git repo or a repo root with .to-sanitise/ and .sanitised/ ignored."
+    }
+    $current = $parent
+  }
+}
+
+$RepoRoot = Resolve-RepoRootFromScript
 Set-Location $RepoRoot
 
 $InputDir = ".to-sanitise"

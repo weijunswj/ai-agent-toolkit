@@ -1502,7 +1502,7 @@ test('source-lock audit passes and catches exact-copy drift for retired sources'
   assert.equal(lock.source_lifecycle, 'retired_after_migration');
   assert.equal(lock.source_update_policy, 'none');
   assert.equal(lock.public_attribution_required, false);
-  const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'sanitizer', 'prepare-n8n-template.js');
+  const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync', 'should-import-n8n-workflow.cjs');
   fs.appendFileSync(copiedFile, '\nDrift test\n');
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);

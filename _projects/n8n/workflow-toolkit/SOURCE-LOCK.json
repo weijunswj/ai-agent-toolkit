@@ -22,17 +22,18 @@
       "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with clearer colored retry output."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "scripts/prepare-n8n-template.js",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/prepare-n8n-template.js",
-      "source_blob_sha": "4d09cc76a158a5edb56f9cf8e05c54a502fb4ad6"
+      "source_blob_sha": "4d09cc76a158a5edb56f9cf8e05c54a502fb4ad6",
+      "notes": "Usage text was updated after rehoming the sanitizer helper so it no longer points at the original scripts/ path."
     },
     {
       "mode": "adapted",
       "source_path": "scripts/sanitise-n8n-template.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/sanitise-n8n-template.ps1",
       "source_blob_sha": "725541965ed49dabc04d4c2af93bff1b9e141384",
-      "notes": "Local wrapper filename references and co-located stripper script resolution were updated after replacing dash-prefixed CMD entrypoints with underscore-prefixed entrypoints and rehoming the helper from the original scripts folder."
+      "notes": "Local wrapper filename references, co-located stripper script resolution, and repo-root staging folder resolution were updated after replacing dash-prefixed CMD entrypoints with underscore-prefixed entrypoints and rehoming the helper from the original scripts folder."
     },
     {
       "mode": "adapted",
@@ -60,21 +61,21 @@
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/export-n8n-workflows-live.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/export-n8n-workflows-live.ps1",
       "source_blob_sha": "e4d3fa06239817e0ac4248f31a31b2fa6ebe2f5d",
-      "notes": "Toolkit-adapted after migration to make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration."
+      "notes": "Toolkit-adapted after migration to make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration. Also refuses unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
     },
     {
       "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/import-n8n-workflows-live.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1",
       "source_blob_sha": "10d37f121e00dfd4d12dd8a9ca59426276fd95ee",
-      "notes": "Toolkit-adapted after migration to make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration. Also prevents dry-run hook execution and revalidates prepared workflow JSON after before-live-import hooks before live import execution."
+      "notes": "Toolkit-adapted after migration to make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration. Also prevents dry-run hook execution, revalidates prepared workflow JSON after before-live-import hooks before live import execution, and refuses unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
     },
     {
       "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/n8n-workflow-sync-menu.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/n8n-workflow-sync-menu.ps1",
       "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a",
-      "notes": "RestartContainerAfterImport menu guidance adapted to recommend the existing auto-restart option for local Docker imports when restart warnings appear."
+      "notes": "RestartContainerAfterImport menu guidance adapted to recommend the existing auto-restart option for local Docker imports when restart warnings appear. Repo-root resolution was added after rehome so .n8n-local command history is maintained at the repo root instead of under helper folders."
     },
     {
       "mode": "adapted",
