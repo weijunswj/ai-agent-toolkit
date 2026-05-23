@@ -289,6 +289,14 @@ function Load-PreviousCommand {
   return Get-Content -Raw -Path $PreviousCommandFile | ConvertFrom-Json
 }
 
+function Test-TrustedCommandRecord($Record) {
+  $script = [string]$Record.script
+  if ($script -eq $ExportHelperScript) { return $true }
+  if ($script -eq $ImportHelperScript) { return $true }
+  if ($script -eq "node" -and @($Record.args).Count -gt 0 -and [string]$Record.args[0] -eq $ValidateHelperScript) { return $true }
+  return $false
+}
+
 function Show-PreviousCommand {
   $previous = Load-PreviousCommand
   if ($null -eq $previous) {
@@ -403,6 +411,10 @@ function Invoke-UsePrevious {
   $previous = Load-PreviousCommand
   if ($null -eq $previous) {
     Write-Step "INFO" "No previous command is saved."
+    return
+  }
+  if (-not (Test-TrustedCommandRecord $previous)) {
+    Write-Step "BLOCK" "Saved previous command is not trusted. Clear previous command and rebuild it from the menu."
     return
   }
   Invoke-CommandRecord $previous ([bool]$Yes)

@@ -663,6 +663,52 @@ test('PowerShell n8n helper scripts keep local staging and history at repo root 
   }
 });
 
+test('n8n workflow sync menus resolve helper commands from their own folder', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit source menu', path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['workflow toolkit generated menu', path.join(scriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['Secure CI/CD preserved menu', path.join(secureCicdN8nTemplateDir, 'n8n-workflow-sync-menu.ps1')],
+  ]) {
+    const text = readText(filePath);
+
+    assert.match(text, /\$HelperScriptDir = \(Resolve-Path \$PSScriptRoot\)\.Path/, label);
+    assert.match(text, /\$ExportHelperScript = Join-Path \$HelperScriptDir "export-n8n-workflows-live\.ps1"/, label);
+    assert.match(text, /\$ImportHelperScript = Join-Path \$HelperScriptDir "import-n8n-workflows-live\.ps1"/, label);
+    assert.match(text, /\$ValidateHelperScript = Join-Path \$HelperScriptDir "validate-n8n-workflows\.cjs"/, label);
+    assert.doesNotMatch(text, /"\.\\scripts\\export-n8n-workflows-live\.ps1"/, label);
+    assert.doesNotMatch(text, /"\.\\scripts\\import-n8n-workflows-live\.ps1"/, label);
+    assert.doesNotMatch(text, /"scripts\/validate-n8n-workflows\.cjs"/, label);
+    assert.doesNotMatch(text, /scripts\\\\export-n8n-workflows-live\.ps1/, label);
+    assert.doesNotMatch(text, /scripts\\\\import-n8n-workflows-live\.ps1/, label);
+  }
+});
+
+test('n8n workflow sync menus validate saved previous commands before replay', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit source menu', path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['workflow toolkit generated menu', path.join(scriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['Secure CI/CD preserved menu', path.join(secureCicdN8nTemplateDir, 'n8n-workflow-sync-menu.ps1')],
+  ]) {
+    const text = readText(filePath);
+    const invokeUsePreviousStart = text.indexOf('function Invoke-UsePrevious');
+    const clearPreviousStart = text.indexOf('function Clear-PreviousCommand');
+    assert.notEqual(invokeUsePreviousStart, -1, `${label} Invoke-UsePrevious not found`);
+    assert.notEqual(clearPreviousStart, -1, `${label} Clear-PreviousCommand not found`);
+    const invokeUsePrevious = text.slice(invokeUsePreviousStart, clearPreviousStart);
+    const trustCheckIndex = invokeUsePrevious.indexOf('Test-TrustedCommandRecord $previous');
+    const invokeIndex = invokeUsePrevious.indexOf('Invoke-CommandRecord $previous');
+
+    assert.match(text, /function Test-TrustedCommandRecord\(\$Record\)/, label);
+    assert.match(text, /\$script -eq \$ExportHelperScript/, label);
+    assert.match(text, /\$script -eq \$ImportHelperScript/, label);
+    assert.match(text, /\$script -eq "node" -and @\(\$Record\.args\)\.Count -gt 0 -and \[string\]\$Record\.args\[0\] -eq \$ValidateHelperScript/, label);
+    assert.match(text, /Saved previous command is not trusted\. Clear previous command and rebuild it from the menu\./, label);
+    assert.notEqual(trustCheckIndex, -1, `${label} previous command trust check not found`);
+    assert.notEqual(invokeIndex, -1, `${label} previous command invocation not found`);
+    assert.ok(trustCheckIndex < invokeIndex, `${label} trust check must run before previous command invocation`);
+  }
+});
+
 test('n8n helper tests do not execute live n8n import or export helpers', () => {
   const testText = readText(__filename);
   const childProcessCalls = testText.match(/(?:spawnSync|execFileSync)\([\s\S]*?\);/g) || [];
