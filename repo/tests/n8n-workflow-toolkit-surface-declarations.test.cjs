@@ -90,7 +90,7 @@ const cmdWrapperCases = [
 ];
 
 const wrapperAdaptationNote =
-  'Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output and clears the console before reruns.';
+  'Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output, clears the console before reruns, and resolves Windows PowerShell from the trusted absolute SystemRoot path instead of PATH.';
 
 function readJson(relPath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relPath), 'utf8'));
@@ -170,9 +170,14 @@ test('n8n workflow toolkit cmd wrappers invoke co-located PowerShell scripts', (
     for (const relPath of [wrapper.sourcePath, wrapper.outputPath]) {
       const wrapperText = readText(relPath);
       assert.equal(wrapperText.includes(wrapper.oldScriptPath), false, relPath);
+      assert.match(wrapperText, /:resolve_powershell/, relPath);
+      assert.match(wrapperText, /%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe/i, relPath);
+      assert.match(wrapperText, /set "POWERSHELL_EXE=/, relPath);
+      assert.doesNotMatch(wrapperText, /(^|\r?\n)\s*powershell\b/i, relPath);
+      assert.doesNotMatch(wrapperText, /(^|\r?\n)\s*pwsh\b/i, relPath);
       if (wrapper.ps1Name === 'import-n8n-workflows-live.ps1') {
         assert.equal(
-          wrapperText.includes(`powershell -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %* %RESTART_ARG%`),
+          wrapperText.includes(`"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %* %RESTART_ARG%`),
           true,
           relPath
         );
@@ -180,14 +185,14 @@ test('n8n workflow toolkit cmd wrappers invoke co-located PowerShell scripts', (
         assert.match(wrapperText, /-RestartContainerAfterImport/, relPath);
       } else {
         assert.equal(
-          wrapperText.includes(`powershell -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %*`),
+          wrapperText.includes(`"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %*`),
           true,
           relPath
         );
       }
       assert.match(wrapperText, /call :banner "n8n .+"/, relPath);
       assert.match(wrapperText, /call :status DarkCyan "-+"/, relPath);
-      assert.match(wrapperText, /powershell -NoProfile -Command "Write-Host \$env:AAT_STATUS_MESSAGE -ForegroundColor \$env:AAT_STATUS_COLOR"/, relPath);
+      assert.match(wrapperText, /"%POWERSHELL_EXE%" -NoProfile -Command "Write-Host \$env:AAT_STATUS_MESSAGE -ForegroundColor \$env:AAT_STATUS_COLOR"/, relPath);
       assert.equal(/^cd\s+\/d\s+"%~dp0\.\."/im.test(wrapperText), false, relPath);
     }
   }

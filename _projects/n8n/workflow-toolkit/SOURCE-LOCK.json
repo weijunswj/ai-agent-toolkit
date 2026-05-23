@@ -19,7 +19,7 @@
       "source_path": "scripts/- sanitise-n8n-template.cmd",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/_sanitise-n8n-template.cmd",
       "source_blob_sha": "0ed27a6b98c45ae3695e662ded246c1a8739a974",
-      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output and clears the console before reruns."
+      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output, clears the console before reruns, and resolves Windows PowerShell from the trusted absolute SystemRoot path instead of PATH."
     },
     {
       "mode": "adapted",
@@ -40,14 +40,14 @@
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/- export-n8n-workflows-live.cmd",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd",
       "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66",
-      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output and clears the console before reruns."
+      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output, clears the console before reruns, and resolves Windows PowerShell from the trusted absolute SystemRoot path instead of PATH."
     },
     {
       "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/- import-n8n-workflows-live.cmd",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd",
       "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898",
-      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output and clears the console before reruns."
+      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output, clears the console before reruns, and resolves Windows PowerShell from the trusted absolute SystemRoot path instead of PATH."
     },
     {
       "mode": "adapted",
