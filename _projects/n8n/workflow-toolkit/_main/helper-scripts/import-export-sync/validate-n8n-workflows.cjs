@@ -206,7 +206,9 @@ function validationRulePathCandidates(root) {
     .filter(Boolean)
     .map((value) => (path.isAbsolute(value) ? value : path.join(root, value)));
 
-  const defaults = DEFAULT_VALIDATION_RULE_FILES.map((file) => path.join(root, file));
+  const defaultsEnabled = /^(?:1|true|yes|on)$/i.test(String(process.env.N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD || ''))
+    ? DEFAULT_VALIDATION_RULE_FILES.map((file) => path.join(root, file))
+    : [];
   const candidates = [];
   const seen = new Map();
   function addCandidate(filePath, required) {
@@ -223,7 +225,7 @@ function validationRulePathCandidates(root) {
   }
 
   for (const filePath of configured) addCandidate(filePath, true);
-  for (const filePath of defaults) addCandidate(filePath, false);
+  for (const filePath of defaultsEnabled) addCandidate(filePath, false);
   return candidates;
 }
 
