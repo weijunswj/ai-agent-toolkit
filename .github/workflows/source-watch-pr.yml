@@ -1,7 +1,6 @@
 name: Source Watch PR Notifier
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: "17 3 * * *"
     - cron: "43 9 * * *"
@@ -18,6 +17,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: refs/heads/main
           fetch-depth: 0
           persist-credentials: false
 
