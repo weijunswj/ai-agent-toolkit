@@ -5,6 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
   "outputs": [
     {
       "kind": "curated",

@@ -40,6 +40,7 @@ const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
 const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']);
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
+const projectVersionPattern = /^\d+\.\d+\.\d+$/;
 const agentRuleSpecPath = path.join(root, 'repo', 'scripts', 'agent-rule-template-specs.json');
 const agentRuleSpecDocument = JSON.parse(fs.readFileSync(agentRuleSpecPath, 'utf8'));
 
@@ -195,8 +196,17 @@ function validateProjectShape(errors, relPath) {
     return null;
   }
 
-  for (const key of ['id', 'category', 'name', 'title', 'module_path', 'main_path', 'outputs', 'writes', 'requires_approval', 'run_commands_by_default', 'live_actions', 'ci_live_actions']) {
+  for (const key of ['id', 'category', 'name', 'title', 'module_path', 'main_path', 'version', 'version_policy', 'version_notes', 'outputs', 'writes', 'requires_approval', 'run_commands_by_default', 'live_actions', 'ci_live_actions']) {
     if (!(key in project)) fail(errors, `${relPath} missing ${key}`);
+  }
+  if ('version' in project && (typeof project.version !== 'string' || !projectVersionPattern.test(project.version))) {
+    fail(errors, `${relPath} version must be MAJOR.MINOR.PATCH`);
+  }
+  if ('version_policy' in project && project.version_policy !== 'semver') {
+    fail(errors, `${relPath} version_policy must be semver`);
+  }
+  if ('version_notes' in project && (typeof project.version_notes !== 'string' || !project.version_notes.trim())) {
+    fail(errors, `${relPath} version_notes must be a non-empty string`);
   }
   if ('exports_path' in project) fail(errors, `${relPath} must not use exports_path`);
   if (!Array.isArray(project.outputs)) fail(errors, `${relPath} outputs must be an array`);
@@ -741,6 +751,9 @@ function registryEntries(projects) {
       category: project.category,
       name: project.name,
       title: project.title,
+      version: project.version,
+      version_policy: project.version_policy,
+      version_notes: project.version_notes,
       project: project.project,
       surface: project.surface,
       module_path: project.module_path,

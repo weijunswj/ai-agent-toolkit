@@ -12,8 +12,9 @@ Current advisory flow:
 
 1. Read `_projects/**/SOURCE-LOCK.json`.
 2. Separate active update candidates from retired provenance sources.
-3. Render a source-watch plan.
-4. Run source-lock audit and project sync checks.
+3. Use active third-party source locks to identify upstream repo, source ref, locked commit, update policy, attribution requirement, allowlisted files, and exact blob pins.
+4. Render a source-watch plan.
+5. Run source-lock audit and project sync checks.
 
 Possible future updater flow, if separately approved:
 
@@ -51,10 +52,15 @@ Allowed scoped writes:
 Current source-watch output is advisory only. For any separately approved future updater work, third-party source updates require stricter review:
 
 - Strict allowlist.
+- Exact `source_blob_sha` pins for exact and adapted copied files.
+- Manual attribution check.
 - Manual script review.
 - Local-only static checks for no network, shell execution, subprocess use, package installs, or browser launches.
+- Full repo validation.
 - Labels such as `source-update` and `third-party-review`.
 - Review from `weijunswj` before merge.
+
+Active third-party source locks must use `source_lifecycle: "active"`, `source_role: "third_party_attribution_source"`, `source_update_policy: "manual_review_required"`, `public_attribution_required: true`, and a full 40-character `source_commit` SHA. Retired internal source locks are historical provenance only and are not scheduled-watch targets.
 
 For `nextlevelbuilder/ui-ux-pro-max-skill`, the allowlist is:
 
@@ -78,5 +84,6 @@ GitHub notifications depend on the user's notification settings. Any separately 
 - No direct-to-main source updates.
 - No token printing.
 - No upstream code execution.
+- No network fetching in this advisory workflow.
 - No product repo destructive actions.
 - No live n8n import/export in CI.

@@ -134,6 +134,24 @@ When a project uses shims, document the reason in that project's `SOURCE-MANIFES
 
 The sync script never uses AI, never summarises, never executes project scripts, never installs packages, never uses network, and never runs live n8n import/export.
 
+## Project Versioning
+
+Every `toolkit.project.json` declares the toolkit project module version:
+
+- `version`: the toolkit project module version, formatted as `MAJOR.MINOR.PATCH`.
+- `version_policy`: currently only `semver` is supported.
+- `version_notes`: a short explanation of what the version represents.
+
+The project version belongs to the toolkit adaptation and routing contract. For third-party projects, it is not the upstream third-party version. Do not duplicate upstream repo, ref, commit, file pins, or attribution metadata into `toolkit.project.json`; keep that data in `SOURCE-LOCK.json`.
+
+Do not use Git tags, package tags, or GitHub release tags as substitutes for project module versions. Do not add per-file versions. Do not bump the project version for regenerated outputs when source content and the project contract did not change.
+
+Version bump guidance:
+
+- Patch: typo, wording, docs-only cleanup, bugfix, or validation hardening with no output contract change.
+- Minor: new templates, new generated outputs, new references, additive manifest/schema fields, or an upstream refresh with meaningful content changes but the same output shape.
+- Major: breaking folder shape, output paths, manifest schema, public contract, or removed/renamed published surfaces.
+
 ## Source Locks
 
 Each project module has a `SOURCE-LOCK.json` file. Exact-copy entries pin the expected Git blob SHA for preserved files. Adapted or excluded entries must say so explicitly with notes. AI-facing helper/tool surfaces may also be listed with `root_surface_path` when they intentionally mirror or adapt upstream material.
@@ -148,6 +166,23 @@ Each lock also declares source lifecycle metadata:
 - `public_attribution_required`: boolean.
 
 Retired internal sources keep exact-byte provenance but are not watched as active upstreams. Active third-party attribution sources require manual review and public attribution.
+
+Active third-party `SOURCE-LOCK.json` files must include:
+
+- `source_repo`
+- `source_ref`
+- `source_commit`
+- `source_lifecycle: "active"`
+- `source_role: "third_party_attribution_source"`
+- `source_update_policy: "manual_review_required"`
+- `public_attribution_required: true`
+- `files`
+
+For active third-party projects, `source_commit` must be a full 40-character commit SHA. Exact and adapted copied files must include `source_blob_sha`. Adapted copied files must include non-empty `notes`. Excluded files may omit `project_path`, but they should include notes explaining why they are excluded.
+
+Scheduled source-watch tasks must read active third-party tracking from `SOURCE-LOCK.json`, not `toolkit.project.json`. The lock identifies the upstream repo, source ref, locked commit, `source_update_policy`, attribution requirement, allowlisted files, and exact blob pins. Active third-party checks are advisory/manual-review only: no network fetching is implemented here, no auto-merge, no direct-to-main updates, no live n8n actions, and no upstream code execution.
+
+Third-party updates require manual review, attribution check, allowlist check, local-only script checks, and full repo validation. Retired internal source locks remain historical provenance only and are not scheduled-watch targets.
 
 Run the local audit without network access:
 

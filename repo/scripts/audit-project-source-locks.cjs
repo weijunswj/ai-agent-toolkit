@@ -19,6 +19,7 @@ const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT ||
 const allowedSourceLifecycles = new Set(['active', 'retired_after_migration']);
 const allowedSourceRoles = new Set(['migration_provenance_only', 'third_party_attribution_source']);
 const allowedSourceUpdatePolicies = new Set(['none', 'manual_review_required']);
+const fullCommitShaPattern = /^[0-9a-f]{40}$/;
 // These prefixes are reserved toolkit-local source/maintenance namespaces.
 // SOURCE-LOCK source_path values must usually describe upstream repo paths,
 // not toolkit-local layout paths. A narrow exception exists for retired
@@ -100,6 +101,14 @@ function validateLifecycleMetadata(lock, relPath, errors) {
   if (lock.source_role === 'third_party_attribution_source') {
     if (lock.source_lifecycle !== 'active') {
       errors.push(`${relPath} third-party attribution source must use source_lifecycle active`);
+    }
+    for (const key of ['source_repo', 'source_ref', 'source_commit']) {
+      if (key in lock && (typeof lock[key] !== 'string' || !lock[key].trim())) {
+        errors.push(`${relPath} active third-party ${key} must be a non-empty string`);
+      }
+    }
+    if ('source_commit' in lock && (typeof lock.source_commit !== 'string' || !fullCommitShaPattern.test(lock.source_commit))) {
+      errors.push(`${relPath} active third-party source_commit must be a 40-character SHA`);
     }
     if (lock.source_update_policy !== 'manual_review_required') {
       errors.push(`${relPath} third-party attribution source must use source_update_policy manual_review_required`);
@@ -185,6 +194,7 @@ function validateLock(lock, relPath, errors) {
     return;
   }
 
+  const isActiveThirdParty = lock.source_lifecycle === 'active' && lock.source_role === 'third_party_attribution_source';
   for (const file of lock.files) {
     const mode = file.mode || 'exact';
     const localPath = file.project_path || file.root_surface_path;
@@ -209,6 +219,7 @@ function validateLock(lock, relPath, errors) {
       }
     } else if (mode === 'adapted') {
       if (!file.notes) errors.push(`${relPath} adapted entry needs notes: ${label}`);
+      if (isActiveThirdParty && !file.source_blob_sha) errors.push(`${relPath} adapted entry missing source_blob_sha: ${label}`);
       if (!localPath) errors.push(`${relPath} adapted entry missing project_path or root_surface_path: ${label}`);
       if (localPath && !fs.existsSync(resolveRel(localPath))) {
         errors.push(`${relPath} adapted entry missing local file: ${localPath}`);

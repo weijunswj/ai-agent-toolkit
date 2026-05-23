@@ -171,8 +171,68 @@ test('project registry includes the project modules', () => {
   for (const entry of registry) {
     assert.ok(entry.project?.summary, entry.id);
     assert.ok(['skill', 'mcp', 'both', 'source_only'].includes(entry.surface?.publish_as), entry.id);
+    assert.match(entry.version, /^\d+\.\d+\.\d+$/, entry.id);
+    assert.equal(entry.version_policy, 'semver', entry.id);
+    assert.ok(entry.version_notes, entry.id);
     assert.doesNotMatch(JSON.stringify(entry.root_surfaces), /(^|[^A-Za-z0-9_])for_ai\//);
   }
+});
+
+test('project manifests require toolkit project version metadata', () => {
+  for (const manifest of validator.projectManifests()) {
+    assert.match(manifest.version, /^\d+\.\d+\.\d+$/, manifest.id);
+    assert.equal(manifest.version_policy, 'semver', manifest.id);
+    assert.equal(typeof manifest.version_notes, 'string', manifest.id);
+    assert.notEqual(manifest.version_notes.trim(), '', manifest.id);
+  }
+});
+
+test('project manifest validation rejects missing version', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  delete manifest.version;
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing version/);
+});
+
+test('project manifest validation rejects invalid semver version', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.version = '1.0';
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /version must be MAJOR\.MINOR\.PATCH/);
+});
+
+test('project manifest validation rejects invalid version policy', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.version_policy = 'calendar';
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /version_policy must be semver/);
+});
+
+test('project manifest validation rejects empty version notes', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.version_notes = '   ';
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /version_notes must be a non-empty string/);
 });
 
 test('project metadata supports all declared publish_as values', () => {
@@ -1561,6 +1621,97 @@ test('source-lock lifecycle metadata accepts retired internal and active third-p
   assert.equal(thirdParty.source_role, 'third_party_attribution_source');
   assert.equal(thirdParty.source_update_policy, 'manual_review_required');
   assert.equal(thirdParty.public_attribution_required, true);
+});
+
+test('active third-party source lock keeps upstream pins in SOURCE-LOCK', () => {
+  const thirdParty = readJsonFile(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json'));
+  assert.equal(thirdParty.source_repo, 'nextlevelbuilder/ui-ux-pro-max-skill');
+  assert.equal(thirdParty.source_ref, 'main');
+  assert.match(thirdParty.source_commit, /^[0-9a-f]{40}$/);
+  assert.equal(thirdParty.source_update_policy, 'manual_review_required');
+  assert.equal(thirdParty.public_attribution_required, true);
+  assert.ok(thirdParty.files.some((file) => file.mode === 'exact' && file.source_blob_sha));
+  assert.ok(thirdParty.files.some((file) => file.mode === 'adapted' && file.source_blob_sha && file.notes));
+
+  const manifest = readJsonFile(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'toolkit.project.json'));
+  assert.equal(manifest.version, '1.0.0');
+  assert.equal(manifest.version_policy, 'semver');
+  assert.doesNotMatch(JSON.stringify(manifest), /source_commit|source_blob_sha/);
+});
+
+test('active third-party source lock rejects missing or non-SHA source commit', () => {
+  let cwd = tempCopy();
+  let lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
+  let lock = readJsonFile(lockPath);
+  delete lock.source_commit;
+  writeJsonFile(lockPath, lock);
+  let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing source_commit/);
+
+  cwd = tempCopy();
+  lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
+  lock = readJsonFile(lockPath);
+  lock.source_commit = 'main';
+  writeJsonFile(lockPath, lock);
+  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /active third-party source_commit must be a 40-character SHA/);
+});
+
+test('active third-party source lock rejects disabled public attribution', () => {
+  const cwd = tempCopy();
+  const lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
+  const lock = readJsonFile(lockPath);
+  lock.public_attribution_required = false;
+  writeJsonFile(lockPath, lock);
+  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /third-party attribution source must set public_attribution_required true/);
+});
+
+test('active third-party exact and adapted copied files require source blob pins', () => {
+  let cwd = tempCopy();
+  let lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
+  let lock = readJsonFile(lockPath);
+  const exactEntry = lock.files.find((file) => file.mode === 'exact');
+  delete exactEntry.source_blob_sha;
+  writeJsonFile(lockPath, lock);
+  let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /exact entry missing source_blob_sha/);
+
+  cwd = tempCopy();
+  lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
+  lock = readJsonFile(lockPath);
+  const adaptedEntry = lock.files.find((file) => file.mode === 'adapted');
+  delete adaptedEntry.source_blob_sha;
+  writeJsonFile(lockPath, lock);
+  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /adapted entry missing source_blob_sha/);
+});
+
+test('active third-party adapted copied files require notes', () => {
+  const cwd = tempCopy();
+  const lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
+  const lock = readJsonFile(lockPath);
+  const adaptedEntry = lock.files.find((file) => file.mode === 'adapted');
+  adaptedEntry.notes = '';
+  writeJsonFile(lockPath, lock);
+  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /adapted entry needs notes/);
+});
+
+test('retired internal source locks remain historical provenance without active third-party rules', () => {
+  const cwd = tempCopy();
+  const lockPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'SOURCE-LOCK.json');
+  const lock = readJsonFile(lockPath);
+  lock.source_commit = 'retired-source-marker';
+  writeJsonFile(lockPath, lock);
+  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('source watch separates retired provenance sources from active update candidates', () => {

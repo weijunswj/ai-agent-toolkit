@@ -5,6 +5,9 @@
   "title": "Knowledge Index Updater",
   "module_path": "_projects/knowledge/knowledge-index-updater",
   "main_path": "_projects/knowledge/knowledge-index-updater/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
   "outputs": [
     {
       "kind": "copy",
