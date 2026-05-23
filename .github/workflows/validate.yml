@@ -29,4 +29,15 @@ jobs:
           python-version: '3.12'
 
       - name: Run validation
-        run: npm run validate:all
+        run: |
+          node repo/scripts/sync-repo-doc-contract.cjs --check
+          node repo/scripts/sync-toolkit-projects.cjs --check
+          node repo/scripts/audit-project-source-locks.cjs
+          node repo/scripts/audit-published-surfaces.cjs --check
+          node repo/scripts/validate-toolkit.cjs
+          node --test repo/tests/*.test.cjs
+          node repo/scripts/package-skills.cjs --check
+          node repo/scripts/audit-skill-portability.cjs
+          node repo/scripts/package-packs.cjs --check
+          node repo/scripts/run-design-tests.cjs
+          git diff --check

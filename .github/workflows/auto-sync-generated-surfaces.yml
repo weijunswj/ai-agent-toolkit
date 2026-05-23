@@ -87,9 +87,8 @@ jobs:
 
             case "$path" in
               _projects/*/_main/*|repo/docs/*|repo/scripts/*|repo/tests/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
-                echo "::notice::Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate: ${path}. Generated outputs must be committed by the author/Codex and verified by npm run validate:all."
-                echo "should_sync=false" >> "$GITHUB_OUTPUT"
-                exit 0
+                echo "::error file=${path}::Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate: ${path}. Commit generated outputs manually and rely on the normal read-only Validate workflow."
+                exit 1
                 ;;
             esac
           done

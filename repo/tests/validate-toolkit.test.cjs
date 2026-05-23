@@ -424,10 +424,41 @@ test('curated playbook recipes are not full runtime skill references', () => {
 
 test('validation workflow runs canonical full validation read-only', () => {
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'validate.yml'));
-  assert.match(workflow, /^\s*run:\s+npm run validate:all\s*$/m);
+  const expectedCommands = [
+    'node repo/scripts/sync-repo-doc-contract.cjs --check',
+    'node repo/scripts/sync-toolkit-projects.cjs --check',
+    'node repo/scripts/audit-project-source-locks.cjs',
+    'node repo/scripts/audit-published-surfaces.cjs --check',
+    'node repo/scripts/validate-toolkit.cjs',
+    'node --test repo/tests/*.test.cjs',
+    'node repo/scripts/package-skills.cjs --check',
+    'node repo/scripts/audit-skill-portability.cjs',
+    'node repo/scripts/package-packs.cjs --check',
+    'node repo/scripts/run-design-tests.cjs',
+    'git diff --check'
+  ];
+  assert.doesNotMatch(workflow, /^\s*run:\s+npm run validate:all\s*$/m);
+  assert.doesNotMatch(workflow, /\bnpm\s+run\s+validate:all\b/);
+  assert.match(workflow, /^\s*run:\s*\|\s*$/m);
+  for (const command of expectedCommands) {
+    assert.match(workflow, new RegExp(`^\\s*${escapeRegExp(command)}\\s*$`, 'm'), command);
+  }
   assert.doesNotMatch(workflow, /sync-repo-doc-contract\.cjs --write/);
-  assert.doesNotMatch(workflow, /^\s*node repo\/scripts\//m);
   assert.match(workflow, /^permissions:\n  contents: read$/m);
+});
+
+test('validator rejects validation workflow that relies on npm validate script', () => {
+  const cwd = tempCopy();
+  const workflowPath = path.join(cwd, '.github', 'workflows', 'validate.yml');
+  const workflow = readTextFile(workflowPath);
+  fs.writeFileSync(
+    workflowPath,
+    workflow.replace(/run:\s*\|[\s\S]*$/m, 'run: npm run validate:all\n')
+  );
+
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /validate\.yml must use explicit validation commands instead of npm run validate:all/);
 });
 
 test('source-watch PR notifier uses the stable review-notification PR contract', () => {
@@ -478,6 +509,29 @@ test('validator rejects source-watch PR notifier issue permission', () => {
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /source-watch-pr\.yml must grant only contents: write and pull-requests: write/);
+});
+
+test('validator rejects source-watch PR notifier issue permission with inline comment', () => {
+  const cwd = tempCopy();
+  const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
+  const workflow = readTextFile(workflowPath);
+  fs.writeFileSync(workflowPath, workflow.replace('  pull-requests: write\n', '  pull-requests: write\n  issues: write # not actually harmless\n'));
+
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /source-watch-pr\.yml must grant only contents: write and pull-requests: write/);
+});
+
+test('validator accepts expected workflow permissions with inline comments', () => {
+  const cwd = tempCopy();
+  const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
+  const workflow = readTextFile(workflowPath)
+    .replace('  contents: write\n', '  contents: write # needed to update the stable notification branch\n')
+    .replace('  pull-requests: write\n', '  pull-requests: write # needed to create or update the stable notification PR\n');
+  fs.writeFileSync(workflowPath, workflow);
+
+  const result = runValidate(cwd);
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('source-watch advisory plan is manual-only', () => {
@@ -798,19 +852,19 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
   }
 });
 
-test('auto-sync generated surfaces workflow skips unsafe preflight paths before writeback', () => {
+test('auto-sync generated surfaces workflow fails unsafe mixed preflight paths before writeback', () => {
   const cases = [
-    ['repo docs skip is required', (text) => text.replace('repo/docs/*|', ''), /missing unsafe preflight skip handling for repo\/docs/],
-    ['_main skip is required', (text) => text.replace('_projects/*/_main/*|', ''), /missing unsafe preflight skip handling for _projects\/\*\*\/_main/],
-    ['.github skip is required', (text) => text.replace('.github/*|', ''), /missing unsafe preflight skip handling for \.github/],
-    ['repo scripts skip is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight skip handling for repo/' + 'scripts')],
-    ['repo tests skip is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight skip handling for repo\/tests/],
-    ['lockfile skip is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight skip handling for package\/lockfile changes/],
+    ['repo docs fail is required', (text) => text.replace('repo/docs/*|', ''), /missing unsafe preflight fail handling for repo\/docs/],
+    ['_main fail is required', (text) => text.replace('_projects/*/_main/*|', ''), /missing unsafe preflight fail handling for _projects\/\*\*\/_main/],
+    ['.github fail is required', (text) => text.replace('.github/*|', ''), /missing unsafe preflight fail handling for \.github/],
+    ['repo scripts fail is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight fail handling for repo/' + 'scripts')],
+    ['repo tests fail is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight fail handling for repo\/tests/],
+    ['lockfile fail is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight fail handling for package\/lockfile changes/],
     ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/_partials/*', '_projects/blocked/_main/_partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
     ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
-    ['clear skip notice is required', (text) => text.replace('Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate', 'Auto-sync did something else'), /preflight must skip unsafe maintenance\/source PRs/],
-    ['skip must rely on validate:all gate', (text) => text.replace('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.', 'Generated outputs will be checked here.'), /preflight must skip unsafe maintenance\/source PRs/],
-    ['skip must set should_sync false', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"', 'echo "should_sync=true" >> "$GITHUB_OUTPUT"'), /preflight must skip unsafe maintenance\/source PRs/]
+    ['clear fail-closed error is required', (text) => text.replace('Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate', 'Auto-sync did something else'), /preflight must fail unsafe mixed maintenance\/source PRs/],
+    ['manual generated-output guidance is required', (text) => text.replace('Commit generated outputs manually and rely on the normal read-only Validate workflow.', 'Generated outputs will be checked here.'), /preflight must fail unsafe mixed maintenance\/source PRs/],
+    ['unsafe path branch must exit non-zero', (text) => text.replace('Commit generated outputs manually and rely on the normal read-only Validate workflow."\n                exit 1', 'Commit generated outputs manually and rely on the normal read-only Validate workflow."\n                exit 0'), /preflight must fail unsafe mixed maintenance\/source PRs/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
