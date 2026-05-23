@@ -1011,7 +1011,16 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     { label: 'package/lockfile changes', token: 'package.json|package-lock.json|pnpm-lock.yaml|yarn.lock' }
   ];
   for (const { label, token } of requiredPreflightPathBlocks) {
-    if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight skip handling for ${label}`);
+    if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight fail-closed handling for ${label}`);
+  }
+  const autoSyncContractInputs = [
+    'repo/docs/partials/source-of-truth-contract.md'
+  ];
+  for (const token of autoSyncContractInputs) {
+    const preflightOccurrences = preflightSection.split(token).length - 1;
+    if (preflightOccurrences < 3) {
+      fail(errors, `${entry.relPath} must allow source-of-truth contract partial changes as auto-sync eligible inputs`);
+    }
   }
   const autoSyncAgentRulePartialInputs = [
     '_projects/development/ai-coding-agent-rules/_main/_partials/*',
@@ -1027,12 +1036,13 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       fail(errors, `${entry.relPath} must allow generated source-side agent-rule templates in the guarded PR file set`);
     }
   }
-  const unsafeSkipMessage = 'Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate';
-  if (!preflightSection.includes(unsafeSkipMessage) ||
+  const unsafeFailClosedMessage = 'Auto-sync failed closed: this PR mixes deterministic generated-surface inputs with unsafe paths';
+  if (!preflightSection.includes(unsafeFailClosedMessage) ||
       !preflightSection.includes('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.') ||
-      !preflightSection.includes('should_sync=false') ||
+      preflightSection.includes('should_sync=false') ||
+      preflightSection.includes('Auto-sync skipped:') ||
       !preflightSection.includes('should_sync=true')) {
-    fail(errors, `${entry.relPath} preflight must skip unsafe maintenance/source PRs and set should_sync before writeback`);
+    fail(errors, `${entry.relPath} preflight must fail closed for unsafe maintenance/source PRs before writeback`);
   }
 
   if (!text.includes('Forbidden post-sync change outside generated output scope') ||

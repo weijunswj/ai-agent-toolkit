@@ -798,19 +798,20 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
   }
 });
 
-test('auto-sync generated surfaces workflow skips unsafe preflight paths before writeback', () => {
+test('auto-sync generated surfaces workflow fails closed for unsafe preflight paths before writeback', () => {
   const cases = [
-    ['repo docs skip is required', (text) => text.replace('repo/docs/*|', ''), /missing unsafe preflight skip handling for repo\/docs/],
-    ['_main skip is required', (text) => text.replace('_projects/*/_main/*|', ''), /missing unsafe preflight skip handling for _projects\/\*\*\/_main/],
-    ['.github skip is required', (text) => text.replace('.github/*|', ''), /missing unsafe preflight skip handling for \.github/],
-    ['repo scripts skip is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight skip handling for repo/' + 'scripts')],
-    ['repo tests skip is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight skip handling for repo\/tests/],
-    ['lockfile skip is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight skip handling for package\/lockfile changes/],
+    ['repo docs fail-closed block is required', (text) => text.replace('repo/docs/*|', ''), /missing unsafe preflight fail-closed handling for repo\/docs/],
+    ['_main fail-closed block is required', (text) => text.replace('_projects/*/_main/*|', ''), /missing unsafe preflight fail-closed handling for _projects\/\*\*\/_main/],
+    ['.github fail-closed block is required', (text) => text.replace('.github/*|', ''), /missing unsafe preflight fail-closed handling for \.github/],
+    ['repo scripts fail-closed block is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight fail-closed handling for repo/' + 'scripts')],
+    ['repo tests fail-closed block is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight fail-closed handling for repo\/tests/],
+    ['lockfile fail-closed block is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight fail-closed handling for package\/lockfile changes/],
+    ['source-of-truth contract partial carve-out is required', (text) => text.replaceAll('repo/docs/partials/source-of-truth-contract.md', 'repo/docs/partials/other-contract.md'), /must allow source-of-truth contract partial changes as auto-sync eligible inputs/],
     ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/_partials/*', '_projects/blocked/_main/_partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
     ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
-    ['clear skip notice is required', (text) => text.replace('Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate', 'Auto-sync did something else'), /preflight must skip unsafe maintenance\/source PRs/],
-    ['skip must rely on validate:all gate', (text) => text.replace('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.', 'Generated outputs will be checked here.'), /preflight must skip unsafe maintenance\/source PRs/],
-    ['skip must set should_sync false', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"', 'echo "should_sync=true" >> "$GITHUB_OUTPUT"'), /preflight must skip unsafe maintenance\/source PRs/]
+    ['clear fail-closed error is required', (text) => text.replace('Auto-sync failed closed: this PR mixes deterministic generated-surface inputs with unsafe paths', 'Auto-sync did something else'), /preflight must fail closed for unsafe maintenance\/source PRs/],
+    ['failure must rely on validate:all gate', (text) => text.replace('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.', 'Generated outputs will be checked here.'), /preflight must fail closed for unsafe maintenance\/source PRs/],
+    ['unsafe preflight paths must not use should_sync=false skip semantics', (text) => text.replace('Auto-sync failed closed: this PR mixes deterministic generated-surface inputs with unsafe paths', 'Auto-sync failed closed: this PR mixes deterministic generated-surface inputs with unsafe paths"\n                echo "should_sync=false" >> "$GITHUB_OUTPUT"\n                echo "'), /preflight must fail closed for unsafe maintenance\/source PRs/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');

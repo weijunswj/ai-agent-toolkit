@@ -80,16 +80,15 @@ jobs:
 
           for path in "${changed_files[@]}"; do
             case "$path" in
-              _projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/n8n/local-setup/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md|_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md|_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md)
+              repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/n8n/local-setup/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md|_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md|_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md)
                 continue
                 ;;
             esac
 
             case "$path" in
               _projects/*/_main/*|repo/docs/*|repo/scripts/*|repo/tests/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
-                echo "::notice::Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate: ${path}. Generated outputs must be committed by the author/Codex and verified by npm run validate:all."
-                echo "should_sync=false" >> "$GITHUB_OUTPUT"
-                exit 0
+                echo "::error file=$path::Auto-sync failed closed: this PR mixes deterministic generated-surface inputs with unsafe paths: ${path}. Generated outputs must be committed by the author/Codex and verified by npm run validate:all."
+                exit 1
                 ;;
             esac
           done
@@ -106,13 +105,13 @@ jobs:
           eligible=false
           for path in "${changed_files[@]}"; do
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/n8n/local-setup/_main/_partials/*)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/n8n/local-setup/_main/_partials/*)
                 eligible=true
                 ;;
             esac
 
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/n8n/local-setup/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md|_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md|_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md|README.md|AGENTS.md|skills/*|mcp/*)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/n8n/local-setup/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md|_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md|_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md|README.md|AGENTS.md|skills/*|mcp/*)
                 ;;
               *)
                 echo "::error file=$path::Auto-sync only runs on deterministic source/routing/contract and generated surface paths: $path"
