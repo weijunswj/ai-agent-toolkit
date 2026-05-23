@@ -369,7 +369,7 @@ test('validate-n8n-workflows.cjs has no SpaceKoncept-specific placeholder requir
   assert.equal(result.status, 0, result.stderr);
 });
 
-test('validate-n8n-workflows.cjs loads project validation rules from consumer repo paths', () => {
+test('validate-n8n-workflows.cjs does not auto-load project validation rules by default', () => {
   const cwd = tempDir();
   writeJson(path.join(cwd, 'n8n-workflows', 'generic.json'), safeWorkflow());
   fs.mkdirSync(path.join(cwd, 'scripts'), { recursive: true });
@@ -385,9 +385,9 @@ test('validate-n8n-workflows.cjs loads project validation rules from consumer re
 
   const result = runNode(validateScript, [], { cwd });
 
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /custom rule failed/);
-  assert.match(result.stdout, /Using validation rule scripts[\\/]n8n-workflow-validation-rules\.cjs/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /custom rule failed/);
+  assert.doesNotMatch(result.stdout, /Using validation rule scripts[\\/]n8n-workflow-validation-rules\.cjs/);
 });
 
 test('validate-n8n-workflows.cjs fails when configured validation rule is missing', () => {
@@ -428,6 +428,8 @@ test('n8n hook and validation extension points stay generic and product agnostic
   assert.match(text, /N8N_WORKFLOW_HOOK_SCRIPT/);
   assert.match(text, /n8n-workflow-hooks/);
   assert.match(text, /N8N_WORKFLOW_VALIDATION_RULES/);
+  assert.match(text, /N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD/);
+  assert.match(text, /N8N_WORKFLOW_HOOK_AUTOLOAD/);
   assert.match(text, /n8n-workflow-validation-rules/);
   assert.doesNotMatch(text, /SpaceKoncept|SPACEKONCEPT|Groq/i);
   assert.doesNotMatch(text, /ui-ux-pro-max|design-system-generator/);
@@ -455,6 +457,7 @@ test('PowerShell n8n hooks require configured hook scripts but keep defaults opt
     const text = readText(path.join(scriptDir, fileName));
 
     assert.match(text, /N8N_WORKFLOW_HOOK_SCRIPT[\s\S]*Add-HookScriptCandidate \$hookPath \$true/);
+    assert.match(text, /N8N_WORKFLOW_HOOK_AUTOLOAD/);
     assert.match(text, /Add-HookScriptCandidate \$relativePath \$false/);
     assert.match(text, /"scripts\/n8n-workflow-hooks\.cjs"/);
     assert.match(text, /"\.n8n-local\/n8n-workflow-hooks\.cjs"/);
