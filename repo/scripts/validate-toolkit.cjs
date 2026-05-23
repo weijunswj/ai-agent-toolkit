@@ -813,8 +813,10 @@ function workflowPermissionLines(text) {
     const line = lines[i];
     if (/^\S/.test(line) && line.trim() !== '') break;
     if (line.trim() === '') continue;
-    const match = line.match(/^  ([A-Za-z-]+):\s*(\S+)\s*$/);
+    if (/^\s*#/.test(line)) continue;
+    const match = line.match(/^  ([A-Za-z-]+):\s*([A-Za-z-]+)\s*(?:#.*)?$/);
     if (match) permissions.push(`${match[1]}: ${match[2]}`);
+    else permissions.push(`__unparsed__: ${line.trim()}`);
   }
   return permissions;
 }
@@ -880,6 +882,43 @@ const shellCommandStartPrefix = String.raw`^\s*(?:run:\s*)?(?:env\s+)?${shellEnv
 const packageManagerCommandPrefix = String.raw`(?:[^\s#;]+/)?`;
 const npmValidateAllCommandPattern = new RegExp(`${shellCommandStartPrefix}${packageManagerCommandPrefix}npm(?:\\.cmd)?\\s+run\\s+validate:all\\b`, 'm');
 const packageManagerCommandPattern = new RegExp(`${shellCommandStartPrefix}${packageManagerCommandPrefix}(?:npm|pnpm|yarn)(?:\\.cmd)?(?:\\s|$)`, 'm');
+const explicitValidationWorkflowCommands = [
+  'node repo/scripts/sync-repo-doc-contract.cjs --check',
+  'node repo/scripts/sync-toolkit-projects.cjs --check',
+  'node repo/scripts/audit-project-source-locks.cjs',
+  'node repo/scripts/audit-published-surfaces.cjs --check',
+  'node repo/scripts/validate-toolkit.cjs',
+  'node --test repo/tests/*.test.cjs',
+  'node repo/scripts/package-skills.cjs --check',
+  'node repo/scripts/audit-skill-portability.cjs',
+  'node repo/scripts/package-packs.cjs --check',
+  'node repo/scripts/run-design-tests.cjs',
+  'git diff --check'
+];
+
+function validateReadOnlyValidationWorkflow(entry, text, errors) {
+  const permissions = workflowPermissionLines(text) || [];
+  const expectedPermissions = ['contents: read'];
+  if (permissions.length !== expectedPermissions.length || expectedPermissions.some((permission) => !permissions.includes(permission))) {
+    fail(errors, `${entry.relPath} must grant only contents: read`);
+  }
+
+  if (npmValidateAllCommandPattern.test(text)) {
+    fail(errors, `${entry.relPath} must use explicit validation commands instead of npm run validate:all`);
+  }
+
+  const steps = workflowStepBlocks(text);
+  const validationStep = workflowStepText(steps, 'Run validation');
+  const commands = workflowRunCommands(validationStep);
+  if (commands.length !== explicitValidationWorkflowCommands.length ||
+      explicitValidationWorkflowCommands.some((command, index) => commands[index] !== command)) {
+    fail(errors, `${entry.relPath} must run the canonical explicit validation command list`);
+  }
+
+  if (/sync-repo-doc-contract\.cjs\s+--write/.test(text) || /sync-toolkit-projects\.cjs\s+--write/.test(text)) {
+    fail(errors, `${entry.relPath} must not write generated outputs`);
+  }
+}
 
 function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const permissions = workflowPermissionLines(text) || [];
@@ -1011,7 +1050,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     { label: 'package/lockfile changes', token: 'package.json|package-lock.json|pnpm-lock.yaml|yarn.lock' }
   ];
   for (const { label, token } of requiredPreflightPathBlocks) {
-    if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight skip handling for ${label}`);
+    if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight fail handling for ${label}`);
   }
   const autoSyncAgentRulePartialInputs = [
     '_projects/development/ai-coding-agent-rules/_main/_partials/*',
@@ -1027,12 +1066,13 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       fail(errors, `${entry.relPath} must allow generated source-side agent-rule templates in the guarded PR file set`);
     }
   }
-  const unsafeSkipMessage = 'Auto-sync skipped: this PR includes paths that make privileged generated-surface writeback inappropriate';
-  if (!preflightSection.includes(unsafeSkipMessage) ||
-      !preflightSection.includes('Generated outputs must be committed by the author/Codex and verified by npm run validate:all.') ||
-      !preflightSection.includes('should_sync=false') ||
-      !preflightSection.includes('should_sync=true')) {
-    fail(errors, `${entry.relPath} preflight must skip unsafe maintenance/source PRs and set should_sync before writeback`);
+  const unsafeFailMessage = 'Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate';
+  if (!preflightSection.includes(unsafeFailMessage) ||
+      !preflightSection.includes('Commit generated outputs manually and rely on the normal read-only Validate workflow.') ||
+      !preflightSection.includes('should_sync=true') ||
+      preflightSection.includes('should_sync=false') ||
+      !/Auto-sync refused:[\s\S]{0,400}exit 1/.test(preflightSection)) {
+    fail(errors, `${entry.relPath} preflight must fail unsafe mixed maintenance/source PRs before writeback`);
   }
 
   if (!text.includes('Forbidden post-sync change outside generated output scope') ||
@@ -1195,6 +1235,7 @@ function validateWorkflows(errors) {
     const isAutoSyncGeneratedSurfacesWorkflow = entry.relPath === autoSyncGeneratedSurfacesWorkflowPath;
     const isSourceWatchPlanWorkflow = entry.relPath === '.github/workflows/source-watch-plan.yml';
     const isSourceWatchPrWorkflow = entry.relPath === sourceWatchPrWorkflowPath;
+    const isReadOnlyValidationWorkflow = entry.relPath === '.github/workflows/validate.yml';
     if (!/^permissions:\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
     if (/contents:\s*write/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
     if (/pull-requests:\s*write/i.test(text) && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} uses pull-requests: write`);
@@ -1210,6 +1251,7 @@ function validateWorkflows(errors) {
     }
     if (isSourceWatchPrWorkflow) validateSourceWatchPrWorkflow(entry, text, errors);
     if (isAutoSyncGeneratedSurfacesWorkflow) validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors);
+    if (isReadOnlyValidationWorkflow) validateReadOnlyValidationWorkflow(entry, text, errors);
     if (entry.relPath.endsWith('safe-source-update.yml')) {
       fail(errors, `${entry.relPath} has been retired; source update notifications must use PRs, not issues`);
     }
