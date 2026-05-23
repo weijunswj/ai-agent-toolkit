@@ -11,13 +11,16 @@ const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repo
 
 const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync');
 const sourceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync');
+const sanitizerDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer');
+const sourceSanitizerDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'sanitizer');
+const secureCicdN8nTemplateDir = path.join(repoRoot, '_projects', 'cicd', 'secure-installer', '_main', 'templates', 'n8n');
 const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
 const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');
 const compareCredentialsScript = path.join(scriptDir, 'compare-n8n-workflow-credentials.cjs');
 const sourceLockAuditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs');
-const sanitizerScript = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer', 'prepare-n8n-template.js');
-const sanitizerPs1 = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer', 'sanitise-n8n-template.ps1');
+const sanitizerScript = path.join(sanitizerDir, 'prepare-n8n-template.js');
+const sanitizerPs1 = path.join(sanitizerDir, 'sanitise-n8n-template.ps1');
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-helper-test-'));
@@ -268,8 +271,8 @@ test('prepare-n8n-template.js keeps node names stable when replacing config lite
 test('sanitise-n8n-template.ps1 dry-run creates staging folders but writes no sanitized templates', { skip: !findPowerShell() }, () => {
   const shell = findPowerShell();
   const cwd = tempDir();
-  fs.writeFileSync(path.join(cwd, '.gitignore'), '.to-sanitise/\n.sanitised/\n');
-  const localSanitizerDir = path.join(cwd, 'scripts');
+  fs.mkdirSync(path.join(cwd, '.git'));
+  const localSanitizerDir = path.join(cwd, 'helper-scripts', 'sanitizer');
   fs.cpSync(path.dirname(sanitizerPs1), localSanitizerDir, { recursive: true });
   const localSanitizerPs1 = path.join(localSanitizerDir, 'sanitise-n8n-template.ps1');
 
@@ -282,6 +285,33 @@ test('sanitise-n8n-template.ps1 dry-run creates staging folders but writes no sa
   assert.equal(fs.existsSync(path.join(cwd, '.to-sanitise')), true);
   assert.equal(fs.existsSync(path.join(cwd, '.sanitised')), true);
   assert.equal(fs.readdirSync(path.join(cwd, '.sanitised')).length, 0);
+});
+
+test('sanitise-n8n-template.ps1 resolves co-located stripper script after helper rehome', { skip: !findPowerShell() }, () => {
+  const shell = findPowerShell();
+  const cwd = tempDir();
+  fs.mkdirSync(path.join(cwd, '.git'));
+  const helperRoot = path.join(cwd, 'helper-scripts');
+  const localSanitizerDir = path.join(helperRoot, 'sanitizer');
+  fs.cpSync(path.dirname(sanitizerPs1), localSanitizerDir, { recursive: true });
+  writeJson(path.join(cwd, '.to-sanitise', 'workflow.live-export.json'), safeWorkflow({
+    id: 'wf_live',
+    versionId: 'version_live',
+    tags: [{ id: 'tag_live', name: 'Live' }],
+  }));
+
+  const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(localSanitizerDir, 'sanitise-n8n-template.ps1')], {
+    cwd,
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const outputPath = path.join(cwd, '.sanitised', 'workflow.template.json');
+  assert.equal(fs.existsSync(outputPath), true);
+  assert.equal(fs.existsSync(path.join(helperRoot, '.sanitised')), false);
+  const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+  assert.equal(Object.prototype.hasOwnProperty.call(prepared, 'versionId'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(prepared, 'tags'), false);
 });
 
 test('validate-n8n-workflows.cjs defaults to n8n-workflows', () => {
@@ -492,13 +522,23 @@ test('generated n8n helper scripts are fresh copies of project source', () => {
   for (const fileName of [
     'export-n8n-workflows-live.ps1',
     'import-n8n-workflows-live.ps1',
+    'n8n-workflow-sync-menu.ps1',
     'prepare-n8n-live-import.cjs',
     'compare-n8n-workflow-credentials.cjs',
+    'sync-n8n-live-exports.cjs',
+    'should-import-n8n-workflow.cjs',
     'validate-n8n-workflows.cjs',
   ]) {
     assert.equal(readText(path.join(scriptDir, fileName)), readText(path.join(sourceScriptDir, fileName)), fileName);
   }
 
+  for (const fileName of [
+    '_sanitise-n8n-template.cmd',
+    'prepare-n8n-template.js',
+    'sanitise-n8n-template.ps1',
+  ]) {
+    assert.equal(readText(path.join(sanitizerDir, fileName)), readText(path.join(sourceSanitizerDir, fileName)), fileName);
+  }
 });
 
 test('n8n hook and validation extension points stay generic and product agnostic', () => {
@@ -591,6 +631,7 @@ test('PowerShell n8n repo root resolver ignores nested gitignore files', () => {
   for (const fileName of [
     'export-n8n-workflows-live.ps1',
     'import-n8n-workflows-live.ps1',
+    'n8n-workflow-sync-menu.ps1',
   ]) {
     const text = readText(path.join(scriptDir, fileName));
     const resolverMatch = text.match(/function Resolve-RepoRootFromScript \{[\s\S]*?\n\}/);
@@ -600,6 +641,25 @@ test('PowerShell n8n repo root resolver ignores nested gitignore files', () => {
     assert.match(resolver, /Join-Path \$current "\.git"/);
     assert.match(resolver, /Join-Path \$current "n8n-workflows"/);
     assert.doesNotMatch(resolver, /\.gitignore/);
+  }
+});
+
+test('PowerShell n8n helper scripts keep local staging and history at repo root after rehome', () => {
+  const sanitizerText = readText(path.join(sanitizerDir, 'sanitise-n8n-template.ps1'));
+  assert.match(sanitizerText, /function Resolve-RepoRootFromScript/);
+  assert.match(sanitizerText, /\$RepoRoot = Resolve-RepoRootFromScript/);
+  assert.match(sanitizerText, /\$StripperScript = Join-Path \$PSScriptRoot "prepare-n8n-template\.js"/);
+  assert.doesNotMatch(sanitizerText, /Join-Path \$RepoRoot "scripts[\\/]prepare-n8n-template\.js"/);
+
+  const menuText = readText(path.join(scriptDir, 'n8n-workflow-sync-menu.ps1'));
+  for (const [label, text] of [
+    ['workflow toolkit menu', menuText],
+    ['Secure CI/CD preserved menu', readText(path.join(secureCicdN8nTemplateDir, 'n8n-workflow-sync-menu.ps1'))],
+  ]) {
+    assert.match(text, /function Resolve-RepoRootFromScript/, label);
+    assert.match(text, /\$RepoRoot = Resolve-RepoRootFromScript/, label);
+    assert.match(text, /\$PreviousCommandFile = Join-Path \$RepoRoot "\.n8n-local\\n8n-sync-last-command\.json"/, label);
+    assert.doesNotMatch(text, /\$RepoRoot = \(Resolve-Path \(Join-Path \$PSScriptRoot "\.\."\)\)\.Path/, label);
   }
 });
 

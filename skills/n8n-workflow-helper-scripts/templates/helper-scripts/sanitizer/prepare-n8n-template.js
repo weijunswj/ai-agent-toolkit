@@ -59,7 +59,7 @@ const SAFE_CONFIG_LITERAL_VALUES = new Set([
 ]);
 
 function usage(exitCode = 1) {
-  console.error(`Usage: node scripts/prepare-n8n-template.js <input.json> <output.template.json> [--preserve-unicode] [--allow-empty]`);
+  console.error(`Usage: node prepare-n8n-template.js <input.json> <output.template.json> [--preserve-unicode] [--allow-empty]`);
   process.exit(exitCode);
 }
 

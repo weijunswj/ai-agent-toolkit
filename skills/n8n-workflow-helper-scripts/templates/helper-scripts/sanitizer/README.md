@@ -23,7 +23,7 @@ When run in a reviewed consumer repo, the PowerShell wrapper may create and writ
 - `.to-sanitise/**`
 - `.sanitised/**`
 
-Both folders must remain ignored and uncommitted. Review sanitized outputs before moving any generic, inactive, credential-free template into a tracked folder.
+Both folders are created at the repo root, not inside the copied helper folder. They must remain ignored and uncommitted. Review sanitized outputs before moving any generic, inactive, credential-free template into a tracked folder.
 
 ## Entry Points
 
@@ -33,6 +33,6 @@ Both folders must remain ignored and uncommitted. Review sanitized outputs befor
 
 ## Wrapper Working Directory
 
-The `.cmd` wrapper invokes the co-located PowerShell script with `%~dp0sanitise-n8n-template.ps1` and does not change directory itself. The PowerShell script resolves and sets its working directory from its script location.
+The `.cmd` wrapper invokes the co-located PowerShell script with `%~dp0sanitise-n8n-template.ps1` and does not change directory itself. The PowerShell script resolves the repo root from its script location, sets its working directory to that repo root, and executes the co-located `prepare-n8n-template.js` script by absolute path.
 
 Use `-DryRun` with the PowerShell script to confirm paths without writing sanitized template files.

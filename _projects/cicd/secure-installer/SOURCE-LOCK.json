@@ -45,20 +45,21 @@
       "source_path": "templates/n8n/export-n8n-workflows-live.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/export-n8n-workflows-live.ps1",
       "source_blob_sha": "7cef2a3aaa3a60f66fe4ee6c83055c459be56f65",
-      "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules."
+      "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules. Also refuses unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/import-n8n-workflows-live.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/import-n8n-workflows-live.ps1",
       "source_blob_sha": "7c124a2e2b7598bcbab3d75524ea0377008589b0",
-      "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules."
+      "notes": "Toolkit-adapted after migration to support project-local n8n workflow hooks without hardcoding product-specific rules. Also refuses unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/n8n/n8n-workflow-sync-menu.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/n8n-workflow-sync-menu.ps1",
-      "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a"
+      "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a",
+      "notes": "Repo-root resolution was added after migration so .n8n-local command history is maintained at the repo root instead of under helper folders."
     },
     {
       "mode": "exact",
