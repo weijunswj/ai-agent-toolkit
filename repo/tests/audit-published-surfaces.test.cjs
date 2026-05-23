@@ -59,6 +59,28 @@ function addCrossOwnedOutputFixture(cwd, metadata = {}) {
   return outputRel;
 }
 
+function addDeclaredOutputFixture(cwd, projectParts, options) {
+  const projectDir = path.join(cwd, '_projects', ...projectParts);
+  const sourcePath = path.join(projectDir, options.sourceRel);
+  const outputPath = path.join(cwd, options.outputRel);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(sourcePath, options.sourceText, 'utf8');
+  fs.writeFileSync(outputPath, options.outputText || options.sourceText, 'utf8');
+
+  const manifestPath = path.join(projectDir, 'toolkit.project.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest.outputs.push({
+    kind: options.kind || 'curated',
+    source: options.sourceRel,
+    output: options.outputRel,
+    ...(options.metadata || {})
+  });
+  manifest.writes.allowed.push(options.outputRel);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  return options.outputRel;
+}
+
 test('audit-published-surfaces runs successfully on the current repo', () => {
   const result = runAudit();
   assert.equal(result.status, 0, result.stderr);
@@ -83,6 +105,20 @@ test('audit-published-surfaces has no n8n shared-surface helper leftovers', () =
   assert.equal(report.summary.sharedSurfaceMetadataFindings, 0);
   assert.deepEqual(report.issues.crossOwnedOutputs, []);
   assert.deepEqual(report.issues.sharedSurfaceOutputs, []);
+});
+
+test('audit-published-surfaces preserves legitimate curated references and MCP specs', () => {
+  const report = runAuditJson();
+  const findings = report.issues.boundaryRecipeFindings.map((entry) => entry.path);
+  const reviewedReference = report.boundaryRecipes.find((entry) =>
+    entry.path === 'skills/n8n-workflow-helper-scripts/references/workflow-sync.md'
+  );
+  const mcpSpec = report.boundaryRecipes.find((entry) => entry.path === 'mcp/installer-mcp/SPEC.md');
+
+  assert.equal(reviewedReference?.classification, 'curated_reference');
+  assert.equal(mcpSpec?.classification, 'main_full_fidelity');
+  assert.equal(findings.includes('skills/n8n-workflow-helper-scripts/references/workflow-sync.md'), false);
+  assert.equal(findings.includes('mcp/installer-mcp/SPEC.md'), false);
 });
 
 test('audit-published-surfaces classifies curated boundary recipes', () => {
@@ -204,6 +240,151 @@ test('audit-published-surfaces rejects shared-surface metadata without a reason'
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /new shared-surface metadata finding:/);
   assert.match(result.stderr, /shared_surface_reason is required/);
+});
+
+test('audit-published-surfaces rejects runtime-heavy reviewed references', () => {
+  const cwd = tempCopy();
+  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'workflow-toolkit'], {
+    sourceRel: 'curated_output_for_ai/references/new-reviewed-runtime-reference.md',
+    outputRel: 'skills/n8n-workflow-helper-scripts/references/new-reviewed-runtime-reference.md',
+    sourceText: [
+      '# New Reviewed Runtime Reference',
+      '',
+      '## Setup',
+      '',
+      '1. Install the local dependency.',
+      '2. Start the helper server.',
+      '3. Import the workflow.',
+      ''
+    ].join('\n'),
+    metadata: {
+      notes: 'Short helper-script reviewed reference generated from project-owned curated AI output.',
+      fidelity: 'reviewed_entrypoint'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  assert.ok(finding);
+  assert.equal(finding.classification, 'suspicious_curated_runtime');
+  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Setup/.test(reason)));
+});
+
+test('audit-published-surfaces rejects runtime-heavy pack README exceptions', () => {
+  const cwd = tempCopy();
+  const sourceRel = 'curated_output_for_ai/packs/runtime-heavy-pack/README.md';
+  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
+    sourceRel,
+    outputRel: 'skills/n8n-local-setup/packs/runtime-heavy-pack/README.md',
+    sourceText: [
+      '# Runtime Heavy Pack',
+      '',
+      '## Setup',
+      '',
+      '1. Install dependencies.',
+      '2. Start the local server.',
+      '3. Import the workflow.',
+      '4. Export the workflow.',
+      ''
+    ].join('\n'),
+    metadata: {
+      notes: 'Skill-local pack README generated from project-owned curated AI output.',
+      fidelity: 'reviewed_entrypoint'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const boundaryFinding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  const curatedFinding = report.issues.curatedDirectoryFindings.find((entry) =>
+    entry.path === `_projects/n8n/local-setup/${sourceRel}`
+  );
+  assert.ok(boundaryFinding);
+  assert.equal(boundaryFinding.classification, 'suspicious_curated_runtime');
+  assert.ok(curatedFinding);
+  assert.ok(curatedFinding.reasons.some((reason) => /numbered setup steps/.test(reason)));
+});
+
+test('audit-published-surfaces rejects platform overviews with numbered runtime setup steps', () => {
+  const cwd = tempCopy();
+  const sourceRel = '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/runtime-numbered-platform.md';
+  const sourcePath = path.join(cwd, sourceRel);
+  fs.writeFileSync(sourcePath, [
+    '# Runtime Numbered Platform Overview',
+    '',
+    '## Boundary',
+    '',
+    'This is a short platform overview and routing note. It is not the full runtime setup guide.',
+    '',
+    'For full setup detail, use the local full-fidelity references and templates in this copied skill folder.',
+    '',
+    '## Setup',
+    '',
+    '1. Install dependencies.',
+    '2. Start the local server.',
+    '3. Import the workflow.',
+    '4. Export the workflow.',
+    ''
+  ].join('\n'), 'utf8');
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.curatedDirectoryFindings.find((entry) => entry.path === sourceRel);
+  assert.ok(finding);
+  assert.ok(finding.reasons.some((reason) => /numbered setup steps/.test(reason)));
+});
+
+test('audit-published-surfaces rejects overview metadata on runtime recipes', () => {
+  const cwd = tempCopy();
+  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
+    sourceRel: 'curated_output_for_ai/references/n8n/runtime-recipe-overview.md',
+    outputRel: 'skills/n8n-local-setup/references/n8n/runtime-recipe-overview.md',
+    sourceText: [
+      '# Runtime Recipe',
+      '',
+      '## Setup',
+      '',
+      '1. Install dependencies.',
+      '2. Start the local server.',
+      '3. Import the workflow.',
+      ''
+    ].join('\n'),
+    metadata: {
+      notes: 'Runtime recipe overview generated from project-owned curated AI output.',
+      fidelity: 'reviewed_entrypoint'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  assert.ok(finding);
+  assert.equal(finding.classification, 'suspicious_curated_runtime');
+});
+
+test('audit-published-surfaces rejects runtime MCP surfaces from the MCP-ready registry module', () => {
+  const cwd = tempCopy();
+  const outputRel = addDeclaredOutputFixture(cwd, ['repo-methodology', 'mcp-ready-registry'], {
+    kind: 'copy',
+    sourceRel: '_main/server-package/README.md',
+    outputRel: 'mcp/server-package/README.md',
+    sourceText: [
+      '# Runtime MCP Server Package',
+      '',
+      '## Setup',
+      '',
+      '1. Install the server package.',
+      '2. Start the MCP server.',
+      '3. Import runtime tools.',
+      ''
+    ].join('\n'),
+    metadata: {
+      notes: 'Published runtime MCP server package generated from project-owned source.',
+      fidelity: 'exact'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  assert.ok(finding);
+  assert.equal(finding.classification, 'suspicious_main_adapter');
 });
 
 test('audit-published-surfaces --check fails when a new curated runtime recipe is introduced', () => {

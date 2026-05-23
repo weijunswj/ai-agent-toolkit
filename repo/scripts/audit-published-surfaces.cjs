@@ -31,6 +31,11 @@ const curatedRuntimePathWords = /\b(guides?|setup|workflows?|prompts?|templates?
 const numberedStepPattern = /^\s*\d+\.\s+/gm;
 const codeFencePattern = /^```/gm;
 const markdownHeadingPattern = /^#{1,6}\s+/gm;
+const runtimeNumberedStepPattern = /^\s*\d+\.\s+.*\b(?:install|start|run|execute|import|export|deploy|publish|activate|deactivate|archive|delete|server|package|npm|npx|node|docker|powershell|cmd|bash|workflow|dependencies)\b/gim;
+const commandSnippetPattern = /^```(?:[a-z0-9_-]+)?\n[\s\S]*?\b(?:npm|pnpm|yarn|node|npx|docker|docker-compose|powershell|cmd|bash|sh|gh|git|n8n)\b[\s\S]*?^```/gim;
+const runtimeServerPackagePattern = /\b(?:local server|mcp server|server package|start(?:ing)? (?:the )?[^.\n]{0,60}server|install(?:ing)? (?:the )?[^.\n]{0,60}(?:package|dependency|dependencies)|runtime tools?)\b/i;
+const runtimeSetupMarkers = new Set(['Setup', 'Install', 'Upgrade']);
+const safetyOnlyMarkers = new Set(['Do not commit', 'Do not push', 'Do not deploy']);
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -391,8 +396,15 @@ function isAgentMetadata(relPath) {
   return /^skills\/[^/]+\/agents\/[^/]+\.(md|ya?ml)$/.test(relPath);
 }
 
-function isMcpSpec(relPath) {
-  return relPath.startsWith('mcp/');
+function isMcpSpec(entryOrPath) {
+  const relPath = typeof entryOrPath === 'string' ? entryOrPath : entryOrPath.path;
+  if (!relPath.startsWith('mcp/')) return false;
+  if (relPath === 'mcp/README.md') return true;
+  if (/^mcp\/registry\/(?:README\.md|[^/]+\.registry\.json)$/.test(relPath)) return true;
+  if (/^mcp\/projects\/[^/]+\.md$/.test(relPath)) return true;
+  if (/^mcp\/(?:installer-mcp|registry-mcp)\/(?:README|SECURITY|SPEC)\.md$/.test(relPath)) return true;
+  if (/^mcp\/references\/(?:README|installer-mcp|local-mcp-setup|mcp-security|registry-mcp)\.md$/.test(relPath)) return true;
+  return false;
 }
 
 function isReferenceShim(entry) {
@@ -441,34 +453,69 @@ function boundaryMarkerHits(text) {
   return boundaryHeadingMarkers.filter((marker) => new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
 }
 
-function reviewedTemplateRuntimeHits(hits) {
-  const safetyOnlyMarkers = new Set(['Do not commit', 'Do not push', 'Do not deploy']);
-  return hits.filter((hit) => !safetyOnlyMarkers.has(hit));
+function runtimeBoundaryMarkerHits(text) {
+  return boundaryMarkerHits(text).filter((hit) => !safetyOnlyMarkers.has(hit));
+}
+
+function runtimeInstructionReasons(text) {
+  const reasons = [];
+  const hits = runtimeBoundaryMarkerHits(text);
+  const hasSetupMarker = hits.some((hit) => runtimeSetupMarkers.has(hit));
+  const numberedRuntimeSteps = text.match(runtimeNumberedStepPattern) || [];
+  const commandSnippets = text.match(commandSnippetPattern) || [];
+  const hasServerPackagePattern = runtimeServerPackagePattern.test(text);
+  const hasRuntimeContext = numberedRuntimeSteps.length >= 2 || commandSnippets.length >= 2 || hasServerPackagePattern;
+
+  if (hits.length && hasRuntimeContext && (hasSetupMarker || commandSnippets.length >= 2 || hasServerPackagePattern)) {
+    reasons.push(`runtime markers: ${hits.join(', ')}`);
+  }
+  if (numberedRuntimeSteps.length >= 2 && (hasSetupMarker || commandSnippets.length >= 2 || hasServerPackagePattern)) {
+    reasons.push(`numbered runtime setup steps: ${numberedRuntimeSteps.length}`);
+  }
+  if (commandSnippets.length >= 2) {
+    reasons.push('command snippets look executable');
+  }
+  if (hasServerPackagePattern && (hasSetupMarker || commandSnippets.length >= 2 || numberedRuntimeSteps.length >= 2)) {
+    reasons.push('server or package runtime pattern');
+  }
+
+  return reasons;
 }
 
 function recipeBoundaryReasons(root, entry) {
   const reasons = [];
   const reviewedTemplate = isReviewedTemplate(entry);
+  const runtimeCheckedCurated =
+    isPackReadme(entry.path) ||
+    isSkillTemplateReadme(entry.path) ||
+    isMcpSpec(entry) ||
+    isReviewedReference(entry) ||
+    reviewedTemplate ||
+    isIndexLike(entry) ||
+    isOverviewLike(entry);
   const allowedCurated =
     isSkillRouter(entry.path) ||
     isSkillReadme(entry.path) ||
     isPackManifest(entry.path) ||
     isPackReadme(entry.path) ||
     isAgentMetadata(entry.path) ||
-    isMcpSpec(entry.path) ||
+    isMcpSpec(entry) ||
     isReferenceShim(entry) ||
     isSkillTemplateReadme(entry.path) ||
     isReviewedReference(entry) ||
     reviewedTemplate ||
     isIndexLike(entry) ||
     isOverviewLike(entry);
-  const shouldAuditRuntimeHeft = !allowedCurated || reviewedTemplate;
+  const shouldAuditRuntimeHeft = !allowedCurated || runtimeCheckedCurated;
 
   if (isSkillReferenceOutput(entry.path) && !allowedCurated) {
     reasons.push('skill reference output uses curated source');
   }
   if (isSkillTemplateOutput(entry.path) && !allowedCurated) {
     reasons.push('skill template output uses curated source');
+  }
+  if (entry.path.startsWith('mcp/') && !isMcpSpec(entry)) {
+    reasons.push('MCP output is not a known design, spec, registry, project, reference, or index surface');
   }
   if (looksLikeRuntimeSurface(entry.path) && !allowedCurated) {
     reasons.push('runtime-looking output uses curated source');
@@ -478,10 +525,11 @@ function recipeBoundaryReasons(root, entry) {
     if (!source.includes('/curated_output_for_ai/') || !source.endsWith('.md')) continue;
     if (!fs.existsSync(resolveRel(root, source))) continue;
     const text = readText(root, source);
-    const hits = boundaryMarkerHits(text);
-    const relevantHits = reviewedTemplate ? reviewedTemplateRuntimeHits(hits) : hits;
-    if (relevantHits.length && shouldAuditRuntimeHeft) {
-      reasons.push(`curated source has runtime markers: ${relevantHits.join(', ')}`);
+    const runtimeReasons = runtimeInstructionReasons(text);
+    if (runtimeReasons.length && shouldAuditRuntimeHeft) {
+      for (const reason of runtimeReasons) {
+        reasons.push(`curated source has ${reason}`);
+      }
     }
     if (fileSize(root, source) >= 3000 && curatedRuntimePathWords.test(source) && shouldAuditRuntimeHeft) {
       reasons.push('large curated Markdown source looks runtime-critical');
@@ -491,17 +539,27 @@ function recipeBoundaryReasons(root, entry) {
   return [...new Set(reasons)];
 }
 
-function mainAdapterReasons(entry) {
+function isMcpReadyRegistryEntry(entry) {
+  return entry.projectId === 'repo-methodology.mcp-ready-registry' &&
+    entry.path.startsWith('mcp/') &&
+    sourcePathsForEntry(entry).every((source) => source.startsWith('_projects/repo-methodology/mcp-ready-registry/_main/'));
+}
+
+function mainAdapterReasons(root, entry) {
   const reasons = [];
   if (isPromotedStandaloneSkillSource(entry)) return reasons;
-  if (
-    entry.projectId === 'repo-methodology.mcp-ready-registry' &&
-    entry.path.startsWith('mcp/') &&
-    sourcePathsForEntry(entry).every((source) => source.startsWith('_projects/repo-methodology/mcp-ready-registry/_main/'))
-  ) {
-    return reasons;
+  if (isMcpReadyRegistryEntry(entry)) {
+    if (isMcpSpec(entry)) return reasons;
+    reasons.push('mcp-ready registry output is not a known design, spec, registry, reference, or index surface');
+    for (const source of sourcePathsForEntry(entry)) {
+      if (!source.endsWith('.md') || !fs.existsSync(resolveRel(root, source))) continue;
+      for (const reason of runtimeInstructionReasons(readText(root, source))) {
+        reasons.push(`main MCP source has ${reason}`);
+      }
+    }
+    return [...new Set(reasons)];
   }
-  if (isSkillRouter(entry.path) || isSkillReadme(entry.path) || isMcpSpec(entry.path) || isPackManifest(entry.path)) {
+  if (isSkillRouter(entry.path) || isSkillReadme(entry.path) || isMcpSpec(entry) || isPackManifest(entry.path)) {
     reasons.push('main source is publishing an adapter, index, spec, or metadata surface');
   }
   return reasons;
@@ -518,23 +576,33 @@ function classifyBoundaryRecipe(root, entry) {
     if (isPackManifest(entry.path) || entry.kind === 'json') return 'curated_metadata';
     if (isAgentMetadata(entry.path)) return 'curated_agent_metadata';
     if (isSkillRouter(entry.path)) return 'curated_router';
-    if (isMcpSpec(entry.path)) return 'curated_spec';
-    if (isPackReadme(entry.path)) return 'curated_pack_readme';
-    if (isSkillTemplateReadme(entry.path)) return 'curated_template_index';
-    if (isReviewedReference(entry)) return 'curated_reference';
+    if (isMcpSpec(entry)) {
+      return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_spec';
+    }
+    if (isPackReadme(entry.path)) {
+      return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_pack_readme';
+    }
+    if (isSkillTemplateReadme(entry.path)) {
+      return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_template_index';
+    }
+    if (isReviewedReference(entry)) {
+      return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_reference';
+    }
     if (isReviewedTemplateExample(entry)) {
       return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_template_example';
     }
     if (isReviewedTemplate(entry)) {
       return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_template';
     }
-    if (isIndexLike(entry) || isOverviewLike(entry)) return 'curated_index';
+    if (isIndexLike(entry) || isOverviewLike(entry)) {
+      return recipeBoundaryReasons(root, entry).length ? 'suspicious_curated_runtime' : 'curated_index';
+    }
     if (recipeBoundaryReasons(root, entry).length) return 'suspicious_curated_runtime';
     return 'unknown';
   }
 
   if (hasMainSource) {
-    if (mainAdapterReasons(entry).length) return 'suspicious_main_adapter';
+    if (mainAdapterReasons(root, entry).length) return 'suspicious_main_adapter';
     return 'main_full_fidelity';
   }
 
@@ -560,7 +628,7 @@ function boundaryRecipes(root, entries) {
       reasons: entry.classification === 'suspicious_curated_runtime'
         ? recipeBoundaryReasons(root, entry)
         : entry.classification === 'suspicious_main_adapter'
-          ? mainAdapterReasons(entry)
+          ? mainAdapterReasons(root, entry)
           : entry.classification === 'unknown'
             ? ['recipe source boundary is not classifiable by current heuristics']
             : []
@@ -607,7 +675,8 @@ function hasExplicitWorkflowToolkitReferenceBoundary(relPath, text) {
 function curatedDirectoryReasons(root, relPath) {
   if (!relPath.endsWith('.md')) return [];
   const allowedCategory = curatedFileAllowedCategory(relPath);
-  if (allowedCategory && allowedCategory !== 'curated_index') return [];
+  const runtimeAuditedCategories = new Set(['curated_index', 'curated_template', 'curated_template_index', 'curated_pack_readme', 'curated_spec']);
+  if (allowedCategory && !runtimeAuditedCategories.has(allowedCategory)) return [];
   const text = readText(root, relPath);
   const reasons = [];
   if (fileSize(root, relPath) >= 3000) reasons.push('large Markdown file');
@@ -617,15 +686,23 @@ function curatedDirectoryReasons(root, relPath) {
   if (numberedSteps.length >= 4) reasons.push('many numbered setup steps');
   const headingCount = (text.match(markdownHeadingPattern) || []).length;
   if (headingCount >= 8) reasons.push('many Markdown headings');
-  const markerHits = boundaryMarkerHits(text);
-  if (markerHits.length) reasons.push(`runtime markers: ${markerHits.join(', ')}`);
-  if (curatedRuntimePathWords.test(relPath)) reasons.push('path looks like guide, setup, workflow, prompt, template, reference, or playbook');
-  const heavyRuntimeShape = fileSize(root, relPath) >= 3000 || codeFences.length >= 4 || headingCount >= 8;
+  const runtimeReasons = runtimeInstructionReasons(text);
+  reasons.push(...runtimeReasons);
+  if ((!allowedCategory || allowedCategory === 'curated_index') && curatedRuntimePathWords.test(relPath)) {
+    reasons.push('path looks like guide, setup, workflow, prompt, template, reference, or playbook');
+  }
+  const heavyRuntimeShape = fileSize(root, relPath) >= 3000 ||
+    codeFences.length >= 4 ||
+    headingCount >= 8 ||
+    runtimeReasons.length >= 2;
   if (hasExplicitPlatformOverviewBoundary(relPath, text) && !heavyRuntimeShape) return [];
   if (hasExplicitOverviewBoundary(relPath, text) && !heavyRuntimeShape) return [];
   if (hasExplicitWorkflowToolkitReferenceBoundary(relPath, text) && !heavyRuntimeShape) return [];
+  if (allowedCategory && allowedCategory !== 'curated_index') {
+    return runtimeReasons.length >= 2 || codeFences.length >= 4 ? [...new Set(reasons)] : [];
+  }
   if (allowedCategory === 'curated_index' && reasons.length < 3) return [];
-  if (reasons.length >= 2) return reasons;
+  if (reasons.length >= 2) return [...new Set(reasons)];
   return [];
 }
 
