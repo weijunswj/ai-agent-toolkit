@@ -3,6 +3,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  isActiveThirdPartyAttributionLock,
+  isRetiredMigrationLock
+} = require('./audit-project-source-locks.cjs');
 
 const root = process.cwd();
 const projectRoot = '_projects';
@@ -57,7 +61,12 @@ function parseArgs(argv) {
 }
 
 function isRetiredProvenanceSource(lock) {
-  return lock.source_update_policy === 'none' || lock.source_lifecycle === 'retired_after_migration';
+  return isRetiredMigrationLock(lock);
+}
+
+function assertSupportedLifecycle(lockFile) {
+  if (isRetiredMigrationLock(lockFile.lock) || isActiveThirdPartyAttributionLock(lockFile.lock)) return;
+  throw new Error(`Unsupported SOURCE-LOCK lifecycle metadata: ${lockFile.relPath}`);
 }
 
 function riskForActiveSource(lock) {
@@ -120,6 +129,7 @@ function buildPlan(lockFiles = discoverLocks()) {
   const active = [];
   const retired = [];
   for (const lockFile of lockFiles) {
+    assertSupportedLifecycle(lockFile);
     if (isRetiredProvenanceSource(lockFile.lock)) retired.push(retiredProvenanceEntry(lockFile));
     else active.push(planEntry(lockFile));
   }

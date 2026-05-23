@@ -291,7 +291,7 @@ function readJson(relPath) {
 }
 
 function retiredInternalSourceReposFromLocks() {
-  const repos = new Set();
+  const repos = new Set(sourceLockAudit.knownRetiredInternalSourceRepos || []);
   for (const lockPath of sourceLockAudit.discoverLockFiles()) {
     let lock;
     try {
@@ -344,6 +344,9 @@ const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md',
   '_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md'
 ];
+const allowedCredentialExampleJsonPaths = new Set([
+  '_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json'
+]);
 
 function isAutoSyncGeneratedOutputPath(relPath) {
   const rel = slash(relPath);
@@ -383,7 +386,7 @@ function validateForbiddenFiles(errors) {
     if (name === '.env' || (name.startsWith('.env.') && name !== '.env.example')) fail(errors, `Forbidden env file: ${rel}`);
     if (lower.endsWith('.zip') || lower.endsWith('.tgz')) fail(errors, `Generated package artifact present: ${rel}`);
     if (lower.endsWith('.live-export.json') || lower.endsWith('.live-import.json')) fail(errors, `Live n8n import/export file present: ${rel}`);
-    const safeExampleJson = lower.endsWith('.example.json') || lower.endsWith('-example.json');
+    const safeExampleJson = allowedCredentialExampleJsonPaths.has(lower);
     if (!safeExampleJson && (lower.endsWith('.credentials.json') || lower.endsWith('.credential.json') || lower.endsWith('.credential.json'))) fail(errors, `Credential file present: ${rel}`);
     if (!safeExampleJson && /credential.*\.json$/i.test(name) && !lower.endsWith('package.json')) fail(errors, `Credential-looking JSON file present: ${rel}`);
     if (/binding.*\.json$/i.test(name)) fail(errors, `Credential binding-looking JSON file present: ${rel}`);

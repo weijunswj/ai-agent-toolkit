@@ -5,6 +5,10 @@ const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
 const path = require('node:path');
+const {
+  isActiveThirdPartyAttributionLock,
+  isRetiredMigrationLock
+} = require('./audit-project-source-locks.cjs');
 
 const defaultReportPath = 'repo/source-watch/reviews/active-third-party-updates.md';
 const githubApiBaseUrl = 'https://api.github.com';
@@ -66,16 +70,15 @@ function discoverSourceLocks(workspace) {
 }
 
 function isActiveThirdPartyLock(lock) {
-  return (
-    lock &&
-    lock.source_lifecycle === 'active' &&
-    lock.source_role === 'third_party_attribution_source' &&
-    lock.source_update_policy === 'manual_review_required'
-  );
+  return isActiveThirdPartyAttributionLock(lock);
 }
 
 function activeThirdPartyLocks(lockFiles) {
-  return lockFiles.filter((lockFile) => isActiveThirdPartyLock(lockFile.lock));
+  return lockFiles.filter((lockFile) => {
+    if (isActiveThirdPartyAttributionLock(lockFile.lock)) return true;
+    if (isRetiredMigrationLock(lockFile.lock)) return false;
+    throw new Error(`Unsupported SOURCE-LOCK lifecycle metadata: ${lockFile.relPath}`);
+  });
 }
 
 function parseGitHubRepo(sourceRepo) {
