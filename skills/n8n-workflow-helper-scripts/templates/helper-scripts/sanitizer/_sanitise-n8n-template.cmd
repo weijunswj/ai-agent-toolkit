@@ -15,7 +15,7 @@ if "%LAST_EXIT%"=="0" (
 call :prompt "Press R to run again or E to exit."
 choice /C RE /N /M "> "
 if errorlevel 2 exit /b %LAST_EXIT%
-echo.
+cls
 goto run_sanitise
 
 :banner

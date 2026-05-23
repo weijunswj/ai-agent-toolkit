@@ -90,7 +90,7 @@ const cmdWrapperCases = [
 ];
 
 const wrapperAdaptationNote =
-  'Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output.';
+  'Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output and clears the console before reruns.';
 
 function readJson(relPath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relPath), 'utf8'));
