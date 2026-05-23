@@ -19,33 +19,50 @@ if (-not $PSScriptRoot) {
   throw "This script must be run from a .ps1 file."
 }
 
-function Test-SanitizerRepoRootCandidate($Path) {
-  if (
-    (Test-Path -LiteralPath (Join-Path $Path ".git")) -or
-    (Test-Path -LiteralPath (Join-Path $Path "n8n-workflows"))
-  ) {
+function Test-RepoRootPathIsUnsafe($Path) {
+  if ([string]::IsNullOrWhiteSpace($Path)) {
     return $true
   }
 
-  $gitignorePath = Join-Path $Path ".gitignore"
-  if (Test-Path -LiteralPath $gitignorePath -PathType Leaf) {
-    $gitignore = Get-Content -Raw -Path $gitignorePath
-    return $gitignore -match '(?m)^\.to-sanitise/' -and $gitignore -match '(?m)^\.sanitised/'
+  $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  $pathRoot = [System.IO.Path]::GetPathRoot($fullPath)
+  if ([string]::IsNullOrWhiteSpace($pathRoot)) {
+    return $true
   }
 
-  return $false
+  $trimmedRoot = $pathRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  return $fullPath -eq $trimmedRoot
+}
+
+function Test-N8nRepoRootCandidate($Path) {
+  if (Test-RepoRootPathIsUnsafe $Path) {
+    return $false
+  }
+
+  $hasGit = Test-Path -LiteralPath (Join-Path $Path ".git")
+  $hasWorkflowDir = Test-Path -LiteralPath (Join-Path $Path "n8n-workflows") -PathType Container
+  $hasToolkitMarkers = (
+    (Test-Path -LiteralPath (Join-Path $Path "repo/scripts/sync-toolkit-projects.cjs") -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $Path "_projects/n8n/workflow-toolkit/toolkit.project.json") -PathType Leaf)
+  )
+
+  return ($hasGit -and $hasWorkflowDir) -or ($hasGit -and $hasToolkitMarkers)
 }
 
 function Resolve-RepoRootFromScript {
-  $current = (Resolve-Path $PSScriptRoot).Path
+  $current = (Resolve-Path -LiteralPath $PSScriptRoot).Path
   while ($true) {
-    if (Test-SanitizerRepoRootCandidate $current) {
+    if (Test-RepoRootPathIsUnsafe $current) {
+      throw "Refusing filesystem root as repo root: $current. Could not resolve safe repo root from $PSScriptRoot."
+    }
+
+    if (Test-N8nRepoRootCandidate $current) {
       return $current
     }
 
     $parent = Split-Path -Parent $current
     if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
-      throw "Could not resolve repo root from $PSScriptRoot. Run this helper from inside a Git repo or a repo root with .to-sanitise/ and .sanitised/ ignored."
+      throw "Could not resolve safe repo root from $PSScriptRoot. Run this helper from inside a Git repo with n8n-workflows/ at the root, or inside the ai-agent-toolkit repo."
     }
     $current = $parent
   }

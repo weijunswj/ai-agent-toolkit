@@ -83,6 +83,48 @@ function psSingleQuoted(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+function runRepoRootResolverHarness(shell, helperScriptPath, helperDir) {
+  fs.mkdirSync(helperDir, { recursive: true });
+  const harnessPath = path.join(helperDir, 'resolver-harness.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$sourceFile = ${psSingleQuoted(helperScriptPath)}
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($sourceFile, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) {
+  throw "Could not parse source helper: $($errors[0].Message)"
+}
+$functionNames = @(
+  "Test-RepoRootPathIsUnsafe",
+  "Test-N8nRepoRootCandidate",
+  "Test-SanitizerRepoRootCandidate",
+  "Resolve-RepoRootFromScript"
+)
+$functions = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true)
+foreach ($function in $functions) {
+  $functionText = $function.Extent.Text.Replace('$PSScriptRoot', ${psSingleQuoted(helperDir)})
+  Invoke-Expression $functionText
+}
+try {
+  $root = Resolve-RepoRootFromScript
+  Write-Output "ROOT=$root"
+  exit 0
+} catch {
+  Write-Output "ERROR=$($_.Exception.Message)"
+  exit 9
+}
+`, 'utf8');
+
+  return spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+    cwd: helperDir,
+    encoding: 'utf8',
+  });
+}
+
 function fakeMenuRepo(menuSourcePath) {
   const root = tempDir();
   const helperDir = path.join(root, 'helper-scripts');
@@ -310,6 +352,7 @@ test('sanitise-n8n-template.ps1 dry-run creates staging folders but writes no sa
   const shell = findPowerShell();
   const cwd = tempDir();
   fs.mkdirSync(path.join(cwd, '.git'));
+  fs.mkdirSync(path.join(cwd, 'n8n-workflows'), { recursive: true });
   const localSanitizerDir = path.join(cwd, 'helper-scripts', 'sanitizer');
   fs.cpSync(path.dirname(sanitizerPs1), localSanitizerDir, { recursive: true });
   const localSanitizerPs1 = path.join(localSanitizerDir, 'sanitise-n8n-template.ps1');
@@ -329,6 +372,7 @@ test('sanitise-n8n-template.ps1 resolves co-located stripper script after helper
   const shell = findPowerShell();
   const cwd = tempDir();
   fs.mkdirSync(path.join(cwd, '.git'));
+  fs.mkdirSync(path.join(cwd, 'n8n-workflows'), { recursive: true });
   const helperRoot = path.join(cwd, 'helper-scripts');
   const localSanitizerDir = path.join(helperRoot, 'sanitizer');
   fs.cpSync(path.dirname(sanitizerPs1), localSanitizerDir, { recursive: true });
@@ -848,9 +892,72 @@ test('PowerShell n8n repo root resolver ignores nested gitignore files', () => {
     assert.ok(resolverMatch, `${fileName} resolver not found`);
     const resolver = resolverMatch[0];
 
-    assert.match(resolver, /Join-Path \$current "\.git"/);
-    assert.match(resolver, /Join-Path \$current "n8n-workflows"/);
+    assert.match(text, /function Test-N8nRepoRootCandidate\(\$Path\)/);
+    assert.match(text, /Join-Path \$Path "\.git"/);
+    assert.match(text, /Join-Path \$Path "n8n-workflows"/);
     assert.doesNotMatch(resolver, /\.gitignore/);
+  }
+});
+
+test('PowerShell n8n repo root resolver accepts a repo with git and n8n-workflows markers', { skip: !findPowerShell() }, () => {
+  const shell = findPowerShell();
+  for (const [label, helperScriptPath, helperSubdir] of [
+    ['export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'), path.join('scripts')],
+    ['import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'), path.join('scripts')],
+    ['menu helper', path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1'), path.join('scripts')],
+    ['sanitizer helper', path.join(sourceSanitizerDir, 'sanitise-n8n-template.ps1'), path.join('scripts', 'sanitizer')],
+  ]) {
+    const repo = tempDir();
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(repo, 'n8n-workflows'), { recursive: true });
+    const helperDir = path.join(repo, helperSubdir);
+
+    const result = runRepoRootResolverHarness(shell, helperScriptPath, helperDir);
+
+    assert.equal(result.status, 0, `${label}\n${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, new RegExp(`ROOT=${repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), label);
+  }
+});
+
+test('PowerShell n8n repo root resolver rejects n8n-workflows-only fake drive roots before scratch creation', { skip: !findPowerShell() }, () => {
+  const shell = findPowerShell();
+  for (const [label, helperScriptPath, helperSubdir] of [
+    ['export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'), path.join('scripts')],
+    ['import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'), path.join('scripts')],
+    ['menu helper', path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1'), path.join('scripts')],
+    ['sanitizer helper', path.join(sourceSanitizerDir, 'sanitise-n8n-template.ps1'), path.join('scripts', 'sanitizer')],
+  ]) {
+    const fakeDriveRoot = tempDir();
+    fs.mkdirSync(path.join(fakeDriveRoot, 'n8n-workflows'), { recursive: true });
+    const helperDir = path.join(fakeDriveRoot, helperSubdir);
+
+    const result = runRepoRootResolverHarness(shell, helperScriptPath, helperDir);
+
+    assert.notEqual(result.status, 0, `${label} accepted unsafe root\n${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout + result.stderr, /Could not resolve safe repo root|Refusing filesystem root/, label);
+    assert.equal(fs.existsSync(path.join(fakeDriveRoot, '.tmp')), false, `${label} created .tmp outside a safe repo`);
+    assert.equal(fs.existsSync(path.join(fakeDriveRoot, '.to-sanitise')), false, `${label} created .to-sanitise outside a safe repo`);
+    assert.equal(fs.existsSync(path.join(fakeDriveRoot, '.sanitised')), false, `${label} created .sanitised outside a safe repo`);
+  }
+});
+
+test('PowerShell n8n import and export scratch directories are rooted under resolved repo root', () => {
+  const exportText = readText(path.join(scriptDir, 'export-n8n-workflows-live.ps1'));
+  const importText = readText(path.join(scriptDir, 'import-n8n-workflows-live.ps1'));
+
+  assert.match(exportText, /\$ExportDirPath = Join-Path \$RepoRoot \$ExportDir/);
+  assert.match(importText, /\$PreparedDirPath = Join-Path \$RepoRoot \$PreparedDir/);
+  assert.match(importText, /\$CredentialExportDirPath = Join-Path \$RepoRoot \$CredentialExportDir/);
+
+  for (const [label, text] of [
+    ['export helper', exportText],
+    ['import helper', importText],
+    ['menu helper', readText(path.join(scriptDir, 'n8n-workflow-sync-menu.ps1'))],
+  ]) {
+    assert.match(text, /function Test-RepoRootPathIsUnsafe\(\$Path\)/, label);
+    assert.match(text, /function Test-N8nRepoRootCandidate\(\$Path\)/, label);
+    assert.match(text, /Refusing filesystem root as repo root/, label);
+    assert.doesNotMatch(text, /return \$current[\s\S]*Join-Path \$current "n8n-workflows"[\s\S]*-or/, label);
   }
 });
 
