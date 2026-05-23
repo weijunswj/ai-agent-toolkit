@@ -52,7 +52,6 @@ Description
 Source
 Notion Key
 GitHub Key
-Canonical Key
 Visibility
 Status
 Last checked
@@ -66,27 +65,28 @@ GitHub Link
 Source Link
 Related / Backlinks
 Last reviewed
+Canonical Key
 ```
 
 ## Key rule
 
-The key columns are also the clickable links.
+The key columns are also the clickable links. `Notion Key` and `GitHub Key` are the only hard identity fields.
 
 Use:
 
 ```text
 Notion Key = notion.so/<page-id>
 GitHub Key = github.com/<owner>/<repo>
-Canonical Key = stable-slug-for-the-real-thing
 ```
 
-Before creating a row, always check whether an existing row already has the same:
+Before creating a row, always query whether an existing row already has the same:
 
 1. Notion Key.
 2. GitHub Key.
-3. Canonical Key.
 
 If any key matches, update the existing row. Do not create a new row.
+
+Do not use `Canonical Key` for matching, creating, merging, or deduplication. It is removed from the clean default schema because it is AI-generated and can drift. If an existing database still has `Canonical Key`, ignore it during scheduled runs unless the user explicitly asks for legacy cleanup. Hide it from the default view before deleting it, and delete it only after the user confirms cleanup.
 
 ## Category rules
 
@@ -114,11 +114,10 @@ The default table view should be:
    3. Description
    4. GitHub Key
    5. Notion Key
-   6. Canonical Key
-   7. Source
-   8. Last checked
-   9. Status
-   10. Visibility
+   6. Source
+   7. Last checked
+   8. Status
+   9. Visibility
 
 ## Merge examples
 

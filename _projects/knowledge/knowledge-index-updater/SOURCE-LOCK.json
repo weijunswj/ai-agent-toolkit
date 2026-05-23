@@ -9,18 +9,18 @@
   "notes": "First-party standalone skill material promoted into _main/skill/** from real root-skill paths in the pinned source commit. _main/source-provenance.md is newly authored for this module and documented in SOURCE-MANIFEST.md rather than represented as an upstream source_path.",
   "files": [
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "skills/knowledge-index-updater/README.md",
       "project_path": "_projects/knowledge/knowledge-index-updater/_main/skill/README.md",
       "source_blob_sha": "2edbbfeb5d6ede6a1ac5fee4ba3e8ebfd6d95125",
-      "notes": "Former standalone skill README promoted exactly into _main/skill."
+      "notes": "Toolkit-adapted after migration to remove AI-generated Canonical Key from hard identity/default schema guidance and keep scheduled runs deterministic with Notion Key and GitHub Key only."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "skills/knowledge-index-updater/SKILL.md",
       "project_path": "_projects/knowledge/knowledge-index-updater/_main/skill/SKILL.md",
       "source_blob_sha": "9618539a818b8249469f3563e6c05107d1357942",
-      "notes": "Former standalone skill entrypoint promoted exactly into _main/skill."
+      "notes": "Toolkit-adapted after migration to remove AI-generated Canonical Key from hard identity/default schema guidance and keep scheduled runs deterministic with Notion Key and GitHub Key only."
     },
     {
       "mode": "exact",
