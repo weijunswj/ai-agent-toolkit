@@ -5,6 +5,9 @@
   "title": "MCP-Ready Registry",
   "module_path": "_projects/repo-methodology/mcp-ready-registry",
   "main_path": "_projects/repo-methodology/mcp-ready-registry/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial stable toolkit project version.",
   "outputs": [
     {
       "kind": "copy",

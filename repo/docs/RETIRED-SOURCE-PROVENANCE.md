@@ -12,6 +12,8 @@ Public attribution is not required for retired internal source repos owned by `w
 
 `SOURCE-LOCK.json` source repo names, commits, source paths, and blob hashes are retained as provenance and local drift checks.
 
+Retired internal source locks are not forced into active third-party scheduled-watch rules. They must keep `source_update_policy: "none"` and remain provenance-only records.
+
 ## `weijunswj/ai-agent-toolkit`
 
 Inspected:

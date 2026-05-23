@@ -9,6 +9,10 @@ Use [_projects/](../../_projects/) when you need the preserved source context be
 - `_main/` keeps preserved project files, full docs, and provenance source.
 - `curated_output_for_ai/` keeps reviewed AI-facing source material that sync recipes publish into `skills/` and `mcp/`.
 - `_generated/` is preview-only and not source of truth.
+- `toolkit.project.json` owns the toolkit module version, routing contract, generated outputs, and write policy.
+- `SOURCE-LOCK.json` owns upstream/source provenance, source pins, blob pins, lifecycle, attribution requirements, and source-watch update policy.
+
+For third-party projects, the project `version` is the toolkit adaptation version, not the upstream version. Source-watch tasks must use `SOURCE-LOCK.json` for upstream repo, source ref, locked commit, update policy, attribution requirement, allowlisted files, and exact blob pins.
 
 Start with:
 
