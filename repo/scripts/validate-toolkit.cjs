@@ -1052,6 +1052,15 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   for (const { label, token } of requiredPreflightPathBlocks) {
     if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight fail handling for ${label}`);
   }
+  const autoSyncContractInputs = [
+    'repo/docs/partials/source-of-truth-contract.md'
+  ];
+  for (const token of autoSyncContractInputs) {
+    const preflightOccurrences = preflightSection.split(token).length - 1;
+    if (preflightOccurrences < 3) {
+      fail(errors, `${entry.relPath} must allow source-of-truth contract partial changes as auto-sync eligible inputs`);
+    }
+  }
   const autoSyncAgentRulePartialInputs = [
     '_projects/development/ai-coding-agent-rules/_main/_partials/*',
     '_projects/n8n/local-setup/_main/_partials/*'
