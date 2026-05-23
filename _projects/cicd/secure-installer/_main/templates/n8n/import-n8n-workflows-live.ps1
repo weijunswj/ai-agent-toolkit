@@ -45,7 +45,7 @@ function Resolve-RepoRootFromScript {
 
     $parent = Split-Path -Parent $current
     if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
-      return (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+      throw "Could not resolve repo root from $PSScriptRoot. Run this helper from inside a Git repo or a repo with n8n-workflows/ at the root."
     }
     $current = $parent
   }
