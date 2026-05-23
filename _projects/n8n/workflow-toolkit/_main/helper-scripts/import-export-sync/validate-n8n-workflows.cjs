@@ -7,9 +7,14 @@ const DEFAULT_POLICY_FILE = 'n8n-workflow-policy.json';
 function parseArgs(argv) {
   let workflowDirArg = null;
   let policyArg = null;
+  let allowPreparedDir = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === '--allow-prepared-dir') {
+      allowPreparedDir = true;
+      continue;
+    }
     if (arg === '--policy') {
       policyArg = argv[index + 1];
       index += 1;
@@ -24,7 +29,7 @@ function parseArgs(argv) {
     }
   }
 
-  return { workflowDirArg, policyArg };
+  return { workflowDirArg, policyArg, allowPreparedDir };
 }
 
 function loadPolicy(root, policyArg) {
@@ -80,10 +85,10 @@ function workflowFilesIn(dir) {
     .map((file) => path.join(dir, file));
 }
 
-function resolveWorkflowDir(root, workflowDirArg) {
+function resolveWorkflowDir(root, workflowDirArg, options = {}) {
   if (workflowDirArg) {
     const workflowDir = path.resolve(workflowDirArg);
-    if (path.basename(workflowDir) !== CANONICAL_WORKFLOW_DIR) {
+    if (!options.allowPreparedDir && path.basename(workflowDir) !== CANONICAL_WORKFLOW_DIR) {
       throw new Error('Only n8n-workflows is supported. Validate n8n-workflows/ or a fixture directory named n8n-workflows.');
     }
     return {
@@ -317,7 +322,9 @@ const helpers = createPolicyHelpers(policy);
 const projectValidationRules = loadProjectValidationRules(root);
 let resolvedWorkflowDir;
 try {
-  resolvedWorkflowDir = resolveWorkflowDir(root, parsedArgs.workflowDirArg);
+  resolvedWorkflowDir = resolveWorkflowDir(root, parsedArgs.workflowDirArg, {
+    allowPreparedDir: parsedArgs.allowPreparedDir,
+  });
 } catch (error) {
   fail(error.message);
   resolvedWorkflowDir = {

@@ -90,7 +90,7 @@ const cmdWrapperCases = [
 ];
 
 const wrapperAdaptationNote =
-  'Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with clearer colored retry output.';
+  'Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output.';
 
 function readJson(relPath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relPath), 'utf8'));
@@ -176,7 +176,7 @@ test('n8n workflow toolkit cmd wrappers invoke co-located PowerShell scripts', (
           true,
           relPath
         );
-        assert.match(wrapperText, /Auto-restart n8n container if restart warning is true\? \[Y\/N\]: /, relPath);
+        assert.match(wrapperText, /call :prompt "Auto-restart n8n container if restart warning is true\?"/, relPath);
         assert.match(wrapperText, /-RestartContainerAfterImport/, relPath);
       } else {
         assert.equal(
@@ -185,7 +185,8 @@ test('n8n workflow toolkit cmd wrappers invoke co-located PowerShell scripts', (
           relPath
         );
       }
-      assert.match(wrapperText, /call :status Cyan "== n8n .+ =="/, relPath);
+      assert.match(wrapperText, /call :banner "n8n .+"/, relPath);
+      assert.match(wrapperText, /call :status DarkCyan "-+"/, relPath);
       assert.match(wrapperText, /powershell -NoProfile -Command "Write-Host \$env:AAT_STATUS_MESSAGE -ForegroundColor \$env:AAT_STATUS_COLOR"/, relPath);
       assert.equal(/^cd\s+\/d\s+"%~dp0\.\."/im.test(wrapperText), false, relPath);
     }

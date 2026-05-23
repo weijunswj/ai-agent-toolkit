@@ -387,6 +387,20 @@ test('validate-n8n-workflows.cjs passes safe generic placeholders', () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
+test('validate-n8n-workflows.cjs requires n8n-workflows unless prepared directories are explicitly allowed', () => {
+  const cwd = tempDir();
+  const preparedDir = path.join(cwd, '.tmp', 'n8n-live-import');
+  writeJson(path.join(preparedDir, 'safe.json'), safeWorkflow());
+
+  const strictResult = runNode(validateScript, [preparedDir], { cwd });
+  assert.notEqual(strictResult.status, 0);
+  assert.match(strictResult.stderr, /Only n8n-workflows is supported/);
+
+  const preparedResult = runNode(validateScript, ['--allow-prepared-dir', preparedDir], { cwd });
+  assert.equal(preparedResult.status, 0, preparedResult.stderr);
+  assert.match(preparedResult.stdout, /\.tmp[\\/]n8n-live-import[\\/]safe\.json/);
+});
+
 test('validate-n8n-workflows.cjs fails credentials.id', () => {
   const cwd = tempDir();
   writeJson(path.join(cwd, 'n8n-workflows', 'unsafe.json'), safeWorkflow({
@@ -579,6 +593,52 @@ test('generated n8n helper scripts are fresh copies of project source', () => {
   }
 });
 
+test('Secure CI/CD n8n helper templates stay aligned with workflow toolkit source', () => {
+  for (const fileName of [
+    '_export-n8n-workflows-live.cmd',
+    '_import-n8n-workflows-live.cmd',
+    'compare-n8n-workflow-credentials.cjs',
+    'export-n8n-workflows-live.ps1',
+    'import-n8n-workflows-live.ps1',
+    'n8n-workflow-sync-menu.ps1',
+    'prepare-n8n-live-import.cjs',
+    'should-import-n8n-workflow.cjs',
+    'sync-n8n-live-exports.cjs',
+    'validate-n8n-workflows.cjs',
+  ]) {
+    assert.equal(readText(path.join(secureCicdN8nTemplateDir, fileName)), readText(path.join(sourceScriptDir, fileName)), fileName);
+  }
+});
+
+test('n8n command wrappers use framed colored retry output', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit export wrapper', path.join(sourceScriptDir, '_export-n8n-workflows-live.cmd')],
+    ['workflow toolkit import wrapper', path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd')],
+    ['workflow toolkit sanitizer wrapper', path.join(sourceSanitizerDir, '_sanitise-n8n-template.cmd')],
+    ['generated export wrapper', path.join(scriptDir, '_export-n8n-workflows-live.cmd')],
+    ['generated import wrapper', path.join(scriptDir, '_import-n8n-workflows-live.cmd')],
+    ['generated sanitizer wrapper', path.join(sanitizerDir, '_sanitise-n8n-template.cmd')],
+    ['Secure CI/CD export wrapper', path.join(secureCicdN8nTemplateDir, '_export-n8n-workflows-live.cmd')],
+    ['Secure CI/CD import wrapper', path.join(secureCicdN8nTemplateDir, '_import-n8n-workflows-live.cmd')],
+  ]) {
+    const text = readText(filePath);
+
+    assert.match(text, /call :banner /, label);
+    assert.match(text, /call :prompt "Press R to run again or E to exit\."/, label);
+    assert.match(text, /:banner/, label);
+    assert.match(text, /:prompt/, label);
+    assert.match(text, /DarkCyan/, label);
+    assert.match(text, /Yellow/, label);
+    assert.match(text, /:status/, label);
+
+    if (label.includes('import wrapper')) {
+      assert.match(text, /:configure_restart/, label);
+      assert.match(text, /RestartContainerAfterImport/, label);
+      assert.match(text, /Auto-restart n8n container if restart warning is true\?/, label);
+    }
+  }
+});
+
 test('n8n hook and validation extension points stay generic and product agnostic', () => {
   const text = [
     'export-n8n-workflows-live.ps1',
@@ -655,7 +715,7 @@ test('import helper guards before-import-validation hooks during dry-run and rev
   assert.notEqual(importIndex, -1);
   assert.ok(beforeLiveImportIndex < revalidationIndex, 'prepared revalidation must run after before-live-import hook');
   assert.ok(revalidationIndex < importIndex, 'prepared revalidation must run before live import');
-  assert.match(text, /validate-n8n-workflows\.cjs"\), \$PreparedDirPath/);
+  assert.match(text, /validate-n8n-workflows\.cjs"\), "--allow-prepared-dir", \$PreparedDirPath/);
   assert.match(text, /Prepared workflow JSON validation failed after before-live-import hook/);
 });
 

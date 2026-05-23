@@ -1,22 +1,33 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0.."
 
 :run_export
-call :status Cyan "== n8n workflow export =="
-powershell -ExecutionPolicy Bypass -File scripts\export-n8n-workflows-live.ps1 %*
+call :banner "n8n workflow export" "Runs export-n8n-workflows-live.ps1 from this helper folder."
+powershell -ExecutionPolicy Bypass -File "%~dp0export-n8n-workflows-live.ps1" %*
 set "LAST_EXIT=%ERRORLEVEL%"
 
 echo.
 if "%LAST_EXIT%"=="0" (
-  call :status Green "Export finished successfully."
+  call :status Green "DONE  Export finished successfully."
 ) else (
-  call :status Red "Export stopped with exit code %LAST_EXIT%."
+  call :status Red "FAIL  Export stopped with exit code %LAST_EXIT%."
 )
-choice /C RE /N /M "Press R to run again or E to exit: "
+call :prompt "Press R to run again or E to exit."
+choice /C RE /N /M "> "
 if errorlevel 2 exit /b %LAST_EXIT%
 echo.
 goto run_export
+
+:banner
+call :status DarkCyan "------------------------------------------------------------"
+call :status Cyan "%~1"
+call :status DarkGray "%~2"
+call :status DarkCyan "------------------------------------------------------------"
+exit /b 0
+
+:prompt
+call :status Yellow "%~1"
+exit /b 0
 
 :status
 set "AAT_STATUS_COLOR=%~1"

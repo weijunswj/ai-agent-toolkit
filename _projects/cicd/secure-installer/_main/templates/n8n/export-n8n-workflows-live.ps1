@@ -129,6 +129,22 @@ function Resolve-ProjectWorkflowHookScripts {
     }
   }
 
+  if ($env:N8N_WORKFLOW_HOOK_AUTOLOAD -match '^(?i:true|1|yes|on)$') {
+    foreach ($relativePath in @(
+      "scripts/n8n-workflow-hooks.cjs",
+      "scripts/n8n-workflow-hooks.js",
+      "scripts/n8n-workflow-hooks.ps1",
+      ".n8n-local/n8n-workflow-hooks.cjs",
+      ".n8n-local/n8n-workflow-hooks.js",
+      ".n8n-local/n8n-workflow-hooks.ps1",
+      ".n8n-workflow-hooks.cjs",
+      ".n8n-workflow-hooks.js",
+      ".n8n-workflow-hooks.ps1"
+    )) {
+      Add-HookScriptCandidate $relativePath $false
+    }
+  }
+
   $seen = @{}
   $existingScripts = @()
   foreach ($candidate in $candidates) {

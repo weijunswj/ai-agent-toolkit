@@ -7,9 +7,14 @@ const DEFAULT_POLICY_FILE = 'n8n-workflow-policy.json';
 function parseArgs(argv) {
   let workflowDirArg = null;
   let policyArg = null;
+  let allowPreparedDir = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === '--allow-prepared-dir') {
+      allowPreparedDir = true;
+      continue;
+    }
     if (arg === '--policy') {
       policyArg = argv[index + 1];
       index += 1;
@@ -24,7 +29,7 @@ function parseArgs(argv) {
     }
   }
 
-  return { workflowDirArg, policyArg };
+  return { workflowDirArg, policyArg, allowPreparedDir };
 }
 
 function loadPolicy(root, policyArg) {
@@ -80,10 +85,10 @@ function workflowFilesIn(dir) {
     .map((file) => path.join(dir, file));
 }
 
-function resolveWorkflowDir(root, workflowDirArg) {
+function resolveWorkflowDir(root, workflowDirArg, options = {}) {
   if (workflowDirArg) {
     const workflowDir = path.resolve(workflowDirArg);
-    if (path.basename(workflowDir) !== CANONICAL_WORKFLOW_DIR) {
+    if (!options.allowPreparedDir && path.basename(workflowDir) !== CANONICAL_WORKFLOW_DIR) {
       throw new Error('Only n8n-workflows is supported. Validate n8n-workflows/ or a fixture directory named n8n-workflows.');
     }
     return {
@@ -206,7 +211,9 @@ function validationRulePathCandidates(root) {
     .filter(Boolean)
     .map((value) => (path.isAbsolute(value) ? value : path.join(root, value)));
 
-  const defaults = DEFAULT_VALIDATION_RULE_FILES.map((file) => path.join(root, file));
+  const defaultsEnabled = /^(?:1|true|yes|on)$/i.test(String(process.env.N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD || ''))
+    ? DEFAULT_VALIDATION_RULE_FILES.map((file) => path.join(root, file))
+    : [];
   const candidates = [];
   const seen = new Map();
   function addCandidate(filePath, required) {
@@ -223,7 +230,7 @@ function validationRulePathCandidates(root) {
   }
 
   for (const filePath of configured) addCandidate(filePath, true);
-  for (const filePath of defaults) addCandidate(filePath, false);
+  for (const filePath of defaultsEnabled) addCandidate(filePath, false);
   return candidates;
 }
 
@@ -315,7 +322,9 @@ const helpers = createPolicyHelpers(policy);
 const projectValidationRules = loadProjectValidationRules(root);
 let resolvedWorkflowDir;
 try {
-  resolvedWorkflowDir = resolveWorkflowDir(root, parsedArgs.workflowDirArg);
+  resolvedWorkflowDir = resolveWorkflowDir(root, parsedArgs.workflowDirArg, {
+    allowPreparedDir: parsedArgs.allowPreparedDir,
+  });
 } catch (error) {
   fail(error.message);
   resolvedWorkflowDir = {

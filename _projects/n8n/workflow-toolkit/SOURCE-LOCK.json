@@ -19,7 +19,7 @@
       "source_path": "scripts/- sanitise-n8n-template.cmd",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/_sanitise-n8n-template.cmd",
       "source_blob_sha": "0ed27a6b98c45ae3695e662ded246c1a8739a974",
-      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with clearer colored retry output."
+      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output."
     },
     {
       "mode": "adapted",
@@ -40,14 +40,14 @@
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/- export-n8n-workflows-live.cmd",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd",
       "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66",
-      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with clearer colored retry output."
+      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output."
     },
     {
       "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/- import-n8n-workflows-live.cmd",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd",
       "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898",
-      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with clearer colored retry output."
+      "notes": "Wrapper path and console formatting adapted after rehome so the published helper entrypoint invokes the co-located PowerShell script with framed colored retry output."
     },
     {
       "mode": "adapted",
@@ -68,7 +68,7 @@
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/import-n8n-workflows-live.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1",
       "source_blob_sha": "10d37f121e00dfd4d12dd8a9ca59426276fd95ee",
-      "notes": "Toolkit-adapted after migration to make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration. Also prevents dry-run hook execution, revalidates prepared workflow JSON after before-live-import hooks before live import execution, and refuses unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
+      "notes": "Toolkit-adapted after migration to make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration. Also prevents dry-run hook execution, revalidates prepared workflow JSON after before-live-import hooks with explicit prepared-directory validation before live import execution, and refuses unresolved repo-root fallback so .tmp and .n8n-local state is not created under helper folders."
     },
     {
       "mode": "adapted",
@@ -101,7 +101,7 @@
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/validate-n8n-workflows.cjs",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/validate-n8n-workflows.cjs",
       "source_blob_sha": "721d9cd48b8de71b1fa360364b3ca080efdd2237",
-      "notes": "Toolkit-adapted after migration to make project-local validation-rule autoload opt-in via N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD while preserving explicit N8N_WORKFLOW_VALIDATION_RULES configuration."
+      "notes": "Toolkit-adapted after migration to make project-local validation-rule autoload opt-in via N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD while preserving explicit N8N_WORKFLOW_VALIDATION_RULES configuration. Also adds an explicit prepared-import validation flag while keeping default directory-name enforcement strict."
     },
     {
       "mode": "exact",
