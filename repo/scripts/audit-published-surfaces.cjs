@@ -457,16 +457,39 @@ function runtimeBoundaryMarkerHits(text) {
   return boundaryMarkerHits(text).filter((hit) => !safetyOnlyMarkers.has(hit));
 }
 
+function runtimeImportExportActionMarkersWithCommand(text) {
+  const markers = [];
+  const headingPattern = /^(#{1,6})\s+(Import|Export)\s*$/gim;
+  let match;
+  while ((match = headingPattern.exec(text)) !== null) {
+    const level = match[1].length;
+    const marker = match[2].toLowerCase() === 'import' ? 'Import' : 'Export';
+    const sectionStart = headingPattern.lastIndex;
+    const nextHeadingPattern = new RegExp(`^#{1,${level}}\\s+`, 'gm');
+    nextHeadingPattern.lastIndex = sectionStart;
+    const nextHeading = nextHeadingPattern.exec(text);
+    const section = text.slice(sectionStart, nextHeading ? nextHeading.index : text.length);
+    if ((section.match(commandSnippetPattern) || []).length) markers.push(marker);
+  }
+  return [...new Set(markers)];
+}
+
 function runtimeInstructionReasons(text) {
   const reasons = [];
   const hits = runtimeBoundaryMarkerHits(text);
   const hasSetupMarker = hits.some((hit) => runtimeSetupMarkers.has(hit));
+  const importExportActionMarkers = runtimeImportExportActionMarkersWithCommand(text);
   const numberedRuntimeSteps = text.match(runtimeNumberedStepPattern) || [];
   const commandSnippets = text.match(commandSnippetPattern) || [];
   const hasServerPackagePattern = runtimeServerPackagePattern.test(text);
-  const hasRuntimeContext = numberedRuntimeSteps.length >= 2 || commandSnippets.length >= 2 || hasServerPackagePattern;
+  const hasImportExportCommand = importExportActionMarkers.length > 0;
+  const hasRuntimeContext =
+    numberedRuntimeSteps.length >= 2 ||
+    commandSnippets.length >= 2 ||
+    hasServerPackagePattern ||
+    hasImportExportCommand;
 
-  if (hits.length && hasRuntimeContext && (hasSetupMarker || commandSnippets.length >= 2 || hasServerPackagePattern)) {
+  if (hits.length && hasRuntimeContext && (hasSetupMarker || commandSnippets.length >= 2 || hasServerPackagePattern || hasImportExportCommand)) {
     reasons.push(`runtime markers: ${hits.join(', ')}`);
   }
   if (numberedRuntimeSteps.length >= 2 && (hasSetupMarker || commandSnippets.length >= 2 || hasServerPackagePattern)) {
