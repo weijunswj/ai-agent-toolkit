@@ -10,6 +10,7 @@ const sourceSkill = path.join(repoRoot, '_projects', 'knowledge', 'knowledge-ind
 const generatedSkill = path.join(repoRoot, 'skills', 'knowledge-index-updater', 'SKILL.md');
 const sourceReadme = path.join(repoRoot, '_projects', 'knowledge', 'knowledge-index-updater', '_main', 'skill', 'README.md');
 const generatedReadme = path.join(repoRoot, 'skills', 'knowledge-index-updater', 'README.md');
+const realDataSourceId = 'collection://3b98d9e9-102c-48bb-9abf-b64aa0df0039';
 
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
@@ -44,6 +45,17 @@ test('Knowledge Index scheduled prompt treats Notion and GitHub keys as the only
   assert.match(scheduled, /If an existing row still has a `Canonical Key`, ignore it unless I explicitly ask for legacy cleanup\./);
   assert.match(scheduled, /Do not create separate Notion Link, GitHub Link, Source Link, or Canonical Key fields\./);
   assert.doesNotMatch(scheduled, /Treat Notion Key, GitHub Key, and Canonical Key as identity fields/);
+});
+
+test('Knowledge Index scheduled prompt uses database placeholders instead of a real data source ID', () => {
+  for (const filePath of [sourceSkill, generatedSkill]) {
+    const text = read(filePath);
+    const scheduled = section(text, '### 7. Scheduled updater behaviour');
+    assert.match(scheduled, /Replace the placeholder database name and data source URL with the user's actual Notion Knowledge Index details before using this prompt in an external scheduler\./, filePath);
+    assert.match(scheduled, /- Name: <Knowledge Index database name>/, filePath);
+    assert.match(scheduled, /- Data source: <collection:\/\/your-notion-data-source-id>/, filePath);
+    assert.doesNotMatch(text, new RegExp(realDataSourceId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), filePath);
+  }
 });
 
 test('Knowledge Index README documents only Notion and GitHub hard identity keys', () => {

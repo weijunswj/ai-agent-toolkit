@@ -211,6 +211,8 @@ When the user asks for a recurring updater, create a scheduled task that:
 - Does not permanently delete anything.
 - Reports what changed after each run.
 
+Replace the placeholder database name and data source URL with the user's actual Notion Knowledge Index details before using this prompt in an external scheduler.
+
 Recommended prompt for an external AI scheduler or cron-style runner:
 
 ```text
@@ -219,8 +221,8 @@ Search my Notion and GitHub for new, changed, removed, or renamed guides, refere
 Update the root-level Notion Knowledge Index using one row per real project, guide, reference, portfolio item, tool, or repo.
 
 Current database:
-- Name: Knowledge Index
-- Data source: collection://3b98d9e9-102c-48bb-9abf-b64aa0df0039
+- Name: <Knowledge Index database name>
+- Data source: <collection://your-notion-data-source-id>
 
 Hard identity rules:
 
