@@ -12,25 +12,28 @@
       "source_path": "1. local setup.md",
       "project_path": "_projects/n8n/local-setup/_main/1. local setup.md",
       "source_blob_sha": "a08f0b83ed5722b5b8ecbc560f1ccfe89baf4563",
-      "notes": "Toolkit-adapted after migration to route Codex agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n add-on template, while avoiding active nested instruction filenames in skill copies."
+      "notes": "Toolkit-adapted after migration to route Codex agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n add-on template, while avoiding active nested instruction filenames in skill copies. Local Docker examples now bind to loopback by default, with explicit public-exposure safety guidance for external access."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "2. upgrading.md",
       "project_path": "_projects/n8n/local-setup/_main/2. upgrading.md",
-      "source_blob_sha": "a155cef59f93e9b31104ac91289490665ef32e47"
+      "source_blob_sha": "a155cef59f93e9b31104ac91289490665ef32e47",
+      "notes": "Toolkit-adapted after migration to bind local Docker examples to loopback by default and document explicit public-exposure safety guidance for external access."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "3. tunneling guide.md",
       "project_path": "_projects/n8n/local-setup/_main/3. tunneling guide.md",
-      "source_blob_sha": "3c3b252811c024803123c44459ff9f6c23c4cc24"
+      "source_blob_sha": "3c3b252811c024803123c44459ff9f6c23c4cc24",
+      "notes": "Toolkit-adapted after migration to bind local Docker examples to loopback by default and document explicit public-exposure safety guidance for external access."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "3a. docker compose + ngrok.md",
       "project_path": "_projects/n8n/local-setup/_main/3a. docker compose + ngrok.md",
-      "source_blob_sha": "e0819653c14f2a05819fecd1ea113f949194c223"
+      "source_blob_sha": "e0819653c14f2a05819fecd1ea113f949194c223",
+      "notes": "Toolkit-adapted after migration to bind local Docker Compose examples to loopback by default and document explicit public-exposure safety guidance for external access."
     },
     {
       "mode": "exact",
@@ -81,10 +84,11 @@
       "notes": "Toolkit-adapted after migration to delegate to the current inert .template.md agent-rule generator instead of regenerating retired active-name template docs."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "scripts/windows/start-n8n-ngrok.bat",
       "project_path": "_projects/n8n/local-setup/_main/scripts/windows/start-n8n-ngrok.bat",
-      "source_blob_sha": "2f3b40bdcf4e3cd9e54dce86e33b85653fb51c4a"
+      "source_blob_sha": "2f3b40bdcf4e3cd9e54dce86e33b85653fb51c4a",
+      "notes": "Toolkit-adapted after migration to bind the local ngrok launcher container port to loopback by default while ngrok provides the public tunnel endpoint."
     },
     {
       "mode": "exact",

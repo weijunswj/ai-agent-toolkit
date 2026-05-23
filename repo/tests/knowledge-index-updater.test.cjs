@@ -10,7 +10,8 @@ const sourceSkill = path.join(repoRoot, '_projects', 'knowledge', 'knowledge-ind
 const generatedSkill = path.join(repoRoot, 'skills', 'knowledge-index-updater', 'SKILL.md');
 const sourceReadme = path.join(repoRoot, '_projects', 'knowledge', 'knowledge-index-updater', '_main', 'skill', 'README.md');
 const generatedReadme = path.join(repoRoot, 'skills', 'knowledge-index-updater', 'README.md');
-const realDataSourceId = 'collection://3b98d9e9-102c-48bb-9abf-b64aa0df0039';
+const fakeDataSourceId = 'collection://replace-with-your-notion-data-source-id';
+const realDataSourceIdPattern = /collection:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
@@ -54,8 +55,14 @@ test('Knowledge Index scheduled prompt uses database placeholders instead of a r
     assert.match(scheduled, /Replace the placeholder database name and data source URL with the user's actual Notion Knowledge Index details before using this prompt in an external scheduler\./, filePath);
     assert.match(scheduled, /- Name: <Knowledge Index database name>/, filePath);
     assert.match(scheduled, /- Data source: <collection:\/\/your-notion-data-source-id>/, filePath);
-    assert.doesNotMatch(text, new RegExp(realDataSourceId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), filePath);
+    assert.doesNotMatch(text, realDataSourceIdPattern, filePath);
   }
+});
+
+test('Knowledge Index tests use a clearly fake Notion data source ID sentinel', () => {
+  assert.equal(fakeDataSourceId, 'collection://replace-with-your-notion-data-source-id');
+  assert.match(fakeDataSourceId, /^collection:\/\/[a-z-]+$/);
+  assert.doesNotMatch(fakeDataSourceId, realDataSourceIdPattern);
 });
 
 test('Knowledge Index README documents only Notion and GitHub hard identity keys', () => {

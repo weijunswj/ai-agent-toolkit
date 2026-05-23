@@ -105,7 +105,10 @@ That is also the flow used in n8n's official Docker Compose based VPS guides.
 
 If you followed the local Docker setup from this repo, paste this whole block into PowerShell.
 
-The defaults assume local n8n on `http://localhost:5678/`. If you later expose n8n through a tunnel, reverse proxy, or VPS domain, change only `$WEBHOOK_URL` before running the command.
+The defaults assume local n8n on `http://localhost:5678/`.
+For local development, this block keeps the container loopback-only on `127.0.0.1`.
+If you later need public exposure, use the tunneling or VPS guides and confirm access-control, firewall, HTTPS/tunnel, and credential safeguards first.
+Change only `$WEBHOOK_URL` in this block for tunnel, reverse proxy, or VPS test flows.
 
 ```powershell
 $CONTAINER_NAME = "n8n"
@@ -127,7 +130,7 @@ docker rm $CONTAINER_NAME 2>$null
 docker volume create $VOLUME_NAME | Out-Null
 
 docker run -d --name $CONTAINER_NAME `
-  -p "${HOST_PORT}:${CONTAINER_PORT}" `
+  -p "127.0.0.1:${HOST_PORT}:${CONTAINER_PORT}" `
   -e "GENERIC_TIMEZONE=$TZ" `
   -e "TZ=$TZ" `
   -e "N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true" `
