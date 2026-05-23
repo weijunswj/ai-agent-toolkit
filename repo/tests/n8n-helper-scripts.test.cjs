@@ -126,6 +126,92 @@ try {
   });
 }
 
+function runImportRunDirectoryHarness(shell, helperScriptPath) {
+  const root = tempDir();
+  const safeDir = path.join(root, '.tmp', 'n8n-live-import');
+  const safeForwardDir = `${root.replace(/\\/g, '/')}/.tmp/n8n-live-import-forward`;
+  const tmpRoot = path.join(root, '.tmp');
+  const repoOutsideTmp = path.join(root, 'n8n-workflows');
+  const outsideRoot = tempDir();
+  const outsideTmp = path.join(outsideRoot, 'n8n-live-import');
+  const traversalOutsideTmp = path.join(root, '.tmp', 'n8n-live-import', '..', '..', 'outside-tmp');
+  const filesystemRoot = path.parse(root).root;
+
+  fs.mkdirSync(safeDir, { recursive: true });
+  fs.writeFileSync(path.join(safeDir, 'old.txt'), 'old staging payload', 'utf8');
+  fs.mkdirSync(tmpRoot, { recursive: true });
+  fs.mkdirSync(repoOutsideTmp, { recursive: true });
+  fs.mkdirSync(outsideTmp, { recursive: true });
+
+  const harnessPath = path.join(root, 'run-directory-harness.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$RepoRoot = ${psSingleQuoted(root)}
+$sourceFile = ${psSingleQuoted(helperScriptPath)}
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($sourceFile, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) {
+  throw "Could not parse source helper: $($errors[0].Message)"
+}
+$functionNames = @(
+  "Get-PathStringComparison",
+  "Get-NormalizedFullPath",
+  "Test-PathIsStrictChild",
+  "Initialize-RunDirectory"
+)
+$functions = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true)
+foreach ($function in $functions) {
+  Invoke-Expression $function.Extent.Text
+}
+if (-not (Get-Command Initialize-RunDirectory -ErrorAction SilentlyContinue)) {
+  throw "Initialize-RunDirectory not loaded"
+}
+
+function Assert-Rejected($Label, $RunDirectory) {
+  try {
+    Initialize-RunDirectory $RunDirectory
+    throw "accepted unsafe path: $Label"
+  } catch {
+    if ($_.Exception.Message -like "accepted unsafe path:*") {
+      throw
+    }
+    Write-Output "REJECTED=$Label"
+  }
+}
+
+Initialize-RunDirectory ${psSingleQuoted(safeDir)}
+if (-not (Test-Path -LiteralPath ${psSingleQuoted(safeDir)} -PathType Container)) {
+  throw "safe child was not recreated"
+}
+if (Test-Path -LiteralPath ${psSingleQuoted(path.join(safeDir, 'old.txt'))}) {
+  throw "safe child was not cleared"
+}
+Write-Output "ACCEPTED=safe child"
+
+Initialize-RunDirectory ${psSingleQuoted(safeForwardDir)}
+if (-not (Test-Path -LiteralPath ${psSingleQuoted(safeForwardDir)} -PathType Container)) {
+  throw "forward-separator safe child was not created"
+}
+Write-Output "ACCEPTED=forward separator child"
+
+Assert-Rejected ".tmp itself" ${psSingleQuoted(tmpRoot)}
+Assert-Rejected "repo root" ${psSingleQuoted(root)}
+Assert-Rejected "filesystem root" ${psSingleQuoted(filesystemRoot)}
+Assert-Rejected "repo child outside .tmp" ${psSingleQuoted(repoOutsideTmp)}
+Assert-Rejected "outside repo" ${psSingleQuoted(outsideTmp)}
+Assert-Rejected "traversal outside .tmp" ${psSingleQuoted(traversalOutsideTmp)}
+`, 'utf8');
+
+  return spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+}
+
 function fakeMenuRepo(menuSourcePath) {
   const root = tempDir();
   const helperDir = path.join(root, 'helper-scripts');
@@ -1058,6 +1144,53 @@ test('import helper guards hooks, no-op imports, and prepared payload revalidati
     assert.match(text, /Write-CommandOutput \$preparedValidationResult\.StdOut "VALID"/, label);
     assert.match(text, /Prepared workflow JSON validation failed after before-live-import hook/, label);
     assert.match(text, /Live n8n was not changed\./, label);
+  }
+});
+
+test('import helper run-directory safety is separator-aware and strictly under .tmp', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
+  ]) {
+    const text = readText(filePath);
+    const initStart = text.indexOf('function Initialize-RunDirectory');
+    const initEnd = text.indexOf('\nfunction Resolve-WorkflowDirPath', initStart);
+    assert.notEqual(initStart, -1, `${label}: Initialize-RunDirectory not found`);
+    assert.notEqual(initEnd, -1, `${label}: Initialize-RunDirectory block end not found`);
+    const initializeBlock = text.slice(initStart, initEnd);
+
+    assert.match(text, /\[string\]\$PreparedDir = "\.tmp\/n8n-live-import"/, label);
+    assert.match(text, /\[string\]\$CredentialExportDir = "\.tmp\/n8n-live-credential-exports"/, label);
+    assert.match(text, /function Get-PathStringComparison/, label);
+    assert.match(text, /function Get-NormalizedFullPath\(\$Path\)/, label);
+    assert.match(text, /function Test-PathIsStrictChild\(\$Path, \$ParentPath\)/, label);
+    assert.match(text, /DirectorySeparatorChar/, label);
+    assert.match(initializeBlock, /Test-PathIsStrictChild \$resolvedPath \$tmpRoot/, label);
+    assert.doesNotMatch(initializeBlock, /\$tmpPrefix\s*=\s*\$tmpRoot\s*\+\s*'\\'/, label);
+    assert.doesNotMatch(initializeBlock, /TrimEnd\('\\'\)/, label);
+  }
+});
+
+test('PowerShell import run-directory guard accepts only strict .tmp children', { skip: !findPowerShell() }, () => {
+  const shell = findPowerShell();
+  for (const [label, filePath] of [
+    ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
+  ]) {
+    const result = runImportRunDirectoryHarness(shell, filePath);
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.equal(result.status, 0, `${label}\n${output}`);
+    assert.match(output, /ACCEPTED=safe child/, label);
+    assert.match(output, /ACCEPTED=forward separator child/, label);
+    assert.match(output, /REJECTED=\.tmp itself/, label);
+    assert.match(output, /REJECTED=repo root/, label);
+    assert.match(output, /REJECTED=filesystem root/, label);
+    assert.match(output, /REJECTED=repo child outside \.tmp/, label);
+    assert.match(output, /REJECTED=outside repo/, label);
+    assert.match(output, /REJECTED=traversal outside \.tmp/, label);
   }
 });
 

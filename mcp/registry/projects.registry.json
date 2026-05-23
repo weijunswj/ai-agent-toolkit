@@ -4,9 +4,9 @@
     "category": "cicd",
     "name": "secure-installer",
     "title": "Secure CI/CD Installer",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "version_policy": "semver",
-    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
+    "version_notes": "Patch release to keep the preserved n8n import helper template aligned with workflow-toolkit cross-platform staging path safety.",
     "project": {
       "name": "Secure CI/CD Installer",
       "category": "cicd",
@@ -268,9 +268,9 @@
     "category": "n8n",
     "name": "workflow-toolkit",
     "title": "n8n Workflow Toolkit",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "version_policy": "semver",
-    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
+    "version_notes": "Patch release for cross-platform n8n import staging path safety.",
     "project": {
       "name": "n8n Workflow Toolkit",
       "category": "n8n",
