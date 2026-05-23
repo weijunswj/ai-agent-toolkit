@@ -79,6 +79,44 @@ function findPowerShell() {
   return null;
 }
 
+function psSingleQuoted(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function fakeMenuRepo(menuSourcePath) {
+  const root = tempDir();
+  const helperDir = path.join(root, 'helper-scripts');
+  const scriptsDir = path.join(root, 'scripts');
+  const previousDir = path.join(root, '.n8n-local');
+  const markerPath = path.join(root, 'malicious-ran.txt');
+  const trustedMarkerPath = path.join(root, 'trusted-ran.txt');
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'n8n-workflows'), { recursive: true });
+  fs.mkdirSync(helperDir, { recursive: true });
+  fs.mkdirSync(scriptsDir, { recursive: true });
+  fs.mkdirSync(previousDir, { recursive: true });
+
+  const menuPath = path.join(helperDir, 'n8n-workflow-sync-menu.ps1');
+  const trustedExportScript = path.join(helperDir, 'export-n8n-workflows-live.ps1');
+  const maliciousExportScript = path.join(scriptsDir, 'export-n8n-workflows-live.ps1');
+  fs.copyFileSync(menuSourcePath, menuPath);
+  fs.writeFileSync(trustedExportScript, `Set-Content -LiteralPath ${psSingleQuoted(trustedMarkerPath)} -Value 'trusted export executed'\n`, 'utf8');
+  fs.writeFileSync(path.join(helperDir, 'import-n8n-workflows-live.ps1'), `Set-Content -LiteralPath ${psSingleQuoted(trustedMarkerPath)} -Value 'trusted import executed'\n`, 'utf8');
+  fs.writeFileSync(path.join(helperDir, 'validate-n8n-workflows.cjs'), "console.log('trusted validation executed');\n", 'utf8');
+  fs.writeFileSync(maliciousExportScript, `Set-Content -LiteralPath ${psSingleQuoted(markerPath)} -Value 'malicious export executed'\n`, 'utf8');
+
+  return {
+    root,
+    helperDir,
+    menuPath,
+    previousPath: path.join(previousDir, 'n8n-sync-last-command.json'),
+    trustedExportScript,
+    maliciousExportScript,
+    markerPath,
+    trustedMarkerPath,
+  };
+}
+
 test('prepare-n8n-template.js strips live fields and writes sanitized template output', () => {
   const cwd = tempDir();
   const inputPath = path.join(cwd, '.to-sanitise', 'workflow.json');
@@ -671,10 +709,18 @@ test('n8n workflow sync menus resolve helper commands from their own folder', ()
   ]) {
     const text = readText(filePath);
 
-    assert.match(text, /\$HelperScriptDir = \(Resolve-Path \$PSScriptRoot\)\.Path/, label);
+    assert.match(text, /\$HelperScriptDir = \(Resolve-Path -LiteralPath \$PSScriptRoot\)\.Path/, label);
     assert.match(text, /\$ExportHelperScript = Join-Path \$HelperScriptDir "export-n8n-workflows-live\.ps1"/, label);
     assert.match(text, /\$ImportHelperScript = Join-Path \$HelperScriptDir "import-n8n-workflows-live\.ps1"/, label);
     assert.match(text, /\$ValidateHelperScript = Join-Path \$HelperScriptDir "validate-n8n-workflows\.cjs"/, label);
+    assert.match(text, /\$TrustedExportHelperScript = Resolve-TrustedHelperPath \$ExportHelperScript "export helper"/, label);
+    assert.match(text, /\$TrustedImportHelperScript = Resolve-TrustedHelperPath \$ImportHelperScript "import helper"/, label);
+    assert.match(text, /\$TrustedValidateHelperScript = Resolve-TrustedHelperPath \$ValidateHelperScript "validation helper"/, label);
+    assert.match(text, /Resolve-Path -LiteralPath/, label);
+    assert.match(text, /Get-Command node -CommandType Application -ErrorAction Stop/, label);
+    assert.match(text, /\$NodeCommandPath/, label);
+    assert.doesNotMatch(text, /New-CommandRecord\s+[^`r`n]*"node"/, label);
+    assert.doesNotMatch(text, /&\s+node\b/, label);
     assert.doesNotMatch(text, /"\.\\scripts\\export-n8n-workflows-live\.ps1"/, label);
     assert.doesNotMatch(text, /"\.\\scripts\\import-n8n-workflows-live\.ps1"/, label);
     assert.doesNotMatch(text, /"scripts\/validate-n8n-workflows\.cjs"/, label);
@@ -699,13 +745,99 @@ test('n8n workflow sync menus validate saved previous commands before replay', (
     const invokeIndex = invokeUsePrevious.indexOf('Invoke-CommandRecord $previous');
 
     assert.match(text, /function Test-TrustedCommandRecord\(\$Record\)/, label);
-    assert.match(text, /\$script -eq \$ExportHelperScript/, label);
-    assert.match(text, /\$script -eq \$ImportHelperScript/, label);
-    assert.match(text, /\$script -eq "node" -and @\(\$Record\.args\)\.Count -gt 0 -and \[string\]\$Record\.args\[0\] -eq \$ValidateHelperScript/, label);
+    assert.match(text, /schemaVersion = \$CommandSchemaVersion/, label);
+    assert.match(text, /commandKind = \$CommandKind/, label);
+    assert.match(text, /helperScriptDir = \$HelperScriptDir/, label);
+    assert.match(text, /schemaVersion", "commandKind", "commandName", "script", "args", "helperScriptDir"/, label);
+    assert.match(text, /Test-ExportCommandArgs \$args/, label);
+    assert.match(text, /Test-ImportCommandArgs \$args/, label);
+    assert.match(text, /\$recordValidateScript = Resolve-CanonicalPathOrNull \$args\[0\]/, label);
+    assert.match(text, /\$recordScript -ne \$TrustedExportHelperScript/, label);
+    assert.match(text, /\$recordScript -ne \$TrustedImportHelperScript/, label);
+    assert.match(text, /\$recordScript -ne \$trustedNodePath/, label);
+    assert.match(text, /ProjectId[\s\S]*UserId/, label);
+    assert.match(text, /Saved previous command is from an older or untrusted format\. Clear previous command and rebuild it from the menu\./, label);
     assert.match(text, /Saved previous command is not trusted\. Clear previous command and rebuild it from the menu\./, label);
     assert.notEqual(trustCheckIndex, -1, `${label} previous command trust check not found`);
     assert.notEqual(invokeIndex, -1, `${label} previous command invocation not found`);
     assert.ok(trustCheckIndex < invokeIndex, `${label} trust check must run before previous command invocation`);
+    assert.match(text, /if \(-not \(Test-TrustedCommandRecord \$Record\)\)/, label);
+    assert.match(text, /Unknown trusted command type/, label);
+  }
+});
+
+test('n8n workflow sync menus block tampered previous command replay', () => {
+  const powerShell = findPowerShell();
+  if (!powerShell) return;
+
+  for (const [label, menuSourcePath] of [
+    ['workflow toolkit source menu', path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['workflow toolkit generated menu', path.join(scriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['Secure CI/CD preserved menu', path.join(secureCicdN8nTemplateDir, 'n8n-workflow-sync-menu.ps1')],
+  ]) {
+    const repo = fakeMenuRepo(menuSourcePath);
+    writeJson(repo.previousPath, {
+      schemaVersion: 2,
+      commandKind: 'export',
+      commandName: 'Export live workflows to repo',
+      script: repo.maliciousExportScript,
+      args: [
+        '-WorkflowDir', 'n8n-workflows',
+        '-Container', 'n8n',
+        '-BindingsFile', '.n8n-local\\n8n-credential-bindings.json',
+        '-Mode', 'RepoTrackedOnly',
+        '-MissingLiveMode', 'Fail',
+        '-DryRun',
+      ],
+      cwd: repo.root,
+      helperScriptDir: repo.helperDir,
+    });
+
+    const result = spawnSync(powerShell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', repo.menuPath, '-UsePrevious', '-Yes'], {
+      cwd: repo.root,
+      encoding: 'utf8',
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.match(output, /Saved previous command is not trusted\. Clear previous command and rebuild it from the menu\./, label);
+    assert.equal(fs.existsSync(repo.markerPath), false, `${label} executed malicious repo-root script`);
+    assert.equal(fs.existsSync(repo.trustedMarkerPath), false, `${label} executed trusted export script despite blocked replay`);
+  }
+});
+
+test('n8n workflow sync menus block old-format previous command replay', () => {
+  const powerShell = findPowerShell();
+  if (!powerShell) return;
+
+  for (const [label, menuSourcePath] of [
+    ['workflow toolkit source menu', path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['workflow toolkit generated menu', path.join(scriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['Secure CI/CD preserved menu', path.join(secureCicdN8nTemplateDir, 'n8n-workflow-sync-menu.ps1')],
+  ]) {
+    const repo = fakeMenuRepo(menuSourcePath);
+    writeJson(repo.previousPath, {
+      commandName: 'Export live workflows to repo',
+      script: repo.trustedExportScript,
+      args: [
+        '-WorkflowDir', 'n8n-workflows',
+        '-Container', 'n8n',
+        '-BindingsFile', '.n8n-local\\n8n-credential-bindings.json',
+        '-Mode', 'RepoTrackedOnly',
+        '-MissingLiveMode', 'Fail',
+        '-DryRun',
+      ],
+      cwd: repo.root,
+    });
+
+    const result = spawnSync(powerShell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', repo.menuPath, '-UsePrevious', '-Yes'], {
+      cwd: repo.root,
+      encoding: 'utf8',
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.match(output, /Saved previous command is from an older or untrusted format\. Clear previous command and rebuild it from the menu\./, label);
+    assert.equal(fs.existsSync(repo.markerPath), false, `${label} executed malicious repo-root script`);
+    assert.equal(fs.existsSync(repo.trustedMarkerPath), false, `${label} executed trusted export script despite old-format block`);
   }
 });
 
