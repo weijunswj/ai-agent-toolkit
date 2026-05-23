@@ -29,6 +29,10 @@ function Resolve-RepoRootFromScript {
 
 $RepoRoot = Resolve-RepoRootFromScript
 Set-Location $RepoRoot
+$HelperScriptDir = (Resolve-Path $PSScriptRoot).Path
+$ExportHelperScript = Join-Path $HelperScriptDir "export-n8n-workflows-live.ps1"
+$ImportHelperScript = Join-Path $HelperScriptDir "import-n8n-workflows-live.ps1"
+$ValidateHelperScript = Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"
 
 $DefaultWorkflowDir = "n8n-workflows"
 $DefaultContainer = "n8n"
@@ -358,7 +362,7 @@ function Build-ExportCommand([bool]$DryRunMode) {
   if ($preserveTags) { $args += "-PreserveTags" }
   if ($DryRunMode) { $args += "-DryRun" }
 
-  return New-CommandRecord "Export live workflows to repo" ".\scripts\export-n8n-workflows-live.ps1" $args
+  return New-CommandRecord "Export live workflows to repo" $ExportHelperScript $args
 }
 
 function Build-ImportCommand([bool]$DryRunMode) {
@@ -386,13 +390,13 @@ function Build-ImportCommand([bool]$DryRunMode) {
   if ($restartAfterImport) { $args += "-RestartContainerAfterImport" }
   if ($DryRunMode) { $args += "-DryRun" }
 
-  return New-CommandRecord "Import repo workflows to live n8n" ".\scripts\import-n8n-workflows-live.ps1" $args
+  return New-CommandRecord "Import repo workflows to live n8n" $ImportHelperScript $args
 }
 
 function Build-ValidateCommand {
   Show-CommonSettingExplanations
   $workflowDir = Read-Default "WorkflowDir" $DefaultWorkflowDir
-  return New-CommandRecord "Validate repo workflow JSON" "node" @("scripts/validate-n8n-workflows.cjs", $workflowDir)
+  return New-CommandRecord "Validate repo workflow JSON" "node" @($ValidateHelperScript, $workflowDir)
 }
 
 function Invoke-UsePrevious {
