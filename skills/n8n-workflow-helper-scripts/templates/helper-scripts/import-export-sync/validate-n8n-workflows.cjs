@@ -8,11 +8,21 @@ function parseArgs(argv) {
   let workflowDirArg = null;
   let policyArg = null;
   let allowPreparedDir = false;
+  let mode = 'repo-template';
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--allow-prepared-dir') {
       allowPreparedDir = true;
+      continue;
+    }
+    if (arg === '--mode') {
+      mode = argv[index + 1] || mode;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--mode=')) {
+      mode = arg.slice('--mode='.length);
       continue;
     }
     if (arg === '--policy') {
@@ -29,7 +39,11 @@ function parseArgs(argv) {
     }
   }
 
-  return { workflowDirArg, policyArg, allowPreparedDir };
+  if (mode !== 'repo-template' && mode !== 'prepared-import') {
+    throw new Error(`Unsupported validation mode: ${mode}. Use repo-template or prepared-import.`);
+  }
+
+  return { workflowDirArg, policyArg, allowPreparedDir: allowPreparedDir || mode === 'prepared-import', mode };
 }
 
 function loadPolicy(root, policyArg) {
@@ -76,11 +90,11 @@ function loadPolicy(root, policyArg) {
   };
 }
 
-function workflowFilesIn(dir) {
+function workflowFilesIn(dir, options = {}) {
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)
-    .filter((file) => file.endsWith('.json'))
+    .filter((file) => options.preparedImportMode ? file.endsWith('.live-import.json') : file.endsWith('.json'))
     .sort()
     .map((file) => path.join(dir, file));
 }
@@ -295,7 +309,6 @@ function runProjectValidationRules(rules, context) {
 }
 
 const root = process.cwd();
-const parsedArgs = parseArgs(process.argv.slice(2));
 const messages = [];
 let errors = 0;
 let warnings = 0;
@@ -308,6 +321,14 @@ function fail(message) {
 function warn(message) {
   warnings += 1;
   console.warn(`WARN: ${message}`);
+}
+
+let parsedArgs;
+try {
+  parsedArgs = parseArgs(process.argv.slice(2));
+} catch (error) {
+  fail(error.message);
+  parsedArgs = { workflowDirArg: null, policyArg: null, allowPreparedDir: false, mode: 'repo-template' };
 }
 
 let policy;
@@ -333,6 +354,7 @@ try {
   };
 }
 const { workflowDir, workflowDirName } = resolvedWorkflowDir;
+const preparedImportMode = parsedArgs.mode === 'prepared-import';
 
 if (policy.policyPath) {
   messages.push(`Using policy ${path.relative(root, policy.policyPath) || policy.policyPath}.`);
@@ -346,10 +368,16 @@ if (!fs.existsSync(workflowDir)) {
   fail(`Workflow directory not found: n8n-workflows. Create n8n-workflows/ or run AllLive export to bootstrap from live n8n.`);
 }
 
-const files = workflowFilesIn(workflowDir);
+if (preparedImportMode) {
+  messages.push('Using prepared-import validation mode.');
+}
+
+const files = workflowFilesIn(workflowDir, { preparedImportMode });
 
 if (fs.existsSync(workflowDir) && files.length === 0) {
-  fail(`No workflow JSON files found in ${workflowDirName}/.`);
+  fail(preparedImportMode
+    ? `No prepared live import workflow JSON files found in ${workflowDirName}/. Expected *.live-import.json.`
+    : `No workflow JSON files found in ${workflowDirName}/.`);
 }
 
 for (const filePath of files) {
@@ -399,7 +427,7 @@ for (const filePath of files) {
   }
 
   walk(workflow, (node, trail) => {
-    if (node.credentials && typeof node.credentials === 'object') {
+    if (!preparedImportMode && node.credentials && typeof node.credentials === 'object') {
       for (const [credentialName, credentialValue] of Object.entries(node.credentials)) {
         if (credentialValue && typeof credentialValue === 'object' && 'id' in credentialValue) {
           fail(`${relative} contains credentials.id at ${trailString(trail.concat(['credentials', credentialName, 'id']))}.`);
@@ -412,6 +440,7 @@ for (const filePath of files) {
     }
 
     if (
+      !preparedImportMode &&
       'webhookId' in node &&
       node.webhookId &&
       !helpers.isAllowedPlaceholder(node.webhookId) &&

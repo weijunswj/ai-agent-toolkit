@@ -20,8 +20,10 @@ $ErrorActionPreference = "Stop"
 
 trap {
   Write-Host ""
-  Write-Host "== Import failed =="
-  Write-Host ($_.Exception.Message)
+  Write-Host "== " -NoNewline -ForegroundColor DarkGray
+  Write-Host "Import failed" -NoNewline -ForegroundColor Red
+  Write-Host " ==" -ForegroundColor DarkGray
+  Write-Host ($_.Exception.Message) -ForegroundColor Red
   exit 1
 }
 
@@ -57,11 +59,32 @@ Set-Location $RepoRoot
 
 function Write-Section($Title) {
   Write-Host ""
-  Write-Host "== $Title =="
+  Write-Host "== " -NoNewline -ForegroundColor DarkGray
+  Write-Host $Title -NoNewline -ForegroundColor Cyan
+  Write-Host " ==" -ForegroundColor DarkGray
+}
+
+function Get-StatusColor($Status) {
+  switch (([string]$Status).Trim().ToUpperInvariant()) {
+    { $_ -in @("OK", "VALID", "READY", "DONE", "FOUND", "MATCH", "CREATE", "EXPORT", "IMPORT", "RESTART", "CLEAR") } { return "Green" }
+    { $_ -in @("WARN", "ARCHIVE", "DUP", "MISSING", "RETRY") } { return "Yellow" }
+    { $_ -in @("FAIL", "BLOCK", "CANCEL") } { return "Red" }
+    "SKIP" { return "DarkGray" }
+    { $_ -in @("LIVE", "CHECK", "PLAN", "INFO", "START", "HOOK", "ID", "CRED", "FORCE", "NOTE") } { return "Cyan" }
+    default { return "Gray" }
+  }
+}
+
+function Write-StatusTag($Status) {
+  $statusText = ([string]$Status).PadRight(7)
+  Write-Host "[" -NoNewline -ForegroundColor DarkGray
+  Write-Host $statusText -NoNewline -ForegroundColor (Get-StatusColor $statusText)
+  Write-Host "]" -NoNewline -ForegroundColor DarkGray
 }
 
 function Write-Step($Status, $Message) {
-  Write-Host ("[{0}] {1}" -f $Status.PadRight(7), $Message)
+  Write-StatusTag $Status
+  Write-Host " $Message"
 }
 
 function Invoke-CapturedCommand($Command, [string[]]$Arguments) {
@@ -595,9 +618,9 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
       if ($liveWorkflowForCredentialCheck.active -eq $true -or (Test-WorkflowHasScheduleTrigger $repoWorkflow) -or (Test-WorkflowHasScheduleTrigger $liveWorkflowForCredentialCheck)) {
         $requiresRestartWarning = $true
         $restartWarningCount += 1
-        Write-Host "[WARN] This import updates a previously active or scheduled workflow."
-        Write-Host "[WARN] On non multi-main n8n instances, cron triggers may keep running until n8n is restarted."
-        Write-Host "[WARN] Restart the n8n container after import before trusting activation state."
+        Write-Step "WARN" "This import updates a previously active or scheduled workflow."
+        Write-Step "WARN" "On non multi-main n8n instances, cron triggers may keep running until n8n is restarted."
+        Write-Step "WARN" "Restart the n8n container after import before trusting activation state."
       }
     }
 
@@ -866,7 +889,7 @@ Invoke-ProjectWorkflowHook "before-live-import" @{
 }
 
 Write-Section "Prepared Workflow Re-Validation"
-$preparedValidationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"), "--allow-prepared-dir", $PreparedDirPath)
+$preparedValidationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"), "--mode", "prepared-import", $PreparedDirPath)
 if ($preparedValidationResult.ExitCode -ne 0) {
   throw "Prepared workflow JSON validation failed after before-live-import hook.`n$($preparedValidationResult.Output -join "`n")"
 }

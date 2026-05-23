@@ -8,8 +8,10 @@ $ErrorActionPreference = "Stop"
 
 trap {
   Write-Host ""
-  Write-Host "== Sanitise failed =="
-  Write-Host ($_.Exception.Message)
+  Write-Host "== " -NoNewline -ForegroundColor DarkGray
+  Write-Host "Sanitise failed" -NoNewline -ForegroundColor Red
+  Write-Host " ==" -ForegroundColor DarkGray
+  Write-Host ($_.Exception.Message) -ForegroundColor Red
   exit 1
 }
 
@@ -62,11 +64,32 @@ $StripperScript = Join-Path $PSScriptRoot "prepare-n8n-template.js"
 
 function Write-Section($Title) {
   Write-Host ""
-  Write-Host "== $Title =="
+  Write-Host "== " -NoNewline -ForegroundColor DarkGray
+  Write-Host $Title -NoNewline -ForegroundColor Cyan
+  Write-Host " ==" -ForegroundColor DarkGray
+}
+
+function Get-StatusColor($Status) {
+  switch (([string]$Status).Trim().ToUpperInvariant()) {
+    { $_ -in @("OK", "VALID", "READY", "DONE", "FOUND", "MATCH", "CREATE", "EXPORT", "IMPORT", "RESTART", "CLEAR") } { return "Green" }
+    { $_ -in @("WARN", "ARCHIVE", "DUP", "MISSING", "RETRY") } { return "Yellow" }
+    { $_ -in @("FAIL", "BLOCK", "CANCEL") } { return "Red" }
+    "SKIP" { return "DarkGray" }
+    { $_ -in @("LIVE", "CHECK", "PLAN", "INFO", "START", "HOOK", "ID", "CRED", "FORCE", "NOTE") } { return "Cyan" }
+    default { return "Gray" }
+  }
+}
+
+function Write-StatusTag($Status) {
+  $statusText = ([string]$Status).PadRight(7)
+  Write-Host "[" -NoNewline -ForegroundColor DarkGray
+  Write-Host $statusText -NoNewline -ForegroundColor (Get-StatusColor $statusText)
+  Write-Host "]" -NoNewline -ForegroundColor DarkGray
 }
 
 function Write-Step($Status, $Message) {
-  Write-Host ("[{0}] {1}" -f $Status.PadRight(7), $Message)
+  Write-StatusTag $Status
+  Write-Host " $Message"
 }
 
 function Test-CommandExists($Command) {

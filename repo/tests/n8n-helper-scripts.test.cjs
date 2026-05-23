@@ -399,6 +399,76 @@ test('validate-n8n-workflows.cjs requires n8n-workflows unless prepared director
   const preparedResult = runNode(validateScript, ['--allow-prepared-dir', preparedDir], { cwd });
   assert.equal(preparedResult.status, 0, preparedResult.stderr);
   assert.match(preparedResult.stdout, /\.tmp[\\/]n8n-live-import[\\/]safe\.json/);
+
+  writeJson(path.join(preparedDir, 'unsafe.live-compare.json'), safeWorkflow({
+    active: true,
+    nodes: [
+      {
+        id: 'webhook_1',
+        name: 'Webhook',
+        type: 'n8n-nodes-base.webhook',
+        typeVersion: 2,
+        position: [0, 0],
+        webhookId: 'live-webhook-id',
+        parameters: {},
+        credentials: {
+          httpHeaderAuth: {
+            id: 'live-credential-id',
+            name: 'Live Credential',
+          },
+        },
+      },
+    ],
+  }));
+  writeJson(path.join(preparedDir, 'safe.live-import.json'), safeWorkflow({
+    nodes: [
+      {
+        id: 'webhook_1',
+        name: 'Webhook',
+        type: 'n8n-nodes-base.webhook',
+        typeVersion: 2,
+        position: [0, 0],
+        webhookId: 'live-webhook-id',
+        parameters: {},
+        credentials: {
+          httpHeaderAuth: {
+            id: 'live-credential-id',
+            name: 'Live Credential',
+          },
+        },
+      },
+    ],
+  }));
+
+  const preparedImportResult = runNode(validateScript, ['--mode', 'prepared-import', preparedDir], { cwd });
+  assert.equal(preparedImportResult.status, 0, preparedImportResult.stderr);
+  assert.match(preparedImportResult.stdout, /\.tmp[\\/]n8n-live-import[\\/]safe\.live-import\.json/);
+  assert.doesNotMatch(preparedImportResult.stdout, /unsafe\.live-compare\.json/);
+  assert.doesNotMatch(preparedImportResult.stderr, /credentials\.id|real-looking webhookId|must have active: false/);
+});
+
+test('validate-n8n-workflows.cjs prepared-import mode still fails possible secrets', () => {
+  const cwd = tempDir();
+  const preparedDir = path.join(cwd, '.tmp', 'n8n-live-import');
+  writeJson(path.join(preparedDir, 'unsafe.live-import.json'), safeWorkflow({
+    nodes: [
+      {
+        id: 'http_1',
+        name: 'HTTP Request',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [0, 0],
+        parameters: {
+          apiKey: `sk-${'123456789012345678901234'}`,
+        },
+      },
+    ],
+  }));
+
+  const result = runNode(validateScript, ['--mode', 'prepared-import', preparedDir], { cwd });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /possible secret: sk-prefixed API key/);
 });
 
 test('validate-n8n-workflows.cjs fails credentials.id', () => {
@@ -630,12 +700,54 @@ test('n8n command wrappers use framed colored retry output', () => {
     assert.match(text, /DarkCyan/, label);
     assert.match(text, /Yellow/, label);
     assert.match(text, /:status/, label);
+    assert.match(text, /if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
 
     if (label.includes('import wrapper')) {
       assert.match(text, /:configure_restart/, label);
       assert.match(text, /RestartContainerAfterImport/, label);
       assert.match(text, /Auto-restart n8n container if restart warning is true\?/, label);
     }
+  }
+});
+
+test('PowerShell n8n helper scripts use colored sections, status tags, and clean failure blocks', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
+    ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['workflow toolkit menu helper', path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['workflow toolkit sanitizer helper', path.join(sourceSanitizerDir, 'sanitise-n8n-template.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
+    ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated menu helper', path.join(scriptDir, 'n8n-workflow-sync-menu.ps1')],
+    ['generated sanitizer helper', path.join(sanitizerDir, 'sanitise-n8n-template.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
+    ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD menu helper', path.join(secureCicdN8nTemplateDir, 'n8n-workflow-sync-menu.ps1')],
+  ]) {
+    const text = readText(filePath);
+
+    assert.match(text, /function Write-Section\(\$Title\)/, label);
+    assert.match(text, /ForegroundColor Cyan/, label);
+    assert.match(text, /function Get-StatusColor\(\$Status\)/, label);
+    assert.match(text, /function Write-StatusTag\(\$Status\)/, label);
+    assert.match(text, /ForegroundColor \(Get-StatusColor \$statusText\)/, label);
+  }
+
+  for (const [label, filePath, title] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'), 'Export failed'],
+    ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'), 'Import failed'],
+    ['workflow toolkit sanitizer helper', path.join(sourceSanitizerDir, 'sanitise-n8n-template.ps1'), 'Sanitise failed'],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1'), 'Export failed'],
+    ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1'), 'Import failed'],
+    ['generated sanitizer helper', path.join(sanitizerDir, 'sanitise-n8n-template.ps1'), 'Sanitise failed'],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1'), 'Export failed'],
+    ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1'), 'Import failed'],
+  ]) {
+    const text = readText(filePath);
+
+    assert.match(text, /trap \{[\s\S]*ForegroundColor Red[\s\S]*exit 1[\s\S]*\}/, label);
+    assert.match(text, new RegExp(title), label);
+    assert.doesNotMatch(text, new RegExp(`Write-Host "== ${title} =="`), label);
   }
 });
 
@@ -715,7 +827,7 @@ test('import helper guards before-import-validation hooks during dry-run and rev
   assert.notEqual(importIndex, -1);
   assert.ok(beforeLiveImportIndex < revalidationIndex, 'prepared revalidation must run after before-live-import hook');
   assert.ok(revalidationIndex < importIndex, 'prepared revalidation must run before live import');
-  assert.match(text, /validate-n8n-workflows\.cjs"\), "--allow-prepared-dir", \$PreparedDirPath/);
+  assert.match(text, /validate-n8n-workflows\.cjs"\), "--mode", "prepared-import", \$PreparedDirPath/);
   assert.match(text, /Prepared workflow JSON validation failed after before-live-import hook/);
 });
 
