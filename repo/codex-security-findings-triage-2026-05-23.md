@@ -1,6 +1,6 @@
-# Codex Security Findings Triage — 2026-05-23
+# Codex Security Findings Triage - 2026-05-23
 
-Triaged against current `origin/main` at `a4d6523` (`Merge pull request #64 from weijunswj/codex/fix-n8n-prepared-import-validation`).
+Triaged against current `origin/main` at `f7079b6` (`Merge pull request #68 from weijunswj/codex/fix-n8n-prepared-import-validation`). This includes the merged PR #66 prepared-import validation mode and console output fixes, PR #67 n8n helper repo-root hardening, and PR #68 no-op import revalidation fix.
 
 Input CSV was present in the repository root at the start of triage and contained 23 rows. It had no line/range column, so "CSV line/range" below records the CSV row number and notes that no explicit line range was provided.
 
@@ -8,9 +8,9 @@ Input CSV was present in the repository root at the start of triage and containe
 
 | Bucket | Count |
 |---|---:|
-| real/fix-now | 0 |
+| real/fix-now | 1 |
 | already-fixed | 6 |
-| active-side-fix | 1 |
+| active-side-fix | 0 |
 | false-positive | 0 |
 | info/later | 16 |
 
@@ -24,9 +24,9 @@ Input CSV was present in the repository root at the start of triage and containe
 - Current classification: `info/later`
 - Current status on `main`: Still active. The workflow itself grants only the intended permissions, but the parser still ignores permission entries with inline comments.
 - Evidence:
-  - Current code reference: `.github/workflows/source-watch-pr.yml:11` grants `contents: write` and `pull-requests: write`; `repo/scripts/validate-toolkit.cjs:815` only records permission lines that fully match `^  ([A-Za-z-]+):\s*(\S+)\s*$`; `repo/scripts/validate-toolkit.cjs:1231` compares the collected list to the two expected entries.
+  - Current code reference: `.github/workflows/source-watch-pr.yml:12` and `.github/workflows/source-watch-pr.yml:13` grant `contents: write` and `pull-requests: write`; `repo/scripts/validate-toolkit.cjs:807` only records permission lines that fully match `^  ([A-Za-z-]+):\s*(\S+)\s*$`; `repo/scripts/validate-toolkit.cjs:1232` compares the collected list to the two expected entries.
   - Related PR, if any: Introduced around PR #60; PR #63 changed source-watch notifier trust boundaries but did not change this parser.
-  - Test coverage, if any: `repo/tests/validate-toolkit.test.cjs:460` rejects an uncommented extra permission. No current test covers `issues: write # comment`.
+  - Test coverage, if any: `repo/tests/validate-toolkit.test.cjs:472` rejects an uncommented extra permission. No current test covers `issues: write # comment`.
 - Recommendation: Later hardening PR should parse YAML permissions robustly or reject unparsed indented entries in the permissions block.
 - Needs PR:
   - yes
@@ -40,7 +40,7 @@ Input CSV was present in the repository root at the start of triage and containe
 - Current classification: `info/later`
 - Current status on `main`: Still active as a validation design gap. Current lock data is not currently wrong, but changing lock lifecycle metadata can still affect the retired-repo deny set.
 - Evidence:
-  - Current code reference: `repo/scripts/validate-toolkit.cjs:292` derives retired internal repos from current `SOURCE-LOCK.json` files; `repo/scripts/validate-toolkit.cjs:466` blocks registry entries only if they are in that derived set; `repo/scripts/audit-project-source-locks.cjs:89` enforces constraints only when lifecycle is already `retired_after_migration`; `repo/scripts/watch-project-sources.cjs:59` treats `source_update_policy: none` or retired lifecycle as archived.
+  - Current code reference: `repo/scripts/validate-toolkit.cjs:293` derives retired internal repos from current `SOURCE-LOCK.json` files; `repo/scripts/validate-toolkit.cjs:468` blocks registry entries only if they are in that derived set; `repo/scripts/audit-project-source-locks.cjs:89` enforces constraints only when lifecycle is already `retired_after_migration`; `repo/scripts/watch-project-sources.cjs:59` treats `source_update_policy: none` or retired lifecycle as archived.
   - Related PR, if any: PR #54 (`Clean retired source repo references`).
   - Test coverage, if any: Current tests cover happy-path retired locks and third-party locks, but not the converse constraint that `migration_provenance_only` or `source_update_policy: none` must remain retired.
 - Recommendation: Later PR should make retired internal repo identities immutable outside PR-controlled lock metadata or enforce lifecycle/role/update-policy converse constraints.
@@ -88,9 +88,9 @@ Input CSV was present in the repository root at the start of triage and containe
 - Current classification: `info/later`
 - Current status on `main`: Still active for the unprivileged validation workflow. The workflow checks out PR code and runs the PR-controlled `npm run validate:all`.
 - Evidence:
-  - Current code reference: `.github/workflows/validate.yml:31` runs `npm run validate:all`; `package.json:18` defines that script in repository-controlled JSON; `repo/scripts/validate-toolkit.cjs:880` guards `npm run validate:all` only in the privileged auto-sync workflow context.
+  - Current code reference: `.github/workflows/validate.yml:32` runs `npm run validate:all`; `package.json:18` defines that script in repository-controlled JSON; `repo/scripts/validate-toolkit.cjs:881` guards `npm run validate:all` only in the privileged auto-sync workflow context.
   - Related PR, if any: PR #32 (`ci-methodology-hardening`).
-  - Test coverage, if any: `repo/tests/validate-toolkit.test.cjs:415` asserts the validate workflow uses `npm run validate:all`; `repo/tests/validate-toolkit.test.cjs:720` forbids it in the privileged auto-sync workflow.
+  - Test coverage, if any: `repo/tests/validate-toolkit.test.cjs:427` asserts the validate workflow uses `npm run validate:all`; `repo/tests/validate-toolkit.test.cjs:732` forbids it in the privileged auto-sync workflow.
 - Recommendation: Later PR should make the read-only validation gate invoke a protected explicit command list, or validate `package.json` scripts before relying on them.
 - Needs PR:
   - yes
@@ -101,13 +101,13 @@ Input CSV was present in the repository root at the start of triage and containe
 - CSV severity: medium
 - CSV file/path: `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- export-n8n-workflows-live.cmd | skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/- import-n8n-workflows-live.cmd | skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/- sanitise-n8n-template.cmd`
 - CSV line/range: CSV row 6; no explicit line/range field provided
-- Current classification: `active-side-fix`
-- Current status on `main`: Still active in helper wrappers, though the CSV paths use the old dash-prefixed names. Current underscore-prefixed wrappers still invoke bare `powershell`.
+- Current classification: `real/fix-now`
+- Current status on `main`: Still active in helper wrappers, though the CSV paths use the old dash-prefixed names. Current underscore-prefixed source, generated, and Secure CI/CD wrappers still invoke bare `powershell`.
 - Evidence:
-  - Current code reference: `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd:6`, `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd:7`, and `skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/_sanitise-n8n-template.cmd:6` invoke `powershell` without an absolute path.
-  - Related PR, if any: PR #62 addressed n8n sync-menu replay hardening, not these `.cmd` executable resolution calls.
+  - Current code reference: `_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd:6`, `_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd:7`, `_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/_sanitise-n8n-template.cmd:6`, `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd:6`, `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd:7`, `skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/_sanitise-n8n-template.cmd:6`, `_projects/cicd/secure-installer/_main/templates/n8n/_export-n8n-workflows-live.cmd:6`, and `_projects/cicd/secure-installer/_main/templates/n8n/_import-n8n-workflows-live.cmd:7` invoke `powershell` without an absolute path.
+  - Related PR, if any: PR #62 addressed n8n sync-menu replay hardening; PR #66 and PR #68 polished helper behavior/output; PR #67 hardened repo-root detection. None resolved these `.cmd` executable resolution calls.
   - Test coverage, if any: `repo/tests/n8n-helper-scripts.test.cjs:615` checks wrapper files exist across source/generated surfaces, but there is no assertion that wrappers resolve PowerShell by absolute system path.
-- Recommendation: Fold into the active helper-script side fix, or split a focused helper-wrapper hardening PR if that side fix is not covering it.
+- Recommendation: Split a focused helper-wrapper hardening PR. This should resolve PowerShell from a trusted system location or otherwise avoid PATH-search execution in the CMD wrappers, then sync generated and Secure CI/CD copies.
 - Needs PR:
   - yes
   - If yes, proposed PR title: Harden n8n helper CMD wrappers against PowerShell path hijacking
@@ -216,9 +216,9 @@ Input CSV was present in the repository root at the start of triage and containe
 - Current classification: `already-fixed`
 - Current status on `main`: Fixed for the main `Validate` workflow. The audit is now included through `npm run validate:all`.
 - Evidence:
-  - Current code reference: `.github/workflows/validate.yml:31` runs `npm run validate:all`; `package.json:18` includes `node repo/scripts/audit-published-surfaces.cjs --check` in `validate:all`.
+  - Current code reference: `.github/workflows/validate.yml:32` runs `npm run validate:all`; `package.json:18` includes `node repo/scripts/audit-published-surfaces.cjs --check` in `validate:all`.
   - Related PR, if any: PR #32 (`ci-methodology-hardening`) changed the main validation entrypoint.
-  - Test coverage, if any: `repo/tests/validate-toolkit.test.cjs:415` asserts the validate workflow uses `npm run validate:all`; `repo/tests/audit-published-surfaces.test.cjs:209` verifies new curated runtime recipes fail audit check.
+  - Test coverage, if any: `repo/tests/validate-toolkit.test.cjs:427` asserts the validate workflow uses `npm run validate:all`; `repo/tests/audit-published-surfaces.test.cjs:209` verifies new curated runtime recipes fail audit check.
 - Recommendation: No separate PR for this stale finding. Finding 5 tracks the residual risk from relying on PR-controlled npm scripts.
 - Needs PR:
   - no
@@ -342,11 +342,11 @@ Input CSV was present in the repository root at the start of triage and containe
 - CSV file/path: `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1 | skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs`
 - CSV line/range: CSV row 21; no explicit line/range field provided
 - Current classification: `already-fixed`
-- Current status on `main`: Fixed by PR #64.
+- Current status on `main`: Fixed by PR #66 and PR #68. Prepared import revalidation now uses explicit prepared-import mode, while default repo-template validation still requires `n8n-workflows/`.
 - Evidence:
-  - Current code reference: `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1:869` invokes `validate-n8n-workflows.cjs` with `--allow-prepared-dir`; `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs:14` parses that flag; `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs:91` only enforces the `n8n-workflows` basename when prepared dirs are not allowed.
-  - Related PR, if any: PR #64 (`fix-n8n-prepared-import-validation`).
-  - Test coverage, if any: `repo/tests/n8n-helper-scripts.test.cjs:390` covers strict rejection and explicit `--allow-prepared-dir` success; `repo/tests/n8n-helper-scripts.test.cjs:706` checks the import helper passes the flag after the `before-live-import` hook.
+  - Current code reference: `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1:953` exits before `before-live-import` and prepared revalidation when there are no planned imports; `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1:979` invokes `validate-n8n-workflows.cjs` with `--mode prepared-import`; `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs:42` allows only `repo-template` or `prepared-import`; `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs:357` detects prepared-import mode; `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs:372` reports that mode.
+  - Related PR, if any: PR #66 (`Fix n8n prepared import revalidation and console output`) and PR #68 (`Fix no-op n8n import revalidation`).
+  - Test coverage, if any: `repo/tests/n8n-helper-scripts.test.cjs:487` covers explicit `--mode prepared-import` success; `repo/tests/n8n-helper-scripts.test.cjs:494` verifies prepared-import mode still fails possible secrets; `repo/tests/n8n-helper-scripts.test.cjs:890` through `repo/tests/n8n-helper-scripts.test.cjs:901` check the no-op guard and import helper invocation.
 - Recommendation: No separate PR. Keep this in already-fixed notes.
 - Needs PR:
   - no
@@ -358,11 +358,11 @@ Input CSV was present in the repository root at the start of triage and containe
 - CSV file/path: `_projects/cicd/secure-installer/_main/templates/n8n/import-n8n-workflows-live.ps1 | _projects/cicd/secure-installer/_main/templates/n8n/validate-n8n-workflows.cjs`
 - CSV line/range: CSV row 22; no explicit line/range field provided
 - Current classification: `already-fixed`
-- Current status on `main`: Fixed by PR #64 in the Secure CI/CD copied helper surface as well.
+- Current status on `main`: Fixed by PR #66 and PR #68 in the Secure CI/CD copied helper surface as well.
 - Evidence:
-  - Current code reference: `_projects/cicd/secure-installer/_main/templates/n8n/import-n8n-workflows-live.ps1:869` passes `--allow-prepared-dir`; `_projects/cicd/secure-installer/_main/templates/n8n/validate-n8n-workflows.cjs:14` parses that flag; `_projects/cicd/secure-installer/_main/templates/n8n/validate-n8n-workflows.cjs:91` keeps default strict basename validation when the flag is absent.
-  - Related PR, if any: PR #64 (`fix-n8n-prepared-import-validation`).
-  - Test coverage, if any: `repo/tests/n8n-helper-scripts.test.cjs:390` and `repo/tests/n8n-helper-scripts.test.cjs:706` cover the shared generated helper behavior.
+  - Current code reference: `_projects/cicd/secure-installer/_main/templates/n8n/import-n8n-workflows-live.ps1:953` exits before prepared revalidation when there are no planned imports; `_projects/cicd/secure-installer/_main/templates/n8n/import-n8n-workflows-live.ps1:979` passes `--mode prepared-import`; `_projects/cicd/secure-installer/_main/templates/n8n/validate-n8n-workflows.cjs:42` allows only `repo-template` or `prepared-import`; `_projects/cicd/secure-installer/_main/templates/n8n/validate-n8n-workflows.cjs:357` detects prepared-import mode; `_projects/cicd/secure-installer/_main/templates/n8n/validate-n8n-workflows.cjs:372` reports that mode.
+  - Related PR, if any: PR #66 (`Fix n8n prepared import revalidation and console output`) and PR #68 (`Fix no-op n8n import revalidation`).
+  - Test coverage, if any: `repo/tests/n8n-helper-scripts.test.cjs:487`, `repo/tests/n8n-helper-scripts.test.cjs:494`, and `repo/tests/n8n-helper-scripts.test.cjs:890` through `repo/tests/n8n-helper-scripts.test.cjs:901` cover the shared source/generated helper behavior.
 - Recommendation: No separate PR. Keep this in already-fixed notes.
 - Needs PR:
   - no
@@ -374,34 +374,34 @@ Input CSV was present in the repository root at the start of triage and containe
 - CSV file/path: `_projects/cicd/secure-installer/SOURCE-LOCK.json | _projects/cicd/secure-installer/_main/templates/n8n/validate-n8n-workflows.cjs | for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs | repo/scripts/sync-toolkit-projects.cjs | repo/scripts/audit-project-source-locks.cjs`
 - CSV line/range: CSV row 23; no explicit line/range field provided
 - Current classification: `already-fixed`
-- Current status on `main`: Fixed for the CSV's n8n helper/source-lock drift. The obsolete `for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs` path is absent, and source-lock audit passes on current `main`.
+- Current status on `main`: Fixed for the CSV's n8n helper/source-lock drift. The obsolete `for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs` path is absent, source-lock audit passes on current `main`, and later n8n helper fixes are synced across the source, generated, and Secure CI/CD copies.
 - Evidence:
-  - Current code reference: `_projects/cicd/secure-installer/SOURCE-LOCK.json:48`, `_projects/cicd/secure-installer/SOURCE-LOCK.json:55`, and `_projects/cicd/secure-installer/SOURCE-LOCK.json:88` contain current helper blob pins/notes; `for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs` is not present on current `main`.
-  - Related PR, if any: PR #64 (`fix-n8n-prepared-import-validation`) updated the prepared-import helper surfaces; the triage run also confirmed `node repo/scripts/audit-project-source-locks.cjs` passes.
-  - Test coverage, if any: Source-lock validation tests in `repo/tests/validate-toolkit.test.cjs` cover missing blob pins and adapted-entry notes.
-- Recommendation: No separate source-lock PR for this CSV finding. Note that the current `sync-toolkit-projects --check` command reports unrelated stale generated agent metadata, captured under validation.
+  - Current code reference: `_projects/cicd/secure-installer/SOURCE-LOCK.json:48`, `_projects/cicd/secure-installer/SOURCE-LOCK.json:55`, and `_projects/cicd/secure-installer/SOURCE-LOCK.json:88` contain current helper blob pins/notes; `for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs` is not present on current `main`; `_projects/cicd/secure-installer/_main/templates/n8n/import-n8n-workflows-live.ps1:979`, `_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1:979`, and `skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1:979` share the final prepared-import invocation.
+  - Related PR, if any: PR #66 updated prepared-import helper behavior and output; PR #67 hardened n8n helper repo-root detection against filesystem and drive roots; PR #68 fixed no-op import revalidation and stale prepared staging. The triage run also confirmed `node repo/scripts/audit-project-source-locks.cjs` passes through `npm run validate:all`.
+  - Test coverage, if any: Source-lock validation tests in `repo/tests/validate-toolkit.test.cjs` cover missing blob pins and adapted-entry notes. `repo/tests/n8n-helper-scripts.test.cjs:966` covers fake drive-root rejection before scratch creation, and `repo/tests/n8n-helper-scripts.test.cjs:988` covers import/export scratch directories staying under the resolved repo root.
+- Recommendation: No separate source-lock PR for this CSV finding. Continue to require source-lock audit and deterministic sync on future n8n helper changes.
 - Needs PR:
   - no
   - If yes, proposed PR title: n/a
 
 ## Fix-now queue
 
-No findings are classified `real/fix-now`. The CSV contains medium, low, and informational findings; none met the task's threshold for report-plus-immediate-fix in this pass.
+- Finding 6: CMD wrappers allow PowerShell search-path hijacking. Current source, generated, and Secure CI/CD CMD wrappers still invoke bare `powershell`; proposed follow-up PR title: `Harden n8n helper CMD wrappers against PowerShell path hijacking`.
 
 ## Active side-fix queue
 
-- Finding 6: CMD wrappers allow PowerShell search-path hijacking. Current helper wrappers still invoke bare `powershell`; fold into the active helper-script side fix or split a focused helper-wrapper hardening PR.
+No findings remain in `active-side-fix`. PR #66, PR #67, and PR #68 have landed, and Finding 6 remains active without an open side-fix branch.
 
 ## Already-fixed notes
 
 - Finding 4 is stale because the cited root-surface skill-routing partial path is gone on current `main`; agent-rule partials now route through project `_main/_partials/` sources.
 - Finding 13 is fixed for the main `Validate` workflow because `npm run validate:all` now includes `audit-published-surfaces.cjs --check`; Finding 5 tracks the residual npm-script trust issue.
 - Finding 14 is fixed for the cited external `ai-cicd-installer` main-branch helper-fetch path; the prompt now points to the toolkit helper package instead.
-- Findings 21 and 22 are fixed by PR #64, which added `--allow-prepared-dir` to prepared import revalidation and tests for that behavior.
-- Finding 23 is fixed for the cited helper source-lock drift; current source-lock audit passes, and the obsolete `for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs` path is absent.
+- Findings 21 and 22 are fixed by PR #66 and PR #68. Final behavior uses `--mode prepared-import`, filters prepared validation to `*.live-import.json`, clears prepared staging, and exits before `before-live-import` when no payloads are planned.
+- Finding 23 is fixed for the cited helper source-lock drift; current source-lock audit passes, and the obsolete `for_ai/templates/n8n/sync-helpers/validate-n8n-workflows.cjs` path is absent. PR #67 also fixed the drive-root / `C:\.tmp` style n8n helper repo-root issue with safe repo-root checks and scratch-directory tests.
 
 ## Validation
 
-- `npm run validate:all`: failed in `node repo/scripts/sync-toolkit-projects.cjs --check` because current `main` reports stale generated outputs for `skills/windows-localhost-workflows/agents/openai.yaml` and `skills/knowledge-index-updater/agents/openai.yaml`.
+- `npm run validate:all`: passed.
 - `git diff --check`: passed.
-- `git status --short`: showed only this untracked report file before staging.
+- `git status --short`: showed only this report file modified before staging.
