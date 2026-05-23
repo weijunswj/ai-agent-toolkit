@@ -2,8 +2,8 @@ param(
   [string]$WorkflowDir = "n8n-workflows",
   [string]$BindingsFile = ".n8n-local\n8n-credential-bindings.json",
   [string]$Container = "n8n",
-  [string]$PreparedDir = ".tmp\n8n-live-import",
-  [string]$CredentialExportDir = ".tmp\n8n-live-credential-exports",
+  [string]$PreparedDir = ".tmp/n8n-live-import",
+  [string]$CredentialExportDir = ".tmp/n8n-live-credential-exports",
   [string]$ContainerDir = "/tmp",
   [ValidateSet("CreateNew", "UpdateArchived", "Block")]
   [string]$ArchivedByNameMode = "CreateNew",
@@ -197,11 +197,41 @@ function Write-Utf8NoBomText($Path, $Text) {
   $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
   [System.IO.File]::WriteAllText($Path, [string]$Text, $utf8NoBom)
 }
+function Get-PathStringComparison {
+  if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+    return [System.StringComparison]::OrdinalIgnoreCase
+  }
+
+  return [System.StringComparison]::Ordinal
+}
+
+function Get-NormalizedFullPath($Path) {
+  $fullPath = [System.IO.Path]::GetFullPath($Path)
+  $trimmedPath = $fullPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  if ([string]::IsNullOrWhiteSpace($trimmedPath)) {
+    return $fullPath
+  }
+
+  return $trimmedPath
+}
+
+function Test-PathIsStrictChild($Path, $ParentPath) {
+  $resolvedPath = Get-NormalizedFullPath $Path
+  $resolvedParentPath = Get-NormalizedFullPath $ParentPath
+  $comparison = Get-PathStringComparison
+
+  if ($resolvedPath.Equals($resolvedParentPath, $comparison)) {
+    return $false
+  }
+
+  $parentPrefix = $resolvedParentPath + [System.IO.Path]::DirectorySeparatorChar
+  return $resolvedPath.StartsWith($parentPrefix, $comparison)
+}
 
 function Get-DisplayPath($Path) {
-  $resolvedPath = [System.IO.Path]::GetFullPath($Path)
-  $rootPrefix = $RepoRoot.TrimEnd('\') + '\'
-  if ($resolvedPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+  $resolvedPath = Get-NormalizedFullPath $Path
+  $rootPrefix = (Get-NormalizedFullPath $RepoRoot) + [System.IO.Path]::DirectorySeparatorChar
+  if ($resolvedPath.StartsWith($rootPrefix, (Get-PathStringComparison))) {
     return $resolvedPath.Substring($rootPrefix.Length)
   }
 
@@ -331,11 +361,9 @@ function Invoke-ProjectWorkflowHook($HookName, [hashtable]$Context) {
 }
 
 function Initialize-RunDirectory($Path) {
-  $resolvedPath = [System.IO.Path]::GetFullPath($Path)
-  $tmpRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ".tmp")).TrimEnd('\')
-  $tmpPrefix = $tmpRoot + '\'
-  $resolvedTrimmed = $resolvedPath.TrimEnd('\')
-  if ($resolvedTrimmed -eq $tmpRoot -or -not $resolvedPath.StartsWith($tmpPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+  $resolvedPath = Get-NormalizedFullPath $Path
+  $tmpRoot = Get-NormalizedFullPath (Join-Path $RepoRoot ".tmp")
+  if (-not (Test-PathIsStrictChild $resolvedPath $tmpRoot)) {
     throw "Refusing to clear unsafe run directory. Clearable run directories must be inside .tmp/ and must not be .tmp itself: $resolvedPath"
   }
 
