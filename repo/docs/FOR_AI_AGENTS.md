@@ -12,6 +12,10 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 | Pack | Approval-gated bundle manifest inside the relevant skill folder under `packs/`. |
 | MCP registry data | JSON discovery metadata under `mcp/registry/`. |
 | MCP | MCP-ready registry, design/spec docs, and metadata under `mcp/`; no runnable server is shipped today. |
+| Toolkit project version | The `version` in `_projects/**/toolkit.project.json`; it versions the toolkit module/adaptation, not upstream source. |
+| Source lock | `_projects/**/SOURCE-LOCK.json`; it records source provenance, source pins, blob pins, lifecycle, attribution, and source-watch policy. |
+
+`version_policy` currently supports only `semver`. `version_notes` explains what the toolkit project version represents. Do not use Git tags, package tags, GitHub release tags, upstream versions, or per-file versions as substitutes for project module versions.
 
 ## Project Categories
 
@@ -62,6 +66,8 @@ Product repos own product code, product workflows, product config, and customer 
 ## Handling Uncertainty
 
 If historical source provenance needs review, use [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md). Do not claim provenance from a source that was not inspected.
+
+For active third-party projects, read `SOURCE-LOCK.json` before discussing upstream tracking. Scheduled source-watch checks must take upstream repo, source ref, locked commit, `source_update_policy`, attribution requirement, allowlisted files, and exact blob pins from the source lock. Retired internal source locks are historical provenance only and are not active update candidates.
 
 ## Validation Strategy
 

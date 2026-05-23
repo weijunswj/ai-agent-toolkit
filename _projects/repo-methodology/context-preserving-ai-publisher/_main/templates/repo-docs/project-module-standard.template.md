@@ -27,9 +27,21 @@ Project modules preserve source material and declare how published surfaces are 
 - `json`: deterministic JSON formatting.
 - `linked`: directly maintained output with a documented reason.
 
+## Project Versions
+
+The project manifest owns the toolkit module version:
+
+- `version`: toolkit project module/adaptation version in `MAJOR.MINOR.PATCH` format.
+- `version_policy`: currently only `semver`.
+- `version_notes`: what the version represents.
+
+Do not use upstream versions, Git tags, package tags, release tags, or per-file versions as substitutes. Do not bump the project version for regenerated outputs when source content and the project contract did not change.
+
 ## Source Locks
 
-Source locks record exact, adapted, excluded, or linked provenance. Exact entries should pin a stable file hash when the repo supports it.
+Source locks record exact, adapted, excluded, or linked provenance. `SOURCE-LOCK.json` owns upstream repo, source ref, locked commit, lifecycle, role, update policy, attribution requirements, allowlisted files, and exact blob pins.
+
+For third-party projects, the toolkit project version is the toolkit adaptation version, not the upstream version. Scheduled source-watch checks must use `SOURCE-LOCK.json` to identify upstream source and exact pins. Active third-party locks require manual review, public attribution, a full 40-character `source_commit`, and `source_blob_sha` pins for exact and adapted copied files.
 
 ## Updates
 

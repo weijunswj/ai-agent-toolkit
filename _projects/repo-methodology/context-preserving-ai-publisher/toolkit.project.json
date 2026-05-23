@@ -5,6 +5,9 @@
   "title": "Context-Preserving AI Publisher",
   "module_path": "_projects/repo-methodology/context-preserving-ai-publisher",
   "main_path": "_projects/repo-methodology/context-preserving-ai-publisher/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial stable toolkit project version.",
   "outputs": [
     {
       "kind": "curated",

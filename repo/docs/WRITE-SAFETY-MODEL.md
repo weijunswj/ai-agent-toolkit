@@ -6,6 +6,9 @@ This toolkit allows writes only when they are required, scoped, declared, review
 
 Every `_projects/**/toolkit.project.json` must include:
 
+- `version`
+- `version_policy`
+- `version_notes`
 - `writes.allowed`
 - `writes.denied`
 - `requires_approval`
@@ -15,10 +18,13 @@ Every `_projects/**/toolkit.project.json` must include:
 
 Expected defaults:
 
+- `version_policy`: `semver`
 - `requires_approval`: `true`
 - `run_commands_by_default`: `false`
 - `live_actions`: `explicit_confirmation_only`
 - `ci_live_actions`: `false`
+
+`version` is the toolkit project module version, not an upstream source version. `version_notes` explains what that toolkit version represents.
 
 ## Allowed Writes
 
