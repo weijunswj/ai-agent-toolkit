@@ -36,7 +36,13 @@ To inspect source update status:
 node repo/scripts/watch-project-sources.cjs
 ```
 
-This is an advisory plan only. Retired internal sources are provenance-only, not active update targets. Third-party active sources require manual review.
+To run the same active third-party commit drift check used by the scheduled PR notifier:
+
+```powershell
+node repo/scripts/check-project-source-updates.cjs
+```
+
+Retired internal sources are provenance-only, not active update targets. Third-party active sources require manual review. The scheduled source-watch PR is a notification only; it must not copy upstream files or update SOURCE-LOCK pins.
 
 ## Use Skills Manually
 
