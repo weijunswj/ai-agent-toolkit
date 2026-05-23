@@ -97,7 +97,7 @@ function Write-Section($Title) {
 
 function Get-StatusColor($Status) {
   switch (([string]$Status).Trim().ToUpperInvariant()) {
-    { $_ -in @("OK", "VALID", "READY", "DONE", "FOUND", "MATCH", "CREATE", "EXPORT", "IMPORT", "RESTART", "CLEAR") } { return "Green" }
+    { $_ -in @("OK", "VALID", "READY", "DONE", "FOUND", "MATCH", "CREATE", "EXPORT", "IMPORT", "RESTART", "CLEAR", "WRITE", "SAVE") } { return "Green" }
     { $_ -in @("WARN", "ARCHIVE", "DUP", "MISSING", "RETRY") } { return "Yellow" }
     { $_ -in @("FAIL", "BLOCK", "CANCEL") } { return "Red" }
     "SKIP" { return "DarkGray" }
@@ -116,6 +116,47 @@ function Write-StatusTag($Status) {
 function Write-Step($Status, $Message) {
   Write-StatusTag $Status
   Write-Host " $Message"
+}
+
+function Write-CommandOutput($Lines, [string]$DefaultStatus = "INFO") {
+  foreach ($line in @($Lines)) {
+    if ([string]::IsNullOrWhiteSpace([string]$line)) {
+      continue
+    }
+
+    $text = [string]$line
+    if ($text -match '^==\s*(.+?)\s*==$') {
+      Write-Section $Matches[1]
+      continue
+    }
+
+    if ($text -match '^\[([^\]]+)\]\s*(.*)$') {
+      Write-Step $Matches[1].Trim() $Matches[2]
+      continue
+    }
+
+    if ($text -match '^Checked\s+') {
+      Write-Step "VALID" $text
+      continue
+    }
+
+    if ($text -match '^WARN:\s*(.*)$') {
+      Write-Step "WARN" $Matches[1]
+      continue
+    }
+
+    if ($text -match '^FAIL:\s*(.*)$') {
+      Write-Step "FAIL" $Matches[1]
+      continue
+    }
+
+    if ($text -match '^Summary:') {
+      Write-Step $DefaultStatus $text
+      continue
+    }
+
+    Write-Host $text
+  }
 }
 
 function Invoke-CapturedCommand($Command, [string[]]$Arguments) {
@@ -519,7 +560,7 @@ function Export-CredentialBindingsOnly($WorkflowFiles, $LiveWorkflows) {
   $syncResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $CredentialExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--credentials-only", "--allow-missing-exports")
   if ($syncResult.ExitCode -ne 0) {
     Write-Step "FAIL" "Could not save refreshed credential bindings."
-    Write-Host ($syncResult.Output -join "`n")
+    Write-CommandOutput $syncResult.Output
     return $false
   }
 
@@ -854,7 +895,7 @@ $validationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir 
 if ($validationResult.ExitCode -ne 0) {
   throw "Workflow JSON validation failed before live import.`n$($validationResult.Output -join "`n")"
 }
-Write-Step "VALID" ($validationResult.StdOut -join "`n")
+Write-CommandOutput $validationResult.StdOut "VALID"
 
 Invoke-LivePreflight
 $liveWorkflows = Get-LiveWorkflows
@@ -939,7 +980,7 @@ $preparedValidationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperSc
 if ($preparedValidationResult.ExitCode -ne 0) {
   throw "Prepared workflow JSON validation failed after before-live-import hook.`n$($preparedValidationResult.Output -join "`n")"
 }
-Write-Step "VALID" ($preparedValidationResult.StdOut -join "`n")
+Write-CommandOutput $preparedValidationResult.StdOut "VALID"
 
 Write-Section "Import"
 

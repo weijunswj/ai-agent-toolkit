@@ -777,6 +777,22 @@ test('PowerShell n8n helper scripts use colored sections, status tags, and clean
     assert.match(text, /ForegroundColor \(Get-StatusColor \$statusText\)/, label);
   }
 
+  for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
+    ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
+    ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
+    ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
+  ]) {
+    const text = readText(filePath);
+
+    assert.match(text, /function Write-CommandOutput\(\$Lines, \[string\]\$DefaultStatus = "INFO"\)/, label);
+    assert.match(text, /"WRITE", "SAVE"/, label);
+    assert.match(text, /\^==\\s\*\(\.\+\?\)\\s\*==\$/, label);
+    assert.match(text, /\^Checked\\s\+/, label);
+  }
+
   for (const [label, filePath, title] of [
     ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'), 'Export failed'],
     ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'), 'Import failed'],
@@ -883,8 +899,23 @@ test('import helper guards hooks, no-op imports, and prepared payload revalidati
     assert.ok(beforeLiveImportIndex < revalidationIndex, `${label}: prepared revalidation must run after before-live-import hook`);
     assert.ok(revalidationIndex < importIndex, `${label}: prepared revalidation must run before live import`);
     assert.match(text, /validate-n8n-workflows\.cjs"\), "--mode", "prepared-import", \$PreparedDirPath/, label);
+    assert.match(text, /Write-CommandOutput \$validationResult\.StdOut "VALID"/, label);
+    assert.match(text, /Write-CommandOutput \$preparedValidationResult\.StdOut "VALID"/, label);
     assert.match(text, /Prepared workflow JSON validation failed after before-live-import hook/, label);
     assert.match(text, /Live n8n was not changed\./, label);
+  }
+});
+
+test('export helper formats sync live export output through colored sections and tags', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
+  ]) {
+    const text = readText(filePath);
+
+    assert.match(text, /Write-CommandOutput \$syncResult\.Output/, label);
+    assert.doesNotMatch(text, /Write-Host \(\$syncResult\.Output -join "`n"\)/, label);
   }
 });
 

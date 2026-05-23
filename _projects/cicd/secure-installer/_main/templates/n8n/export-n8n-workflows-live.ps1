@@ -90,7 +90,7 @@ function Write-Section($Title) {
 
 function Get-StatusColor($Status) {
   switch (([string]$Status).Trim().ToUpperInvariant()) {
-    { $_ -in @("OK", "VALID", "READY", "DONE", "FOUND", "MATCH", "CREATE", "EXPORT", "IMPORT", "RESTART", "CLEAR") } { return "Green" }
+    { $_ -in @("OK", "VALID", "READY", "DONE", "FOUND", "MATCH", "CREATE", "EXPORT", "IMPORT", "RESTART", "CLEAR", "WRITE", "SAVE") } { return "Green" }
     { $_ -in @("WARN", "ARCHIVE", "DUP", "MISSING", "RETRY") } { return "Yellow" }
     { $_ -in @("FAIL", "BLOCK", "CANCEL") } { return "Red" }
     "SKIP" { return "DarkGray" }
@@ -109,6 +109,47 @@ function Write-StatusTag($Status) {
 function Write-Step($Status, $Message) {
   Write-StatusTag $Status
   Write-Host " $Message"
+}
+
+function Write-CommandOutput($Lines, [string]$DefaultStatus = "INFO") {
+  foreach ($line in @($Lines)) {
+    if ([string]::IsNullOrWhiteSpace([string]$line)) {
+      continue
+    }
+
+    $text = [string]$line
+    if ($text -match '^==\s*(.+?)\s*==$') {
+      Write-Section $Matches[1]
+      continue
+    }
+
+    if ($text -match '^\[([^\]]+)\]\s*(.*)$') {
+      Write-Step $Matches[1].Trim() $Matches[2]
+      continue
+    }
+
+    if ($text -match '^Checked\s+') {
+      Write-Step "VALID" $text
+      continue
+    }
+
+    if ($text -match '^WARN:\s*(.*)$') {
+      Write-Step "WARN" $Matches[1]
+      continue
+    }
+
+    if ($text -match '^FAIL:\s*(.*)$') {
+      Write-Step "FAIL" $Matches[1]
+      continue
+    }
+
+    if ($text -match '^Summary:') {
+      Write-Step $DefaultStatus $text
+      continue
+    }
+
+    Write-Host $text
+  }
 }
 
 function Invoke-CapturedCommand($Command, [string[]]$Arguments) {
@@ -607,10 +648,10 @@ if ($Mode -eq "RepoTrackedOnly") {
   }
   $syncResult = Invoke-CapturedCommand "node" $syncArgs
   if ($syncResult.ExitCode -ne 0) {
-    Write-Host ($syncResult.Output -join "`n")
+    Write-CommandOutput $syncResult.Output
     throw "Failed to sync live exports into $(Get-DisplayPath $WorkflowDirPath)."
   }
-  Write-Host ($syncResult.Output -join "`n")
+  Write-CommandOutput $syncResult.Output
 
   Invoke-ProjectWorkflowHook "after-export-sync" @{
     "bindings-file" = $BindingsFilePath
