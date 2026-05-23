@@ -29,6 +29,18 @@ function tempCopy() {
       return !(
         rel === '.git' ||
         rel.startsWith('.git/') ||
+        rel === '.n8n-local' ||
+        rel.startsWith('.n8n-local/') ||
+        rel === '.tmp' ||
+        rel.startsWith('.tmp/') ||
+        rel === 'n8n-workflows' ||
+        rel.startsWith('n8n-workflows/') ||
+        rel === '.to-sanitise' ||
+        rel.startsWith('.to-sanitise/') ||
+        rel === '.sanitised' ||
+        rel.startsWith('.sanitised/') ||
+        rel === '.n8n-workflow-backups' ||
+        rel.startsWith('.n8n-workflow-backups/') ||
         rel === 'node_modules' ||
         rel.startsWith('node_modules/') ||
         rel === '_dist' ||
@@ -2030,12 +2042,16 @@ test('validator rejects forbidden files but tolerates ignored local runtime fold
   fs.writeFileSync(path.join(cwd, '.env'), 'EXAMPLE=unsafe\n');
   fs.mkdirSync(path.join(cwd, '.n8n-local'), { recursive: true });
   fs.writeFileSync(path.join(cwd, '.n8n-local', '.env.n8n-archived-workflow-cleanup'), 'N8N_API_KEY="local-secret"\n');
+  fs.mkdirSync(path.join(cwd, 'n8n-workflows'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'n8n-workflows', 'local.live-export.json'), '{}\n');
   fs.writeFileSync(path.join(cwd, 'sample.live-export.json'), '{}\n');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Forbidden env file/);
   assert.doesNotMatch(result.stderr, /Forbidden directory present: \.n8n-local/);
   assert.doesNotMatch(result.stderr, /Unexpected root entry: \.n8n-local/);
+  assert.doesNotMatch(result.stderr, /Unexpected root entry: n8n-workflows/);
+  assert.doesNotMatch(result.stderr, /n8n-workflows\/local\.live-export\.json/);
   assert.match(result.stderr, /Live n8n import\/export file/);
 });
 
