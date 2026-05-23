@@ -860,7 +860,7 @@ Invoke-LivePreflight
 $liveWorkflows = Get-LiveWorkflows
 Write-Step "LIVE" "Read $($liveWorkflows.Count) workflow(s) from live n8n."
 
-New-Item -ItemType Directory -Force -Path $PreparedDirPath | Out-Null
+Initialize-RunDirectory $PreparedDirPath
 
 $preflight = Invoke-WorkflowPreflight $workflowFiles $bindingsFileExists $liveWorkflows
 
@@ -905,6 +905,21 @@ if ($DryRun) {
   } else {
     Write-Host "1. No import is needed right now."
   }
+  Write-Host "Deleting archived workflows is not supported by these CLI helper scripts yet."
+  exit 0
+}
+
+if ($preflight.PlannedImports.Count -eq 0) {
+  Write-Section "Summary"
+  Write-Host "Imported          : 0"
+  Write-Host ("Skipped           : {0}" -f $preflight.SkippedCount)
+  Write-Host ("Name matched      : {0}" -f $preflight.NameMatchedWorkflowCount)
+  Write-Host ("New live          : {0}" -f $preflight.MissingLiveWorkflowCount)
+  Write-Host ("Restart warnings  : {0}" -f $preflight.RestartWarningCount)
+  Write-Host "Live n8n was not changed."
+
+  Write-Section "Next Action Steps"
+  Write-Host "1. No import is needed right now."
   Write-Host "Deleting archived workflows is not supported by these CLI helper scripts yet."
   exit 0
 }

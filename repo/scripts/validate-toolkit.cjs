@@ -208,6 +208,7 @@ const allowedRootEntries = new Set([
 const ignoredLocalDirs = new Set([
   '.n8n-local',
   '.tmp',
+  'n8n-workflows',
   '.to-sanitise',
   '.sanitised',
   '.n8n-workflow-backups'

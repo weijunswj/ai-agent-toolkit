@@ -69,7 +69,7 @@ function relativePath(filePath) {
 }
 
 function displayPath(filePath) {
-  return relativePath(filePath);
+  return path.relative(process.cwd(), filePath) || '.';
 }
 
 function writeStep(status, message) {

@@ -859,20 +859,33 @@ test('PowerShell n8n hook autoload uses exact opt-in matching', () => {
   }
 });
 
-test('import helper guards before-import-validation hooks during dry-run and revalidates prepared payloads after before-live-import', () => {
-  const text = readText(path.join(scriptDir, 'import-n8n-workflows-live.ps1'));
+test('import helper guards hooks, no-op imports, and prepared payload revalidation', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
+  ]) {
+    const text = readText(filePath);
 
-  assert.match(text, /if \(-not \$DryRun\) \{\s*Invoke-ProjectWorkflowHook "before-import-validation"/);
-  const beforeLiveImportIndex = text.indexOf('Invoke-ProjectWorkflowHook "before-live-import"');
-  const revalidationIndex = text.indexOf('Write-Section "Prepared Workflow Re-Validation"');
-  const importIndex = text.indexOf('Write-Section "Import"');
-  assert.notEqual(beforeLiveImportIndex, -1);
-  assert.notEqual(revalidationIndex, -1);
-  assert.notEqual(importIndex, -1);
-  assert.ok(beforeLiveImportIndex < revalidationIndex, 'prepared revalidation must run after before-live-import hook');
-  assert.ok(revalidationIndex < importIndex, 'prepared revalidation must run before live import');
-  assert.match(text, /validate-n8n-workflows\.cjs"\), "--mode", "prepared-import", \$PreparedDirPath/);
-  assert.match(text, /Prepared workflow JSON validation failed after before-live-import hook/);
+    assert.match(text, /if \(-not \$DryRun\) \{\s*Invoke-ProjectWorkflowHook "before-import-validation"/, label);
+    assert.match(text, /Initialize-RunDirectory \$PreparedDirPath/, label);
+    assert.doesNotMatch(text, /New-Item -ItemType Directory -Force -Path \$PreparedDirPath/, label);
+
+    const noPlannedImportIndex = text.indexOf('if ($preflight.PlannedImports.Count -eq 0)');
+    const beforeLiveImportIndex = text.indexOf('Invoke-ProjectWorkflowHook "before-live-import"');
+    const revalidationIndex = text.indexOf('Write-Section "Prepared Workflow Re-Validation"');
+    const importIndex = text.indexOf('Write-Section "Import"');
+    assert.notEqual(noPlannedImportIndex, -1, label);
+    assert.notEqual(beforeLiveImportIndex, -1, label);
+    assert.notEqual(revalidationIndex, -1, label);
+    assert.notEqual(importIndex, -1, label);
+    assert.ok(noPlannedImportIndex < beforeLiveImportIndex, `${label}: no-op import must exit before before-live-import hook`);
+    assert.ok(beforeLiveImportIndex < revalidationIndex, `${label}: prepared revalidation must run after before-live-import hook`);
+    assert.ok(revalidationIndex < importIndex, `${label}: prepared revalidation must run before live import`);
+    assert.match(text, /validate-n8n-workflows\.cjs"\), "--mode", "prepared-import", \$PreparedDirPath/, label);
+    assert.match(text, /Prepared workflow JSON validation failed after before-live-import hook/, label);
+    assert.match(text, /Live n8n was not changed\./, label);
+  }
 });
 
 test('n8n workflow toolkit source lock audit passes for adapted helper hardening', () => {
@@ -1244,6 +1257,29 @@ test('sync-n8n-live-exports.cjs sync-exported-only updates only current exports'
   assert.equal(current.name, 'Current After');
   assert.equal(missing.name, 'Missing Before');
   assert.deepEqual(bindings.workflows.map((entry) => path.basename(entry.workflowFile)), ['current.json']);
+});
+
+test('sync-n8n-live-exports.cjs displays local paths with native separators', () => {
+  const cwd = tempDir();
+  const workflowDir = path.join(cwd, 'n8n-workflows');
+  const exportsDir = path.join(cwd, '.tmp', 'exports');
+  const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
+  writeJson(path.join(workflowDir, 'current.json'), safeWorkflow({ id: 'wf_current', name: 'Current Before' }));
+  writeJson(path.join(exportsDir, 'current.live-export.json'), safeWorkflow({ id: 'wf_current', name: 'Current After' }));
+
+  const result = runNode(syncScript, [
+    exportsDir,
+    workflowDir,
+    bindingsPath,
+    '--sync-exported-only',
+  ], { cwd });
+
+  assert.equal(result.status, 0, result.stderr);
+  const expectedExportsDir = path.join('.tmp', 'exports').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(result.stdout, new RegExp(`Exports dir\\s+: ${expectedExportsDir}`));
+  if (path.sep === '\\') {
+    assert.doesNotMatch(result.stdout, /Exports dir\s+:\s+\.tmp\/exports/);
+  }
 });
 
 test('prepare-n8n-live-import.cjs selects bindings by exact file path first', () => {
