@@ -42,9 +42,18 @@ const CACHE_FIELDS = new Set([
 const SENSITIVE_KEY_RE = /(api.?key|access.?token|refresh.?token|secret|password|credential|client.?id|client.?secret|document.?id|sheet.?id|folder.?id|database.?id|spreadsheet.?id|channel.?id|chat.?id|workspace.?id|account.?id)$/i;
 const TEMPLATE_CONFIG_KEY_RE = /(namespace|index|model.?name|model|workflow.?id|send.?to|document.?id|sheet.?name|folder.?to.?watch|pinecone.?index|pinecone_index_name|url)$/i;
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
-const URL_RE = /^https?:\/\//i;
+const URL_RE = /https?:\/\/[^\s"'`)\]}><]+/i;
 const LONG_ID_RE = /^[0-9A-Za-z_-]{28,}$/;
+const LONG_ID_HINT_RE = /\b[0-9A-Za-z_-]{33,}\b/;
+const TEMPLATE_PLACEHOLDER_RE = /__SET_[A-Za-z0-9_]+__/g;
+const STRONG_METADATA_CONFIG_PHRASE_RE = /\b(api.?key|access.?token|refresh.?token|client.?id|client.?secret|workflow.?id|document.?id|sheet.?id|folder.?id|database.?id|spreadsheet.?id|channel.?id|chat.?id|workspace.?id|account.?id|pinecone.?index|pinecone_index_name)\b/i;
+const SEPARATED_METADATA_CONFIG_RE = /\b(?:[A-Za-z0-9]+[_-])*(?:namespace|index|model|workflow|document|sheet|folder|database|chat|workspace|account|token|key|secret|credential)(?:[_-][A-Za-z0-9]+)+\b/i;
 const EXPRESSION_DEFAULT_LITERAL_RE = /(\|\||\?\?)\s*(['"])([^'"]+)\2/g;
+const SENSITIVE_EXPRESSION_PATTERNS = [
+  { label: 'Bearer token', regex: /\bBearer\s+[A-Za-z0-9._-]{20,}\b/i },
+  { label: 'API key', regex: /\b(?:AIza[0-9A-Za-z_-]{20,}|pcsk_[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,})\b/i },
+  { label: 'JWT', regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i },
+];
 const SAFE_CONFIG_LITERAL_VALUES = new Set([
   '',
   'false',
@@ -181,6 +190,27 @@ function isTemplatableConfigLiteral(value) {
   if (/^[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)+$/.test(trimmed) && trimmed.length >= 8) return true;
 
   return false;
+}
+
+function stripTemplatePlaceholders(value) {
+  return String(value || '').replace(TEMPLATE_PLACEHOLDER_RE, ' ');
+}
+
+function findSuspiciousExpressionFindings(value) {
+  const trimmed = String(value || '').trim();
+  const inspected = stripTemplatePlaceholders(trimmed);
+  const findings = new Set();
+
+  if (!trimmed.startsWith('=') && !/\{\{.*\}\}/.test(trimmed)) return [];
+
+  if (EMAIL_RE.test(inspected)) findings.add('email');
+  if (URL_RE.test(inspected)) findings.add('URL');
+  if (LONG_ID_HINT_RE.test(inspected)) findings.add('long ID');
+  for (const suspect of SENSITIVE_EXPRESSION_PATTERNS) {
+    if (suspect.regex.test(inspected)) findings.add(suspect.label);
+  }
+
+  return Array.from(findings);
 }
 
 function sanitiseExpressionDefaults(value, node, pathParts, warnings, suffix = '') {
@@ -327,8 +357,9 @@ function sanitiseString(value, node, pathParts, warnings) {
     const withSanitisedDefaults = isConfigKey(last)
       ? sanitiseExpressionDefaults(safe, node, pathParts, warnings, last)
       : safe;
-    if (EMAIL_RE.test(trimmed) || URL_RE.test(trimmed)) {
-      warnings.push(`Expression may still contain a live value at ${node.name}.${pathParts.join('.')}. Review manually.`);
+    const expressionFindings = findSuspiciousExpressionFindings(trimmed);
+    if (expressionFindings.length > 0) {
+      warnings.push(`Expression may still contain ${expressionFindings.join(' / ')} at ${node.name}.${pathParts.join('.')}. Review manually.`);
     }
     return withSanitisedDefaults;
   }
@@ -379,6 +410,65 @@ function sanitiseResourceLocator(value, node, pathParts, warnings) {
   return clean;
 }
 
+function isLikelyMetadataConfigLiteral(value) {
+  const trimmed = String(value || '').trim();
+  const inspected = stripTemplatePlaceholders(trimmed).trim();
+  if (!inspected) return false;
+  if (trimmed.length < 8) return false;
+
+  if (EMAIL_RE.test(inspected)) return true;
+  if (URL_RE.test(inspected)) return true;
+  if (LONG_ID_HINT_RE.test(inspected)) return true;
+  if (findSuspiciousExpressionFindings(trimmed).length > 0) return true;
+  if (SENSITIVE_EXPRESSION_PATTERNS.some((suspect) => suspect.regex.test(inspected))) return true;
+  if (SENSITIVE_KEY_RE.test(inspected)) return true;
+  if (TEMPLATE_CONFIG_KEY_RE.test(inspected)) return true;
+  if (STRONG_METADATA_CONFIG_PHRASE_RE.test(inspected)) return true;
+  if (SEPARATED_METADATA_CONFIG_RE.test(inspected)) return true;
+
+  return false;
+}
+
+function collectMetadataWarnings(workflow, warnings) {
+  const seen = new Set();
+  const maybeAdd = (path) => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    warnings.push(`Possible config-like stable metadata at ${path}. Review manually.`);
+  };
+
+  if (isLikelyMetadataConfigLiteral(workflow.name)) {
+    maybeAdd('workflow.name');
+  }
+
+  if (isObject(workflow.connections)) {
+    for (const [sourceName, outputMap] of Object.entries(workflow.connections)) {
+      if (isLikelyMetadataConfigLiteral(sourceName)) {
+        maybeAdd(`connections key "${sourceName}"`);
+      }
+      if (!isObject(outputMap)) continue;
+      for (const outputGroups of Object.values(outputMap)) {
+        if (!Array.isArray(outputGroups)) continue;
+        for (const branch of outputGroups) {
+          if (!Array.isArray(branch)) continue;
+          for (const connection of branch) {
+            if (connection && typeof connection === 'object' && typeof connection.node === 'string' && isLikelyMetadataConfigLiteral(connection.node)) {
+              maybeAdd(`connection target "${connection.node}"`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!Array.isArray(workflow.nodes)) return;
+  for (const node of workflow.nodes) {
+    if (node && typeof node === 'object' && isLikelyMetadataConfigLiteral(node.name)) {
+      maybeAdd(`node "${node.name}".name`);
+    }
+  }
+}
+
 function sanitiseValue(value, node, pathParts, warnings) {
   if (typeof value === 'string') return sanitiseString(value, node, pathParts, warnings);
   if (Array.isArray(value)) return value.map((item, index) => sanitiseValue(item, node, pathParts.concat(String(index)), warnings));
@@ -421,9 +511,16 @@ function findSuspiciousValues(value) {
     if (typeof child === 'string') {
       const label = pathParts.join('.') || '(root)';
       const trimmed = child.trim();
-      if (!trimmed.includes('__SET_')) {
-        if (EMAIL_RE.test(trimmed)) warnings.push(`Possible real email remains at ${label}.`);
-        if (URL_RE.test(trimmed)) warnings.push(`Possible real URL remains at ${label}.`);
+      const inspected = stripTemplatePlaceholders(trimmed).trim();
+      if (!inspected) return;
+
+      if (EMAIL_RE.test(inspected)) warnings.push(`Possible real email remains at ${label}.`);
+      if (URL_RE.test(inspected)) warnings.push(`Possible real URL remains at ${label}.`);
+
+      const expressionFindings = findSuspiciousExpressionFindings(trimmed)
+        .filter((finding) => finding !== 'email' && finding !== 'URL');
+      if (expressionFindings.length > 0) {
+        warnings.push(`Possible real ${expressionFindings.join(' / ')} remains at ${label}.`);
       }
       return;
     }
@@ -459,6 +556,8 @@ function stripTemplate(workflow, options) {
   if (!options.allowEmpty && clean.nodes.length === 0) {
     throw new Error('Workflow has zero nodes. Refusing to create an empty template.');
   }
+
+  collectMetadataWarnings(clean, warnings);
 
   const templateConfigReplacements = collectTemplateConfigReplacements(clean);
 

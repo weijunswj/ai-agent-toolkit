@@ -20,6 +20,7 @@ const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');
 const compareCredentialsScript = path.join(scriptDir, 'compare-n8n-workflow-credentials.cjs');
 const sourceLockAuditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs');
 const sanitizerScript = path.join(sanitizerDir, 'prepare-n8n-template.js');
+const { stripTemplate, findSuspiciousValues } = require(sanitizerScript);
 const sanitizerPs1 = path.join(sanitizerDir, 'sanitise-n8n-template.ps1');
 
 function tempDir() {
@@ -346,6 +347,146 @@ test('prepare-n8n-template.js keeps node names stable when replacing config lite
   assert.equal(prepared.connections[sourceName].main[0][0].node, targetName);
   assert.equal(findString(sourceNode.parameters, indexLiteral), false);
   assert.equal(findString(sourceNode.parameters, '__SET_PREPARE_EXAMPLE_NODE_NAME_INDEX_RAG_PINECONE_INDEX_NAME__'), true);
+});
+
+test('prepare-n8n-template.js warns on embedded expression secrets', () => {
+  const bearerToken = ['Bearer', 'b'.repeat(24)].join(' ');
+  const apiKey = ['sk', '-'].join('') + 'a'.repeat(24);
+  const jwt = ['eyJ' + 'a'.repeat(10), 'b'.repeat(10), 'c'.repeat(10)].join('.');
+  const { warnings, workflow } = stripTemplate(safeWorkflow({
+    id: 'workflow-expression-secrets',
+    name: 'Expression Secret Test',
+    active: true,
+    nodes: [{
+      id: 'node-1',
+      name: 'Expression Secret Probe',
+      type: 'n8n-nodes-base.httpRequest',
+      parameters: {
+        authHeader: `= '${bearerToken}'`,
+        apiKey: `= '${apiKey}'`,
+        jwtToken: `={{ "${jwt}" }}`,
+        url: '={{ "https://api.secret-host.test/v1/" + $json.path }}',
+        recipient: '={{ $json.email || "ops@example.internal" }}',
+        workspaceId: '= "abcdefghijklmnopqrstu0123456789vwxyz"',
+      },
+    }],
+  }), {});
+
+  assert.equal(warnings.some((warning) => warning.includes('Expression may still contain')), true);
+  assert.equal(warnings.some((warning) => warning.includes('email')), true);
+  assert.equal(warnings.some((warning) => warning.includes('URL')), true);
+  assert.equal(warnings.some((warning) => warning.includes('long ID')), true);
+  assert.equal(warnings.some((warning) => warning.includes('Bearer token')), true);
+  assert.equal(warnings.some((warning) => warning.includes('API key')), true);
+  assert.equal(warnings.some((warning) => warning.includes('JWT')), true);
+  assert.equal(findString(workflow, 'https://api.secret-host.test/v1/'), true);
+  assert.equal(findString(workflow, 'ops@example.internal'), true);
+  assert.equal(findString(workflow, 'abcdefghijklmnopqrstu0123456789vwxyz'), true);
+});
+
+test('prepare-n8n-template.js final sweep warns on plain leftover URLs and emails', () => {
+  const warnings = findSuspiciousValues({
+    nodes: [{
+      parameters: {
+        note: 'Contact ops@example.internal at https://live.example.test/path',
+      },
+    }],
+  });
+
+  assert.equal(warnings.some((warning) => warning.includes('Possible real email remains')), true);
+  assert.equal(warnings.some((warning) => warning.includes('Possible real URL remains')), true);
+});
+
+test('prepare-n8n-template.js final sweep checks mixed placeholders and live expression values', () => {
+  const bearerToken = ['Bearer', 'c'.repeat(24)].join(' ');
+  const warnings = findSuspiciousValues({
+    nodes: [{
+      parameters: {
+        value: `= "__SET_HTTP_REQUEST_URL__" + "https://live.example.test/path" + "${bearerToken}"`,
+      },
+    }],
+  });
+
+  assert.equal(warnings.some((warning) => warning.includes('Possible real URL remains')), true);
+  assert.equal(warnings.some((warning) => warning.includes('Bearer token')), true);
+});
+
+test('prepare-n8n-template.js does not warn on normal workflow metadata names', () => {
+  const { warnings } = stripTemplate(safeWorkflow({
+    id: 'workflow-normal-metadata-name-test',
+    name: 'Customer Support Workflow',
+    active: true,
+    nodes: [
+      {
+        id: 'source-node',
+        name: 'Customer Support Workflow Intake',
+        type: 'n8n-nodes-base.set',
+        parameters: {},
+      },
+      {
+        id: 'target-node',
+        name: 'Customer Support Workflow Reply',
+        type: 'n8n-nodes-base.set',
+        parameters: {},
+      },
+    ],
+    connections: {
+      'Customer Support Workflow Intake': {
+        main: [[
+          { node: 'Customer Support Workflow Reply', type: 'main', index: 0 },
+        ]],
+      },
+    },
+  }), {});
+
+  assert.equal(warnings.some((warning) => warning.includes('Possible config-like stable metadata')), false);
+});
+
+test('prepare-n8n-template.js warns on metadata config-like literals without rewriting node references', () => {
+  const { warnings, workflow } = stripTemplate(safeWorkflow({
+    id: 'workflow-metadata-leak-test',
+    name: 'Use example-workflow-index-rag template',
+    active: true,
+    nodes: [
+      {
+        id: 'source-node',
+        name: 'Prepare example-node-name-index-rag',
+        type: 'n8n-nodes-base.set',
+        parameters: {
+          assignments: {
+            assignments: [{
+              id: 'namespace-assignment',
+              name: 'namespace',
+              value: 'ExampleKnowledgeBase_kb',
+              type: 'string',
+            }],
+          },
+        },
+      },
+      {
+        id: 'target-node',
+        name: 'Use example-node-name-index-rag',
+        type: 'n8n-nodes-base.set',
+        parameters: {},
+      },
+    ],
+    connections: {
+      'Prepare example-node-name-index-rag': {
+        main: [[
+          { node: 'Use example-node-name-index-rag', type: 'main', index: 0 },
+        ]],
+      },
+    },
+  }), {});
+
+  assert.equal(warnings.some((warning) => warning.includes('workflow.name')), true);
+  assert.equal(warnings.some((warning) => warning.includes('node "Prepare example-node-name-index-rag".name')), true);
+  assert.equal(warnings.some((warning) => warning.includes('connections key "Prepare example-node-name-index-rag"')), true);
+  assert.equal(workflow.name, 'Use example-workflow-index-rag template');
+  assert.equal(workflow.nodes[0].name, 'Prepare example-node-name-index-rag');
+  assert.equal(workflow.nodes[1].name, 'Use example-node-name-index-rag');
+  assert.equal(Object.prototype.hasOwnProperty.call(workflow.connections, 'Prepare example-node-name-index-rag'), true);
+  assert.equal(workflow.connections['Prepare example-node-name-index-rag'].main[0][0].node, 'Use example-node-name-index-rag');
 });
 
 test('sanitise-n8n-template.ps1 dry-run creates staging folders but writes no sanitized templates', { skip: !findPowerShell() }, () => {
