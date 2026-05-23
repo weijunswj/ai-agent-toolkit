@@ -25,14 +25,14 @@
       "source_path": "templates/n8n/- export-n8n-workflows-live.cmd",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/_export-n8n-workflows-live.cmd",
       "source_blob_sha": "f7b5f77bd1105c5fb88aa219d5576072c67a8c66",
-      "notes": "Wrapper path and console formatting adapted after migration to use the underscore-prefixed toolkit wrapper, co-located helper script resolution, framed colored retry output, and console clearing before reruns."
+      "notes": "Wrapper path and console formatting adapted after migration to use the underscore-prefixed toolkit wrapper, co-located helper script resolution, framed colored retry output, console clearing before reruns, and trusted absolute SystemRoot Windows PowerShell resolution instead of PATH."
     },
     {
       "mode": "adapted",
       "source_path": "templates/n8n/- import-n8n-workflows-live.cmd",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/_import-n8n-workflows-live.cmd",
       "source_blob_sha": "b60c89fc19cc9492392d113c24162712c420d898",
-      "notes": "Wrapper path and console formatting adapted after migration to use the underscore-prefixed toolkit wrapper, co-located helper script resolution, framed colored retry output, console clearing before reruns, and restart-option prompting aligned with the import helper."
+      "notes": "Wrapper path and console formatting adapted after migration to use the underscore-prefixed toolkit wrapper, co-located helper script resolution, framed colored retry output, console clearing before reruns, restart-option prompting aligned with the import helper, and trusted absolute SystemRoot Windows PowerShell resolution instead of PATH."
     },
     {
       "mode": "adapted",

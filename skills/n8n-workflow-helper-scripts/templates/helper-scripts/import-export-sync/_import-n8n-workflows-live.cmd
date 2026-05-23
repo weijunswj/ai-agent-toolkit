@@ -1,10 +1,13 @@
 @echo off
 setlocal EnableExtensions
 
+call :resolve_powershell
+if errorlevel 1 exit /b 1
+
 :run_import
 call :banner "n8n workflow import" "Runs import-n8n-workflows-live.ps1 from this helper folder."
 call :configure_restart %*
-powershell -ExecutionPolicy Bypass -File "%~dp0import-n8n-workflows-live.ps1" %* %RESTART_ARG%
+"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0import-n8n-workflows-live.ps1" %* %RESTART_ARG%
 set "LAST_EXIT=%ERRORLEVEL%"
 
 echo.
@@ -55,5 +58,15 @@ exit /b 0
 :status
 set "AAT_STATUS_COLOR=%~1"
 set "AAT_STATUS_MESSAGE=%~2"
-powershell -NoProfile -Command "Write-Host $env:AAT_STATUS_MESSAGE -ForegroundColor $env:AAT_STATUS_COLOR"
+"%POWERSHELL_EXE%" -NoProfile -Command "Write-Host $env:AAT_STATUS_MESSAGE -ForegroundColor $env:AAT_STATUS_COLOR"
 exit /b 0
+
+:resolve_powershell
+if not defined SystemRoot (
+  echo ERROR Trusted Windows PowerShell could not be resolved because SystemRoot is not defined.
+  exit /b 1
+)
+set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if exist "%POWERSHELL_EXE%" exit /b 0
+echo ERROR Trusted Windows PowerShell executable not found: "%POWERSHELL_EXE%"
+exit /b 1

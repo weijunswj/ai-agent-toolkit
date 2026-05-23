@@ -745,6 +745,20 @@ test('n8n command wrappers use framed colored retry output', () => {
     assert.match(text, /Yellow/, label);
     assert.match(text, /:status/, label);
     assert.match(text, /if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
+    assert.match(text, /:resolve_powershell/, label);
+    assert.match(text, /%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe/i, label);
+    assert.match(text, /set "POWERSHELL_EXE=/, label);
+    assert.match(text, /"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0[^"]+\.ps1"/, label);
+    assert.doesNotMatch(text, /(^|\r?\n)\s*powershell\b/i, label);
+    assert.doesNotMatch(text, /(^|\r?\n)\s*pwsh\b/i, label);
+
+    if (label.includes('export wrapper')) {
+      assert.match(text, /"%~dp0export-n8n-workflows-live\.ps1"/, label);
+    } else if (label.includes('import wrapper')) {
+      assert.match(text, /"%~dp0import-n8n-workflows-live\.ps1"/, label);
+    } else {
+      assert.match(text, /"%~dp0sanitise-n8n-template\.ps1"/, label);
+    }
 
     if (label.includes('import wrapper')) {
       assert.match(text, /:configure_restart/, label);
