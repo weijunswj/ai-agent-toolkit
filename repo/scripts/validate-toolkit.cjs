@@ -24,6 +24,10 @@ const registryYamlText = 'reg' + 'istry/*.' + 'yaml';
 const packYamlText = 'pack.' + 'yaml';
 const removedForAiPathPattern = new RegExp('(^|[^A-Za-z0-9_])' + 'for_' + 'ai\\/');
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 const expectedFiles = [
   'README.md',
   'AGENTS.md',
@@ -1224,10 +1228,10 @@ function validateSourceWatchPrWorkflow(entry, text, errors) {
   for (const cron of ['17 3 * * *', '43 9 * * *', '29 15 * * *']) {
     if (!text.includes(`cron: "${cron}"`)) fail(errors, `${entry.relPath} missing staggered cron ${cron}`);
   }
-  for (const permission of ['contents: write', 'pull-requests: write', 'issues: write']) {
-    if (!new RegExp(`^\\s{2}${permission.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\s*$`, 'm').test(text)) {
-      fail(errors, `${entry.relPath} missing ${permission}`);
-    }
+  const permissions = workflowPermissionLines(text) || [];
+  const expectedPermissions = ['contents: write', 'pull-requests: write'];
+  if (permissions.length !== expectedPermissions.length || expectedPermissions.some((permission) => !permissions.includes(permission))) {
+    fail(errors, `${entry.relPath} must grant only contents: write and pull-requests: write`);
   }
   if (!/repo\/scripts\/check-project-source-updates\.cjs/.test(text)) {
     fail(errors, `${entry.relPath} must run check-project-source-updates.cjs`);
@@ -1267,6 +1271,21 @@ function validateSourceWatchPrWorkflow(entry, text, errors) {
     'No auto-merge is allowed.'
   ]) {
     if (!text.includes(required)) fail(errors, `${entry.relPath} missing PR safety body text: ${required}`);
+  }
+  const bodyMarker = 'cat > "$PR_BODY" <<\'EOF\'';
+  const markerMatch = text.match(new RegExp(`^([ \\t]*)${escapeRegExp(bodyMarker)}[ \\t]*$`, 'm'));
+  const bodyMatch = text.match(new RegExp(`${escapeRegExp(bodyMarker)}\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*EOF`, 'm'));
+  if (!markerMatch || !bodyMatch) {
+    fail(errors, `${entry.relPath} must write the review PR body with a heredoc`);
+  } else {
+    const yamlBlockIndent = markerMatch[1];
+    const bodyText = bodyMatch[1]
+      .split(/\r?\n/)
+      .map((line) => line.startsWith(yamlBlockIndent) ? line.slice(yamlBlockIndent.length) : line)
+      .join('\n');
+    if (/^ {4,}\S/m.test(bodyText)) {
+      fail(errors, `${entry.relPath} PR body heredoc content must not render as an indented Markdown code block`);
+    }
   }
 }
 
