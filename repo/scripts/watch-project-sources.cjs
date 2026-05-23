@@ -84,14 +84,18 @@ function planEntry(lockFile) {
     labels: risk === 'third-party' ? ['source-update', 'third-party-review'] : ['source-update'],
     reviewer: risk === 'third-party' ? 'weijunswj' : null,
     allowlist: allowlists[lock.source_repo] || lock.files.map((file) => file.source_path).filter(Boolean).sort(),
+    tracked_files: lock.files.map((file) => ({
+      mode: file.mode || 'exact',
+      source_path: file.source_path,
+      source_blob_sha: file.source_blob_sha || null
+    })),
     required_local_checks: [
       'node repo/scripts/sync-toolkit-projects.cjs --write',
       'node repo/scripts/audit-project-source-locks.cjs',
-      'node repo/scripts/validate-toolkit.cjs',
-      'node --test repo/tests/*.test.cjs'
+      'npm run validate:all'
     ],
     notes: risk === 'third-party'
-      ? 'Read-only advisory. Future updater work must keep weijunswj review, manual script review, and attribution checks.'
+      ? 'Read-only advisory. Future updater work must use SOURCE-LOCK pins, keep weijunswj review, manual script review, allowlist checks, attribution checks, and full validation.'
       : 'Future deterministic PR update may be allowed when allowlist and validation pass. Never auto-merge.'
   };
 }
@@ -152,6 +156,9 @@ function renderMarkdown(plan) {
       '',
       'Allowlist:',
       ...entry.allowlist.map((item) => `- ${item}`),
+      '',
+      'Tracked SOURCE-LOCK files:',
+      ...entry.tracked_files.map((item) => `- ${item.mode}: ${item.source_path}${item.source_blob_sha ? ` @ ${item.source_blob_sha}` : ''}`),
       '',
       'Required local checks:',
       ...entry.required_local_checks.map((item) => `- ${item}`),

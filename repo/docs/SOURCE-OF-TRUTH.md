@@ -35,6 +35,14 @@ Do not move product-owned assets into this toolkit.
 
 The JSON registries under `mcp/registry/` are the published MCP-ready registry discovery surface. Generated registries should be refreshed from project manifests with `node repo/scripts/sync-toolkit-projects.cjs --write`.
 
+## Project Versions And Source Locks
+
+`toolkit.project.json` owns the toolkit project module version and routing contract. Every project manifest must include `version`, `version_policy: "semver"`, and non-empty `version_notes`.
+
+`SOURCE-LOCK.json` owns source/upstream provenance: source repo, source ref, locked commit, source lifecycle, source role, update policy, public attribution requirement, allowlisted files, and blob pins.
+
+For third-party projects, the toolkit project version is the toolkit adaptation version, not the upstream third-party version. Scheduled source-watch tasks must read upstream tracking from `SOURCE-LOCK.json`, not `toolkit.project.json`, including `source_update_policy`. Git tags, package tags, and GitHub release tags are not substitutes for toolkit project versions, and this repo does not use per-file versions.
+
 ## Guarded Generated Auto-Sync
 
 The `Auto-sync generated toolkit surfaces` workflow is only a deterministic generated-output writeback helper. It is optional convenience, not the merge gate. The required merge gate is the normal read-only validation workflow running `npm run validate:all`.

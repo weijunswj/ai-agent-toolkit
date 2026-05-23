@@ -4,6 +4,9 @@
     "category": "cicd",
     "name": "secure-installer",
     "title": "Secure CI/CD Installer",
+    "version": "1.0.0",
+    "version_policy": "semver",
+    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
     "project": {
       "name": "Secure CI/CD Installer",
       "category": "cicd",
@@ -43,6 +46,9 @@
     "category": "design",
     "name": "ui-ux-pro-max",
     "title": "UI/UX Pro Max Design",
+    "version": "1.0.0",
+    "version_policy": "semver",
+    "version_notes": "Third-party-attributed toolkit adaptation. Upstream repo, ref, commit, file pins, attribution, and manual-review update policy are tracked in SOURCE-LOCK.json.",
     "project": {
       "name": "UI/UX Pro Max Design",
       "category": "design",
@@ -94,6 +100,9 @@
     "category": "development",
     "name": "ai-coding-agent-rules",
     "title": "AI Coding Agent Rules",
+    "version": "1.0.0",
+    "version_policy": "semver",
+    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
     "project": {
       "name": "AI Coding Agent Rules",
       "category": "development",
@@ -130,6 +139,9 @@
     "category": "development",
     "name": "windows-localhost-workflows",
     "title": "Windows Localhost Workflows",
+    "version": "1.0.0",
+    "version_policy": "semver",
+    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
     "project": {
       "name": "Windows Localhost Workflows",
       "category": "development",
@@ -160,6 +172,9 @@
     "category": "knowledge",
     "name": "knowledge-index-updater",
     "title": "Knowledge Index Updater",
+    "version": "1.0.0",
+    "version_policy": "semver",
+    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
     "project": {
       "name": "Knowledge Index Updater",
       "category": "knowledge",
@@ -191,6 +206,9 @@
     "category": "n8n",
     "name": "local-setup",
     "title": "Local n8n Setup",
+    "version": "1.0.0",
+    "version_policy": "semver",
+    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
     "project": {
       "name": "Local n8n Setup",
       "category": "n8n",
@@ -250,6 +268,9 @@
     "category": "n8n",
     "name": "workflow-toolkit",
     "title": "n8n Workflow Toolkit",
+    "version": "1.0.0",
+    "version_policy": "semver",
+    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
     "project": {
       "name": "n8n Workflow Toolkit",
       "category": "n8n",
@@ -294,6 +315,9 @@
     "category": "repo-methodology",
     "name": "context-preserving-ai-publisher",
     "title": "Context-Preserving AI Publisher",
+    "version": "1.0.0",
+    "version_policy": "semver",
+    "version_notes": "Initial stable toolkit project version.",
     "project": {
       "name": "Context-Preserving AI Publisher",
       "category": "repo-methodology",
@@ -347,6 +371,9 @@
     "category": "repo-methodology",
     "name": "mcp-ready-registry",
     "title": "MCP-Ready Registry",
+    "version": "1.0.0",
+    "version_policy": "semver",
+    "version_notes": "Initial stable toolkit project version.",
     "project": {
       "name": "MCP-Ready Registry",
       "category": "repo-methodology",
