@@ -141,8 +141,11 @@ echo.
 echo [8/9] Recreating n8n container with updated image and webhook URL...
 docker rm -f "%CONTAINER_NAME%" >nul 2>&1
 
+REM Bind the Docker port to loopback by default.
+REM ngrok handles the public tunnel endpoint.
+REM Do not bind directly to LAN or public interfaces for local development.
 docker run -d --name "%CONTAINER_NAME%" ^
-  -p %LOCAL_PORT%:%CONTAINER_PORT% ^
+  -p 127.0.0.1:%LOCAL_PORT%:%CONTAINER_PORT% ^
   -e GENERIC_TIMEZONE="%TZ%" ^
   -e TZ="%TZ%" ^
   -e N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true ^
