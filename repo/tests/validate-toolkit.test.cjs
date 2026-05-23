@@ -402,6 +402,30 @@ test('validation workflow runs canonical full validation read-only', () => {
   assert.match(workflow, /^permissions:\n  contents: read$/m);
 });
 
+test('source-watch PR notifier uses the stable review-notification PR contract', () => {
+  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.yml'));
+  assert.match(workflow, /^name:\s*Source Watch PR Notifier\s*$/m);
+  for (const cron of ['17 3 * * *', '43 9 * * *', '29 15 * * *']) {
+    assert.ok(workflow.includes(`cron: "${cron}"`), cron);
+  }
+  assert.match(workflow, /^  contents: write$/m);
+  assert.match(workflow, /^  pull-requests: write$/m);
+  assert.match(workflow, /^  issues: write$/m);
+  assert.match(workflow, /repo\/scripts\/check-project-source-updates\.cjs/);
+  assert.match(workflow, /source-watch\/review-active-third-party-updates/);
+  assert.match(workflow, /\[source-watch\] Review active third-party source updates/);
+  assert.match(workflow, /This PR is a review notification only\./);
+  assert.match(workflow, /No auto-merge is allowed\./);
+  assert.doesNotMatch(workflow, /gh issue create|safe-source-update\.cjs|gh pr merge|--auto/i);
+});
+
+test('source-watch advisory plan is manual-only', () => {
+  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'source-watch-plan.yml'));
+  assert.match(workflow, /^name:\s*Source Watch Advisory Plan\s*$/m);
+  assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(workflow, /^\s{2}schedule:\s*$/m);
+});
+
 test('build agent rule templates workflow tracks and verifies split template outputs', () => {
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'build-agent-rule-templates.yml'));
   const watchedPaths = [
@@ -1886,29 +1910,29 @@ test('validator rejects source-watch wording that promises live update actions',
   );
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch wording must stay advisory\/read-only/);
+  assert.match(result.stderr, /source-watch wording must stay notification-only and source-safe/);
 });
 
-test('validator rejects source-watch action claims even with advisory wording', () => {
+test('validator rejects source-watch source-write claims even with advisory wording', () => {
   const cwd = tempCopy();
   fs.writeFileSync(
     path.join(cwd, 'repo', 'docs', 'bad-source-watch-advisory.md'),
-    'Source-watch is advisory but opens draft PRs.\n'
+    'Source-watch is advisory but copies upstream files into review PRs.\n'
   );
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch wording must stay advisory\/read-only/);
+  assert.match(result.stderr, /source-watch wording must stay notification-only and source-safe/);
 });
 
-test('validator allows source-watch action phrases when the action is negated', () => {
+test('validator allows source-watch notification PR wording and negated source-write phrases', () => {
   const cwd = tempCopy();
   fs.writeFileSync(
     path.join(cwd, 'repo', 'docs', 'ok-source-watch-negated.md'),
     [
-      'source-watch does not open PRs.',
+      'source-watch opens or updates a review notification PR.',
       'source-watch will not create branches.',
       'source-watch never mutates credentials.',
-      'source-watch is read-only; it does not fetch upstream repos.'
+      'source-watch does not copy upstream source files.'
     ].join('\n')
   );
   const result = runValidate(cwd);

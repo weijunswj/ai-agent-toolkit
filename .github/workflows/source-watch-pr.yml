@@ -1,0 +1,103 @@
+name: Source Watch PR Notifier
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+    - cron: "43 9 * * *"
+    - cron: "29 15 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate source locks
+        run: node repo/scripts/audit-project-source-locks.cjs
+
+      - name: Check active third-party source updates
+        id: source_updates
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REPORT_TEMP="$RUNNER_TEMP/active-third-party-updates.md"
+          node repo/scripts/check-project-source-updates.cjs --report "$REPORT_TEMP"
+          if [ -f "$REPORT_TEMP" ]; then
+            echo "pr_needed=true" >> "$GITHUB_OUTPUT"
+            echo "report_temp=$REPORT_TEMP" >> "$GITHUB_OUTPUT"
+          else
+            echo "pr_needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update review notification branch
+        id: update_branch
+        if: steps.source_updates.outputs.pr_needed == 'true'
+        env:
+          BRANCH: source-watch/review-active-third-party-updates
+          REPORT_TEMP: ${{ steps.source_updates.outputs.report_temp }}
+          REPORT_PATH: repo/source-watch/reviews/active-third-party-updates.md
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
+            git switch -C "$BRANCH" "origin/$BRANCH"
+          else
+            git switch -C "$BRANCH"
+          fi
+          mkdir -p "$(dirname "$REPORT_PATH")"
+          cp "$REPORT_TEMP" "$REPORT_PATH"
+          git add "$REPORT_PATH"
+          if git diff --cached --quiet; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "Update active third-party source review report"
+          git push origin "HEAD:$BRANCH"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update review notification PR
+        if: steps.source_updates.outputs.pr_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: source-watch/review-active-third-party-updates
+          PR_TITLE: "[source-watch] Review active third-party source updates"
+          PR_BODY: ${{ runner.temp }}/source-watch-pr-body.md
+        run: |
+          set -euo pipefail
+          cat > "$PR_BODY" <<'EOF'
+          This PR is a review notification only.
+          No source files were updated.
+          No SOURCE-LOCK pins were changed.
+          No upstream code was executed.
+          No auto-merge is allowed.
+          A human must review upstream changes, attribution/licence impact, allowlist scope, and then ask an AI agent to inspect before any real edits happen.
+
+          - [ ] Review upstream diff manually.
+          - [ ] Confirm changed files are within allowlist.
+          - [ ] Confirm attribution/licence notes still apply.
+          - [ ] Confirm no upstream code was executed.
+          - [ ] Decide whether a separate update PR should copy/adapt files.
+          - [ ] Run npm run validate:all before any real source update merge.
+          EOF
+          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh pr edit "$BRANCH" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$PR_TITLE" --body-file "$PR_BODY"
+          fi

@@ -2,8 +2,6 @@ name: Source Watch Advisory Plan
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '21 3 * * 1'
 
 permissions:
   contents: read
