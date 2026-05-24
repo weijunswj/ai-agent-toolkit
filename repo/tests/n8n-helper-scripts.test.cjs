@@ -158,6 +158,8 @@ $functionNames = @(
   "Get-PathStringComparison",
   "Get-NormalizedFullPath",
   "Test-PathIsStrictChild",
+  "Test-PathItemIsUnsafeLink",
+  "Assert-RunDirectoryPathHasNoUnsafeLinks",
   "Initialize-RunDirectory"
 )
 $functions = $ast.FindAll({
@@ -204,6 +206,102 @@ Assert-Rejected "filesystem root" ${psSingleQuoted(filesystemRoot)}
 Assert-Rejected "repo child outside .tmp" ${psSingleQuoted(repoOutsideTmp)}
 Assert-Rejected "outside repo" ${psSingleQuoted(outsideTmp)}
 Assert-Rejected "traversal outside .tmp" ${psSingleQuoted(traversalOutsideTmp)}
+`, 'utf8');
+
+  return spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+}
+
+function tryCreateDirectoryLink(targetPath, linkPath) {
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  try {
+    fs.symlinkSync(targetPath, linkPath, linkType);
+    return null;
+  } catch (error) {
+    return `${error.code || error.name}: ${error.message}`;
+  }
+}
+
+function runImportRunDirectoryLinkHarness(shell, helperScriptPath) {
+  const root = tempDir();
+  const tmpRoot = path.join(root, '.tmp');
+  const outsideRoot = tempDir();
+  const directTarget = path.join(outsideRoot, 'direct-target');
+  const nestedTarget = path.join(outsideRoot, 'nested-target');
+  const nestedTargetChild = path.join(nestedTarget, 'n8n-live-import');
+  const directLink = path.join(tmpRoot, 'n8n-live-import');
+  const nestedLink = path.join(tmpRoot, 'link');
+  const nestedLinkedRunDirectory = path.join(nestedLink, 'n8n-live-import');
+  const directSentinel = path.join(directTarget, 'outside-target.txt');
+  const nestedSentinel = path.join(nestedTargetChild, 'outside-target.txt');
+
+  fs.mkdirSync(tmpRoot, { recursive: true });
+  fs.mkdirSync(directTarget, { recursive: true });
+  fs.mkdirSync(nestedTargetChild, { recursive: true });
+  fs.writeFileSync(directSentinel, 'direct outside target must remain', 'utf8');
+  fs.writeFileSync(nestedSentinel, 'nested outside target must remain', 'utf8');
+
+  const directLinkError = tryCreateDirectoryLink(directTarget, directLink);
+  if (directLinkError) return { skipped: `could not create direct directory link: ${directLinkError}` };
+
+  const nestedLinkError = tryCreateDirectoryLink(nestedTarget, nestedLink);
+  if (nestedLinkError) return { skipped: `could not create nested directory link: ${nestedLinkError}` };
+
+  const harnessPath = path.join(root, 'run-directory-link-harness.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$RepoRoot = ${psSingleQuoted(root)}
+$sourceFile = ${psSingleQuoted(helperScriptPath)}
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($sourceFile, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) {
+  throw "Could not parse source helper: $($errors[0].Message)"
+}
+$functionNames = @(
+  "Get-PathStringComparison",
+  "Get-NormalizedFullPath",
+  "Test-PathIsStrictChild",
+  "Test-PathItemIsUnsafeLink",
+  "Assert-RunDirectoryPathHasNoUnsafeLinks",
+  "Initialize-RunDirectory"
+)
+$functions = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true)
+foreach ($function in $functions) {
+  Invoke-Expression $function.Extent.Text
+}
+if (-not (Get-Command Initialize-RunDirectory -ErrorAction SilentlyContinue)) {
+  throw "Initialize-RunDirectory not loaded"
+}
+
+function Assert-Rejected($Label, $RunDirectory) {
+  try {
+    Initialize-RunDirectory $RunDirectory
+    throw "accepted unsafe path: $Label"
+  } catch {
+    if ($_.Exception.Message -like "accepted unsafe path:*") {
+      throw
+    }
+    Write-Output "REJECTED=$Label"
+  }
+}
+
+Assert-Rejected "run directory link" ${psSingleQuoted(directLink)}
+if (-not (Test-Path -LiteralPath ${psSingleQuoted(directSentinel)} -PathType Leaf)) {
+  throw "direct outside target was deleted"
+}
+Write-Output "PRESERVED=direct outside target"
+
+Assert-Rejected "nested link component" ${psSingleQuoted(nestedLinkedRunDirectory)}
+if (-not (Test-Path -LiteralPath ${psSingleQuoted(nestedSentinel)} -PathType Leaf)) {
+  throw "nested outside target was deleted"
+}
+Write-Output "PRESERVED=nested outside target"
 `, 'utf8');
 
   return spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
@@ -1165,8 +1263,12 @@ test('import helper run-directory safety is separator-aware and strictly under .
     assert.match(text, /function Get-PathStringComparison/, label);
     assert.match(text, /function Get-NormalizedFullPath\(\$Path\)/, label);
     assert.match(text, /function Test-PathIsStrictChild\(\$Path, \$ParentPath\)/, label);
+    assert.match(text, /function Test-PathItemIsUnsafeLink\(\$Item\)/, label);
+    assert.match(text, /function Assert-RunDirectoryPathHasNoUnsafeLinks\(\$Path, \$TmpRoot\)/, label);
     assert.match(text, /DirectorySeparatorChar/, label);
+    assert.match(text, /ReparsePoint/, label);
     assert.match(initializeBlock, /Test-PathIsStrictChild \$resolvedPath \$tmpRoot/, label);
+    assert.match(initializeBlock, /Assert-RunDirectoryPathHasNoUnsafeLinks \$resolvedPath \$tmpRoot/, label);
     assert.doesNotMatch(initializeBlock, /\$tmpPrefix\s*=\s*\$tmpRoot\s*\+\s*'\\'/, label);
     assert.doesNotMatch(initializeBlock, /TrimEnd\('\\'\)/, label);
   }
@@ -1191,6 +1293,28 @@ test('PowerShell import run-directory guard accepts only strict .tmp children', 
     assert.match(output, /REJECTED=repo child outside \.tmp/, label);
     assert.match(output, /REJECTED=outside repo/, label);
     assert.match(output, /REJECTED=traversal outside \.tmp/, label);
+  }
+});
+
+test('PowerShell import run-directory guard rejects link escapes under .tmp', { skip: !findPowerShell() }, (t) => {
+  const shell = findPowerShell();
+  for (const [label, filePath] of [
+    ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
+  ]) {
+    const result = runImportRunDirectoryLinkHarness(shell, filePath);
+    if (result.skipped) {
+      t.skip(`${label}: ${result.skipped}`);
+      return;
+    }
+
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.equal(result.status, 0, `${label}\n${output}`);
+    assert.match(output, /REJECTED=run directory link/, label);
+    assert.match(output, /REJECTED=nested link component/, label);
+    assert.match(output, /PRESERVED=direct outside target/, label);
+    assert.match(output, /PRESERVED=nested outside target/, label);
   }
 });
 
