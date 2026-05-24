@@ -51,7 +51,15 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 3. Load `SKILL.md` into the target AI platform.
 4. Include `agents/openai.yaml` when the platform supports OpenAI skill metadata.
 
-For Codex or Claude Code, copy the whole skill folder into that tool's supported skills folder.
+For Codex, copy or symlink the whole skill folder into one of these locations:
+
+- Repo-level: `<repo>/.agents/skills/<skill-name>/SKILL.md`.
+- User-level: `$HOME/.agents/skills/<skill-name>/SKILL.md`.
+- Admin-level: `/etc/codex/skills/<skill-name>/SKILL.md`.
+
+Codex scans repo skills from `.agents/skills` from the current working directory up to the repo root. It initially sees each skill's name, description, and file path, then loads the full `SKILL.md` only when selected. Use `/skills` or `$skill-name` for explicit invocation; implicit invocation depends on the `description` frontmatter. `~/.codex/config.toml` is for Codex configuration, including disabling skills by `SKILL.md` path, not the main skill install surface.
+
+For Claude Code, copy the whole skill folder into that tool's supported skills folder.
 
 `skills/**/SKILL.md` files are published toolkit surfaces. If a generated notice is present, update the source path named in that notice and run `node repo/scripts/sync-toolkit-projects.cjs --write`. Directly maintained `linked` skills should be rare and justified in the related project manifest.
 

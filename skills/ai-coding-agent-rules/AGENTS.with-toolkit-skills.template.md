@@ -374,25 +374,54 @@ Keep the final response concise but complete.
 
 Use installed skills only when they clearly match the task and improve correctness.
 
-## Frontend Design
+These rules can live inside always-on instruction files such as `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`. They are routing guidance for those agents; they are not themselves a Codex Skill.
 
-Use `ui-ux-secure-frontend-design` for design systems, landing pages, SaaS dashboards, forms, accessibility, responsive polish, privacy-safe UX, and frontend implementation review.
+## Always-On Rules Vs Codex Skills
 
-## Localhost
+- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are always-on agent instruction files after they are installed in a supported repo or user location.
+- Codex Skills are on-demand directories. Each skill directory contains `SKILL.md` with `name` and `description` frontmatter, plus optional local `references/`, `examples/`, `templates/`, `tools/`, `assets/`, or `packs/`.
+- Codex initially sees each skill's name, description, and file path. It loads the full `SKILL.md` only when a skill is selected.
+- Explicit Codex invocation uses `/skills` or `$skill-name`.
+- Implicit Codex invocation depends on a clear match between the user request and the skill `description`.
 
-Use `windows-localhost-workflows` for starting, relaunching, verifying, and troubleshooting local Windows dev servers.
+## Codex Install And Discovery
 
-## n8n Workflow Toolkit
+- Repo-level Codex skill: `<repo>/.agents/skills/<skill-name>/SKILL.md`.
+- User-level Codex skill: `$HOME/.agents/skills/<skill-name>/SKILL.md`.
+- Admin-level Codex skill: `/etc/codex/skills/<skill-name>/SKILL.md`.
+- Codex scans repo skills from `.agents/skills` from the current working directory up to the repo root.
+- Symlinked skill folders are acceptable.
+- `~/.codex/config.toml` is for Codex configuration, including disabling skills by `SKILL.md` path. It is not the main skill install surface.
 
-Use `n8n-workflow-helper-scripts` for safe n8n workflow sanitation, repo/live sync planning, credential binding hygiene, and import/export review.
+When using this toolkit with Codex, copy or symlink the whole `skills/<skill-name>/` folder into one of the Codex skill locations above. Do not copy only `SKILL.md`.
 
-Use `n8n-workflow-templates` for selecting, reviewing, or copying public generic inactive n8n workflow JSON templates.
+## Current Toolkit Skill Routing
 
-## Secure CI/CD
+| Skill | Use when the task involves |
+|---|---|
+| `ai-coding-agent-rules` | Installing or explaining generic execution-first agent rules, optional toolkit skill-routing, or safe merge plans for `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`. |
+| `n8n-local-setup` | Safe local n8n setup, MCP config selection, tunneling choices, or platform-specific n8n agent-rule setup. |
+| `n8n-workflow-helper-scripts` | Safe n8n workflow helper scripts, sanitizer helpers, import/export sync helpers, validation, comparison, live-import preparation, or repo/live workflow hygiene. |
+| `n8n-workflow-templates` | Selecting, reviewing, or copying public reusable n8n workflow JSON templates that are generic, inactive, credential-free, and safe for publication. |
+| `secure-cicd-installer` | Reviewing, planning, or applying secure CI/CD installer materials with approval-gated writes, safe status tracking, and no default command execution. |
+| `context-preserving-ai-publisher` | Creating or maintaining source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift docs. |
+| `windows-localhost-workflows` | Starting, relaunching, verifying, or troubleshooting localhost development workflows on Windows. |
+| `knowledge-index-updater` | Creating or updating a Notion/GitHub knowledge index, merging duplicates, categorising entries, maintaining stable source keys, or scheduling index checks. |
+| `ui-ux-secure-frontend-design` | Creating, reviewing, or improving frontend interfaces, design systems, landing pages, SaaS dashboards, forms, components, accessibility, responsive polish, privacy-safe UX, or implementation quality. |
 
-Use secure CI/CD materials for GitHub Actions setup, CI security gates, safe deployment planning, and `CURRENT_CICD_STATUS.md` style tracking.
+## Intentionally Omitted Skills
+
+None currently. If a skill should not be auto-routed, list it here as `skill-name`: reason.
+
+## Routing Maintenance
+
+- When adding, removing, renaming, or materially changing a skill under `skills/**`, update this routing table.
+- When adding, removing, renaming, or materially changing a project module that publishes a skill, update this routing table if that skill should be invokable by Codex or other agents.
+- When changing skill names, `SKILL.md` frontmatter, or skill descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, this routing partial, and generated `AGENTS`/`CLAUDE`/`GEMINI` equivalents.
+- When a new skill should not be auto-routed, document why it is intentionally omitted.
+- Do not let this routing table become stale relative to current `skills/*/SKILL.md`.
 
 ## Safety
 
-Do not use a skill as permission to mutate live systems, write secrets, run live n8n actions, or install templates without review.
+Do not use a skill as permission to mutate live systems, write secrets, run live n8n actions, install templates without review, or skip explicit approval gates.
 ````````

@@ -28,12 +28,27 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 
 ## Task Routing
 
-- Use `ui-ux-secure-frontend-design` for frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review.
-- Use `ai-coding-agent-rules` for generic execution-first AGENTS.md, CLAUDE.md, and GEMINI.md rule templates.
-- Use `windows-localhost-workflows` for starting, relaunching, verifying, or debugging local Windows dev servers.
-- Use `n8n-workflow-helper-scripts` for safe n8n workflow import/export hygiene, template sanitation, credential safety, and repo/live sync planning.
-- Use `n8n-workflow-templates` when the task is specifically about public generic inactive n8n workflow JSON templates.
-- Use secure CI/CD materials when asked to plan or template GitHub Actions, CI security gates, or CI/CD installer prompts.
+Use installed skills only when they clearly match the task and improve correctness.
+
+| Skill | Use when the task involves |
+| --- | --- |
+| `ai-coding-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates or toolkit skill-routing setup. |
+| `n8n-local-setup` | Safe local n8n setup, MCP config selection, tunneling choices, or platform-specific n8n agent-rule setup. |
+| `n8n-workflow-helper-scripts` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
+| `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
+| `secure-cicd-installer` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |
+| `context-preserving-ai-publisher` | Source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, manifests, source locks, audits, or anti-drift docs. |
+| `windows-localhost-workflows` | Starting, relaunching, verifying, or debugging local Windows dev servers. |
+| `knowledge-index-updater` | Maintaining a Notion/GitHub knowledge index with stable source keys, de-duplication, categorisation, and stale/missing item checks. |
+| `ui-ux-secure-frontend-design` | Frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review. |
+
+## Skill Routing Maintenance
+
+- When adding, removing, renaming, or materially changing a skill under `skills/**`, update `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`.
+- When adding, removing, renaming, or materially changing a project module that publishes a skill, update the routing table if that skill should be invokable by Codex or other agents.
+- When changing skill names, `SKILL.md` frontmatter, or descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, the routing partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
+- When a new skill should not be auto-routed, document why it is intentionally omitted from routing.
+- Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
 
 ## Install Safety
 

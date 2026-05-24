@@ -29,7 +29,20 @@ Good adapter examples:
 - MCP overview.
 - Safety wrapper.
 
-## 3. Which Recipe Fits?
+## 3. Does It Publish A Skill?
+
+When creating or materially changing a skill, decide:
+
+- Does this publish a Codex-usable skill folder with `SKILL.md`?
+- Should the skill be listed in the repo's skill-routing guidance for Codex or other agents?
+- Does the `SKILL.md` description clearly support implicit Codex invocation?
+- Does the skill need local examples, references, templates, tools, assets, or pack manifests inside the skill folder?
+- Do README skill tables, registry metadata, or routing docs need updates?
+- What validation proves the source and generated output stayed aligned?
+
+If a skill is intentionally omitted from auto-routing, document the reason in the routing source.
+
+## 4. Which Recipe Fits?
 
 Use these generic recipe classes:
 
@@ -42,7 +55,7 @@ Use these generic recipe classes:
 
 If your repo uses different names, keep the same intent: deterministic source-to-output declarations.
 
-## 4. Are Links Still Valid After Publishing?
+## 5. Are Links Still Valid After Publishing?
 
 When a curated file is intentionally authored as a published-surface source, it may use output-relative links. Add a note in the curated source when those links are confusing from the source folder, for example:
 
@@ -52,7 +65,7 @@ This file is authored as a published-surface source; relative links are intended
 
 When full docs are exact copied from source and their source-relative links break after publishing, do not rewrite the whole doc just to fix links. Prefer tiny compatibility shims in the published skill folder.
 
-## 5. Does The Manifest Declare The Output?
+## 6. Does The Manifest Declare The Output?
 
 Before sync passes, the manifest should declare:
 
@@ -64,7 +77,7 @@ Before sync passes, the manifest should declare:
 - Denied sensitive paths.
 - Shared-surface ownership, if applicable.
 
-## 6. What Must Be Audited?
+## 7. What Must Be Audited?
 
 At minimum, audit for:
 
