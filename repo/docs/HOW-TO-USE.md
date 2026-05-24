@@ -91,10 +91,8 @@ For Antigravity, copy or symlink the whole skill folder into one of these locati
 
 - Workspace-level: `<workspace-root>/.agents/skills/<skill-name>/SKILL.md`.
 - Global Antigravity: `$HOME/.gemini/antigravity/skills/<skill-name>/SKILL.md`.
-- Antigravity CLI / Gemini CLI shared global: `$HOME/.gemini/skills/<skill-name>/SKILL.md`.
-- Legacy workspace-level: `<workspace-root>/.agent/skills/<skill-name>/SKILL.md`.
 
-Prefer `.agents/skills` for workspace installs; `.agent/skills` is listed only for backward compatibility. Use `GEMINI.md` or the configured context file for always-on Antigravity instructions.
+Use `GEMINI.md` or the configured context file for always-on Antigravity instructions.
 
 `skills/**/SKILL.md` files are published toolkit surfaces. If a generated notice is present, update the source path named in that notice and run `node repo/scripts/sync-toolkit-projects.cjs --write`. Directly maintained `linked` skills should be rare and justified in the related project manifest.
 

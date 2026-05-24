@@ -127,12 +127,15 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /Use `AGENTS\.md`, `AGENTS\.override\.md`, or the configured OpenCode rules file/);
   assert.match(howToUse, /Workspace-level: `<workspace-root>\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
   assert.match(howToUse, /Global Antigravity: `\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(howToUse, /Antigravity CLI \/ Gemini CLI shared global: `\$HOME\/\.gemini\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(howToUse, /Legacy workspace-level: `<workspace-root>\/\.agent\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.doesNotMatch(howToUse, /\$HOME\/\.gemini\/skills\/<skill-name>\/SKILL\.md/);
+  assert.doesNotMatch(howToUse, /<workspace-root>\/\.agent\/skills\/<skill-name>\/SKILL\.md/);
   assert.match(howToUse, /Use `GEMINI\.md` or the configured context file/);
   assert.match(readme, /`<repo>\/\.claude\/skills\/<skill-name>\/`/);
   assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`/);
   assert.match(readme, /`<workspace-root>\/\.agents\/skills\/<skill-name>\/`/);
+  assert.match(readme, /`\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\/`/);
+  assert.doesNotMatch(readme, /\$HOME\/\.gemini\/skills\/<skill-name>\//);
+  assert.doesNotMatch(readme, /<workspace-root>\/\.agent\/skills\/<skill-name>\//);
   assert.match(howToUse, /\[OpenCode reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/opencode\.md\)/);
   assert.match(howToUse, /\[Antigravity reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/antigravity\.md\)/);
 });
