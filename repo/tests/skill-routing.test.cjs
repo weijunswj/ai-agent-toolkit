@@ -80,17 +80,33 @@ test('toolkit skill routing covers current skill folders or documents omissions'
   }
 });
 
-test('toolkit skill routing documents current Codex skill discovery semantics', () => {
+test('toolkit skill routing stays routing-only', () => {
   const routing = readText(routingPartial);
 
-  assert.match(routing, /`AGENTS\.md`, `CLAUDE\.md`, and `GEMINI\.md` are always-on agent instruction files/);
-  assert.match(routing, /Codex Skills are on-demand directories/);
-  assert.match(routing, /Codex initially sees each skill's name, description, and file path/);
-  assert.match(routing, /Explicit Codex invocation uses `\/skills` or `\$skill-name`/);
-  assert.match(routing, /Repo-level Codex skill: `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(routing, /User-level Codex skill: `\$HOME\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(routing, /Admin-level Codex skill: `\/etc\/codex\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(routing, /Symlinked skill folders are acceptable/);
-  assert.match(routing, /`~\/\.codex\/config\.toml` is for Codex configuration/);
-  assert.match(routing, /not the main skill install surface/);
+  assert.match(routing, /Use the skill name, description, and local files to decide whether a skill applies/);
+  assert.doesNotMatch(routing, /Codex Install And Discovery/);
+  assert.doesNotMatch(routing, /Repo-level Codex skill/);
+  assert.doesNotMatch(routing, /User-level Codex skill/);
+  assert.doesNotMatch(routing, /Admin-level Codex skill/);
+  assert.doesNotMatch(routing, /`~\/\.codex\/config\.toml`/);
+  assert.doesNotMatch(routing, /`\/skills`/);
+  assert.doesNotMatch(routing, /`\$skill-name`/);
+});
+
+test('human setup docs cover platform-specific skill and rule setup fairly', () => {
+  const howToUse = readText(path.join(repoRoot, 'repo', 'docs', 'HOW-TO-USE.md'));
+
+  for (const heading of ['Codex Setup', 'Claude Code Setup', 'OpenCode Setup', 'Antigravity Setup']) {
+    assert.match(howToUse, new RegExp(`^## ${heading}$`, 'm'), heading);
+  }
+
+  assert.match(howToUse, /Repo-level: `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(howToUse, /User-level: `\$HOME\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(howToUse, /Admin-level: `\/etc\/codex\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(howToUse, /`~\/\.codex\/config\.toml` is for Codex configuration/);
+  assert.match(howToUse, /Use `CLAUDE\.md`, `CLAUDE\.local\.md`, or `\.claude\/rules\/`/);
+  assert.match(howToUse, /Use `AGENTS\.md`, `AGENTS\.override\.md`, or the configured OpenCode rules file/);
+  assert.match(howToUse, /Use `GEMINI\.md` or the configured context file/);
+  assert.match(howToUse, /\[OpenCode reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/opencode\.md\)/);
+  assert.match(howToUse, /\[Antigravity reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/antigravity\.md\)/);
 });

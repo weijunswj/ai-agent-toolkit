@@ -45,7 +45,7 @@ Use installed skills only when they clearly match the task and improve correctne
 ## Skill Routing Maintenance
 
 - When adding, removing, renaming, or materially changing a skill under `skills/**`, update `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`.
-- When adding, removing, renaming, or materially changing a project module that publishes a skill, update the routing table if that skill should be invokable by Codex or other agents.
+- When adding, removing, renaming, or materially changing a project module that publishes a skill, update the routing table if that skill should be invokable by supported agents.
 - When changing skill names, `SKILL.md` frontmatter, or descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, the routing partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
 - When a new skill should not be auto-routed, document why it is intentionally omitted from routing.
 - Do not let the routing table become stale relative to current `skills/*/SKILL.md`.

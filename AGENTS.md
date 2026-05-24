@@ -46,7 +46,7 @@ This repo has a source layer and a published layer.
 - If changing preserved source, edit `_projects/**/_main/`.
 - If adding or moving a generated output, update the relevant `toolkit.project.json` recipe and `writes.allowed`.
 - If adding, removing, renaming, or materially changing a skill under `skills/**`, update `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`.
-- If adding, removing, renaming, or materially changing a project module that publishes a skill, update the toolkit skill-routing table when that skill should be invokable by Codex or other agents.
+- If adding, removing, renaming, or materially changing a project module that publishes a skill, update the toolkit skill-routing table when that skill should be invokable by supported agents.
 - If changing skill names, `SKILL.md` frontmatter, or skill descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, the toolkit skill-routing source partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
 - If a new skill should not be auto-routed, document why it is intentionally omitted in the toolkit skill-routing source partial.
 - Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
@@ -79,7 +79,7 @@ When adding a new project module or changing a published skill/MCP surface:
 
 - Treat `_projects/**/_main/**` as preserved source/provenance.
 - Keep `SKILL.md` concise, but keep required runtime instructions local inside the copied skill folder.
-- Decide whether the project publishes a Codex-usable skill, whether that skill belongs in toolkit skill routing, and whether the `SKILL.md` description is specific enough for implicit Codex invocation.
+- Decide whether the project publishes an agent-usable skill, whether that skill belongs in toolkit skill routing, and whether the `SKILL.md` description is specific enough for implicit invocation where supported.
 - If the project publishes a skill, update README/registry/routing docs as applicable, regenerate generated AGENTS/CLAUDE/GEMINI equivalents, or document why the skill is intentionally omitted from routing.
 - Do not replace full working docs, prompts, templates, setup guides, troubleshooting notes, or examples with lossy summaries.
 - Use deterministic recipes in `toolkit.project.json`: `copy`, `extract`, `concat`, `curated`, `json`, or rare justified `linked`.

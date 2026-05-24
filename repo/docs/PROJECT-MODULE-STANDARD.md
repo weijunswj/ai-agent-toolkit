@@ -90,9 +90,9 @@ Skill-specific templates, references, helper scripts, and pack manifests should 
 
 When a project module creates or materially changes a skill, decide and document:
 
-- Does this publish a Codex-usable skill folder with `SKILL.md` plus any needed local support files?
-- Should the skill be listed in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md` for Codex or other agent routing?
-- Does the `SKILL.md` description clearly support implicit Codex invocation?
+- Does this publish an agent-usable skill folder with `SKILL.md` plus any needed local support files?
+- Should the skill be listed in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md` for supported agent routing?
+- Does the `SKILL.md` description clearly support implicit invocation where supported?
 - Does the skill need examples, references, templates, tools, assets, or pack manifests inside the skill folder?
 - Do README skill tables, the registry source that publishes `mcp/registry/skills.registry.json`, and toolkit skill-routing need updates?
 - What validation proves the source and generated outputs stayed aligned?

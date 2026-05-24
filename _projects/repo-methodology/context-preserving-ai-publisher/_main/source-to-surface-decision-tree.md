@@ -27,9 +27,9 @@ Good adapter examples:
 
 When creating or materially changing a skill, decide:
 
-- Does this publish a Codex-usable skill folder with `SKILL.md`?
-- Should the skill be listed in the repo's skill-routing guidance for Codex or other agents?
-- Does the `SKILL.md` description clearly support implicit Codex invocation?
+- Does this publish an agent-usable skill folder with `SKILL.md`?
+- Should the skill be listed in the repo's skill-routing guidance for supported agents?
+- Does the `SKILL.md` description clearly support implicit invocation where supported?
 - Does the skill need local examples, references, templates, tools, assets, or pack manifests inside the skill folder?
 - Do README skill tables, registry metadata, or routing docs need updates?
 - What validation proves the source and generated output stayed aligned?

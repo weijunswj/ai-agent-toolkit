@@ -12,7 +12,7 @@
 
 ## Skill Routing Decision
 
-- Codex-usable skill: `<yes/no>`.
+- Agent-usable skill: `<yes/no>`.
 - Listed in toolkit skill routing: `<yes/no>`.
 - If omitted from routing, reason: `<short reason>`.
 - `SKILL.md` description supports implicit invocation: `<yes/no>`.

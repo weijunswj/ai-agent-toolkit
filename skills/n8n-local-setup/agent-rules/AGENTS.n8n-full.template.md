@@ -375,26 +375,7 @@ Keep the final response concise but complete.
 
 Use installed skills only when they clearly match the task and improve correctness.
 
-These rules can live inside always-on instruction files such as `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`. They are routing guidance for those agents; they are not themselves a Codex Skill.
-
-## Always-On Rules Vs Codex Skills
-
-- `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are always-on agent instruction files after they are installed in a supported repo or user location.
-- Codex Skills are on-demand directories. Each skill directory contains `SKILL.md` with `name` and `description` frontmatter, plus optional local `references/`, `examples/`, `templates/`, `tools/`, `assets/`, or `packs/`.
-- Codex initially sees each skill's name, description, and file path. It loads the full `SKILL.md` only when a skill is selected.
-- Explicit Codex invocation uses `/skills` or `$skill-name`.
-- Implicit Codex invocation depends on a clear match between the user request and the skill `description`.
-
-## Codex Install And Discovery
-
-- Repo-level Codex skill: `<repo>/.agents/skills/<skill-name>/SKILL.md`.
-- User-level Codex skill: `$HOME/.agents/skills/<skill-name>/SKILL.md`.
-- Admin-level Codex skill: `/etc/codex/skills/<skill-name>/SKILL.md`.
-- Codex scans repo skills from `.agents/skills` from the current working directory up to the repo root.
-- Symlinked skill folders are acceptable.
-- `~/.codex/config.toml` is for Codex configuration, including disabling skills by `SKILL.md` path. It is not the main skill install surface.
-
-When using this toolkit with Codex, copy or symlink the whole `skills/<skill-name>/` folder into one of the Codex skill locations above. Do not copy only `SKILL.md`.
+Use the skill name, description, and local files to decide whether a skill applies. Load the full skill only when the task matches its scope.
 
 ## Current Toolkit Skill Routing
 
@@ -417,7 +398,7 @@ None currently. If a skill should not be auto-routed, list it here as `skill-nam
 ## Routing Maintenance
 
 - When adding, removing, renaming, or materially changing a skill under `skills/**`, update this routing table.
-- When adding, removing, renaming, or materially changing a project module that publishes a skill, update this routing table if that skill should be invokable by Codex or other agents.
+- When adding, removing, renaming, or materially changing a project module that publishes a skill, update this routing table if that skill should be invokable by supported agents.
 - When changing skill names, `SKILL.md` frontmatter, or skill descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, this routing partial, and generated `AGENTS`/`CLAUDE`/`GEMINI` equivalents.
 - When a new skill should not be auto-routed, document why it is intentionally omitted.
 - Do not let this routing table become stale relative to current `skills/*/SKILL.md`.
