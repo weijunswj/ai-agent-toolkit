@@ -5,7 +5,7 @@ param(
   [ValidateSet("Fail", "Skip", "Report")]
   [string]$MissingLiveMode = "Fail",
   [string]$Container = "n8n",
-  [string]$ExportDir = ".tmp\n8n-live-exports",
+  [string]$ExportDir = ".tmp/n8n-live-exports",
   [string]$BindingsFile = ".n8n-local\n8n-credential-bindings.json",
   [switch]$IncludeArchived,
   [switch]$PublishedOnly,
@@ -191,10 +191,86 @@ function Write-Utf8NoBomText($Path, $Text) {
   [System.IO.File]::WriteAllText($Path, [string]$Text, $utf8NoBom)
 }
 
+function Get-PathStringComparison {
+  if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+    return [System.StringComparison]::OrdinalIgnoreCase
+  }
+
+  return [System.StringComparison]::Ordinal
+}
+
+function Get-NormalizedFullPath($Path) {
+  $fullPath = [System.IO.Path]::GetFullPath($Path)
+  $trimmedPath = $fullPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  if ([string]::IsNullOrWhiteSpace($trimmedPath)) {
+    return $fullPath
+  }
+
+  return $trimmedPath
+}
+
+function Test-PathIsStrictChild($Path, $ParentPath) {
+  $resolvedPath = Get-NormalizedFullPath $Path
+  $resolvedParentPath = Get-NormalizedFullPath $ParentPath
+  $comparison = Get-PathStringComparison
+
+  if ($resolvedPath.Equals($resolvedParentPath, $comparison)) {
+    return $false
+  }
+
+  $parentPrefix = $resolvedParentPath + [System.IO.Path]::DirectorySeparatorChar
+  return $resolvedPath.StartsWith($parentPrefix, $comparison)
+}
+
+function Test-PathItemIsUnsafeLink($Item) {
+  if ($null -eq $Item) {
+    return $false
+  }
+
+  if (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    return $true
+  }
+
+  $linkTypeProperty = $Item.PSObject.Properties["LinkType"]
+  if ($linkTypeProperty -and -not [string]::IsNullOrWhiteSpace([string]$linkTypeProperty.Value)) {
+    return $true
+  }
+
+  return $false
+}
+
+function Assert-RunDirectoryPathHasNoUnsafeLinks($Path, $TmpRoot) {
+  $resolvedPath = Get-NormalizedFullPath $Path
+  $resolvedTmpRoot = Get-NormalizedFullPath $TmpRoot
+  $comparison = Get-PathStringComparison
+  $current = $resolvedPath
+
+  while (-not [string]::IsNullOrWhiteSpace($current)) {
+    if (Test-Path -LiteralPath $current) {
+      $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+      if (Test-PathItemIsUnsafeLink $item) {
+        throw "Refusing to clear unsafe run directory because a path component is a symlink, junction, or reparse point: $current"
+      }
+    }
+
+    if ($current.Equals($resolvedTmpRoot, $comparison)) {
+      return
+    }
+
+    $parent = Split-Path -Parent $current
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent.Equals($current, $comparison)) {
+      break
+    }
+    $current = Get-NormalizedFullPath $parent
+  }
+
+  throw "Refusing to clear unsafe run directory because its path components could not be verified under .tmp/: $resolvedPath"
+}
+
 function Get-DisplayPath($Path) {
-  $resolvedPath = [System.IO.Path]::GetFullPath($Path)
-  $rootPrefix = $RepoRoot.TrimEnd('\') + '\'
-  if ($resolvedPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+  $resolvedPath = Get-NormalizedFullPath $Path
+  $rootPrefix = (Get-NormalizedFullPath $RepoRoot) + [System.IO.Path]::DirectorySeparatorChar
+  if ($resolvedPath.StartsWith($rootPrefix, (Get-PathStringComparison))) {
     return $resolvedPath.Substring($rootPrefix.Length)
   }
 
@@ -324,13 +400,13 @@ function Invoke-ProjectWorkflowHook($HookName, [hashtable]$Context) {
 }
 
 function Initialize-RunDirectory($Path) {
-  $resolvedPath = [System.IO.Path]::GetFullPath($Path)
-  $tmpRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ".tmp")).TrimEnd('\')
-  $tmpPrefix = $tmpRoot + '\'
-  $resolvedTrimmed = $resolvedPath.TrimEnd('\')
-  if ($resolvedTrimmed -eq $tmpRoot -or -not $resolvedPath.StartsWith($tmpPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+  $resolvedPath = Get-NormalizedFullPath $Path
+  $tmpRoot = Get-NormalizedFullPath (Join-Path $RepoRoot ".tmp")
+  if (-not (Test-PathIsStrictChild $resolvedPath $tmpRoot)) {
     throw "Refusing to clear unsafe run directory. Clearable run directories must be inside .tmp/ and must not be .tmp itself: $resolvedPath"
   }
+
+  Assert-RunDirectoryPathHasNoUnsafeLinks $resolvedPath $tmpRoot
 
   if (Test-Path -LiteralPath $resolvedPath) {
     Remove-Item -LiteralPath $resolvedPath -Recurse -Force

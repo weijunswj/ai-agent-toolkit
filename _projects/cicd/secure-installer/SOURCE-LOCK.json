@@ -46,7 +46,7 @@
       "source_path": "templates/n8n/export-n8n-workflows-live.ps1",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/export-n8n-workflows-live.ps1",
       "source_blob_sha": "7cef2a3aaa3a60f66fe4ee6c83055c459be56f65",
-      "notes": "Toolkit-adapted after migration to stay aligned with the n8n workflow-toolkit helper, make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration, refuse unresolved or filesystem-root repo-root fallback so .tmp and .n8n-local state is not created under helper folders or drive roots, and provide colored section/status output with clean failure reporting."
+      "notes": "Toolkit-adapted after migration to stay aligned with the n8n workflow-toolkit helper, make project-local workflow hook autoload opt-in via N8N_WORKFLOW_HOOK_AUTOLOAD while preserving explicit N8N_WORKFLOW_HOOK_SCRIPT configuration, use separator-aware strict child-path checks so clearable run directories must resolve under .tmp on Windows and non-Windows PowerShell hosts, reject symlink, junction, and reparse-point run-directory components before recursive export staging cleanup, refuse unresolved or filesystem-root repo-root fallback so .tmp and .n8n-local state is not created under helper folders or drive roots, and provide colored section/status output with clean failure reporting."
     },
     {
       "mode": "adapted",

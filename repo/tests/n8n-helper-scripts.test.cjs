@@ -310,6 +310,78 @@ Write-Output "PRESERVED=nested outside target"
   });
 }
 
+function exportDirDefaultFromHelper(helperScriptPath) {
+  const match = readText(helperScriptPath).match(/\[string\]\$ExportDir = "([^"]+)"/);
+  assert.ok(match, `${helperScriptPath}: ExportDir default not found`);
+  return match[1];
+}
+
+function runExportDefaultRunDirectoryHarness(shell, helperScriptPath) {
+  const root = tempDir();
+  const exportDir = exportDirDefaultFromHelper(helperScriptPath);
+  const expectedDir = path.join(root, '.tmp', 'n8n-live-exports');
+
+  const harnessPath = path.join(root, 'export-default-run-directory-harness.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$RepoRoot = ${psSingleQuoted(root)}
+$ExportDir = ${psSingleQuoted(exportDir)}
+$sourceFile = ${psSingleQuoted(helperScriptPath)}
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($sourceFile, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) {
+  throw "Could not parse source helper: $($errors[0].Message)"
+}
+$functionNames = @(
+  "Get-PathStringComparison",
+  "Get-NormalizedFullPath",
+  "Test-PathIsStrictChild",
+  "Test-PathItemIsUnsafeLink",
+  "Assert-RunDirectoryPathHasNoUnsafeLinks",
+  "Initialize-RunDirectory"
+)
+$functions = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true)
+foreach ($function in $functions) {
+  Invoke-Expression $function.Extent.Text
+}
+if (-not (Get-Command Initialize-RunDirectory -ErrorAction SilentlyContinue)) {
+  throw "Initialize-RunDirectory not loaded"
+}
+
+$ExportDirPath = Join-Path $RepoRoot $ExportDir
+Initialize-RunDirectory $ExportDirPath
+
+$expected = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-exports"
+$comparison = Get-PathStringComparison
+$actualFull = Get-NormalizedFullPath $ExportDirPath
+$expectedFull = Get-NormalizedFullPath $expected
+if (-not $actualFull.Equals($expectedFull, $comparison)) {
+  throw "ExportDir default resolved to unexpected path: $actualFull"
+}
+if (-not (Test-Path -LiteralPath $expected -PathType Container)) {
+  throw "expected export staging directory was not created"
+}
+
+$literalBackslashPath = Join-Path $RepoRoot ".tmp\\n8n-live-exports"
+$literalBackslashFull = Get-NormalizedFullPath $literalBackslashPath
+if (-not $literalBackslashFull.Equals($expectedFull, $comparison) -and (Test-Path -LiteralPath $literalBackslashPath)) {
+  throw "literal backslash export staging directory was created: $literalBackslashFull"
+}
+
+Write-Output "EXPORT_DIR=$ExportDir"
+Write-Output "CREATED=.tmp/n8n-live-exports"
+`, 'utf8');
+
+  return spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+}
+
 function fakeMenuRepo(menuSourcePath) {
   const root = tempDir();
   const helperDir = path.join(root, 'helper-scripts');
@@ -1245,10 +1317,13 @@ test('import helper guards hooks, no-op imports, and prepared payload revalidati
   }
 });
 
-test('import helper run-directory safety is separator-aware and strictly under .tmp', () => {
+test('PowerShell n8n live helpers guard run-directory cleanup under .tmp', () => {
   for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
     ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
     ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
     ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
   ]) {
     const text = readText(filePath);
@@ -1258,8 +1333,12 @@ test('import helper run-directory safety is separator-aware and strictly under .
     assert.notEqual(initEnd, -1, `${label}: Initialize-RunDirectory block end not found`);
     const initializeBlock = text.slice(initStart, initEnd);
 
-    assert.match(text, /\[string\]\$PreparedDir = "\.tmp\/n8n-live-import"/, label);
-    assert.match(text, /\[string\]\$CredentialExportDir = "\.tmp\/n8n-live-credential-exports"/, label);
+    if (label.includes('import helper')) {
+      assert.match(text, /\[string\]\$PreparedDir = "\.tmp\/n8n-live-import"/, label);
+      assert.match(text, /\[string\]\$CredentialExportDir = "\.tmp\/n8n-live-credential-exports"/, label);
+    } else {
+      assert.match(text, /\[string\]\$ExportDir = "\.tmp\/n8n-live-exports"/, label);
+    }
     assert.match(text, /function Get-PathStringComparison/, label);
     assert.match(text, /function Get-NormalizedFullPath\(\$Path\)/, label);
     assert.match(text, /function Test-PathIsStrictChild\(\$Path, \$ParentPath\)/, label);
@@ -1274,11 +1353,30 @@ test('import helper run-directory safety is separator-aware and strictly under .
   }
 });
 
-test('PowerShell import run-directory guard accepts only strict .tmp children', { skip: !findPowerShell() }, () => {
+test('PowerShell export helper default run directory resolves under .tmp', { skip: !findPowerShell() }, () => {
   const shell = findPowerShell();
   for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
+  ]) {
+    const result = runExportDefaultRunDirectoryHarness(shell, filePath);
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.equal(result.status, 0, `${label}\n${output}`);
+    assert.match(output, /EXPORT_DIR=\.tmp\/n8n-live-exports/, label);
+    assert.match(output, /CREATED=\.tmp\/n8n-live-exports/, label);
+  }
+});
+
+test('PowerShell live helper run-directory guard accepts only strict .tmp children', { skip: !findPowerShell() }, () => {
+  const shell = findPowerShell();
+  for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
     ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
     ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
     ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
   ]) {
     const result = runImportRunDirectoryHarness(shell, filePath);
@@ -1296,11 +1394,14 @@ test('PowerShell import run-directory guard accepts only strict .tmp children', 
   }
 });
 
-test('PowerShell import run-directory guard rejects link escapes under .tmp', { skip: !findPowerShell() }, (t) => {
+test('PowerShell live helper run-directory guard rejects link escapes under .tmp', { skip: !findPowerShell() }, (t) => {
   const shell = findPowerShell();
   for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
     ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
     ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
     ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
   ]) {
     const result = runImportRunDirectoryLinkHarness(shell, filePath);
