@@ -288,6 +288,34 @@ test('n8n workflow toolkit curated Markdown outputs carry generated notices', ()
   }
 });
 
+test('n8n helper docs distinguish non-live and live approval requirements', () => {
+  const docs = [
+    '_projects/n8n/workflow-toolkit/curated_output_for_ai/skills/n8n-workflow-helper-scripts/SKILL.md',
+    '_projects/n8n/workflow-toolkit/curated_output_for_ai/references/import-export-flow.md',
+    '_projects/n8n/workflow-toolkit/curated_output_for_ai/references/workflow-sync.md'
+  ].map(readText).join('\n');
+
+  for (const phrase of [
+    'validate repo workflow JSON',
+    'sanitise/check local candidate exports',
+    'compare/diff already-exported local files',
+    'prepare import payloads into ignored `.tmp/**`',
+    'check ignored `.n8n-local/**` credential-binding metadata',
+    'target repo',
+    'target n8n instance/environment',
+    'allowed operation',
+    'workflow names/set',
+    'forbidden operations',
+    'credential creation/update/delete/binding/replacement',
+    'ignored scratch folders contain commit-worthy changes',
+    'Yes, in this repo, run the n8n validation script only',
+    'Yes, in this repo, run the live export helper against my local n8n instance only',
+    'Yes, in this repo, run the prepared live import against my local n8n instance only'
+  ]) {
+    assert.match(docs, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), phrase);
+  }
+});
+
 test('global-error-handler source and generated template stay in sync', () => {
   assert.deepEqual(readJson(globalErrorHandlerPublishedPath), readJson(globalErrorHandlerSourcePath));
 });
