@@ -113,11 +113,16 @@ test('audit-published-surfaces preserves legitimate curated references and MCP s
   const reviewedReference = report.boundaryRecipes.find((entry) =>
     entry.path === 'skills/n8n-workflow-helper-scripts/references/workflow-sync.md'
   );
+  const importExportSafetyReference = report.boundaryRecipes.find((entry) =>
+    entry.path === 'skills/n8n-workflow-helper-scripts/references/import-export-flow.md'
+  );
   const mcpSpec = report.boundaryRecipes.find((entry) => entry.path === 'mcp/installer-mcp/SPEC.md');
 
   assert.equal(reviewedReference?.classification, 'curated_reference');
+  assert.equal(importExportSafetyReference?.classification, 'curated_reference');
   assert.equal(mcpSpec?.classification, 'main_full_fidelity');
   assert.equal(findings.includes('skills/n8n-workflow-helper-scripts/references/workflow-sync.md'), false);
+  assert.equal(findings.includes('skills/n8n-workflow-helper-scripts/references/import-export-flow.md'), false);
   assert.equal(findings.includes('mcp/installer-mcp/SPEC.md'), false);
 });
 
@@ -150,6 +155,15 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     assert.equal(entry?.classification, 'main_full_fidelity', outputPath);
   }
   assert.deepEqual(report.issues.boundaryRecipeFindings, []);
+});
+
+test('audit-published-surfaces does not baseline helper README import/export context', () => {
+  const report = runAuditJson();
+  const helperReadme = 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md';
+  const baseline = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'published-surface-audit-baseline.json'), 'utf8'));
+
+  assert.equal(report.issues.boundaryRecipeFindings.some((entry) => entry.path === helperReadme), false);
+  assert.equal((baseline.issueKeys?.boundaryRecipeFindings || []).some((entry) => entry.includes(helperReadme)), false);
 });
 
 test('audit-published-surfaces inspects curated directory contents', () => {
@@ -268,6 +282,87 @@ test('audit-published-surfaces rejects runtime-heavy reviewed references', () =>
   assert.ok(finding);
   assert.equal(finding.classification, 'suspicious_curated_runtime');
   assert.ok(finding.reasons.some((reason) => /runtime markers: .*Setup/.test(reason)));
+});
+
+test('audit-published-surfaces rejects reviewed templates with one import command', () => {
+  const cwd = tempCopy();
+  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
+    sourceRel: 'curated_output_for_ai/templates/new-import-template.md',
+    outputRel: 'skills/n8n-local-setup/templates/new-import-template.md',
+    sourceText: [
+      '# New Import Template',
+      '',
+      '## Import',
+      '',
+      '```bash',
+      'n8n import:workflow --input workflow.json',
+      '```',
+      ''
+    ].join('\n'),
+    metadata: {
+      notes: 'AI-facing reviewed template fixture.',
+      fidelity: 'reviewed_entrypoint'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  assert.ok(finding);
+  assert.equal(finding.classification, 'suspicious_curated_runtime');
+  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Import/.test(reason)));
+});
+
+test('audit-published-surfaces rejects reviewed templates with one export command', () => {
+  const cwd = tempCopy();
+  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
+    sourceRel: 'curated_output_for_ai/templates/new-export-template.md',
+    outputRel: 'skills/n8n-local-setup/templates/new-export-template.md',
+    sourceText: [
+      '# New Export Template',
+      '',
+      '## Export',
+      '',
+      '```bash',
+      'n8n export:workflow --id abc123 --output workflow.json',
+      '```',
+      ''
+    ].join('\n'),
+    metadata: {
+      notes: 'AI-facing reviewed template fixture.',
+      fidelity: 'reviewed_entrypoint'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  assert.ok(finding);
+  assert.equal(finding.classification, 'suspicious_curated_runtime');
+  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Export/.test(reason)));
+});
+
+test('audit-published-surfaces allows short reviewed template indexes without runtime commands', () => {
+  const cwd = tempCopy();
+  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
+    sourceRel: 'curated_output_for_ai/templates/short-index/README.md',
+    outputRel: 'skills/n8n-local-setup/templates/short-index/README.md',
+    sourceText: [
+      '# Short Template Index',
+      '',
+      '## Import',
+      '',
+      'Use this short index to find reviewed template material.',
+      ''
+    ].join('\n'),
+    metadata: {
+      notes: 'AI-facing reviewed template index fixture.',
+      fidelity: 'reviewed_entrypoint'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const entry = report.boundaryRecipes.find((item) => item.path === outputRel);
+  assert.equal(entry?.classification, 'curated_template_index');
+  assert.equal(report.issues.boundaryRecipeFindings.some((item) => item.path === outputRel), false);
 });
 
 test('audit-published-surfaces rejects runtime-heavy pack README exceptions', () => {
