@@ -312,6 +312,35 @@ test('audit-published-surfaces rejects reviewed templates with one import comman
   assert.ok(finding.reasons.some((reason) => /runtime markers: .*Import/.test(reason)));
 });
 
+test('audit-published-surfaces rejects reviewed import templates with fenced shell comments', () => {
+  const cwd = tempCopy();
+  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
+    sourceRel: 'curated_output_for_ai/templates/new-commented-import-template.md',
+    outputRel: 'skills/n8n-local-setup/templates/new-commented-import-template.md',
+    sourceText: [
+      '# New Commented Import Template',
+      '',
+      '## Import',
+      '',
+      '```bash',
+      '# run import',
+      'n8n import:workflow --input workflow.json',
+      '```',
+      ''
+    ].join('\n'),
+    metadata: {
+      notes: 'AI-facing reviewed template fixture.',
+      fidelity: 'reviewed_entrypoint'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  assert.ok(finding);
+  assert.equal(finding.classification, 'suspicious_curated_runtime');
+  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Import/.test(reason)));
+});
+
 test('audit-published-surfaces rejects reviewed templates with one export command', () => {
   const cwd = tempCopy();
   const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
@@ -323,6 +352,35 @@ test('audit-published-surfaces rejects reviewed templates with one export comman
       '## Export',
       '',
       '```bash',
+      'n8n export:workflow --id abc123 --output workflow.json',
+      '```',
+      ''
+    ].join('\n'),
+    metadata: {
+      notes: 'AI-facing reviewed template fixture.',
+      fidelity: 'reviewed_entrypoint'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
+  assert.ok(finding);
+  assert.equal(finding.classification, 'suspicious_curated_runtime');
+  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Export/.test(reason)));
+});
+
+test('audit-published-surfaces rejects reviewed export templates with fenced shell comments', () => {
+  const cwd = tempCopy();
+  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
+    sourceRel: 'curated_output_for_ai/templates/new-commented-export-template.md',
+    outputRel: 'skills/n8n-local-setup/templates/new-commented-export-template.md',
+    sourceText: [
+      '# New Commented Export Template',
+      '',
+      '## Export',
+      '',
+      '```bash',
+      '# run export',
       'n8n export:workflow --id abc123 --output workflow.json',
       '```',
       ''

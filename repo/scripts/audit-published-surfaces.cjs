@@ -457,18 +457,56 @@ function runtimeBoundaryMarkerHits(text) {
   return boundaryMarkerHits(text).filter((hit) => !safetyOnlyMarkers.has(hit));
 }
 
+function markdownHeadingsOutsideFences(text) {
+  const headings = [];
+  const lines = text.split(/(?<=\n)/);
+  let offset = 0;
+  let fence = null;
+
+  for (const line of lines) {
+    const lineStart = offset;
+    const cleanLine = line.replace(/\r?\n$/, '');
+    const fenceMatch = cleanLine.match(/^\s*(`{3,}|~{3,})/);
+
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      const fenceChar = marker[0];
+      if (!fence) {
+        fence = { char: fenceChar, length: marker.length };
+      } else if (fence.char === fenceChar && marker.length >= fence.length) {
+        fence = null;
+      }
+      offset += line.length;
+      continue;
+    }
+
+    if (!fence) {
+      const headingMatch = cleanLine.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+      if (headingMatch) {
+        headings.push({
+          level: headingMatch[1].length,
+          title: headingMatch[2].trim(),
+          index: lineStart,
+          end: lineStart + line.length
+        });
+      }
+    }
+
+    offset += line.length;
+  }
+
+  return headings;
+}
+
 function runtimeImportExportActionMarkersWithCommand(text) {
   const markers = [];
-  const headingPattern = /^(#{1,6})\s+(Import|Export)\s*$/gim;
-  let match;
-  while ((match = headingPattern.exec(text)) !== null) {
-    const level = match[1].length;
-    const marker = match[2].toLowerCase() === 'import' ? 'Import' : 'Export';
-    const sectionStart = headingPattern.lastIndex;
-    const nextHeadingPattern = new RegExp(`^#{1,${level}}\\s+`, 'gm');
-    nextHeadingPattern.lastIndex = sectionStart;
-    const nextHeading = nextHeadingPattern.exec(text);
-    const section = text.slice(sectionStart, nextHeading ? nextHeading.index : text.length);
+  const headings = markdownHeadingsOutsideFences(text);
+  for (const [index, heading] of headings.entries()) {
+    if (!/^(Import|Export)$/i.test(heading.title)) continue;
+
+    const marker = heading.title.toLowerCase() === 'import' ? 'Import' : 'Export';
+    const nextHeading = headings.slice(index + 1).find((candidate) => candidate.level <= heading.level);
+    const section = text.slice(heading.end, nextHeading ? nextHeading.index : text.length);
     if ((section.match(commandSnippetPattern) || []).length) markers.push(marker);
   }
   return [...new Set(markers)];
