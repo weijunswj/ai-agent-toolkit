@@ -360,27 +360,37 @@ Keep the final response concise but complete.
 
 Use installed skills only when they clearly match the task and improve correctness.
 
-## Frontend Design
+Use the skill name, description, and local files to decide whether a skill applies. Load the full skill only when the task matches its scope.
 
-Use `ui-ux-secure-frontend-design` for design systems, landing pages, SaaS dashboards, forms, accessibility, responsive polish, privacy-safe UX, and frontend implementation review.
+## Current Toolkit Skill Routing
 
-## Localhost
+| Skill | Use when the task involves |
+|---|---|
+| `ai-coding-agent-rules` | Installing or explaining generic execution-first agent rules, optional toolkit skill-routing, or safe merge plans for `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`. |
+| `n8n-local-setup` | Safe local n8n setup, MCP config selection, tunneling choices, or platform-specific n8n agent-rule setup. |
+| `n8n-workflow-helper-scripts` | Safe n8n workflow helper scripts, sanitizer helpers, import/export sync helpers, validation, comparison, live-import preparation, or repo/live workflow hygiene. |
+| `n8n-workflow-templates` | Selecting, reviewing, or copying public reusable n8n workflow JSON templates that are generic, inactive, credential-free, and safe for publication. |
+| `secure-cicd-installer` | Reviewing, planning, or applying secure CI/CD installer materials with approval-gated writes, safe status tracking, and no default command execution. |
+| `context-preserving-ai-publisher` | Creating or maintaining source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift docs. |
+| `windows-localhost-workflows` | Starting, relaunching, verifying, or troubleshooting localhost development workflows on Windows. |
+| `knowledge-index-updater` | Creating or updating a Notion/GitHub knowledge index, merging duplicates, categorising entries, maintaining stable source keys, or scheduling index checks. |
+| `ui-ux-secure-frontend-design` | Creating, reviewing, or improving frontend interfaces, design systems, landing pages, SaaS dashboards, forms, components, accessibility, responsive polish, privacy-safe UX, or implementation quality. |
 
-Use `windows-localhost-workflows` for starting, relaunching, verifying, and troubleshooting local Windows dev servers.
+## Intentionally Omitted Skills
 
-## n8n Workflow Toolkit
+None currently. If a skill should not be auto-routed, list it here as `skill-name`: reason.
 
-Use `n8n-workflow-helper-scripts` for safe n8n workflow sanitation, repo/live sync planning, credential binding hygiene, and import/export review.
+## Routing Maintenance
 
-Use `n8n-workflow-templates` for selecting, reviewing, or copying public generic inactive n8n workflow JSON templates.
-
-## Secure CI/CD
-
-Use secure CI/CD materials for GitHub Actions setup, CI security gates, safe deployment planning, and `CURRENT_CICD_STATUS.md` style tracking.
+- When adding, removing, renaming, or materially changing a skill under `skills/**`, update this routing table.
+- When adding, removing, renaming, or materially changing a project module that publishes a skill, update this routing table if that skill should be invokable by supported agents.
+- When changing skill names, `SKILL.md` frontmatter, or skill descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, this routing partial, and generated `AGENTS`/`CLAUDE`/`GEMINI` equivalents.
+- When a new skill should not be auto-routed, document why it is intentionally omitted.
+- Do not let this routing table become stale relative to current `skills/*/SKILL.md`.
 
 ## Safety
 
-Do not use a skill as permission to mutate live systems, write secrets, run live n8n actions, or install templates without review.
+Do not use a skill as permission to mutate live systems, write secrets, run live n8n actions, install templates without review, or skip explicit approval gates.
 
 # n8n MCP workflow rules
 

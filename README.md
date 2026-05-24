@@ -74,6 +74,21 @@ Required runtime context should live inside the skill folder in local files such
 | Windows Localhost Workflows | Start and verify a Windows localhost dev server instead of guessing commands or retrying failures. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
 | Knowledge Index Updater | Maintain a Notion/GitHub knowledge index with stable keys, clickable source links, and no duplicate rows. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |
 
+## Install Skills By Platform
+
+Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`.
+
+For deeper setup notes, use [How To Use: Use Skills Manually](repo/docs/HOW-TO-USE.md#use-skills-manually).
+
+| Platform | Skill folder install | Always-on rules | Setup references |
+|---|---|---|---|
+| Codex | Copy or symlink to `<repo>/.agents/skills/<skill-name>/`, `$HOME/.agents/skills/<skill-name>/`, or `/etc/codex/skills/<skill-name>/`. `~/.codex/config.toml` is for Codex config and disabling skills by path, not the main install folder. | [`AGENTS.with-toolkit-skills.template.md`](skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md) | [Codex platform reference](skills/n8n-local-setup/references/ai-agent-platforms/codex.md) and [Codex MCP config](skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md) |
+| Claude Code | Copy or symlink to `<repo>/.claude/skills/<skill-name>/` or `$HOME/.claude/skills/<skill-name>/`. | [`CLAUDE.with-toolkit-skills.template.md`](skills/ai-coding-agent-rules/CLAUDE.with-toolkit-skills.template.md) | [Claude Code platform reference](skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md) and [Claude Code MCP config](skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md) |
+| OpenCode | Copy or symlink to `<repo>/.opencode/skills/<skill-name>/`, `$HOME/.config/opencode/skills/<skill-name>/`, `<repo>/.claude/skills/<skill-name>/`, `$HOME/.claude/skills/<skill-name>/`, `<repo>/.agents/skills/<skill-name>/`, or `$HOME/.agents/skills/<skill-name>/`. | [`AGENTS.with-toolkit-skills.template.md`](skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md) | [OpenCode platform reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md) and [OpenCode MCP config](skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md) |
+| Antigravity | Copy or symlink to `<workspace-root>/.agents/skills/<skill-name>/` or `$HOME/.gemini/antigravity/skills/<skill-name>/`. | [`GEMINI.with-toolkit-skills.template.md`](skills/ai-coding-agent-rules/GEMINI.with-toolkit-skills.template.md) | [Antigravity platform reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md) and [Antigravity MCP config](skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md) |
+
+For n8n-specific workflow and MCP safety rules, install the matching generic rules template first, then merge the [n8n agent rules add-on](skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md).
+
 ## MCP
 
 The MCP area is currently MCP-ready registry, design/spec docs, and metadata. It does not ship a runnable MCP server, package, CLI, or executable MCP tools today.
@@ -151,6 +166,7 @@ This repo has a source layer and a published layer.
 - For third-party projects, `toolkit.project.json` version is the toolkit adaptation version only; scheduled source-watch tracking must read upstream repo, source ref, locked commit, `source_update_policy`, attribution requirement, allowlisted files, and exact blob pins from `SOURCE-LOCK.json`.
 - Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.
 - `skills/` contains copyable AI-agent skill folders. The whole skill folder is the install unit.
+- Toolkit skill-routing source lives in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`; keep it aligned with current `skills/*/SKILL.md` when skills or skill-publishing project modules change, and document any intentionally omitted skill.
 - `mcp/` contains MCP-ready registry, design/spec docs, metadata, and status documentation for future MCP usage.
 - Generated `skills/` and `mcp/` files must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
 - `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.

@@ -15,6 +15,7 @@ This repo has a source layer and a published layer.
 - For third-party projects, `toolkit.project.json` version is the toolkit adaptation version only; scheduled source-watch tracking must read upstream repo, source ref, locked commit, `source_update_policy`, attribution requirement, allowlisted files, and exact blob pins from `SOURCE-LOCK.json`.
 - Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.
 - `skills/` contains copyable AI-agent skill folders. The whole skill folder is the install unit.
+- Toolkit skill-routing source lives in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`; keep it aligned with current `skills/*/SKILL.md` when skills or skill-publishing project modules change, and document any intentionally omitted skill.
 - `mcp/` contains MCP-ready registry, design/spec docs, metadata, and status documentation for future MCP usage.
 - Generated `skills/` and `mcp/` files must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
 - `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
@@ -44,6 +45,11 @@ This repo has a source layer and a published layer.
 - If changing an internal skill, MCP doc, skill-local template, skill-local pack, or registry-backed MCP note, edit `_projects/**/curated_output_for_ai/` first, then run sync.
 - If changing preserved source, edit `_projects/**/_main/`.
 - If adding or moving a generated output, update the relevant `toolkit.project.json` recipe and `writes.allowed`.
+- If adding, removing, renaming, or materially changing a skill under `skills/**`, update `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`.
+- If adding, removing, renaming, or materially changing a project module that publishes a skill, update the toolkit skill-routing table when that skill should be invokable by supported agents.
+- If changing skill names, `SKILL.md` frontmatter, or skill descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, the toolkit skill-routing source partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
+- If a new skill should not be auto-routed, document why it is intentionally omitted in the toolkit skill-routing source partial.
+- Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
 - Do not generate curated files automatically from `_main`; curated content is reviewed source.
 - Do not weaken safety rules around credentials, `.env`, `.tmp`, `.n8n-local`, live n8n actions, approval, attribution, or local-only constraints.
 - Run sync, check, and relevant tests before reporting completion.
@@ -73,6 +79,8 @@ When adding a new project module or changing a published skill/MCP surface:
 
 - Treat `_projects/**/_main/**` as preserved source/provenance.
 - Keep `SKILL.md` concise, but keep required runtime instructions local inside the copied skill folder.
+- Decide whether the project publishes an agent-usable skill, whether that skill belongs in toolkit skill routing, and whether the `SKILL.md` description is specific enough for implicit invocation where supported.
+- If the project publishes a skill, update README/registry/routing docs as applicable, regenerate generated AGENTS/CLAUDE/GEMINI equivalents, or document why the skill is intentionally omitted from routing.
 - Do not replace full working docs, prompts, templates, setup guides, troubleshooting notes, or examples with lossy summaries.
 - Use deterministic recipes in `toolkit.project.json`: `copy`, `extract`, `concat`, `curated`, `json`, or rare justified `linked`.
 - If publishing a full source doc into a skill folder, prefer exact `copy` or `extract`.

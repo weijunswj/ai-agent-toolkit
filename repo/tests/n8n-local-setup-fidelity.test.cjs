@@ -125,6 +125,10 @@ test('n8n copied setup references use portable published baseline template links
   }
 
   assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/n8n/local-setup.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md/);
+  assert.match(
+    readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md'),
+    /\[skills\/ai-coding-agent-rules\/AGENTS\.template\.md\]\(\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md\)/
+  );
   assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/CLAUDE\.template\.md/);
   assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md/);
   assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/GEMINI\.template\.md/);

@@ -17,7 +17,7 @@ For full setup detail, use the local full-fidelity references and templates in t
 ## Local Routes
 
 - Use [local setup](../n8n/local-setup.md) for the full Windows local n8n and Codex setup guide.
-- Use `skills/ai-coding-agent-rules/AGENTS.template.md` for generic Codex agent rules. Copy or merge it into the target repo root as `AGENTS.md` only when the user explicitly wants Codex rules installed.
+- Use [skills/ai-coding-agent-rules/AGENTS.template.md](../../../ai-coding-agent-rules/AGENTS.template.md) for generic Codex agent rules. Copy or merge it into the target repo root as `AGENTS.md` only when the user explicitly wants Codex rules installed.
 - Use [n8n-mcp-rules.template.md](../../agent-rules/n8n-mcp-rules.template.md) as the n8n-specific add-on after the generic rules are installed.
 - Use [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md) for the full Codex MCP config template.
 - Restart Codex after changing MCP config, agent rules, or user environment variables.

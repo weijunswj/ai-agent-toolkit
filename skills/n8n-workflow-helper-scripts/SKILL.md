@@ -32,7 +32,7 @@ Use this instruction-only skill when the user wants to copy, review, adapt, or r
 
 - The task is unrelated to n8n workflow files or helper scripts.
 - The user asks only for actual reusable workflow JSON templates.
-- The request would run live n8n import/export without explicit current-turn confirmation.
+- The request would run live n8n actions without explicit current-turn confirmation.
 
 ## Rules
 
@@ -42,6 +42,28 @@ Use this instruction-only skill when the user wants to copy, review, adapt, or r
 - Do not commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, live import/export JSON, credentials, credential bindings, private keys, or `.env` files.
 - Keep consumer-repo workflow JSON inactive unless the user explicitly confirms activation in the target live instance.
 - Review workflow diffs before committing `n8n-workflows/*.json` in a consumer repo.
+
+## Approval Boundary
+
+After scoped user approval in a consumer repo, agents may run non-live local helper actions only for the approved repo and operation:
+
+- Validate repo workflow JSON.
+- Sanitise/check local candidate exports.
+- Compare/diff already-exported local files.
+- Prepare import payloads into ignored `.tmp/**`.
+- Check ignored `.n8n-local/**` credential-binding metadata.
+
+Non-live approval does not allow live n8n access, Docker, deployment, activation, credential changes, or source-watch actions. Never commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, credential bindings, live payloads, `.env`, or secrets.
+
+Live n8n actions require explicit current-turn approval naming the target repo, target n8n instance/environment, allowed operation, workflow names/set, and forbidden operations. Live-gated actions include live export/import/sync, activation/deactivation, publish/unpublish, archive/delete, execution, and credential creation/update/delete/binding/replacement.
+
+Stop and ask again if approval does not name the target repo; live approval does not name the target instance/environment or workflow set; the operation is broader than approved; credentials would be touched unexpectedly; activation, publish, delete, archive, or execution would happen unexpectedly; workflow matching is ambiguous; credential bindings are missing, stale, or ambiguous; or ignored scratch folders contain commit-worthy changes.
+
+## Approval Examples
+
+- Non-live: `Yes, in this repo, run the n8n validation script only. Do not run live import/export, Docker, activation, credential, or deployment actions.`
+- Live export: `Yes, in this repo, run the live export helper against my local n8n instance only. Export only these workflows: <names>. Do not import, activate, publish, delete, execute, or modify credentials.`
+- Live import: `Yes, in this repo, run the prepared live import against my local n8n instance only for these reviewed workflow files: <paths>. Do not activate, publish, delete, execute, or modify credentials.`
 
 ## References
 
