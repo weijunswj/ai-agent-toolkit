@@ -74,6 +74,21 @@ Required runtime context should live inside the skill folder in local files such
 | Windows Localhost Workflows | Start and verify a Windows localhost dev server instead of guessing commands or retrying failures. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
 | Knowledge Index Updater | Maintain a Notion/GitHub knowledge index with stable keys, clickable source links, and no duplicate rows. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |
 
+## Install Skills By Platform
+
+Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`.
+
+For deeper setup notes, use [How To Use: Use Skills Manually](repo/docs/HOW-TO-USE.md#use-skills-manually).
+
+| Platform | Skill folder install | Always-on rules | Setup references |
+|---|---|---|---|
+| Codex | Copy or symlink to `<repo>/.agents/skills/<skill-name>/`, `$HOME/.agents/skills/<skill-name>/`, or `/etc/codex/skills/<skill-name>/`. `~/.codex/config.toml` is for Codex config and disabling skills by path, not the main install folder. | [`AGENTS.template.md`](skills/ai-coding-agent-rules/AGENTS.template.md) | [Codex platform reference](skills/n8n-local-setup/references/ai-agent-platforms/codex.md) and [Codex MCP config](skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md) |
+| Claude Code | Copy the whole skill folder into the supported Claude Code skills folder for your setup. | [`CLAUDE.template.md`](skills/ai-coding-agent-rules/CLAUDE.template.md) | [Claude Code platform reference](skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md) and [Claude Code MCP config](skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md) |
+| OpenCode | Copy the whole skill folder into the supported OpenCode skill location for your setup. | [`AGENTS.template.md`](skills/ai-coding-agent-rules/AGENTS.template.md) | [OpenCode platform reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md) and [OpenCode MCP config](skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md) |
+| Antigravity | Copy the whole skill folder into the supported Antigravity or Gemini-style skill location for your setup. | [`GEMINI.template.md`](skills/ai-coding-agent-rules/GEMINI.template.md) | [Antigravity platform reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md) and [Antigravity MCP config](skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md) |
+
+For n8n-specific workflow and MCP safety rules, install the matching generic rules template first, then merge the [n8n agent rules add-on](skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md).
+
 ## MCP
 
 The MCP area is currently MCP-ready registry, design/spec docs, and metadata. It does not ship a runnable MCP server, package, CLI, or executable MCP tools today.

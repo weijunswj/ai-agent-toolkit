@@ -95,9 +95,16 @@ test('toolkit skill routing stays routing-only', () => {
 
 test('human setup docs cover platform-specific skill and rule setup fairly', () => {
   const howToUse = readText(path.join(repoRoot, 'repo', 'docs', 'HOW-TO-USE.md'));
+  const readme = readText(path.join(repoRoot, 'README.md'));
 
   for (const heading of ['Codex Setup', 'Claude Code Setup', 'OpenCode Setup', 'Antigravity Setup']) {
     assert.match(howToUse, new RegExp(`^## ${heading}$`, 'm'), heading);
+  }
+
+  assert.match(readme, /^## Install Skills By Platform$/m);
+  assert.match(readme, /\[How To Use: Use Skills Manually\]\(repo\/docs\/HOW-TO-USE\.md#use-skills-manually\)/);
+  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'Antigravity']) {
+    assert.match(readme, new RegExp(`\\| ${platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\|`), platform);
   }
 
   assert.match(howToUse, /Repo-level: `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
