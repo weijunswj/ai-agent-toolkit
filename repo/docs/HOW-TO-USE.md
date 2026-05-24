@@ -53,6 +53,8 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 
 Copy the whole skill folder. Do not copy only `SKILL.md`.
 
+### Codex
+
 For Codex, copy or symlink the whole skill folder into one of these locations:
 
 - Repo-level: `<repo>/.agents/skills/<skill-name>/SKILL.md`.
@@ -61,11 +63,38 @@ For Codex, copy or symlink the whole skill folder into one of these locations:
 
 Codex scans repo skills from `.agents/skills` from the current working directory up to the repo root. It initially sees each skill's name, description, and file path, then loads the full `SKILL.md` only when selected. Use `/skills` or `$skill-name` for explicit invocation; implicit invocation depends on the `description` frontmatter. `~/.codex/config.toml` is for Codex configuration, including disabling skills by `SKILL.md` path, not the main skill install surface.
 
-For Claude Code, copy the whole skill folder into that tool's supported skills folder. Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Code instructions.
+### Claude Code
 
-For OpenCode, copy the whole skill folder into the supported OpenCode skill location for your setup. Use `AGENTS.md`, `AGENTS.override.md`, or the configured OpenCode rules file for always-on OpenCode instructions.
+For Claude Code, copy or symlink the whole skill folder into one of these locations:
 
-For Antigravity, copy the whole skill folder into the supported Antigravity or Gemini-style skill location for your setup. Use `GEMINI.md` or the configured context file for always-on Antigravity instructions.
+- Project-level: `<repo>/.claude/skills/<skill-name>/SKILL.md`.
+- User-level: `$HOME/.claude/skills/<skill-name>/SKILL.md`.
+
+Claude Code also supports plugin-provided skills, but this toolkit's manual install path is the project or user skills folder above. Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Code instructions.
+
+### OpenCode
+
+For OpenCode, copy or symlink the whole skill folder into one of these locations:
+
+- Project OpenCode config: `<repo>/.opencode/skills/<skill-name>/SKILL.md`.
+- User OpenCode config: `$HOME/.config/opencode/skills/<skill-name>/SKILL.md`.
+- Project Claude-compatible: `<repo>/.claude/skills/<skill-name>/SKILL.md`.
+- User Claude-compatible: `$HOME/.claude/skills/<skill-name>/SKILL.md`.
+- Project agent-compatible: `<repo>/.agents/skills/<skill-name>/SKILL.md`.
+- User agent-compatible: `$HOME/.agents/skills/<skill-name>/SKILL.md`.
+
+OpenCode walks upward from the current working directory to the git worktree for project-local skill paths, and it also loads global skill definitions. Use `AGENTS.md`, `AGENTS.override.md`, or the configured OpenCode rules file for always-on OpenCode instructions.
+
+### Antigravity
+
+For Antigravity, copy or symlink the whole skill folder into one of these locations:
+
+- Workspace-level: `<workspace-root>/.agents/skills/<skill-name>/SKILL.md`.
+- Global Antigravity: `$HOME/.gemini/antigravity/skills/<skill-name>/SKILL.md`.
+- Antigravity CLI / Gemini CLI shared global: `$HOME/.gemini/skills/<skill-name>/SKILL.md`.
+- Legacy workspace-level: `<workspace-root>/.agent/skills/<skill-name>/SKILL.md`.
+
+Prefer `.agents/skills` for workspace installs; `.agent/skills` is listed only for backward compatibility. Use `GEMINI.md` or the configured context file for always-on Antigravity instructions.
 
 `skills/**/SKILL.md` files are published toolkit surfaces. If a generated notice is present, update the source path named in that notice and run `node repo/scripts/sync-toolkit-projects.cjs --write`. Directly maintained `linked` skills should be rare and justified in the related project manifest.
 
