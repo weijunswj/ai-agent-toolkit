@@ -316,6 +316,8 @@ test('global-error-handler safe context creates escaped, sheet-safe, and subject
   assert.match(jsCode, /function escapeHtml\(value\)/);
   assert.match(jsCode, /function safeSheetValue\(value\)/);
   assert.match(jsCode, /function safeSubjectText\(value, fallback\)/);
+  assert.match(jsCode, /subject_error_type:\s*safeSubjectText\(json\.error_type, 'workflow_error'\)/);
+  assert.match(jsCode, /subject_error_workflow_name:\s*safeSubjectText\(json\.error_workflow_name, ''\)/);
 
   for (const field of [...safeAlertFields, ...sheetAlertFields, ...subjectAlertFields]) {
     assert.match(jsCode, new RegExp(`\\b${field}\\b`), field);
