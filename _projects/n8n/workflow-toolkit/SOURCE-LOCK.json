@@ -105,11 +105,11 @@
       "notes": "Toolkit-adapted after migration to make project-local validation-rule autoload opt-in via N8N_WORKFLOW_VALIDATION_RULES_AUTOLOAD while preserving explicit N8N_WORKFLOW_VALIDATION_RULES configuration. Also adds explicit prepared-import validation mode for live import payload revalidation while keeping default directory-name and committed-template hygiene enforcement strict."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/global-error-handler/global-error-handler.template.json",
       "project_path": "_projects/n8n/workflow-toolkit/_main/workflow-templates/error-handling/global-error-handler.template.json",
       "source_blob_sha": "cc85e60bfa71371a6f255ee48dd3b4215729acc8",
-      "notes": "Exact template source rehomed under error-handling; global-error-handler remains the intended template name."
+      "notes": "Template source rehomed under error-handling, then toolkit-adapted to route alert outputs through escaped email fields, bounded subject fields, and formula-hardened sheet fields while preserving the generic global-error-handler template shape."
     }
   ]
 }

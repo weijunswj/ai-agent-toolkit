@@ -8,6 +8,48 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
+const globalErrorHandlerSourcePath =
+  '_projects/n8n/workflow-toolkit/_main/workflow-templates/error-handling/global-error-handler.template.json';
+const globalErrorHandlerPublishedPath =
+  'skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json';
+
+const unsafeAlertFields = [
+  'error_message',
+  'contact_id',
+  'error_type',
+  'error_workflow_name',
+  'last_node_executed',
+  'execution_id',
+  'execution_url',
+  'payload_json'
+];
+
+const safeAlertFields = [
+  'safe_error_message',
+  'safe_contact_id',
+  'safe_error_type',
+  'safe_error_workflow_name',
+  'safe_last_node_executed',
+  'safe_execution_id',
+  'safe_execution_url',
+  'safe_payload_json'
+];
+
+const sheetAlertFields = [
+  'sheet_error_message',
+  'sheet_contact_id',
+  'sheet_error_type',
+  'sheet_error_workflow_name',
+  'sheet_last_node_executed',
+  'sheet_execution_id',
+  'sheet_execution_url',
+  'sheet_payload_json'
+];
+
+const subjectAlertFields = [
+  'subject_error_type',
+  'subject_error_workflow_name'
+];
 
 const curatedMappings = [
   [
@@ -98,6 +140,12 @@ function readJson(relPath) {
 
 function readText(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/\r\n/g, '\n');
+}
+
+function getNode(workflow, nodeName) {
+  const node = workflow.nodes.find((entry) => entry.name === nodeName);
+  assert.ok(node, nodeName);
+  return node;
 }
 
 function workflowToolkitManifest() {
@@ -240,23 +288,92 @@ test('n8n workflow toolkit curated Markdown outputs carry generated notices', ()
   }
 });
 
-test('global-error-handler template remains inactive and credential-free', () => {
-  const workflow = readJson('skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json');
-  const serialized = JSON.stringify(workflow);
-  const credentialPaths = [];
+test('global-error-handler source and generated template stay in sync', () => {
+  assert.deepEqual(readJson(globalErrorHandlerPublishedPath), readJson(globalErrorHandlerSourcePath));
+});
 
-  function walk(value, trail = []) {
-    if (!value || typeof value !== 'object') return;
-    if (Object.prototype.hasOwnProperty.call(value, 'credentials')) {
-      credentialPaths.push([...trail, 'credentials'].join('.'));
-    }
-    for (const [key, child] of Object.entries(value)) walk(child, [...trail, key]);
+test('global-error-handler template routes alert outputs through safe context', () => {
+  const workflow = readJson(globalErrorHandlerPublishedPath);
+
+  getNode(workflow, 'Build Safe Error Alert Context');
+
+  assert.deepEqual(workflow.connections['Error Trigger'].main[0].map((entry) => entry.node), ['Build Error Row']);
+  assert.deepEqual(workflow.connections['Build Error Row'].main[0].map((entry) => entry.node), [
+    'Build Safe Error Alert Context'
+  ]);
+  assert.deepEqual(
+    workflow.connections['Build Safe Error Alert Context'].main[0].map((entry) => entry.node),
+    ['Append Error Row', 'Send Error Email', 'Has User Chat Failure Feedback']
+  );
+});
+
+test('global-error-handler safe context creates escaped, sheet-safe, and subject-safe fields', () => {
+  const workflow = readJson(globalErrorHandlerPublishedPath);
+  const safeContext = getNode(workflow, 'Build Safe Error Alert Context');
+  const jsCode = safeContext.parameters.jsCode;
+
+  assert.equal(safeContext.type, 'n8n-nodes-base.code');
+  assert.match(jsCode, /function escapeHtml\(value\)/);
+  assert.match(jsCode, /function safeSheetValue\(value\)/);
+  assert.match(jsCode, /function safeSubjectText\(value, fallback\)/);
+
+  for (const field of [...safeAlertFields, ...sheetAlertFields, ...subjectAlertFields]) {
+    assert.match(jsCode, new RegExp(`\\b${field}\\b`), field);
+  }
+});
+
+test('global-error-handler email alert uses only safe fields for unsafe values', () => {
+  const workflow = readJson(globalErrorHandlerPublishedPath);
+  const email = getNode(workflow, 'Send Error Email');
+  const html = email.parameters.html;
+  const subject = email.parameters.subject;
+
+  for (const field of unsafeAlertFields) {
+    assert.doesNotMatch(html, new RegExp(`\\$json\\.${field}\\b`), field);
+    assert.doesNotMatch(subject, new RegExp(`\\$json\\.${field}\\b`), field);
   }
 
-  walk(workflow);
-  assert.equal(workflow.name, 'Global Error Handler');
-  assert.equal(workflow.active, false);
-  assert.deepEqual(credentialPaths, []);
-  assert.equal(serialized.includes('webhookId'), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(workflow, 'id'), false);
+  for (const field of safeAlertFields.filter((field) => field !== 'safe_payload_json')) {
+    assert.match(html, new RegExp(`\\$json\\.${field}\\b`), field);
+  }
+
+  for (const field of subjectAlertFields) {
+    assert.match(subject, new RegExp(`\\$json\\.${field}\\b`), field);
+  }
+});
+
+test('global-error-handler sheet logging uses sheet-safe fields for unsafe values', () => {
+  const workflow = readJson(globalErrorHandlerPublishedPath);
+  const append = getNode(workflow, 'Append Error Row');
+  const columns = append.parameters.columns.value;
+
+  for (const field of unsafeAlertFields) {
+    assert.doesNotMatch(columns[field], new RegExp(`\\$json\\.${field}\\b`), field);
+    assert.match(columns[field], new RegExp(`\\$json\\.sheet_${field}\\b`), field);
+  }
+
+  assert.equal(append.parameters.options.cellFormat, 'RAW');
+});
+
+test('global-error-handler template remains inactive and credential-free', () => {
+  for (const relPath of [globalErrorHandlerSourcePath, globalErrorHandlerPublishedPath]) {
+    const workflow = readJson(relPath);
+    const serialized = JSON.stringify(workflow);
+    const credentialPaths = [];
+
+    function walk(value, trail = []) {
+      if (!value || typeof value !== 'object') return;
+      if (Object.prototype.hasOwnProperty.call(value, 'credentials')) {
+        credentialPaths.push([...trail, 'credentials'].join('.'));
+      }
+      for (const [key, child] of Object.entries(value)) walk(child, [...trail, key]);
+    }
+
+    walk(workflow);
+    assert.equal(workflow.name, 'Global Error Handler', relPath);
+    assert.equal(workflow.active, false, relPath);
+    assert.deepEqual(credentialPaths, [], relPath);
+    assert.equal(serialized.includes('webhookId'), false, relPath);
+    assert.equal(Object.prototype.hasOwnProperty.call(workflow, 'id'), false, relPath);
+  }
 });
