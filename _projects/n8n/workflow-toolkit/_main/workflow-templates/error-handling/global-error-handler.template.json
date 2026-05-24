@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "# TEMPLATE: Global Error Handler\n\nThis workflow is a reusable n8n error-handler template.\n\n\n### Main path:\nError Trigger -> Build Error Row -> Google Sheets log / Email alert / Optional Telegram user notice.\n\n\n### Optional example path:\nManual Trigger -> Build Failure Payload -> Stop And Error.\n\n- The manual branch is only a caller-example / testing reference. It is not part of the live Error Trigger path.\n\n\n### Before use:\n\n- Attach Google Sheets, SMTP, and Telegram credentials.\n- Replace placeholder Sheet ID, Sheet name, sender email, and recipient email.\n- Set this workflow as the Error Workflow in caller workflow settings.\n- Activate only after testing.",
+        "content": "# TEMPLATE: Global Error Handler\n\nThis workflow is a reusable n8n error-handler template.\n\n\n### Main path:\nError Trigger -> Build Error Row -> Build Safe Error Alert Context -> Google Sheets log / Email alert / Optional Telegram user notice.\n\n\n### Optional example path:\nManual Trigger -> Build Failure Payload -> Stop And Error.\n\n- The manual branch is only a caller-example / testing reference. It is not part of the live Error Trigger path.\n\n\n### Before use:\n\n- Attach Google Sheets, SMTP, and Telegram credentials.\n- Replace placeholder Sheet ID, Sheet name, sender email, and recipient email.\n- Set this workflow as the Error Workflow in caller workflow settings.\n- Activate only after testing.",
         "height": 448,
         "width": 768,
         "color": 7
@@ -69,7 +69,7 @@
     },
     {
       "parameters": {
-        "content": "# Error Intake\n\n- Starts when n8n sends an error payload through this workflow's Error Trigger.\n- Maps the incoming error payload into shared fields for sheet logging, email alerts, and optional Telegram feedback.\n- Captures execution details such as `execution_id`, `execution_url`, and `last_node_executed` when available.\n- Telegram feedback can be sent only when the payload includes both `contact_id` and `failure_feedback_enabled`.",
+        "content": "# Error Intake\n\n- Starts when n8n sends an error payload through this workflow's Error Trigger.\n- Maps the incoming error payload into shared fields for sheet logging, email alerts, and optional Telegram feedback.\n- Captures execution details such as `execution_id`, `execution_url`, and `last_node_executed` when available.\n- Builds escaped email fields, bounded subject fields, and formula-hardened sheet fields before alert outputs.\n- Telegram feedback can be sent only when the payload includes both `contact_id` and `failure_feedback_enabled`.",
         "height": 852,
         "width": 472,
         "color": 5
@@ -85,7 +85,7 @@
     },
     {
       "parameters": {
-        "content": "## Error Sheet Logging\n\n- Appends one row to the configured Google Sheet for each mapped error item.\n- Logs timestamp, source workflow, error type, error message, contact ID, execution details, payload JSON and failed node\n- Uses the upstream `error_type` value when available; this workflow does not classify error categories itself.\n- Sheet logging is configured to retry on failure, then continue without blocking the email or Telegram branches.\n\n**Required manual configuration:**\n\n- Append Error Row\n  - `documentId`: Google Sheet used for error logs.\n  - `sheetName`: Sheet tab used for error logs.",
+        "content": "## Error Sheet Logging\n\n- Appends one row to the configured Google Sheet for each mapped error item.\n- Logs timestamp, source workflow, error type, error message, contact ID, execution details, payload JSON and failed node.\n- Writes sheet-safe fields and uses RAW cell format to avoid formula evaluation.\n- Uses the upstream `error_type` value when available; this workflow does not classify error categories itself.\n- Sheet logging is configured to retry on failure, then continue without blocking the email or Telegram branches.\n\n**Required manual configuration:**\n\n- Append Error Row\n  - `documentId`: Google Sheet used for error logs.\n  - `sheetName`: Sheet tab used for error logs.",
         "height": 856,
         "width": 468,
         "color": 3
@@ -124,25 +124,25 @@
             {
               "id": "__SET_BUILD_ERROR_ROW_ID__",
               "name": "error_type",
-              "value": "={{ $json.execution?.error?.context?.metadata?.error_type || $json.error_type || $json.execution?.error?.name || $json.trigger?.error?.name || 'workflow_error' }}",
+              "value": "={{ $json.execution?.error?.name || $json.trigger?.error?.name || $json.execution?.error?.context?.metadata?.error_type || $json.error_type || 'workflow_error' }}",
               "type": "string"
             },
             {
               "id": "__SET_BUILD_ERROR_ROW_ID__",
               "name": "error_message",
-              "value": "={{ $json.execution?.error?.context?.metadata?.error_message || $json.error_message || $json.execution?.error?.message || $json.trigger?.error?.message || 'Unknown workflow error' }}",
+              "value": "={{ $json.execution?.error?.message || $json.trigger?.error?.message || $json.execution?.error?.context?.metadata?.error_message || $json.error_message || 'Unknown workflow error' }}",
               "type": "string"
             },
             {
               "id": "__SET_BUILD_ERROR_ROW_ID__",
               "name": "error_workflow_name",
-              "value": "={{ $json.execution?.error?.context?.metadata?.error_workflow_name || $json.error_workflow_name || $json.workflow?.name || 'Unknown workflow' }}",
+              "value": "={{ $json.workflow?.name || $json.execution?.error?.context?.metadata?.error_workflow_name || $json.error_workflow_name || 'Unknown workflow' }}",
               "type": "string"
             },
             {
               "id": "__SET_BUILD_ERROR_ROW_ID__",
               "name": "last_node_executed",
-              "value": "={{ $json.execution?.error?.context?.metadata?.last_node_executed || $json.last_node_executed || $json.execution?.lastNodeExecuted || $json.trigger?.error?.node?.name || '' }}",
+              "value": "={{ $json.execution?.lastNodeExecuted || $json.trigger?.error?.node?.name || $json.execution?.error?.context?.metadata?.last_node_executed || $json.last_node_executed || '' }}",
               "type": "string"
             },
             {
@@ -184,6 +184,20 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\n\nfunction toDisplayText(value) {\n  if (value === undefined || value === null) return '';\n  if (typeof value === 'string') return value;\n  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);\n  try {\n    return JSON.stringify(value);\n  } catch (error) {\n    return String(value);\n  }\n}\n\nfunction escapeHtml(value) {\n  return toDisplayText(value)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction safeSheetValue(value) {\n  const text = toDisplayText(value);\n  if (/^[=+\\-@]/.test(text)) return \"'\" + text;\n  return text;\n}\n\nfunction safeSubjectText(value, fallback) {\n  const fallbackText = toDisplayText(fallback || 'n8n workflow error')\n    .split('')\n    .map((char) => {\n      const code = char.charCodeAt(0);\n      return code < 32 || code === 127 ? ' ' : char;\n    })\n    .join('')\n    .replace(/[<>\"]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  const text = toDisplayText(value)\n    .split('')\n    .map((char) => {\n      const code = char.charCodeAt(0);\n      return code < 32 || code === 127 ? ' ' : char;\n    })\n    .join('')\n    .replace(/[<>\"]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  const normalized = text || fallbackText || 'n8n workflow error';\n  return normalized.length > 120 ? normalized.slice(0, 117).trimEnd() + '...' : normalized;\n}\n\nreturn items.map((item) => {\n  const json = item && item.json && typeof item.json === 'object' ? item.json : {};\n\n  return {\n    json: {\n      ...json,\n      safe_contact_id: escapeHtml(json.contact_id),\n      safe_error_type: escapeHtml(json.error_type),\n      safe_error_message: escapeHtml(json.error_message),\n      safe_error_workflow_name: escapeHtml(json.error_workflow_name),\n      safe_last_node_executed: escapeHtml(json.last_node_executed),\n      safe_execution_id: escapeHtml(json.execution_id),\n      safe_execution_url: escapeHtml(json.execution_url),\n      safe_payload_json: escapeHtml(json.payload_json),\n      sheet_contact_id: safeSheetValue(json.contact_id),\n      sheet_error_type: safeSheetValue(json.error_type),\n      sheet_error_message: safeSheetValue(json.error_message),\n      sheet_error_workflow_name: safeSheetValue(json.error_workflow_name),\n      sheet_last_node_executed: safeSheetValue(json.last_node_executed),\n      sheet_execution_id: safeSheetValue(json.execution_id),\n      sheet_execution_url: safeSheetValue(json.execution_url),\n      sheet_payload_json: safeSheetValue(json.payload_json),\n      subject_error_type: safeSubjectText(json.error_type, 'workflow_error'),\n      subject_error_workflow_name: safeSubjectText(json.error_workflow_name, ''),\n    },\n  };\n});"
+      },
+      "id": "77f0df90-cf45-4e5d-bc09-ae559f24290d",
+      "name": "Build Safe Error Alert Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        128
+      ]
+    },
+    {
+      "parameters": {
         "operation": "append",
         "documentId": {
           "__rl": true,
@@ -200,14 +214,14 @@
           "value": {
             "logged_date": "={{ $json.logged_date }}",
             "logged_time": "={{ $json.logged_time }}",
-            "contact_id": "={{ $json.contact_id }}",
-            "error_type": "={{ $json.error_type }}",
-            "error_message": "={{ $json.error_message }}",
-            "last_node_executed": "={{ $json.last_node_executed }}",
-            "execution_id": "={{ $json.execution_id }}",
-            "execution_url": "={{ $json.execution_url }}",
-            "payload_json": "={{ $json.payload_json }}",
-            "error_workflow_name": "={{ $json.error_workflow_name }}"
+            "contact_id": "={{ $json.sheet_contact_id }}",
+            "error_type": "={{ $json.sheet_error_type }}",
+            "error_message": "={{ $json.sheet_error_message }}",
+            "last_node_executed": "={{ $json.sheet_last_node_executed }}",
+            "execution_id": "={{ $json.sheet_execution_id }}",
+            "execution_url": "={{ $json.sheet_execution_url }}",
+            "payload_json": "={{ $json.sheet_payload_json }}",
+            "error_workflow_name": "={{ $json.sheet_error_workflow_name }}"
           },
           "matchingColumns": [],
           "schema": [
@@ -313,7 +327,9 @@
           "attemptToConvertTypes": false,
           "convertFieldsToString": false
         },
-        "options": {}
+        "options": {
+          "cellFormat": "RAW"
+        }
       },
       "id": "fcba6ca5-799f-4a7e-8e5c-3045553562d8",
       "name": "Append Error Row",
@@ -329,7 +345,7 @@
     },
     {
       "parameters": {
-        "content": "## Error Alert\n\n- Sends an email alert for each mapped error item from `Build Error Row`.\n- Uses the same mapped fields as the Google Sheet log and Telegram feedback condition.\n- Runs in parallel with sheet logging, so admin alerts do not depend on a successful sheet append.\n- Email sending is configured to continue on error.\n- Sends an optional Telegram failure notice when `contact_id` is present and `failure_feedback_enabled` is true.\n\n**Required manual configuration:**\n\n- Send Error Email\n  - `fromEmail`: Sender address for error alerts.\n  - `toEmail`: Recipient address for error alerts.",
+        "content": "## Error Alert\n\n- Sends an email alert for each mapped error item from `Build Safe Error Alert Context`.\n- Email HTML uses escaped `safe_*` fields and the subject uses bounded `subject_*` fields.\n- Runs in parallel with sheet logging, so admin alerts do not depend on a successful sheet append.\n- Email sending is configured to continue on error.\n- Sends an optional Telegram failure notice when `contact_id` is present and `failure_feedback_enabled` is true.\n\n**Required manual configuration:**\n\n- Send Error Email\n  - `fromEmail`: Sender address for error alerts.\n  - `toEmail`: Recipient address for error alerts.",
         "height": 856,
         "width": 464,
         "color": 4
@@ -347,8 +363,8 @@
       "parameters": {
         "fromEmail": "__SET_SEND_ERROR_EMAIL_EMAIL__",
         "toEmail": "__SET_SEND_ERROR_EMAIL_EMAIL__",
-        "subject": "=[ ERROR ALERT ] {{ $json.error_workflow_name || $json.error_type || 'n8n workflow error' }} / {{ $json.logged_date }} - {{ $json.logged_time }}",
-        "html": "=<p><strong>Error Time:</strong> {{ $json.logged_date }} - {{ $json.logged_time }}</p>\n<p><strong>Contact ID:</strong> {{ $json.contact_id }}</p>\n<p><strong>Error Type:</strong> {{ $json.error_type }}</p>\n<p><strong>Error Message:</strong> {{ $json.error_message }}</p>\n<p><strong>Last Node Executed:</strong> {{ $json.last_node_executed }}</p>\n<p><strong>Execution ID:</strong> {{ $json.execution_id }}</p>\n<p><strong>Execution URL:</strong> {{ $json.execution_url }}</p>",
+        "subject": "=[ ERROR ALERT ] {{ $json.subject_error_workflow_name || $json.subject_error_type || 'n8n workflow error' }} / {{ $json.logged_date }} - {{ $json.logged_time }}",
+        "html": "=<p><strong>Error Time:</strong> {{ $json.logged_date }} - {{ $json.logged_time }}</p>\n<p><strong>Contact ID:</strong> {{ $json.safe_contact_id }}</p>\n<p><strong>Error Type:</strong> {{ $json.safe_error_type }}</p>\n<p><strong>Error Message:</strong> {{ $json.safe_error_message }}</p>\n<p><strong>Last Node Executed:</strong> {{ $json.safe_last_node_executed }}</p>\n<p><strong>Execution ID:</strong> {{ $json.safe_execution_id }}</p>\n<p><strong>Execution URL:</strong> {{ $json.safe_execution_url }}</p>\n<p><strong>Source Workflow:</strong> {{ $json.safe_error_workflow_name }}</p>",
         "options": {
           "appendAttribution": false
         }
@@ -478,6 +494,17 @@
       ]
     },
     "Build Error Row": {
+      "main": [
+        [
+          {
+            "node": "Build Safe Error Alert Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Safe Error Alert Context": {
       "main": [
         [
           {
