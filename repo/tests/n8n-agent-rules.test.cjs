@@ -128,6 +128,45 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   }
 });
 
+test('n8n-agent-rules skill documents the adapter auto-check approval protocol', () => {
+  for (const relPath of [
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/n8n-agent-rules/SKILL.md',
+    'skills/n8n-agent-rules/SKILL.md'
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, /^## Adapter Auto-Check Protocol$/m, relPath);
+    assert.match(text, /When this skill is selected for an n8n task/i, relPath);
+    assert.match(text, /AGENTS\.md[\s\S]*CLAUDE\.md[\s\S]*GEMINI\.md/, relPath);
+    assert.match(text, /--dry-run/, relPath);
+    assert.match(text, /Show the dry-run result to the user/i, relPath);
+    assert.match(text, /explicit current-turn approval before running `--write`/i, relPath);
+    assert.match(text, /If approved, run the installer with `--write`/i, relPath);
+    assert.match(text, /If declined, continue the current n8n task/i, relPath);
+    assert.match(text, /future sessions\/tools may not auto-load the rules/i, relPath);
+    assert.match(text, /If no active instruction file exists/i, relPath);
+    assert.match(text, /`AGENTS\.md` for Codex\/OpenCode/i, relPath);
+    assert.match(text, /`CLAUDE\.md` for Claude Code/i, relPath);
+    assert.match(text, /`GEMINI\.md` for Gemini\/Antigravity/i, relPath);
+    assert.match(text, /\ball\b/i, relPath);
+    assert.match(text, /\bnone\b/i, relPath);
+  }
+});
+
+test('n8n-agent-rules README tells agents to dry-run then ask before write', () => {
+  for (const relPath of [
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/n8n-agent-rules/README.md',
+    'skills/n8n-agent-rules/README.md'
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, /agents should automatically check/i, relPath);
+    assert.match(text, /dry-run/i, relPath);
+    assert.match(text, /show the preview/i, relPath);
+    assert.match(text, /ask for explicit current-turn approval/i, relPath);
+    assert.match(text, /Do not silently auto-install adapters/i, relPath);
+    assert.match(text, /--target all/, relPath);
+  }
+});
+
 test('generic AI coding agent templates stay slim and obsolete heavy templates are absent', () => {
   for (const relPath of [
     'skills/ai-coding-agent-rules/AGENTS.template.md',
@@ -236,6 +275,57 @@ test('adapter installer dry-run reports changes and write mode is idempotent', (
   assert.equal(markerCount(installed, '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->'), 1);
   assert.equal(markerCount(installed, '<!-- END N8N-AGENT-RULES-ADAPTER -->'), 1);
   assert.match(installed, /\bn8n-agent-rules\b/);
+});
+
+test('adapter installer target all dry-run previews all adapters without writing', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-all-dry-run-');
+  fs.writeFileSync(path.join(workspace, 'CLAUDE.md'), '# Existing CLAUDE\n');
+
+  const result = runInstaller(workspace, ['--target', 'all', '--dry-run']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Would create AGENTS\.md/);
+  assert.match(result.stdout, /Would update CLAUDE\.md/);
+  assert.match(result.stdout, /Would create GEMINI\.md/);
+
+  assert.equal(fs.existsSync(path.join(workspace, 'AGENTS.md')), false);
+  assert.equal(fs.existsSync(path.join(workspace, 'GEMINI.md')), false);
+  const claude = fs.readFileSync(path.join(workspace, 'CLAUDE.md'), 'utf8');
+  assert.doesNotMatch(claude, /BEGIN N8N-AGENT-RULES-ADAPTER/);
+});
+
+test('adapter installer target all write creates and updates all adapters', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-all-write-');
+  fs.writeFileSync(path.join(workspace, 'CLAUDE.md'), '# Existing CLAUDE\n');
+
+  const result = runInstaller(workspace, ['--target', 'all', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Created AGENTS\.md/);
+  assert.match(result.stdout, /Updated CLAUDE\.md/);
+  assert.match(result.stdout, /Created GEMINI\.md/);
+
+  for (const activeFile of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
+    const text = fs.readFileSync(path.join(workspace, activeFile), 'utf8');
+    assert.equal(markerCount(text, beginMarker), 1, activeFile);
+    assert.equal(markerCount(text, endMarker), 1, activeFile);
+    assert.match(text, /\bn8n-agent-rules\b/, activeFile);
+  }
+});
+
+test('adapter installer target auto only patches existing active instruction files', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-auto-existing-only-');
+  fs.writeFileSync(path.join(workspace, 'AGENTS.md'), '# Existing AGENTS\n');
+
+  const result = runInstaller(workspace, ['--target', 'auto', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Updated AGENTS\.md/);
+  assert.doesNotMatch(result.stdout, /CLAUDE\.md/);
+  assert.doesNotMatch(result.stdout, /GEMINI\.md/);
+
+  assert.equal(fs.existsSync(path.join(workspace, 'CLAUDE.md')), false);
+  assert.equal(fs.existsSync(path.join(workspace, 'GEMINI.md')), false);
+  const agents = fs.readFileSync(path.join(workspace, 'AGENTS.md'), 'utf8');
+  assert.equal(markerCount(agents, beginMarker), 1);
+  assert.equal(markerCount(agents, endMarker), 1);
 });
 
 test('adapter installer refuses symlinked active instruction files without modifying the target', (t) => {

@@ -24,7 +24,7 @@ const targetDefinitions = {
 
 function usage() {
   return [
-    'Usage: node install-n8n-agent-adapter.cjs --dry-run|--write [--target auto|agents|claude|gemini] [--workspace <path>]',
+    'Usage: node install-n8n-agent-adapter.cjs --dry-run|--write [--target auto|all|agents|claude|gemini] [--workspace <path>]',
     '',
     'Use --dry-run to preview changes. Use --write only after explicit approval to patch active instruction files.'
   ].join('\n');
@@ -56,7 +56,7 @@ function parseArgs(argv) {
   if (args.dryRun === args.write) {
     throw new Error('Choose exactly one of --dry-run or --write.');
   }
-  if (!['auto', 'agents', 'claude', 'gemini'].includes(args.target)) {
+  if (!['auto', 'all', 'agents', 'claude', 'gemini'].includes(args.target)) {
     throw new Error(`Unsupported --target value: ${args.target}`);
   }
   if (!args.workspace) {
@@ -219,6 +219,7 @@ function replaceManagedBlock(existing, block, activeFile = 'active instruction f
 }
 
 function targetList(root, target) {
+  if (target === 'all') return Object.values(targetDefinitions);
   if (target !== 'auto') return [targetDefinitions[target]];
   return Object.values(targetDefinitions).filter((definition) => fs.existsSync(path.join(root, definition.activeFile)));
 }

@@ -11,23 +11,23 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -672,
-        -480
+        0,
+        -16
       ],
-      "id": "f1aded9c-4f42-41c1-9b7f-21a2d86ac465",
+      "id": "542d0275-ee34-45a4-bb14-63a34c298e41",
       "name": "Sticky Note"
     },
     {
       "parameters": {
         "jsCode": "const item = $input.first();\nconst input = item && item.json && typeof item.json === 'object' ? item.json : {};\n\nfunction firstNodeJson(name) {\n  try {\n    const item = $(name).first();\n    return item && item.json && typeof item.json === 'object' ? item.json : {};\n  } catch (error) {\n    return {};\n  }\n}\n\nfunction get(source, keys, fallback = null) {\n  for (const key of keys) {\n    const val = source[key];\n    if (val !== undefined && val !== null && val !== '') return val;\n  }\n  return fallback;\n}\n\nconst brief = firstNodeJson('Build Telegram Brief');\nconst workflow = $workflow;\nconst error = (input.error && typeof input.error === 'object') ? input.error : {};\n\nconst error_type = get(input, ['error_type'], get(error, ['error_type'], 'workflow_error'));\nconst error_message = get(input, ['error_message', 'error'], get(error, ['error_message', 'error'], null)) ?? 'unknown';\nconst last_node_executed = $prevNode.name ?? null;\nconst failure_feedback_enabled = get(input, ['failure_feedback_enabled'], get(error, ['failure_feedback_enabled'], get(brief, ['failure_feedback_enabled'], true)));\n\nconst contact_id = get(\n  brief,\n  ['contact_id', 'telegram_chat_id', 'chatId'],\n  get(input, ['contact_id', 'telegram_chat_id', 'chatId'], get(error, ['contact_id', 'telegram_chat_id', 'chatId'], null))\n);\n\nconst payload = {\n  contact_id,\n  error_type,\n  error_message,\n  error_workflow_name: workflow.name,\n  last_node_executed,\n  failure_feedback_enabled,\n};\n\npayload.payload_json = JSON.stringify(payload);\n\nreturn [{ json: payload }];"
       },
-      "id": "2460f001-3718-41b6-940b-01423346d42a",
+      "id": "da8fba2d-950a-4e41-8c1a-d97fcadd4f4e",
       "name": "Build Failure Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -352,
-        304
+        320,
+        768
       ]
     },
     {
@@ -36,13 +36,13 @@
         "height": 504,
         "width": 772
       },
-      "id": "e4f12bae-7026-44ed-9b37-da995702b7c5",
+      "id": "1dae5d82-d5cc-424d-be39-884ef0b8fe1a",
       "name": "Error Sheet Logging1",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -672,
-        -32
+        0,
+        432
       ]
     },
     {
@@ -50,53 +50,53 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -576,
-        304
+        96,
+        768
       ],
-      "id": "929ac432-5b7e-479c-bf1e-8424ae8ab760",
+      "id": "cab645be-11b7-4c15-a5a8-67319b3d917d",
       "name": "When clicking \"Execute workflow\""
     },
     {
       "parameters": {},
-      "id": "4db8161a-9db0-414c-9f8e-8b9981f1bce8",
+      "id": "f2d04896-a761-4560-a881-2fb241662d4a",
       "name": "Error Trigger",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
       "position": [
-        144,
-        128
+        816,
+        544
       ]
     },
     {
       "parameters": {
         "content": "# Error Intake\n\n- Starts when n8n sends an error payload through this workflow's Error Trigger.\n- Maps the incoming error payload into shared fields for sheet logging, email alerts, and optional Telegram feedback.\n- Captures execution details such as `execution_id`, `execution_url`, and `last_node_executed` when available.\n- Builds escaped email fields, bounded subject fields, and formula-hardened sheet fields before alert outputs.\n- Telegram feedback can be sent only when the payload includes both `contact_id` and `failure_feedback_enabled`.",
-        "height": 852,
-        "width": 472,
+        "height": 884,
+        "width": 696,
         "color": 5
       },
-      "id": "64052f58-a44b-43bd-82ec-f9be7beadfb7",
+      "id": "dcf2eb82-abe5-477a-8174-687180cf7aa4",
       "name": "Error Intake",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        96,
-        -432
+        768,
+        -16
       ]
     },
     {
       "parameters": {
         "content": "## Error Sheet Logging\n\n- Appends one row to the configured Google Sheet for each mapped error item.\n- Logs timestamp, source workflow, error type, error message, contact ID, execution details, payload JSON and failed node.\n- Writes sheet-safe fields and uses RAW cell format to avoid formula evaluation.\n- Uses the upstream `error_type` value when available; this workflow does not classify error categories itself.\n- Sheet logging is configured to retry on failure, then continue without blocking the email or Telegram branches.\n\n**Required manual configuration:**\n\n- Append Error Row\n  - `documentId`: Google Sheet used for error logs.\n  - `sheetName`: Sheet tab used for error logs.",
-        "height": 856,
-        "width": 468,
+        "height": 888,
+        "width": 404,
         "color": 3
       },
-      "id": "630988ff-5b40-4e41-868b-22711f90bd45",
+      "id": "fd1548d4-758d-45e5-ad3c-7639ccedea61",
       "name": "Error Sheet Logging",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        576,
-        -432
+        1472,
+        -16
       ]
     },
     {
@@ -173,27 +173,26 @@
         },
         "options": {}
       },
-      "id": "805a8f09-e750-4a46-8932-7136c99a7737",
+      "id": "98f57f58-c77f-4230-bc72-5a6a8a9c3f06",
       "name": "Build Error Row",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        368,
-        128
+        1040,
+        544
       ]
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
         "jsCode": "const items = $input.all();\n\nfunction toDisplayText(value) {\n  if (value === undefined || value === null) return '';\n  if (typeof value === 'string') return value;\n  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);\n  try {\n    return JSON.stringify(value);\n  } catch (error) {\n    return String(value);\n  }\n}\n\nfunction escapeHtml(value) {\n  return toDisplayText(value)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction safeSheetValue(value) {\n  const text = toDisplayText(value);\n  if (/^[=+\\-@]/.test(text)) return \"'\" + text;\n  return text;\n}\n\nfunction safeSubjectText(value, fallback) {\n  const fallbackText = toDisplayText(fallback || 'n8n workflow error')\n    .split('')\n    .map((char) => {\n      const code = char.charCodeAt(0);\n      return code < 32 || code === 127 ? ' ' : char;\n    })\n    .join('')\n    .replace(/[<>\"]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  const text = toDisplayText(value)\n    .split('')\n    .map((char) => {\n      const code = char.charCodeAt(0);\n      return code < 32 || code === 127 ? ' ' : char;\n    })\n    .join('')\n    .replace(/[<>\"]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  const normalized = text || fallbackText || 'n8n workflow error';\n  return normalized.length > 120 ? normalized.slice(0, 117).trimEnd() + '...' : normalized;\n}\n\nreturn items.map((item) => {\n  const json = item && item.json && typeof item.json === 'object' ? item.json : {};\n\n  return {\n    json: {\n      ...json,\n      safe_contact_id: escapeHtml(json.contact_id),\n      safe_error_type: escapeHtml(json.error_type),\n      safe_error_message: escapeHtml(json.error_message),\n      safe_error_workflow_name: escapeHtml(json.error_workflow_name),\n      safe_last_node_executed: escapeHtml(json.last_node_executed),\n      safe_execution_id: escapeHtml(json.execution_id),\n      safe_execution_url: escapeHtml(json.execution_url),\n      safe_payload_json: escapeHtml(json.payload_json),\n      sheet_contact_id: safeSheetValue(json.contact_id),\n      sheet_error_type: safeSheetValue(json.error_type),\n      sheet_error_message: safeSheetValue(json.error_message),\n      sheet_error_workflow_name: safeSheetValue(json.error_workflow_name),\n      sheet_last_node_executed: safeSheetValue(json.last_node_executed),\n      sheet_execution_id: safeSheetValue(json.execution_id),\n      sheet_execution_url: safeSheetValue(json.execution_url),\n      sheet_payload_json: safeSheetValue(json.payload_json),\n      subject_error_type: safeSubjectText(json.error_type, 'workflow_error'),\n      subject_error_workflow_name: safeSubjectText(json.error_workflow_name, ''),\n    },\n  };\n});"
       },
-      "id": "77f0df90-cf45-4e5d-bc09-ae559f24290d",
+      "id": "d031b038-943f-4ebe-ba19-77a0688bab7c",
       "name": "Build Safe Error Alert Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        576,
-        128
+        1280,
+        544
       ]
     },
     {
@@ -331,13 +330,13 @@
           "cellFormat": "RAW"
         }
       },
-      "id": "fcba6ca5-799f-4a7e-8e5c-3045553562d8",
+      "id": "ab48fa61-12e0-4e81-a238-f7f8cf61ab96",
       "name": "Append Error Row",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        752,
-        -16
+        1584,
+        416
       ],
       "retryOnFail": true,
       "waitBetweenTries": 3000,
@@ -346,17 +345,17 @@
     {
       "parameters": {
         "content": "## Error Alert\n\n- Sends an email alert for each mapped error item from `Build Safe Error Alert Context`.\n- Email HTML uses escaped `safe_*` fields and the subject uses bounded `subject_*` fields.\n- Runs in parallel with sheet logging, so admin alerts do not depend on a successful sheet append.\n- Email sending is configured to continue on error.\n- Sends an optional Telegram failure notice when `contact_id` is present and `failure_feedback_enabled` is true.\n\n**Required manual configuration:**\n\n- Send Error Email\n  - `fromEmail`: Sender address for error alerts.\n  - `toEmail`: Recipient address for error alerts.",
-        "height": 856,
+        "height": 888,
         "width": 464,
         "color": 4
       },
-      "id": "a6b0d020-1453-4372-a950-fc5e180025da",
+      "id": "162a33e6-f28e-4afc-afc0-9400f53e1f53",
       "name": "Error Email Alert",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1056,
-        -432
+        1888,
+        -16
       ]
     },
     {
@@ -369,13 +368,13 @@
           "appendAttribution": false
         }
       },
-      "id": "6bbdb2e0-2ebb-47b1-9c14-5994f3a9bdcb",
+      "id": "e29806fa-d3ef-41cb-a18d-e82cb4296ec8",
       "name": "Send Error Email",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        1232,
-        128
+        2064,
+        544
       ],
       "onError": "continueRegularOutput"
     },
@@ -414,13 +413,13 @@
         },
         "options": {}
       },
-      "id": "d5c276dc-fb9e-42a9-a159-8a14553b68f6",
+      "id": "9869cf3a-dff9-4c2a-99fd-63903f010892",
       "name": "Has User Chat Failure Feedback",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
       "position": [
-        752,
-        224
+        1584,
+        656
       ]
     },
     {
@@ -433,13 +432,13 @@
           "parse_mode": "HTML"
         }
       },
-      "id": "92bc0089-d246-48cb-a2a6-d3441fe40681",
+      "id": "164099ed-7781-40b2-a349-d3b7db5a0d0c",
       "name": "Send User Failure Notice",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1232,
-        304
+        2064,
+        720
       ],
       "onError": "continueRegularOutput"
     },
@@ -448,13 +447,13 @@
         "errorType": "errorObject",
         "errorObject": "={{ $json }}"
       },
-      "id": "ae333cdf-5f24-4749-89b5-cb1bd2a3c20e",
+      "id": "916dc242-3ec2-4b70-a323-68704c4c7d20",
       "name": "Stop Failure With Context",
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
       "position": [
-        -128,
-        304
+        544,
+        768
       ],
       "executeOnce": true
     }
