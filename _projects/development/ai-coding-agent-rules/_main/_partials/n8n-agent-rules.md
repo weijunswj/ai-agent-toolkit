@@ -21,6 +21,8 @@ Use documentation or builder tools first for n8n workflow design and workflow JS
 - Validating workflow structure.
 - Confirming current n8n node behaviour.
 
+When both `n8n_docs` and `n8n_live` style tools are available, use `n8n_docs` or equivalent documentation/build/validation tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
+
 Do not use n8n docs or builder tools for:
 
 - General coding.
@@ -102,6 +104,16 @@ A workflow can be inactive but still visible or available to MCP tools depending
 When creating workflows through n8n MCP tools, mention if the tool may mark the workflow as available in MCP by default.
 
 If the user does not want MCP exposure, disable or avoid MCP exposure when the tool supports it. If the tool does not support changing exposure, report that manual follow-up may be needed in n8n.
+
+## Webhook IDs and static data
+
+Do not invent, preserve, copy, or publish live `webhookId` values in reusable workflow JSON unless the user explicitly asks for live-instance work on the named target workflow.
+
+For reusable templates, remove live webhook IDs and keep webhook path values generic or clearly marked as non-secret manual configuration.
+
+Do not treat workflow `staticData` as reusable template content by default. Static data can contain live cursor state, timestamps, IDs, paging tokens, or environment-specific runtime state.
+
+Before importing, exporting, or publishing workflow JSON, inspect `staticData` and remove or explain environment-specific values unless the user explicitly confirms they are required for the target live workflow.
 
 ## Backups
 

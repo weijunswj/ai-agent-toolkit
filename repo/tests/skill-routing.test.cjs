@@ -134,9 +134,10 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`/);
   assert.match(readme, /`<workspace-root>\/\.agents\/skills\/<skill-name>\/`/);
   assert.match(readme, /`\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\/`/);
-  assert.match(readme, /\[`AGENTS\.with-toolkit-skills\.template\.md`\]\(skills\/ai-coding-agent-rules\/AGENTS\.with-toolkit-skills\.template\.md\)/);
-  assert.match(readme, /\[`CLAUDE\.with-toolkit-skills\.template\.md`\]\(skills\/ai-coding-agent-rules\/CLAUDE\.with-toolkit-skills\.template\.md\)/);
-  assert.match(readme, /\[`GEMINI\.with-toolkit-skills\.template\.md`\]\(skills\/ai-coding-agent-rules\/GEMINI\.with-toolkit-skills\.template\.md\)/);
+  assert.match(readme, /\[`AGENTS\.template\.md`\]\(skills\/ai-coding-agent-rules\/AGENTS\.template\.md\)/);
+  assert.match(readme, /\[`CLAUDE\.template\.md`\]\(skills\/ai-coding-agent-rules\/CLAUDE\.template\.md\)/);
+  assert.match(readme, /\[`GEMINI\.template\.md`\]\(skills\/ai-coding-agent-rules\/GEMINI\.template\.md\)/);
+  assert.match(readme, /\(skills\/n8n-agent-rules\/\)/);
   assert.doesNotMatch(readme, /\$HOME\/\.gemini\/skills\/<skill-name>\//);
   assert.doesNotMatch(readme, /<workspace-root>\/\.agent\/skills\/<skill-name>\//);
   assert.match(howToUse, /\[OpenCode reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/opencode\.md\)/);

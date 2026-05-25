@@ -10,6 +10,8 @@ This skill contains reviewed public n8n workflow JSON templates.
 
 Templates here are intended to be copied into consumer repos only after review.
 
+This skill depends on `n8n-agent-rules`. Apply that skill before editing, validating, importing, activating, executing, or syncing any n8n workflow JSON.
+
 ## Included Templates
 
 - [Global Error Handler](templates/error-handling/global-error-handler.template.json)
@@ -23,3 +25,5 @@ Templates here are intended to be copied into consumer repos only after review.
 - Use placeholders for non-secret manual configuration.
 
 Use the helper-script skill when you need sanitizer, validation, import/export, compare, prepare, or sync helpers.
+
+A generated cross-skill reference is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for copy-paste portability. It is generated from the canonical `development.ai-coding-agent-rules` source and must not be edited directly.

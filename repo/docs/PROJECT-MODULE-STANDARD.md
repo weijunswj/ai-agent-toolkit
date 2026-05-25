@@ -99,6 +99,21 @@ When a project module creates or materially changes a skill, decide and document
 
 If a new skill should not be auto-routed, document the omission and reason in the toolkit skill-routing source partial. Do not let that routing table drift from current `skills/*/SKILL.md`.
 
+## Cross-Project And Cross-Skill Dependencies
+
+Projects link to projects. Skills link to skills.
+
+When a skill depends on another skill, declare that dependency in:
+
+- `SKILL.md`.
+- The skill README or install/use docs.
+- Registry metadata when the registry has an applicable field.
+- Any pack or adapter docs that install or route the dependent skill.
+
+If copy-paste portability requires a copied cross-skill reference, generate it from the canonical source with a declared recipe. The generated file must clearly state that it is generated cross-skill content, name the canonical source project and source file, name the owning skill/project, name the generated destination, say not to edit it directly, and tell maintainers to update source and run sync.
+
+Cross-generated references must not be manually edited. Validation should catch undeclared or stale cross-skill references where practical.
+
 ## Shared-Surface Outputs
 
 A project should normally publish only into its own skill or MCP surface.

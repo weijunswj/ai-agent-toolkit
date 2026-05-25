@@ -64,7 +64,8 @@ npx --version
 ### Follow the OpenCode AGENTS.md Setup guide:
 
 * Install or copy generic AI coding agent rules from [AGENTS.template.md](../../../ai-coding-agent-rules/AGENTS.template.md), then copy or merge them into the target repo root as `AGENTS.md`.
-* Merge the n8n-specific add-on from [agent-rules/n8n-mcp-rules.template.md](./agent-rules/n8n-mcp-rules.template.md) into the same `AGENTS.md`.
+* Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
+* Optionally merge the brief `AGENTS.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `AGENTS.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
 * If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 ## 4. Create The Global OpenCode MCP Config

@@ -1,6 +1,6 @@
 ---
 name: n8n-workflow-templates
-description: Use when selecting, reviewing, or copying public reusable n8n workflow JSON templates that must be generic, inactive, credential-free, and safe for publication.
+description: Use when selecting, reviewing, or copying public reusable n8n workflow JSON templates that must be generic, inactive, credential-free, and safe for publication, after applying n8n-agent-rules.
 ---
 
 <!--
@@ -12,6 +12,8 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 # n8n Workflow Templates
 
 Use this instruction-only skill when the user wants actual reusable n8n workflow JSON templates.
+
+Apply `n8n-agent-rules` first for the full n8n operating contract. A generated local copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for portability.
 
 ## Use When
 
@@ -29,6 +31,7 @@ Use this instruction-only skill when the user wants actual reusable n8n workflow
 ## Rules
 
 - Templates must be public, generic, inactive, and credential-free.
+- Follow `n8n-agent-rules` for workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and live n8n safety.
 - Do not include live workflow IDs, live webhook IDs, credential bindings, credential names that reveal private context, `.env` values, private URLs, customer data, or live import/export payloads.
 - Required manual configuration may be documented for non-secret literal placeholders.
 - Do not run live n8n actions from this toolkit repo.

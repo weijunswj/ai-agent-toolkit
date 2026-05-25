@@ -1,0 +1,38 @@
+---
+name: n8n-agent-rules
+description: Use for every n8n task, including n8n workflow JSON, n8n MCP, n8n_docs, n8n_live, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, workflow activation, execution, repo/live sync, and n8n safety. Always apply before n8n workflow or live n8n work.
+---
+
+<!--
+Curated AI-facing source.
+Project: development.ai-coding-agent-rules
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
+# n8n Agent Rules
+
+Use this skill before any n8n workflow, helper-script, MCP, or live n8n work.
+
+## Mandatory Rule
+
+Read [n8n-agent-rules.md](n8n-agent-rules.md) before planning or editing n8n material. Those rules are the full operating contract for n8n workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and n8n safety.
+
+## Boundaries
+
+- This skill owns the full n8n operating ruleset.
+- `n8n-local-setup` owns local n8n setup, Docker setup, tunnels, MCP config, and platform setup notes.
+- `n8n-workflow-helper-scripts` owns helper scripts, sanitising, validation, import/export helpers, comparison, prepare-import, and repo/live workflow hygiene.
+- `n8n-workflow-templates` owns generic inactive reusable workflow templates.
+
+## Safety
+
+- Prefer n8n documentation/build/validation tools before live-instance tools.
+- Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, archive/delete, credential, source-watch, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
+- Keep workflows inactive or unpublished by default unless the user explicitly asks otherwise.
+- Never put secrets, credentials, tokens, webhook secrets, private keys, `.env` values, credential bindings, or live import/export payloads into repo files.
+
+## Optional Adapters
+
+The files under [adapters/](adapters/) are brief optional snippets for existing active instruction files. They point agents to this skill without copying the full rules into global always-on context.
+
+The installer script under [scripts/install-n8n-agent-adapter.cjs](scripts/install-n8n-agent-adapter.cjs) supports `--dry-run` and `--write`. Do not run it with `--write` unless the user explicitly approves patching the named active instruction file in the current turn.

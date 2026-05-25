@@ -5,9 +5,9 @@
     "path": "skills/ai-coding-agent-rules/"
   },
   {
-    "id": "n8n-agent-rules-add-on",
-    "title": "n8n Agent Rule Add-on Template",
-    "path": "skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md"
+    "id": "n8n-agent-rule-adapters",
+    "title": "n8n Agent Rule Adapter Templates",
+    "path": "skills/n8n-agent-rules/adapters/"
   },
   {
     "id": "mcp-configs",

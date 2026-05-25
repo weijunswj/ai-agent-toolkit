@@ -109,7 +109,15 @@ function gitTrackedFiles(root, prefixes) {
 
 function trackedOrFilesystemFiles(root, prefixes) {
   const tracked = gitTrackedFiles(root, prefixes);
-  if (tracked) return { source: 'git', files: tracked };
+  if (tracked) {
+    return {
+      source: 'git',
+      files: tracked.filter((relPath) => {
+        const fullPath = resolveRel(root, relPath);
+        return fs.existsSync(fullPath) && fs.statSync(fullPath).isFile();
+      })
+    };
+  }
   const files = prefixes.flatMap((prefix) => listFiles(root, prefix)).sort();
   return { source: 'filesystem', files };
 }
@@ -268,6 +276,11 @@ function projectOwners(projects) {
   for (const project of projects) {
     const skillPath = project.surface?.skill?.path ? normalizeRel(project.surface.skill.path) : '';
     if (skillPath) bySkillRoot.set(skillPath, project);
+    for (const output of project.outputs || []) {
+      if (output.shared_surface === true) continue;
+      const root = skillRoot(normalizeRel(output.output || ''));
+      if (root && !bySkillRoot.has(root)) bySkillRoot.set(root, project);
+    }
     const mcpPath = project.surface?.mcp?.path ? normalizeRel(project.surface.mcp.path) : '';
     if (mcpPath) byMcpPath.set(mcpPath, project);
   }
@@ -447,6 +460,26 @@ function isReviewedReference(entry) {
   if (!isSkillReferenceOutput(entry.path)) return false;
   return /\b(short|skill-local|reviewed|safety)\b/i.test(`${entry.notes} ${entry.fidelity}`) &&
     /\breference\b/i.test(`${entry.notes} ${entry.fidelity}`);
+}
+
+function isBriefN8nAgentAdapter(entry) {
+  return entry.projectId === 'development.ai-coding-agent-rules' &&
+    /^skills\/n8n-agent-rules\/adapters\/(?:AGENTS|CLAUDE|GEMINI)\.n8n-brief\.template\.md$/.test(entry.path) &&
+    sourcePathsForEntry(entry).every((source) =>
+      source.startsWith('_projects/development/ai-coding-agent-rules/curated_output_for_ai/adapters/')
+    ) &&
+    /\bbrief\b/i.test(`${entry.notes} ${entry.fidelity}`);
+}
+
+function isGeneratedN8nAgentCrossSkillReference(entry) {
+  const sources = sourcePathsForEntry(entry);
+  return entry.projectId === 'development.ai-coding-agent-rules' &&
+    entry.sharedSurface === true &&
+    /^skills\/n8n-(?:local-setup|workflow-helper-scripts|workflow-templates)\/references\/n8n-agent-rules\.md$/.test(entry.path) &&
+    sources.includes('_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md') &&
+    sources.some((source) =>
+      source.startsWith('_projects/development/ai-coding-agent-rules/curated_output_for_ai/cross-skill-references/')
+    );
 }
 
 function boundaryMarkerHits(text) {
@@ -629,6 +662,8 @@ function mainAdapterReasons(root, entry) {
 function classifyBoundaryRecipe(root, entry) {
   if (entry.kind === 'generated_registry') return 'curated_metadata';
   if (entry.kind === 'linked') return 'linked_exception';
+  if (isGeneratedN8nAgentCrossSkillReference(entry)) return 'generated_cross_skill_reference';
+  if (isBriefN8nAgentAdapter(entry)) return 'curated_adapter';
   const hasCuratedSource = entryHasSource(entry, '/curated_output_for_ai/');
   const hasMainSource = entryHasSource(entry, '/_main/');
 

@@ -1,6 +1,6 @@
 ---
 name: n8n-workflow-helper-scripts
-description: Use for safe n8n workflow helper-script templates, including sanitizer helpers, import/export sync helpers, validation, comparison, live-import preparation, and repo/live workflow hygiene. Applies when copying, reviewing, or explaining these helper scripts for a consumer repo.
+description: Use for safe n8n workflow helper-script templates, including sanitizer helpers, import/export sync helpers, validation, comparison, live-import preparation, and repo/live workflow hygiene. Applies when copying, reviewing, or explaining these helper scripts for a consumer repo, after applying n8n-agent-rules.
 ---
 
 <!--
@@ -12,6 +12,8 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 # n8n Workflow Helper Scripts
 
 Use this instruction-only skill when the user wants to copy, review, adapt, or reason about reusable n8n workflow helper scripts.
+
+Apply `n8n-agent-rules` first for the full n8n operating contract. A generated local copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for portability.
 
 ## Use When
 
@@ -31,6 +33,7 @@ Use this instruction-only skill when the user wants to copy, review, adapt, or r
 ## Rules
 
 - Treat these scripts as review-required templates, not trusted runtime code.
+- Follow `n8n-agent-rules` for workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and live n8n safety.
 - Do not run live n8n import/export from this toolkit repo.
 - Do not run live n8n import/export in CI.
 - Do not commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, live import/export JSON, credentials, credential bindings, private keys, or `.env` files.
@@ -65,6 +68,7 @@ Stop and ask again if approval does not name the target repo; live approval does
 - `references/import-export-flow.md`: import/export review flow.
 - `references/credential-safety.md`: credential and binding hygiene.
 - `references/n8n-credential-safety.md`: n8n local binding metadata rules.
+- `references/n8n-agent-rules.md`: generated cross-skill copy of the full n8n operating rules.
 
 ## Templates
 

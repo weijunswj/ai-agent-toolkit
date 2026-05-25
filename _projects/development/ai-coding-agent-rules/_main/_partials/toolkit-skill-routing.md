@@ -8,7 +8,8 @@ Use the skill name, description, and local files to decide whether a skill appli
 
 | Skill | Use when the task involves |
 |---|---|
-| `ai-coding-agent-rules` | Installing or explaining generic execution-first agent rules, optional toolkit skill-routing, or safe merge plans for `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`. |
+| `ai-coding-agent-rules` | Installing or explaining slim generic execution-first agent rules or safe merge plans for `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`. |
+| `n8n-agent-rules` | Any n8n task, including workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
 | `n8n-local-setup` | Safe local n8n setup, MCP config selection, tunneling choices, or platform-specific n8n agent-rule setup. |
 | `n8n-workflow-helper-scripts` | Safe n8n workflow helper scripts, sanitizer helpers, import/export sync helpers, validation, comparison, live-import preparation, or repo/live workflow hygiene. |
 | `n8n-workflow-templates` | Selecting, reviewing, or copying public reusable n8n workflow JSON templates that are generic, inactive, credential-free, and safe for publication. |

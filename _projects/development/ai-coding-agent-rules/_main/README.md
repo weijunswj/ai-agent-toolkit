@@ -1,24 +1,26 @@
 # AI Coding Agent Rule Templates
 
-This source folder owns generic execution-first AI coding agent rule templates.
+This source folder owns slim generic execution-first AI coding agent rule templates and the canonical n8n agent rules source.
 
 ## Templates
 
 - `AGENTS.template.md`, `CLAUDE.template.md`, and `GEMINI.template.md` are generic baseline templates.
-- `TOOLKIT-SKILL-ROUTING.template.md` is optional. Use it only when the target environment has this toolkit's `skills/` folders installed or copied.
-- Do not use `TOOLKIT-SKILL-ROUTING.template.md` as a standalone replacement for the generic baseline.
-- Merge optional add-ons under the generic baseline in the same active instruction file.
+- Default generic templates stay compact and do not include full n8n rules or full skill-routing tables.
+- Optional n8n adapters live under `skills/n8n-agent-rules/adapters/` after sync. They point to the n8n skill instead of duplicating the full ruleset.
 - Do not overwrite existing active instruction files.
 
 ## Source Partials
 
 - `_partials/ai-coding-agent-execution.md` generates the generic baseline templates.
-- `_partials/toolkit-skill-routing.md` generates only `TOOLKIT-SKILL-ROUTING.template.md`.
+- `_partials/toolkit-skill-routing.md` is the toolkit skill-routing source partial.
+- `_partials/n8n-agent-rules.md` is the canonical full n8n operating ruleset source.
 
-## n8n Add-On
+## n8n Agent Rules
 
-For n8n work, install a generic baseline first, then merge the n8n add-on from:
+For n8n work, install or load:
 
 ```text
-skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md
+skills/n8n-agent-rules/
 ```
+
+Do not copy the full n8n rules into global always-on instructions unless the extra context cost is intentional.

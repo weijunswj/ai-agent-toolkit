@@ -258,13 +258,21 @@ test('n8n workflow toolkit cmd wrapper source locks document path adaptation', (
   }
 });
 
-test('n8n workflow toolkit has no pack-installed or cross-owned leftovers', () => {
+test('n8n workflow toolkit has no unresolved pack-installed or cross-owned leftovers', () => {
   const report = runAuditJson();
   const unresolved = report.issues.packInstalledUndeclared
     .map((entry) => entry.path)
     .filter((entryPath) => entryPath.startsWith('skills/n8n-workflow-helper-scripts/') || entryPath.startsWith('skills/n8n-workflow-templates/'));
+  const workflowToolkitShared = report.issues.sharedSurfaceOutputs
+    .filter((entry) => entry.targetProjectId === 'n8n.workflow-toolkit')
+    .map((entry) => entry.output)
+    .sort();
   assert.deepEqual(unresolved, []);
-  assert.deepEqual(report.issues.sharedSurfaceOutputs, []);
+  assert.deepEqual(workflowToolkitShared, [
+    'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
+    'skills/n8n-workflow-templates/references/n8n-agent-rules.md'
+  ]);
+  assert.deepEqual(report.issues.sharedSurfaceMetadataFindings, []);
   assert.deepEqual(report.issues.crossOwnedOutputs, []);
 });
 

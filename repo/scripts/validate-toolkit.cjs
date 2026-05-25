@@ -95,14 +95,16 @@ const expectedFiles = [
   'skills/ai-coding-agent-rules/AGENTS.template.md',
   'skills/ai-coding-agent-rules/CLAUDE.template.md',
   'skills/ai-coding-agent-rules/GEMINI.template.md',
-  'skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md',
-  'skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md',
-  'skills/ai-coding-agent-rules/CLAUDE.with-toolkit-skills.template.md',
-  'skills/ai-coding-agent-rules/GEMINI.with-toolkit-skills.template.md',
-  'skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md',
-  'skills/n8n-local-setup/agent-rules/AGENTS.n8n-full.template.md',
-  'skills/n8n-local-setup/agent-rules/CLAUDE.n8n-full.template.md',
-  'skills/n8n-local-setup/agent-rules/GEMINI.n8n-full.template.md',
+  'skills/n8n-agent-rules/SKILL.md',
+  'skills/n8n-agent-rules/README.md',
+  'skills/n8n-agent-rules/n8n-agent-rules.md',
+  'skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md',
+  'skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md',
+  'skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md',
+  'skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs',
+  'skills/n8n-local-setup/references/n8n-agent-rules.md',
+  'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
+  'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
   'repo/scripts/agent-rule-template-specs.json',
   'repo/scripts/build-agent-rule-templates.ps1',
   'repo/scripts/_build-agent-rule-templates.cmd',
@@ -139,6 +141,9 @@ const expectedDirs = [
   '_projects/design/ui-ux-pro-max/_main',
   'skills/ui-ux-secure-frontend-design',
   'skills/ai-coding-agent-rules',
+  'skills/n8n-agent-rules',
+  'skills/n8n-agent-rules/adapters',
+  'skills/n8n-agent-rules/scripts',
   'skills/windows-localhost-workflows',
   'skills/n8n-workflow-helper-scripts',
   'skills/n8n-workflow-templates',
@@ -146,9 +151,10 @@ const expectedDirs = [
   'skills/secure-cicd-installer',
   'skills/knowledge-index-updater',
   'skills/n8n-local-setup/references/ai-agent-platforms',
+  'skills/n8n-workflow-helper-scripts/references',
+  'skills/n8n-workflow-templates/references',
   'mcp/references',
   'skills/n8n-local-setup/references/n8n',
-  'skills/n8n-local-setup/agent-rules',
   'skills/n8n-local-setup/templates/mcp-configs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer',
@@ -239,7 +245,8 @@ const allowedExecutablePrefixes = [
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/'
+  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/',
+  'skills/n8n-agent-rules/scripts/'
 ];
 
 const executableExtensions = new Set([
@@ -340,9 +347,7 @@ const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification
 const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md',
-  '_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md'
+  '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
 ];
 const allowedCredentialExampleJsonPaths = new Set([
   '_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json'
@@ -1065,8 +1070,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     }
   }
   const autoSyncAgentRulePartialInputs = [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/*',
-    '_projects/n8n/local-setup/_main/_partials/*'
+    '_projects/development/ai-coding-agent-rules/_main/_partials/*'
   ];
   for (const token of autoSyncAgentRulePartialInputs) {
     if (!preflightSection.includes(token)) {

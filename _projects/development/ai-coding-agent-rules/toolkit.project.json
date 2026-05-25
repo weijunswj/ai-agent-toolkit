@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "version_policy": "semver",
-  "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
+  "version_notes": "Adds the n8n-agent-rules skill and removes heavy always-on toolkit/n8n convenience templates from the generated default agent-rule surface.",
   "outputs": [
     {
       "kind": "curated",
@@ -45,38 +45,92 @@
       "fidelity": "exact"
     },
     {
-      "kind": "copy",
-      "source": "_main/AGENTS.template.md",
-      "output": "skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md",
-      "agent_rule_template": "AGENTS.with-toolkit-skills.template.md",
-      "notes": "Published-only inert Codex/OpenCode generic AI coding agent rule template generated directly from the generic baseline and toolkit skill-routing partial specs for environments that have this toolkit's skills folders installed or copied.",
-      "fidelity": "exact",
-      "notice": false
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-agent-rules/SKILL.md",
+      "output": "skills/n8n-agent-rules/SKILL.md",
+      "notes": "Published n8n agent-rules skill entrypoint generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-agent-rules/README.md",
+      "output": "skills/n8n-agent-rules/README.md",
+      "notes": "Published n8n agent-rules skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "copy",
-      "source": "_main/CLAUDE.template.md",
-      "output": "skills/ai-coding-agent-rules/CLAUDE.with-toolkit-skills.template.md",
-      "agent_rule_template": "CLAUDE.with-toolkit-skills.template.md",
-      "notes": "Published-only inert Claude Code generic AI coding agent rule template generated directly from the generic baseline and toolkit skill-routing partial specs for environments that have this toolkit's skills folders installed or copied.",
-      "fidelity": "exact",
-      "notice": false
-    },
-    {
-      "kind": "copy",
-      "source": "_main/GEMINI.template.md",
-      "output": "skills/ai-coding-agent-rules/GEMINI.with-toolkit-skills.template.md",
-      "agent_rule_template": "GEMINI.with-toolkit-skills.template.md",
-      "notes": "Published-only inert Gemini/Antigravity generic AI coding agent rule template generated directly from the generic baseline and toolkit skill-routing partial specs for environments that have this toolkit's skills folders installed or copied.",
-      "fidelity": "exact",
-      "notice": false
-    },
-    {
-      "kind": "copy",
-      "source": "_main/TOOLKIT-SKILL-ROUTING.template.md",
-      "output": "skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md",
-      "notes": "Published optional toolkit skill-routing add-on template for environments that have this toolkit's skills folders installed or copied.",
+      "source": "_main/_partials/n8n-agent-rules.md",
+      "output": "skills/n8n-agent-rules/n8n-agent-rules.md",
+      "notes": "Full n8n operating ruleset copied from the canonical development project source into the copyable n8n-agent-rules skill folder.",
       "fidelity": "exact"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/adapters/AGENTS.n8n-brief.template.md",
+      "output": "skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md",
+      "notes": "Brief optional Codex/OpenCode n8n adapter snippet generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/adapters/CLAUDE.n8n-brief.template.md",
+      "output": "skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md",
+      "notes": "Brief optional Claude Code n8n adapter snippet generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/adapters/GEMINI.n8n-brief.template.md",
+      "output": "skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md",
+      "notes": "Brief optional Gemini/Antigravity n8n adapter snippet generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/scripts/install-n8n-agent-adapter.cjs",
+      "output": "skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs",
+      "notes": "Optional adapter installer script copied from project-owned source. It supports dry-run preview and requires --write before mutating active instruction files.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "concat",
+      "sources": [
+        "curated_output_for_ai/cross-skill-references/n8n-agent-rules-for-n8n-local-setup.md",
+        "_main/_partials/n8n-agent-rules.md"
+      ],
+      "output": "skills/n8n-local-setup/references/n8n-agent-rules.md",
+      "notes": "Generated cross-skill reference that keeps the full n8n rules portable inside n8n-local-setup while source ownership remains with n8n-agent-rules.",
+      "fidelity": "reviewed_entrypoint",
+      "shared_surface": true,
+      "surface_owner_project": "n8n.local-setup",
+      "shared_surface_reason": "n8n-local-setup depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership."
+    },
+    {
+      "kind": "concat",
+      "sources": [
+        "curated_output_for_ai/cross-skill-references/n8n-agent-rules-for-n8n-workflow-helper-scripts.md",
+        "_main/_partials/n8n-agent-rules.md"
+      ],
+      "output": "skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md",
+      "notes": "Generated cross-skill reference that keeps the full n8n rules portable inside n8n-workflow-helper-scripts while source ownership remains with n8n-agent-rules.",
+      "fidelity": "reviewed_entrypoint",
+      "shared_surface": true,
+      "surface_owner_project": "n8n.workflow-toolkit",
+      "shared_surface_reason": "n8n-workflow-helper-scripts depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership."
+    },
+    {
+      "kind": "concat",
+      "sources": [
+        "curated_output_for_ai/cross-skill-references/n8n-agent-rules-for-n8n-workflow-templates.md",
+        "_main/_partials/n8n-agent-rules.md"
+      ],
+      "output": "skills/n8n-workflow-templates/references/n8n-agent-rules.md",
+      "notes": "Generated cross-skill reference that keeps the full n8n rules portable inside n8n-workflow-templates while source ownership remains with n8n-agent-rules.",
+      "fidelity": "reviewed_entrypoint",
+      "shared_surface": true,
+      "surface_owner_project": "n8n.workflow-toolkit",
+      "shared_surface_reason": "n8n-workflow-templates depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership."
     }
   ],
   "writes": {
@@ -86,10 +140,16 @@
       "skills/ai-coding-agent-rules/AGENTS.template.md",
       "skills/ai-coding-agent-rules/CLAUDE.template.md",
       "skills/ai-coding-agent-rules/GEMINI.template.md",
-      "skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md",
-      "skills/ai-coding-agent-rules/CLAUDE.with-toolkit-skills.template.md",
-      "skills/ai-coding-agent-rules/GEMINI.with-toolkit-skills.template.md",
-      "skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md",
+      "skills/n8n-agent-rules/SKILL.md",
+      "skills/n8n-agent-rules/README.md",
+      "skills/n8n-agent-rules/n8n-agent-rules.md",
+      "skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md",
+      "skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md",
+      "skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md",
+      "skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs",
+      "skills/n8n-local-setup/references/n8n-agent-rules.md",
+      "skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md",
+      "skills/n8n-workflow-templates/references/n8n-agent-rules.md",
       "mcp/registry/projects.registry.json"
     ],
     "denied": [
@@ -111,18 +171,18 @@
   "project": {
     "name": "AI Coding Agent Rules",
     "category": "development",
-    "summary": "Generic execution-first AI coding agent rule templates plus an optional toolkit skill-routing add-on for common agent instruction files."
+    "summary": "Generic execution-first AI coding agent rule templates plus the n8n-agent-rules operating contract and optional n8n adapter snippets."
   },
   "surface": {
     "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/ai-coding-agent-rules",
-      "summary": "Provides inert AGENTS, CLAUDE, and GEMINI generic baseline templates plus an optional toolkit skill-routing add-on."
+      "summary": "Provides slim generic AGENTS, CLAUDE, and GEMINI baseline templates and also publishes the n8n-agent-rules skill from the same project-owned rules source."
     },
     "mcp": {
       "status": "not_applicable",
-      "summary": "No MCP surface is published for this standalone rules skill."
+      "summary": "No MCP surface is published for this standalone rules project."
     }
   }
 }

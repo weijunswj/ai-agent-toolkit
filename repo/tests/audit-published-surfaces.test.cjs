@@ -97,14 +97,21 @@ test('audit-published-surfaces detects pack-installed undeclared files', () => {
   assert.ok(paths.includes('skills/ui-ux-secure-frontend-design/references/new-pack-undeclared-fixture.md'));
 });
 
-test('audit-published-surfaces has no n8n shared-surface helper leftovers', () => {
+test('audit-published-surfaces records declared n8n cross-skill references', () => {
   const report = runAuditJson();
 
   assert.equal(report.summary.crossOwnedOutputs, 0);
-  assert.equal(report.summary.sharedSurfaceOutputs, 0);
+  assert.equal(report.summary.sharedSurfaceOutputs, 3);
   assert.equal(report.summary.sharedSurfaceMetadataFindings, 0);
   assert.deepEqual(report.issues.crossOwnedOutputs, []);
-  assert.deepEqual(report.issues.sharedSurfaceOutputs, []);
+  assert.deepEqual(
+    report.issues.sharedSurfaceOutputs.map((entry) => entry.output).sort(),
+    [
+      'skills/n8n-local-setup/references/n8n-agent-rules.md',
+      'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
+      'skills/n8n-workflow-templates/references/n8n-agent-rules.md'
+    ]
+  );
 });
 
 test('audit-published-surfaces preserves legitimate curated references and MCP specs', () => {
@@ -135,6 +142,8 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     'curated_index',
     'curated_reference',
     'curated_metadata',
+    'curated_adapter',
+    'generated_cross_skill_reference',
     'curated_pack_readme',
     'curated_shim',
     'curated_spec',

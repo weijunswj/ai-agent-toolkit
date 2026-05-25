@@ -6,7 +6,7 @@
   "source_role": "migration_provenance_only",
   "source_update_policy": "none",
   "public_attribution_required": false,
-  "notes": "Generic AI coding agent execution rules were rehomed from n8n.local-setup into this development module. The toolkit skill-routing partial was moved exactly from a same-repo linked root surface and is documented in SOURCE-MANIFEST.md rather than represented as an upstream source_path in this retired n8n source lock.",
+  "notes": "Generic AI coding agent execution rules and the full n8n operating ruleset were rehomed from n8n.local-setup into this development module. The toolkit skill-routing partial was moved exactly from a same-repo linked root surface and is documented in SOURCE-MANIFEST.md rather than represented as an upstream source_path in this retired n8n source lock.",
   "files": [
     {
       "mode": "adapted",
@@ -14,6 +14,13 @@
       "project_path": "_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md",
       "source_blob_sha": "33361f156446e64eb501c5fbc769e5ccab478236",
       "notes": "Moved exactly from the n8n local setup partial source during the source-ownership split, then relocated to _main/_partials during the agent-rule path cleanup. It remains toolkit-adapted relative to the retired upstream source."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/partials/n8n-mcp-rules.md",
+      "project_path": "_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md",
+      "source_blob_sha": "ed961cd1b9a5ff25b7a077d98fa32f0e8b790e72",
+      "notes": "Moved from n8n.local-setup into the ai-coding-agent-rules project because this is an agent operating ruleset. The moved rules were renamed and strengthened with explicit n8n_docs before n8n_live, webhook ID, and staticData guidance while preserving live-action approval gates."
     }
   ]
 }
