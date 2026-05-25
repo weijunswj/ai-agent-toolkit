@@ -144,6 +144,9 @@ test('n8n-agent-rules skill documents the adapter auto-check approval protocol',
     assert.match(text, /If declined, continue the current n8n task/i, relPath);
     assert.match(text, /future sessions\/tools may not auto-load the rules/i, relPath);
     assert.match(text, /If no active instruction file exists/i, relPath);
+    assert.match(text, /`--target auto` is discovery only/i, relPath);
+    assert.match(text, /stop and ask the adapter-target question before continuing the n8n task/i, relPath);
+    assert.match(text, /unless the user already answered that target question in the current turn/i, relPath);
     assert.match(text, /read-only or no-modify tasks/i, relPath);
     assert.match(text, /Read-only\/no-modify blocks file writes and `--write`/i, relPath);
     assert.match(text, /does not block the adapter-target question/i, relPath);
@@ -152,6 +155,7 @@ test('n8n-agent-rules skill documents the adapter auto-check approval protocol',
     assert.match(text, /`GEMINI\.md` for Gemini\/Antigravity/i, relPath);
     assert.match(text, /\ball\b/i, relPath);
     assert.match(text, /\bnone\b/i, relPath);
+    assert.match(text, /The answer `none` is allowed and must be respected/i, relPath);
   }
 });
 
@@ -166,8 +170,12 @@ test('n8n-agent-rules README tells agents to dry-run then ask before write', () 
     assert.match(text, /show the preview/i, relPath);
     assert.match(text, /ask for explicit current-turn approval/i, relPath);
     assert.match(text, /If no `AGENTS\.md`, `CLAUDE\.md`, or `GEMINI\.md` exists/i, relPath);
+    assert.match(text, /`--target auto` is discovery only/i, relPath);
+    assert.match(text, /stop and ask which adapter target to create or propose before continuing the n8n task/i, relPath);
+    assert.match(text, /unless the user already answered that target question in the current turn/i, relPath);
     assert.match(text, /read-only or no-modify tasks/i, relPath);
     assert.match(text, /does not block the adapter-target question/i, relPath);
+    assert.match(text, /`none` is allowed/i, relPath);
     assert.match(text, /Do not silently auto-install adapters/i, relPath);
     assert.match(text, /--target all/, relPath);
   }
@@ -281,6 +289,27 @@ test('adapter installer dry-run reports changes and write mode is idempotent', (
   assert.equal(markerCount(installed, '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->'), 1);
   assert.equal(markerCount(installed, '<!-- END N8N-AGENT-RULES-ADAPTER -->'), 1);
   assert.match(installed, /\bn8n-agent-rules\b/);
+});
+
+test('adapter installer auto dry-run with no active instruction files asks for required target choice', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-auto-no-active-');
+
+  const result = runInstaller(workspace, ['--target', 'auto', '--dry-run']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Detected n8n involvement/i);
+  assert.match(result.stdout, /No existing active instruction files found for --target auto/i);
+  assert.match(result.stdout, /No files would be created automatically/i);
+  assert.match(result.stdout, /Required next step/i);
+  assert.match(result.stdout, /Ask the user which adapter target to create or propose/i);
+  for (const option of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'all', 'none']) {
+    assert.match(result.stdout, new RegExp(option.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), option);
+  }
+  assert.match(result.stdout, /read-only or no-modify tasks/i);
+  assert.match(result.stdout, /Do not run --write without explicit current-turn approval/i);
+
+  for (const activeFile of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
+    assert.equal(fs.existsSync(path.join(workspace, activeFile)), false, activeFile);
+  }
 });
 
 test('adapter installer target all dry-run previews all adapters without writing', () => {

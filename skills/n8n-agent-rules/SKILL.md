@@ -35,13 +35,17 @@ If an active instruction file exists and the adapter is missing, run [scripts/in
 
 Do not silently auto-install adapters. If declined, continue the current n8n task using the already-loaded `n8n-agent-rules`, but tell the user that future sessions/tools may not auto-load the rules unless the skill or adapter is installed.
 
-If no active instruction file exists, ask which adapter target to create or propose. Ask this even during read-only or no-modify tasks. Read-only/no-modify blocks file writes and `--write`; it does not block the adapter-target question.
+`--target auto` is discovery only. It previews or patches only existing active instruction files; it must not choose a new adapter target for the user.
+
+If no active instruction file exists, stop and ask the adapter-target question before continuing the n8n task, unless the user already answered that target question in the current turn. Ask this even during read-only or no-modify tasks. Read-only/no-modify blocks file writes and `--write`; it does not block the adapter-target question.
 
 - `AGENTS.md` for Codex/OpenCode
 - `CLAUDE.md` for Claude Code
 - `GEMINI.md` for Gemini/Antigravity
 - `all`
 - `none`
+
+The answer `none` is allowed and must be respected.
 
 ## Boundaries
 
