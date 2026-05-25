@@ -1073,11 +1073,11 @@ test('generic agent-rule partials live in project _partials folders, not skill f
 
 test('validator rejects active agent instruction filenames inside skill folders', () => {
   const cwd = tempCopy();
-  const activePath = path.join(cwd, 'skills', 'n8n-local-setup', 'agent-rules', 'AGENTS.md');
+  const activePath = path.join(cwd, 'skills', 'n8n-agent-rules', 'AGENTS.md');
   fs.writeFileSync(activePath, '# Active nested rules fixture\n');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Skill folder must use inert agent-rule template filenames: skills\/n8n-local-setup\/agent-rules\/AGENTS\.md/);
+  assert.match(result.stderr, /Skill folder must use inert agent-rule template filenames: skills\/n8n-agent-rules\/AGENTS\.md/);
 });
 
 test('validator rejects broken relative links in non-_main Markdown files', () => {
