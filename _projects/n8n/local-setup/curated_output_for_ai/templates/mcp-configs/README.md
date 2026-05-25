@@ -6,14 +6,14 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # MCP Config Templates
 
-These files are source templates for configuring MCP access in different AI-agent platforms.
+These source templates configure MCP access for different AI-agent platforms.
 
 ## Files
 
-- `codex-mcp-config.md`
-- `claude-mcp-config.md`
-- `opencode-mcp-config.md`
-- `antigravity-mcp-config.md`
+- [codex-mcp-config.md](codex-mcp-config.md)
+- [claude-mcp-config.md](claude-mcp-config.md)
+- [opencode-mcp-config.md](opencode-mcp-config.md)
+- [antigravity-mcp-config.md](antigravity-mcp-config.md)
 
 ## Rules
 

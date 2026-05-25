@@ -4,32 +4,30 @@ A practical toolkit of reusable AI-agent skills, preserved source projects, and 
 
 ## What this repo is
 
-This repo keeps reusable AI-agent material in a source-first layout. Full source stays under `_projects/`, copyable agent skills publish under `skills/`, MCP-ready registry, design/spec docs, and metadata live under `mcp/`, and repo maintenance lives under `repo/`.
+This repo keeps reusable AI-agent material in a source-first layout:
 
-## Pick What You Need
-
-- If you want the full original guide or source context, open `_projects/<category>/<project>/_main/`.
-- If you want something an AI agent can copy and use, open [`skills/<skill-name>/`](skills/).
-- If you want MCP-ready registry/design/spec information for future MCP usage, open [`mcp/`](mcp/).
-- If you are maintaining this repo, open [`repo/`](repo/) for docs, scripts, tests, and validation.
+- [_projects/](_projects/) preserves project source, provenance, and reviewed AI-facing source.
+- [skills/](skills/) contains copyable AI-agent skill folders.
+- [mcp/](mcp/) contains MCP-ready registry, design/spec docs, and metadata. No runnable MCP server is shipped today.
+- [repo/](repo/) contains repo maintenance docs, scripts, tests, and validation policy.
 
 ## Quick Start
 
-| What you want| How to get it |
+| What you want | Start here |
 |---|---|
-| Full guide | Open `_projects/<category>/<project>/_main/`. |
-| Install a skill | Copy the whole `skills/<skill-name>/` folder into your agent's skills directory. |
-| MCP-ready registry material | Open [`mcp/`](mcp/) for current status, design/spec docs, registries, and notes. |
-| Maintenance work | Start with [`repo/docs/`](repo/docs/) and the validation commands below. |
+| Full guide or source context | Open a project under [_projects/](_projects/), then its `_main/` folder. |
+| Install a skill | Copy the whole folder from [skills/](skills/) into your agent's skills directory. |
+| MCP-ready registry material | Open [mcp/](mcp/) for current status, design/spec docs, registries, and notes. |
+| Maintenance work | Start with [repo/docs/](repo/docs/) and the validation commands below. |
 
 ## Terms
 
 | Term | What it means |
 |---|---|
-| Project | The source/provenance area where the real material is maintained.
-| Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files.
-| MCP | MCP-ready registry, design/spec docs, and metadata for future MCP usage. No runnable server is shipped today.
-| Generated surface | A published file under [`skills/`](skills/) or [`mcp/`](mcp/) that is rebuilt from project source by a deterministic sync script.
+| Project | The source/provenance area where the real material is maintained. |
+| Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files. |
+| MCP | MCP-ready registry, design/spec docs, and metadata for future MCP usage. No runnable server is shipped today. |
+| Generated surface | A published file under [skills/](skills/) or [mcp/](mcp/) that is rebuilt from project source by a deterministic sync script. |
 
 ## Project Categories
 
@@ -44,85 +42,71 @@ This repo keeps reusable AI-agent material in a source-first layout. Full source
 
 ## Projects
 
-Open a project when you need the maintained source behind a skill or MCP note.
+Open a project when you need maintained source, provenance, or the owner behind a generated surface.
 
-| Project | What it is for | What it contains | Skills & MCP |
-|---|---|---|---|
-| [Local n8n Setup](_projects/n8n/local-setup/) | Helps an agent or human set up local n8n safely. | Full setup, upgrade, tunneling, platform, and MCP config source guides. | [`skills/n8n-local-setup/`](skills/n8n-local-setup/) and [`mcp/projects/n8n-local-setup.md`](mcp/projects/n8n-local-setup.md) |
-| [n8n Workflow Toolkit](_projects/n8n/workflow-toolkit/) | Owns reusable n8n workflow helper material. | Safe helper scripts for sanitising, validating, exporting, importing, comparing, and preparing workflow JSON, plus public inactive workflow templates. | [`skills/n8n-workflow-helper-scripts/`](skills/n8n-workflow-helper-scripts/), [`skills/n8n-workflow-templates/`](skills/n8n-workflow-templates/), and [`mcp/projects/n8n-workflow-toolkit.md`](mcp/projects/n8n-workflow-toolkit.md) |
-| [Secure CI/CD Installer](_projects/cicd/secure-installer/) | Helps plan CI/CD changes with approval gates and safety status tracking. | The full installer prompt, CI/CD status templates, GitHub Actions notes, and safety policy source. | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) and [`mcp/projects/secure-cicd-installer.md`](mcp/projects/secure-cicd-installer.md) |
-| [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Provides frontend design guidance and a local design-system generator. | Third-party-attributed design source, local CSV data, generator scripts, and attribution notes. | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) and [`mcp/projects/ui-ux-pro-max.md`](mcp/projects/ui-ux-pro-max.md) |
-| [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Helps maintain source-traceable skills, MCP notes, templates, manifests, and audit baselines. | Generic publishing methodology, source-to-surface decision rules, validation guidance, and starter templates. | [`skills/context-preserving-ai-publisher/`](skills/context-preserving-ai-publisher/) |
-| [AI Coding Agent Rules](_projects/development/ai-coding-agent-rules/) | Provides generic execution-first AI coding agent rules and the full n8n operating ruleset. | Slim generic AGENTS/CLAUDE/GEMINI templates, skill-routing source, `n8n-agent-rules`, and optional brief n8n adapters. | [`skills/ai-coding-agent-rules/`](skills/ai-coding-agent-rules/) and [`skills/n8n-agent-rules/`](skills/n8n-agent-rules/) |
-| [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Helps an agent start and prove Windows localhost dev services are reachable. | The full standalone skill source for launch discovery, port checks, logs, background start, and HTTP verification. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
-| [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Helps maintain a Notion/GitHub knowledge index without duplicate rows. | The full standalone skill source for schema setup, source matching, duplicate handling, and daily updater behavior. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |
+| Project | Purpose | Source |
+|---|---|---|
+| [Local n8n Setup](_projects/n8n/local-setup/) | Local n8n setup, platform notes, and MCP config source. | [_main/](_projects/n8n/local-setup/_main/) |
+| [n8n Workflow Toolkit](_projects/n8n/workflow-toolkit/) | n8n helper-script sources and inactive workflow templates. | [_main/](_projects/n8n/workflow-toolkit/_main/) |
+| [Secure CI/CD Installer](_projects/cicd/secure-installer/) | CI/CD planning prompt, status templates, and safety policy source. | [_main/](_projects/cicd/secure-installer/_main/) |
+| [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Frontend design guidance, local generator source, and attribution notes. | [_main/](_projects/design/ui-ux-pro-max/_main/) |
+| [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Source-to-surface publishing method and starter templates. | [_main/](_projects/repo-methodology/context-preserving-ai-publisher/_main/) |
+| [MCP-Ready Registry](_projects/repo-methodology/mcp-ready-registry/) | Source for MCP registry, design/spec docs, and metadata. | [_main/](_projects/repo-methodology/mcp-ready-registry/_main/) |
+| [AI Coding Agent Rules](_projects/development/ai-coding-agent-rules/) | Generic agent-rule templates, skill routing source, and n8n rules source. | [_main/](_projects/development/ai-coding-agent-rules/_main/) |
+| [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
+| [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Notion/GitHub knowledge-index skill source. | [_main/](_projects/knowledge/knowledge-index-updater/_main/) |
 
 ## Skills
 
-Skills are copyable folder packages for AI agents. To install one, copy the whole folder under [`skills/`](skills/); do not cherry-pick only `SKILL.md`.
+Skills are copyable folder packages. Install by copying the whole `skills/<skill-name>/` folder; do not copy only `SKILL.md`.
 
-Required runtime context should live inside the skill folder in local files such as `references/`, `examples/`, `templates/`, `tools/`, or `packs/`. External links are for provenance or further reading, not required runtime context.
-
-| Skill | Use this when you want to... | Folder |
-|---|---|---|
-| AI Coding Agent Rules | Install generic execution-first agent rules for Codex/OpenCode, Claude Code, Gemini CLI, or Antigravity. | [`skills/ai-coding-agent-rules/`](skills/ai-coding-agent-rules/) |
-| n8n Agent Rules | Apply the full n8n operating contract before workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, helper scripts, import/export, validation, credentials, activation, execution, repo/live sync, or live n8n work. | [`skills/n8n-agent-rules/`](skills/n8n-agent-rules/) |
-| n8n Local Setup | Set up local n8n, choose MCP config, handle tunnels, Docker setup, or platform setup notes. | [`skills/n8n-local-setup/`](skills/n8n-local-setup/) |
-| n8n Workflow Helper Scripts | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. | [`skills/n8n-workflow-helper-scripts/`](skills/n8n-workflow-helper-scripts/) |
-| n8n Workflow Templates | Start from a ready-to-review public inactive n8n workflow JSON template, such as the global error handler. | [`skills/n8n-workflow-templates/`](skills/n8n-workflow-templates/) |
-| Secure CI/CD Installer | Plan CI/CD setup with approval gates, safe GitHub Actions notes, and status templates. | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) |
-| Context-Preserving AI Publisher | Turn source docs into skills, MCP notes, templates, or manifests without losing detail or creating drift. | [`skills/context-preserving-ai-publisher/`](skills/context-preserving-ai-publisher/) |
-| Secure UI/UX Frontend Design | Design or review frontend work for accessibility, responsive polish, privacy, and security guardrails. | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) |
-| Windows Localhost Workflows | Start and verify a Windows localhost dev server instead of guessing commands or retrying failures. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
-| Knowledge Index Updater | Maintain a Notion/GitHub knowledge index with stable keys, clickable source links, and no duplicate rows. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |
+| Skill | Use |
+|---|---|
+| [AI Coding Agent Rules](skills/ai-coding-agent-rules/) | Install generic execution-first agent rules for supported coding agents. |
+| [n8n Agent Rules](skills/n8n-agent-rules/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
+| [n8n Local Setup](skills/n8n-local-setup/) | Set up local n8n, choose MCP config, handle tunnels, Docker setup, or platform notes. |
+| [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
+| [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
+| [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |
+| [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, MCP notes, templates, manifests, and audits. |
+| [Secure UI/UX Frontend Design](skills/ui-ux-secure-frontend-design/) | Design or review frontend work with accessibility, responsive, privacy, and security guardrails. |
+| [Windows Localhost Workflows](skills/windows-localhost-workflows/) | Start and verify Windows localhost dev services. |
+| [Knowledge Index Updater](skills/knowledge-index-updater/) | Maintain a Notion/GitHub knowledge index with stable source keys and no duplicate rows. |
 
 ## Install Skills By Platform
 
-Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`.
-
 For deeper setup notes, use [How To Use: Use Skills Manually](repo/docs/HOW-TO-USE.md#use-skills-manually).
 
-| Platform | Skill folder install | Always-on rules | Setup references |
+| Platform | Install location | Active instruction file | Notes |
 |---|---|---|---|
-| Codex | Copy or symlink to `<repo>/.agents/skills/<skill-name>/`, `$HOME/.agents/skills/<skill-name>/`, or `/etc/codex/skills/<skill-name>/`. `~/.codex/config.toml` is for Codex config and disabling skills by path, not the main install folder. | [`AGENTS.template.md`](skills/ai-coding-agent-rules/AGENTS.template.md) | [Codex platform reference](skills/n8n-local-setup/references/ai-agent-platforms/codex.md) and [Codex MCP config](skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md) |
-| Claude Code | Copy or symlink to `<repo>/.claude/skills/<skill-name>/` or `$HOME/.claude/skills/<skill-name>/`. | [`CLAUDE.template.md`](skills/ai-coding-agent-rules/CLAUDE.template.md) | [Claude Code platform reference](skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md) and [Claude Code MCP config](skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md) |
-| OpenCode | Copy or symlink to `<repo>/.opencode/skills/<skill-name>/`, `$HOME/.config/opencode/skills/<skill-name>/`, `<repo>/.claude/skills/<skill-name>/`, `$HOME/.claude/skills/<skill-name>/`, `<repo>/.agents/skills/<skill-name>/`, or `$HOME/.agents/skills/<skill-name>/`. | [`AGENTS.template.md`](skills/ai-coding-agent-rules/AGENTS.template.md) | [OpenCode platform reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md) and [OpenCode MCP config](skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md) |
-| Antigravity | Copy or symlink to `<workspace-root>/.agents/skills/<skill-name>/` or `$HOME/.gemini/antigravity/skills/<skill-name>/`. | [`GEMINI.template.md`](skills/ai-coding-agent-rules/GEMINI.template.md) | [Antigravity platform reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md) and [Antigravity MCP config](skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md) |
+| Codex | `<repo>/.agents/skills/<skill-name>/`, `$HOME/.agents/skills/<skill-name>/`, or `/etc/codex/skills/<skill-name>/` | Target `AGENTS.md`; start from [`AGENTS.template.md`](skills/ai-coding-agent-rules/AGENTS.template.md) when needed. | [Codex reference](skills/n8n-local-setup/references/ai-agent-platforms/codex.md); [Codex MCP config](skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md). |
+| Claude Code | `<repo>/.claude/skills/<skill-name>/` or `$HOME/.claude/skills/<skill-name>/` | Target `CLAUDE.md`; start from [`CLAUDE.template.md`](skills/ai-coding-agent-rules/CLAUDE.template.md) when needed. | [Claude Code reference](skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md); [Claude Code MCP config](skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md). |
+| OpenCode | `<repo>/.opencode/skills/<skill-name>/`, `$HOME/.config/opencode/skills/<skill-name>/`, or compatible `.agents/skills/` / `.claude/skills/` locations | Target `AGENTS.md`; start from [`AGENTS.template.md`](skills/ai-coding-agent-rules/AGENTS.template.md) when needed. | [OpenCode reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md); [OpenCode MCP config](skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md). |
+| Antigravity | `<workspace-root>/.agents/skills/<skill-name>/` or `$HOME/.gemini/antigravity/skills/<skill-name>/` | Target `GEMINI.md`; start from [`GEMINI.template.md`](skills/ai-coding-agent-rules/GEMINI.template.md) when needed. | [Antigravity reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md); [Antigravity MCP config](skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md). |
 
-Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [`skills/n8n-agent-rules/`](skills/n8n-agent-rules/). Optional adapters in [`skills/n8n-agent-rules/adapters/`](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
+Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [skills/n8n-agent-rules/](skills/n8n-agent-rules/). Optional adapters in [skills/n8n-agent-rules/adapters/](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
 
 ## MCP
 
-The MCP area is currently MCP-ready registry, design/spec docs, and metadata. It does not ship a runnable MCP server, package, CLI, or executable MCP tools today.
+MCP material lives in [mcp/](mcp/) (`mcp/`). This repo does not ship a runnable MCP server, package, CLI, or executable MCP tools today.
 
-| MCP area | Status | What it is for |
+| MCP area | Status | Use |
 |---|---|---|
-| [`mcp/registry-mcp/`](mcp/registry-mcp/) | Design/spec-only | Future read-only discovery and query design over JSON registries. |
-| [`mcp/installer-mcp/`](mcp/installer-mcp/) | Design/spec-only | Future approval-gated installation design for skill-local pack manifests. |
-| [`mcp/projects/`](mcp/projects/) | Project notes | Short project-specific MCP specs, safety notes, and boundaries. |
-| [`mcp/registry/`](mcp/registry/) | MCP-ready registry metadata | JSON project, skill, pack, template, and source metadata for future discovery. |
-| [`mcp/references/`](mcp/references/) | Supporting docs | Registry, installer, MCP setup, and security reference material. |
-
-No MCP commands are runnable from this repo today. The specs describe future tools only:
-
-| Command/tool | What it does | Inputs | Output |
-|---|---|---|---|
-| `list_skills` | Future registry lookup for available skills. | None or small JSON filter | Skill IDs, titles, paths, and summaries. |
-| `search_skills` | Future skill search. | Query string | Matching skills and routing notes. |
-| `list_templates` | Future listing of skill-local templates. | Optional category | Template IDs, titles, and paths. |
-| `list_packs` | Future listing of skill-local pack manifests. | Optional category | Pack IDs, titles, and risk notes. |
-| `route_task` | Future task-to-surface routing. | Task description | Suggested skill/MCP/project surfaces. |
-| `get_skill_context` | Future local skill context retrieval. | Skill ID | Local skill file paths and context notes. |
-| `get_install_plan` | Future pack preview. | Pack ID | Write preview requiring approval before any mutation. |
+| [mcp/](mcp/) | Overview | Current MCP surface status. |
+| [mcp/registry/](mcp/registry/) | MCP-ready registry metadata | JSON registry data for future discovery. |
+| [mcp/registry-mcp/](mcp/registry-mcp/) | Design/spec-only | Future read-only registry query design. |
+| [mcp/installer-mcp/](mcp/installer-mcp/) | Design/spec-only | Future approval-gated installer design. |
+| [mcp/projects/](mcp/projects/) | Project notes | Project-specific MCP specs, safety notes, and boundaries. |
+| [mcp/references/](mcp/references/) | Supporting docs | MCP setup, security, registry, and installer notes. |
 
 ## Folder Map
 
 | Path | Use it when |
 |---|---|
-| [`_projects/`](_projects/) | You want full preserved project guides/source material. |
-| [`skills/`](skills/) | You want copyable agent skills. |
-| [`mcp/`](mcp/) | You want MCP-ready registry, design/spec docs, and metadata. |
-| [`repo/`](repo/) | You are maintaining this toolkit. |
+| [_projects/](_projects/) | You want full preserved project guides/source material. |
+| [skills/](skills/) | You want copyable agent skills. |
+| [mcp/](mcp/) | You want MCP-ready registry, design/spec docs, and metadata. |
+| [repo/](repo/) | You are maintaining this toolkit. |
 
 ## For Maintainers
 
@@ -133,13 +117,13 @@ Edit source first, then publish:
 3. Update `_projects/**/toolkit.project.json` when routing or surface metadata changes.
 4. Run [`repo/scripts/sync-toolkit-projects.cjs`](repo/scripts/sync-toolkit-projects.cjs) with `--write`.
 
-Do not edit generated [`skills/`](skills/) or [`mcp/`](mcp/) outputs directly unless the output is explicitly declared as `linked`.
+Do not edit generated [skills/](skills/) or [mcp/](mcp/) outputs directly unless the output is explicitly declared as `linked`.
 
-For project module rules, follow [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md).
+For project module rules, follow [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md).
 
 ## Validation
 
-Use targeted checks while iterating, then run full final validation before a PR-ready summary. See [`repo/docs/VALIDATION-STRATEGY.md`](repo/docs/VALIDATION-STRATEGY.md).
+Use targeted checks while iterating, then run full final validation before a PR-ready summary. See [repo/docs/VALIDATION-STRATEGY.md](repo/docs/VALIDATION-STRATEGY.md).
 
 ```powershell
 node repo/scripts/sync-repo-doc-contract.cjs --check

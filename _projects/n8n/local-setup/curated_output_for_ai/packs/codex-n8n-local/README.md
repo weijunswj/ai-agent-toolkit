@@ -6,8 +6,8 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Codex n8n Local Pack
 
-Collects the generic Codex rules template from `skills/ai-coding-agent-rules`, the full `n8n-agent-rules` skill, the optional Codex n8n adapter, Codex MCP config guidance, and local n8n setup guides.
+Collects [AI Coding Agent Rules](../../../ai-coding-agent-rules/), [n8n Agent Rules](../../../n8n-agent-rules/), the optional [Codex n8n adapter](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md), [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md), and local n8n setup guides.
 
-Review `pack.json` before use.
+Review [pack.json](pack.json) before use.
 
-Copy or merge the generic `AGENTS.template.md` into the target repo root as `AGENTS.md`, install or load `skills/n8n-agent-rules`, and optionally merge `AGENTS.n8n-brief.template.md` into the same file. If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge/diff plan. Run the adapter installer with `--dry-run` first and only use `--write` after explicit current-turn approval.
+Copy or merge [AGENTS.template.md](../../../ai-coding-agent-rules/AGENTS.template.md) into the target repo root as `AGENTS.md`, install or load [n8n Agent Rules](../../../n8n-agent-rules/), and optionally merge [AGENTS.n8n-brief.template.md](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md) into the same file. If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge/diff plan. Run the adapter installer with `--dry-run` first and only use `--write` after explicit current-turn approval.

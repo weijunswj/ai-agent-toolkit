@@ -20,6 +20,8 @@ Adapters under [adapters/](adapters/) are optional brief snippets for active `AG
 
 When this skill is used for an n8n task, agents should automatically check whether the current target repo has the managed adapter block in active instruction files. If an active file exists and the block is missing, run [scripts/install-n8n-agent-adapter.cjs](scripts/install-n8n-agent-adapter.cjs) with `--dry-run`, show the preview, and ask for explicit current-turn approval before `--write`.
 
+If no `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` exists, ask which adapter target to create or propose even during read-only or no-modify tasks. Read-only/no-modify blocks file writes and `--write`; it does not block the adapter-target question.
+
 Do not silently auto-install adapters. The script must be run with `--write` before it mutates files. `--target auto` only patches existing active instruction files. `--target all` can preview or, after approval with `--write`, create or update `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`.
 
 Do not copy the full n8n rules into global always-on instructions unless you intentionally accept the extra context cost. Prefer installing this skill or a generated cross-skill reference.

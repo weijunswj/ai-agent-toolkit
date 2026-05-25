@@ -21,4 +21,4 @@ Use bootstrap mode when a repo does not yet have a source-to-surface architectur
 
 Use maintenance mode when a repo already has local docs, manifests, generated outputs, or validation. In maintenance mode, the local repo law wins over these generic templates.
 
-For validation cadence, see `validation-strategy.md`.
+For validation cadence, see [validation-strategy.md](validation-strategy.md).

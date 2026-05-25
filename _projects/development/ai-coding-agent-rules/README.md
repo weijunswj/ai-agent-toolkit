@@ -1,6 +1,6 @@
 # AI Coding Agent Rules
 
-Project module for the published `skills/ai-coding-agent-rules/` and `skills/n8n-agent-rules/` skills.
+Project module for the published [AI Coding Agent Rules](../../../skills/ai-coding-agent-rules/) and [n8n Agent Rules](../../../skills/n8n-agent-rules/) skills.
 
 The module owns slim generic AI coding agent execution rules, the toolkit skill-routing source partial, the full n8n agent operating ruleset, and optional brief n8n adapter snippets.
 

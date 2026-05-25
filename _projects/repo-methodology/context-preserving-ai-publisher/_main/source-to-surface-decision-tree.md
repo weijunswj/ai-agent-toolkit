@@ -51,6 +51,12 @@ If your repo uses different names, keep the same intent: deterministic source-to
 
 ## 5. Are Links Still Valid After Publishing?
 
+Human-facing navigational paths and URLs must be clickable Markdown links. Important links must not exist only inside code fences or inline code.
+
+- Use code blocks for commands, payloads, literal examples, and copy/paste prompts.
+- Use inline code for commands, filenames being discussed literally, globs, config keys, or short literal examples.
+- Do not use inline code as the only navigation path to important docs or assets.
+
 When a curated file is intentionally authored as a published-surface source, it may use output-relative links. Add a note in the curated source when those links are confusing from the source folder, for example:
 
 ```md
