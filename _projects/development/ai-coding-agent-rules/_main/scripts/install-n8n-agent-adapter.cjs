@@ -188,24 +188,34 @@ function adapterBlock(adapterFile) {
   return template.slice(start, finish + endMarker.length).trimEnd();
 }
 
+function markerIndexes(text, marker) {
+  const positions = [];
+  let index = text.indexOf(marker);
+  while (index !== -1) {
+    positions.push(index);
+    index = text.indexOf(marker, index + marker.length);
+  }
+  return positions;
+}
+
 function replaceManagedBlock(existing, block, activeFile = 'active instruction file') {
   const normalized = normalizeNewlines(existing);
-  const start = normalized.indexOf(beginMarker);
-  const finish = normalized.indexOf(endMarker);
-  const hasStart = start !== -1;
-  const hasFinish = finish !== -1;
-  if (hasStart !== hasFinish) {
+  const starts = markerIndexes(normalized, beginMarker);
+  const finishes = markerIndexes(normalized, endMarker);
+  if (starts.length === 0 && finishes.length === 0) {
+    return `${normalized.trimEnd()}\n\n${block}\n`;
+  }
+  if (starts.length !== 1 || finishes.length !== 1) {
     throw new Error(`Malformed managed adapter markers in ${activeFile}`);
   }
-  if (hasStart && finish < start) {
+  const [start] = starts;
+  const [finish] = finishes;
+  if (finish < start) {
     throw new Error(`Malformed managed adapter markers in ${activeFile}`);
   }
-  if (hasStart) {
-    const before = normalized.slice(0, start).trimEnd();
-    const after = normalized.slice(finish + endMarker.length).trimStart();
-    return `${before}\n\n${block}\n${after ? `\n${after.trimEnd()}\n` : ''}`;
-  }
-  return `${normalized.trimEnd()}\n\n${block}\n`;
+  const before = normalized.slice(0, start).trimEnd();
+  const after = normalized.slice(finish + endMarker.length).trimStart();
+  return `${before}\n\n${block}\n${after ? `\n${after.trimEnd()}\n` : ''}`;
 }
 
 function targetList(root, target) {

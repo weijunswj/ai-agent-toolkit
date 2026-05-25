@@ -8,6 +8,8 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+const beginMarker = '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->';
+const endMarker = '<!-- END N8N-AGENT-RULES-ADAPTER -->';
 
 function readText(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -266,11 +268,53 @@ test('adapter installer updates normal non-symlink active instruction files', ()
   assert.equal(markerCount(installed, '<!-- END N8N-AGENT-RULES-ADAPTER -->'), 1);
 });
 
+test('adapter installer replaces a single managed adapter block', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-replace-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  fs.writeFileSync(activePath, `# Existing AGENTS\n\n${beginMarker}\nold adapter block\n${endMarker}\n`);
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+
+  const installed = fs.readFileSync(activePath, 'utf8');
+  assert.match(installed, /# Existing AGENTS/);
+  assert.doesNotMatch(installed, /old adapter block/);
+  assert.equal(markerCount(installed, beginMarker), 1);
+  assert.equal(markerCount(installed, endMarker), 1);
+});
+
+test('adapter installer appends managed adapter block when no markers exist', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-append-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  fs.writeFileSync(activePath, '# Existing AGENTS\n\nKeep this local rule.\n');
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+
+  const installed = fs.readFileSync(activePath, 'utf8');
+  assert.match(installed, /# Existing AGENTS/);
+  assert.match(installed, /Keep this local rule\./);
+  assert.equal(markerCount(installed, beginMarker), 1);
+  assert.equal(markerCount(installed, endMarker), 1);
+});
+
+test('adapter installer rejects duplicate complete managed adapter blocks without modifying the file', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-duplicate-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  const existing = `# Existing AGENTS\n\n${beginMarker}\nold adapter block 1\n${endMarker}\n\n${beginMarker}\nold adapter block 2\n${endMarker}\n`;
+  fs.writeFileSync(activePath, existing);
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Malformed managed adapter markers in AGENTS\.md/);
+  assert.equal(fs.readFileSync(activePath, 'utf8'), existing);
+});
+
 test('adapter installer rejects malformed managed markers', () => {
   const malformedCases = [
-    ['begin only', '# Existing AGENTS\n\n<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->\nold block\n'],
-    ['end only', '# Existing AGENTS\n\n<!-- END N8N-AGENT-RULES-ADAPTER -->\nold block\n'],
-    ['end before begin', '# Existing AGENTS\n\n<!-- END N8N-AGENT-RULES-ADAPTER -->\nold block\n<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->\n']
+    ['begin only', `# Existing AGENTS\n\n${beginMarker}\nold block\n`],
+    ['end only', `# Existing AGENTS\n\n${endMarker}\nold block\n`],
+    ['end before begin', `# Existing AGENTS\n\n${endMarker}\nold block\n${beginMarker}\n`]
   ];
 
   for (const [label, existing] of malformedCases) {
