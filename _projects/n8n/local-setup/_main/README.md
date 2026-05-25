@@ -15,7 +15,7 @@ Beginner-friendly Windows guide for running local `n8n` in Docker and connecting
 | OpenCode setup | [6. OpenCode Integration](./6.%20extra%20-%20opencode%20integration.md) |
 | Antigravity setup | [7. Antigravity Integration](./7.%20extra%20-%20antigravity%20integration.md) |
 
-## Beginner Path
+## Fast Path
 
 1. Follow [1. Local Setup](./1.%20local%20setup.md).
 2. Add generic agent rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md) to the target repo as `AGENTS.md`.
@@ -41,9 +41,6 @@ Beginner-friendly Windows guide for running local `n8n` in Docker and connecting
 | [CLAUDE.template.md](../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md) | Generic Claude Code rules template. |
 | [GEMINI.template.md](../../../development/ai-coding-agent-rules/_main/GEMINI.template.md) | Generic Gemini or Antigravity rules template. |
 | [n8n-agent-rules skill](../../../../skills/n8n-agent-rules/) | Full n8n workflow, MCP routing, live-instance, and manual-configuration rules. |
-| [AGENTS n8n adapter](../../../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md) | Optional Codex or OpenCode active-instruction pointer. |
-| [CLAUDE n8n adapter](../../../../skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md) | Optional Claude Code active-instruction pointer. |
-| [GEMINI n8n adapter](../../../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md) | Optional Gemini or Antigravity active-instruction pointer. |
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
