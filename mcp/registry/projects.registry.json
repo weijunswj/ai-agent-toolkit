@@ -100,9 +100,9 @@
     "category": "development",
     "name": "ai-coding-agent-rules",
     "title": "AI Coding Agent Rules",
-    "version": "2.0.1",
+    "version": "2.0.2",
     "version_policy": "semver",
-    "version_notes": "Hardens n8n adapter auto dry-run guidance when --target auto finds no active instruction files.",
+    "version_notes": "Requires neutral n8n adapter target-choice prompts instead of defaulting to none during read-only tasks.",
     "project": {
       "name": "AI Coding Agent Rules",
       "category": "development",

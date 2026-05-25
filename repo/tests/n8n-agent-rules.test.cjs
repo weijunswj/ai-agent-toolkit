@@ -155,6 +155,8 @@ test('n8n-agent-rules skill documents the adapter auto-check approval protocol',
     assert.match(text, /`GEMINI\.md` for Gemini\/Antigravity/i, relPath);
     assert.match(text, /\ball\b/i, relPath);
     assert.match(text, /\bnone\b/i, relPath);
+    assert.match(text, /present all five options neutrally/, relPath);
+    assert.match(text, /Do not suggest or default to `none` merely because the current task is read-only or no-modify/, relPath);
     assert.match(text, /The answer `none` is allowed and must be respected/i, relPath);
   }
 });
@@ -175,6 +177,8 @@ test('n8n-agent-rules README tells agents to dry-run then ask before write', () 
     assert.match(text, /unless the user already answered that target question in the current turn/i, relPath);
     assert.match(text, /read-only or no-modify tasks/i, relPath);
     assert.match(text, /does not block the adapter-target question/i, relPath);
+    assert.match(text, /present all five options neutrally/, relPath);
+    assert.match(text, /Do not suggest or default to `none` merely because the current task is read-only or no-modify/, relPath);
     assert.match(text, /`none` is allowed/i, relPath);
     assert.match(text, /Do not silently auto-install adapters/i, relPath);
     assert.match(text, /--target all/, relPath);
