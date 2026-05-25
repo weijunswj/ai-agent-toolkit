@@ -35,6 +35,10 @@ Do not move product-owned assets into this toolkit.
 
 The JSON registries under `mcp/registry/` are the published MCP-ready registry discovery surface. Generated registries should be refreshed from project manifests with `node repo/scripts/sync-toolkit-projects.cjs --write`.
 
+## Documentation Links
+
+Human-facing navigational paths and URLs must be clickable Markdown links. Do not leave important links only inside code fences or inline code. Code blocks are for commands, payloads, literal examples, and copy/paste prompts.
+
 ## Project Versions And Source Locks
 
 `toolkit.project.json` owns the toolkit project module version and routing contract. Every project manifest must include `version`, `version_policy: "semver"`, and non-empty `version_notes`.

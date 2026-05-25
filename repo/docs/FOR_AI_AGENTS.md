@@ -17,6 +17,10 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 
 `version_policy` currently supports only `semver`. `version_notes` explains what the toolkit project version represents. Do not use Git tags, package tags, GitHub release tags, upstream versions, or per-file versions as substitutes for project module versions.
 
+## Documentation Links
+
+Human-facing navigational paths and URLs must be clickable Markdown links. Do not leave important links only inside code fences or inline code. Code blocks are for commands, payloads, literal examples, and copy/paste prompts.
+
 ## Project Categories
 
 - `cicd/`: CI/CD and GitHub Actions safety material.

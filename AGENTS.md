@@ -120,6 +120,7 @@ Keep the topology simple:
 ## Documentation Rules
 
 - Humans should use `_projects/**/_main/` for full source docs and original guides.
+- Human-facing navigational paths and URLs must be clickable Markdown links. Do not leave important links only inside code fences or inline code. Code blocks are for commands, payloads, literal examples, and copy/paste prompts.
 - `_projects/**/README.md` files should stay tiny landing cards.
 - `skills/<skill-name>/README.md` files should explain how to copy/install/use the skill folder.
 - `mcp/README.md` must say plainly whether the MCP surface is runnable today or design/spec-only.
