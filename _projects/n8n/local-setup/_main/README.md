@@ -46,8 +46,8 @@ Important:
 
 1. Follow [1. Local Setup](./1.%20local%20setup.md).
 2. Install or copy generic AI coding agent rules from the source-side generic templates, such as [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), into the target repo root as `AGENTS.md`.
-3. Install or load the `n8n-agent-rules` skill for the full n8n operating contract.
-4. Optionally merge a brief adapter from `skills/n8n-agent-rules/adapters/` into the active rules file. Adapters point to the skill; they do not duplicate the full ruleset.
+3. Install or load the [n8n-agent-rules skill](../../../../skills/n8n-agent-rules/) for the full n8n operating contract.
+4. Optionally merge a brief adapter from [n8n-agent-rules adapters](../../../../skills/n8n-agent-rules/adapters/) into the active rules file. Adapters point to the skill; they do not duplicate the full ruleset.
 5. Copy the Codex MCP config from [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
 6. Restart Codex.
 7. Run the smoke tests in the local setup guide.
@@ -62,10 +62,10 @@ Important:
 
 | Tool | Copy-paste path |
 | --- | --- |
-| Codex | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), install or load `skills/n8n-agent-rules`, optionally merge `AGENTS.n8n-brief.template.md`, then copy [templates/codex-mcp-config.md](./templates/codex-mcp-config.md). |
-| Claude Code | Install generic rules from [CLAUDE.template.md](../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md), install or load `skills/n8n-agent-rules`, optionally merge `CLAUDE.n8n-brief.template.md`, then run the commands from [templates/claude-mcp-config.md](./templates/claude-mcp-config.md). |
-| OpenCode | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), install or load `skills/n8n-agent-rules`, optionally merge `AGENTS.n8n-brief.template.md`, then copy [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md). |
-| Antigravity | Install generic rules from [GEMINI.template.md](../../../development/ai-coding-agent-rules/_main/GEMINI.template.md), install or load `skills/n8n-agent-rules`, optionally merge `GEMINI.n8n-brief.template.md`, then copy [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md). |
+| Codex | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/), optionally merge [AGENTS.n8n-brief.template.md](../../../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md), then copy [templates/codex-mcp-config.md](./templates/codex-mcp-config.md). |
+| Claude Code | Install generic rules from [CLAUDE.template.md](../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md), install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/), optionally merge [CLAUDE.n8n-brief.template.md](../../../../skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md), then run the commands from [templates/claude-mcp-config.md](./templates/claude-mcp-config.md). |
+| OpenCode | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/), optionally merge [AGENTS.n8n-brief.template.md](../../../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md), then copy [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md). |
+| Antigravity | Install generic rules from [GEMINI.template.md](../../../development/ai-coding-agent-rules/_main/GEMINI.template.md), install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/), optionally merge [GEMINI.n8n-brief.template.md](../../../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md), then copy [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md). |
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
@@ -75,28 +75,33 @@ If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not 
 
 Use these linked templates instead of copying giant config walls from the guide.
 
-Generated templates should not be edited directly; edit the source partials first, then regenerate the generated templates.
+Generated templates should not be edited directly. Use the generated templates and references below for normal copying or review; maintainers can update the owning source and regenerate.
 
-| Source file | Edit when |
+### Agent rules and adapters
+
+| Agent rules or adapter | Use when |
 | --- | --- |
-| [n8n agent rules](../../../development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md) | You want to change n8n workflow, MCP routing, live-instance, or manual-configuration rules. |
-| [Codex MCP config](./templates/codex-mcp-config.md) | You want to change Codex MCP server config. This file is not generated from partials. |
-| [Antigravity MCP config](./templates/antigravity-mcp-config.md) | You want to change Antigravity MCP server config. This file is not generated from partials. |
+| [n8n agent rules](../../../../skills/n8n-agent-rules/n8n-agent-rules.md) | You need the generated full n8n workflow, MCP routing, live-instance, or manual-configuration rules. |
+| [AGENTS n8n adapter](../../../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md) | You want a brief optional Codex or OpenCode active-instruction snippet that points to `n8n-agent-rules`. |
+| [CLAUDE n8n adapter](../../../../skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md) | You want a brief optional Claude Code active-instruction snippet that points to `n8n-agent-rules`. |
+| [GEMINI n8n adapter](../../../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md) | You want a brief optional Gemini or Antigravity active-instruction snippet that points to `n8n-agent-rules`. |
 
 Generic AI coding agent execution rules and the full n8n operating rules are owned by [_projects/development/ai-coding-agent-rules/](../../../development/ai-coding-agent-rules/).
 
-The local setup project does not own the full n8n ruleset. It references the generated `n8n-agent-rules` skill and its generated local reference copy for portability.
+The local setup project does not own the full n8n ruleset. It references the generated [n8n-agent-rules skill](../../../../skills/n8n-agent-rules/) and its generated [local reference copy](../../../../skills/n8n-local-setup/references/n8n-agent-rules.md) for portability.
 
 To regenerate locally from the toolkit repo root, run `npm run build:agent-rules`, then `node repo/scripts/sync-toolkit-projects.cjs --write`.
 
 GitHub Actions is also set up to regenerate rule templates and check the expected generated files on PR branches when source partials or the template generator change. It is check-only.
+
+### MCP config templates
+
 | Template | Use when |
 | --- | --- |
 | [Codex MCP config](./templates/codex-mcp-config.md) | You want Codex to connect to `n8n_docs` and `n8n_live`. |
 | [Claude MCP config](./templates/claude-mcp-config.md) | You want Claude Code to connect to `n8n_docs` and `n8n_live`. |
 | [OpenCode MCP config](./templates/opencode-mcp-config.md) | You want OpenCode to connect to `n8n_docs` and approval-gated `n8n_live`. |
 | [Antigravity MCP config](./templates/antigravity-mcp-config.md) | You want Antigravity to connect to `n8n_docs` and `n8n_live`. |
-| `skills/n8n-agent-rules/adapters/*.n8n-brief.template.md` | You want a brief optional active-instruction snippet that points to `n8n-agent-rules` without copying the full rules. |
 
 ## Scripts
 
@@ -137,7 +142,7 @@ If you are lazy and just want the safest normal path:
 
 1. Open [1. Local Setup](./1.%20local%20setup.md).
 2. Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md).
-3. Install or load `skills/n8n-agent-rules`.
+3. Install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/).
 4. Use [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
 5. Ignore Claude Code, OpenCode, and Antigravity until Codex works.
 6. Ignore tunnelling until you actually need external webhooks.
