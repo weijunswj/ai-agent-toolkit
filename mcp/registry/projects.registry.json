@@ -100,9 +100,9 @@
     "category": "development",
     "name": "ai-coding-agent-rules",
     "title": "AI Coding Agent Rules",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "version_policy": "semver",
-    "version_notes": "Adds the n8n-agent-rules skill and removes heavy always-on toolkit/n8n convenience templates from the generated default agent-rule surface.",
+    "version_notes": "Hardens n8n adapter auto dry-run guidance when --target auto finds no active instruction files.",
     "project": {
       "name": "AI Coding Agent Rules",
       "category": "development",

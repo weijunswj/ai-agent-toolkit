@@ -248,7 +248,9 @@ function main() {
   }
 
   if (!targets.length) {
-    console.log('No existing active instruction files found for --target auto. No files would be created.');
+    console.log('No existing active instruction files found for --target auto. No files would be created automatically.');
+    console.log('Required next step: Ask the user which adapter target to create or propose: AGENTS.md, CLAUDE.md, GEMINI.md, all, or none.');
+    console.log('Do this even during read-only or no-modify tasks. Do not run --write without explicit current-turn approval.');
     return;
   }
 
