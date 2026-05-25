@@ -44,6 +44,38 @@ function markerCount(text, marker) {
   return text.split(marker).length - 1;
 }
 
+function installerScriptPath() {
+  return path.join(repoRoot, 'skills', 'n8n-agent-rules', 'scripts', 'install-n8n-agent-adapter.cjs');
+}
+
+function runInstaller(workspace, args = []) {
+  return spawnSync(process.execPath, [installerScriptPath(), '--workspace', workspace, ...args], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+}
+
+function makeN8nWorkspace(prefix = 'n8n-agent-adapter-') {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.mkdirSync(path.join(workspace, 'n8n-workflows'), { recursive: true });
+  fs.writeFileSync(path.join(workspace, 'n8n-workflows', 'sample.workflow.json'), JSON.stringify({ nodes: [], connections: {} }, null, 2));
+  return workspace;
+}
+
+function createSymlinkOrSkip(t, target, linkPath, type) {
+  try {
+    fs.rmSync(linkPath, { recursive: true, force: true });
+    fs.symlinkSync(target, linkPath, type);
+  } catch (error) {
+    if (['EPERM', 'EINVAL', 'ENOTSUP', 'EACCES'].includes(error.code)) {
+      t.skip(`symlink creation is not available in this environment: ${error.message}`);
+      return false;
+    }
+    throw error;
+  }
+  return true;
+}
+
 test('n8n-agent-rules skill publishes the canonical full rules from development source', () => {
   const canonicalPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md';
   const skillPath = 'skills/n8n-agent-rules/SKILL.md';
@@ -184,26 +216,17 @@ test('n8n adapters are brief optional snippets and do not duplicate the full rul
 });
 
 test('adapter installer dry-run reports changes and write mode is idempotent', () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-agent-adapter-'));
-  fs.mkdirSync(path.join(workspace, 'n8n-workflows'), { recursive: true });
-  fs.writeFileSync(path.join(workspace, 'n8n-workflows', 'sample.workflow.json'), JSON.stringify({ nodes: [], connections: {} }, null, 2));
+  const workspace = makeN8nWorkspace();
   fs.writeFileSync(path.join(workspace, 'AGENTS.md'), '# Existing AGENTS\n\n');
 
-  const script = path.join(repoRoot, 'skills', 'n8n-agent-rules', 'scripts', 'install-n8n-agent-adapter.cjs');
-  const dryRun = spawnSync(process.execPath, [script, '--workspace', workspace, '--target', 'auto', '--dry-run'], {
-    cwd: repoRoot,
-    encoding: 'utf8'
-  });
+  const dryRun = runInstaller(workspace, ['--target', 'auto', '--dry-run']);
   assert.equal(dryRun.status, 0, dryRun.stderr);
   assert.match(dryRun.stdout, /Detected n8n involvement/i);
   assert.match(dryRun.stdout, /Would update AGENTS\.md/i);
   assert.doesNotMatch(fs.readFileSync(path.join(workspace, 'AGENTS.md'), 'utf8'), /BEGIN N8N-AGENT-RULES-ADAPTER/);
 
   for (let i = 0; i < 2; i += 1) {
-    const write = spawnSync(process.execPath, [script, '--workspace', workspace, '--target', 'auto', '--write'], {
-      cwd: repoRoot,
-      encoding: 'utf8'
-    });
+    const write = runInstaller(workspace, ['--target', 'auto', '--write']);
     assert.equal(write.status, 0, write.stderr);
   }
 
@@ -211,4 +234,53 @@ test('adapter installer dry-run reports changes and write mode is idempotent', (
   assert.equal(markerCount(installed, '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->'), 1);
   assert.equal(markerCount(installed, '<!-- END N8N-AGENT-RULES-ADAPTER -->'), 1);
   assert.match(installed, /\bn8n-agent-rules\b/);
+});
+
+test('adapter installer refuses symlinked active instruction files without modifying the target', (t) => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-symlink-');
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-agent-adapter-outside-'));
+  const outsideTarget = path.join(outsideDir, 'outside-AGENTS.md');
+  const originalOutside = '# Outside target\n';
+  fs.writeFileSync(outsideTarget, originalOutside);
+
+  const activePath = path.join(workspace, 'AGENTS.md');
+  if (!createSymlinkOrSkip(t, outsideTarget, activePath, 'file')) return;
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Refusing symlinked active instruction file: AGENTS\.md/);
+  assert.equal(fs.readFileSync(outsideTarget, 'utf8'), originalOutside);
+});
+
+test('adapter installer updates normal non-symlink active instruction files', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-normal-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  fs.writeFileSync(activePath, '# Existing AGENTS\n');
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+
+  const installed = fs.readFileSync(activePath, 'utf8');
+  assert.match(installed, /# Existing AGENTS/);
+  assert.equal(markerCount(installed, '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->'), 1);
+  assert.equal(markerCount(installed, '<!-- END N8N-AGENT-RULES-ADAPTER -->'), 1);
+});
+
+test('adapter installer rejects malformed managed markers', () => {
+  const malformedCases = [
+    ['begin only', '# Existing AGENTS\n\n<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->\nold block\n'],
+    ['end only', '# Existing AGENTS\n\n<!-- END N8N-AGENT-RULES-ADAPTER -->\nold block\n'],
+    ['end before begin', '# Existing AGENTS\n\n<!-- END N8N-AGENT-RULES-ADAPTER -->\nold block\n<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->\n']
+  ];
+
+  for (const [label, existing] of malformedCases) {
+    const workspace = makeN8nWorkspace(`n8n-agent-adapter-malformed-${label.replaceAll(' ', '-')}-`);
+    const activePath = path.join(workspace, 'AGENTS.md');
+    fs.writeFileSync(activePath, existing);
+
+    const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+    assert.notEqual(result.status, 0, label);
+    assert.match(result.stderr, /Malformed managed adapter markers in AGENTS\.md/, label);
+    assert.equal(fs.readFileSync(activePath, 'utf8'), existing, label);
+  }
 });

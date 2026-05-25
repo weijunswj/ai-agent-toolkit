@@ -74,6 +74,46 @@ function isInside(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function isReparsePoint(stats) {
+  if (typeof stats.isReparsePoint === 'function') return stats.isReparsePoint();
+  return stats.isReparsePoint === true;
+}
+
+function lstatIfExists(filePath) {
+  try {
+    return fs.lstatSync(filePath);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function assertSafeActiveInstructionPath(root, activePath, activeFile) {
+  const activeParent = path.dirname(activePath);
+  const activeRealParent = fs.existsSync(activeParent)
+    ? fs.realpathSync.native(activeParent)
+    : root;
+  if (!isInside(root, activeRealParent)) {
+    throw new Error(`Refusing target outside workspace: ${activeFile}`);
+  }
+
+  const activeStats = lstatIfExists(activePath);
+  if (!activeStats) return false;
+
+  if (activeStats.isSymbolicLink()) {
+    throw new Error(`Refusing symlinked active instruction file: ${activeFile}`);
+  }
+  if (isReparsePoint(activeStats)) {
+    throw new Error(`Refusing reparse-point active instruction file: ${activeFile}`);
+  }
+
+  const activeRealPath = fs.realpathSync.native(activePath);
+  if (!isInside(root, activeRealPath)) {
+    throw new Error(`Refusing target outside workspace: ${activeFile}`);
+  }
+  return true;
+}
+
 function safeWorkspace(rootInput) {
   const root = path.resolve(rootInput);
   const real = fs.realpathSync.native(root);
@@ -148,11 +188,19 @@ function adapterBlock(adapterFile) {
   return template.slice(start, finish + endMarker.length).trimEnd();
 }
 
-function replaceManagedBlock(existing, block) {
+function replaceManagedBlock(existing, block, activeFile = 'active instruction file') {
   const normalized = normalizeNewlines(existing);
   const start = normalized.indexOf(beginMarker);
   const finish = normalized.indexOf(endMarker);
-  if (start !== -1 && finish !== -1 && finish > start) {
+  const hasStart = start !== -1;
+  const hasFinish = finish !== -1;
+  if (hasStart !== hasFinish) {
+    throw new Error(`Malformed managed adapter markers in ${activeFile}`);
+  }
+  if (hasStart && finish < start) {
+    throw new Error(`Malformed managed adapter markers in ${activeFile}`);
+  }
+  if (hasStart) {
     const before = normalized.slice(0, start).trimEnd();
     const after = normalized.slice(finish + endMarker.length).trimStart();
     return `${before}\n\n${block}\n${after ? `\n${after.trimEnd()}\n` : ''}`;
@@ -195,21 +243,17 @@ function main() {
 
   for (const target of targets) {
     const activePath = path.join(root, target.activeFile);
-    const activeRealParent = fs.existsSync(path.dirname(activePath))
-      ? fs.realpathSync.native(path.dirname(activePath))
-      : root;
-    if (!isInside(root, activeRealParent)) {
-      throw new Error(`Refusing target outside workspace: ${target.activeFile}`);
-    }
+    const activeExists = assertSafeActiveInstructionPath(root, activePath, target.activeFile);
     const block = adapterBlock(path.join(adaptersDir, target.adapter));
-    const current = fs.existsSync(activePath) ? fs.readFileSync(activePath, 'utf8') : '';
-    const next = replaceManagedBlock(current, block);
-    const action = fs.existsSync(activePath) ? 'update' : 'create';
+    const current = activeExists ? fs.readFileSync(activePath, 'utf8') : '';
+    const next = replaceManagedBlock(current, block, target.activeFile);
+    const action = activeExists ? 'update' : 'create';
     if (current === next) {
       console.log(`${args.write ? 'No change for' : 'Would leave unchanged'} ${target.activeFile}`);
       continue;
     }
     if (args.write) {
+      assertSafeActiveInstructionPath(root, activePath, target.activeFile);
       fs.writeFileSync(activePath, next, 'utf8');
       console.log(`${action === 'create' ? 'Created' : 'Updated'} ${target.activeFile}`);
     } else {
@@ -222,6 +266,7 @@ if (require.main === module) main();
 
 module.exports = {
   adapterBlock,
+  assertSafeActiveInstructionPath,
   detectN8nInvolvement,
   replaceManagedBlock,
   targetList
