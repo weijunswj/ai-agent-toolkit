@@ -33,12 +33,14 @@ This repo keeps reusable AI-agent material in a source-first layout. Full source
 
 ## Project Categories
 
-- **[`cicd/`](_projects/cicd/):** CI/CD and GitHub Actions safety material.
-- **[`design/`](_projects/design/):** UI/UX and frontend design material.
-- **[`development/`](_projects/development/):** General development workflow helpers.
-- **[`knowledge/`](_projects/knowledge/):** Knowledge-base and index-maintenance skills.
-- **[`n8n/`](_projects/n8n/):** n8n setup, workflow helper scripts, and workflow templates.
-- **[`repo-methodology/`](_projects/repo-methodology/):** How this toolkit preserves source truth, generates skills/MCP surfaces, and prevents context drift.
+| Category | What it contains |
+|---|---|
+| [`cicd/`](_projects/cicd/) | CI/CD and GitHub Actions safety material. |
+| [`design/`](_projects/design/) | UI/UX and frontend design material. |
+| [`development/`](_projects/development/) | General development workflow helpers. |
+| [`knowledge/`](_projects/knowledge/) | Knowledge-base and index-maintenance skills. |
+| [`n8n/`](_projects/n8n/) | n8n setup, workflow helper scripts, and workflow templates. |
+| [`repo-methodology/`](_projects/repo-methodology/) | How this toolkit preserves source truth, generates skills/MCP surfaces, and prevents context drift. |
 
 ## Projects
 
@@ -51,7 +53,6 @@ Open a project when you need the maintained source behind a skill or MCP note.
 | [Secure CI/CD Installer](_projects/cicd/secure-installer/) | Helps plan CI/CD changes with approval gates and safety status tracking. | The full installer prompt, CI/CD status templates, GitHub Actions notes, and safety policy source. | [`skills/secure-cicd-installer/`](skills/secure-cicd-installer/) and [`mcp/projects/secure-cicd-installer.md`](mcp/projects/secure-cicd-installer.md) |
 | [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Provides frontend design guidance and a local design-system generator. | Third-party-attributed design source, local CSV data, generator scripts, and attribution notes. | [`skills/ui-ux-secure-frontend-design/`](skills/ui-ux-secure-frontend-design/) and [`mcp/projects/ui-ux-pro-max.md`](mcp/projects/ui-ux-pro-max.md) |
 | [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Helps maintain source-traceable skills, MCP notes, templates, manifests, and audit baselines. | Generic publishing methodology, source-to-surface decision rules, validation guidance, and starter templates. | [`skills/context-preserving-ai-publisher/`](skills/context-preserving-ai-publisher/) |
-| [MCP-Ready Registry](_projects/repo-methodology/mcp-ready-registry/) | Owns the repo-level MCP-ready registry and future design/spec surface. | MCP-ready registry metadata, operator references, and future registry/installer MCP design docs. | [`mcp/`](mcp/) |
 | [AI Coding Agent Rules](_projects/development/ai-coding-agent-rules/) | Provides generic execution-first AI coding agent rules and the full n8n operating ruleset. | Slim generic AGENTS/CLAUDE/GEMINI templates, skill-routing source, `n8n-agent-rules`, and optional brief n8n adapters. | [`skills/ai-coding-agent-rules/`](skills/ai-coding-agent-rules/) and [`skills/n8n-agent-rules/`](skills/n8n-agent-rules/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Helps an agent start and prove Windows localhost dev services are reachable. | The full standalone skill source for launch discovery, port checks, logs, background start, and HTTP verification. | [`skills/windows-localhost-workflows/`](skills/windows-localhost-workflows/) |
 | [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Helps maintain a Notion/GitHub knowledge index without duplicate rows. | The full standalone skill source for schema setup, source matching, duplicate handling, and daily updater behavior. | [`skills/knowledge-index-updater/`](skills/knowledge-index-updater/) |

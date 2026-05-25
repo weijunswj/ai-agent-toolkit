@@ -75,11 +75,11 @@ If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not 
 
 Use these linked templates instead of copying giant config walls from the guide.
 
-Generated templates should not be edited directly; edit the source partials first, then regenerate the generated templates.
+Generated templates should not be edited directly. Use the generated templates and references below for normal copying or review; maintainers can update the owning source and regenerate.
 
-| Source file | Edit when |
+| Generated template or reference | Use when |
 | --- | --- |
-| [n8n agent rules](../../../development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md) | You want to change n8n workflow, MCP routing, live-instance, or manual-configuration rules. |
+| [n8n agent rules](../../../../skills/n8n-agent-rules/n8n-agent-rules.md) | You need the generated full n8n workflow, MCP routing, live-instance, or manual-configuration rules. |
 | [Codex MCP config](./templates/codex-mcp-config.md) | You want to change Codex MCP server config. This file is not generated from partials. |
 | [Antigravity MCP config](./templates/antigravity-mcp-config.md) | You want to change Antigravity MCP server config. This file is not generated from partials. |
 
