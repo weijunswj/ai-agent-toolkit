@@ -13,7 +13,7 @@ Project: repo-methodology.context-preserving-ai-publisher
 Published-surface source note: This file is authored as a published-surface source; relative links are intended to resolve after sync at skills/context-preserving-ai-publisher/README.md.
 -->
 
-Copy the whole `skills/context-preserving-ai-publisher/` folder into an agent skill location when you want reusable guidance for source-traceable AI-facing repo surfaces.
+Copy the whole [context-preserving-ai-publisher](./) skill folder into an agent skill location when you want reusable guidance for source-traceable AI-facing repo surfaces.
 
 Use it for:
 
@@ -22,4 +22,4 @@ Use it for:
 - Reviewing audit baseline movement and generated-output ownership.
 - Avoiding lossy AI-facing surfaces and context drift.
 
-Start with `SKILL.md`, then load only the reference or template needed for the task.
+Start with [SKILL.md](SKILL.md), then load only the reference or template needed for the task.

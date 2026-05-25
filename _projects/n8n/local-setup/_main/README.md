@@ -1,151 +1,79 @@
 # Codex + n8n Local Setup
 
-This repository is a beginner-friendly Windows guide for running local `n8n` in Docker and connecting it to Codex through MCP.
+Beginner-friendly Windows guide for running local `n8n` in Docker and connecting it to Codex through MCP.
 
-It also includes optional local tunnelling, a Docker Compose + ngrok path, VPS hosting notes, Claude Code integration, OpenCode integration, Antigravity integration, reusable settings templates, and Windows helper scripts for local webhook testing and template maintenance.
+## Start Here
 
----
-
-## Start here
-
-Use this table to choose the right path. Do not overthink it.
-
-| Situation | Use this |
+| Need | Open |
 | --- | --- |
-| I want local n8n + Codex on Windows | [1. Local Setup](./1.%20local%20setup.md) |
-| I want to refresh/update my local Docker n8n | [2. Upgrading](./2.%20upgrading.md) |
-| I need Stripe, Telegram, GitHub, Meta, or another external service to call my local n8n | [3. Tunneling Guide](./3.%20tunneling%20guide.md) |
-| I want local n8n managed by Docker Compose while still using ngrok | [3a. Docker Compose + ngrok](./3a.%20docker%20compose%20%2B%20ngrok.md) |
-| I want a real always-on public n8n | [4. VPS Hosting](./4.%20vps%20hosting.md) |
-| I already have Codex working and want Claude Code too | [EXTRA: Claude Code Integration](./5.%20extra%20-%20claude%20code%20integration.md) |
-| I already have Codex working and want OpenCode too | [EXTRA: OpenCode Integration](./6.%20extra%20-%20opencode%20integration.md) |
-| I already have Codex working and want Antigravity too | [EXTRA: Antigravity Integration](./7.%20extra%20-%20antigravity%20integration.md) |
+| Local n8n + Codex on Windows | [1. Local Setup](./1.%20local%20setup.md) |
+| Refresh or update local Docker n8n | [2. Upgrading](./2.%20upgrading.md) |
+| External services need to call local n8n | [3. Tunneling Guide](./3.%20tunneling%20guide.md) |
+| Docker Compose plus a temporary ngrok URL | [3a. Docker Compose + ngrok](./3a.%20docker%20compose%20%2B%20ngrok.md) |
+| Always-on public n8n | [4. VPS Hosting](./4.%20vps%20hosting.md) |
+| Claude Code setup | [5. Claude Code Integration](./5.%20extra%20-%20claude%20code%20integration.md) |
+| OpenCode setup | [6. OpenCode Integration](./6.%20extra%20-%20opencode%20integration.md) |
+| Antigravity setup | [7. Antigravity Integration](./7.%20extra%20-%20antigravity%20integration.md) |
 
----
-
-## Local vs tunnel vs Compose vs VPS
-
-| Setup | Public URL | Permanent | Use scripts from this repo? |
-| --- | --- | --- | --- |
-| Local Windows Docker | No | Yes, on your own PC | No script needed |
-| Local Windows Docker + ngrok | Yes, temporary | No | Yes, optional ngrok script |
-| Local Docker Compose + ngrok | Yes, temporary | No | Yes, use the Compose wrapper script from the guide |
-| VPS / production | Yes | Yes | No |
-
-Important:
-
-* The local n8n scripts in this repo are for local Windows development only.
-* Do not use local n8n scripts for VPS, production, Hostinger, or Coolify deployments.
-* Use the normal ngrok script if you want the simplest local tunnel path.
-* Use the Compose + ngrok guide if you want cleaner Docker management while still using a temporary local tunnel.
-* VPS / production upgrades should use Docker Compose or the provider UI.
-
----
-
-## Recommended beginner flow
+## Fast Path
 
 1. Follow [1. Local Setup](./1.%20local%20setup.md).
-2. Install or copy generic AI coding agent rules from the source-side generic templates, such as [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), into the target repo root as `AGENTS.md`.
-3. Install or load the [n8n-agent-rules skill](../../../../skills/n8n-agent-rules/) for the full n8n operating contract.
-4. Optionally merge a brief adapter from [n8n-agent-rules adapters](../../../../skills/n8n-agent-rules/adapters/) into the active rules file. Adapters point to the skill; they do not duplicate the full ruleset.
-5. Copy the Codex MCP config from [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
-6. Restart Codex.
-7. Run the smoke tests in the local setup guide.
-8. Add Claude Code, OpenCode, or Antigravity only after the Codex setup works.
-9. Only move to tunnelling if an outside service needs to call your local n8n.
-10. If the normal ngrok script feels limiting and you want a cleaner Docker base, move to [3a. Docker Compose + ngrok](./3a.%20docker%20compose%20%2B%20ngrok.md).
-11. Only move to VPS hosting when you need real always-on public n8n.
+2. Add generic agent rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md) to the target repo as `AGENTS.md`.
+3. Install or load the [n8n-agent-rules skill](../../../../skills/n8n-agent-rules/).
+4. Copy the [Codex MCP config](./templates/codex-mcp-config.md).
+5. Restart Codex and run the smoke tests from the setup guide.
+6. Add Claude Code, OpenCode, Antigravity, tunnelling, Compose, or VPS only when you need them.
 
----
+## Setup Choices
 
-## Copy-paste setup paths
+| Setup | Public URL | Persistent | Notes |
+| --- | --- | --- | --- |
+| Local Windows Docker | No | Yes, on your PC | Best first path. |
+| Local Windows Docker + ngrok | Temporary | No | Simplest webhook-testing tunnel. |
+| Local Docker Compose + ngrok | Temporary | No | Cleaner Docker management with the same tunnel idea. |
+| VPS / production | Yes | Yes | Use provider or Compose operations, not local Windows scripts. |
 
-| Tool | Copy-paste path |
+## Agent Rules And Adapters
+
+| File or folder | Use |
 | --- | --- |
-| Codex | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/), optionally merge [AGENTS.n8n-brief.template.md](../../../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md), then copy [templates/codex-mcp-config.md](./templates/codex-mcp-config.md). |
-| Claude Code | Install generic rules from [CLAUDE.template.md](../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md), install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/), optionally merge [CLAUDE.n8n-brief.template.md](../../../../skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md), then run the commands from [templates/claude-mcp-config.md](./templates/claude-mcp-config.md). |
-| OpenCode | Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md), install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/), optionally merge [AGENTS.n8n-brief.template.md](../../../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md), then copy [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md). |
-| Antigravity | Install generic rules from [GEMINI.template.md](../../../development/ai-coding-agent-rules/_main/GEMINI.template.md), install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/), optionally merge [GEMINI.n8n-brief.template.md](../../../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md), then copy [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md). |
+| [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md) | Generic Codex or OpenCode rules template. |
+| [CLAUDE.template.md](../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md) | Generic Claude Code rules template. |
+| [GEMINI.template.md](../../../development/ai-coding-agent-rules/_main/GEMINI.template.md) | Generic Gemini or Antigravity rules template. |
+| [n8n-agent-rules skill](../../../../skills/n8n-agent-rules/) | Full n8n workflow, MCP routing, live-instance, and manual-configuration rules. |
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
----
+The local setup project references the n8n rules; it does not own them. The canonical source is [_projects/development/ai-coding-agent-rules/](../../../development/ai-coding-agent-rules/).
 
-## Settings templates
+## MCP Config Templates
 
-Use these linked templates instead of copying giant config walls from the guide.
-
-Generated templates should not be edited directly. Use the generated templates and references below for normal copying or review; maintainers can update the owning source and regenerate.
-
-### Agent rules and adapters
-
-| Agent rules or adapter | Use when |
+| Template | Use |
 | --- | --- |
-| [n8n agent rules](../../../../skills/n8n-agent-rules/n8n-agent-rules.md) | You need the generated full n8n workflow, MCP routing, live-instance, or manual-configuration rules. |
-| [AGENTS n8n adapter](../../../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md) | You want a brief optional Codex or OpenCode active-instruction snippet that points to `n8n-agent-rules`. |
-| [CLAUDE n8n adapter](../../../../skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md) | You want a brief optional Claude Code active-instruction snippet that points to `n8n-agent-rules`. |
-| [GEMINI n8n adapter](../../../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md) | You want a brief optional Gemini or Antigravity active-instruction snippet that points to `n8n-agent-rules`. |
+| [Codex MCP config](./templates/codex-mcp-config.md) | Connect Codex to `n8n_docs` and `n8n_live`. |
+| [Claude MCP config](./templates/claude-mcp-config.md) | Connect Claude Code to `n8n_docs` and `n8n_live`. |
+| [OpenCode MCP config](./templates/opencode-mcp-config.md) | Connect OpenCode to `n8n_docs` and approval-gated `n8n_live`. |
+| [Antigravity MCP config](./templates/antigravity-mcp-config.md) | Connect Antigravity to `n8n_docs` and `n8n_live`. |
 
-Generic AI coding agent execution rules and the full n8n operating rules are owned by [_projects/development/ai-coding-agent-rules/](../../../development/ai-coding-agent-rules/).
-
-The local setup project does not own the full n8n ruleset. It references the generated [n8n-agent-rules skill](../../../../skills/n8n-agent-rules/) and its generated [local reference copy](../../../../skills/n8n-local-setup/references/n8n-agent-rules.md) for portability.
-
-To regenerate locally from the toolkit repo root, run `npm run build:agent-rules`, then `node repo/scripts/sync-toolkit-projects.cjs --write`.
-
-GitHub Actions is also set up to regenerate rule templates and check the expected generated files on PR branches when source partials or the template generator change. It is check-only.
-
-### MCP config templates
-
-| Template | Use when |
-| --- | --- |
-| [Codex MCP config](./templates/codex-mcp-config.md) | You want Codex to connect to `n8n_docs` and `n8n_live`. |
-| [Claude MCP config](./templates/claude-mcp-config.md) | You want Claude Code to connect to `n8n_docs` and `n8n_live`. |
-| [OpenCode MCP config](./templates/opencode-mcp-config.md) | You want OpenCode to connect to `n8n_docs` and approval-gated `n8n_live`. |
-| [Antigravity MCP config](./templates/antigravity-mcp-config.md) | You want Antigravity to connect to `n8n_docs` and `n8n_live`. |
+Keep live tokens in user environment variables, not repo files.
 
 ## Scripts
 
-| Script | Use when |
+| Script | Use |
 | --- | --- |
-| [start-n8n-ngrok.bat](./scripts/windows/start-n8n-ngrok.bat) | You want the simplest local n8n with a temporary public ngrok URL for webhook testing. |
-| `start-n8n-compose-ngrok.bat` from [3a. Docker Compose + ngrok](./3a.%20docker%20compose%20%2B%20ngrok.md) | You want n8n managed by Docker Compose while still auto-reading the ngrok URL. |
-| `npm run build:agent-rules` | You changed generic agent-rule partials and want to regenerate inert generic templates. |
+| [start-n8n-ngrok.bat](./scripts/windows/start-n8n-ngrok.bat) | Start local n8n with a temporary ngrok URL for webhook testing. |
+| `start-n8n-compose-ngrok.bat` from [3a. Docker Compose + ngrok](./3a.%20docker%20compose%20%2B%20ngrok.md) | Run the Compose-based local tunnel flow from that guide. |
+| `npm run build:agent-rules` | Regenerate generic agent-rule templates after source partial changes. |
 
-The normal ngrok script:
+The normal ngrok script starts ngrok, reads the HTTPS tunnel URL, pulls the latest stable n8n Docker image, recreates the local container, and sets `WEBHOOK_URL` plus `N8N_PROXY_HOPS=1`.
 
-* Starts ngrok.
-* Reads the public HTTPS tunnel URL.
-* Pulls the latest n8n stable Docker image.
-* Recreates the local n8n Docker container.
-* Sets `WEBHOOK_URL` and `N8N_PROXY_HOPS=1`.
+There is no separate local upgrade script. The local setup commands, normal ngrok script, and Compose wrapper flow pull the latest image before recreating the container.
 
-The Compose + ngrok guide keeps the same tunnel behaviour, but uses Docker Compose for the n8n container instead of a long `docker run` command.
+## Safety Notes
 
-There is intentionally no separate local upgrade script. The local PowerShell blocks, the normal ngrok script, and the Compose wrapper flow all pull the latest image before recreating the container.
-
----
-
-## What not to do
-
-* Do not use tunnelling as permanent hosting.
-* Do not use local Windows scripts on VPS or production.
-* Do not paste real API tokens into repo files.
-* Do not store n8n tokens in workflow nodes or sticky notes.
-* Do not edit Docker volume names unless you understand that this changes where your n8n data lives.
-* Do not remove the existing `n8n_data` Docker volume unless you intentionally want to delete your local n8n data.
-
----
-
-## Fast route
-
-If you are lazy and just want the safest normal path:
-
-1. Open [1. Local Setup](./1.%20local%20setup.md).
-2. Install generic rules from [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md).
-3. Install or load [n8n-agent-rules](../../../../skills/n8n-agent-rules/).
-4. Use [templates/codex-mcp-config.md](./templates/codex-mcp-config.md).
-5. Ignore Claude Code, OpenCode, and Antigravity until Codex works.
-6. Ignore tunnelling until you actually need external webhooks.
-7. Use the normal ngrok script first if you need external webhook testing.
-8. Move to [3a. Docker Compose + ngrok](./3a.%20docker%20compose%20%2B%20ngrok.md) only when you want cleaner Docker management.
-9. Ignore VPS until you need always-on public hosting.
+- Do not use tunnelling as permanent hosting.
+- Do not use local Windows scripts on VPS or production.
+- Do not paste real API tokens into repo files.
+- Do not store n8n tokens in workflow nodes or sticky notes.
+- Do not edit Docker volume names unless you understand that this changes where your n8n data lives.
+- Do not remove the existing `n8n_data` Docker volume unless you intentionally want to delete local n8n data.

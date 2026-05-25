@@ -22,6 +22,14 @@ Use a reviewed adapter layer for short files whose job is to route, package, or 
 
 Adapters should not silently become lossy rewrites of source docs.
 
+## Keep Navigation Clickable
+
+Human-facing navigational paths and URLs must be clickable Markdown links.
+
+- Important links must not exist only inside code fences or inline code.
+- Code blocks are for commands, payloads, literal examples, and copy/paste prompts.
+- Inline code is acceptable for commands, filenames being discussed literally, globs, config keys, or short literal examples, but not as the only navigation path to important docs or assets.
+
 ## Make Publishing Declarative
 
 Every generated or published AI-facing file should be declared in a manifest or routing contract. The contract should say:
