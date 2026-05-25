@@ -10,6 +10,8 @@ This skill contains reusable helper-script templates for safe n8n workflow work.
 
 It owns sanitizer helpers, import/export sync helpers, validation, compare, prepare, and workflow sync scripts.
 
+This skill depends on `n8n-agent-rules`. Apply that skill before n8n workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, import/export, validation, credential, webhook ID, activation, execution, repo/live sync, or live n8n work.
+
 ## What It Covers
 
 - Sanitizing raw workflow exports.
@@ -33,3 +35,5 @@ It owns sanitizer helpers, import/export sync helpers, validation, compare, prep
 - [Import/export sync helpers](templates/helper-scripts/import-export-sync/)
 
 Review these helpers before copying them into a consumer repo.
+
+A generated cross-skill reference is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for copy-paste portability. It is generated from the canonical `development.ai-coding-agent-rules` source and must not be edited directly.

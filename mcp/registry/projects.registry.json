@@ -100,38 +100,44 @@
     "category": "development",
     "name": "ai-coding-agent-rules",
     "title": "AI Coding Agent Rules",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "version_policy": "semver",
-    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
+    "version_notes": "Adds the n8n-agent-rules skill and removes heavy always-on toolkit/n8n convenience templates from the generated default agent-rule surface.",
     "project": {
       "name": "AI Coding Agent Rules",
       "category": "development",
-      "summary": "Generic execution-first AI coding agent rule templates plus an optional toolkit skill-routing add-on for common agent instruction files."
+      "summary": "Generic execution-first AI coding agent rule templates plus the n8n-agent-rules operating contract and optional n8n adapter snippets."
     },
     "surface": {
       "publish_as": "skill",
       "skill": {
         "status": "published",
         "path": "skills/ai-coding-agent-rules",
-        "summary": "Provides inert AGENTS, CLAUDE, and GEMINI generic baseline templates plus an optional toolkit skill-routing add-on."
+        "summary": "Provides slim generic AGENTS, CLAUDE, and GEMINI baseline templates and also publishes the n8n-agent-rules skill from the same project-owned rules source."
       },
       "mcp": {
         "status": "not_applicable",
-        "summary": "No MCP surface is published for this standalone rules skill."
+        "summary": "No MCP surface is published for this standalone rules project."
       }
     },
     "module_path": "_projects/development/ai-coding-agent-rules",
     "main_path": "_projects/development/ai-coding-agent-rules/_main",
     "root_surfaces": [
       "skills/ai-coding-agent-rules/AGENTS.template.md",
-      "skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md",
       "skills/ai-coding-agent-rules/CLAUDE.template.md",
-      "skills/ai-coding-agent-rules/CLAUDE.with-toolkit-skills.template.md",
       "skills/ai-coding-agent-rules/GEMINI.template.md",
-      "skills/ai-coding-agent-rules/GEMINI.with-toolkit-skills.template.md",
       "skills/ai-coding-agent-rules/README.md",
       "skills/ai-coding-agent-rules/SKILL.md",
-      "skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md"
+      "skills/n8n-agent-rules/README.md",
+      "skills/n8n-agent-rules/SKILL.md",
+      "skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md",
+      "skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md",
+      "skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md",
+      "skills/n8n-agent-rules/n8n-agent-rules.md",
+      "skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs",
+      "skills/n8n-local-setup/references/n8n-agent-rules.md",
+      "skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md",
+      "skills/n8n-workflow-templates/references/n8n-agent-rules.md"
     ]
   },
   {
@@ -206,20 +212,20 @@
     "category": "n8n",
     "name": "local-setup",
     "title": "Local n8n Setup",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "version_policy": "semver",
-    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
+    "version_notes": "Removes ownership of the full n8n ruleset and points local setup users to the generated n8n-agent-rules skill.",
     "project": {
       "name": "Local n8n Setup",
       "category": "n8n",
-      "summary": "Preserved local n8n setup guides plus copyable n8n MCP add-on, platform, tunneling, and MCP configuration templates."
+      "summary": "Preserved local n8n setup guides plus platform, tunneling, MCP configuration templates, and references to the generated n8n-agent-rules skill."
     },
     "surface": {
       "publish_as": "both",
       "skill": {
         "status": "published",
         "path": "skills/n8n-local-setup",
-        "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and n8n-specific agent-rule add-on templates without running live actions by default."
+        "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and platform references while depending on n8n-agent-rules for workflow/live n8n rules."
       },
       "mcp": {
         "status": "published",
@@ -233,11 +239,6 @@
       "mcp/projects/n8n-local-setup.md",
       "skills/n8n-local-setup/README.md",
       "skills/n8n-local-setup/SKILL.md",
-      "skills/n8n-local-setup/agent-rules/AGENTS.n8n-full.template.md",
-      "skills/n8n-local-setup/agent-rules/CLAUDE.n8n-full.template.md",
-      "skills/n8n-local-setup/agent-rules/GEMINI.n8n-full.template.md",
-      "skills/n8n-local-setup/agent-rules/README.md",
-      "skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
@@ -268,20 +269,20 @@
     "category": "n8n",
     "name": "workflow-toolkit",
     "title": "n8n Workflow Toolkit",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "version_policy": "semver",
-    "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
+    "version_notes": "Documents dependency on the generated n8n-agent-rules skill for n8n workflow and live-instance operating rules.",
     "project": {
       "name": "n8n Workflow Toolkit",
       "category": "n8n",
-      "summary": "Reusable n8n workflow helper scripts and public generic workflow templates with separate published skill boundaries."
+      "summary": "Reusable n8n workflow helper scripts and public generic workflow templates with separate published skill boundaries that depend on n8n-agent-rules for the full n8n operating contract."
     },
     "surface": {
       "publish_as": "both",
       "skill": {
         "status": "published",
         "path": "skills/n8n-workflow-helper-scripts",
-        "summary": "Helps an agent review, copy, and use n8n helper-script templates safely."
+        "summary": "Helps an agent review, copy, and use n8n helper-script templates safely while following n8n-agent-rules for workflow and live n8n work."
       },
       "mcp": {
         "status": "published",
@@ -371,9 +372,9 @@
     "category": "repo-methodology",
     "name": "mcp-ready-registry",
     "title": "MCP-Ready Registry",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "version_policy": "semver",
-    "version_notes": "Initial stable toolkit project version.",
+    "version_notes": "Adds n8n-agent-rules registry metadata and replaces obsolete n8n add-on template metadata with adapter metadata.",
     "project": {
       "name": "MCP-Ready Registry",
       "category": "repo-methodology",

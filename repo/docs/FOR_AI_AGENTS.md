@@ -32,7 +32,8 @@ Use installed skills only when they clearly match the task and improve correctne
 
 | Skill | Use when the task involves |
 | --- | --- |
-| `ai-coding-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates or toolkit skill-routing setup. |
+| `ai-coding-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates. |
+| `n8n-agent-rules` | Any n8n task, including workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
 | `n8n-local-setup` | Safe local n8n setup, MCP config selection, tunneling choices, or platform-specific n8n agent-rule setup. |
 | `n8n-workflow-helper-scripts` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
 | `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
@@ -64,7 +65,8 @@ Never commit or install:
 
 Scoped writes are allowed only when the relevant template or helper is being run intentionally:
 
-- [Agent-rule generator](../scripts/build-agent-rule-templates.ps1) may regenerate only the project-pure source-side generic/toolkit add-on templates under `_projects/development/ai-coding-agent-rules/_main/` and the n8n add-on template at `_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md`. Toolkit sync may then publish inert skill copies and published-only convenience templates under `skills/ai-coding-agent-rules/*.template.md` and `skills/n8n-local-setup/agent-rules/*.template.md`.
+- [Agent-rule generator](../scripts/build-agent-rule-templates.ps1) may regenerate only the project-pure source-side generic templates under `_projects/development/ai-coding-agent-rules/_main/`. Toolkit sync publishes inert generic skill copies and the generated `skills/n8n-agent-rules/` skill from the same development project source.
+- `n8n-agent-rules` owns the full n8n operating ruleset. Other n8n skills depend on it; optional adapters are brief pointers and are not automatically appended to generic always-on templates.
 - n8n sanitizer templates may write ignored `.to-sanitise/**` and `.sanitised/**` staging folders.
 - n8n sync helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, and ignored `.n8n-local/**` in a consumer repo after review.
 

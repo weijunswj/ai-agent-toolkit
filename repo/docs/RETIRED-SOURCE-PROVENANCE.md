@@ -69,7 +69,7 @@ Inspected:
 - `skills/n8n-local-setup/templates/agent-rules/CLAUDE.md`
 - `skills/n8n-local-setup/templates/agent-rules/GEMINI.md`
 - `skills/n8n-local-setup/templates/agent-rules/partials/skill-routing-rules.md`
-- `_projects/n8n/local-setup/_main/templates/partials/n8n-mcp-rules.md`
+- `templates/partials/n8n-mcp-rules.md`
 - `skills/n8n-local-setup/templates/mcp-configs/*-mcp-config.md`
 - `repo/scripts/build-templates.ps1`
 - `.github/workflows/build-templates.yml`
@@ -81,7 +81,7 @@ Migrated:
 - n8n local setup, upgrade, tunnelling, Docker Compose + ngrok, VPS, workflow sync, and credential safety guidance into `skills/n8n-local-setup/references/n8n/`.
 - Generic AI coding agent execution rules into `_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md`.
 - Toolkit skill-routing rules into `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`.
-- n8n MCP workflow safety rules into `_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md`; the n8n local setup skill now publishes only the n8n add-on template from this source.
+- n8n MCP workflow safety rules into `_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md`; the generated `skills/n8n-agent-rules/` skill now owns and publishes the full n8n operating ruleset. The local setup skill references it instead of owning the full rules.
 - MCP config templates into `skills/n8n-local-setup/templates/mcp-configs/`.
 - Deterministic agent-rule generator into `repo/scripts/build-agent-rule-templates.ps1`.
 - CMD generator wrapper into `repo/scripts/_build-agent-rule-templates.cmd`.

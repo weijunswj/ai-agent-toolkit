@@ -50,6 +50,8 @@ This repo has a source layer and a published layer.
 - If changing skill names, `SKILL.md` frontmatter, or skill descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, the toolkit skill-routing source partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
 - If a new skill should not be auto-routed, document why it is intentionally omitted in the toolkit skill-routing source partial.
 - Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
+- Projects link to projects, and skills link to skills. If a skill depends on another skill, declare that dependency in `SKILL.md`, the skill README/install docs, registry metadata when applicable, and any related pack or adapter docs.
+- If a copied cross-skill reference is needed for portability, generate it from canonical source, label it as generated cross-skill content, and do not edit it directly.
 - Do not generate curated files automatically from `_main`; curated content is reviewed source.
 - Do not weaken safety rules around credentials, `.env`, `.tmp`, `.n8n-local`, live n8n actions, approval, attribution, or local-only constraints.
 - Run sync, check, and relevant tests before reporting completion.

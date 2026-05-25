@@ -20,7 +20,7 @@ The copied skill folder includes inert generic baseline templates:
 - `CLAUDE.template.md` for Claude Code.
 - `GEMINI.template.md` for Gemini CLI or Antigravity.
 
-The baseline templates stay generic. They do not include toolkit skill-routing.
+The baseline templates stay generic and compact. They do not include full n8n rules, toolkit skill-routing tables, Codex-specific install paths, Claude-specific memory/import sections, OpenCode-specific sections, or Antigravity-specific sections.
 
 Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Never overwrite existing `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`; produce a merge or diff plan instead.
 
@@ -33,19 +33,9 @@ Copy or merge a template into the matching active instruction filename only afte
 | Claude Code | `CLAUDE.template.md` | `skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md` |
 | Antigravity | `GEMINI.template.md` | `skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md` |
 
-Install copied skill folders according to the target platform's supported skill location. Use the setup references for platform-specific rules, MCP config, and restart notes.
+Install copied skill folders according to the target platform's supported skill location. Use the setup references for platform-specific skill, MCP config, and restart notes.
 
-`TOOLKIT-SKILL-ROUTING.template.md` is optional. Use it only when the target environment has this toolkit's `skills/` folders installed or copied. Do not use it as a standalone replacement for the generic baseline; merge it under the generic baseline in the same active instruction file.
-
-Published one-shot convenience alternatives are available when the target environment has this toolkit's `skills/` folders installed or copied:
-
-- `AGENTS.with-toolkit-skills.template.md`
-- `CLAUDE.with-toolkit-skills.template.md`
-- `GEMINI.with-toolkit-skills.template.md`
-
-These combine the generic baseline plus toolkit skill-routing. They are equivalent to installing the matching baseline template and then merging `TOOLKIT-SKILL-ROUTING.template.md`. They are skill-side conveniences, not source-side `_main` canonical templates.
-
-For n8n-specific workflow and MCP safety rules, install the generic baseline first, then merge the n8n add-on from `skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md`.
+For n8n-specific workflow and MCP safety rules, install or load `skills/n8n-agent-rules`. Do not copy the full n8n rules into global always-on generic instructions unless you intentionally accept the context cost.
 
 The `SKILL.md` file is an AI-facing published surface generated from [_projects/development/ai-coding-agent-rules/curated_output_for_ai/](../../_projects/development/ai-coding-agent-rules/curated_output_for_ai/). Update the curated source, then run:
 

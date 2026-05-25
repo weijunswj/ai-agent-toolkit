@@ -101,15 +101,14 @@ Audit baseline movement:
 
 ## n8n Local Setup Skill Surface Declaration Pass
 
-The last three manually present `n8n-local-setup` skill-side files are now declared project outputs:
+The last manually present `n8n-local-setup` skill-side pack files were declared project outputs:
 
 - `skills/n8n-local-setup/packs/claude-code-n8n-local/README.md`
 - `skills/n8n-local-setup/packs/codex-n8n-local/README.md`
-- `skills/n8n-local-setup/agent-rules/README.md`
 
-Their reviewed source now lives under `_projects/n8n/local-setup/curated_output_for_ai/packs/**` and `_projects/n8n/local-setup/curated_output_for_ai/agent-rules/README.md`.
+Their reviewed source now lives under `_projects/n8n/local-setup/curated_output_for_ai/packs/**`. The old local setup `agent-rules/` index was later removed when full n8n rules moved to `skills/n8n-agent-rules/`.
 
-These files are short skill-local indexes and pack READMEs, not full runtime setup guides. They therefore use curated `reviewed_entrypoint` recipes. Full local setup, upgrade, tunneling, hosting, platform, MCP config, and generated agent-rule bodies continue to publish from preserved `_main` source or exact concat/copy recipes.
+These files are short skill-local pack READMEs, not full runtime setup guides. They therefore use curated `reviewed_entrypoint` recipes. Full local setup, upgrade, tunneling, hosting, platform, MCP config, and generated n8n-agent-rules bodies publish from preserved `_main` source or exact concat/copy recipes.
 
 Audit baseline movement:
 
@@ -341,7 +340,7 @@ Files reviewed:
 | --- | --- | --- | --- | --- |
 | `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md` | `skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md` | `allowed_platform_overview` | Stayed curated and was rewritten as a clearer platform overview. | It explains ChatGPT web limitations and manual-use routing, then points to full local references/templates. |
 | `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md` | `skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md` | `allowed_platform_overview` | Stayed curated and was rewritten as a clearer platform overview. | It explains Claude web limitations and routes to the full Claude Code Desktop guide plus local setup references. |
-| `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md` | `skills/n8n-local-setup/references/ai-agent-platforms/codex.md` | `allowed_platform_overview` | Stayed curated and was rewritten as a platform router. | It routes to `references/n8n/local-setup.md`, `agent-rules/n8n-mcp-rules.template.md`, and `templates/mcp-configs/codex-mcp-config.md` instead of duplicating runtime setup detail. |
+| `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md` | `skills/n8n-local-setup/references/ai-agent-platforms/codex.md` | `allowed_platform_overview` | Stayed curated and was rewritten as a platform router. | It routes to `references/n8n/local-setup.md`, `skills/n8n-agent-rules`, the generated cross-skill reference, and `templates/mcp-configs/codex-mcp-config.md` instead of duplicating runtime setup detail. |
 
 Why this follows [Project Module Standard](PROJECT-MODULE-STANDARD.md):
 
@@ -424,6 +423,7 @@ Current skill folders:
 
 - `skills/knowledge-index-updater/`
 - `skills/context-preserving-ai-publisher/`
+- `skills/n8n-agent-rules/`
 - `skills/n8n-local-setup/`
 - `skills/n8n-workflow-helper-scripts/`
 - `skills/n8n-workflow-templates/`
@@ -435,7 +435,8 @@ Declared full-fidelity or deterministic generated surfaces include:
 
 - `skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md` after the Secure CI/CD prompt pass, via exact extract from `_main/README.md`.
 - `skills/ai-coding-agent-rules/AGENTS.template.md`, `CLAUDE.template.md`, and `GEMINI.template.md`, via exact copy recipes from source-side generated templates.
-- `skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md`, via exact copy from the n8n source-side generated add-on.
+- `skills/n8n-agent-rules/n8n-agent-rules.md`, via exact copy from the canonical n8n agent rules partial.
+- `skills/n8n-local-setup/references/n8n-agent-rules.md`, `skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md`, and `skills/n8n-workflow-templates/references/n8n-agent-rules.md`, via generated cross-skill reference recipes with explicit shared-surface metadata.
 - `skills/n8n-local-setup/templates/mcp-configs/*-mcp-config.md`, via exact copy recipes.
 - `skills/n8n-local-setup/references/n8n/*.md` required setup guides, via exact copy recipes from `_main/*.md`.
 - `skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md`, `opencode.md`, and `antigravity.md`, via exact copy recipes from `_main/*.md`.
@@ -564,15 +565,16 @@ Severity: medium
 Source file(s):
 - `_projects/development/ai-coding-agent-rules/_main/_partials/*.md`
 - `_projects/development/ai-coding-agent-rules/_main/*.template.md`
-- `_projects/n8n/local-setup/_main/_partials/n8n-mcp-rules.md`
-- `_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md`
+- `_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md`
 Published file(s):
 - `skills/ai-coding-agent-rules/*.template.md`
-- `skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md`
+- `skills/n8n-agent-rules/n8n-agent-rules.md`
+- `skills/n8n-agent-rules/adapters/*.n8n-brief.template.md`
+- `skills/*/references/n8n-agent-rules.md`
 Problem:
-The agent-rule templates are intentionally assembled from project-local `_main` partial sources into source-side inert `.template.md` files. Generic execution and toolkit skill-routing rules now belong to `development.ai-coding-agent-rules`. n8n local setup owns only the n8n MCP workflow safety add-on.
+The agent-rule templates are intentionally assembled from project-local `_main` partial sources into source-side inert `.template.md` files. Generic execution, toolkit skill-routing source, and the full n8n operating rules now belong to `development.ai-coding-agent-rules`. n8n local setup no longer owns the n8n MCP workflow safety rules.
 Recommended fix:
-Fixed in the inert template migration, cleanup, and AI coding agent rules split passes. Keep each source-first flow project-local: generic partials generate `skills/ai-coding-agent-rules/*.template.md`, and the n8n partial generates `skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md`.
+Fixed in the inert template migration, cleanup, AI coding agent rules split, and n8n-agent-rules ownership pass. Keep the default generic templates slim, publish the full n8n rules through `skills/n8n-agent-rules/`, and use optional brief adapters only when a consumer repo wants active-file pointers.
 
 Finding:
 Severity: medium

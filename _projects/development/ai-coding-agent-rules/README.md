@@ -1,7 +1,7 @@
 # AI Coding Agent Rules
 
-Project module for the published `skills/ai-coding-agent-rules/` skill.
+Project module for the published `skills/ai-coding-agent-rules/` and `skills/n8n-agent-rules/` skills.
 
-The module owns generic AI coding agent execution rules and an optional toolkit skill-routing add-on for Codex/OpenCode, Claude Code, Gemini CLI, or Antigravity instruction files.
+The module owns slim generic AI coding agent execution rules, the toolkit skill-routing source partial, the full n8n agent operating ruleset, and optional brief n8n adapter snippets.
 
-See [`_main/`](_main/) for the canonical `_partials/` source components, generic baseline templates, and optional toolkit skill-routing add-on.
+See [`_main/`](_main/) for the canonical `_partials/` source components, generic baseline templates, and n8n agent rules source.

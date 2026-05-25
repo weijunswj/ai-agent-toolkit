@@ -14,7 +14,7 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 }
 
 const root = path.resolve(workspaceRootFromArgs() || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
-const supportDirs = ['references', 'examples', 'templates', 'agents', 'tools', 'packs'];
+const supportDirs = ['references', 'examples', 'templates', 'agents', 'tools', 'packs', 'scripts'];
 const localMentionPrefixes = new Set([...supportDirs, 'README.md', 'INSTALL.md', 'SOURCE.md']);
 const removedSurfaceName = 'for_' + 'ai';
 const removedSurfacePattern = new RegExp('(^|[^A-Za-z0-9_])' + 'for_' + 'ai\\/(skills|mcp)');
@@ -68,7 +68,7 @@ function markdownTargets(text) {
 
 function codePathMentions(text) {
   const mentions = [];
-  const regex = /`((?:references|examples|templates|agents|tools|packs)\/[^`\n]+|README\.md|INSTALL\.md|SOURCE\.md)`/g;
+  const regex = /`((?:references|examples|templates|agents|tools|packs|scripts)\/[^`\n]+|README\.md|INSTALL\.md|SOURCE\.md)`/g;
   let match;
   while ((match = regex.exec(text)) !== null) mentions.push(match[1].trim());
   return mentions;

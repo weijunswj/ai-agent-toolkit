@@ -12,7 +12,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # AI Agent Platforms
 
-These platform references explain how each AI platform should consume this toolkit. Generic AI coding agent rules live in `skills/ai-coding-agent-rules`; this n8n skill provides the n8n-specific add-on and MCP config templates.
+These platform references explain how each AI platform should consume this toolkit. Generic AI coding agent rules live in `skills/ai-coding-agent-rules`; full n8n operating rules live in `skills/n8n-agent-rules`; this local setup skill provides MCP config templates and setup notes.
 
 | Reference | Use when |
 | --- | --- |

@@ -4,7 +4,7 @@
     "title": "AI Coding Agent Rules",
     "category": "development",
     "path": "skills/ai-coding-agent-rules/",
-    "purpose": "Generic execution-first AI coding agent rule templates plus optional toolkit skill-routing for AGENTS.md, CLAUDE.md, and GEMINI.md.",
+    "purpose": "Slim generic execution-first AI coding agent rule templates for AGENTS.md, CLAUDE.md, and GEMINI.md.",
     "supported_platforms": [
       "ChatGPT",
       "Codex",
@@ -26,6 +26,42 @@
     "source_refs": [
       "_projects/development/ai-coding-agent-rules/",
       "skills/ai-coding-agent-rules/"
+    ]
+  },
+  {
+    "id": "n8n-agent-rules",
+    "title": "n8n Agent Rules",
+    "category": "automation",
+    "path": "skills/n8n-agent-rules/",
+    "purpose": "Full mandatory n8n operating contract for workflow JSON, n8n MCP, n8n_docs, n8n_live, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and n8n safety.",
+    "supported_platforms": [
+      "ChatGPT",
+      "Codex",
+      "Claude",
+      "Claude Code",
+      "Gemini",
+      "Antigravity",
+      "OpenCode"
+    ],
+    "auto_use_triggers": [
+      "n8n",
+      "n8n workflow JSON",
+      "n8n MCP",
+      "n8n_docs",
+      "n8n_live",
+      "workflow import",
+      "workflow export",
+      "workflow activation",
+      "credential binding",
+      "webhook IDs",
+      "repo/live sync"
+    ],
+    "risk_level": "high",
+    "instruction_only": true,
+    "source_refs": [
+      "_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md",
+      "skills/n8n-agent-rules/",
+      "skills/n8n-agent-rules/n8n-agent-rules.md"
     ]
   },
   {
@@ -103,10 +139,14 @@
     ],
     "risk_level": "high",
     "instruction_only": true,
+    "skill_dependencies": [
+      "n8n-agent-rules"
+    ],
     "source_refs": [
       "_projects/n8n/workflow-toolkit/",
       "skills/n8n-workflow-helper-scripts/",
-      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/"
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/",
+      "skills/n8n-agent-rules/"
     ]
   },
   {
@@ -129,10 +169,14 @@
     ],
     "risk_level": "high",
     "instruction_only": true,
+    "skill_dependencies": [
+      "n8n-agent-rules"
+    ],
     "source_refs": [
       "_projects/n8n/workflow-toolkit/",
       "skills/n8n-workflow-templates/",
-      "skills/n8n-workflow-templates/templates/"
+      "skills/n8n-workflow-templates/templates/",
+      "skills/n8n-agent-rules/"
     ]
   },
   {
@@ -140,7 +184,7 @@
     "title": "n8n Local Setup",
     "category": "automation",
     "path": "skills/n8n-local-setup/",
-    "purpose": "Safe local n8n setup, MCP config routing, tunneling choices, and n8n-specific agent rule add-on setup.",
+    "purpose": "Safe local n8n setup, MCP config routing, tunneling choices, Docker setup, and platform setup notes. Full n8n operating rules are owned by n8n-agent-rules.",
     "supported_platforms": [
       "ChatGPT",
       "Codex",
@@ -155,10 +199,14 @@
     ],
     "risk_level": "high",
     "instruction_only": true,
+    "skill_dependencies": [
+      "n8n-agent-rules"
+    ],
     "source_refs": [
       "_projects/n8n/local-setup/",
       "skills/n8n-local-setup/",
-      "skills/ai-coding-agent-rules/"
+      "skills/ai-coding-agent-rules/",
+      "skills/n8n-agent-rules/"
     ]
   },
   {

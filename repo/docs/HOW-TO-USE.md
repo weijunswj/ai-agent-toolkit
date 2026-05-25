@@ -100,15 +100,17 @@ Use `GEMINI.md` or the configured context file for always-on Antigravity instruc
 
 Templates are published material. Review them before copying into a consumer repo, and follow generated notices back to `_main/` or `curated_output_for_ai/` when editing toolkit-owned sources.
 
-- [Generic agent rule templates](../../skills/ai-coding-agent-rules/) contain generated inert baseline templates, optional toolkit skill-routing add-on, and one-shot baseline plus toolkit skill-routing convenience templates.
-- [n8n agent rule templates](../../skills/n8n-local-setup/agent-rules/) contain the n8n workflow/MCP add-on plus one-shot baseline, toolkit skill-routing, and n8n rule convenience templates.
+- [Generic agent rule templates](../../skills/ai-coding-agent-rules/) contain generated inert slim baseline templates only. They intentionally do not include the full n8n ruleset or full skill-routing table.
+- [n8n agent rules](../../skills/n8n-agent-rules/) contain the full n8n operating ruleset plus optional brief adapters under `adapters/`.
 - [MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) contain MCP setup examples.
 - [n8n import/export sync helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/) contain n8n import/export, validation, compare, prepare, and sync helper templates.
 - [n8n sanitizer helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/) contain sanitizer tooling.
 - [n8n workflow templates](../../skills/n8n-workflow-templates/templates/) contain public generic inactive workflow JSON templates.
 - [CI/CD templates](../../skills/secure-cicd-installer/templates/cicd/) contain CI/CD installer prompts and status templates.
 
-Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/_build-agent-rule-templates.cmd) regenerate project-pure source-side baseline/add-on templates under `_projects/development/ai-coding-agent-rules/_main/` and the n8n add-on under `_projects/n8n/local-setup/_main/agent-rules/`; toolkit sync publishes inert skill copies and published-only one-shot convenience templates.
+Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/_build-agent-rule-templates.cmd) regenerate project-pure source-side generic baseline templates under `_projects/development/ai-coding-agent-rules/_main/`; toolkit sync publishes inert skill copies and the generated `n8n-agent-rules` skill.
+
+For n8n work, install or load `skills/n8n-agent-rules`. The optional adapter installer can detect n8n repositories and preview patches to active instruction files, but it must be run with `--dry-run` first and must not be run with `--write` unless the user explicitly approves the current target file and operation. Do not copy the full n8n rules into global always-on instructions unless you intentionally accept the context cost.
 
 n8n helper templates may write scoped local outputs after they are copied into a reviewed consumer repo: `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders. Keep those local folders ignored.
 
@@ -129,7 +131,8 @@ Use:
 
 - [Codex reference](../../skills/n8n-local-setup/references/ai-agent-platforms/codex.md)
 - [Codex generic agent rules template](../../skills/ai-coding-agent-rules/AGENTS.template.md)
-- [n8n agent rules add-on](../../skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md)
+- [n8n agent rules skill](../../skills/n8n-agent-rules/)
+- [optional Codex n8n adapter](../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md)
 - [Codex MCP config](../../skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md)
 - [Local n8n setup source module](../../_projects/n8n/local-setup/)
 
@@ -141,7 +144,8 @@ Use:
 
 - [Claude Code reference](../../skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md)
 - [Claude Code generic agent rules template](../../skills/ai-coding-agent-rules/CLAUDE.template.md)
-- [n8n agent rules add-on](../../skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md)
+- [n8n agent rules skill](../../skills/n8n-agent-rules/)
+- [optional Claude n8n adapter](../../skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md)
 - [Claude Code MCP config](../../skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md)
 - [Claude Code source guide](../../_projects/n8n/local-setup/_main/5.%20extra%20-%20claude%20code%20integration.md)
 
@@ -153,7 +157,8 @@ Use:
 
 - [OpenCode reference](../../skills/n8n-local-setup/references/ai-agent-platforms/opencode.md)
 - [OpenCode generic agent rules template](../../skills/ai-coding-agent-rules/AGENTS.template.md)
-- [n8n agent rules add-on](../../skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md)
+- [n8n agent rules skill](../../skills/n8n-agent-rules/)
+- [optional OpenCode n8n adapter](../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md)
 - [OpenCode MCP config](../../skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md)
 - [OpenCode source guide](../../_projects/n8n/local-setup/_main/6.%20extra%20-%20opencode%20integration.md)
 
@@ -165,7 +170,8 @@ Use:
 
 - [Antigravity reference](../../skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md)
 - [Antigravity generic agent rules template](../../skills/ai-coding-agent-rules/GEMINI.template.md)
-- [n8n agent rules add-on](../../skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md)
+- [n8n agent rules skill](../../skills/n8n-agent-rules/)
+- [optional Antigravity n8n adapter](../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md)
 - [Antigravity MCP config](../../skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md)
 - [Antigravity source guide](../../_projects/n8n/local-setup/_main/7.%20extra%20-%20antigravity%20integration.md)
 
@@ -194,6 +200,7 @@ Use [skills/ui-ux-secure-frontend-design/tools/design-system-generator/](../../s
 - Do not paste real secrets into repo files.
 - Do not copy live n8n exports into this toolkit.
 - Do not install pack files without reviewing the target writes.
+- Do not copy the full n8n rules into global always-on instructions unless the extra context cost is intentional.
 - Do not run live import/export helpers from this toolkit repo.
 - Do not run live n8n import/export helpers in CI.
 - Do not auto-merge or auto-apply upstream updates.
