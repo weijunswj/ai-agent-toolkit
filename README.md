@@ -37,8 +37,8 @@ This repo keeps reusable AI-agent material in a source-first layout. Full source
 - **[`design/`](_projects/design/):** UI/UX and frontend design material.
 - **[`development/`](_projects/development/):** General development workflow helpers.
 - **[`knowledge/`](_projects/knowledge/):** Knowledge-base and index-maintenance skills.
-- **[`n8n/`](_projects/n8n/) =** n8n setup, workflow helper scripts, and workflow templates.
-- **[`repo-methodology/`](_projects/repo-methodology/) =** How this toolkit preserves source truth, generates skills/MCP surfaces, and prevents context drift.
+- **[`n8n/`](_projects/n8n/):** n8n setup, workflow helper scripts, and workflow templates.
+- **[`repo-methodology/`](_projects/repo-methodology/):** How this toolkit preserves source truth, generates skills/MCP surfaces, and prevents context drift.
 
 ## Projects
 
