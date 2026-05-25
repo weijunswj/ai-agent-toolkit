@@ -23,6 +23,26 @@ Use this skill before any n8n workflow, helper-script, MCP, or live n8n work.
 
 Read [n8n-agent-rules.md](n8n-agent-rules.md) before planning or editing n8n material. Those rules are the full operating contract for n8n workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and n8n safety.
 
+## Adapter Auto-Check Protocol
+
+When this skill is selected for an n8n task, automatically check whether the current target repo already has the managed adapter block in active instruction files:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `GEMINI.md`
+
+If an active instruction file exists and the adapter is missing, run [scripts/install-n8n-agent-adapter.cjs](scripts/install-n8n-agent-adapter.cjs) in `--dry-run` mode for the relevant target. Show the dry-run result to the user. Ask for explicit current-turn approval before running `--write`. If approved, run the installer with `--write`.
+
+Do not silently auto-install adapters. If declined, continue the current n8n task using the already-loaded `n8n-agent-rules`, but tell the user that future sessions/tools may not auto-load the rules unless the skill or adapter is installed.
+
+If no active instruction file exists, ask which adapter target to create:
+
+- `AGENTS.md` for Codex/OpenCode
+- `CLAUDE.md` for Claude Code
+- `GEMINI.md` for Gemini/Antigravity
+- `all`
+- `none`
+
 ## Boundaries
 
 - This skill owns the full n8n operating ruleset.
