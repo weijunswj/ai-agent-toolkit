@@ -39,6 +39,8 @@ If no active instruction file exists, stop and ask the adapter-target question b
 - `all`
 - `none`
 
+When asking the adapter-target question, present all five options neutrally. Do not suggest or default to `none` merely because the current task is read-only or no-modify.
+
 The answer `none` is allowed and must be respected.
 
 ## Boundaries
