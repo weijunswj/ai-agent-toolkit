@@ -51,7 +51,6 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Secure CI/CD Installer](_projects/cicd/secure-installer/) | CI/CD planning prompt, status templates, and safety policy source. | [_main/](_projects/cicd/secure-installer/_main/) |
 | [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Frontend design guidance, local generator source, and attribution notes. | [_main/](_projects/design/ui-ux-pro-max/_main/) |
 | [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Source-to-surface publishing method and starter templates. | [_main/](_projects/repo-methodology/context-preserving-ai-publisher/_main/) |
-| [MCP-Ready Registry](_projects/repo-methodology/mcp-ready-registry/) | Source for MCP registry, design/spec docs, and metadata. | [_main/](_projects/repo-methodology/mcp-ready-registry/_main/) |
 | [AI Coding Agent Rules](_projects/development/ai-coding-agent-rules/) | Generic agent-rule templates, skill routing source, and n8n rules source. | [_main/](_projects/development/ai-coding-agent-rules/_main/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
 | [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Notion/GitHub knowledge-index skill source. | [_main/](_projects/knowledge/knowledge-index-updater/_main/) |
@@ -88,7 +87,7 @@ Default generic templates stay slim and do not include full n8n rules or full sk
 
 ## MCP
 
-MCP material lives in [mcp/](mcp/) (`mcp/`). This repo does not ship a runnable MCP server, package, CLI, or executable MCP tools today.
+MCP material lives in [mcp/](mcp/). This repo does not ship a runnable MCP server, package, CLI, or executable MCP tools today.
 
 | MCP area | Status | Use |
 |---|---|---|
