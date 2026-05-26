@@ -21,6 +21,8 @@ Project identity: `n8n.local-setup`
 - Generic AI coding agent rules skill: [skills/ai-coding-agent-rules/](../../skills/ai-coding-agent-rules/)
 - Full n8n operating rules skill: [skills/n8n-agent-rules/](../../skills/n8n-agent-rules/)
 - n8n local setup portability reference: [skills/n8n-local-setup/references/n8n-agent-rules.md](../../skills/n8n-local-setup/references/n8n-agent-rules.md)
+- Local stack Compose template: [skills/n8n-local-setup/templates/local-stack/docker-compose.yml](../../skills/n8n-local-setup/templates/local-stack/docker-compose.yml)
+- Placeholder environment template: [skills/n8n-local-setup/templates/local-stack/.env.example](../../skills/n8n-local-setup/templates/local-stack/.env.example)
 - Codex MCP config: [skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md](../../skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md)
 - Pack: [skills/n8n-local-setup/packs/codex-n8n-local/pack.json](../../skills/n8n-local-setup/packs/codex-n8n-local/pack.json)
 
@@ -34,6 +36,7 @@ Project identity: `n8n.local-setup`
 
 - Declared deterministic outputs in `toolkit.project.json`.
 - No live n8n state writes.
+- Local stack templates are placeholder-only and must not contain real secrets, tokens, webhook URLs, or app database connection values.
 
 ## Denied Writes
 

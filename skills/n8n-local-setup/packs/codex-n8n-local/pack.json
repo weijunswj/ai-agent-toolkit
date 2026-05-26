@@ -1,7 +1,7 @@
 {
   "id": "codex-n8n-local",
   "title": "Codex n8n Local",
-  "description": "Generic Codex agent rules, n8n-agent-rules, optional n8n adapter, and n8n local MCP setup materials.",
+  "description": "Generic Codex agent rules, n8n-agent-rules, optional n8n adapter, and n8n local Docker Compose setup materials.",
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [
@@ -14,6 +14,8 @@
     "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
     "skills/n8n-local-setup/references/n8n/local-setup.md",
     "skills/n8n-local-setup/references/n8n-agent-rules.md",
+    "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
+    "skills/n8n-local-setup/templates/local-stack/.env.example",
     "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md"
   ],
   "suitable_for": [
@@ -32,6 +34,8 @@
     "skills/n8n-local-setup/references/n8n/upgrading.md",
     "skills/n8n-local-setup/references/n8n/tunnelling.md",
     "skills/n8n-local-setup/references/n8n/vps-hosting.md",
+    "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
+    "skills/n8n-local-setup/templates/local-stack/.env.example",
     "skills/ai-coding-agent-rules/AGENTS.template.md",
     "skills/n8n-agent-rules/SKILL.md",
     "skills/n8n-agent-rules/README.md",
@@ -64,6 +68,7 @@
   "requires_approval": true,
   "run_commands": false,
   "notes": [
+    "Copy .env.example to .env locally and do not commit .env.",
     "Do not paste real n8n tokens into config files.",
     "Live n8n actions require separate explicit confirmation."
   ]

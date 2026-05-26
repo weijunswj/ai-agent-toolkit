@@ -4,476 +4,218 @@ Project: n8n.local-setup
 Source: _projects/n8n/local-setup/_main/3a. docker compose + ngrok.md
 Update the project source and run sync.
 -->
-# 3a. Docker Compose + ngrok ( Local Development )
+# 3a. Docker Compose + ngrok
 
-This guide is for people who already have local `n8n` running on Windows, want to manage it with Docker Compose, and still want the convenience of ngrok for temporary public webhooks.
+This is the blessed local stack for this guide.
 
-Use this guide when:
+Docker Compose runs:
 
-* n8n is running on your own laptop or desktop.
-* You want a cleaner `docker-compose.yml` setup.
-* You still need ngrok for webhook or OAuth callback testing.
-* You want a helper script to read the ngrok URL and inject it into Compose.
+- `n8n`
+- `postgres`
+- `ngrok`
+- persistent `n8n_data` and `postgres_data` volumes
 
-Do **not** use this guide for VPS, production, Hostinger, Coolify, or always-on public hosting.
+ngrok is the only supported local public tunnel path. It runs inside Docker Compose, not as a manual Windows ngrok install.
 
-If you just want the simplest local Docker setup, use:
+Do not use this guide for VPS, production, Hostinger, Coolify, or always-on public hosting. Use [4. VPS Hosting](./4.%20vps%20hosting.md) for that.
 
-* [1. Local Setup](./1.%20local%20setup.md)
+## Why This Stack Uses Postgres
 
-If you want the normal tunnel guide without Compose, use:
+SQLite is simpler for throwaway local testing. This toolkit chooses Postgres because it optimises for production-ready templates:
 
-* [3. Tunneling Guide](./3.%20tunneling%20guide.md)
+- It gives local development the same app plus database service shape used by real deployments.
+- It keeps the local template closer to production n8n examples.
+- It makes future queue-mode scaling easier to understand because queue mode also uses Postgres.
 
-If you want real always-on public n8n, use:
+The local Postgres service is only n8n's internal runtime database. It is not Vercel, it is not Supabase, and it must not connect to the user's app database.
 
-* [4. VPS Hosting](./4.%20vps%20hosting.md)
+## Folder Layout
 
----
-
-## 1. Understand the difference
-
-The normal ngrok script in this repo does this:
+Create a local folder outside this repo:
 
 ```text
-start ngrok
--> read the public HTTPS URL
--> docker run n8n with WEBHOOK_URL set
-```
-
-The Compose version does this instead:
-
-```text
-start ngrok
--> read the public HTTPS URL
--> write .env
--> docker compose up -d --force-recreate
-```
-
-Docker Compose itself does **not** automatically discover the random ngrok URL.
-
-The helper script still does that part.
-
-Compose handles the n8n container definition.
-
----
-
-## 2. When this path makes sense
-
-Use this path if you want:
-
-* One readable `docker-compose.yml`.
-* Easier future additions like Postgres, Uptime Kuma, or backups.
-* The same `n8n_data` volume you already use.
-* Automatic ngrok URL capture through a helper script.
-* A stepping stone between beginner local Docker and real VPS hosting.
-
-Skip this path if:
-
-* The current `start-n8n-ngrok.bat` works and you do not want more files yet.
-* You do not need public webhooks.
-* You want real 24/7 uptime.
-
----
-
-## 3. Folder layout
-
-Create a simple folder for your Compose project.
-
-Example:
-
-```text
-C:\n8n-compose
-```
-
-Inside it, you will have:
-
-```text
-C:\n8n-compose
+C:\n8n-local
   docker-compose.yml
   .env
-  start-n8n-compose-ngrok.bat
 ```
 
-The `.env` file can be created by the helper script.
+Copy these templates into that folder:
 
----
+- [templates/local-stack/docker-compose.yml](../../templates/local-stack/docker-compose.yml)
+- [templates/local-stack/.env.example](../../templates/local-stack/.env.example)
 
-## 4. Check your existing Docker volume
+Rename `.env.example` to `.env`, then fill only local placeholder values.
 
-The local setup in this repo uses this volume:
+Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live n8n imports/exports.
 
-```text
-n8n_data
-```
+## `docker-compose.yml`
 
-Check it in PowerShell:
-
-```powershell
-docker volume ls
-```
-
-You should see:
-
-```text
-n8n_data
-```
-
-Do **not** delete this volume.
-
-It contains your local n8n data.
-
----
-
-## 5. Back up first
-
-Before changing how n8n starts, export your workflows.
-
-Run this while your current `n8n` container is still running:
-
-```powershell
-docker exec n8n n8n export:workflow --all --output=/home/node/.n8n/workflows-backup.json
-docker cp n8n:/home/node/.n8n/workflows-backup.json .
-```
-
-This does not replace a full volume backup, but it is a useful quick safety step.
-
----
-
-## 6. Create `docker-compose.yml`
-
-Create this file:
-
-```text
-C:\n8n-compose\docker-compose.yml
-```
-
-Paste this:
+The template source is [templates/local-stack/docker-compose.yml](../../templates/local-stack/docker-compose.yml).
 
 ```yaml
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-n8n}
+      POSTGRES_USER: ${POSTGRES_USER:-n8n}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   n8n:
     image: docker.n8n.io/n8nio/n8n:stable
-    container_name: n8n
     restart: unless-stopped
-    # Bind local n8n to loopback. ngrok provides the public HTTPS endpoint.
+    depends_on:
+      - postgres
     ports:
       - "127.0.0.1:5678:5678"
+    env_file:
+      - .env
     environment:
-      - TZ=Asia/Singapore
-      - GENERIC_TIMEZONE=Asia/Singapore
-      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-      - N8N_RUNNERS_ENABLED=true
-      - WEBHOOK_URL=${WEBHOOK_URL}
-      - N8N_PROXY_HOPS=1
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-n8n}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - n8n_data:/home/node/.n8n
 
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    depends_on:
+      - n8n
+    env_file:
+      - .env
+    command: http --url=${NGROK_DOMAIN} n8n:5678
+    ports:
+      - "127.0.0.1:4040:4040"
+
 volumes:
+  postgres_data:
   n8n_data:
-    external: true
 ```
 
-Important:
+## `.env.example`
 
-* `container_name: n8n` keeps the same container name.
-* `n8n_data` keeps the same existing Docker volume.
-* `external: true` tells Compose to reuse the existing volume instead of creating a new project-scoped volume.
-* Local Compose + ngrok should bind n8n to loopback; ngrok provides the public HTTPS endpoint.
-* Do not expose the Docker port directly to LAN or public interfaces unless you are deliberately hosting with proper authentication, firewall, and HTTPS safeguards.
-* `WEBHOOK_URL=${WEBHOOK_URL}` lets the helper script write the current ngrok URL into `.env`.
+The template source is [templates/local-stack/.env.example](../../templates/local-stack/.env.example).
 
----
+```dotenv
+# n8n internal database
+POSTGRES_DB=n8n
+POSTGRES_USER=n8n
+POSTGRES_PASSWORD=replace-with-local-postgres-password
 
-## 7. Create the Compose ngrok helper script
+# n8n runtime
+N8N_ENCRYPTION_KEY=replace-with-long-random-value
+N8N_HOST=your-reserved-domain.ngrok.app
+N8N_PROTOCOL=https
+WEBHOOK_URL=https://your-reserved-domain.ngrok.app/
+N8N_PROXY_HOPS=1
+TZ=Asia/Singapore
+GENERIC_TIMEZONE=Asia/Singapore
+N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+N8N_RUNNERS_ENABLED=true
 
-Create this file:
-
-```text
-C:\n8n-compose\start-n8n-compose-ngrok.bat
+# ngrok
+NGROK_AUTHTOKEN=replace-with-ngrok-authtoken
+NGROK_DOMAIN=your-reserved-domain.ngrok.app
 ```
 
-Paste this:
+All values are placeholders. Replace them only in the local `.env` file, never in repo templates.
 
-```bat
-@echo off
-setlocal EnableExtensions EnableDelayedExpansion
+## Start The Stack
 
-REM ============================================================
-REM n8n + ngrok launcher for Docker Compose on Windows
-REM ============================================================
-REM Local development only.
-REM Do not use this for VPS, production, Hostinger, or Coolify.
-REM
-REM Run this from the folder that contains docker-compose.yml.
-REM It starts ngrok, reads the public HTTPS URL, writes .env,
-REM and recreates the Compose-managed n8n container.
-REM ============================================================
-
-set "NGROK_PATH=C:\ngrok\ngrok.exe"
-set "LOCAL_PORT=5678"
-set "KILL_EXISTING_NGROK=true"
-
-if not exist "docker-compose.yml" (
-  echo [ERROR] docker-compose.yml not found in this folder.
-  echo Run this script from your n8n Compose folder.
-  echo.
-  pause
-  exit /b 1
-)
-
-if not exist "%NGROK_PATH%" (
-  echo [ERROR] ngrok.exe not found at:
-  echo %NGROK_PATH%
-  echo.
-  pause
-  exit /b 1
-)
-
-docker --version >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] Docker command not found.
-  echo Make sure Docker Desktop is installed and running.
-  echo.
-  pause
-  exit /b 1
-)
-
-if /I "%KILL_EXISTING_NGROK%"=="true" (
-  taskkill /IM ngrok.exe /F >nul 2>&1
-  timeout /t 1 /nobreak >nul
-)
-
-echo Starting ngrok on port %LOCAL_PORT%...
-start "ngrok n8n tunnel" "%NGROK_PATH%" http %LOCAL_PORT%
-
-echo Waiting for ngrok HTTPS URL...
-set "WEBHOOK_URL="
-
-for /L %%A in (1,1,20) do (
-  for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "try { ((Invoke-RestMethod 'http://127.0.0.1:4040/api/tunnels').tunnels | Where-Object { $_.public_url -like 'https://*' } | Select-Object -ExpandProperty public_url -First 1) } catch { '' }"`) do (
-    set "WEBHOOK_URL=%%i"
-  )
-
-  if defined WEBHOOK_URL goto :GotWebhookUrl
-  timeout /t 1 /nobreak >nul
-)
-
-:GotWebhookUrl
-
-if not defined WEBHOOK_URL (
-  echo [ERROR] Could not get ngrok HTTPS URL.
-  echo Check ngrok here:
-  echo http://127.0.0.1:4040
-  echo.
-  pause
-  exit /b 1
-)
-
-if not "!WEBHOOK_URL:~-1!"=="/" set "WEBHOOK_URL=!WEBHOOK_URL!/"
-
-echo WEBHOOK_URL=!WEBHOOK_URL!> .env
-
-echo.
-echo Public webhook URL:
-echo !WEBHOOK_URL!
-echo.
-
-echo Pulling latest n8n image...
-docker compose pull
-if errorlevel 1 (
-  echo [ERROR] docker compose pull failed.
-  echo.
-  pause
-  exit /b 1
-)
-
-echo Starting n8n through Docker Compose...
-docker compose up -d --force-recreate
-if errorlevel 1 (
-  echo [ERROR] docker compose up failed.
-  echo.
-  pause
-  exit /b 1
-)
-
-echo.
-echo Done.
-echo Local n8n:
-echo http://localhost:%LOCAL_PORT%
-echo.
-echo Public webhook URL:
-echo !WEBHOOK_URL!
-echo.
-
-docker ps --filter "name=n8n"
-
-echo.
-pause
-endlocal
-```
-
-If your `ngrok.exe` is not here:
-
-```text
-C:\ngrok\ngrok.exe
-```
-
-change this line in the script:
-
-```bat
-set "NGROK_PATH=C:\ngrok\ngrok.exe"
-```
-
----
-
-## 8. Stop the old container before first Compose run
-
-If your current `n8n` container was created by `docker run`, stop and remove only the container.
-
-PowerShell:
-
-```powershell
-docker stop n8n
-docker rm n8n
-```
-
-Do **not** remove the volume.
-
-Do **not** run this:
-
-```powershell
-docker volume rm n8n_data
-```
-
----
-
-## 9. Start n8n with Compose + ngrok
-
-Open PowerShell in your Compose folder:
-
-```text
-C:\n8n-compose
-```
-
-Run:
-
-```powershell
-.\start-n8n-compose-ngrok.bat
-```
-
-The script will:
-
-1. start ngrok,
-2. read the public HTTPS URL,
-3. write `.env`,
-4. pull the latest stable n8n image,
-5. run `docker compose up -d --force-recreate`,
-6. show the local URL and public webhook URL.
-
-Open local n8n:
-
-```text
-http://localhost:5678
-```
-
-Then open a workflow with a Webhook node.
-
-The webhook URL should show the ngrok domain instead of `localhost`.
-
----
-
-## 10. Normal daily use
-
-When you want local n8n with ngrok:
-
-```powershell
-cd C:\n8n-compose
-.\start-n8n-compose-ngrok.bat
-```
-
-Keep the ngrok window open.
-
-If the ngrok window closes, the public URL stops working.
-
----
-
-## 11. Updating n8n later
-
-The helper script already runs:
-
-```powershell
-docker compose pull
-docker compose up -d --force-recreate
-```
-
-So running it again refreshes the stable image and recreates n8n with the latest ngrok URL.
-
-If you do not need ngrok and only want to restart local Compose n8n:
+From the local stack folder:
 
 ```powershell
 docker compose up -d
 ```
 
----
-
-## 12. Disadvantages compared with the original ngrok batch script
-
-| Original ngrok script | Compose + ngrok path |
-| --- | --- |
-| One script does everything | Uses Compose file + helper script |
-| Simpler for beginners | Cleaner for adding more services later |
-| Uses raw `docker run` | Uses `docker compose up` |
-| Harder to extend cleanly | Easier to add Postgres, Uptime Kuma, backups, etc. |
-| Good for one-container local testing | Better stepping stone to a real stack |
-
-The main downside is more files.
-
-The main upside is cleaner long-term structure.
-
----
-
-## 13. Common mistakes
-
-### n8n opens but looks empty
-
-You are probably using a different Docker volume.
-
-Check `docker-compose.yml` has:
-
-```yaml
-volumes:
-  n8n_data:
-    external: true
-```
-
-### Webhook node still shows localhost
-
-Check `.env` contains:
-
-```env
-WEBHOOK_URL=https://your-ngrok-url/
-```
-
-Then rerun:
+Check containers:
 
 ```powershell
-docker compose up -d --force-recreate
+docker compose ps
 ```
 
-### ngrok URL cannot be found
+Open n8n locally:
 
-Open:
+```text
+http://localhost:5678
+```
+
+Open ngrok's local inspector:
 
 ```text
 http://127.0.0.1:4040
 ```
 
-If that page does not load, ngrok is not running correctly.
+Use the `WEBHOOK_URL` ngrok URL for external webhook and OAuth callback configuration.
+
+## Daily Use
+
+Start or refresh:
+
+```powershell
+docker compose up -d
+```
+
+Pull newer images and recreate:
+
+```powershell
+docker compose pull
+docker compose up -d --force-recreate
+```
+
+Stop containers while keeping volumes:
+
+```powershell
+docker compose down
+```
+
+Do not remove volumes unless you intentionally want to delete local n8n runtime data:
+
+```text
+postgres_data
+n8n_data
+```
+
+## Troubleshooting
+
+### Webhook node still shows localhost
+
+Check `.env`:
+
+```dotenv
+WEBHOOK_URL=https://your-reserved-domain.ngrok.app/
+N8N_HOST=your-reserved-domain.ngrok.app
+N8N_PROTOCOL=https
+N8N_PROXY_HOPS=1
+```
+
+Then recreate:
+
+```powershell
+docker compose up -d --force-recreate
+```
+
+### ngrok does not start
+
+Check:
+
+```dotenv
+NGROK_AUTHTOKEN=replace-with-ngrok-authtoken
+NGROK_DOMAIN=your-reserved-domain.ngrok.app
+```
+
+The domain should be a reserved ngrok domain without `https://`.
 
 ### Port 5678 is already in use
 
-Another n8n container may still be running.
+Another local n8n process may already be running.
 
 Check:
 
@@ -481,29 +223,40 @@ Check:
 docker ps
 ```
 
-Stop the old one:
+Stop the old local test container only if you know it is disposable:
 
 ```powershell
 docker stop n8n
 docker rm n8n
 ```
 
----
+Do not remove Docker volumes.
 
-## 14. Final recommendation
+## Advanced Queue Mode
 
-Use this path if you want Compose without losing the convenient ngrok auto-URL behaviour.
+Normal mode is the default local Fast Path. In normal mode, one n8n service handles the UI, API, webhooks, scheduler, and executions. Postgres stores durable n8n workflow, credential, user, and execution state.
 
-For learning and webhook testing:
+Queue mode is different:
+
+- n8n main serves the UI, API, webhooks, and scheduler.
+- Redis queues jobs.
+- n8n worker containers run executions.
+- Postgres stores durable workflow and execution state.
+
+Queue mode is a future production scaling path, not the default local setup. Do not add Redis or workers to the Fast Path.
+
+## Final Recommendation
+
+For local development:
 
 ```text
-Docker Compose + ngrok helper script
+Docker Compose + n8n + Postgres + ngrok
 ```
 
 For real public hosting:
 
 ```text
-VPS + Docker Compose + real domain + HTTPS
+VPS or production platform + real domain + HTTPS
 ```
 
 Do not treat ngrok as permanent production hosting.

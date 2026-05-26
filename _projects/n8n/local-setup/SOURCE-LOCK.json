@@ -12,28 +12,28 @@
       "source_path": "1. local setup.md",
       "project_path": "_projects/n8n/local-setup/_main/1. local setup.md",
       "source_blob_sha": "a08f0b83ed5722b5b8ecbc560f1ccfe89baf4563",
-      "notes": "Toolkit-adapted after migration to route Codex agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies. Local Docker examples now bind to loopback by default, with explicit public-exposure safety guidance for external access."
+      "notes": "Toolkit-adapted after migration to route Codex agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies. The local Fast Path now uses Docker Compose with n8n, Postgres, and ngrok as a service; ngrok is the only supported local tunnel path."
     },
     {
       "mode": "adapted",
       "source_path": "2. upgrading.md",
       "project_path": "_projects/n8n/local-setup/_main/2. upgrading.md",
       "source_blob_sha": "a155cef59f93e9b31104ac91289490665ef32e47",
-      "notes": "Toolkit-adapted after migration to bind local Docker examples to loopback by default and document explicit public-exposure safety guidance for external access."
+      "notes": "Toolkit-adapted after migration to prefer the local Docker Compose stack for updates while preserving explicit public-exposure safety guidance."
     },
     {
       "mode": "adapted",
       "source_path": "3. tunneling guide.md",
       "project_path": "_projects/n8n/local-setup/_main/3. tunneling guide.md",
       "source_blob_sha": "3c3b252811c024803123c44459ff9f6c23c4cc24",
-      "notes": "Toolkit-adapted after migration to bind local Docker examples to loopback by default and document explicit public-exposure safety guidance for external access."
+      "notes": "Toolkit-adapted after migration to replace scattered local tunneling paths with ngrok as the only supported local tunnel, running as a Docker Compose service."
     },
     {
       "mode": "adapted",
       "source_path": "3a. docker compose + ngrok.md",
       "project_path": "_projects/n8n/local-setup/_main/3a. docker compose + ngrok.md",
       "source_blob_sha": "e0819653c14f2a05819fecd1ea113f949194c223",
-      "notes": "Toolkit-adapted after migration to bind local Docker Compose examples to loopback by default and document explicit public-exposure safety guidance for external access."
+      "notes": "Toolkit-adapted after migration to make Docker Compose the local stack control plane for n8n, Postgres, and ngrok, with placeholder-only environment configuration and queue mode documented as advanced future scaling only."
     },
     {
       "mode": "exact",
@@ -67,7 +67,7 @@
       "source_path": "README.md",
       "project_path": "_projects/n8n/local-setup/_main/README.md",
       "source_blob_sha": "19815dff51b90aaef1d5125dff4b2f188ee54436",
-      "notes": "Toolkit-adapted after migration to document the generic ai-coding-agent-rules split, the n8n-agent-rules skill, optional adapters, and safe copy/merge into target repo root active filenames."
+      "notes": "Toolkit-adapted after migration to document the generic ai-coding-agent-rules split, the n8n-agent-rules skill, optional adapters, and the opinionated local Docker Compose Fast Path with Postgres and ngrok-only tunneling."
     },
     {
       "mode": "adapted",

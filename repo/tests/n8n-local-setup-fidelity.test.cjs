@@ -46,6 +46,17 @@ const restoredReferences = [
   }
 ];
 
+const localStackTemplates = [
+  {
+    source: '_main/templates/local-stack/docker-compose.yml',
+    output: 'skills/n8n-local-setup/templates/local-stack/docker-compose.yml'
+  },
+  {
+    source: '_main/templates/local-stack/.env.example',
+    output: 'skills/n8n-local-setup/templates/local-stack/.env.example'
+  }
+];
+
 function tempCopy() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-fidelity-'));
   fs.cpSync(repoRoot, target, {
@@ -102,6 +113,18 @@ test('n8n local setup restored references are declared copy outputs', () => {
   }
 });
 
+test('n8n local setup stack templates are declared exact copy outputs', () => {
+  const manifest = localSetupManifest();
+  for (const expected of localStackTemplates) {
+    const output = manifest.outputs.find((entry) => entry.output === expected.output);
+    assert.ok(output, expected.output);
+    assert.equal(output.kind, 'copy', expected.output);
+    assert.equal(output.source, expected.source, expected.output);
+    assert.equal(output.fidelity, 'exact', expected.output);
+    assert.ok(manifest.writes.allowed.includes(expected.output), expected.output);
+  }
+});
+
 test('n8n local setup restored references preserve full source guide bodies', () => {
   const manifest = localSetupManifest();
   for (const expected of restoredReferences) {
@@ -110,6 +133,83 @@ test('n8n local setup restored references preserve full source guide bodies', ()
     const output = stripGeneratedNotices(readText(repoRoot, expected.output));
     assert.equal(output, applyTextRewrites(source, recipe), expected.output);
   }
+});
+
+test('n8n local setup stack templates preserve placeholder-only source bodies', () => {
+  for (const expected of localStackTemplates) {
+    const source = readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`).trimEnd() + '\n';
+    const output = readText(repoRoot, expected.output);
+    assert.equal(output, source, expected.output);
+  }
+});
+
+test('n8n local setup docs present one Docker Compose Fast Path', () => {
+  const mainReadme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const tunnelling = readText(repoRoot, '_projects/n8n/local-setup/_main/3. tunneling guide.md');
+  const composeGuide = readText(repoRoot, '_projects/n8n/local-setup/_main/3a. docker compose + ngrok.md');
+  const combined = [mainReadme, localSetup, tunnelling, composeGuide].join('\n');
+
+  assert.match(mainReadme, /## Fast Path/);
+  assert.match(localSetup, /## Fast Path/);
+  assert.match(combined, /Docker Compose/);
+  assert.match(combined, /n8n/);
+  assert.match(combined, /Postgres/);
+  assert.match(combined, /ngrok/);
+  assert.match(combined, /ngrok is the only supported local tunnel path/i);
+  assert.match(combined, /The local Postgres service is only n8n's internal runtime database/);
+  assert.match(combined, /not Vercel/);
+  assert.match(combined, /not Supabase/);
+  assert.match(combined, /does not connect to the user's app database|must not connect to the user's app database/);
+  assert.match(combined, /Advanced Queue Mode/);
+  assert.match(combined, /Redis queues? (execution )?jobs/i);
+  assert.match(combined, /worker containers run executions/i);
+  assert.match(combined, /Do not add Redis or workers to the default local setup|Do not add Redis or workers to the Fast Path/);
+  assert.match(combined, /Never commit `\.env`, credentials, runtime payloads, `\.n8n-local\/`, `\.tmp\/`, or live n8n imports\/exports/);
+
+  assert.doesNotMatch(combined, /Path A - Cloudflare/i);
+  assert.doesNotMatch(combined, /Path C - n8n built-in tunnel/i);
+  assert.doesNotMatch(combined, /Use \*\*Cloudflare Quick Tunnel\*\* when/i);
+  assert.doesNotMatch(combined, /Use \*\*n8n built-in tunnel\*\* when/i);
+  assert.doesNotMatch(combined, /ngrok\.exe/);
+});
+
+test('n8n local setup compose template uses n8n postgres ngrok without default queue services', () => {
+  const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/docker-compose.yml');
+  assert.match(compose, /^\s{2}postgres:/m);
+  assert.match(compose, /^\s{2}n8n:/m);
+  assert.match(compose, /^\s{2}ngrok:/m);
+  assert.match(compose, /postgres:16-alpine/);
+  assert.match(compose, /docker\.n8n\.io\/n8nio\/n8n:stable/);
+  assert.match(compose, /ngrok\/ngrok:latest/);
+  assert.match(compose, /DB_TYPE: postgresdb/);
+  assert.match(compose, /"127\.0\.0\.1:5678:5678"/);
+  assert.match(compose, /"127\.0\.0\.1:4040:4040"/);
+  assert.match(compose, /^\s{2}postgres_data:/m);
+  assert.match(compose, /^\s{2}n8n_data:/m);
+  assert.doesNotMatch(compose, /^\s{2}redis:/m);
+  assert.doesNotMatch(compose, /^\s{2}n8n-worker:/m);
+  assert.doesNotMatch(compose, /EXECUTIONS_MODE:\s*queue/);
+});
+
+test('n8n local setup env example stays placeholder-only', () => {
+  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
+  for (const expected of [
+    'POSTGRES_DB=n8n',
+    'POSTGRES_USER=n8n',
+    'POSTGRES_PASSWORD=replace-with-local-postgres-password',
+    'N8N_ENCRYPTION_KEY=replace-with-long-random-value',
+    'N8N_HOST=your-reserved-domain.ngrok.app',
+    'N8N_PROTOCOL=https',
+    'WEBHOOK_URL=https://your-reserved-domain.ngrok.app/',
+    'N8N_PROXY_HOPS=1',
+    'NGROK_AUTHTOKEN=replace-with-ngrok-authtoken',
+    'NGROK_DOMAIN=your-reserved-domain.ngrok.app'
+  ]) {
+    assert.match(envExample, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.doesNotMatch(envExample, /[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/);
+  assert.doesNotMatch(envExample, /n8n_[A-Za-z0-9_-]{20,}/);
 });
 
 test('n8n copied setup references use portable published baseline template links', () => {
@@ -151,6 +251,8 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
     'skills/n8n-local-setup/references/n8n/4. vps hosting.md',
     'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md',
     'skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md',
+    'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
+    'skills/n8n-local-setup/templates/local-stack/.env.example',
     'skills/ai-coding-agent-rules/AGENTS.template.md',
     'skills/n8n-agent-rules/SKILL.md',
     'skills/n8n-agent-rules/README.md',
@@ -169,6 +271,8 @@ test('claude n8n local pack installs inert generic template and n8n-agent-rules 
   for (const expectedPath of [
     'skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md',
     'skills/n8n-local-setup/references/ai-agent-platforms/templates/claude-mcp-config.md',
+    'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
+    'skills/n8n-local-setup/templates/local-stack/.env.example',
     'skills/ai-coding-agent-rules/CLAUDE.template.md',
     'skills/n8n-agent-rules/SKILL.md',
     'skills/n8n-agent-rules/README.md',

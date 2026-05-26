@@ -63,7 +63,7 @@ Skills are copyable folder packages. Install by copying the whole `skills/<skill
 |---|---|
 | [AI Coding Agent Rules](skills/ai-coding-agent-rules/) | Install generic execution-first agent rules for supported coding agents. |
 | [n8n Agent Rules](skills/n8n-agent-rules/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
-| [n8n Local Setup](skills/n8n-local-setup/) | Set up local n8n, choose MCP config, handle tunnels, Docker setup, or platform notes. |
+| [n8n Local Setup](skills/n8n-local-setup/) | Set up local n8n with Docker Compose, Postgres, ngrok, MCP config, and platform notes. |
 | [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
 | [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
 | [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |
