@@ -86,6 +86,24 @@ Words like `continue`, `next`, `apply`, or `do it` only apply to the already-sco
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
 
+## GitHub PR Completion Rules
+
+When the current conversation is clearly working in a project linked to a GitHub repo, do not leave completed repo changes uncommitted by default.
+
+After making changes, run relevant validation and then either update the current working PR or open a new PR, unless the user explicitly requested local-only, no-commit, or no-PR work. Treat the user's request to make repo changes as permission to complete this normal GitHub PR path, subject to the safety and validation limits below.
+
+If the changes clearly belong to the same working PR in the same conversation thread, commit and push to that PR branch automatically after validation. Do not ask again just to update the same PR.
+
+If the user asks for a different task while a working PR already exists in the same conversation thread, ask whether to commit the new task to the existing PR or open a new PR.
+
+If the user confirms once that a different task should also go into the existing working PR, keep using that existing PR for the remainder of the same conversation thread unless the user changes direction.
+
+If no working PR exists and changes were made, create a branch and open a PR after validation, unless the user explicitly requested local-only, no-PR, or no-commit work.
+
+Never push directly to `main`. Never commit secrets, credentials, `.env`, `.n8n-local/`, `.tmp/`, live runtime payloads, product repo secrets, generated package artifacts, or unsafe live-action outputs. Do not auto-commit when validation fails or unresolved safety blockers remain.
+
+Always report the branch name, commit SHA, PR URL, validation run, and anything intentionally left uncommitted.
+
 ## Scope Control
 
 Before editing:
