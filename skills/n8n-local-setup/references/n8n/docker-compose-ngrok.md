@@ -150,7 +150,7 @@ From the local stack folder:
 
 Use the menu to start the stack. It offers update checks before starting, but the stack does not silently auto-update.
 
-Check-for-updates may pull newer images into the local Docker cache. It does not restart or recreate services until the user chooses an update option.
+Check-for-updates compares local image tag IDs before and after pull. It may pull newer images into the local Docker cache, but it does not restart or recreate services until the user chooses an update option.
 
 Docker Desktop can still be used to view containers and logs. Docker Desktop Play bypasses the menu and update checks, so start through `n8n-local.cmd` when you want guided checks on launch.
 

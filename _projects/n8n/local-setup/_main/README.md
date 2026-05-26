@@ -47,7 +47,7 @@ The default stack is:
 
 Start through `n8n-local.cmd` when you want guided checks and friendly stack actions. The launcher opens a PowerShell menu that checks required files, checks whether Docker appears available, offers update checks, starts the stack, shows status, opens logs, opens n8n, opens the ngrok inspector, and can back up Postgres.
 
-The stack does not silently auto-update. The update check may pull newer images into the local Docker cache, but it does not restart or recreate services until the user chooses an update option.
+The stack does not silently auto-update. The update check compares local image tag IDs before and after pull. It may pull newer images into the local Docker cache, but it does not restart or recreate services until the user chooses an update option.
 
 Docker Desktop can still be used to view containers and logs. Docker Desktop Play bypasses the menu and update checks, so start through `n8n-local.cmd` if you want guided checks on launch.
 

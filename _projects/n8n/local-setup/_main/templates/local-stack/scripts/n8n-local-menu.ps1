@@ -2,6 +2,11 @@ $ErrorActionPreference = 'Stop'
 
 $script:StackRoot = (Get-Location).Path
 $script:Services = @('n8n', 'ngrok', 'postgres')
+$script:ServiceImages = @{
+  n8n = 'docker.n8n.io/n8nio/n8n:stable'
+  ngrok = 'ngrok/ngrok:latest'
+  postgres = 'postgres:16-alpine'
+}
 
 function Write-Header {
   param([string]$Title)
@@ -132,8 +137,14 @@ function Get-ServiceImageIds {
 
   $ids = @{}
   foreach ($service in $Services) {
+    $image = $script:ServiceImages[$service]
+    if (-not $image) {
+      $ids[$service] = ''
+      continue
+    }
+
     try {
-      $imageId = (& docker compose images -q $service 2>$null | Select-Object -First 1)
+      $imageId = (& docker image inspect $image --format '{{.Id}}' 2>$null | Select-Object -First 1)
       if ($LASTEXITCODE -ne 0) {
         $imageId = ''
       }
@@ -152,6 +163,7 @@ function Check-Updates {
   if (-not (Test-DockerReady)) { return @() }
 
   Write-Header 'Check For Updates'
+  Write-Info 'This compares local image tag IDs before and after pull.'
   Write-Info 'This may pull newer images into the local Docker cache.'
   Write-Info 'It does not restart or recreate running services.'
 

@@ -168,6 +168,7 @@ test('n8n local setup docs present one Docker Compose Fast Path', () => {
   assert.match(combined, /start through `n8n-local\.cmd`|Run `n8n-local\.cmd`/);
   assert.match(combined, /Docker Desktop Play bypasses (the )?menu.*update checks/i);
   assert.match(combined, /does not silently auto-update|not silently auto-update/i);
+  assert.match(combined, /compares local image tag IDs before and after pull/i);
   assert.match(combined, /pull newer images.*does not restart|pull newer images.*does not recreate/i);
   assert.match(combined, /ngrok is the only supported local tunnel path/i);
   assert.match(combined, /The local Postgres service is only n8n's internal runtime database/);
@@ -268,6 +269,11 @@ test('n8n local setup launcher templates provide guided stack actions', () => {
   assert.match(menu, /docker compose logs -f n8n/);
   assert.match(menu, /docker compose logs -f ngrok/);
   assert.match(menu, /docker compose logs -f postgres/);
+  assert.match(menu, /docker image inspect/);
+  assert.match(menu, /docker\.n8n\.io\/n8nio\/n8n:stable/);
+  assert.match(menu, /ngrok\/ngrok:latest/);
+  assert.match(menu, /postgres:16-alpine/);
+  assert.doesNotMatch(menu, /docker compose images -q/);
   assert.match(menu, /Start-Process "http:\/\/localhost:5678"/);
   assert.match(menu, /Start-Process "http:\/\/127\.0\.0\.1:4040"/);
   assert.match(menu, /pg_dump/);

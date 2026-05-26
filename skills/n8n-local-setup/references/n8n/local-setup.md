@@ -111,7 +111,7 @@ From the local stack folder:
 
 Use the menu to start the stack, check for updates, update selected services, restart, stop, view status, follow logs, open n8n, open the ngrok inspector, or back up Postgres.
 
-The stack does not silently auto-update. The check-for-updates action may pull newer images into the local Docker cache, but it does not restart or recreate services until the user chooses an update option.
+The stack does not silently auto-update. The check-for-updates action compares local image tag IDs before and after pull. It may pull newer images into the local Docker cache, but it does not restart or recreate services until the user chooses an update option.
 
 Docker Desktop can still show containers and logs. Docker Desktop Play bypasses the menu and update checks, so start through `n8n-local.cmd` when you want guided checks on launch.
 
