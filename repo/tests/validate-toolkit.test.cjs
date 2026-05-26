@@ -402,6 +402,12 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /toolkit\.project\.json/);
   assert.match(text, /Do not edit generated `skills\/` or `mcp\/` outputs directly/);
   assert.match(text, /Do not generate curated files automatically from `_main`/);
+  assert.match(text, /## GitHub PR Completion Rules/);
+  assert.match(text, /do not leave completed repo changes uncommitted by default/);
+  assert.match(text, /commit and push to that PR branch automatically after validation/);
+  assert.match(text, /If no working PR exists and changes were made, create a branch and open a PR after validation/);
+  assert.match(text, /Never push directly to `main`/);
+  assert.match(text, /Do not auto-commit when validation fails or unresolved safety blockers remain/);
   for (const doc of mandatoryDocs) {
     assert.ok(text.includes(`](${doc})`), `AGENTS.md links ${doc}`);
   }
@@ -409,6 +415,28 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
     text,
     /For new or changed project modules, `repo\/docs\/PROJECT-MODULE-STANDARD\.md` is the detailed rulebook\./
   );
+});
+
+test('generic agent-rule source includes GitHub PR completion rules', () => {
+  const relPaths = [
+    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/GEMINI.template.md'
+  ];
+
+  for (const relPath of relPaths) {
+    const text = readTextFile(path.join(repoRoot, relPath));
+    assert.match(text, /## GitHub PR Completion Rules/, `${relPath} includes PR completion section`);
+    assert.match(text, /do not leave completed repo changes uncommitted by default/, `${relPath} requires completed repo changes to be committed by default`);
+    assert.match(text, /commit and push to that PR branch automatically after validation/, `${relPath} updates the same working PR without re-asking`);
+    assert.match(text, /If no working PR exists and changes were made, create a branch and open a PR after validation/, `${relPath} opens a PR when needed`);
+    assert.match(text, /Never push directly to `main`/, `${relPath} blocks direct main pushes`);
+    assert.match(text, /Do not auto-commit when validation fails or unresolved safety blockers remain/, `${relPath} blocks unsafe auto-commit`);
+  }
 });
 
 test('Project Module Standard documents the playbook boundary', () => {
