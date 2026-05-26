@@ -18,4 +18,4 @@ Review [pack.json](pack.json) before use.
 
 Copy or merge [AGENTS.template.md](../../../ai-coding-agent-rules/AGENTS.template.md) into the target repo root as `AGENTS.md`, install or load [n8n Agent Rules](../../../n8n-agent-rules/), and optionally merge [AGENTS.n8n-brief.template.md](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md) into the same file. If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge/diff plan. Run the adapter installer with `--dry-run` first and only use `--write` after explicit current-turn approval.
 
-For local runtime, copy [.env.example](../../templates/local-stack/.env.example) to `.env` outside this repo, fill placeholders locally, and never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live imports/exports.
+For local runtime, copy the local stack templates outside this repo, copy [.env.example](../../templates/local-stack/.env.example) to `.env`, fill placeholders locally, then start through [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd). Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live imports/exports.

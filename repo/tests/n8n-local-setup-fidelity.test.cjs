@@ -54,6 +54,14 @@ const localStackTemplates = [
   {
     source: '_main/templates/local-stack/.env.example',
     output: 'skills/n8n-local-setup/templates/local-stack/.env.example'
+  },
+  {
+    source: '_main/templates/local-stack/n8n-local.cmd',
+    output: 'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd'
+  },
+  {
+    source: '_main/templates/local-stack/scripts/n8n-local-menu.ps1',
+    output: 'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1'
   }
 ];
 
@@ -156,6 +164,11 @@ test('n8n local setup docs present one Docker Compose Fast Path', () => {
   assert.match(combined, /n8n/);
   assert.match(combined, /Postgres/);
   assert.match(combined, /ngrok/);
+  assert.match(combined, /n8n-local\.cmd/);
+  assert.match(combined, /start through `n8n-local\.cmd`|Run `n8n-local\.cmd`/);
+  assert.match(combined, /Docker Desktop Play bypasses (the )?menu.*update checks/i);
+  assert.match(combined, /does not silently auto-update|not silently auto-update/i);
+  assert.match(combined, /pull newer images.*does not restart|pull newer images.*does not recreate/i);
   assert.match(combined, /ngrok is the only supported local tunnel path/i);
   assert.match(combined, /The local Postgres service is only n8n's internal runtime database/);
   assert.match(combined, /not Vercel/);
@@ -215,6 +228,56 @@ test('n8n local setup env example stays placeholder-only', () => {
   assert.doesNotMatch(envExample, /n8n_[A-Za-z0-9_-]{20,}/);
 });
 
+test('n8n local setup launcher templates provide guided stack actions', () => {
+  const cmd = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local.cmd');
+  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+
+  assert.match(cmd, /n8n-local-menu\.ps1/);
+  assert.match(cmd, /-ExecutionPolicy Bypass/);
+  assert.match(cmd, /%~dp0/);
+  assert.doesNotMatch(cmd, /NGROK_AUTHTOKEN|POSTGRES_PASSWORD|N8N_ENCRYPTION_KEY/);
+
+  for (const expected of [
+    'Write-Header',
+    'Write-Info',
+    'Write-Success',
+    'Write-Warning',
+    'Write-ErrorMessage',
+    'Pause-Menu',
+    'Invoke-Compose',
+    'Test-DockerReady',
+    'Test-StackFiles',
+    'Get-EnvValue',
+    'Get-ServiceImageIds',
+    'Check-Updates',
+    'Apply-Update'
+  ]) {
+    assert.match(menu, new RegExp(`function ${expected.replace('-', '\\-')}`), expected);
+  }
+
+  assert.match(menu, /Clear-Host/);
+  assert.match(menu, /Write-Host/);
+  assert.match(menu, /ForegroundColor/);
+  assert.match(menu, /docker compose up -d/);
+  assert.match(menu, /docker compose pull/);
+  assert.match(menu, /docker compose up -d --force-recreate/);
+  assert.match(menu, /docker compose down/);
+  assert.match(menu, /docker compose restart/);
+  assert.match(menu, /docker compose ps/);
+  assert.match(menu, /docker compose logs -f/);
+  assert.match(menu, /docker compose logs -f n8n/);
+  assert.match(menu, /docker compose logs -f ngrok/);
+  assert.match(menu, /docker compose logs -f postgres/);
+  assert.match(menu, /Start-Process "http:\/\/localhost:5678"/);
+  assert.match(menu, /Start-Process "http:\/\/127\.0\.0\.1:4040"/);
+  assert.match(menu, /pg_dump/);
+  assert.match(menu, /POSTGRES_USER/);
+  assert.match(menu, /POSTGRES_DB/);
+  assert.doesNotMatch(menu, /POSTGRES_PASSWORD\s*=/);
+  assert.doesNotMatch(menu, /NGROK_AUTHTOKEN\s*=/);
+  assert.doesNotMatch(menu, /N8N_ENCRYPTION_KEY\s*=/);
+});
+
 test('n8n copied setup references use portable published baseline template links', () => {
   for (const relPath of [
     'skills/n8n-local-setup/references/n8n/local-setup.md',
@@ -256,6 +319,8 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
     'skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md',
     'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
     'skills/n8n-local-setup/templates/local-stack/.env.example',
+    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
+    'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
     'skills/ai-coding-agent-rules/AGENTS.template.md',
     'skills/n8n-agent-rules/SKILL.md',
     'skills/n8n-agent-rules/README.md',
@@ -276,6 +341,8 @@ test('claude n8n local pack installs inert generic template and n8n-agent-rules 
     'skills/n8n-local-setup/references/ai-agent-platforms/templates/claude-mcp-config.md',
     'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
     'skills/n8n-local-setup/templates/local-stack/.env.example',
+    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
+    'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
     'skills/ai-coding-agent-rules/CLAUDE.template.md',
     'skills/n8n-agent-rules/SKILL.md',
     'skills/n8n-agent-rules/README.md',

@@ -14,6 +14,8 @@
     "skills/n8n-local-setup/references/n8n-agent-rules.md",
     "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
     "skills/n8n-local-setup/templates/local-stack/.env.example",
+    "skills/n8n-local-setup/templates/local-stack/n8n-local.cmd",
+    "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
     "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md"
   ],
   "suitable_for": [
@@ -28,6 +30,8 @@
     "skills/n8n-local-setup/references/n8n/upgrading.md",
     "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
     "skills/n8n-local-setup/templates/local-stack/.env.example",
+    "skills/n8n-local-setup/templates/local-stack/n8n-local.cmd",
+    "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
     "skills/ai-coding-agent-rules/CLAUDE.template.md",
     "skills/n8n-agent-rules/SKILL.md",
     "skills/n8n-agent-rules/README.md",

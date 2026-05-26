@@ -21,7 +21,7 @@ The copied skill folder includes:
 - [local Docker Compose stack templates](templates/local-stack/)
 - [MCP config templates](templates/mcp-configs/)
 
-The local Fast Path is `n8n + postgres + ngrok` through Docker Compose. ngrok is the only supported local tunnel path in this guide, and `.env.example` is placeholder-only.
+The local Fast Path is `n8n + postgres + ngrok` through Docker Compose. Start it through `templates/local-stack/n8n-local.cmd` for the guided menu, update checks, logs, status, browser links, and Postgres backup action. ngrok is the only supported local tunnel path in this guide, and `.env.example` is placeholder-only.
 
 Normal use of this skill does not require `_projects/`.
 

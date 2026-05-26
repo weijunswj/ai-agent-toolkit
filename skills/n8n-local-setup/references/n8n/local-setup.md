@@ -22,13 +22,14 @@ ngrok is the only supported local public tunnel path in this guide, and it runs 
 
 1. Install Docker Desktop, Node.js LTS, and the Codex app.
 2. Create a local stack folder outside this repo.
-3. Copy the Compose template and `.env.example` template into that folder.
+3. Copy the Compose template, `.env.example`, `n8n-local.cmd`, and the `scripts` folder into that folder.
 4. Rename `.env.example` to `.env`.
 5. Fill `NGROK_AUTHTOKEN`, `NGROK_DOMAIN`, `WEBHOOK_URL`, `POSTGRES_PASSWORD`, and `N8N_ENCRYPTION_KEY`.
-6. Run `docker compose up -d`.
-7. Open `http://localhost:5678`.
-8. Use the ngrok URL for webhooks and OAuth callbacks.
-9. Enable MCP in n8n, copy the MCP URL and access token, then configure Codex.
+6. Run `n8n-local.cmd`.
+7. Use the menu to start the stack.
+8. Open `http://localhost:5678`.
+9. Use the ngrok URL for webhooks and OAuth callbacks.
+10. Enable MCP in n8n, copy the MCP URL and access token, then configure Codex.
 
 Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live n8n imports/exports.
 
@@ -65,6 +66,9 @@ The folder should contain:
 ```text
 C:\n8n-local
   docker-compose.yml
+  n8n-local.cmd
+  scripts\
+    n8n-local-menu.ps1
   .env
 ```
 
@@ -74,6 +78,8 @@ Copy these toolkit templates into the local stack folder:
 
 - [templates/local-stack/docker-compose.yml](../../templates/local-stack/docker-compose.yml)
 - [templates/local-stack/.env.example](../../templates/local-stack/.env.example)
+- [templates/local-stack/n8n-local.cmd](../../templates/local-stack/n8n-local.cmd)
+- [templates/local-stack/scripts/n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1)
 
 Then rename the local copy of `.env.example` to `.env`.
 
@@ -95,19 +101,19 @@ Use a long random value for `N8N_ENCRYPTION_KEY` and store it in your password m
 
 The local Postgres service is only n8n's internal runtime database. It is not Vercel, it is not Supabase, and it does not connect to the user's app database.
 
-## 5. Start The Stack
+## 5. Start The Stack With The Menu
 
 From the local stack folder:
 
 ```powershell
-docker compose up -d
+.\n8n-local.cmd
 ```
 
-Check status:
+Use the menu to start the stack, check for updates, update selected services, restart, stop, view status, follow logs, open n8n, open the ngrok inspector, or back up Postgres.
 
-```powershell
-docker compose ps
-```
+The stack does not silently auto-update. The check-for-updates action may pull newer images into the local Docker cache, but it does not restart or recreate services until the user chooses an update option.
+
+Docker Desktop can still show containers and logs. Docker Desktop Play bypasses the menu and update checks, so start through `n8n-local.cmd` when you want guided checks on launch.
 
 Open n8n locally:
 

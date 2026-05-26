@@ -31,6 +31,7 @@ For any n8n workflow, helper-script, MCP, `n8n_docs`, `n8n_live`, import/export,
 - Use the local full-fidelity references in [references/n8n/](references/n8n/) for setup, upgrade, ngrok tunneling, Docker Compose plus Postgres, and VPS hosting details.
 - Treat ngrok as the only supported local tunnel path in this guide; Cloudflare tunnels and the built-in n8n tunnel are out of scope.
 - Use the local stack templates in [templates/local-stack/](templates/local-stack/) for `n8n + postgres + ngrok`.
+- Treat [templates/local-stack/n8n-local.cmd](templates/local-stack/n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, and Postgres backup actions.
 - Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, and Claude web routing.
 - Use `skills/ai-coding-agent-rules` for generic AI coding agent rules.
 - Use `skills/n8n-agent-rules` or [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for the full n8n operating ruleset.
@@ -46,6 +47,8 @@ For any n8n workflow, helper-script, MCP, `n8n_docs`, `n8n_live`, import/export,
 - Codex MCP config: [templates/mcp-configs/codex-mcp-config.md](templates/mcp-configs/codex-mcp-config.md)
 - Docker Compose local stack: [templates/local-stack/docker-compose.yml](templates/local-stack/docker-compose.yml)
 - Placeholder environment template: [templates/local-stack/.env.example](templates/local-stack/.env.example)
+- Guided local stack launcher: [templates/local-stack/n8n-local.cmd](templates/local-stack/n8n-local.cmd)
+- PowerShell local stack menu: [templates/local-stack/scripts/n8n-local-menu.ps1](templates/local-stack/scripts/n8n-local-menu.ps1)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
 - Upgrade reference: [references/n8n/upgrading.md](references/n8n/upgrading.md)
 - Claude Code reference: [references/ai-agent-platforms/claude-code.md](references/ai-agent-platforms/claude-code.md)

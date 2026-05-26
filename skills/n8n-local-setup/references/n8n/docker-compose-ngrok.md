@@ -36,6 +36,9 @@ Create a local folder outside this repo:
 ```text
 C:\n8n-local
   docker-compose.yml
+  n8n-local.cmd
+  scripts\
+    n8n-local-menu.ps1
   .env
 ```
 
@@ -43,6 +46,8 @@ Copy these templates into that folder:
 
 - [templates/local-stack/docker-compose.yml](../../templates/local-stack/docker-compose.yml)
 - [templates/local-stack/.env.example](../../templates/local-stack/.env.example)
+- [templates/local-stack/n8n-local.cmd](../../templates/local-stack/n8n-local.cmd)
+- [templates/local-stack/scripts/n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1)
 
 Rename `.env.example` to `.env`, then fill only local placeholder values.
 
@@ -140,13 +145,19 @@ All values are placeholders. Replace them only in the local `.env` file, never i
 From the local stack folder:
 
 ```powershell
-docker compose up -d
+.\n8n-local.cmd
 ```
 
-Check containers:
+Use the menu to start the stack. It offers update checks before starting, but the stack does not silently auto-update.
+
+Check-for-updates may pull newer images into the local Docker cache. It does not restart or recreate services until the user chooses an update option.
+
+Docker Desktop can still be used to view containers and logs. Docker Desktop Play bypasses the menu and update checks, so start through `n8n-local.cmd` when you want guided checks on launch.
+
+The raw start command behind the menu is:
 
 ```powershell
-docker compose ps
+docker compose up -d
 ```
 
 Open n8n locally:
@@ -165,16 +176,34 @@ Use the `WEBHOOK_URL` ngrok URL for external webhook and OAuth callback configur
 
 ## Daily Use
 
-Start or refresh:
+Use `n8n-local.cmd` for normal local stack control:
+
+- Start stack
+- Check for updates
+- Update selected services
+- Restart or stop
+- Show status
+- Follow all logs or service logs
+- Open n8n or the ngrok inspector
+- Back up the Postgres database
+
+Raw commands behind the menu:
+
+Start:
 
 ```powershell
 docker compose up -d
 ```
 
-Pull newer images and recreate:
+Check for newer images without recreating services:
 
 ```powershell
 docker compose pull
+```
+
+Pull newer images and recreate selected services:
+
+```powershell
 docker compose up -d --force-recreate
 ```
 

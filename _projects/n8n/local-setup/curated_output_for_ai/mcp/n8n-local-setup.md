@@ -17,6 +17,8 @@ Project identity: `n8n.local-setup`
 - n8n local setup portability reference: [skills/n8n-local-setup/references/n8n-agent-rules.md](../../skills/n8n-local-setup/references/n8n-agent-rules.md)
 - Local stack Compose template: [skills/n8n-local-setup/templates/local-stack/docker-compose.yml](../../skills/n8n-local-setup/templates/local-stack/docker-compose.yml)
 - Placeholder environment template: [skills/n8n-local-setup/templates/local-stack/.env.example](../../skills/n8n-local-setup/templates/local-stack/.env.example)
+- Guided local stack launcher: [skills/n8n-local-setup/templates/local-stack/n8n-local.cmd](../../skills/n8n-local-setup/templates/local-stack/n8n-local.cmd)
+- PowerShell local stack menu: [skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1](../../skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1)
 - Codex MCP config: [skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md](../../skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md)
 - Pack: [skills/n8n-local-setup/packs/codex-n8n-local/pack.json](../../skills/n8n-local-setup/packs/codex-n8n-local/pack.json)
 

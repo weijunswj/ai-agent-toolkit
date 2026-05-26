@@ -8,13 +8,14 @@ This project has one blessed local path: Docker Compose runs `n8n`, `postgres`, 
 
 1. Install Docker Desktop and Node.js LTS.
 2. Create a local stack folder outside this repo, for example `C:\n8n-local`.
-3. Copy [docker-compose.yml](./templates/local-stack/docker-compose.yml) and [.env.example](./templates/local-stack/.env.example) into that folder.
+3. Copy the local stack templates into that folder: [docker-compose.yml](./templates/local-stack/docker-compose.yml), [.env.example](./templates/local-stack/.env.example), [n8n-local.cmd](./templates/local-stack/n8n-local.cmd), and the [scripts](./templates/local-stack/scripts/) folder.
 4. Rename `.env.example` to `.env`.
 5. Fill only placeholder values in `.env`: `NGROK_AUTHTOKEN`, `NGROK_DOMAIN`, `WEBHOOK_URL`, `POSTGRES_PASSWORD`, and `N8N_ENCRYPTION_KEY`.
-6. Run `docker compose up -d` from the stack folder.
-7. Open n8n locally at `http://localhost:5678`.
-8. Use the ngrok HTTPS URL from `WEBHOOK_URL` for webhook and OAuth callback testing.
-9. Copy the [Codex MCP config](./templates/codex-mcp-config.md) only after n8n is running and MCP is enabled inside n8n.
+6. Run `n8n-local.cmd`.
+7. Use the guided menu to start, update, inspect logs, open URLs, and back up Postgres.
+8. Open n8n locally at `http://localhost:5678`.
+9. Use the ngrok HTTPS URL from `WEBHOOK_URL` for webhook and OAuth callback testing.
+10. Copy the [Codex MCP config](./templates/codex-mcp-config.md) only after n8n is running and MCP is enabled inside n8n.
 
 Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live n8n imports/exports.
 
@@ -40,6 +41,15 @@ The default stack is:
 - `ngrok`: the only supported local public tunnel in this guide.
 - `postgres_data` and `n8n_data`: persistent local Docker volumes.
 - `.env`: local-only runtime configuration copied from placeholder-only `.env.example`.
+- `n8n-local.cmd`: the blessed local launcher for guided start, update, logs, status, browser, and backup actions.
+
+## Blessed Local Launcher
+
+Start through `n8n-local.cmd` when you want guided checks and friendly stack actions. The launcher opens a PowerShell menu that checks required files, checks whether Docker appears available, offers update checks, starts the stack, shows status, opens logs, opens n8n, opens the ngrok inspector, and can back up Postgres.
+
+The stack does not silently auto-update. The update check may pull newer images into the local Docker cache, but it does not restart or recreate services until the user chooses an update option.
+
+Docker Desktop can still be used to view containers and logs. Docker Desktop Play bypasses the menu and update checks, so start through `n8n-local.cmd` if you want guided checks on launch.
 
 ## Why Postgres Is Included
 

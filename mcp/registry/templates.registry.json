@@ -16,7 +16,7 @@
   },
   {
     "id": "n8n-local-stack",
-    "title": "n8n Local Docker Compose Stack",
+    "title": "n8n Local Stack Launcher And Compose Templates",
     "path": "skills/n8n-local-setup/templates/local-stack/"
   },
   {
