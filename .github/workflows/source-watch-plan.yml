@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Render advisory source update plan
         run: node repo/scripts/watch-project-sources.cjs >> "$GITHUB_STEP_SUMMARY"
