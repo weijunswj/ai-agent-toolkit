@@ -152,6 +152,13 @@ function replaceWorkflowStepText(text, stepName, search, replacement) {
   return `${text.slice(0, stepStart)}${stepBlock.replace(search, replacement)}${text.slice(stepEnd)}`;
 }
 
+function insertWorkflowStepBefore(text, stepName, stepText) {
+  const stepMarker = `      - name: ${stepName}`;
+  const stepStart = text.indexOf(stepMarker);
+  assert.notEqual(stepStart, -1, `missing step: ${stepName}`);
+  return `${text.slice(0, stepStart)}${stepText}\n${text.slice(stepStart)}`;
+}
+
 function manifestsById() {
   return new Map(validator.projectManifests().map((manifest) => [manifest.id, manifest]));
 }
@@ -918,6 +925,52 @@ test('auto-sync generated surfaces workflow requires exact privileged action ref
   for (const [name, mutate, expected] of cases) {
     const cwd = tempCopy();
     fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, expected, name);
+  }
+});
+
+test('auto-sync generated surfaces workflow rejects unexpected uses action steps', () => {
+  const cases = [
+    [
+      'extra checkout v1 action after preflight is rejected',
+      `      - name: Extra unsafe checkout
+        if: steps.preflight.outputs.should_sync == 'true'
+        uses: actions/checkout@v1`,
+      /must allow only the reviewed uses action steps/
+    ],
+    [
+      'extra checkout v6 action after preflight is rejected',
+      `      - name: Extra duplicate checkout
+        if: steps.preflight.outputs.should_sync == 'true'
+        uses: actions/checkout@v6`,
+      /must allow only the reviewed uses action steps/
+    ],
+    [
+      'extra setup-node v1 action is rejected',
+      `      - name: Extra setup node
+        if: steps.preflight.outputs.should_sync == 'true'
+        uses: actions/setup-node@v1`,
+      /must allow only the reviewed uses action steps/
+    ],
+    [
+      'unrelated uses action is rejected',
+      `      - name: Extra unrelated action
+        if: steps.preflight.outputs.should_sync == 'true'
+        uses: actions/cache@v4`,
+      /must allow only the reviewed uses action steps/
+    ]
+  ];
+
+  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
+  const original = readTextFile(workflowPath);
+  for (const [name, stepText, expected] of cases) {
+    const cwd = tempCopy();
+    fs.writeFileSync(
+      path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'),
+      `${insertWorkflowStepBefore(original, 'Checkout trusted base revision', stepText)}\n`
+    );
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0, name);
     assert.match(result.stderr, expected, name);

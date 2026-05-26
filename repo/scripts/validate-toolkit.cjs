@@ -969,9 +969,22 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const preflightIndex = text.indexOf('- name: Preflight guard');
   const trustedCheckoutIndex = text.indexOf('- name: Checkout trusted base revision');
   const prCheckoutIndex = text.indexOf('- name: Checkout PR head commit');
-  const checkoutSteps = steps
-    .map((step, index) => ({ index, textIndex: text.indexOf(`      - name: ${step.name}`), uses: workflowStepUses(step.text) }))
-    .filter((step) => step.uses.startsWith('actions/checkout@'));
+  const usesSteps = steps
+    .map((step, index) => ({ name: step.name, index, text: step.text, textIndex: text.indexOf(`      - name: ${step.name}`), uses: workflowStepUses(step.text) }))
+    .filter((step) => step.uses);
+  const requiredAutoSyncActionReferences = [
+    { stepName: 'Checkout trusted base revision', expectedUses: 'actions/checkout@v6' },
+    { stepName: 'Checkout PR head commit', expectedUses: 'actions/checkout@v6' },
+    { stepName: 'Set up Node.js', expectedUses: 'actions/setup-node@v6' }
+  ];
+  const expectedUsesByStepName = new Map(requiredAutoSyncActionReferences.map(({ stepName, expectedUses }) => [stepName, expectedUses]));
+  if (
+    usesSteps.length !== requiredAutoSyncActionReferences.length ||
+    usesSteps.some((step) => !expectedUsesByStepName.has(step.name))
+  ) {
+    fail(errors, `${entry.relPath} must allow only the reviewed uses action steps`);
+  }
+  const checkoutSteps = usesSteps.filter((step) => step.uses.startsWith('actions/checkout@'));
   const checkoutIndex = checkoutSteps
     .map((step) => step.textIndex)
     .filter((index) => index !== -1)
@@ -987,12 +1000,13 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   const trustedCheckoutStep = workflowStepText(steps, 'Checkout trusted base revision');
   const prCheckoutStep = workflowStepText(steps, 'Checkout PR head commit');
   const setupNodeStep = workflowStepText(steps, 'Set up Node.js');
-  const requiredAutoSyncActionReferences = [
-    { stepName: 'Checkout trusted base revision', stepText: trustedCheckoutStep, expectedUses: 'actions/checkout@v6' },
-    { stepName: 'Checkout PR head commit', stepText: prCheckoutStep, expectedUses: 'actions/checkout@v6' },
-    { stepName: 'Set up Node.js', stepText: setupNodeStep, expectedUses: 'actions/setup-node@v6' }
-  ];
-  for (const { stepName, stepText, expectedUses } of requiredAutoSyncActionReferences) {
+  for (const { stepName, expectedUses } of requiredAutoSyncActionReferences) {
+    const matchingUsesSteps = usesSteps.filter((step) => step.name === stepName);
+    if (matchingUsesSteps.length !== 1) {
+      fail(errors, `${entry.relPath} must contain exactly one ${stepName} uses action step`);
+      continue;
+    }
+    const stepText = matchingUsesSteps[0].text;
     if (workflowStepUses(stepText) !== expectedUses) {
       fail(errors, `${entry.relPath} ${stepName} must use ${expectedUses}`);
     }
