@@ -135,6 +135,10 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
+          "from": "./1.%20local%20setup.md",
+          "to": "local-setup.md"
+        },
+        {
           "from": "./templates/local-stack/docker-compose.yml",
           "to": "../../templates/local-stack/docker-compose.yml"
         }
@@ -147,6 +151,10 @@
       "notes": "Full tunneling guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
       "text_rewrites": [
+        {
+          "from": "./1.%20local%20setup.md",
+          "to": "local-setup.md"
+        },
         {
           "from": "./templates/local-stack/.env.example",
           "to": "../../templates/local-stack/.env.example"
@@ -168,6 +176,10 @@
       "notes": "Full Docker Compose plus ngrok guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
       "text_rewrites": [
+        {
+          "from": "./1.%20local%20setup.md",
+          "to": "local-setup.md"
+        },
         {
           "from": "./templates/local-stack/docker-compose.yml",
           "to": "../../templates/local-stack/docker-compose.yml"
@@ -201,6 +213,10 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
+          "from": "./1.%20local%20setup.md",
+          "to": "../n8n/local-setup.md"
+        },
+        {
           "from": "../../../development/ai-coding-agent-rules/_main/AGENTS.template.md",
           "to": "../../../ai-coding-agent-rules/AGENTS.template.md"
         },
@@ -222,6 +238,10 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
+          "from": "./1.%20local%20setup.md",
+          "to": "../n8n/local-setup.md"
+        },
+        {
           "from": "../../../development/ai-coding-agent-rules/_main/AGENTS.template.md",
           "to": "../../../ai-coding-agent-rules/AGENTS.template.md"
         },
@@ -242,6 +262,10 @@
       "notes": "Full Antigravity integration guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
       "text_rewrites": [
+        {
+          "from": "./1.%20local%20setup.md",
+          "to": "../n8n/local-setup.md"
+        },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/AGENTS.template.md",
           "to": "../../../ai-coding-agent-rules/AGENTS.template.md"

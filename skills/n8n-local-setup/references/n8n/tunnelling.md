@@ -6,7 +6,7 @@ Update the project source and run sync.
 -->
 # 3. Tunneling Guide
 
-The primary local setup guide is [1. Local Setup](./1.%20local%20setup.md). This page is retained as an appendix/reference for focused tunnel details, not as a separate start path.
+The primary local setup guide is [1. Local Setup](local-setup.md). This page is retained as an appendix/reference for focused tunnel details, not as a separate start path.
 
 This guide is for local development only.
 

@@ -283,6 +283,30 @@ test('n8n local setup appendices point back to the primary guide and stay substa
   }
 });
 
+test('generated n8n local setup references use portable primary guide links', () => {
+  for (const relPath of [
+    'skills/n8n-local-setup/references/n8n/upgrading.md',
+    'skills/n8n-local-setup/references/n8n/tunnelling.md',
+    'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md'
+  ]) {
+    const text = readText(repoRoot, relPath);
+    assert.doesNotMatch(text, /\.\/1\.%20local%20setup\.md/, relPath);
+    assert.match(text, /\]\(local-setup\.md\)/, relPath);
+  }
+});
+
+test('generated n8n platform references use portable primary guide links', () => {
+  for (const relPath of [
+    'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'
+  ]) {
+    const text = readText(repoRoot, relPath);
+    assert.doesNotMatch(text, /\.\/1\.%20local%20setup\.md/, relPath);
+    assert.match(text, /\]\(\.\.\/n8n\/local-setup\.md\)/, relPath);
+  }
+});
+
 test('n8n local setup uses Desktop as the example while allowing any folder', () => {
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
   const readme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');

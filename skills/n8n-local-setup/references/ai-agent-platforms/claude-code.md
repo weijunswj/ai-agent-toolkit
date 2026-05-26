@@ -6,7 +6,7 @@ Update the project source and run sync.
 -->
 # EXTRA: Claude Code Desktop Integration ( Windows )
 
-The primary local setup guide is [1. Local Setup](./1.%20local%20setup.md). This page is retained as a secondary platform reference for Claude Code details, not as a required local setup path.
+The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This page is retained as a secondary platform reference for Claude Code details, not as a required local setup path.
 
 This extra guide adds Claude Code Desktop to the same n8n setup used by the Codex guide.
 
@@ -27,7 +27,7 @@ It gives Claude Code Desktop:
 
 ## 1. Before You Start
 
-Finish [1. Local Setup](./1.%20local%20setup.md) first if you are using local n8n.
+Finish [1. Local Setup](../n8n/local-setup.md) first if you are using local n8n.
 
 You should already have:
 
