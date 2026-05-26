@@ -6,6 +6,8 @@ Update the project source and run sync.
 -->
 # 2. Upgrading n8n
 
+The primary local setup guide is [1. Local Setup](./1.%20local%20setup.md). This page is retained as an appendix/reference for focused upgrade details, not as a separate start path.
+
 This guide covers the safest low-friction ways to update a self-hosted n8n instance.
 
 It is written for five common setups:
@@ -103,7 +105,9 @@ That is also the flow used in n8n's official Docker Compose based VPS guides.
 
 ## 5. Local Docker Compose Upgrade ( This Repo Style )
 
-If you followed the local setup from this repo, update from the local stack folder that contains `docker-compose.yml` and `.env`.
+If you followed the local setup from this repo, update from the local stack folder that contains [docker-compose.yml](../../templates/local-stack/docker-compose.yml) and the local `.env`.
+
+Run this in PowerShell from the local stack folder:
 
 ```powershell
 docker compose pull

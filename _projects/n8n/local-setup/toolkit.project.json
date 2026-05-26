@@ -62,8 +62,68 @@
           "to": "../../templates/local-stack/n8n-local.cmd"
         },
         {
-          "from": "./templates/local-stack/scripts/n8n-local-menu.ps1",
-          "to": "../../templates/local-stack/scripts/n8n-local-menu.ps1"
+          "from": "./templates/local-stack/scripts/",
+          "to": "../../templates/local-stack/scripts/"
+        },
+        {
+          "from": "./templates/codex-mcp-config.md",
+          "to": "../../templates/mcp-configs/codex-mcp-config.md"
+        },
+        {
+          "from": "./templates/claude-mcp-config.md",
+          "to": "../../templates/mcp-configs/claude-mcp-config.md"
+        },
+        {
+          "from": "./templates/opencode-mcp-config.md",
+          "to": "../../templates/mcp-configs/opencode-mcp-config.md"
+        },
+        {
+          "from": "./templates/antigravity-mcp-config.md",
+          "to": "../../templates/mcp-configs/antigravity-mcp-config.md"
+        },
+        {
+          "from": "Run this from the toolkit repo root:",
+          "to": "Run this from the copied `n8n-local-setup` skill folder:"
+        },
+        {
+          "from": "_projects\\n8n\\local-setup\\_main\\templates\\local-stack\\",
+          "to": "templates\\local-stack\\"
+        },
+        {
+          "from": "../../../../skills/n8n-agent-rules/",
+          "to": "../../../n8n-agent-rules/"
+        },
+        {
+          "from": "../../../../skills/ai-coding-agent-rules/",
+          "to": "../../../ai-coding-agent-rules/"
+        },
+        {
+          "from": "./2.%20upgrading.md",
+          "to": "upgrading.md"
+        },
+        {
+          "from": "./3.%20tunneling%20guide.md",
+          "to": "tunnelling.md"
+        },
+        {
+          "from": "./3a.%20docker%20compose%20%2B%20ngrok.md",
+          "to": "docker-compose-ngrok.md"
+        },
+        {
+          "from": "./4.%20vps%20hosting.md",
+          "to": "vps-hosting.md"
+        },
+        {
+          "from": "./5.%20extra%20-%20claude%20code%20integration.md",
+          "to": "../ai-agent-platforms/claude-code.md"
+        },
+        {
+          "from": "./6.%20extra%20-%20opencode%20integration.md",
+          "to": "../ai-agent-platforms/opencode.md"
+        },
+        {
+          "from": "./7.%20extra%20-%20antigravity%20integration.md",
+          "to": "../ai-agent-platforms/antigravity.md"
         }
       ]
     },
@@ -72,7 +132,13 @@
       "source": "_main/2. upgrading.md",
       "output": "skills/n8n-local-setup/references/n8n/upgrading.md",
       "notes": "Full upgrade guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact"
+      "fidelity": "exact",
+      "text_rewrites": [
+        {
+          "from": "./templates/local-stack/docker-compose.yml",
+          "to": "../../templates/local-stack/docker-compose.yml"
+        }
+      ]
     },
     {
       "kind": "copy",

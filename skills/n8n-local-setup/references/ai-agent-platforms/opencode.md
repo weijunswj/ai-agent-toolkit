@@ -6,6 +6,8 @@ Update the project source and run sync.
 -->
 # EXTRA: OpenCode Integration ( Windows )
 
+The primary local setup guide is [1. Local Setup](./1.%20local%20setup.md). This page is retained as a secondary platform reference for OpenCode details, not as a required local setup path.
+
 This extra guide adds OpenCode to the same n8n setup used by the Codex guide.
 
 * It does not replace Codex.
