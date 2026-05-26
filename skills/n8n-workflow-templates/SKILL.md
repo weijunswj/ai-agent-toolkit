@@ -45,6 +45,8 @@ Apply `n8n-agent-rules` first for the full n8n operating contract. A generated l
 ## Templates
 
 - `templates/error-handling/global-error-handler.template.json`: generic inactive global error-handler template.
+- `templates/chatbot-with-RAG/customer-support-agent.workflow.template.json`: generic inactive RAG customer-support workflow template.
+- `templates/chatbot-with-RAG/rag-ingestion.workflow.template.json`: generic inactive RAG knowledge-base ingestion workflow template.
 
 ## Output
 

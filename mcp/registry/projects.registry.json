@@ -273,9 +273,9 @@
     "category": "n8n",
     "name": "workflow-toolkit",
     "title": "n8n Workflow Toolkit",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "version_policy": "semver",
-    "version_notes": "Documents dependency on the generated n8n-agent-rules skill for n8n workflow and live-instance operating rules.",
+    "version_notes": "Adds reviewed chatbot/RAG workflow templates and hardens the sanitizer to remove live error workflow and MCP exposure settings from reusable workflow templates.",
     "project": {
       "name": "n8n Workflow Toolkit",
       "category": "n8n",
@@ -312,6 +312,8 @@
       "skills/n8n-workflow-templates/README.md",
       "skills/n8n-workflow-templates/SKILL.md",
       "skills/n8n-workflow-templates/templates/README.md",
+      "skills/n8n-workflow-templates/templates/chatbot-with-RAG/customer-support-agent.workflow.template.json",
+      "skills/n8n-workflow-templates/templates/chatbot-with-RAG/rag-ingestion.workflow.template.json",
       "skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json"
     ]
   },

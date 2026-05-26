@@ -13,6 +13,8 @@ const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', '
 const sourceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync');
 const sanitizerDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer');
 const sourceSanitizerDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'sanitizer');
+const sourceRagTemplateDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'workflow-templates', 'chatbot-with-RAG');
+const publishedRagTemplateDir = path.join(repoRoot, 'skills', 'n8n-workflow-templates', 'templates', 'chatbot-with-RAG');
 const secureCicdN8nTemplateDir = path.join(repoRoot, '_projects', 'cicd', 'secure-installer', '_main', 'templates', 'n8n');
 const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
@@ -451,6 +453,25 @@ test('prepare-n8n-template.js strips live fields and writes sanitized template o
   assert.equal('credentials' in prepared.nodes[0], false);
   assert.equal('webhookId' in prepared.nodes[0], false);
   assert.match(prepared.nodes[0].parameters.url, /^__SET_HTTP_REQUEST_URL__$/);
+});
+
+test('prepare-n8n-template.js strips live workflow settings', () => {
+  const { workflow } = stripTemplate(safeWorkflow({
+    id: 'workflow-live-settings',
+    name: 'Live Settings Test',
+    active: true,
+    settings: {
+      executionOrder: 'v1',
+      errorWorkflow: 'd7af97c3-9c86-47d2-a5de-548592fd9cce',
+      availableInMCP: true,
+      binaryMode: 'separate',
+    },
+  }), {});
+
+  assert.deepEqual(workflow.settings, {
+    executionOrder: 'v1',
+    binaryMode: 'separate',
+  });
 });
 
 test('prepare-n8n-template.js sanitizes reusable config literals and expression defaults', () => {
@@ -1104,6 +1125,50 @@ test('generated n8n helper scripts are fresh copies of project source', () => {
   }
 });
 
+test('RAG workflow templates stay generic, inactive, and source-synced', () => {
+  for (const fileName of [
+    'customer-support-agent.workflow.template.json',
+    'rag-ingestion.workflow.template.json',
+  ]) {
+    const sourcePath = path.join(sourceRagTemplateDir, fileName);
+    const publishedPath = path.join(publishedRagTemplateDir, fileName);
+    const sourceText = readText(sourcePath);
+    const publishedText = readText(publishedPath);
+    const workflow = JSON.parse(sourceText);
+
+    assert.equal(publishedText, sourceText, fileName);
+    assert.equal(workflow.active, false, fileName);
+    assert.doesNotMatch(sourceText, /SKR|SpaceKoncept|SpaceKonceptRental|Swooshz/, fileName);
+    assert.doesNotMatch(sourceText, /Asia\/Singapore/, fileName);
+    assert.doesNotMatch(sourceText, /Singapore\/British English/, fileName);
+    assert.doesNotMatch(sourceText, /\bSGT\b/, fileName);
+    assert.doesNotMatch(sourceText, /What you want\?/, fileName);
+    assert.match(sourceText, /__SET_WORKFLOW_TIMEZONE__/, fileName);
+    assert.match(sourceText, /__SET_WORKFLOW_TIMEZONE_LABEL__/, fileName);
+    assert.doesNotMatch(sourceText, /"credentials"\s*:/, fileName);
+    assert.doesNotMatch(sourceText, /"webhookId"\s*:/, fileName);
+    assert.doesNotMatch(sourceText, /"errorWorkflow"\s*:/, fileName);
+    assert.doesNotMatch(sourceText, /"availableInMCP"\s*:/, fileName);
+    assert.doesNotMatch(sourceText, /[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/, fileName);
+    assert.doesNotMatch(sourceText, /\b(?:sk|n8n)_[A-Za-z0-9_-]{20,}\b/, fileName);
+  }
+
+  const customerSupportText = readText(path.join(sourceRagTemplateDir, 'customer-support-agent.workflow.template.json'));
+  for (const expected of [
+    'Hi, how can I help you today?',
+    'Use clear, professional English unless the workflow owner configures another style.',
+    'TEMPLATE-MSG-',
+    'TEMPLATE-CONV-',
+    'TEMPLATE-DEDUP-',
+    'TEMPLATE-UNANSWERED-',
+    '[Template Alert]',
+    '[Template Lead]',
+    '[Template Ticket]',
+    '[Template Unanswered]',
+  ]) {
+    assert.match(customerSupportText, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), expected);
+  }
+});
 test('Secure CI/CD n8n helper templates stay aligned with workflow toolkit source', () => {
   for (const fileName of [
     '_export-n8n-workflows-live.cmd',

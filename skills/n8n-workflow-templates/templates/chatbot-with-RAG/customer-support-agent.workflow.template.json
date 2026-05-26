@@ -1,0 +1,3610 @@
+{
+  "name": "TEMPLATE - RAG Customer Support Agent",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# RAG ANSWER\n\n- Runs the AI agent with Pinecone retrieval.\n- Retrieves from `kb_namespace`, which defaults to `__SET_NORMALISE_INPUT_KB_NAMESPACE__` and matches KB ingestion.\n- Keep namespace assignment controlled by workflow config, not free-form customer input.\n- Parses strict JSON for reply, logging, and routing.\n- AI/RAG errors use the agent error output and go to `Build Internal Error Context`.\n\n## Required manual configuration:\n\n- **TEMPLATE Knowledge Base**\n  - `pineconeIndex`: Set this to the Pinecone index used for retrieval.",
+        "height": 1180,
+        "width": 868,
+        "color": 3
+      },
+      "id": "a08f61af-f3c1-4a9e-8340-476e660ba535",
+      "name": "RAG answer group",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# REPLY AND LOGGING\n\n- Sends the customer reply.\n- Updates the conversation row after the agent response is parsed.\n- If AI/RAG fails after the processing row is written, the fallback path calls the global error handler without waiting, then sends a handoff reply directly so Sheets cannot block the customer response.\n\n## Required manual configuration:\n\n- **Upsert Conversation Completed**\n  - `documentId.value`: Set this to the Google Sheets workbook used for support logs.\n- **Notify Main Error Handler**\n  - `workflowId`: Set this to the global error handler workflow.",
+        "height": 1180,
+        "width": 1044,
+        "color": 4
+      },
+      "id": "662eb229-fd3e-4e70-b08f-aacefe8bbb9a",
+      "name": "Reply and logging group",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        224,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# FOLLOW-UP ROUTING\n\n- Routes leads, bookings, tickets, escalations, and unanswered items.\n- Writes each follow-up record after the main conversation row is completed.\n- Dedicated lead, ticket, and unanswered emails own those cases so the generic escalation alert does not duplicate them.\n\n## Required manual configuration:\n\n- **Upsert Lead or Booking**\n  - `documentId.value`: Set this to the Google Sheets workbook used for lead and booking logs.\n  - Leads sheet headers must include exact `conversation_ref` and `conversation_transcript` headers.\n- **Upsert Ticket**\n  - `documentId.value`: Set this to the Google Sheets workbook used for ticket logs.\n  - Tickets sheet headers must include exact `conversation_ref` and `conversation_transcript` headers.\n- **Send Escalation Alert**\n  - `sendTo`: Set this to the support mailbox for escalation alerts.\n- **Upsert Unanswered Question**\n  - `documentId.value`: Set this to the Google Sheets workbook used for unanswered question logs.\n  - Unanswered questions sheet headers must include exact `conversation_ref` and `conversation_transcript` headers.",
+        "height": 1212,
+        "width": 1092,
+        "color": 6
+      },
+      "id": "30e0031f-78d4-436a-8921-46639b4986f4",
+      "name": "Follow-up routing group",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# FINAL CHAT RESPONSE\n\n- Sends the customer-facing chat message after logging and follow-up routing have had a chance to run.\n- Keep these reply nodes visually after the routing lanes.\n- Chat reply nodes park the execution in waiting; moving them earlier can stop lead, ticket, escalation, or unanswered records from writing.",
+        "height": 544,
+        "width": 1092,
+        "color": 2
+      },
+      "id": "2efeaf05-0dc6-40f9-ac13-2967b80c367a",
+      "name": "Final chat response group",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "public": true,
+        "initialMessages": "Hi, how can I help you today?",
+        "options": {
+          "responseMode": "responseNodes"
+        }
+      },
+      "id": "0a17aea3-07fb-43f0-8bb5-dfa7e7f9b104",
+      "name": "When Chat Message Received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -2928,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "normalise-input-1",
+              "name": "message_id",
+              "value": "={{ $json.message_id || $json.messageId || ('TEMPLATE-MSG-' + $now.setZone('__SET_WORKFLOW_TIMEZONE__').toFormat('yyyyLLdd-HHmmss') + '-' + String($execution.id).slice(-6)) }}",
+              "type": "string"
+            },
+            {
+              "id": "normalise-input-2",
+              "name": "session_id",
+              "value": "={{ $json.sessionId || $json.session_id || $json.chatId || 'session-' + $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "normalise-input-3",
+              "name": "channel",
+              "value": "={{ $json.channel || 'n8n_chat' }}",
+              "type": "string"
+            },
+            {
+              "id": "normalise-input-4",
+              "name": "customer_name",
+              "value": "={{ $json.customer_name || $json.name || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "normalise-input-5",
+              "name": "customer_email",
+              "value": "={{ $json.customer_email || $json.email || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "normalise-input-6",
+              "name": "customer_phone",
+              "value": "={{ $json.customer_phone || $json.phone || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "normalise-input-7",
+              "name": "message",
+              "value": "={{ $json.chatInput || $json.message || $json.text || $json.body?.message || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "normalise-input-8",
+              "name": "timestamp",
+              "value": "={{ $now.setZone('__SET_WORKFLOW_TIMEZONE__').toFormat('yyyy-MM-dd HH:mm:ss') + ' __SET_WORKFLOW_TIMEZONE_LABEL__' }}",
+              "type": "string"
+            },
+            {
+              "id": "normalise-input-9",
+              "name": "execution_id",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "normalise-input-10",
+              "name": "kb_namespace",
+              "value": "__SET_NORMALISE_INPUT_KB_NAMESPACE__",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "2043cdba-2141-4adf-86fe-1818531dfac8",
+      "name": "Normalise Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2672,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function redact(text = '') {\n  // Keep customer email and phone visible in support logs; they are operational\n  // contact details. Still redact high-risk identifiers that should not sit in\n  // general workflow logs.\n  return String(text).trim()\n    .replace(/\\b[STFGM]\\d{7}[A-Z]\\b/gi, '[redacted-nric-fin]')\n    .replace(/\\b\\d{9,}\\b/g, '[redacted-id]');\n}\n\nfunction safeSheetValue(value = '') {\n  const text = String(value ?? '');\n  if (!text) return '';\n  if (/^\\+\\s*[\\d()\\-\\s]{3,}$/.test(text)) return text;\n  return /^[=+\\-@]/.test(text) ? \"'\" + text : text;\n}\n\nfunction normaliseForDedupe(text = '') {\n  return redact(text).toLowerCase().replace(/\\s+/g, ' ').trim();\n}\n\nfunction hashText(text = '') {\n  let hash = 2166136261;\n  for (const char of text) {\n    hash ^= char.charCodeAt(0);\n    hash = Math.imul(hash, 16777619);\n  }\n  return (hash >>> 0).toString(36);\n}\n\nfunction shortSession(value = '') {\n  return String(value || 'session').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'session';\n}\n\nfunction workflowDateKey(date = new Date()) {\n  const formatter = new Intl.DateTimeFormat('en-CA', {\n    timeZone: '__SET_WORKFLOW_TIMEZONE__',\n    year: 'numeric',\n    month: '2-digit',\n    day: '2-digit',\n  });\n  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));\n  return '' + parts.year + parts.month + parts.day;\n}\n\nfunction conversationRef(item) {\n  const sessionId = item.session_id || item.sessionId || item.chatId || 'unknown_session';\n  const suffix = hashText(String(sessionId)).toUpperCase().slice(0, 6);\n  return item.conversation_ref || 'TEMPLATE-CONV-' + workflowDateKey() + '-' + suffix;\n}\n\nfunction dedupeKey(item, bucketOffset = 0) {\n  const bucketSizeMs = 2 * 60 * 1000;\n  const bucket = Math.floor(Date.now() / bucketSizeMs) + bucketOffset;\n  const sessionId = item.session_id || item.sessionId || item.chatId || 'unknown_session';\n  const messageHash = hashText(normaliseForDedupe(item.message)).toUpperCase();\n  return 'TEMPLATE-DEDUP-' + shortSession(sessionId) + '-' + messageHash + '-' + bucket;\n}\n\nreturn items.map((item) => {\n  const userMessageRedacted = redact(item.json.message);\n  const conversationReference = conversationRef(item.json);\n  const dedupe = dedupeKey(item.json);\n  const previousDedupe = dedupeKey(item.json, -1);\n\n  return {\n    json: {\n      ...item.json,\n      user_message_redacted: userMessageRedacted,\n      conversation_ref: conversationReference,\n      dedupe_key: dedupe,\n      dedupe_key_previous: previousDedupe,\n      sheet_conversation_ref: safeSheetValue(conversationReference),\n      sheet_channel: safeSheetValue(item.json.channel),\n      sheet_customer_name: safeSheetValue(item.json.customer_name),\n      sheet_customer_email: safeSheetValue(item.json.customer_email),\n      sheet_customer_phone: safeSheetValue(item.json.customer_phone),\n      sheet_user_message_redacted: safeSheetValue(userMessageRedacted),\n      sheet_execution_id: safeSheetValue(item.json.execution_id),\n      sheet_message_id: safeSheetValue(item.json.message_id),\n      sheet_session_id: safeSheetValue(item.json.session_id),\n      sheet_dedupe_key: safeSheetValue(dedupe),\n      sheet_timestamp: safeSheetValue(item.json.timestamp),\n    },\n  };\n});"
+      },
+      "id": "ee4a900b-fc01-489b-a526-f9c98760206e",
+      "name": "Redact PII for Logs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2416,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_LOOKUP_CONVERSATION_STATE_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_LOOKUP_CONVERSATION_STATE_SHEETNAME__",
+          "mode": "id"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "session_id",
+              "lookupValue": "={{ $json.session_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": false
+        }
+      },
+      "id": "b6b9cdd8-08fb-4e04-937f-54c5e8c31c0c",
+      "name": "Lookup Conversation State",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1680,
+        1440
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 10000,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "debounce-superseded-row",
+              "leftValue": "={{ $json.debounce_superseded }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ede4ca63-5810-4f82-948d-cda8e3336a8a",
+      "name": "Superseded by Newer Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1200,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_UPSERT_CONVERSATION_PROCESSING_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_UPSERT_CONVERSATION_PROCESSING_SHEETNAME__",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "conversation_ref": "={{ $node[\"Redact PII for Logs\"].json.sheet_conversation_ref }}",
+            "channel": "={{ $node[\"Redact PII for Logs\"].json.sheet_channel }}",
+            "customer_name": "={{ $node[\"Redact PII for Logs\"].json.sheet_customer_name }}",
+            "customer_email": "={{ $node[\"Redact PII for Logs\"].json.sheet_customer_email }}",
+            "customer_phone": "={{ $node[\"Redact PII for Logs\"].json.sheet_customer_phone }}",
+            "user_message_redacted": "={{ $node[\"Redact PII for Logs\"].json.sheet_user_message_redacted }}",
+            "bot_reply": "queued_for_ai_response",
+            "intent": "queued",
+            "confidence": "0",
+            "status": "queued",
+            "needs_escalation": "false",
+            "lead_captured": "false",
+            "ticket_id": "={{ '' }}",
+            "booking_requested": "false",
+            "source_titles": "={{ '' }}",
+            "source_file_ids": "={{ '' }}",
+            "execution_id": "={{ $node[\"Redact PII for Logs\"].json.sheet_execution_id }}",
+            "created_at": "={{ $node[\"Redact PII for Logs\"].json.sheet_timestamp }}",
+            "completed_at": "={{ '' }}",
+            "dedupe_key": "={{ $node[\"Redact PII for Logs\"].json.sheet_dedupe_key }}",
+            "message_id": "={{ $node[\"Redact PII for Logs\"].json.sheet_message_id }}",
+            "session_id": "={{ $node[\"Redact PII for Logs\"].json.sheet_session_id }}"
+          },
+          "matchingColumns": [
+            "message_id"
+          ],
+          "schema": [
+            {
+              "id": "conversation_ref",
+              "displayName": "conversation_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_email",
+              "displayName": "customer_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_phone",
+              "displayName": "customer_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_message_redacted",
+              "displayName": "user_message_redacted",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "bot_reply",
+              "displayName": "bot_reply",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "needs_escalation",
+              "displayName": "needs_escalation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_captured",
+              "displayName": "lead_captured",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "booking_requested",
+              "displayName": "booking_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_titles",
+              "displayName": "source_titles",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_file_ids",
+              "displayName": "source_file_ids",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_id",
+              "displayName": "message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "24102aa4-1e6d-4db7-9ad7-68c577906e34",
+      "name": "Upsert Conversation Processing",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -2160,
+        1440
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "message_id",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.message_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "dedupe_key",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.dedupe_key }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "session_id",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "conversation_ref",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.conversation_ref }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "channel",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.channel }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "customer_name",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.customer_name }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "customer_email",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.customer_email }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "customer_phone",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.customer_phone }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "message",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.message }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "user_message_redacted",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.user_message_redacted }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "timestamp",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "execution_id",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.execution_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_RESTORE_PROCESSING_CONTEXT_ID__",
+              "name": "kb_namespace",
+              "value": "={{ $node[\"Select Debounced Chat Batch\"].json.kb_namespace || '__SET_RESTORE_PROCESSING_CONTEXT_KB_NAMESPACE_DEFAULT__' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "38012ac6-4055-436a-aaa9-ec09e94c4e25",
+      "name": "Restore Processing Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -816,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Use this tool to answer questions about TEMPLATE products, furniture rental packages, pricing, rental process, delivery, pickup, policies, appointment booking, ticketing, escalation, and FAQs.",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "__SET_TEMPLATE_KNOWLEDGE_BASE_PINECONEINDEX__",
+          "mode": "id"
+        },
+        "topK": 6,
+        "options": {
+          "pineconeNamespace": "={{ $json.kb_namespace || '__SET_TEMPLATE_KNOWLEDGE_BASE_PINECONENAMESPACE_DEFAULT__' }}"
+        }
+      },
+      "id": "39522006-3b3c-49c9-8d47-cd14fbe34996",
+      "name": "TEMPLATE Knowledge Base",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        -256,
+        1536
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "__SET_PARSE_STRICT_JSON_RESPONSE_URL__"
+      },
+      "id": "bf0f562c-029d-4412-a839-e41f57e8bb52",
+      "name": "Parse Strict JSON Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "message": "={{ $json.reply }}",
+        "options": {}
+      },
+      "id": "d128d046-32b2-4712-84e0-cd549651a45b",
+      "name": "Send Customer Reply",
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1.3,
+      "position": [
+        1360,
+        2032
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_UPSERT_CONVERSATION_COMPLETED_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_UPSERT_CONVERSATION_COMPLETED_SHEETNAME__",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "conversation_ref": "={{ $json.sheet_conversation_ref }}",
+            "channel": "={{ $json.sheet_channel }}",
+            "customer_name": "={{ $json.sheet_customer_name }}",
+            "customer_email": "={{ $json.sheet_customer_email }}",
+            "customer_phone": "={{ $json.sheet_customer_phone }}",
+            "user_message_redacted": "={{ $json.sheet_user_message_redacted }}",
+            "bot_reply": "={{ $json.sheet_reply }}",
+            "intent": "={{ $json.sheet_intent }}",
+            "confidence": "={{ $json.confidence }}",
+            "status": "completed",
+            "needs_escalation": "={{ $json.needs_escalation }}",
+            "lead_captured": "={{ $json.lead_captured }}",
+            "ticket_id": "={{ $json.sheet_ticket_id }}",
+            "booking_requested": "={{ $json.booking_requested }}",
+            "source_titles": "={{ $json.sheet_source_titles }}",
+            "source_file_ids": "={{ $json.sheet_source_file_ids }}",
+            "execution_id": "={{ $json.sheet_execution_id }}",
+            "created_at": "={{ $json.sheet_timestamp }}",
+            "completed_at": "={{ $json.sheet_completed_at }}",
+            "dedupe_key": "={{ $json.sheet_dedupe_key }}",
+            "message_id": "={{ $json.sheet_message_id }}",
+            "session_id": "={{ $json.sheet_session_id }}"
+          },
+          "matchingColumns": [
+            "message_id"
+          ],
+          "schema": [
+            {
+              "id": "conversation_ref",
+              "displayName": "conversation_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_email",
+              "displayName": "customer_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_phone",
+              "displayName": "customer_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_message_redacted",
+              "displayName": "user_message_redacted",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "bot_reply",
+              "displayName": "bot_reply",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "needs_escalation",
+              "displayName": "needs_escalation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_captured",
+              "displayName": "lead_captured",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "booking_requested",
+              "displayName": "booking_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_titles",
+              "displayName": "source_titles",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_file_ids",
+              "displayName": "source_file_ids",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_id",
+              "displayName": "message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "97ab4482-b9cf-4955-964a-75a40f4ae584",
+      "name": "Upsert Conversation Completed",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        352,
+        1312
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "__SET_LEAD_OR_BOOKING_REQUIRED_ID__",
+              "leftValue": "={{ String((String($json.ticket_required).toLowerCase() !== 'true') && (String($json.lead_captured).toLowerCase() === 'true' || String($json.booking_requested).toLowerCase() === 'true')) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2713cee9-a111-4a5c-8c30-6f3a2ca11168",
+      "name": "Lead or Booking Required?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1360,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set-lead-or-booking-row-1",
+              "name": "lead_id",
+              "value": "={{ $json.lead_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "conversation_ref",
+              "value": "={{ $json.conversation_ref || $json.lead_id || $json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-2",
+              "name": "session_id",
+              "value": "={{ $json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-3",
+              "name": "name",
+              "value": "={{ $json.lead?.name || $json.customer_name || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-4",
+              "name": "email",
+              "value": "={{ $json.lead?.email || $json.customer_email || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-5",
+              "name": "phone",
+              "value": "={{ $json.lead?.phone || $json.customer_phone || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-6",
+              "name": "company",
+              "value": "={{ $json.lead?.company || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-7",
+              "name": "rental_purpose",
+              "value": "={{ $json.lead?.rental_purpose || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-8",
+              "name": "rental_start_date",
+              "value": "={{ $json.lead?.rental_start_date || $json.booking?.preferred_date || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-9",
+              "name": "rental_duration",
+              "value": "={{ $json.lead?.rental_duration || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-10",
+              "name": "items_needed",
+              "value": "={{ $json.lead?.items_needed || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-11",
+              "name": "delivery_area",
+              "value": "={{ $json.lead?.delivery_area || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-12",
+              "name": "budget",
+              "value": "={{ $json.lead?.budget || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-13",
+              "name": "status",
+              "value": "={{ $json.booking_requested ? \"booking_requested\" : \"new\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-14",
+              "name": "source_channel",
+              "value": "={{ $json.channel }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "conversation_transcript",
+              "value": "={{ $json.conversation_transcript_text || $json.user_message_redacted || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-15",
+              "name": "created_at",
+              "value": "={{ $json.completed_at }}",
+              "type": "string"
+            },
+            {
+              "id": "set-lead-or-booking-row-16",
+              "name": "execution_id",
+              "value": "={{ $json.execution_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_lead_id",
+              "value": "={{ $json.sheet_lead_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_conversation_ref",
+              "value": "={{ $json.sheet_conversation_ref }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_session_id",
+              "value": "={{ $json.sheet_session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_name",
+              "value": "={{ $json.sheet_lead_name }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_email",
+              "value": "={{ $json.sheet_lead_email }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_phone",
+              "value": "={{ $json.sheet_lead_phone }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_company",
+              "value": "={{ $json.sheet_lead_company }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_rental_purpose",
+              "value": "={{ $json.sheet_lead_rental_purpose }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_rental_start_date",
+              "value": "={{ $json.sheet_lead_rental_start_date }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_rental_duration",
+              "value": "={{ $json.sheet_lead_rental_duration }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_items_needed",
+              "value": "={{ $json.sheet_lead_items_needed }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_delivery_area",
+              "value": "={{ $json.sheet_lead_delivery_area }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_budget",
+              "value": "={{ $json.sheet_lead_budget }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_status",
+              "value": "={{ $json.sheet_lead_status }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_source_channel",
+              "value": "={{ $json.sheet_source_channel }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "__SET_SET_LEAD_OR_BOOKING_ROW_NAME__",
+              "value": "={{ $json.sheet_conversation_transcript }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_created_at",
+              "value": "={{ $json.sheet_completed_at }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_LEAD_OR_BOOKING_ROW_ID__",
+              "name": "sheet_execution_id",
+              "value": "={{ $json.sheet_execution_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c8d9482e-c91a-427b-83ff-69ca86517c26",
+      "name": "Set Lead or Booking Row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1632,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_UPSERT_LEAD_OR_BOOKING_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_UPSERT_LEAD_OR_BOOKING_SHEETNAME__",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "conversation_ref": "={{ $json.sheet_conversation_ref }}",
+            "name": "={{ $json.sheet_name }}",
+            "email": "={{ $json.sheet_email }}",
+            "phone": "={{ $json.sheet_phone }}",
+            "company": "={{ $json.sheet_company }}",
+            "rental_purpose": "={{ $json.sheet_rental_purpose }}",
+            "rental_start_date": "={{ $json.sheet_rental_start_date }}",
+            "rental_duration": "={{ $json.sheet_rental_duration }}",
+            "items_needed": "={{ $json.sheet_items_needed }}",
+            "delivery_area": "={{ $json.sheet_delivery_area }}",
+            "budget": "={{ $json.sheet_budget }}",
+            "status": "={{ $json.sheet_status }}",
+            "source_channel": "={{ $json.sheet_source_channel }}",
+            "conversation_transcript": "={{ $json.sheet_conversation_transcript }}",
+            "created_at": "={{ $json.sheet_created_at }}",
+            "execution_id": "={{ $json.sheet_execution_id }}",
+            "lead_id": "={{ $json.sheet_lead_id }}",
+            "session_id": "={{ $json.sheet_session_id }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "conversation_ref",
+              "displayName": "conversation_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "rental_purpose",
+              "displayName": "rental_purpose",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "rental_start_date",
+              "displayName": "rental_start_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "rental_duration",
+              "displayName": "rental_duration",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "items_needed",
+              "displayName": "items_needed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "delivery_area",
+              "displayName": "delivery_area",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "budget",
+              "displayName": "budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_channel",
+              "displayName": "source_channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversation_transcript",
+              "displayName": "conversation_transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "7e0601aa-8422-4c40-9188-e316c7aa8a4d",
+      "name": "Upsert Lead or Booking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        1104
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "ticket-required--ready",
+              "leftValue": "={{ String($json.ticket_ready) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a5207a49-6b5d-49e0-a696-d1ecc5b5b60b",
+      "name": "Ticket Required?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1360,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set-ticket-row-1",
+              "name": "ticket_id",
+              "value": "={{ $json.ticket_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "conversation_ref",
+              "value": "={{ $json.conversation_ref || $json.ticket_id || $json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-2",
+              "name": "session_id",
+              "value": "={{ $json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-3",
+              "name": "name",
+              "value": "={{ $json.ticket?.name || $json.lead?.name || $json.customer_name || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-4",
+              "name": "email",
+              "value": "={{ $json.ticket?.email || $json.lead?.email || $json.customer_email || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-5",
+              "name": "phone",
+              "value": "={{ $json.ticket?.phone || $json.lead?.phone || $json.customer_phone || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-6",
+              "name": "category",
+              "value": "={{ $json.ticket?.category || \"other\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-7",
+              "name": "summary",
+              "value": "={{ $json.ticket?.summary || $json.intent || \"support_request\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-8",
+              "name": "details",
+              "value": "={{ $json.ticket?.details || $json.user_message_redacted || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "conversation_transcript",
+              "value": "={{ $json.conversation_transcript_text || $json.user_message_redacted || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-9",
+              "name": "urgency",
+              "value": "={{ $json.ticket?.urgency || \"medium\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-10",
+              "name": "status",
+              "value": "new",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-11",
+              "name": "created_at",
+              "value": "={{ $json.completed_at }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-12",
+              "name": "execution_id",
+              "value": "={{ $json.execution_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "sheet_ticket_id",
+              "value": "={{ $json.sheet_ticket_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "sheet_conversation_ref",
+              "value": "={{ $json.sheet_conversation_ref }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "sheet_session_id",
+              "value": "={{ $json.sheet_session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-sheet_name",
+              "name": "sheet_name",
+              "value": "={{ $json.sheet_ticket_name }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-sheet_email",
+              "name": "sheet_email",
+              "value": "={{ $json.sheet_ticket_email }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-sheet_phone",
+              "name": "sheet_phone",
+              "value": "={{ $json.sheet_ticket_phone }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "sheet_category",
+              "value": "={{ $json.sheet_ticket_category }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "sheet_summary",
+              "value": "={{ $json.sheet_ticket_summary }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "sheet_details",
+              "value": "={{ $json.sheet_ticket_details }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "__SET_SET_TICKET_ROW_NAME__",
+              "value": "={{ $json.sheet_conversation_transcript }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "sheet_urgency",
+              "value": "={{ $json.sheet_ticket_urgency }}",
+              "type": "string"
+            },
+            {
+              "id": "set-ticket-row-sheet_status",
+              "name": "sheet_status",
+              "value": "={{ $json.sheet_ticket_status }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "sheet_created_at",
+              "value": "={{ $json.sheet_completed_at }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_TICKET_ROW_ID__",
+              "name": "sheet_execution_id",
+              "value": "={{ $json.sheet_execution_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3a56e125-ca3f-4983-9c2c-c5a18a01b462",
+      "name": "Set Ticket Row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1632,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_UPSERT_TICKET_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_UPSERT_TICKET_SHEETNAME__",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "conversation_ref": "={{ $json.sheet_conversation_ref }}",
+            "name": "={{ $json.sheet_name }}",
+            "email": "={{ $json.sheet_email }}",
+            "phone": "={{ $json.sheet_phone }}",
+            "category": "={{ $json.sheet_category }}",
+            "summary": "={{ $json.sheet_summary }}",
+            "details": "={{ $json.sheet_details }}",
+            "conversation_transcript": "={{ $json.sheet_conversation_transcript }}",
+            "urgency": "={{ $json.sheet_urgency }}",
+            "status": "={{ $json.sheet_status }}",
+            "created_at": "={{ $json.sheet_created_at }}",
+            "execution_id": "={{ $json.sheet_execution_id }}",
+            "ticket_id": "={{ $json.sheet_ticket_id }}",
+            "session_id": "={{ $json.sheet_session_id }}"
+          },
+          "matchingColumns": [
+            "ticket_id"
+          ],
+          "schema": [
+            {
+              "id": "conversation_ref",
+              "displayName": "conversation_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "details",
+              "displayName": "details",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversation_transcript",
+              "displayName": "conversation_transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "urgency",
+              "displayName": "urgency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "1da2fb0c-6806-4586-9047-460fa3c9db35",
+      "name": "Upsert Ticket",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        1296
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "needs-escalation--1",
+              "leftValue": "={{ String((String($json.needs_escalation).toLowerCase() === 'true' || String($json.incomplete_ticket_followup).toLowerCase() === 'true') && String($json.lead_captured).toLowerCase() !== 'true' && String($json.booking_requested).toLowerCase() !== 'true' && String($json.ticket_ready).toLowerCase() !== 'true' && String($json.intent || '').toLowerCase() !== 'unknown' && Number($json.confidence || 0) >= 0.55 && String($json.unanswered_required).toLowerCase() !== 'true') }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9df80ae6-cccf-41d1-967f-b58e352969fb",
+      "name": "Needs Escalation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1360,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "__SET_SEND_ESCALATION_ALERT_EMAIL__",
+        "subject": "=[Template Alert] {{ $json.subject_escalation_intent }} - {{ $json.subject_escalation_reference }}",
+        "message": "=<h2>Support alert</h2>{{ $json.safe_notification_summary_html }}<h3>Current message</h3><p>{{ $json.safe_user_message_redacted || \"__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__\" }}</p><h3>Bot reply</h3><p>{{ $json.safe_reply || \"__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__\" }}</p><h3>Missing fields</h3><p>{{ $json.safe_missing_fields || \"none\" }}</p><h3>Useful IDs</h3><p><strong>Ticket:</strong> {{ $json.safe_ticket_id || \"not_applicable\" }}<br><strong>Lead:</strong> {{ $json.safe_lead_id || \"not_applicable\" }}<br><strong>Execution:</strong> {{ $json.safe_execution_id }}</p><h3>Sources</h3><p>{{ $json.safe_source_titles || \"__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__\" }}<br>{{ $json.safe_source_file_ids || \"\" }}</p><h3>Conversation transcript ({{ $json.conversation_message_count }} message(s); showing {{ $json.conversation_transcript_rows_rendered || $json.conversation_message_count }})</h3>{{ $json.safe_conversation_transcript_html }}<hr><p style=\"font-size:12px;color:#697386;\">This email was generated from the n8n customer support workflow. Review the transcript before replying to the customer.</p>",
+        "options": {}
+      },
+      "id": "a6c1e72b-debc-47ed-a47f-b26482baba67",
+      "name": "Send Escalation Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2176,
+        1504
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "__SET_UNANSWERED_OR_LOW_CONFIDENCE_ID__",
+              "leftValue": "={{ String($json.unanswered_required).toLowerCase() }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "__SET_UNANSWERED_OR_LOW_CONFIDENCE_ID__",
+              "leftValue": "={{ Number($json.confidence || 0) }}",
+              "rightValue": 0.55,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            },
+            {
+              "id": "__SET_UNANSWERED_OR_LOW_CONFIDENCE_ID__",
+              "leftValue": "={{ $json.intent }}",
+              "rightValue": "unknown",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "74b8c4f5-bfab-413a-bed1-390f2cc3ff5d",
+      "name": "Unanswered or Low Confidence?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1360,
+        1696
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set-unanswered-row-1",
+              "name": "id",
+              "value": "={{ $json.unanswered_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "conversation_ref",
+              "value": "={{ $json.conversation_ref || $json.unanswered_id || $json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "set-unanswered-row-2",
+              "name": "session_id",
+              "value": "={{ $json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "set-unanswered-row-3",
+              "name": "user_message_redacted",
+              "value": "={{ $json.user_message_redacted }}",
+              "type": "string"
+            },
+            {
+              "id": "set-unanswered-row-4",
+              "name": "reason",
+              "value": "={{ $json.unanswered_reason || (Number($json.confidence || 0) < 0.55 ? \"low_confidence\" : \"unknown_intent\") }}",
+              "type": "string"
+            },
+            {
+              "id": "set-unanswered-row-5",
+              "name": "intent",
+              "value": "={{ $json.intent }}",
+              "type": "string"
+            },
+            {
+              "id": "set-unanswered-row-6",
+              "name": "confidence",
+              "value": "={{ $json.confidence }}",
+              "type": "string"
+            },
+            {
+              "id": "set-unanswered-row-7",
+              "name": "source_titles",
+              "value": "={{ $json.source_titles }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "conversation_transcript",
+              "value": "={{ $json.conversation_transcript_text || $json.user_message_redacted || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "set-unanswered-row-8",
+              "name": "created_at",
+              "value": "={{ $json.completed_at }}",
+              "type": "string"
+            },
+            {
+              "id": "set-unanswered-row-9",
+              "name": "execution_id",
+              "value": "={{ $json.execution_id }}",
+              "type": "string"
+            },
+            {
+              "id": "set-unanswered-row-sheet_id",
+              "name": "sheet_id",
+              "value": "={{ $json.sheet_unanswered_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "sheet_conversation_ref",
+              "value": "={{ $json.sheet_conversation_ref }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "sheet_session_id",
+              "value": "={{ $json.sheet_session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "sheet_user_message_redacted",
+              "value": "={{ $json.sheet_user_message_redacted }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "sheet_reason",
+              "value": "={{ $json.sheet_unanswered_reason }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "sheet_intent",
+              "value": "={{ $json.sheet_intent }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "sheet_source_titles",
+              "value": "={{ $json.sheet_source_titles }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "__SET_SET_UNANSWERED_ROW_NAME__",
+              "value": "={{ $json.sheet_conversation_transcript }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "sheet_created_at",
+              "value": "={{ $json.sheet_completed_at }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_SET_UNANSWERED_ROW_ID__",
+              "name": "sheet_execution_id",
+              "value": "={{ $json.sheet_execution_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fb11f040-b567-4018-b252-779da5fa9459",
+      "name": "Set Unanswered Row",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1632,
+        1696
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_UPSERT_UNANSWERED_QUESTION_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_UPSERT_UNANSWERED_QUESTION_SHEETNAME__",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "conversation_ref": "={{ $json.sheet_conversation_ref }}",
+            "user_message_redacted": "={{ $json.sheet_user_message_redacted }}",
+            "reason": "={{ $json.sheet_reason }}",
+            "intent": "={{ $json.sheet_intent }}",
+            "confidence": "={{ $json.confidence }}",
+            "source_titles": "={{ $json.sheet_source_titles }}",
+            "conversation_transcript": "={{ $json.sheet_conversation_transcript }}",
+            "created_at": "={{ $json.sheet_created_at }}",
+            "execution_id": "={{ $json.sheet_execution_id }}",
+            "id": "={{ $json.sheet_id }}",
+            "session_id": "={{ $json.sheet_session_id }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "conversation_ref",
+              "displayName": "conversation_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_message_redacted",
+              "displayName": "user_message_redacted",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_titles",
+              "displayName": "source_titles",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversation_transcript",
+              "displayName": "conversation_transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "64bcb6aa-0af1-46c8-8b4b-6315348e5c8c",
+      "name": "Upsert Unanswered Question",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        1696
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "content": "# INTAKE AND DEBOUNCE\n\n- Receives chat messages and normalises input.\n- Writes each incoming chat message as a queued conversation row before AI/RAG runs.\n- Waits briefly, then reads same-session queued and merged rows.\n- Only the newest rapid-fire message runs AI; older rapid-fire executions are marked merged and do not send a separate customer reply.\n- The newest execution sends the AI one merged customer turn so messages like \"hi\" then \"I need 20 stools\" are handled together.\n- Completed or failed rows do not block later repeated questions.\n- Public demo chat stays stateless; `session_id` is kept for logging, dedupe, and operator transcript context, not persisted AI memory.\n- `message_id` remains the unique audit row id.\n- `dedupe_key` is kept only as a diagnostic/audit hash, not as the customer-facing block condition.\n- Later AI/RAG fields use `={{ '' }}` on purpose so Sheets cells stay blank until the row is overwritten by the completed, failed, or merged path.\n\n## Required manual configuration:\n\n- **Workflow timezone placeholders**\n  - `__SET_WORKFLOW_TIMEZONE__`: Set this to the workflow timezone used by settings and timestamp expressions.\n  - `__SET_WORKFLOW_TIMEZONE_LABEL__`: Set this to the short label appended to sheet timestamps.\n- **Lookup Conversation State**\n  - `documentId.value`: Set this to the Google Sheets workbook used for support logs.\n  - Conversations sheet headers must include exact `session_id`, `conversation_ref`, `status`, and `dedupe_key` headers with no trailing spaces.\n- **Upsert Conversation Processing**\n  - `documentId.value`: Set this to the same Google Sheets workbook used for support logs.\n- **Mark Conversation Processing**\n  - `documentId.value`: Set this to the same Google Sheets workbook used for support logs.\n- **Mark Conversation Merged**\n  - `documentId.value`: Set this to the same Google Sheets workbook used for support logs.",
+        "height": 1180,
+        "width": 2404,
+        "color": 5
+      },
+      "id": "ecb12d5b-598d-4682-abb8-1676165c625d",
+      "name": "Intake and dedupe group",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2976,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message }}",
+        "hasOutputParser": true,
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "=You are the TEMPLATE Customer Support Agent.\n\nYour job:\n- Help customers with furniture rental questions.\n- Answer FAQs, operating hours, pricing, rental process, delivery/pickup, product/package questions, policies, and troubleshooting.\n- Help with appointment booking.\n- Create support tickets.\n- Escalate issues to the human team when required.\n- Capture leads by collecting contact details and rental requirements.\n\nKnowledge rules:\n- Your ONLY factual source is the retrieved TEMPLATE knowledge base content from the Pinecone tool.\n- Do not use general knowledge or guess.\n- If the answer is not found in retrieved content, say you do not have that detail yet and offer to help escalate.\n- Never invent prices, dates, stock availability, furniture dimensions, rental terms, warranty terms, damage fees, delivery fees, discounts, or policies.\n- When giving facts, keep them concise and clear.\n- If retrieved chunks conflict, do not choose randomly. Tell the customer you need the team to confirm and escalate.\n\nConversation style:\n- Warm, helpful, concise.\n- Use clear, professional English unless the workflow owner configures another style.\n- Do not be robotic.\n- Use light emojis only when natural.\n- Ask one focused follow-up question at a time.\n- Do not tell customers to reach out via the website, email, or WhatsApp when they are already chatting here. Ask for the missing details directly instead.\n\nEscalation rules:\nEscalate when:\n- The answer is not in the KB.\n- The customer is angry or dissatisfied.\n- The issue involves billing, refund, damage, complaint, urgent delivery, cancellation, or special pricing.\n- The customer asks to speak with a person.\n- The customer wants a custom quote and has provided enough details.\n\nLead capture rules:\nFor rental enquiries, collect name, email or phone, company if applicable, rental purpose, preferred rental start date and duration, furniture items or package needed, delivery area, and budget if offered.\n\nTicket rules:\nFor support tickets, collect full name, email or phone, issue category, one-line summary, detailed description, urgency, and preferred callback/contact method. Put ticket contact details in ticket.name, ticket.email, and ticket.phone. For ticket-only complaint or support cases, do not set lead_captured to true, do not set booking_requested to true, and do not copy ticket-only contact details into lead.* unless the customer is also making a rental enquiry or booking.\n\nBooking rules:\nFor appointment booking, collect name, email or phone, preferred date and time, appointment type, and notes/requirements.\n\nOutput rules:\n- Use the connected structured output parser.\n- The reply field must contain only natural customer-facing text, never JSON or internal metadata.\n- Keep routing fields truthful and consistent with the reply.",
+          "enableStreaming": false
+        }
+      },
+      "id": "77a3d5aa-711a-4cb3-aece-e56e67f7cee4",
+      "name": "TEMPLATE AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -544,
+        1216
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"required\": [\n    \"reply\",\n    \"intent\",\n    \"confidence\",\n    \"needs_escalation\",\n    \"needs_human_followup\",\n    \"lead_captured\",\n    \"ticket_required\",\n    \"booking_requested\",\n    \"missing_fields\",\n    \"lead\",\n    \"ticket\",\n    \"booking\",\n    \"retrieval_summary\"\n  ],\n  \"properties\": {\n    \"reply\": {\n      \"type\": \"string\"\n    },\n    \"intent\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"faq\",\n        \"pricing\",\n        \"booking\",\n        \"ticket\",\n        \"lead\",\n        \"escalation\",\n        \"handoff\",\n        \"unknown\"\n      ]\n    },\n    \"confidence\": {\n      \"type\": \"number\",\n      \"minimum\": 0,\n      \"maximum\": 1\n    },\n    \"needs_escalation\": {\n      \"type\": \"boolean\"\n    },\n    \"needs_human_followup\": {\n      \"type\": \"boolean\"\n    },\n    \"lead_captured\": {\n      \"type\": \"boolean\"\n    },\n    \"ticket_required\": {\n      \"type\": \"boolean\"\n    },\n    \"booking_requested\": {\n      \"type\": \"boolean\"\n    },\n    \"missing_fields\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"lead\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"name\",\n        \"email\",\n        \"phone\",\n        \"company\",\n        \"rental_purpose\",\n        \"rental_start_date\",\n        \"rental_duration\",\n        \"items_needed\",\n        \"delivery_area\",\n        \"budget\"\n      ],\n      \"properties\": {\n        \"name\": {\n          \"type\": \"string\"\n        },\n        \"email\": {\n          \"type\": \"string\"\n        },\n        \"phone\": {\n          \"type\": \"string\"\n        },\n        \"company\": {\n          \"type\": \"string\"\n        },\n        \"rental_purpose\": {\n          \"type\": \"string\"\n        },\n        \"rental_start_date\": {\n          \"type\": \"string\"\n        },\n        \"rental_duration\": {\n          \"type\": \"string\"\n        },\n        \"items_needed\": {\n          \"type\": \"string\"\n        },\n        \"delivery_area\": {\n          \"type\": \"string\"\n        },\n        \"budget\": {\n          \"type\": \"string\"\n        }\n      }\n    },\n    \"ticket\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"name\",\n        \"email\",\n        \"phone\",\n        \"category\",\n        \"summary\",\n        \"details\",\n        \"urgency\"\n      ],\n      \"properties\": {\n        \"category\": {\n          \"type\": \"string\"\n        },\n        \"summary\": {\n          \"type\": \"string\"\n        },\n        \"details\": {\n          \"type\": \"string\"\n        },\n        \"urgency\": {\n          \"type\": \"string\"\n        },\n        \"name\": {\n          \"type\": \"string\"\n        },\n        \"email\": {\n          \"type\": \"string\"\n        },\n        \"phone\": {\n          \"type\": \"string\"\n        }\n      }\n    },\n    \"booking\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"appointment_type\",\n        \"preferred_date\",\n        \"preferred_time\",\n        \"notes\"\n      ],\n      \"properties\": {\n        \"appointment_type\": {\n          \"type\": \"string\"\n        },\n        \"preferred_date\": {\n          \"type\": \"string\"\n        },\n        \"preferred_time\": {\n          \"type\": \"string\"\n        },\n        \"notes\": {\n          \"type\": \"string\"\n        }\n      }\n    },\n    \"retrieval_summary\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false,\n      \"required\": [\n        \"used_kb\",\n        \"source_titles\",\n        \"source_file_ids\"\n      ],\n      \"properties\": {\n        \"used_kb\": {\n          \"type\": \"boolean\"\n        },\n        \"source_titles\": {\n          \"type\": \"array\",\n          \"items\": {\n            \"type\": \"string\"\n          }\n        },\n        \"source_file_ids\": {\n          \"type\": \"array\",\n          \"items\": {\n            \"type\": \"string\"\n          }\n        }\n      }\n    }\n  }\n}"
+      },
+      "id": "48670902-6b7b-463c-b0d6-66da17948bd1",
+      "name": "Agent Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -352,
+        1408
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "dd4cc15a-0fbc-40c6-90e2-f7d4e8d2e178",
+      "name": "OpenAI Retrieval Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -176,
+        1696
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "message_id",
+              "value": "={{ $(\"Restore Processing Context\").first().json.message_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "dedupe_key",
+              "value": "={{ $(\"Restore Processing Context\").first().json.dedupe_key }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "session_id",
+              "value": "={{ $(\"Restore Processing Context\").first().json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "channel",
+              "value": "={{ $(\"Restore Processing Context\").first().json.channel }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "customer_name",
+              "value": "={{ $(\"Restore Processing Context\").first().json.customer_name }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "customer_email",
+              "value": "={{ $(\"Restore Processing Context\").first().json.customer_email }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "customer_phone",
+              "value": "={{ $(\"Restore Processing Context\").first().json.customer_phone }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "message",
+              "value": "={{ $(\"Restore Processing Context\").first().json.message }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "user_message_redacted",
+              "value": "={{ $(\"Restore Processing Context\").first().json.user_message_redacted }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "reply",
+              "value": "Sorry, I had trouble checking the knowledge base just now. I will route this to the TEMPLATE team for follow-up.",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "intent",
+              "value": "handoff",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "confidence",
+              "value": "={{ 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "needs_escalation",
+              "value": "={{ true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "needs_human_followup",
+              "value": "={{ true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "lead_captured",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "ticket_required",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "booking_requested",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "ticket_id",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "lead_id",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "source_titles",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "source_file_ids",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "execution_id",
+              "value": "={{ $(\"Restore Processing Context\").first().json.execution_id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "timestamp",
+              "value": "={{ $(\"Restore Processing Context\").first().json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "completed_at",
+              "value": "={{ $now.setZone(\"__SET_WORKFLOW_TIMEZONE__\").toFormat(\"yyyy-MM-dd HH:mm:ss\") + \" __SET_WORKFLOW_TIMEZONE_LABEL__\" }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "unanswered_id",
+              "value": "={{ \"TEMPLATE-UNANSWERED-\" + $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "agent_error_message",
+              "value": "={{ $json.error?.message || $json.message || \"AI/RAG step failed before a reply could be generated.\" }}",
+              "type": "string"
+            },
+            {
+              "id": "internal-error-error-type",
+              "name": "error_type",
+              "value": "customer_chat_failure",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "workflow_name",
+              "value": "TEMPLATE - RAG Customer Support Agent",
+              "type": "string"
+            },
+            {
+              "id": "internal-error-workflow-id",
+              "name": "workflow_id",
+              "value": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_WORKFLOW_ID__",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "error_message",
+              "value": "={{ $json.error?.message || $json.message || $json.description || \"AI/RAG step failed before a reply could be generated.\" }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "last_node_executed",
+              "value": "TEMPLATE AI Agent",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "execution_url",
+              "value": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__",
+              "type": "string"
+            },
+            {
+              "id": "internal-error-contact-id",
+              "name": "contact_id",
+              "value": "={{ $(\"Restore Processing Context\").first().json.conversation_ref || $(\"Restore Processing Context\").first().json.message_id || \"__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__\" }}",
+              "type": "string"
+            },
+            {
+              "id": "__SET_BUILD_INTERNAL_ERROR_CONTEXT_ID__",
+              "name": "failure_payload_json",
+              "value": "={{ JSON.stringify($json) }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "3b974bce-0c6c-43d0-ae31-9b8f3520ae02",
+      "name": "Build Internal Error Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        64,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "message": "={{ $json.reply }}",
+        "options": {}
+      },
+      "id": "ddeca625-6dda-4967-8dce-e2348084d75f",
+      "name": "Send Fallback Reply",
+      "type": "@n8n/n8n-nodes-langchain.chat",
+      "typeVersion": 1.3,
+      "position": [
+        1360,
+        2240
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "__SET_NOTIFY_MAIN_ERROR_HANDLER_WORKFLOWID__",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "b8ca1491-c14f-40de-ad28-b14e62d96f3c",
+      "name": "Notify Main Error Handler",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        352,
+        1504
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "__SET_GOOGLE_GEMINI_CHAT_MODEL_MODELNAME__",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -576,
+        1392
+      ],
+      "id": "34ed9bd6-3a3c-4732-bc5b-41f6f62b4e1c",
+      "name": "Google Gemini Chat Model"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "__SET_OPENAI_CHAT_MODEL_MODEL__",
+          "mode": "id"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -496,
+        1552
+      ],
+      "id": "3f9cea2d-a345-429e-ab67-06f85ea7806a",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "const debounceWindowMs = 20 * 1000;\nconst now = Date.now();\nconst current = $('Redact PII for Logs').first().json || {};\n\nfunction safeSheetValue(value = '') {\n  const text = String(value ?? '');\n  if (!text) return '';\n  if (/^\\+\\s*[\\d()\\-\\s]{3,}$/.test(text)) return text;\n  return /^[=+\\-@]/.test(text) ? \"'\" + text : text;\n}\n\nfunction parseWorkflowTimestamp(value) {\n  const parsed = Date.parse(value);\n  if (Number.isFinite(parsed)) return parsed;\n  const match = String(value || '').trim().match(/^(\\d{4})-(\\d{2})-(\\d{2}) (\\d{2}):(\\d{2}):(\\d{2})(?:\\s+\\S+)?$/);\n  if (!match) return NaN;\n  const [, year, month, day, hour, minute, second] = match.map(Number);\n  return Date.UTC(year, month - 1, day, hour, minute, second);\n}\n\nfunction rowTime(row) {\n  const value = row.created_at || row.timestamp || current.timestamp || '';\n  const workflowParsed = parseWorkflowTimestamp(value);\n  return Number.isFinite(workflowParsed) ? workflowParsed : 0;\n}\n\nfunction meaningful(value) {\n  const text = String(value || '').trim();\n  if (!text) return '';\n  if (/^(n\\/a|na|none|null|unknown|__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__|pending|pending_ai_response|queued_for_ai_response)$/i.test(text)) return '';\n  return text;\n}\n\nfunction messageText(row) {\n  return meaningful(row.message) || meaningful(row.user_message_redacted);\n}\n\nfunction uniqueByMessageId(rows) {\n  const byId = new Map();\n  for (const row of rows) {\n    const key = String(row.message_id || '').trim();\n    if (!key) continue;\n    byId.set(key, row);\n  }\n  return [...byId.values()];\n}\n\nfunction executionOrder(row) {\n  const parsed = Number(String(row.execution_id || '').replace(/[^0-9]/g, ''));\n  return Number.isFinite(parsed) ? parsed : 0;\n}\n\nfunction withSheetFields(row) {\n  return {\n    ...row,\n    sheet_conversation_ref: safeSheetValue(row.conversation_ref),\n    sheet_channel: safeSheetValue(row.channel),\n    sheet_customer_name: safeSheetValue(row.customer_name),\n    sheet_customer_email: safeSheetValue(row.customer_email),\n    sheet_customer_phone: safeSheetValue(row.customer_phone),\n    sheet_user_message_redacted: safeSheetValue(row.user_message_redacted),\n    sheet_execution_id: safeSheetValue(row.execution_id),\n    sheet_message_id: safeSheetValue(row.message_id),\n    sheet_session_id: safeSheetValue(row.session_id),\n    sheet_dedupe_key: safeSheetValue(row.dedupe_key),\n    sheet_timestamp: safeSheetValue(row.timestamp),\n  };\n}\n\nconst currentTime = rowTime(current) || now;\nconst sheetRows = items.map((item) => item.json || {});\nconst currentRow = { ...current, status: 'queued' };\nconst rows = uniqueByMessageId([...sheetRows, currentRow])\n  .filter((row) => String(row.session_id || '') === String(current.session_id || ''))\n  .map((row) => ({ ...row, _row_time: rowTime(row) || currentTime }))\n  .filter((row) => Math.abs(row._row_time - currentTime) <= debounceWindowMs)\n  .filter((row) => ['queued', 'merged', 'processing'].includes(String(row.status || '').toLowerCase()))\n  .sort((a, b) =>\n    (a._row_time - b._row_time) ||\n    (executionOrder(a) - executionOrder(b)) ||\n    String(a.message_id || '').localeCompare(String(b.message_id || ''))\n  );\n\nconst latest = rows[rows.length - 1] || currentRow;\nif (String(latest.message_id || '') !== String(current.message_id || '')) {\n  return [{\n    json: withSheetFields({\n      ...current,\n      debounce_superseded: 'true',\n      debounce_latest_message_id: latest.message_id || '',\n      debounce_batch_count: rows.length,\n    }),\n  }];\n}\n\nconst batchRows = rows.length ? rows : [currentRow];\nconst mergedTexts = batchRows\n  .map((row, index) => {\n    const text = messageText(row);\n    return text ? String(index + 1) + '. ' + text : '';\n  })\n  .filter(Boolean);\n\nconst mergedMessage = mergedTexts.length > 1\n  ? 'The customer sent these rapid messages in order. Treat them as one customer turn:\\n\\n' + mergedTexts.join('\\n')\n  : (meaningful(current.message) || meaningful(current.user_message_redacted));\nconst mergedUserMessage = mergedTexts.length > 1 ? mergedTexts.join('\\n') : current.user_message_redacted;\n\nreturn [{\n  json: withSheetFields({\n    ...current,\n    message: mergedMessage,\n    user_message_redacted: mergedUserMessage,\n    debounce_superseded: 'false',\n    debounce_batch_count: batchRows.length,\n    merged_message_ids: batchRows.map((row) => row.message_id).filter(Boolean).join(', '),\n  }),\n}];"
+      },
+      "id": "a914a6ba-a057-4d93-a7d0-139acde13992",
+      "name": "Select Debounced Chat Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1440,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "__SET_SEND_LEAD_NOTIFICATION_EMAIL__",
+        "subject": "=[Template Lead] {{ $(\"Build Notification Context\").first().json.subject_lead_name }} - {{ $(\"Build Notification Context\").first().json.subject_lead_items }} - {{ $(\"Build Notification Context\").first().json.subject_lead_reference }}",
+        "message": "=<h2>New rental lead</h2><table cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;width:100%;max-width:760px;\"><tr><td style=\"width:150px;color:#52606d;\"><strong>Lead ID</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_lead_id }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Conversation</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_conversation_ref }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Contact</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_lead_name }} | {{ $(\"Build Notification Context\").first().json.safe_lead_email }} | {{ $(\"Build Notification Context\").first().json.safe_lead_phone }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Company</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_lead_company }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Items</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_lead_items_needed }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Event</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_lead_rental_purpose }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Date / Duration</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_lead_rental_start_date }} / {{ $(\"Build Notification Context\").first().json.safe_lead_rental_duration }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Venue</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_lead_delivery_area }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Budget</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_lead_budget }}</td></tr></table><h3>Conversation transcript ({{ $(\"Build Notification Context\").first().json.conversation_message_count || 1 }} message(s); showing {{ $(\"Build Notification Context\").first().json.conversation_transcript_rows_rendered || 1 }})</h3>{{ $(\"Build Notification Context\").first().json.safe_conversation_transcript_html || \"<p>No transcript available.</p>\" }}<hr><p style=\"font-size:12px;color:#697386;\">This email was generated from the n8n customer support workflow. Review the transcript before replying to the customer.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2176,
+        1104
+      ],
+      "id": "875941de-39f0-4bab-8aaa-5c3ca18fedef",
+      "name": "Send Lead Notification"
+    },
+    {
+      "parameters": {
+        "sendTo": "__SET_SEND_TICKET_NOTIFICATION_EMAIL__",
+        "subject": "=[Template Ticket] {{ $(\"Build Notification Context\").first().json.subject_ticket_urgency }} - {{ $(\"Build Notification Context\").first().json.subject_ticket_summary }} - {{ $(\"Build Notification Context\").first().json.subject_ticket_reference }}",
+        "message": "=<h2>New support ticket</h2><table cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;width:100%;max-width:760px;\"><tr><td style=\"width:150px;color:#52606d;\"><strong>Ticket ID</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_ticket_id }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Conversation</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_conversation_ref }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Contact</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_ticket_name }} | {{ $(\"Build Notification Context\").first().json.safe_ticket_email }} | {{ $(\"Build Notification Context\").first().json.safe_ticket_phone }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Category</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_ticket_category }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Urgency</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_ticket_urgency }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Summary</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_ticket_summary }}</td></tr><tr><td style=\"color:#52606d;\"><strong>Details</strong></td><td>{{ $(\"Build Notification Context\").first().json.safe_ticket_details }}</td></tr></table><h3>Conversation transcript ({{ $(\"Build Notification Context\").first().json.conversation_message_count || 1 }} message(s); showing {{ $(\"Build Notification Context\").first().json.conversation_transcript_rows_rendered || 1 }})</h3>{{ $(\"Build Notification Context\").first().json.safe_conversation_transcript_html || \"<p>No transcript available.</p>\" }}<hr><p style=\"font-size:12px;color:#697386;\">This email was generated from the n8n customer support workflow. Review the transcript before replying to the customer.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2176,
+        1296
+      ],
+      "id": "893df85e-69e9-4e66-94ef-7d04e9e0ff31",
+      "name": "Send Ticket Notification"
+    },
+    {
+      "parameters": {
+        "sendTo": "__SET_SEND_UNANSWERED_NOTIFICATION_EMAIL__",
+        "subject": "=[Template Unanswered] {{ $json.subject_unanswered_intent }} - {{ $json.subject_unanswered_reference }}",
+        "message": "=<h2>Unanswered or low-confidence reply</h2>{{ $json.safe_notification_summary_html }}<h3>Conversation</h3><p>{{ $json.safe_conversation_ref }}</p><h3>Reason</h3><p>{{ $json.safe_unanswered_reason || \"Low confidence or unknown intent\" }}</p><h3>Current message</h3><p>{{ $json.safe_user_message_redacted || \"__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__\" }}</p><h3>Sources</h3><p>{{ $json.safe_source_titles || \"__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__\" }}</p><h3>Conversation transcript ({{ $(\"Build Notification Context\").first().json.conversation_message_count || 1 }} message(s); showing {{ $(\"Build Notification Context\").first().json.conversation_transcript_rows_rendered || 1 }})</h3>{{ $(\"Build Notification Context\").first().json.safe_conversation_transcript_html || \"<p>No transcript available.</p>\" }}<hr><p style=\"font-size:12px;color:#697386;\">This email was generated from the n8n customer support workflow. Review the transcript before replying to the customer.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2176,
+        1696
+      ],
+      "id": "4664336a-6cb1-4030-a4b5-7254f60701b5",
+      "name": "Send Unanswered Notification"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_LOOKUP_CONVERSATION_TRANSCRIPT_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_LOOKUP_CONVERSATION_TRANSCRIPT_SHEETNAME__",
+          "mode": "id"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "session_id",
+              "lookupValue": "={{ $('Parse Strict JSON Response').first().json.session_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": false
+        }
+      },
+      "id": "ffff8938-90fa-3b7e-c0ff-7690d91066cc",
+      "name": "Lookup Conversation Transcript",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        608,
+        1312
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 10000,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAX_TRANSCRIPT_ROWS = 12;\nconst MAX_TRANSCRIPT_CHARS = 6000;\nconst TRUNCATED_MARKER = '[Transcript truncated]';\n\nfunction escapeHtml(value = '') {\n  return String(value || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#39;');\n}\n\nfunction safeSheetValue(value = '') {\n  const text = String(value ?? '');\n  if (!text) return '';\n  if (/^\\+\\s*[\\d()\\-\\s]{3,}$/.test(text)) return text;\n  return /^[=+\\-@]/.test(text) ? \"'\" + text : text;\n}\n\nfunction meaningful(value) {\n  const text = String(value || '').trim();\n  if (!text) return '';\n  if (/^(n\\/a|na|none|null|unknown|__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__|not provided|pending)$/i.test(text)) return '';\n  return text;\n}\n\nfunction firstMeaningful(...values) {\n  for (const value of values) {\n    const text = meaningful(value);\n    if (text) return text;\n  }\n  return '';\n}\n\nfunction safeText(value, fallback = '__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__') {\n  return escapeHtml(firstMeaningful(value, fallback));\n}\n\nfunction safeSubjectText(value, fallback = '__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__', maxLength = 100) {\n  const text = firstMeaningful(value, fallback)\n    .replace(/[\\u0000-\\u001f\\u007f]+/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n  const safe = text || fallback;\n  return safe.length > maxLength ? safe.slice(0, maxLength - 3).trimEnd() + '...' : safe;\n}\n\nfunction boolText(value) {\n  return String(value).toLowerCase() === 'true' ? 'Yes' : 'No';\n}\n\nfunction rowTime(row) {\n  return meaningful(row.created_at) || meaningful(row.completed_at) || meaningful(row.timestamp) || '';\n}\n\nfunction rowTranscriptText(row, displayIndex) {\n  const when = rowTime(row) || 'time___SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__';\n  const customerMessage = meaningful(row.user_message_redacted) || meaningful(row.message) || '';\n  const botReply = meaningful(row.bot_reply) || meaningful(row.reply) || '';\n  const intent = meaningful(row.intent);\n\n  return [\n    '#' + displayIndex + ' - ' + when + (intent ? ' - ' + intent : ''),\n    customerMessage ? 'Customer: ' + customerMessage : '',\n    botReply ? 'Bot: ' + botReply : '',\n  ].filter(Boolean).join('\\n');\n}\n\nfunction transcriptEntry(row, displayIndex, text) {\n  const when = rowTime(row) || 'time___SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__';\n  const customerMessage = meaningful(row.user_message_redacted) || meaningful(row.message) || '';\n  const botReply = meaningful(row.bot_reply) || meaningful(row.reply) || '';\n  const intent = meaningful(row.intent);\n  return {\n    displayIndex,\n    text,\n    html: [\n      '<div style=\"border-left:3px solid #d9e2ec;padding:8px 0 8px 12px;margin:10px 0;\">',\n      '<p style=\"margin:0 0 4px 0;color:#52606d;\"><strong>#' + displayIndex + '</strong> - ' + escapeHtml(when) + (intent ? ' - ' + escapeHtml(intent) : '') + '</p>',\n      customerMessage ? '<p style=\"margin:0 0 6px 0;\"><strong>Customer:</strong> ' + escapeHtml(customerMessage) + '</p>' : '',\n      botReply ? '<p style=\"margin:0;\"><strong>Bot:</strong> ' + escapeHtml(botReply) + '</p>' : '',\n      '</div>',\n    ].join(''),\n  };\n}\n\nconst original = $('Parse Strict JSON Response').first().json || {};\nconst rows = items\n  .map((item) => item.json || {})\n  .filter((row) => String(row.session_id || '') === String(original.session_id || ''))\n  .sort((a, b) => String(rowTime(a)).localeCompare(String(rowTime(b))));\n\nconst transcriptSourceRows = rows.length ? rows : [original];\nconst newestRows = transcriptSourceRows.slice(-MAX_TRANSCRIPT_ROWS);\nconst displayOffset = transcriptSourceRows.length - newestRows.length;\nlet remainingChars = MAX_TRANSCRIPT_CHARS;\nlet charTruncated = false;\nconst selectedEntries = [];\n\nfor (let index = newestRows.length - 1; index >= 0; index -= 1) {\n  const row = newestRows[index];\n  const displayIndex = displayOffset + index + 1;\n  let text = rowTranscriptText(row, displayIndex);\n  const separatorCost = selectedEntries.length ? 2 : 0;\n  if (text.length + separatorCost > remainingChars) {\n    charTruncated = true;\n    const allowed = Math.max(0, remainingChars - separatorCost);\n    if (allowed > 80 || selectedEntries.length === 0) {\n      text = text.slice(0, Math.max(0, allowed)).trimEnd();\n      selectedEntries.unshift(transcriptEntry(row, displayIndex, text));\n    }\n    break;\n  }\n  remainingChars -= text.length + separatorCost;\n  selectedEntries.unshift(transcriptEntry(row, displayIndex, text));\n}\n\nconst rowTruncated = transcriptSourceRows.length > newestRows.length;\nconst transcriptTruncated = rowTruncated || charTruncated || selectedEntries.length < transcriptSourceRows.length;\nconst transcriptText = selectedEntries.map((entry) => entry.text).join('\\n\\n') || 'No previous conversation rows found for this session.';\nconst transcriptHtml = selectedEntries.map((entry) => entry.html).join('') || '<p>No previous conversation rows found for this session.</p>';\nconst truncationText = transcriptTruncated ? '\\n\\n' + TRUNCATED_MARKER : '';\nconst truncationHtml = transcriptTruncated ? '<p><em>' + escapeHtml(TRUNCATED_MARKER) + '</em></p>' : '';\n\nconst conversationRef = firstMeaningful(original.conversation_ref, original.ticket_id, original.lead_id, original.message_id);\nconst caseReference = firstMeaningful(original.ticket_id, original.lead_id, original.unanswered_id, original.message_id);\nconst lead = original.lead || {};\nconst ticket = original.ticket || {};\nconst booking = original.booking || {};\n\nconst customerName = firstMeaningful(original.customer_name, lead.name, ticket.name);\nconst customerEmail = firstMeaningful(original.customer_email, lead.email, ticket.email);\nconst customerPhone = firstMeaningful(original.customer_phone, lead.phone, ticket.phone);\nconst notificationContactLine = [customerName, customerEmail, customerPhone].filter(Boolean).join(' | ') || 'Contact not provided';\nconst notificationSubjectLabel = firstMeaningful(ticket.summary, lead.items_needed, original.intent, 'Support update');\nconst missingFieldsText = firstMeaningful(original.missing_fields_text, Array.isArray(original.missing_fields) ? original.missing_fields.join(', ') : '', 'none');\nconst safeConversationTranscriptHtml = transcriptHtml + truncationHtml;\nconst notificationSummaryHtml = [\n  '<table cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;width:100%;max-width:760px;\">',\n  '<tr><td style=\"width:150px;color:#52606d;\"><strong>Conversation</strong></td><td>' + escapeHtml(conversationRef) + '</td></tr>',\n  '<tr><td style=\"color:#52606d;\"><strong>Case</strong></td><td>' + escapeHtml(caseReference) + '</td></tr>',\n  '<tr><td style=\"color:#52606d;\"><strong>Session</strong></td><td>' + escapeHtml(original.session_id || '') + '</td></tr>',\n  '<tr><td style=\"color:#52606d;\"><strong>Contact</strong></td><td>' + escapeHtml(notificationContactLine) + '</td></tr>',\n  '<tr><td style=\"color:#52606d;\"><strong>Intent</strong></td><td>' + escapeHtml(original.intent || '') + '</td></tr>',\n  '<tr><td style=\"color:#52606d;\"><strong>Escalation</strong></td><td>' + escapeHtml(boolText(original.needs_escalation || original.incomplete_ticket_followup)) + '</td></tr>',\n  '<tr><td style=\"color:#52606d;\"><strong>Missing fields</strong></td><td>' + escapeHtml(missingFieldsText) + '</td></tr>',\n  '<tr><td style=\"color:#52606d;\"><strong>Completed</strong></td><td>' + escapeHtml(original.completed_at || '') + '</td></tr>',\n  '</table>',\n].join('');\n\nreturn [{\n  json: {\n    ...original,\n    customer_name: customerName,\n    customer_email: customerEmail,\n    customer_phone: customerPhone,\n    conversation_ref: conversationRef,\n    conversation_transcript_text: transcriptText + truncationText,\n    conversation_transcript_html: safeConversationTranscriptHtml,\n    notification_contact_line: notificationContactLine,\n    notification_subject_label: notificationSubjectLabel,\n    notification_summary_html: notificationSummaryHtml,\n    conversation_message_count: transcriptSourceRows.length,\n    conversation_transcript_rows_rendered: selectedEntries.length,\n    transcript_truncated: transcriptTruncated,\n    subject_escalation_intent: safeSubjectText(original.intent, 'Support alert'),\n    subject_escalation_reference: safeSubjectText(firstMeaningful(original.escalation_reference_id, caseReference, conversationRef), '__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__'),\n    subject_lead_name: safeSubjectText(firstMeaningful(lead.name, customerName, 'New enquiry'), 'New enquiry'),\n    subject_lead_items: safeSubjectText(firstMeaningful(lead.items_needed, lead.rental_purpose, original.lead_id, 'Rental enquiry'), 'Rental enquiry'),\n    subject_lead_reference: safeSubjectText(firstMeaningful(original.lead_id, conversationRef), '__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__'),\n    subject_ticket_urgency: safeSubjectText(firstMeaningful(ticket.urgency, 'medium'), 'medium'),\n    subject_ticket_summary: safeSubjectText(firstMeaningful(ticket.summary, original.ticket_id, 'Support ticket'), 'Support ticket'),\n    subject_ticket_reference: safeSubjectText(firstMeaningful(original.ticket_id, conversationRef), '__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__'),\n    subject_unanswered_intent: safeSubjectText(original.intent, 'Unanswered'),\n    subject_unanswered_reference: safeSubjectText(firstMeaningful(original.unanswered_id, conversationRef), '__SET_BUILD_INTERNAL_ERROR_CONTEXT_EXECUTION_URL__'),\n    safe_conversation_ref: safeText(conversationRef),\n    safe_case_reference: safeText(caseReference),\n    safe_session_id: safeText(original.session_id),\n    safe_customer_name: safeText(customerName),\n    safe_customer_email: safeText(customerEmail),\n    safe_customer_phone: safeText(customerPhone),\n    safe_notification_contact_line: safeText(notificationContactLine),\n    safe_notification_subject_label: safeText(notificationSubjectLabel),\n    safe_intent: safeText(original.intent),\n    safe_completed_at: safeText(original.completed_at),\n    safe_user_message_redacted: safeText(original.user_message_redacted),\n    safe_reply: safeText(original.reply),\n    safe_source_titles: safeText(original.source_titles),\n    safe_source_file_ids: safeText(original.source_file_ids, ''),\n    safe_missing_fields: safeText(missingFieldsText, 'none'),\n    safe_ticket_id: safeText(original.ticket_id, 'not_applicable'),\n    safe_lead_id: safeText(original.lead_id, 'not_applicable'),\n    safe_execution_id: safeText(original.execution_id),\n    safe_unanswered_id: safeText(original.unanswered_id),\n    safe_unanswered_reason: safeText(firstMeaningful(original.unanswered_reason, Number(original.confidence || 0) < 0.55 ? 'low_confidence' : 'unknown_intent')),\n    safe_notification_summary_html: notificationSummaryHtml,\n    safe_conversation_transcript_html: safeConversationTranscriptHtml,\n    safe_lead_name: safeText(firstMeaningful(lead.name, customerName)),\n    safe_lead_email: safeText(firstMeaningful(lead.email, customerEmail)),\n    safe_lead_phone: safeText(firstMeaningful(lead.phone, customerPhone)),\n    safe_lead_company: safeText(lead.company),\n    safe_lead_rental_purpose: safeText(lead.rental_purpose),\n    safe_lead_rental_start_date: safeText(firstMeaningful(lead.rental_start_date, booking.preferred_date)),\n    safe_lead_rental_duration: safeText(lead.rental_duration),\n    safe_lead_items_needed: safeText(lead.items_needed),\n    safe_lead_delivery_area: safeText(lead.delivery_area),\n    safe_lead_budget: safeText(lead.budget),\n    safe_ticket_name: safeText(firstMeaningful(ticket.name, lead.name, customerName)),\n    safe_ticket_email: safeText(firstMeaningful(ticket.email, lead.email, customerEmail)),\n    safe_ticket_phone: safeText(firstMeaningful(ticket.phone, lead.phone, customerPhone)),\n    safe_ticket_category: safeText(ticket.category),\n    safe_ticket_urgency: safeText(ticket.urgency, 'medium'),\n    safe_ticket_summary: safeText(ticket.summary),\n    safe_ticket_details: safeText(ticket.details),\n    sheet_conversation_ref: safeSheetValue(conversationRef),\n    sheet_session_id: safeSheetValue(original.session_id),\n    sheet_user_message_redacted: safeSheetValue(original.user_message_redacted),\n    sheet_reply: safeSheetValue(original.reply),\n    sheet_intent: safeSheetValue(original.intent),\n    sheet_source_titles: safeSheetValue(original.source_titles),\n    sheet_source_file_ids: safeSheetValue(original.source_file_ids),\n    sheet_conversation_transcript: safeSheetValue(transcriptText + truncationText),\n    sheet_execution_id: safeSheetValue(original.execution_id),\n    sheet_completed_at: safeSheetValue(original.completed_at),\n    sheet_lead_id: safeSheetValue(original.lead_id),\n    sheet_lead_name: safeSheetValue(firstMeaningful(lead.name, customerName)),\n    sheet_lead_email: safeSheetValue(firstMeaningful(lead.email, customerEmail)),\n    sheet_lead_phone: safeSheetValue(firstMeaningful(lead.phone, customerPhone)),\n    sheet_lead_company: safeSheetValue(lead.company),\n    sheet_lead_rental_purpose: safeSheetValue(lead.rental_purpose),\n    sheet_lead_rental_start_date: safeSheetValue(firstMeaningful(lead.rental_start_date, booking.preferred_date)),\n    sheet_lead_rental_duration: safeSheetValue(lead.rental_duration),\n    sheet_lead_items_needed: safeSheetValue(lead.items_needed),\n    sheet_lead_delivery_area: safeSheetValue(lead.delivery_area),\n    sheet_lead_budget: safeSheetValue(lead.budget),\n    sheet_lead_status: safeSheetValue(original.booking_requested ? 'booking_requested' : 'new'),\n    sheet_source_channel: safeSheetValue(original.channel),\n    sheet_ticket_id: safeSheetValue(original.ticket_id),\n    sheet_ticket_name: safeSheetValue(firstMeaningful(ticket.name, lead.name, customerName)),\n    sheet_ticket_email: safeSheetValue(firstMeaningful(ticket.email, lead.email, customerEmail)),\n    sheet_ticket_phone: safeSheetValue(firstMeaningful(ticket.phone, lead.phone, customerPhone)),\n    sheet_ticket_category: safeSheetValue(ticket.category),\n    sheet_ticket_summary: safeSheetValue(ticket.summary),\n    sheet_ticket_details: safeSheetValue(ticket.details),\n    sheet_ticket_urgency: safeSheetValue(firstMeaningful(ticket.urgency, 'medium')),\n    sheet_ticket_status: safeSheetValue('new'),\n    sheet_unanswered_id: safeSheetValue(original.unanswered_id),\n    sheet_unanswered_reason: safeSheetValue(firstMeaningful(original.unanswered_reason, Number(original.confidence || 0) < 0.55 ? 'low_confidence' : 'unknown_intent')),\n  },\n}];"
+      },
+      "id": "e41e37bc-4ba6-ce30-cf70-96469b6c80c9",
+      "name": "Build Notification Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "id": "90642e08-0f2e-4e34-8f3a-938787af588a",
+      "name": "Debounce Chat Batch",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1920,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_MARK_CONVERSATION_PROCESSING_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_MARK_CONVERSATION_PROCESSING_SHEETNAME__",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "conversation_ref": "={{ $json.sheet_conversation_ref }}",
+            "channel": "={{ $json.sheet_channel }}",
+            "customer_name": "={{ $json.sheet_customer_name }}",
+            "customer_email": "={{ $json.sheet_customer_email }}",
+            "customer_phone": "={{ $json.sheet_customer_phone }}",
+            "user_message_redacted": "={{ $json.sheet_user_message_redacted }}",
+            "bot_reply": "pending_ai_response",
+            "intent": "pending",
+            "confidence": "0",
+            "status": "processing",
+            "needs_escalation": "false",
+            "lead_captured": "false",
+            "ticket_id": "={{ '' }}",
+            "booking_requested": "false",
+            "source_titles": "={{ '' }}",
+            "source_file_ids": "={{ '' }}",
+            "execution_id": "={{ $json.sheet_execution_id }}",
+            "created_at": "={{ $json.sheet_timestamp }}",
+            "completed_at": "={{ '' }}",
+            "dedupe_key": "={{ $json.sheet_dedupe_key }}",
+            "message_id": "={{ $json.sheet_message_id }}",
+            "session_id": "={{ $json.sheet_session_id }}"
+          },
+          "matchingColumns": [
+            "message_id"
+          ],
+          "schema": [
+            {
+              "id": "conversation_ref",
+              "displayName": "conversation_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_email",
+              "displayName": "customer_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_phone",
+              "displayName": "customer_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_message_redacted",
+              "displayName": "user_message_redacted",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "bot_reply",
+              "displayName": "bot_reply",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "needs_escalation",
+              "displayName": "needs_escalation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_captured",
+              "displayName": "lead_captured",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "booking_requested",
+              "displayName": "booking_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_titles",
+              "displayName": "source_titles",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_file_ids",
+              "displayName": "source_file_ids",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_id",
+              "displayName": "message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "5f448a23-366d-41be-8bc6-4d3992517e25",
+      "name": "Mark Conversation Processing",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1008,
+        1536
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "__SET_MARK_CONVERSATION_MERGED_DOCUMENTID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "__SET_MARK_CONVERSATION_MERGED_SHEETNAME__",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "conversation_ref": "={{ $json.sheet_conversation_ref }}",
+            "channel": "={{ $json.sheet_channel }}",
+            "customer_name": "={{ $json.sheet_customer_name }}",
+            "customer_email": "={{ $json.sheet_customer_email }}",
+            "customer_phone": "={{ $json.sheet_customer_phone }}",
+            "user_message_redacted": "={{ $json.sheet_user_message_redacted }}",
+            "bot_reply": "={{ '' }}",
+            "intent": "rapid_message_merged",
+            "confidence": "0",
+            "status": "merged",
+            "needs_escalation": "false",
+            "lead_captured": "false",
+            "ticket_id": "={{ '' }}",
+            "booking_requested": "false",
+            "source_titles": "={{ '' }}",
+            "source_file_ids": "={{ '' }}",
+            "execution_id": "={{ $json.sheet_execution_id }}",
+            "created_at": "={{ $json.sheet_timestamp }}",
+            "completed_at": "={{ $now.setZone('__SET_WORKFLOW_TIMEZONE__').toFormat('yyyy-MM-dd HH:mm:ss') + ' __SET_WORKFLOW_TIMEZONE_LABEL__' }}",
+            "dedupe_key": "={{ $json.sheet_dedupe_key }}",
+            "message_id": "={{ $json.sheet_message_id }}",
+            "session_id": "={{ $json.sheet_session_id }}"
+          },
+          "matchingColumns": [
+            "message_id"
+          ],
+          "schema": [
+            {
+              "id": "conversation_ref",
+              "displayName": "conversation_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_email",
+              "displayName": "customer_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "customer_phone",
+              "displayName": "customer_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_message_redacted",
+              "displayName": "user_message_redacted",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "bot_reply",
+              "displayName": "bot_reply",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "needs_escalation",
+              "displayName": "needs_escalation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_captured",
+              "displayName": "lead_captured",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "booking_requested",
+              "displayName": "booking_requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_titles",
+              "displayName": "source_titles",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_file_ids",
+              "displayName": "source_file_ids",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "completed_at",
+              "displayName": "completed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message_id",
+              "displayName": "message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "86c22167-5e22-4f77-a714-d45a15560771",
+      "name": "Mark Conversation Merged",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -1008,
+        1328
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "When Chat Message Received": {
+      "main": [
+        [
+          {
+            "node": "Normalise Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise Input": {
+      "main": [
+        [
+          {
+            "node": "Redact PII for Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redact PII for Logs": {
+      "main": [
+        [
+          {
+            "node": "Upsert Conversation Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Conversation State": {
+      "main": [
+        [
+          {
+            "node": "Select Debounced Chat Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Conversation Processing": {
+      "main": [
+        [
+          {
+            "node": "Debounce Chat Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Processing Context": {
+      "main": [
+        [
+          {
+            "node": "TEMPLATE AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TEMPLATE Knowledge Base": {
+      "ai_tool": [
+        [
+          {
+            "node": "TEMPLATE AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Strict JSON Response": {
+      "main": [
+        [
+          {
+            "node": "Upsert Conversation Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead or Booking Required?": {
+      "main": [
+        [
+          {
+            "node": "Set Lead or Booking Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Lead or Booking Row": {
+      "main": [
+        [
+          {
+            "node": "Upsert Lead or Booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket Required?": {
+      "main": [
+        [
+          {
+            "node": "Set Ticket Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Ticket Row": {
+      "main": [
+        [
+          {
+            "node": "Upsert Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Escalation?": {
+      "main": [
+        [
+          {
+            "node": "Send Escalation Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unanswered or Low Confidence?": {
+      "main": [
+        [
+          {
+            "node": "Set Unanswered Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Unanswered Row": {
+      "main": [
+        [
+          {
+            "node": "Upsert Unanswered Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TEMPLATE AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Strict JSON Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Internal Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Retrieval Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "TEMPLATE Knowledge Base",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "TEMPLATE AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "TEMPLATE AI Agent",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Agent Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "TEMPLATE AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Lead or Booking": {
+      "main": [
+        [
+          {
+            "node": "Send Lead Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Ticket": {
+      "main": [
+        [
+          {
+            "node": "Send Ticket Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Unanswered Question": {
+      "main": [
+        [
+          {
+            "node": "Send Unanswered Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Conversation Completed": {
+      "main": [
+        [
+          {
+            "node": "Lookup Conversation Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Conversation Transcript": {
+      "main": [
+        [
+          {
+            "node": "Build Notification Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Notification Context": {
+      "main": [
+        [
+          {
+            "node": "Send Customer Reply",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Lead or Booking Required?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ticket Required?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Needs Escalation?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Unanswered or Low Confidence?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Debounced Chat Batch": {
+      "main": [
+        [
+          {
+            "node": "Superseded by Newer Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Superseded by Newer Message?": {
+      "main": [
+        [
+          {
+            "node": "Mark Conversation Merged",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Conversation Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Debounce Chat Batch": {
+      "main": [
+        [
+          {
+            "node": "Lookup Conversation State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Conversation Merged": {
+      "main": [
+        []
+      ]
+    },
+    "Mark Conversation Processing": {
+      "main": [
+        [
+          {
+            "node": "Restore Processing Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Internal Error Context": {
+      "main": [
+        [
+          {
+            "node": "Notify Main Error Handler",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Fallback Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "__SET_WORKFLOW_TIMEZONE__",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

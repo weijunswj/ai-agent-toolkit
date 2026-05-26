@@ -15,6 +15,8 @@ This is a short template index and safety checklist. It is not a helper-script r
 ## Included Templates
 
 - `error-handling/global-error-handler.template.json`: generic inactive global error-handler workflow template.
+- `chatbot-with-RAG/customer-support-agent.workflow.template.json`: generic inactive RAG customer-support workflow template.
+- `chatbot-with-RAG/rag-ingestion.workflow.template.json`: generic inactive RAG knowledge-base ingestion workflow template.
 
 ## Required
 
