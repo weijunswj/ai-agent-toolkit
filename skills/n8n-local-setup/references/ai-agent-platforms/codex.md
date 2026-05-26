@@ -22,7 +22,8 @@ For full setup detail, use the local full-fidelity references and templates in t
 
 ## Local Routes
 
-- Use [local setup](../n8n/local-setup.md) for the full Windows local n8n and Codex setup guide.
+- Use [local setup](../n8n/local-setup.md) for the full Docker Compose local n8n and Codex setup guide.
+- Use [local stack templates](../../templates/local-stack/) for the `n8n + postgres + ngrok` Fast Path.
 - Use [skills/ai-coding-agent-rules/AGENTS.template.md](../../../ai-coding-agent-rules/AGENTS.template.md) for generic Codex agent rules. Copy or merge it into the target repo root as `AGENTS.md` only when the user explicitly wants Codex rules installed.
 - Use `skills/n8n-agent-rules` or [n8n-agent-rules.md](../n8n-agent-rules.md) for the full n8n operating rules before workflow, MCP, helper-script, or live n8n work.
 - Optionally merge `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` into `AGENTS.md`; it is a pointer, not the full ruleset.

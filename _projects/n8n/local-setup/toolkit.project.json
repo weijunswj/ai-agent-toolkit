@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "version_policy": "semver",
-  "version_notes": "Removes ownership of the full n8n ruleset and points local setup users to the generated n8n-agent-rules skill.",
+  "version_notes": "Refactors the local setup guide around a Docker Compose stack with n8n, Postgres, ngrok as the only supported local tunnel path, and a guided n8n-local.cmd launcher.",
   "outputs": [
     {
       "kind": "curated",
@@ -48,6 +48,22 @@
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
           "to": "../../../ai-coding-agent-rules/GEMINI.template.md"
+        },
+        {
+          "from": "./templates/local-stack/docker-compose.yml",
+          "to": "../../templates/local-stack/docker-compose.yml"
+        },
+        {
+          "from": "./templates/local-stack/.env.example",
+          "to": "../../templates/local-stack/.env.example"
+        },
+        {
+          "from": "./templates/local-stack/n8n-local.cmd",
+          "to": "../../templates/local-stack/n8n-local.cmd"
+        },
+        {
+          "from": "./templates/local-stack/scripts/n8n-local-menu.ps1",
+          "to": "../../templates/local-stack/scripts/n8n-local-menu.ps1"
         }
       ]
     },
@@ -63,14 +79,46 @@
       "source": "_main/3. tunneling guide.md",
       "output": "skills/n8n-local-setup/references/n8n/tunnelling.md",
       "notes": "Full tunneling guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact"
+      "fidelity": "exact",
+      "text_rewrites": [
+        {
+          "from": "./templates/local-stack/.env.example",
+          "to": "../../templates/local-stack/.env.example"
+        },
+        {
+          "from": "./templates/local-stack/n8n-local.cmd",
+          "to": "../../templates/local-stack/n8n-local.cmd"
+        },
+        {
+          "from": "./templates/local-stack/scripts/n8n-local-menu.ps1",
+          "to": "../../templates/local-stack/scripts/n8n-local-menu.ps1"
+        }
+      ]
     },
     {
       "kind": "copy",
       "source": "_main/3a. docker compose + ngrok.md",
       "output": "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md",
       "notes": "Full Docker Compose plus ngrok guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact"
+      "fidelity": "exact",
+      "text_rewrites": [
+        {
+          "from": "./templates/local-stack/docker-compose.yml",
+          "to": "../../templates/local-stack/docker-compose.yml"
+        },
+        {
+          "from": "./templates/local-stack/.env.example",
+          "to": "../../templates/local-stack/.env.example"
+        },
+        {
+          "from": "./templates/local-stack/n8n-local.cmd",
+          "to": "../../templates/local-stack/n8n-local.cmd"
+        },
+        {
+          "from": "./templates/local-stack/scripts/n8n-local-menu.ps1",
+          "to": "../../templates/local-stack/scripts/n8n-local-menu.ps1"
+        }
+      ]
     },
     {
       "kind": "copy",
@@ -209,6 +257,34 @@
       "fidelity": "exact"
     },
     {
+      "kind": "copy",
+      "source": "_main/templates/local-stack/docker-compose.yml",
+      "output": "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
+      "notes": "Copy-ready local Docker Compose stack for n8n, Postgres, and ngrok.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/local-stack/.env.example",
+      "output": "skills/n8n-local-setup/templates/local-stack/.env.example",
+      "notes": "Placeholder-only local stack environment template.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/local-stack/n8n-local.cmd",
+      "output": "skills/n8n-local-setup/templates/local-stack/n8n-local.cmd",
+      "notes": "Windows launcher for the guided local n8n stack menu.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/local-stack/scripts/n8n-local-menu.ps1",
+      "output": "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
+      "notes": "PowerShell menu for guided local stack start, update, logs, status, browser launch, and backup actions.",
+      "fidelity": "exact"
+    },
+    {
       "kind": "curated",
       "source": "curated_output_for_ai/templates/mcp-configs/README.md",
       "output": "skills/n8n-local-setup/templates/mcp-configs/README.md",
@@ -267,6 +343,10 @@
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md",
+      "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
+      "skills/n8n-local-setup/templates/local-stack/.env.example",
+      "skills/n8n-local-setup/templates/local-stack/n8n-local.cmd",
+      "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
       "skills/n8n-local-setup/templates/mcp-configs/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
@@ -295,14 +375,14 @@
   "project": {
     "name": "Local n8n Setup",
     "category": "n8n",
-    "summary": "Preserved local n8n setup guides plus platform, tunneling, MCP configuration templates, and references to the generated n8n-agent-rules skill."
+    "summary": "Preserved local n8n setup guides plus Docker Compose, Postgres, ngrok-only tunneling, guided local stack launcher templates, MCP configuration templates, and references to the generated n8n-agent-rules skill."
   },
   "surface": {
     "publish_as": "both",
     "skill": {
       "status": "published",
       "path": "skills/n8n-local-setup",
-      "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and platform references while depending on n8n-agent-rules for workflow/live n8n rules."
+      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, MCP config, ngrok tunnel, and platform references while depending on n8n-agent-rules for workflow/live n8n rules."
     },
     "mcp": {
       "status": "published",

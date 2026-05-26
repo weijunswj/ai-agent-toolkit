@@ -13,7 +13,7 @@ It is written for five common setups:
 * Hostinger Docker Manager / Docker Catalog installs.
 * Hostinger VPS template installs.
 * Standard Docker Compose installs on any VPS.
-* Local Docker installs like the Windows setup in this repo.
+* Local Docker Compose installs like the setup in this repo.
 * Local npm installs.
 
 Important:
@@ -101,51 +101,21 @@ That is also the flow used in n8n's official Docker Compose based VPS guides.
 
 ---
 
-## 5. Local Docker Upgrade ( Windows / This Repo Style )
+## 5. Local Docker Compose Upgrade ( This Repo Style )
 
-If you followed the local Docker setup from this repo, paste this whole block into PowerShell.
-
-The defaults assume local n8n on `http://localhost:5678/`.
-For local development, this block keeps the container loopback-only on `127.0.0.1`.
-If you later need public exposure, use the tunneling or VPS guides and confirm access-control, firewall, HTTPS/tunnel, and credential safeguards first.
-Change only `$WEBHOOK_URL` in this block for tunnel, reverse proxy, or VPS test flows.
+If you followed the local setup from this repo, update from the local stack folder that contains `docker-compose.yml` and `.env`.
 
 ```powershell
-$CONTAINER_NAME = "n8n"
-$HOST_PORT = "5678"
-$CONTAINER_PORT = "5678"
-$TZ = "Asia/Singapore"
-$VOLUME_NAME = "n8n_data"
-$IMAGE = "docker.n8n.io/n8nio/n8n:stable"
-$WEBHOOK_URL = "http://localhost:${HOST_PORT}/"
-
-# Optional public webhook example:
-# $WEBHOOK_URL = "https://n8n.yourdomain.com/"
-
-docker pull $IMAGE
-
-docker stop $CONTAINER_NAME 2>$null
-docker rm $CONTAINER_NAME 2>$null
-
-docker volume create $VOLUME_NAME | Out-Null
-
-docker run -d --name $CONTAINER_NAME `
-  -p "127.0.0.1:${HOST_PORT}:${CONTAINER_PORT}" `
-  -e "GENERIC_TIMEZONE=$TZ" `
-  -e "TZ=$TZ" `
-  -e "N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true" `
-  -e "N8N_RUNNERS_ENABLED=true" `
-  -e "WEBHOOK_URL=$WEBHOOK_URL" `
-  -e "N8N_PROXY_HOPS=1" `
-  -v "${VOLUME_NAME}:/home/node/.n8n" `
-  $IMAGE
+docker compose pull
+docker compose up -d --force-recreate
 ```
 
 Notes:
 
-* The Docker volume keeps your local n8n data during the recreate.
-* `WEBHOOK_URL` stays in the command even for localhost, so changing to a public URL later is one-line lazy mode.
-* `N8N_PROXY_HOPS=1` is harmless for this setup and useful once you put n8n behind a tunnel or reverse proxy.
+* The `n8n_data` and `postgres_data` Docker volumes keep local runtime data during the recreate.
+* `WEBHOOK_URL`, `N8N_HOST`, `N8N_PROTOCOL`, and `N8N_PROXY_HOPS` stay in `.env`.
+* ngrok is the only supported local tunnel path in this guide, and it runs as a Compose service.
+* Do not commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live n8n imports/exports.
 
 ---
 
@@ -173,20 +143,7 @@ npm install -g n8n@<version>
 docker compose ps
 ```
 
-If you are using the local single-container Windows setup instead of Compose:
-
-```powershell
-docker ps
-```
-
 ### Check version from inside the container
-
-For the single-container local setup:
-
-```powershell
-$CONTAINER_NAME = "n8n"
-docker exec $CONTAINER_NAME n8n --version
-```
 
 For Compose setups, first find the n8n container name, then run:
 
