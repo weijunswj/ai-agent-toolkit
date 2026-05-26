@@ -6,6 +6,8 @@ Update the project source and run sync.
 -->
 # 3a. Docker Compose + ngrok
 
+The primary local setup guide is [1. Local Setup](local-setup.md). This page is retained as an appendix/reference for focused Compose template details, not as a separate start path.
+
 This is the blessed local stack for this guide.
 
 Docker Compose runs:
@@ -31,10 +33,10 @@ The local Postgres service is only n8n's internal runtime database. It is not Ve
 
 ## Folder Layout
 
-Create a local folder outside this repo:
+The local stack folder can live anywhere. For this guide, the example location is the user's Desktop:
 
 ```text
-C:\n8n-local
+%USERPROFILE%\Desktop\n8n-local
   docker-compose.yml
   n8n-local.cmd
   scripts\
@@ -44,10 +46,10 @@ C:\n8n-local
 
 Copy these templates into that folder:
 
-- [templates/local-stack/docker-compose.yml](../../templates/local-stack/docker-compose.yml)
-- [templates/local-stack/.env.example](../../templates/local-stack/.env.example)
-- [templates/local-stack/n8n-local.cmd](../../templates/local-stack/n8n-local.cmd)
-- [templates/local-stack/scripts/n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1)
+- [docker-compose.yml](../../templates/local-stack/docker-compose.yml)
+- [.env.example](../../templates/local-stack/.env.example)
+- [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd)
+- [n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1)
 
 Rename `.env.example` to `.env`, then fill only local placeholder values.
 
@@ -142,7 +144,7 @@ All values are placeholders. Replace them only in the local `.env` file, never i
 
 ## Start The Stack
 
-From the local stack folder:
+Run this in PowerShell from the local stack folder:
 
 ```powershell
 .\n8n-local.cmd
@@ -160,17 +162,13 @@ The raw start command behind the menu is:
 docker compose up -d
 ```
 
-Open n8n locally:
+Open this URL in your browser for local n8n:
 
-```text
-http://localhost:5678
-```
+[http://localhost:5678](http://localhost:5678)
 
-Open ngrok's local inspector:
+Open this URL in your browser for ngrok's local inspector:
 
-```text
-http://127.0.0.1:4040
-```
+[http://127.0.0.1:4040](http://127.0.0.1:4040)
 
 Use the `WEBHOOK_URL` ngrok URL for external webhook and OAuth callback configuration.
 

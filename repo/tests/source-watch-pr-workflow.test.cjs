@@ -41,7 +41,7 @@ test('source-watch PR notifier remains scheduled-only with minimum write permiss
 });
 
 test('source-watch PR notifier runs trusted main code before branch writes', () => {
-  assert.match(workflow, /uses:\s*actions\/checkout@v4/);
+  assert.match(workflow, /uses:\s*actions\/checkout@v6/);
   assert.match(workflow, /^\s*ref:\s*refs\/heads\/main\s*$/m);
   assert.match(workflow, /^\s*fetch-depth:\s*0\s*$/m);
   assert.match(workflow, /^\s*persist-credentials:\s*false\s*$/m);

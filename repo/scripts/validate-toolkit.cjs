@@ -961,7 +961,8 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const preflightIndex = text.indexOf('- name: Preflight guard');
-  const checkoutIndex = text.indexOf('uses: actions/checkout@v4');
+  const checkoutMatch = text.match(/uses:\s*actions\/checkout@v\d+\b/);
+  const checkoutIndex = checkoutMatch ? checkoutMatch.index : -1;
   const trustedCheckoutIndex = text.indexOf('- name: Checkout trusted base revision');
   const prCheckoutIndex = text.indexOf('- name: Checkout PR head commit');
   if (preflightIndex === -1 || checkoutIndex === -1 || checkoutIndex < preflightIndex) {
