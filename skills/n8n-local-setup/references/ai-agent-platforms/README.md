@@ -14,6 +14,8 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 These platform references explain how each AI platform should consume this toolkit. Generic AI coding agent rules live in [AI Coding Agent Rules](../../../ai-coding-agent-rules/); full n8n operating rules live in [n8n Agent Rules](../../../n8n-agent-rules/).
 
+For local setup, start with [local setup](../n8n/local-setup.md). The platform pages below are secondary references for platform-specific config details.
+
 | Reference | Use when |
 | --- | --- |
 | [codex.md](codex.md) | Codex platform router for local rules, references, and n8n MCP templates. |
