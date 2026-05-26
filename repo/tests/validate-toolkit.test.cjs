@@ -403,11 +403,18 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /Do not edit generated `skills\/` or `mcp\/` outputs directly/);
   assert.match(text, /Do not generate curated files automatically from `_main`/);
   assert.match(text, /## GitHub PR Completion Rules/);
-  assert.match(text, /do not leave completed repo changes uncommitted by default/);
-  assert.match(text, /commit and push to that PR branch automatically after validation/);
-  assert.match(text, /If no working PR exists and changes were made, create a branch and open a PR after validation/);
+  assert.match(text, /do not leave completed repo changes floating silently/);
+  assert.match(text, /A request to make repo changes permits scoped local edits and validation\. It is not by itself permission to push to GitHub, create a PR, or update a PR\./);
+  assert.match(text, /ask for explicit current-turn approval before pushing a branch or opening\/updating a PR/);
+  assert.match(text, /If the user has explicitly approved a working PR lane in the current conversation/);
+  assert.match(text, /related follow-up changes for that same PR may be committed and pushed/);
+  assert.match(text, /Once a working PR exists, include its PR URL/);
+  assert.match(text, /If no PR exists yet, state `PR: none yet`/);
+  assert.match(text, /include the existing PR URL/);
   assert.match(text, /Never push directly to `main`/);
-  assert.match(text, /Do not auto-commit when validation fails or unresolved safety blockers remain/);
+  assert.match(text, /Do not commit, push, open, or update a PR when validation fails or unresolved safety blockers remain/);
+  assert.doesNotMatch(text, /commit and push to that PR branch automatically after validation/);
+  assert.doesNotMatch(text, /If no working PR exists and changes were made, create a branch and open a PR after validation/);
   for (const doc of mandatoryDocs) {
     assert.ok(text.includes(`](${doc})`), `AGENTS.md links ${doc}`);
   }
@@ -431,11 +438,18 @@ test('generic agent-rule source includes GitHub PR completion rules', () => {
   for (const relPath of relPaths) {
     const text = readTextFile(path.join(repoRoot, relPath));
     assert.match(text, /## GitHub PR Completion Rules/, `${relPath} includes PR completion section`);
-    assert.match(text, /do not leave completed repo changes uncommitted by default/, `${relPath} requires completed repo changes to be committed by default`);
-    assert.match(text, /commit and push to that PR branch automatically after validation/, `${relPath} updates the same working PR without re-asking`);
-    assert.match(text, /If no working PR exists and changes were made, create a branch and open a PR after validation/, `${relPath} opens a PR when needed`);
+    assert.match(text, /do not leave completed repo changes floating silently/, `${relPath} requires completed repo changes to be reported`);
+    assert.match(text, /A request to make repo changes permits scoped local edits and validation\. It is not by itself permission to push to GitHub, create a PR, or update a PR\./, `${relPath} distinguishes local edits from GitHub publication`);
+    assert.match(text, /ask for explicit current-turn approval before pushing a branch or opening\/updating a PR/, `${relPath} requires explicit current-turn approval for GitHub publication`);
+    assert.match(text, /If the user has explicitly approved a working PR lane in the current conversation/, `${relPath} preserves approved PR lane context`);
+    assert.match(text, /related follow-up changes for that same PR may be committed and pushed/, `${relPath} preserves same-PR follow-up convenience`);
+    assert.match(text, /Once a working PR exists, include its PR URL/, `${relPath} requires PR URL reporting`);
+    assert.match(text, /If no PR exists yet, state `PR: none yet`/, `${relPath} requires explicit no-PR reporting`);
+    assert.match(text, /include the existing PR URL/, `${relPath} includes existing PR URL in routing questions`);
     assert.match(text, /Never push directly to `main`/, `${relPath} blocks direct main pushes`);
-    assert.match(text, /Do not auto-commit when validation fails or unresolved safety blockers remain/, `${relPath} blocks unsafe auto-commit`);
+    assert.match(text, /Do not commit, push, open, or update a PR when validation fails or unresolved safety blockers remain/, `${relPath} blocks unsafe completion actions`);
+    assert.doesNotMatch(text, /commit and push to that PR branch automatically after validation/, `${relPath} no longer auto-pushes from generic repo-change requests`);
+    assert.doesNotMatch(text, /If no working PR exists and changes were made, create a branch and open a PR after validation/, `${relPath} no longer auto-creates PRs from generic repo-change requests`);
   }
 });
 
