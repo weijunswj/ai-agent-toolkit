@@ -141,6 +141,17 @@ function moveWorkflowStepAfter(text, sourceName, targetName) {
   return `${withoutSource.slice(0, targetEnd)}\n${sourceBlock}${withoutSource.slice(targetEnd)}`;
 }
 
+function replaceWorkflowStepText(text, stepName, search, replacement) {
+  const stepMarker = `      - name: ${stepName}`;
+  const stepStart = text.indexOf(stepMarker);
+  assert.notEqual(stepStart, -1, `missing step: ${stepName}`);
+  const nextStepStart = text.indexOf('\n      - name:', stepStart + stepMarker.length);
+  const stepEnd = nextStepStart === -1 ? text.length : nextStepStart;
+  const stepBlock = text.slice(stepStart, stepEnd);
+  assert.match(stepBlock, search, `missing step text in ${stepName}`);
+  return `${text.slice(0, stepStart)}${stepBlock.replace(search, replacement)}${text.slice(stepEnd)}`;
+}
+
 function manifestsById() {
   return new Map(validator.projectManifests().map((manifest) => [manifest.id, manifest]));
 }
@@ -870,6 +881,36 @@ test('auto-sync generated surfaces workflow keeps privileged preflight before ch
     ['PR files API is required', (text) => text.replace('gh api --paginate \\', 'echo no api \\'), /must query PR changed files before checkout/],
     ['github token is not exposed to sync or validation', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'GH_TOKEN="${{ github.token }}" node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write'), /must expose github.token only to preflight and final push steps/],
     ['should_sync gates checkout and writeback', (text) => text.replace("        if: steps.preflight.outputs.should_sync == 'true'\n        uses: actions/checkout@v6", '        uses: actions/checkout@v6'), /must skip checkout and writeback steps when preflight should_sync is false/]
+  ];
+
+  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
+  const original = readTextFile(workflowPath);
+  for (const [name, mutate, expected] of cases) {
+    const cwd = tempCopy();
+    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, expected, name);
+  }
+});
+
+test('auto-sync generated surfaces workflow requires exact privileged action references', () => {
+  const cases = [
+    [
+      'trusted checkout v1 downgrade is rejected',
+      (text) => replaceWorkflowStepText(text, 'Checkout trusted base revision', /uses: actions\/checkout@v6/, 'uses: actions/checkout@v1'),
+      /Checkout trusted base revision must use actions\/checkout@v6/
+    ],
+    [
+      'PR checkout v1 downgrade is rejected',
+      (text) => replaceWorkflowStepText(text, 'Checkout PR head commit', /uses: actions\/checkout@v6/, 'uses: actions/checkout@v1'),
+      /Checkout PR head commit must use actions\/checkout@v6/
+    ],
+    [
+      'setup-node v1 downgrade is rejected',
+      (text) => replaceWorkflowStepText(text, 'Set up Node.js', /uses: actions\/setup-node@v6/, 'uses: actions/setup-node@v1'),
+      /Set up Node\.js must use actions\/setup-node@v6/
+    ]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');

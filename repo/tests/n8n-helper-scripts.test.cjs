@@ -45,6 +45,12 @@ function findString(value, needle) {
   return false;
 }
 
+function workflowNode(workflow, nodeName) {
+  const node = workflow.nodes.find((candidate) => candidate.name === nodeName);
+  assert.ok(node, `missing workflow node: ${nodeName}`);
+  return node;
+}
+
 function safeWorkflow(overrides = {}) {
   return {
     id: 'wf_safe',
@@ -1167,6 +1173,26 @@ test('RAG workflow templates stay generic, inactive, and source-synced', () => {
     '[Template Unanswered]',
   ]) {
     assert.match(customerSupportText, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), expected);
+  }
+});
+
+test('RAG workflow Code nodes contain executable JavaScript instead of placeholder-only bodies', () => {
+  const cases = [
+    ['customer-support-agent.workflow.template.json', 'Parse Strict JSON Response'],
+    ['rag-ingestion.workflow.template.json', 'Prepare Ingestion Log'],
+    ['rag-ingestion.workflow.template.json', 'Prepare Pinecone Delete Request'],
+  ];
+
+  for (const [fileName, nodeName] of cases) {
+    const workflow = JSON.parse(readText(path.join(sourceRagTemplateDir, fileName)));
+    const node = workflowNode(workflow, nodeName);
+    const jsCode = node.parameters && node.parameters.jsCode;
+
+    assert.equal(node.type, 'n8n-nodes-base.code', nodeName);
+    assert.equal(typeof jsCode, 'string', nodeName);
+    assert.doesNotMatch(jsCode.trim(), /^__SET_[A-Z0-9_]+__$/, nodeName);
+    assert.match(jsCode, /\breturn\b/, nodeName);
+    assert.doesNotThrow(() => new Function(jsCode), nodeName);
   }
 });
 test('Secure CI/CD n8n helper templates stay aligned with workflow toolkit source', () => {

@@ -876,6 +876,11 @@ function workflowStepText(steps, name) {
   return step ? step.text : '';
 }
 
+function workflowStepUses(stepText) {
+  const match = stepText.match(/^\s*uses:\s*([^\s#]+)\s*$/m);
+  return match ? match[1].replace(/^['"]|['"]$/g, '') : '';
+}
+
 function workflowRunCommands(stepText) {
   const lines = stepText.replace(/\r\n/g, '\n').split('\n');
   const runIndex = lines.findIndex((line) => /^\s*run:\s*\|\s*$/.test(line));
@@ -960,20 +965,38 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} must not run live n8n import/export`);
   }
 
+  const steps = workflowStepBlocks(text);
   const preflightIndex = text.indexOf('- name: Preflight guard');
-  const checkoutMatch = text.match(/uses:\s*actions\/checkout@v\d+\b/);
-  const checkoutIndex = checkoutMatch ? checkoutMatch.index : -1;
   const trustedCheckoutIndex = text.indexOf('- name: Checkout trusted base revision');
   const prCheckoutIndex = text.indexOf('- name: Checkout PR head commit');
-  if (preflightIndex === -1 || checkoutIndex === -1 || checkoutIndex < preflightIndex) {
+  const checkoutSteps = steps
+    .map((step, index) => ({ index, textIndex: text.indexOf(`      - name: ${step.name}`), uses: workflowStepUses(step.text) }))
+    .filter((step) => step.uses.startsWith('actions/checkout@'));
+  const checkoutIndex = checkoutSteps
+    .map((step) => step.textIndex)
+    .filter((index) => index !== -1)
+    .sort((a, b) => a - b)[0] ?? -1;
+  const preflightStepOrder = steps.findIndex((step) => step.name === 'Preflight guard');
+  const checkoutStepOrders = checkoutSteps.map((step) => step.index);
+  if (preflightStepOrder === -1 || checkoutStepOrders.length === 0 || checkoutStepOrders.some((index) => index < preflightStepOrder)) {
     fail(errors, `${entry.relPath} must run preflight before any checkout`);
   }
   if (trustedCheckoutIndex === -1 || prCheckoutIndex === -1 || trustedCheckoutIndex < preflightIndex || prCheckoutIndex < preflightIndex) {
     fail(errors, `${entry.relPath} must check out trusted base and PR workspaces only after preflight`);
   }
-  const steps = workflowStepBlocks(text);
   const trustedCheckoutStep = workflowStepText(steps, 'Checkout trusted base revision');
   const prCheckoutStep = workflowStepText(steps, 'Checkout PR head commit');
+  const setupNodeStep = workflowStepText(steps, 'Set up Node.js');
+  const requiredAutoSyncActionReferences = [
+    { stepName: 'Checkout trusted base revision', stepText: trustedCheckoutStep, expectedUses: 'actions/checkout@v6' },
+    { stepName: 'Checkout PR head commit', stepText: prCheckoutStep, expectedUses: 'actions/checkout@v6' },
+    { stepName: 'Set up Node.js', stepText: setupNodeStep, expectedUses: 'actions/setup-node@v6' }
+  ];
+  for (const { stepName, stepText, expectedUses } of requiredAutoSyncActionReferences) {
+    if (workflowStepUses(stepText) !== expectedUses) {
+      fail(errors, `${entry.relPath} ${stepName} must use ${expectedUses}`);
+    }
+  }
   if (!trustedCheckoutStep.includes('repository: ${{ github.repository }}') ||
       !trustedCheckoutStep.includes('ref: ${{ github.event.pull_request.base.sha }}') ||
       !trustedCheckoutStep.includes('path: trusted')) {

@@ -273,9 +273,9 @@
     "category": "n8n",
     "name": "workflow-toolkit",
     "title": "n8n Workflow Toolkit",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "version_policy": "semver",
-    "version_notes": "Adds reviewed chatbot/RAG workflow templates and hardens the sanitizer to remove live error workflow and MCP exposure settings from reusable workflow templates.",
+    "version_notes": "Fixes RAG workflow template Code nodes that were published with placeholder-only JavaScript bodies.",
     "project": {
       "name": "n8n Workflow Toolkit",
       "category": "n8n",
