@@ -212,20 +212,20 @@
     "category": "n8n",
     "name": "local-setup",
     "title": "Local n8n Setup",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "version_policy": "semver",
-    "version_notes": "Removes ownership of the full n8n ruleset and points local setup users to the generated n8n-agent-rules skill.",
+    "version_notes": "Refactors the local setup guide around a Docker Compose stack with n8n, Postgres, ngrok as the only supported local tunnel path, and a guided n8n-local.cmd launcher.",
     "project": {
       "name": "Local n8n Setup",
       "category": "n8n",
-      "summary": "Preserved local n8n setup guides plus platform, tunneling, MCP configuration templates, and references to the generated n8n-agent-rules skill."
+      "summary": "Preserved local n8n setup guides plus Docker Compose, Postgres, ngrok-only tunneling, guided local stack launcher templates, MCP configuration templates, and references to the generated n8n-agent-rules skill."
     },
     "surface": {
       "publish_as": "both",
       "skill": {
         "status": "published",
         "path": "skills/n8n-local-setup",
-        "summary": "Helps an agent choose safe local n8n setup, MCP config, tunnel, and platform references while depending on n8n-agent-rules for workflow/live n8n rules."
+        "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, MCP config, ngrok tunnel, and platform references while depending on n8n-agent-rules for workflow/live n8n rules."
       },
       "mcp": {
         "status": "published",
@@ -257,6 +257,10 @@
       "skills/n8n-local-setup/references/n8n/tunnelling.md",
       "skills/n8n-local-setup/references/n8n/upgrading.md",
       "skills/n8n-local-setup/references/n8n/vps-hosting.md",
+      "skills/n8n-local-setup/templates/local-stack/.env.example",
+      "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
+      "skills/n8n-local-setup/templates/local-stack/n8n-local.cmd",
+      "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
       "skills/n8n-local-setup/templates/mcp-configs/README.md",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",

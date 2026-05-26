@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-n8n}
+      POSTGRES_USER: ${POSTGRES_USER:-n8n}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:stable
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:5678:5678"
+    env_file:
+      - .env
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-n8n}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    depends_on:
+      - n8n
+    env_file:
+      - .env
+    command: http --url=${NGROK_DOMAIN} n8n:5678
+    ports:
+      - "127.0.0.1:4040:4040"
+
+volumes:
+  postgres_data:
+  n8n_data:

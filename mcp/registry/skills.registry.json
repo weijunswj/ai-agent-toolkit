@@ -184,7 +184,7 @@
     "title": "n8n Local Setup",
     "category": "automation",
     "path": "skills/n8n-local-setup/",
-    "purpose": "Safe local n8n setup, MCP config routing, tunneling choices, Docker setup, and platform setup notes. Full n8n operating rules are owned by n8n-agent-rules.",
+    "purpose": "Safe local n8n Docker Compose setup, Postgres/ngrok stack templates, MCP config routing, and platform setup notes. Full n8n operating rules are owned by n8n-agent-rules.",
     "supported_platforms": [
       "ChatGPT",
       "Codex",
