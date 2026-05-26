@@ -52,7 +52,7 @@
     },
     {
       "parameters": {
-        "content": "# INGESTION LOG\n\n- Records append-only ingestion history in `kb_ingestion` for review.\n- Updates `__SET_LOOKUP_KB_CURRENT_STATE_SHEETNAME__` after successful Pinecone insert so dedupe reflects current indexed content.\n- Groups Pinecone chunk outputs back into one log row per source file.\n- Appends changed ingestion events as audit rows; unchanged repeated events stop before Pinecone cleanup and do not append another row.\n- Keeps explicit column mappings in `Append KB Ingestion Log` and `Upsert KB Current State`; changing Sheets operations in the UI can clear them.\n- Uses RAW sheet writes so file names stay literal while chunk counts remain numeric.\n- Sets the `file_name` column hyperlink display to plain text after logging; `file_url` remains the clickable Drive URL.\n\n## Required manual configuration:\n\n- **Append KB Ingestion Log**\n  - `documentId.value`: Set this to the Google Sheets workbook used for ingestion logs.\n  - Sheet headers must include `file_url`, `event_type`, `modified_time`, `content_sha256`, and `ingestion_key`.\n- **Upsert KB Current State**\n  - `sheetName`: Set this to the `__SET_LOOKUP_KB_CURRENT_STATE_SHEETNAME__` tab.\n  - Sheet headers must include `file_id`, `file_name`, `namespace`, `current_content_sha256`, `current_ingestion_key`, `last_successful_execution_id`, `last_indexed_at`, and `status`.\n- **Disable File Name Hyperlinks**\n  - `url`: Keep the spreadsheet ID aligned with `Append KB Ingestion Log.documentId.value`.\n  - `range.sheetId` and column indexes: Keep these aligned with the `kb_ingestion` sheet and the `file_name` column.",
+        "content": "# INGESTION LOG\n\n- Records append-only ingestion history in `kb_ingestion` for review.\n- Updates `__SET_LOOKUP_KB_CURRENT_STATE_SHEETNAME__` after successful Pinecone insert so dedupe reflects current indexed content.\n- Groups Pinecone chunk outputs back into one log row per source file.\n- Appends changed ingestion events as audit rows; unchanged repeated events stop before Pinecone cleanup and do not append another row.\n- Keeps explicit column mappings in `Append KB Ingestion Log` and `Upsert KB Current State`; changing Sheets operations in the UI can clear them.\n- Uses RAW sheet writes so file names stay literal while chunk counts remain numeric.\n- Sets the `file_name` column hyperlink display to plain text after logging; `file_url` remains the clickable Drive URL.\n\n## Required manual configuration:\n\n- **Workflow timezone placeholders**\n  - `__SET_WORKFLOW_TIMEZONE__`: Set this to the workflow timezone used by settings and ingestion timestamp expressions.\n  - `__SET_WORKFLOW_TIMEZONE_LABEL__`: Set this to the short label appended to sheet timestamps.\n- **Append KB Ingestion Log**\n  - `documentId.value`: Set this to the Google Sheets workbook used for ingestion logs.\n  - Sheet headers must include `file_url`, `event_type`, `modified_time`, `content_sha256`, and `ingestion_key`.\n- **Upsert KB Current State**\n  - `sheetName`: Set this to the `__SET_LOOKUP_KB_CURRENT_STATE_SHEETNAME__` tab.\n  - Sheet headers must include `file_id`, `file_name`, `namespace`, `current_content_sha256`, `current_ingestion_key`, `last_successful_execution_id`, `last_indexed_at`, and `status`.\n- **Disable File Name Hyperlinks**\n  - `url`: Keep the spreadsheet ID aligned with `Append KB Ingestion Log.documentId.value`.\n  - `range.sheetId` and column indexes: Keep these aligned with the `kb_ingestion` sheet and the `file_name` column.",
         "height": 1212,
         "width": 820,
         "color": 4
@@ -188,13 +188,13 @@
             {
               "id": "prepare-chunk-metadata-5",
               "name": "modified_time",
-              "value": "={{ $json.modifiedTime ? new Date($json.modifiedTime).toLocaleString('sv-SE', { timeZone: 'Asia/Singapore', hour12: false }) + ' SGT' : ($now.setZone('Asia/Singapore').toFormat('yyyy-MM-dd HH:mm:ss') + ' SGT') }}",
+              "value": "={{ $json.modifiedTime ? new Date($json.modifiedTime).toLocaleString('sv-SE', { timeZone: '__SET_WORKFLOW_TIMEZONE__', hour12: false }) + ' __SET_WORKFLOW_TIMEZONE_LABEL__' : ($now.setZone('__SET_WORKFLOW_TIMEZONE__').toFormat('yyyy-MM-dd HH:mm:ss') + ' __SET_WORKFLOW_TIMEZONE_LABEL__') }}",
               "type": "string"
             },
             {
               "id": "prepare-chunk-metadata-6",
               "name": "ingested_at",
-              "value": "={{ $now.setZone('Asia/Singapore').toFormat('yyyy-MM-dd HH:mm:ss') + ' SGT' }}",
+              "value": "={{ $now.setZone('__SET_WORKFLOW_TIMEZONE__').toFormat('yyyy-MM-dd HH:mm:ss') + ' __SET_WORKFLOW_TIMEZONE_LABEL__' }}",
               "type": "string"
             },
             {
@@ -1154,7 +1154,7 @@
   },
   "settings": {
     "executionOrder": "v1",
-    "timezone": "Asia/Singapore",
+    "timezone": "__SET_WORKFLOW_TIMEZONE__",
     "binaryMode": "separate",
     "timeSavedMode": "fixed",
     "callerPolicy": "workflowsFromSameOwner"

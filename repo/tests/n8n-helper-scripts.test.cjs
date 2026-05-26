@@ -1139,7 +1139,12 @@ test('RAG workflow templates stay generic, inactive, and source-synced', () => {
     assert.equal(publishedText, sourceText, fileName);
     assert.equal(workflow.active, false, fileName);
     assert.doesNotMatch(sourceText, /SKR|SpaceKoncept|SpaceKonceptRental|Swooshz/, fileName);
+    assert.doesNotMatch(sourceText, /Asia\/Singapore/, fileName);
+    assert.doesNotMatch(sourceText, /Singapore\/British English/, fileName);
+    assert.doesNotMatch(sourceText, /\bSGT\b/, fileName);
     assert.doesNotMatch(sourceText, /What you want\?/, fileName);
+    assert.match(sourceText, /__SET_WORKFLOW_TIMEZONE__/, fileName);
+    assert.match(sourceText, /__SET_WORKFLOW_TIMEZONE_LABEL__/, fileName);
     assert.doesNotMatch(sourceText, /"credentials"\s*:/, fileName);
     assert.doesNotMatch(sourceText, /"webhookId"\s*:/, fileName);
     assert.doesNotMatch(sourceText, /"errorWorkflow"\s*:/, fileName);
@@ -1151,6 +1156,7 @@ test('RAG workflow templates stay generic, inactive, and source-synced', () => {
   const customerSupportText = readText(path.join(sourceRagTemplateDir, 'customer-support-agent.workflow.template.json'));
   for (const expected of [
     'Hi, how can I help you today?',
+    'Use clear, professional English unless the workflow owner configures another style.',
     'TEMPLATE-MSG-',
     'TEMPLATE-CONV-',
     'TEMPLATE-DEDUP-',
