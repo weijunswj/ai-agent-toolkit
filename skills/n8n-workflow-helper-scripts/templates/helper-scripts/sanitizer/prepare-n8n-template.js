@@ -34,6 +34,11 @@ const NODE_STRIP_FIELDS = new Set([
   'webhookId',
 ]);
 
+const SETTINGS_STRIP_FIELDS = new Set([
+  'availableInMCP',
+  'errorWorkflow',
+]);
+
 const CACHE_FIELDS = new Set([
   'cachedResultName',
   'cachedResultUrl',
@@ -336,6 +341,16 @@ function stripTopLevelFields(workflow) {
   return clean;
 }
 
+function stripWorkflowSettings(settings) {
+  if (!isObject(settings)) return {};
+
+  const clean = {};
+  for (const [key, value] of Object.entries(settings)) {
+    if (!SETTINGS_STRIP_FIELDS.has(key)) clean[key] = value;
+  }
+  return clean;
+}
+
 function normaliseKeys(value) {
   if (Array.isArray(value)) return value.map(normaliseKeys);
   if (!isObject(value)) return value;
@@ -572,7 +587,7 @@ function stripTemplate(workflow, options) {
   }
 
   clean.connections = isObject(clean.connections) ? normaliseKeys(clean.connections) : {};
-  clean.settings = isObject(clean.settings) ? normaliseKeys(clean.settings) : {};
+  clean.settings = normaliseKeys(stripWorkflowSettings(clean.settings));
 
   if (options.preserveUnicode) {
     // Node parameters have already been sanitised. PreserveUnicode only keeps future manual non-ASCII untouched.

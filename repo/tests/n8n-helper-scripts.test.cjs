@@ -453,6 +453,25 @@ test('prepare-n8n-template.js strips live fields and writes sanitized template o
   assert.match(prepared.nodes[0].parameters.url, /^__SET_HTTP_REQUEST_URL__$/);
 });
 
+test('prepare-n8n-template.js strips live workflow settings', () => {
+  const { workflow } = stripTemplate(safeWorkflow({
+    id: 'workflow-live-settings',
+    name: 'Live Settings Test',
+    active: true,
+    settings: {
+      executionOrder: 'v1',
+      errorWorkflow: 'd7af97c3-9c86-47d2-a5de-548592fd9cce',
+      availableInMCP: true,
+      binaryMode: 'separate',
+    },
+  }), {});
+
+  assert.deepEqual(workflow.settings, {
+    executionOrder: 'v1',
+    binaryMode: 'separate',
+  });
+});
+
 test('prepare-n8n-template.js sanitizes reusable config literals and expression defaults', () => {
   const cwd = tempDir();
   const inputPath = path.join(cwd, '.to-sanitise', 'workflow.json');

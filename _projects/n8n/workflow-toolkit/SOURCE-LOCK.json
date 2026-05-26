@@ -26,7 +26,7 @@
       "source_path": "scripts/prepare-n8n-template.js",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/sanitizer/prepare-n8n-template.js",
       "source_blob_sha": "4d09cc76a158a5edb56f9cf8e05c54a502fb4ad6",
-      "notes": "Usage text was updated after rehoming the sanitizer helper so it no longer points at the original scripts/ path."
+      "notes": "Usage text was updated after rehoming the sanitizer helper so it no longer points at the original scripts/ path. Toolkit-adapted to strip live error workflow links and MCP exposure settings from reusable template output."
     },
     {
       "mode": "adapted",

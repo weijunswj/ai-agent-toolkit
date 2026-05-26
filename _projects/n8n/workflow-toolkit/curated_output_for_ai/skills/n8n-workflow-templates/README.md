@@ -15,6 +15,8 @@ This skill depends on `n8n-agent-rules`. Apply that skill before editing, valida
 ## Included Templates
 
 - [Global Error Handler](templates/error-handling/global-error-handler.template.json)
+- [RAG Customer Support Agent](templates/chatbot-with-RAG/customer-support-agent.workflow.template.json)
+- [RAG Knowledge Base Ingestion](templates/chatbot-with-RAG/rag-ingestion.workflow.template.json)
 
 ## Safety Rules
 
