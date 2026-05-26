@@ -6,13 +6,16 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup Skill
 
-Instruction-only skill for safe local n8n setup, MCP config routing, Docker/tunnel setup, and platform setup guidance.
+Instruction-only skill for safe local n8n setup, MCP config routing, Docker Compose plus Postgres, ngrok tunnel setup, and platform setup guidance.
 
 The copied skill folder includes:
 
 - [n8n setup references](references/n8n/)
 - [AI-agent platform references](references/ai-agent-platforms/)
+- [local Docker Compose stack templates](templates/local-stack/)
 - [MCP config templates](templates/mcp-configs/)
+
+The local Fast Path is `n8n + postgres + ngrok` through Docker Compose. Start it through `templates/local-stack/n8n-local.cmd` for the guided menu, update checks, logs, status, browser links, and Postgres backup action. ngrok is the only supported local tunnel path in this guide, and `.env.example` is placeholder-only.
 
 Normal use of this skill does not require `_projects/`.
 

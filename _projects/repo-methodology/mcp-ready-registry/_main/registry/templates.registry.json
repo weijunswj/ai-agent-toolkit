@@ -15,6 +15,11 @@
     "path": "skills/n8n-local-setup/templates/mcp-configs/"
   },
   {
+    "id": "n8n-local-stack",
+    "title": "n8n Local Stack Launcher And Compose Templates",
+    "path": "skills/n8n-local-setup/templates/local-stack/"
+  },
+  {
     "id": "n8n-import-export-sync-helpers",
     "title": "n8n Import Export Sync Helpers",
     "path": "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/"

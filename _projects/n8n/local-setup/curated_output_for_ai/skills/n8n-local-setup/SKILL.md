@@ -1,6 +1,6 @@
 ---
 name: n8n-local-setup
-description: Guide AI agents through safe local n8n setup, MCP config selection, tunneling choices, Docker setup, and platform setup notes. For any n8n workflow, helper-script, MCP, or live n8n task, first apply n8n-agent-rules.
+description: Guide AI agents through safe local n8n setup with Docker Compose, Postgres, ngrok, MCP config selection, and platform setup notes. For any n8n workflow, helper-script, MCP, or live n8n task, first apply n8n-agent-rules.
 ---
 
 <!--
@@ -11,7 +11,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup
 
-Use this skill when the user needs to set up or explain local n8n, MCP config, tunneling, Docker Compose plus ngrok, VPS hosting notes, or platform integrations for Codex, Claude Code, OpenCode, or Antigravity.
+Use this skill when the user needs to set up or explain local n8n, MCP config, the Docker Compose local stack, ngrok tunneling, VPS hosting notes, or platform integrations for Codex, Claude Code, OpenCode, or Antigravity.
 
 For any n8n workflow, helper-script, MCP, `n8n_docs`, `n8n_live`, import/export, validation, credential, webhook ID, activation, execution, repo/live sync, or live n8n task, apply `n8n-agent-rules` first.
 
@@ -22,7 +22,10 @@ For any n8n workflow, helper-script, MCP, `n8n_docs`, `n8n_live`, import/export,
 
 ## Core Rules
 
-- Use the local full-fidelity references in [references/n8n/](references/n8n/) for setup, upgrade, tunneling, Docker Compose plus ngrok, and VPS hosting details.
+- Use the local full-fidelity references in [references/n8n/](references/n8n/) for setup, upgrade, ngrok tunneling, Docker Compose plus Postgres, and VPS hosting details.
+- Treat ngrok as the only supported local tunnel path in this guide; Cloudflare tunnels and the built-in n8n tunnel are out of scope.
+- Use the local stack templates in [templates/local-stack/](templates/local-stack/) for `n8n + postgres + ngrok`.
+- Treat [templates/local-stack/n8n-local.cmd](templates/local-stack/n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, and Postgres backup actions.
 - Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, and Claude web routing.
 - Use `skills/ai-coding-agent-rules` for generic AI coding agent rules.
 - Use `skills/n8n-agent-rules` or [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for the full n8n operating ruleset.
@@ -36,6 +39,10 @@ For any n8n workflow, helper-script, MCP, `n8n_docs`, `n8n_live`, import/export,
 - n8n rules skill: `skills/n8n-agent-rules`
 - n8n rules local reference: [references/n8n-agent-rules.md](references/n8n-agent-rules.md)
 - Codex MCP config: [templates/mcp-configs/codex-mcp-config.md](templates/mcp-configs/codex-mcp-config.md)
+- Docker Compose local stack: [templates/local-stack/docker-compose.yml](templates/local-stack/docker-compose.yml)
+- Placeholder environment template: [templates/local-stack/.env.example](templates/local-stack/.env.example)
+- Guided local stack launcher: [templates/local-stack/n8n-local.cmd](templates/local-stack/n8n-local.cmd)
+- PowerShell local stack menu: [templates/local-stack/scripts/n8n-local-menu.ps1](templates/local-stack/scripts/n8n-local-menu.ps1)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
 - Upgrade reference: [references/n8n/upgrading.md](references/n8n/upgrading.md)
 - Claude Code reference: [references/ai-agent-platforms/claude-code.md](references/ai-agent-platforms/claude-code.md)

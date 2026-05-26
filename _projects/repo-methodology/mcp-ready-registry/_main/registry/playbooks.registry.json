@@ -71,12 +71,12 @@
   },
   {
     "id": "n8n-tunnelling",
-    "title": "Tunnelling",
+    "title": "ngrok Tunnelling",
     "path": "skills/n8n-local-setup/references/n8n/tunnelling.md"
   },
   {
     "id": "n8n-docker-compose-ngrok",
-    "title": "Docker Compose Plus ngrok",
+    "title": "Docker Compose n8n Postgres ngrok",
     "path": "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md"
   },
   {
