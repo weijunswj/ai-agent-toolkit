@@ -189,7 +189,8 @@ test('generic AI coding agent templates stay slim and obsolete heavy templates a
   for (const relPath of [
     'skills/ai-coding-agent-rules/AGENTS.template.md',
     'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md'
+    'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/ANTIGRAVITY.bootstrap.template.md'
   ]) {
     const text = readText(relPath);
     assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);

@@ -1,8 +1,20 @@
 {
   "partialSources": {
-    "genericExecution": {
-      "name": "ai-coding-agent-execution.md",
-      "rel": "_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md"
+    "managedToolkit": {
+      "name": "agent-toolkit-managed-block.md",
+      "rel": "_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md"
+    },
+    "managedN8nAdapter": {
+      "name": "agent-toolkit-n8n-adapter-block.md",
+      "rel": "_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-n8n-adapter-block.md"
+    },
+    "claudeShim": {
+      "name": "claude-shim.md",
+      "rel": "_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md"
+    },
+    "geminiShim": {
+      "name": "gemini-shim.md",
+      "rel": "_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md"
     }
   },
   "templateSpecs": [
@@ -11,7 +23,8 @@
       "projectId": "development.ai-coding-agent-rules",
       "sourceSideOutputDir": "_projects/development/ai-coding-agent-rules/_main",
       "payloadSources": [
-        "genericExecution"
+        "managedToolkit",
+        "managedN8nAdapter"
       ],
       "templates": [
         {
@@ -49,6 +62,9 @@
           "audience": "Claude Code",
           "destination": "CLAUDE.md",
           "installSubject": "generic Claude Code rules",
+          "payloadSources": [
+            "claudeShim"
+          ],
           "installExamples": [
             {
               "heading": "Claude Code global rules example",
@@ -68,6 +84,9 @@
           "audience": "Gemini CLI or Antigravity",
           "destination": "GEMINI.md",
           "installSubject": "generic Gemini CLI/Antigravity rules",
+          "payloadSources": [
+            "geminiShim"
+          ],
           "installExamples": [
             {
               "heading": "Gemini CLI and Antigravity global rules example",

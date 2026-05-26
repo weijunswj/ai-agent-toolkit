@@ -85,17 +85,20 @@ function Convert-TemplateDefinition {
   if (Test-JsonProperty -Object $TemplateDefinition -Name 'baselineTemplatePaths') {
     $template.BaselineTemplatePaths = @($TemplateDefinition.baselineTemplatePaths)
   }
+  if (Test-JsonProperty -Object $TemplateDefinition -Name 'payloadSources') {
+    $template.PayloadSourceIds = @($TemplateDefinition.payloadSources)
+  }
 
   return $template
 }
 
-function Convert-AgentRuleTemplateSpec {
+function Resolve-PartialSources {
   param(
-    [Parameter(Mandatory = $true)] $SpecDefinition
+    [Parameter(Mandatory = $true)] $SourceIds
   )
 
   $partialSources = @()
-  foreach ($sourceId in @($SpecDefinition.payloadSources)) {
+  foreach ($sourceId in @($SourceIds)) {
     $source = Get-JsonPropertyValue -Object $SpecDocument.partialSources -Name $sourceId
     if ($null -eq $source) {
       throw "Unknown agent-rule partial source id: $sourceId"
@@ -106,11 +109,27 @@ function Convert-AgentRuleTemplateSpec {
       Rel = $source.rel
     }
   }
+  return @($partialSources)
+}
+
+function Convert-AgentRuleTemplateSpec {
+  param(
+    [Parameter(Mandatory = $true)] $SpecDefinition
+  )
+
+  $partialSources = @(Resolve-PartialSources $SpecDefinition.payloadSources)
+  $templates = @($SpecDefinition.templates | ForEach-Object { Convert-TemplateDefinition $_ })
+  foreach ($template in $templates) {
+    if ($template.ContainsKey('PayloadSourceIds')) {
+      $template.PartialSources = @(Resolve-PartialSources $template.PayloadSourceIds)
+      $template.Remove('PayloadSourceIds')
+    }
+  }
 
   $spec = @{
     ProjectId = $SpecDefinition.projectId
     PartialSources = @($partialSources)
-    Templates = @($SpecDefinition.templates | ForEach-Object { Convert-TemplateDefinition $_ })
+    Templates = @($templates)
   }
   if (Test-JsonProperty -Object $SpecDefinition -Name 'sourceSideOutputDir') {
     $spec.SourceSideOutputDir = $SpecDefinition.sourceSideOutputDir
@@ -130,7 +149,8 @@ function Read-Partial($Source) {
 
 function New-GeneratedNotice {
   param(
-    [Parameter(Mandatory = $true)] [hashtable] $Spec
+    [Parameter(Mandatory = $true)] [hashtable] $Spec,
+    [Parameter(Mandatory = $true)] $PartialSources
   )
 
   $notice = @(
@@ -138,7 +158,7 @@ function New-GeneratedNotice {
     'Generated from toolkit project source. Do not edit directly.',
     "Project: $($Spec.ProjectId)"
   )
-  foreach ($source in $Spec.PartialSources) {
+  foreach ($source in $PartialSources) {
     $notice += "Source: $($source.Rel)"
   }
   $notice += 'Update the project source and run sync.'
@@ -275,7 +295,8 @@ function Write-GeneratedTemplate {
   }
 
   $payloadParts = @()
-  foreach ($partial in $Spec.PartialSources) {
+  $partialSources = if ($Template.ContainsKey('PartialSources')) { @($Template.PartialSources) } else { @($Spec.PartialSources) }
+  foreach ($partial in $partialSources) {
     $payloadParts += Read-Partial $partial
   }
 
@@ -286,7 +307,7 @@ function Write-GeneratedTemplate {
   $bodyParts += (($payloadParts -join "`n`n").TrimEnd())
   $bodyParts += '````````'
 
-  $content = (New-GeneratedNotice $Spec) + (($bodyParts -join "`n").TrimEnd()) + "`n"
+  $content = (New-GeneratedNotice -Spec $Spec -PartialSources $partialSources) + (($bodyParts -join "`n").TrimEnd()) + "`n"
   $target = Join-Path $RepoRoot $Template.Output
   $targetDir = Split-Path -Parent $target
   $utf8NoBom = [System.Text.UTF8Encoding]::new($false)

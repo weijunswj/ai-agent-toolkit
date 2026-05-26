@@ -86,27 +86,27 @@ Words like `continue`, `next`, `apply`, or `do it` only apply to the already-sco
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
 
-## GitHub PR Completion Rules
+## Repo/Folder Publication Approval Rules
 
-When the current conversation is clearly working in a project linked to a GitHub repo, do not leave completed repo changes floating silently. Finish with either a local-only summary or a proposed/approved GitHub PR path.
+When the current conversation is clearly working in a project folder, do not leave completed changes floating silently. Finish with a local-only summary or the approval path that matches the available workflow.
 
-A request to make repo changes permits scoped local edits and validation. It is not by itself permission to push to GitHub, create a PR, or update a PR.
+A request to make repo or folder changes permits scoped local edits and validation. It is not by itself permission to commit, push, create a pull request, create a merge request, or update a remote review.
 
-After making changes, run relevant validation. If no PR lane has been explicitly approved in the current conversation, ask for explicit current-turn approval before pushing a branch or opening/updating a PR. Include the current branch, intended branch, target base branch, commit summary, validation run and result, existing PR URL if any, and intended PR title if opening a new PR.
+Use GitHub-specific approval wording only when the project is actually linked to GitHub, the user provides a GitHub PR URL, or the task is explicitly about GitHub. If no GitHub context exists, do not invent one.
 
-If the user has explicitly approved a working PR lane in the current conversation, related follow-up changes for that same PR may be committed and pushed to that PR branch after validation without asking again.
+If approval is missing, end with the exact bold approval question that matches the workflow:
 
-If the user asks for a different task while a working PR already exists in the same conversation thread, ask whether to commit the new task to the existing PR or open a new PR. When asking, include the existing PR URL.
+**GITHUB APPROVAL NEEDED: Should I push this branch and create a pull request now?**
 
-If the user confirms once that a different task should also go into the existing working PR, keep using that existing PR for the remainder of the same conversation thread unless the user changes direction.
+**VERSION CONTROL APPROVAL NEEDED: Should I commit these local changes now?**
 
-If the user explicitly requests local-only, no-commit, no-push, or no-PR work, obey that request.
+**REMOTE APPROVAL NEEDED: Should I push this branch to the configured remote now?**
 
-Once a working PR exists, include its PR URL in every progress update, approval question, routing question, and final report. If no PR exists yet, state `PR: none yet`.
+**LOCAL CHANGE APPROVAL NEEDED: Should I apply these file changes locally now?**
 
-Never push directly to `main`. Never commit or push secrets, credentials, `.env`, `.n8n-local/`, `.tmp/`, live runtime payloads, product repo secrets, generated package artifacts, or unsafe live-action outputs. Do not commit, push, open, or update a PR when validation fails or unresolved safety blockers remain.
+If the user provides a PR URL, treat it as remote source-of-truth. Never report `PR: none` as a final completion state.
 
-Always report the branch name, commit SHA if committed, PR URL if pushed/opened/updated, validation run, and anything intentionally left uncommitted.
+Never push directly to `main`. Never commit or push secrets, credentials, `.env`, `.n8n-local/`, `.tmp/`, live runtime payloads, product repo secrets, generated package artifacts, or unsafe live-action outputs. Do not commit, push, open, or update a PR or merge request when validation fails or unresolved safety blockers remain.
 
 ## Scope Control
 

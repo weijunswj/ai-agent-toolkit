@@ -1,59 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/AGENTS.template.md
-Update the project source and run sync.
--->
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md
-Source: _projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-n8n-adapter-block.md
-Update the project source and run sync.
--->
-# AGENTS.template.md AI coding agent rules
-
-Use this generated template for Codex or OpenCode.
-
-This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `AGENTS.md`.
-
-Copy or merge the fenced payload into the target repo root as `AGENTS.md` only when the user explicitly wants generic Codex/OpenCode rules installed.
-
-If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
-
-## Codex global rules example
-
-Copy or merge the fenced payload into:
-
-```text
-C:\Users\<your-user>\.codex\AGENTS.md
-```
-
-Or create it with PowerShell:
-
-```text
-mkdir $HOME\.codex -Force
-notepad $HOME\.codex\AGENTS.md
-```
-
-## OpenCode global rules example
-
-Copy or merge the fenced payload into:
-
-```text
-C:\Users\<your-user>\.config\opencode\AGENTS.md
-```
-
-Or create it with PowerShell:
-
-```text
-mkdir $HOME\.config\opencode -Force
-notepad $HOME\.config\opencode\AGENTS.md
-```
-
----
-
-````````md
 <!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
 ## Managed Toolkit Rules
 
@@ -148,16 +92,3 @@ Reason:
 
 **SESSION RESET NEEDED: I loaded/updated agent instructions for this repo, so please start a new agent session before continuing the implementation task.**
 <!-- AI-AGENT-TOOLKIT:END toolkit -->
-
-<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
-## Managed n8n Adapter Rules
-
-**N8N RULES CHECK REQUIRED: If the task involves n8n workflows, MCP, credentials, import/export, live n8n, helper scripts, workflow templates, workflow JSON, or n8n runtime actions, stop before continuing unless the n8n Agent Rules are already loaded and acknowledged.**
-
-**If the n8n Agent Rules are missing, do not continue the user's implementation request. End the response with this exact bold line:**
-
-**N8N RULES APPROVAL NEEDED: Should I load/apply the n8n Agent Rules before continuing this task?**
-
-Do not run live n8n, workflow JSON import/export, credential actions, Docker, activation, execution, publish/unpublish, archive/delete, deployments, production actions, or product repo changes unless the user explicitly asks for that live action and confirms the target in the current turn.
-<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->
-````````

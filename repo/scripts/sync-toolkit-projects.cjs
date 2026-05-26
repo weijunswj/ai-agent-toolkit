@@ -49,14 +49,21 @@ const agentRuleSpecPath = path.join(root, 'repo', 'scripts', 'agent-rule-templat
 const agentRuleSpecDocument = JSON.parse(fs.readFileSync(agentRuleSpecPath, 'utf8'));
 
 function hydrateAgentRuleTemplateSpecs() {
-  return agentRuleSpecDocument.templateSpecs.map((spec) => ({
-    ...spec,
-    partialSources: spec.payloadSources.map((sourceId) => {
+  function hydrateSources(sourceIds) {
+    return sourceIds.map((sourceId) => {
       const source = agentRuleSpecDocument.partialSources[sourceId];
       if (!source) throw new Error(`Unknown agent-rule partial source id: ${sourceId}`);
       return { id: sourceId, ...source };
-    }),
-    templates: spec.templates.map((template) => ({ ...template }))
+    });
+  }
+
+  return agentRuleSpecDocument.templateSpecs.map((spec) => ({
+    ...spec,
+    partialSources: hydrateSources(spec.payloadSources),
+    templates: spec.templates.map((template) => ({
+      ...template,
+      partialSources: Array.isArray(template.payloadSources) ? hydrateSources(template.payloadSources) : undefined
+    }))
   }));
 }
 
@@ -416,12 +423,17 @@ function generatedNotice(project, relPaths) {
   ].join('\n');
 }
 
-function agentRuleSourceTemplateNotice(spec) {
+function agentRuleSourcesForTemplate(spec, template) {
+  return template.partialSources || spec.partialSources;
+}
+
+function agentRuleSourceTemplateNotice(spec, template) {
+  const partialSources = agentRuleSourcesForTemplate(spec, template);
   return [
     '<!--',
     'Generated from toolkit project source. Do not edit directly.',
     `Project: ${spec.projectId}`,
-    ...spec.partialSources.map((source) => `Source: ${source.rel}`),
+    ...partialSources.map((source) => `Source: ${source.rel}`),
     'Update the project source and run sync.',
     '-->',
     ''
@@ -507,7 +519,7 @@ function expectedAgentRuleTemplate(spec, template, options = {}) {
   }
 
   const payloadParts = [];
-  for (const source of spec.partialSources) {
+  for (const source of agentRuleSourcesForTemplate(spec, template)) {
     payloadParts.push(readText(source.rel).trimEnd());
   }
 
@@ -518,7 +530,7 @@ function expectedAgentRuleTemplate(spec, template, options = {}) {
   bodyParts.push(payloadParts.join('\n\n').trimEnd());
   bodyParts.push('````````');
 
-  return agentRuleSourceTemplateNotice(spec) + bodyParts.join('\n').trimEnd() + '\n';
+  return agentRuleSourceTemplateNotice(spec, template) + bodyParts.join('\n').trimEnd() + '\n';
 }
 
 function expectedAgentRuleSourceTemplate(spec, template) {
@@ -596,6 +608,9 @@ function validateAgentRuleTemplateSpecs(errors, projects) {
       validateAgentRulePartialSource(errors, spec, source);
     }
     for (const template of spec.templates) {
+      for (const source of agentRuleSourcesForTemplate(spec, template)) {
+        validateAgentRulePartialSource(errors, spec, source);
+      }
       const hasOutput = validateAgentRuleTemplatePath(errors, spec, template, 'output', 'output');
       const hasPublishedOutput = validateAgentRuleTemplatePath(errors, spec, template, 'publishedOutput', 'published output');
       if (!hasOutput && !hasPublishedOutput) {
@@ -610,7 +625,12 @@ function validateAgentRuleSpecSources(errors, spec, project) {
     fail(errors, `${spec.projectId} agent-rule spec project is not declared`);
     return;
   }
-  for (const source of spec.partialSources) {
+  const allSources = new Map();
+  for (const source of spec.partialSources) allSources.set(source.rel, source);
+  for (const template of spec.templates) {
+    for (const source of agentRuleSourcesForTemplate(spec, template)) allSources.set(source.rel, source);
+  }
+  for (const source of allSources.values()) {
     if (!agentRulePartialSourceRels.has(source.rel)) {
       fail(errors, `${spec.projectId} agent-rule partial source must be declared in agent-rule-template-specs.json: ${source.rel}`);
     }
@@ -646,7 +666,12 @@ function validateAgentRuleSourceTemplates(errors, projects) {
 
   const specsWithMissingPartials = new Set();
   for (const spec of specsWithSourceSideTemplates) {
-    for (const source of spec.partialSources) {
+    const sources = new Map();
+    for (const source of spec.partialSources) sources.set(source.rel, source);
+    for (const template of spec.templates) {
+      for (const source of agentRuleSourcesForTemplate(spec, template)) sources.set(source.rel, source);
+    }
+    for (const source of sources.values()) {
       try {
         if (safeExists(source.rel, 'agent-rule partial source')) continue;
       } catch (error) {

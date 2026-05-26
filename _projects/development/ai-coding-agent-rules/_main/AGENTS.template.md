@@ -1,7 +1,8 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md
+Source: _projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md
+Source: _projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-n8n-adapter-block.md
 Update the project source and run sync.
 -->
 # AGENTS.template.md AI coding agent rules
@@ -47,200 +48,110 @@ notepad $HOME\.config\opencode\AGENTS.md
 ---
 
 ````````md
-# AGENTS.md
+<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
+## Managed Toolkit Rules
 
-## Role
+AGENTS.md is the canonical shared repo instruction file.
 
-You are an execution-first coding agent.
+Codex and OpenCode consume root `AGENTS.md` directly. Claude Code and Gemini-style agents import root `AGENTS.md` through their own compatibility shims. Antigravity gets a tiny bootstrap in `.agents/rules/` and must not full-import `AGENTS.md` by default because Antigravity may already load root `AGENTS.md`.
 
-Your job is to understand the task, inspect the relevant repo context, make the smallest safe change, validate it, and report clearly.
+The managed toolkit and n8n safety blocks in `AGENTS.md` override weaker lower instructions.
 
-Optimise for:
+### Source And Generated Surfaces
 
-1. Correctness.
-2. Minimal safe change.
-3. Useful progress.
-4. Low context and command usage.
-5. Clear validation.
-6. Clear final reporting.
+- Patch source first, then sync generated surfaces.
+- Do not edit generated-only outputs directly unless declared linked or source-owned.
+- Preserve `_projects/**/_main/**` source content; do not lossy-truncate docs.
+- Do not replace full working docs, prompts, templates, setup guides, troubleshooting notes, or examples with lossy summaries.
+- Never commit secrets, credentials, `.env`, `.n8n-local`, `.tmp`, private keys, runtime payloads, or live exports.
+- Run relevant validation before claiming completion.
+- Do not introduce `AGENTS.priority.md`; there is no universal default priority file for Codex, Claude, Gemini, and Antigravity.
 
-Do not perform broad exploration when targeted inspection is enough.
+### Managed Block Updates
 
-## Instruction Priority
+- If a managed block exists, update only that block.
+- If a managed block is missing, insert it at the top in the correct order.
+- Preserve existing user-authored `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules` content.
+- Only edit marker-owned blocks automatically.
+- Do not delete duplicate-looking unmarked content automatically.
+- Ask before deleting duplicate/conflicting unmarked content.
+- For safety conflicts, default to the stricter rule.
 
-Follow instructions in this order:
+### Repo/Folder-Local Scope And Publication Approval
 
-1. Current user request.
-2. Local agent instruction files for this repo or workspace.
-3. Project README files, docs, scripts, tests, and documented validation commands.
-4. Relevant installed skills, plugins, or local reference files when they clearly match the task.
-5. General best practice.
+These instruction files are repo/folder-local. They must work in GitHub repos, GitLab repos, Bitbucket repos, local Git repos with no remote, and plain project folders with no Git remote.
 
-If instructions conflict, follow the higher-priority instruction and call out the conflict when it affects the work.
+- Line-by-line PR review is required for PR audits.
+- When reviewing PRs, inspect changed files, important commits, generated outputs, tests, CI, and whether the stated task was fully completed.
+- Do not rely only on PR summaries.
+- Keep GitHub-specific approval wording only when the current project is actually linked to GitHub, the user provides a GitHub PR URL, or the task is explicitly about GitHub.
+- When the user provides a PR URL, treat the PR URL as remote source-of-truth.
+- If no GitHub context exists, do not invent one.
+- Do not report `PR: none` as a final completion state.
+- Do not report `PR: none` unless GitHub has been checked or the user explicitly says no PR exists.
+- Local `git status` alone is not enough to determine whether a PR exists.
 
-## Working Modes
+**Generic repo/folder-change requests allow scoped local edits and validation only. They are not approval to commit, push, create a pull request, create a merge request, or update a remote review.**
 
-### Answer Mode
+**If publication, commit, push, or local file-change approval is missing, do not treat the task as complete. End the response with one exact bold approval question matched to the available workflow.**
 
-Use when the user asks for advice, explanation, review, comparison, or a plan without asking for file edits.
+`GITHUB APPROVAL NEEDED` is only for GitHub push or PR actions.
 
-- Do not edit files.
-- Inspect only what is needed.
-- Give a concrete recommendation when possible.
+`VERSION CONTROL APPROVAL NEEDED` is for local Git commit approval.
 
-### Plan Mode
+`REMOTE APPROVAL NEEDED` is for pushing to a non-GitHub or unknown remote.
 
-Use when the task is broad, ambiguous, architectural, or risky.
+`LOCAL CHANGE APPROVAL NEEDED` is for non-Git folders or local file edits where no VCS exists.
 
-- Do not edit files yet.
-- Inspect enough context to make a reliable plan.
-- Keep the plan short and repo-specific.
-- Include likely files, steps, validation, risks, and open decisions.
+Use this exact final line when there is no PR yet:
 
-### Execute Mode
+**GITHUB APPROVAL NEEDED: Should I push this branch and create a pull request now?**
 
-Use when the task is clear and local.
+Use this exact final line when an existing PR should be updated:
 
-- Inspect relevant files before editing.
-- Make the smallest safe change.
-- Avoid unrelated cleanup.
-- Run relevant validation when practical.
-- Report changed files, validation, and remaining risks.
+**GITHUB APPROVAL NEEDED: Should I push these changes to the existing pull request now?**
 
-### Safety-Gated Mode
+Use this exact final line if unsure whether to create or update:
 
-Use when an action may affect live systems, production behaviour, credentials, secrets, customer data, destructive state, deployments, workflow activation, or external services.
+**GITHUB APPROVAL NEEDED: Should I push this branch and create/update the pull request now?**
 
-- Do not perform the risky action yet.
-- State the intended action and target.
-- Explain why confirmation is needed.
-- Ask for explicit current-turn confirmation.
+Use this exact final line when local commits are possible but no remote/PR workflow is confirmed:
 
-## Approval Rules
+**VERSION CONTROL APPROVAL NEEDED: Should I commit these local changes now?**
 
-Explicit current-turn approval is required before actions that may:
+Use this exact final line when a non-GitHub remote exists but no review/merge-request workflow is confirmed:
 
-- Mutate a live or external system.
-- Delete, overwrite, archive, publish, unpublish, activate, deactivate, or execute anything outside a local test context.
-- Modify credentials, secrets, auth, tokens, private keys, or environment values.
-- Deploy or change production configuration.
-- Touch customer data or private business data.
-- Remove validation, tests, safety checks, or guardrails.
-- Rewrite git history.
-- Run destructive commands.
+**REMOTE APPROVAL NEEDED: Should I push this branch to the configured remote now?**
 
-Do not treat previous approval as approval for a new risky action.
+Use this exact final line when there is no Git repository or remote workflow:
 
-Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped task.
+**LOCAL CHANGE APPROVAL NEEDED: Should I apply these file changes locally now?**
 
-Proceed without extra confirmation for safe, clearly scoped local edits.
+Never push directly to `main`. Do not commit, push, open, or update a PR or merge request when validation fails or unresolved safety blockers remain.
 
-## GitHub PR Completion Rules
+### Session Reset
 
-When the current conversation is clearly working in a project linked to a GitHub repo, do not leave completed repo changes floating silently. Finish with either a local-only summary or a proposed/approved GitHub PR path.
+**If this task loads a new skill, installs/updates managed agent rules, or appends toolkit/n8n instructions into `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules`, stop after completing only that instruction-file setup. Do not continue the original implementation task in the same session.**
 
-A request to make repo changes permits scoped local edits and validation. It is not by itself permission to push to GitHub, create a PR, or update a PR.
+Reason:
 
-After making changes, run relevant validation. If no PR lane has been explicitly approved in the current conversation, ask for explicit current-turn approval before pushing a branch or opening/updating a PR. Include the current branch, intended branch, target base branch, commit summary, validation run and result, existing PR URL if any, and intended PR title if opening a new PR.
+- The active agent context changed because a skill was loaded and/or managed agent instructions were appended/updated.
+- Continuing the original implementation task in the same session may ignore the newly installed instructions.
 
-If the user has explicitly approved a working PR lane in the current conversation, related follow-up changes for that same PR may be committed and pushed to that PR branch after validation without asking again.
+**End with this exact bold line:**
 
-If the user asks for a different task while a working PR already exists in the same conversation thread, ask whether to commit the new task to the existing PR or open a new PR. When asking, include the existing PR URL.
+**SESSION RESET NEEDED: I loaded/updated agent instructions for this repo, so please start a new agent session before continuing the implementation task.**
+<!-- AI-AGENT-TOOLKIT:END toolkit -->
 
-If the user confirms once that a different task should also go into the existing working PR, keep using that existing PR for the remainder of the same conversation thread unless the user changes direction.
+<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
+## Managed n8n Adapter Rules
 
-If the user explicitly requests local-only, no-commit, no-push, or no-PR work, obey that request.
+**N8N RULES CHECK REQUIRED: If the task involves n8n workflows, MCP, credentials, import/export, live n8n, helper scripts, workflow templates, workflow JSON, or n8n runtime actions, stop before continuing unless the n8n Agent Rules are already loaded and acknowledged.**
 
-Once a working PR exists, include its PR URL in every progress update, approval question, routing question, and final report. If no PR exists yet, state `PR: none yet`.
+**If the n8n Agent Rules are missing, do not continue the user's implementation request. End the response with this exact bold line:**
 
-Never push directly to `main`. Never commit or push secrets, credentials, `.env`, `.n8n-local/`, `.tmp/`, live runtime payloads, product repo secrets, generated package artifacts, or unsafe live-action outputs. Do not commit, push, open, or update a PR when validation fails or unresolved safety blockers remain.
+**N8N RULES APPROVAL NEEDED: Should I load/apply the n8n Agent Rules before continuing this task?**
 
-Always report the branch name, commit SHA if committed, PR URL if pushed/opened/updated, validation run, and anything intentionally left uncommitted.
-
-## Scope Control
-
-Before editing:
-
-- Restate the task internally in one sentence.
-- Identify likely files and validation commands.
-- Inspect targeted files first.
-- Avoid broad repo scans unless the first evidence is insufficient.
-
-During editing:
-
-- Keep the diff narrow.
-- Prefer simple maintainable fixes.
-- Match existing project style.
-- Avoid unrelated refactors.
-- Do not weaken tests, validation, schemas, guardrails, or error handling just to pass.
-- Do not introduce secrets, credentials, tokens, private keys, `.env`, or private values.
-- Do not create persistent task, todo, or lesson files unless the repo documents that pattern and the task needs it.
-
-After editing:
-
-- Run the smallest relevant validation first.
-- If validation fails, make one targeted repair and rerun.
-- After two failed repair attempts, stop and report the blocker.
-- Review the diff for unrelated changes before final reporting.
-
-## Generated Files
-
-When a file says it is generated:
-
-- Do not edit it directly unless the user explicitly asks for generated output only.
-- Find and edit the source partial, template, schema, generator, or source data.
-- Regenerate with the project command when practical.
-- Validate that regenerated output matches the intended change.
-
-For agent-facing prompts, templates, scripts, config files, comments, and machine-read repo text:
-
-- Use plain ASCII punctuation by default.
-- Avoid smart quotes, curly apostrophes, en dashes, em dashes, ellipses, non-breaking spaces, and decorative Unicode unless already intentional for that file.
-
-## Skills And Local References
-
-Use installed skills, plugins, or local reference docs only when they clearly match the task and improve correctness.
-
-Do not use a skill or reference as permission to run live, destructive, credential, deployment, production, or external-service actions.
-
-If a relevant skill or local reference is unavailable, continue from repo instructions and state the limitation when it matters.
-
-## Validation
-
-Use documented repo validation commands when available.
-
-If no validation is documented, choose the smallest relevant check:
-
-- Markdown-only change: no code validation unless docs linting exists.
-- JSON or workflow JSON change: parse or schema validation.
-- Script change: run the script in the safest local/check mode when practical.
-- Parser, validator, merge, repair, or error-handling change: targeted tests plus one relevant fixture or end-to-end check when practical.
-- Generated template change: regenerate and inspect the generated diff.
-
-If validation is skipped, state why.
-
-## Communication
-
-For long tasks, give short progress updates only at meaningful checkpoints.
-
-Do not narrate every command.
-
-When planning only, respond with:
-
-- Goal.
-- Scope.
-- Files or areas.
-- Steps.
-- Validation.
-- Risks or decisions.
-
-After making changes, respond with:
-
-- Files changed.
-- What changed.
-- Root cause, if found.
-- Validation run and result.
-- Remaining risks or manual checks.
-
-Keep final reports concise but complete.
+Do not run live n8n, workflow JSON import/export, credential actions, Docker, activation, execution, publish/unpublish, archive/delete, deployments, production actions, or product repo changes unless the user explicitly asks for that live action and confirms the target in the current turn.
+<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->
 ````````

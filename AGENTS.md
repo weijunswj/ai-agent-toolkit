@@ -1,3 +1,112 @@
+<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
+## Managed Toolkit Rules
+
+AGENTS.md is the canonical shared repo instruction file.
+
+Codex and OpenCode consume root `AGENTS.md` directly. Claude Code and Gemini-style agents import root `AGENTS.md` through their own compatibility shims. Antigravity gets a tiny bootstrap in `.agents/rules/` and must not full-import `AGENTS.md` by default because Antigravity may already load root `AGENTS.md`.
+
+The managed toolkit and n8n safety blocks in `AGENTS.md` override weaker lower instructions.
+
+### Source And Generated Surfaces
+
+- Patch source first, then sync generated surfaces.
+- Do not edit generated-only outputs directly unless declared linked or source-owned.
+- Preserve `_projects/**/_main/**` source content; do not lossy-truncate docs.
+- Do not replace full working docs, prompts, templates, setup guides, troubleshooting notes, or examples with lossy summaries.
+- Never commit secrets, credentials, `.env`, `.n8n-local`, `.tmp`, private keys, runtime payloads, or live exports.
+- Run relevant validation before claiming completion.
+- Do not introduce `AGENTS.priority.md`; there is no universal default priority file for Codex, Claude, Gemini, and Antigravity.
+
+### Managed Block Updates
+
+- If a managed block exists, update only that block.
+- If a managed block is missing, insert it at the top in the correct order.
+- Preserve existing user-authored `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules` content.
+- Only edit marker-owned blocks automatically.
+- Do not delete duplicate-looking unmarked content automatically.
+- Ask before deleting duplicate/conflicting unmarked content.
+- For safety conflicts, default to the stricter rule.
+
+### Repo/Folder-Local Scope And Publication Approval
+
+These instruction files are repo/folder-local. They must work in GitHub repos, GitLab repos, Bitbucket repos, local Git repos with no remote, and plain project folders with no Git remote.
+
+- Line-by-line PR review is required for PR audits.
+- When reviewing PRs, inspect changed files, important commits, generated outputs, tests, CI, and whether the stated task was fully completed.
+- Do not rely only on PR summaries.
+- Keep GitHub-specific approval wording only when the current project is actually linked to GitHub, the user provides a GitHub PR URL, or the task is explicitly about GitHub.
+- When the user provides a PR URL, treat the PR URL as remote source-of-truth.
+- If no GitHub context exists, do not invent one.
+- Do not report `PR: none` as a final completion state.
+- Do not report `PR: none` unless GitHub has been checked or the user explicitly says no PR exists.
+- Local `git status` alone is not enough to determine whether a PR exists.
+
+**Generic repo/folder-change requests allow scoped local edits and validation only. They are not approval to commit, push, create a pull request, create a merge request, or update a remote review.**
+
+**If publication, commit, push, or local file-change approval is missing, do not treat the task as complete. End the response with one exact bold approval question matched to the available workflow.**
+
+`GITHUB APPROVAL NEEDED` is only for GitHub push or PR actions.
+
+`VERSION CONTROL APPROVAL NEEDED` is for local Git commit approval.
+
+`REMOTE APPROVAL NEEDED` is for pushing to a non-GitHub or unknown remote.
+
+`LOCAL CHANGE APPROVAL NEEDED` is for non-Git folders or local file edits where no VCS exists.
+
+Use this exact final line when there is no PR yet:
+
+**GITHUB APPROVAL NEEDED: Should I push this branch and create a pull request now?**
+
+Use this exact final line when an existing PR should be updated:
+
+**GITHUB APPROVAL NEEDED: Should I push these changes to the existing pull request now?**
+
+Use this exact final line if unsure whether to create or update:
+
+**GITHUB APPROVAL NEEDED: Should I push this branch and create/update the pull request now?**
+
+Use this exact final line when local commits are possible but no remote/PR workflow is confirmed:
+
+**VERSION CONTROL APPROVAL NEEDED: Should I commit these local changes now?**
+
+Use this exact final line when a non-GitHub remote exists but no review/merge-request workflow is confirmed:
+
+**REMOTE APPROVAL NEEDED: Should I push this branch to the configured remote now?**
+
+Use this exact final line when there is no Git repository or remote workflow:
+
+**LOCAL CHANGE APPROVAL NEEDED: Should I apply these file changes locally now?**
+
+Never push directly to `main`. Do not commit, push, open, or update a PR or merge request when validation fails or unresolved safety blockers remain.
+
+### Session Reset
+
+**If this task loads a new skill, installs/updates managed agent rules, or appends toolkit/n8n instructions into `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules`, stop after completing only that instruction-file setup. Do not continue the original implementation task in the same session.**
+
+Reason:
+
+- The active agent context changed because a skill was loaded and/or managed agent instructions were appended/updated.
+- Continuing the original implementation task in the same session may ignore the newly installed instructions.
+
+**End with this exact bold line:**
+
+**SESSION RESET NEEDED: I loaded/updated agent instructions for this repo, so please start a new agent session before continuing the implementation task.**
+<!-- AI-AGENT-TOOLKIT:END toolkit -->
+
+<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
+## Managed n8n Adapter Rules
+
+**N8N RULES CHECK REQUIRED: If the task involves n8n workflows, MCP, credentials, import/export, live n8n, helper scripts, workflow templates, workflow JSON, or n8n runtime actions, stop before continuing unless the n8n Agent Rules are already loaded and acknowledged.**
+
+**If the n8n Agent Rules are missing, do not continue the user's implementation request. End the response with this exact bold line:**
+
+**N8N RULES APPROVAL NEEDED: Should I load/apply the n8n Agent Rules before continuing this task?**
+
+Do not run live n8n, workflow JSON import/export, credential actions, Docker, activation, execution, publish/unpublish, archive/delete, deployments, production actions, or product repo changes unless the user explicitly asks for that live action and confirms the target in the current turn.
+<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->
+
+# Existing user / repo content below
+
 # AI Agent Toolkit Repo Rules
 
 This repo is the canonical reusable AI Agent Toolkit.
@@ -55,28 +164,6 @@ This repo has a source layer and a published layer.
 - Do not generate curated files automatically from `_main`; curated content is reviewed source.
 - Do not weaken safety rules around credentials, `.env`, `.tmp`, `.n8n-local`, live n8n actions, approval, attribution, or local-only constraints.
 - Run sync, check, and relevant tests before reporting completion.
-
-## GitHub PR Completion Rules
-
-When the current conversation is clearly working in a project linked to a GitHub repo, do not leave completed repo changes floating silently. Finish with either a local-only summary or a proposed/approved GitHub PR path.
-
-A request to make repo changes permits scoped local edits and validation. It is not by itself permission to push to GitHub, create a PR, or update a PR.
-
-After making changes, run relevant validation. If no PR lane has been explicitly approved in the current conversation, ask for explicit current-turn approval before pushing a branch or opening/updating a PR. Include the current branch, intended branch, target base branch, commit summary, validation run and result, existing PR URL if any, and intended PR title if opening a new PR.
-
-If the user has explicitly approved a working PR lane in the current conversation, related follow-up changes for that same PR may be committed and pushed to that PR branch after validation without asking again.
-
-If the user asks for a different task while a working PR already exists in the same conversation thread, ask whether to commit the new task to the existing PR or open a new PR. When asking, include the existing PR URL.
-
-If the user confirms once that a different task should also go into the existing working PR, keep using that existing PR for the remainder of the same conversation thread unless the user changes direction.
-
-If the user explicitly requests local-only, no-commit, no-push, or no-PR work, obey that request.
-
-Once a working PR exists, include its PR URL in every progress update, approval question, routing question, and final report. If no PR exists yet, state `PR: none yet`.
-
-Never push directly to `main`. Never commit or push secrets, credentials, `.env`, `.n8n-local/`, `.tmp/`, live runtime payloads, product repo secrets, generated package artifacts, or unsafe live-action outputs. Do not commit, push, open, or update a PR when validation fails or unresolved safety blockers remain.
-
-Always report the branch name, commit SHA if committed, PR URL if pushed/opened/updated, validation run, and anything intentionally left uncommitted.
 
 ## Mandatory Repo Docs By Task
 

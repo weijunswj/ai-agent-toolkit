@@ -1,6 +1,6 @@
 ---
 name: ai-coding-agent-rules
-description: Install or explain generic AI coding agent execution rules for Codex/OpenCode AGENTS.md, Claude Code CLAUDE.md, and Gemini CLI or Antigravity GEMINI.md files. Use when a user wants reusable slim baseline coding-agent rules, inert instruction templates, or a safe merge plan for existing agent instruction files.
+description: Use when starting repository or project-folder coding work and local instruction files may be missing, stale, unchecked, or lacking AI-AGENT-TOOLKIT managed marker blocks.
 ---
 
 <!--
@@ -11,23 +11,34 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # AI Coding Agent Rules
 
-Use this skill when the user wants generic execution-first AI coding agent rules for a repo, user profile, or agent platform.
+Tiny automatic repo-instruction bootstrap/checker for local project instruction files.
 
-## Core Rules
+Use this skill automatically before repository editing work when any of these are true:
 
-- Use the inert templates in this skill folder as copy or merge sources.
-- Copy or merge `AGENTS.template.md` into `AGENTS.md` for Codex or OpenCode.
-- Copy or merge `CLAUDE.template.md` into `CLAUDE.md` for Claude Code.
-- Copy or merge `GEMINI.template.md` into `GEMINI.md` for Gemini CLI or Antigravity.
-- Keep these generic templates compact and domain-neutral.
-- Do not paste full domain rules, skill-routing tables, or tool-specific platform notes into the default generic templates.
-- Never overwrite an existing active instruction file. Read it first and produce a merge or diff plan.
-- Keep the `.template.md` files inert inside the skill folder. Do not rename them inside `skills/**`.
+- The repo has no `AGENTS.md`.
+- The repo has no `CLAUDE.md`.
+- The repo has no `GEMINI.md`.
+- The repo has no `.agents/rules/00-agent-toolkit-bootstrap.md`.
+- Existing instruction files lack `AI-AGENT-TOOLKIT` managed marker blocks.
+- Existing managed marker blocks are stale or out of order.
+- The session appears to be the first agent session after toolkit skills were installed.
 
-## Workflow
+## Cheap Check First
 
-1. Identify the target agent platform and target active instruction filename.
-2. Read the matching inert template when exact copy-ready content matters.
-3. If the target active file already exists, compare the current file with the template and propose a minimal merge.
-4. Keep optional domain rules separate from the generic baseline.
-5. For n8n workflow and MCP safety rules, install or load `skills/n8n-agent-rules` instead of copying the full n8n rules into global always-on generic instructions.
+1. Locate the project folder or repo root. This works for GitHub, GitLab, Bitbucket, local Git repos, and plain folders.
+2. Inspect `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
+3. Check for current toolkit managed marker blocks and the expected order.
+4. If all required files and markers are current, do not rewrite anything; continue the original user task.
+5. If files are missing or stale, create/update only toolkit-managed blocks and shims from the referenced templates.
+6. Preserve unmarked user-authored content. Do not delete duplicate/conflicting unmarked content automatically; report it.
+7. After creating/updating instruction files, stop and end with:
+
+**SESSION RESET NEEDED: I loaded/updated agent instructions for this repo, so please start a new agent session before continuing the implementation task.**
+
+## Boundaries
+
+This automatic bootstrap is for local repo/folder instruction files only. It must not push, create or update a PR, touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product repos, workflow JSON, imports, exports, or runtime actions.
+
+Do not install heavy global `AGENTS.md` or global `GEMINI.md` rules. After setup, the repo-local files are the source of truth.
+
+Use referenced files for full content: `AGENTS.template.md`, `CLAUDE.template.md`, `GEMINI.template.md`, and `ANTIGRAVITY.bootstrap.template.md`.

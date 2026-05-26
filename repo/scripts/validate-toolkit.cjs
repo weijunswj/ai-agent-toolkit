@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const docContractSync = require('./sync-repo-doc-contract.cjs');
+const agentInstructionSync = require('./sync-agent-instruction-shims.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
 const projectSync = require('./sync-toolkit-projects.cjs');
@@ -31,6 +32,9 @@ function escapeRegExp(value) {
 const expectedFiles = [
   'README.md',
   'AGENTS.md',
+  'CLAUDE.md',
+  'GEMINI.md',
+  '.agents/rules/00-agent-toolkit-bootstrap.md',
   'package.json',
   '.gitignore',
   '.gitattributes',
@@ -95,6 +99,7 @@ const expectedFiles = [
   'skills/ai-coding-agent-rules/AGENTS.template.md',
   'skills/ai-coding-agent-rules/CLAUDE.template.md',
   'skills/ai-coding-agent-rules/GEMINI.template.md',
+  'skills/ai-coding-agent-rules/ANTIGRAVITY.bootstrap.template.md',
   'skills/n8n-agent-rules/SKILL.md',
   'skills/n8n-agent-rules/README.md',
   'skills/n8n-agent-rules/n8n-agent-rules.md',
@@ -105,9 +110,15 @@ const expectedFiles = [
   'skills/n8n-local-setup/references/n8n-agent-rules.md',
   'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
   'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
+  '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md',
+  '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-n8n-adapter-block.md',
+  '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md',
+  '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md',
+  '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md',
   'repo/scripts/agent-rule-template-specs.json',
   'repo/scripts/build-agent-rule-templates.ps1',
   'repo/scripts/_build-agent-rule-templates.cmd',
+  'repo/scripts/sync-agent-instruction-shims.cjs',
   'repo/scripts/validate-toolkit.cjs',
   'repo/scripts/sync-toolkit-projects.cjs',
   'repo/scripts/audit-project-source-locks.cjs',
@@ -133,6 +144,7 @@ const expectedDirs = [
   '_projects/n8n/local-setup/_main',
   '_projects/development/ai-coding-agent-rules',
   '_projects/development/ai-coding-agent-rules/_main',
+  '_projects/development/ai-coding-agent-rules/_main/_partials',
   '_projects/n8n/workflow-toolkit',
   '_projects/n8n/workflow-toolkit/_main',
   '_projects/cicd/secure-installer',
@@ -173,6 +185,8 @@ const expectedDirs = [
   'mcp/installer-mcp',
   'mcp/projects',
   'mcp/registry',
+  '.agents',
+  '.agents/rules',
   'repo/docs/partials',
   '.github/workflows'
 ];
@@ -202,7 +216,10 @@ const allowedRootEntries = new Set([
   '.github',
   '.gitattributes',
   '.gitignore',
+  '.agents',
   'AGENTS.md',
+  'CLAUDE.md',
+  'GEMINI.md',
   'README.md',
   '_projects',
   'mcp',
@@ -682,6 +699,11 @@ function validateProjectModules(errors) {
 
 function validateDocContract(errors) {
   const result = docContractSync.validateAndSync({ mode: 'check' });
+  for (const error of result.errors) fail(errors, error);
+}
+
+function validateAgentInstructionShims(errors) {
+  const result = agentInstructionSync.validateAndSync({ mode: 'check' });
   for (const error of result.errors) fail(errors, error);
 }
 
@@ -1557,6 +1579,7 @@ function runValidation() {
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
   validateDocContract(errors);
+  validateAgentInstructionShims(errors);
   validateReadmeSurface(errors);
   validateProjectModules(errors);
   validateProjectLandingCards(errors);
