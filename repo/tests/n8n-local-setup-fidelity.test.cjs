@@ -183,6 +183,9 @@ test('n8n local setup compose template uses n8n postgres ngrok without default q
   assert.match(compose, /docker\.n8n\.io\/n8nio\/n8n:stable/);
   assert.match(compose, /ngrok\/ngrok:latest/);
   assert.match(compose, /DB_TYPE: postgresdb/);
+  assert.match(compose, /healthcheck:/);
+  assert.match(compose, /pg_isready -U \$\$\{POSTGRES_USER\} -d \$\$\{POSTGRES_DB\}/);
+  assert.match(compose, /condition: service_healthy/);
   assert.match(compose, /"127\.0\.0\.1:5678:5678"/);
   assert.match(compose, /"127\.0\.0\.1:4040:4040"/);
   assert.match(compose, /^\s{2}postgres_data:/m);

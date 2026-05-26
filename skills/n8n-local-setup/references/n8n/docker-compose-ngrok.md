@@ -51,6 +51,7 @@ Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or l
 ## `docker-compose.yml`
 
 The template source is [templates/local-stack/docker-compose.yml](../../templates/local-stack/docker-compose.yml).
+Postgres has a healthcheck, and n8n waits for Postgres to become healthy before startup, improving production-template reliability without adding Redis or workers to the Fast Path.
 
 ```yaml
 services:
@@ -61,6 +62,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-n8n}
       POSTGRES_USER: ${POSTGRES_USER:-n8n}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -68,7 +75,8 @@ services:
     image: docker.n8n.io/n8nio/n8n:stable
     restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
       - "127.0.0.1:5678:5678"
     env_file:
