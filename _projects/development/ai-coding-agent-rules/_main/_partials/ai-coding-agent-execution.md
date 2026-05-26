@@ -88,21 +88,25 @@ Proceed without extra confirmation for safe, clearly scoped local edits.
 
 ## GitHub PR Completion Rules
 
-When the current conversation is clearly working in a project linked to a GitHub repo, do not leave completed repo changes uncommitted by default.
+When the current conversation is clearly working in a project linked to a GitHub repo, do not leave completed repo changes floating silently. Finish with either a local-only summary or a proposed/approved GitHub PR path.
 
-After making changes, run relevant validation and then either update the current working PR or open a new PR, unless the user explicitly requested local-only, no-commit, or no-PR work. Treat the user's request to make repo changes as permission to complete this normal GitHub PR path, subject to the safety and validation limits below.
+A request to make repo changes permits scoped local edits and validation. It is not by itself permission to push to GitHub, create a PR, or update a PR.
 
-If the changes clearly belong to the same working PR in the same conversation thread, commit and push to that PR branch automatically after validation. Do not ask again just to update the same PR.
+After making changes, run relevant validation. If no PR lane has been explicitly approved in the current conversation, ask for explicit current-turn approval before pushing a branch or opening/updating a PR. Include the current branch, intended branch, target base branch, commit summary, validation run and result, existing PR URL if any, and intended PR title if opening a new PR.
 
-If the user asks for a different task while a working PR already exists in the same conversation thread, ask whether to commit the new task to the existing PR or open a new PR.
+If the user has explicitly approved a working PR lane in the current conversation, related follow-up changes for that same PR may be committed and pushed to that PR branch after validation without asking again.
+
+If the user asks for a different task while a working PR already exists in the same conversation thread, ask whether to commit the new task to the existing PR or open a new PR. When asking, include the existing PR URL.
 
 If the user confirms once that a different task should also go into the existing working PR, keep using that existing PR for the remainder of the same conversation thread unless the user changes direction.
 
-If no working PR exists and changes were made, create a branch and open a PR after validation, unless the user explicitly requested local-only, no-PR, or no-commit work.
+If the user explicitly requests local-only, no-commit, no-push, or no-PR work, obey that request.
 
-Never push directly to `main`. Never commit secrets, credentials, `.env`, `.n8n-local/`, `.tmp/`, live runtime payloads, product repo secrets, generated package artifacts, or unsafe live-action outputs. Do not auto-commit when validation fails or unresolved safety blockers remain.
+Once a working PR exists, include its PR URL in every progress update, approval question, routing question, and final report. If no PR exists yet, state `PR: none yet`.
 
-Always report the branch name, commit SHA, PR URL, validation run, and anything intentionally left uncommitted.
+Never push directly to `main`. Never commit or push secrets, credentials, `.env`, `.n8n-local/`, `.tmp/`, live runtime payloads, product repo secrets, generated package artifacts, or unsafe live-action outputs. Do not commit, push, open, or update a PR when validation fails or unresolved safety blockers remain.
+
+Always report the branch name, commit SHA if committed, PR URL if pushed/opened/updated, validation run, and anything intentionally left uncommitted.
 
 ## Scope Control
 
