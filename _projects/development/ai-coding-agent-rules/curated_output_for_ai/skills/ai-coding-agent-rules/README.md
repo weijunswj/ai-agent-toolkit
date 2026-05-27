@@ -13,7 +13,7 @@ The copied skill folder includes inert generic baseline templates:
 - [AGENTS.template.md](AGENTS.template.md) for Codex or OpenCode.
 - [CLAUDE.template.md](CLAUDE.template.md) for Claude Code.
 - [GEMINI.template.md](GEMINI.template.md) for Gemini CLI or Antigravity.
-- [ANTIGRAVITY.bootstrap.template.md](ANTIGRAVITY.bootstrap.template.md) for `.agents/rules/00-agent-toolkit-bootstrap.md`.
+- [antigravity-bootstrap.template.md](antigravity-bootstrap.template.md) for `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
 The baseline templates stay generic and compact. `AGENTS.template.md` carries the canonical shared contract, while `CLAUDE.template.md` and `GEMINI.template.md` are compatibility shims that import `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
 
@@ -30,7 +30,7 @@ Copy or merge a template into the matching active instruction filename only afte
 | Codex | [AGENTS.template.md](AGENTS.template.md) | [Codex reference](../n8n-local-setup/references/ai-agent-platforms/codex.md) |
 | OpenCode | [AGENTS.template.md](AGENTS.template.md) | [OpenCode reference](../n8n-local-setup/references/ai-agent-platforms/opencode.md) |
 | Claude Code | [CLAUDE.template.md](CLAUDE.template.md) | [Claude Code reference](../n8n-local-setup/references/ai-agent-platforms/claude-code.md) |
-| Antigravity | [ANTIGRAVITY.bootstrap.template.md](ANTIGRAVITY.bootstrap.template.md) | [Antigravity reference](../n8n-local-setup/references/ai-agent-platforms/antigravity.md) |
+| Antigravity | [antigravity-bootstrap.template.md](antigravity-bootstrap.template.md) | [Antigravity reference](../n8n-local-setup/references/ai-agent-platforms/antigravity.md) |
 
 Install copied skill folders according to the target platform's supported skill location. Use the setup references for platform-specific skill, MCP config, and restart notes.
 

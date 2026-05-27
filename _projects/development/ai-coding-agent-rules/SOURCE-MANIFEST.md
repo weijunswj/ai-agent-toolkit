@@ -12,25 +12,26 @@
 - `_partials/n8n-agent-rules.md`
 - `scripts/install-n8n-agent-adapter.cjs`
 - `AGENTS.template.md`
-- `CLAUDE.template.md`
-- `GEMINI.template.md`
+- `templates/CLAUDE.shim.template.md`
+- `templates/GEMINI.shim.template.md`
+- `templates/antigravity-bootstrap.template.md`
 - `README.md`
 
-`_partials/ai-coding-agent-execution.md` was moved from the former n8n local setup project source path and kept as retired provenance. It is not the current template source; only stale publication-approval wording may be adapted to avoid contradicting the managed marker blocks.
+`_partials/ai-coding-agent-execution.md` was moved from the former n8n local setup project source path and kept as retired provenance for the reusable execution prompt. GitHub/PR/VCS publication approval workflow wording is intentionally omitted from the default toolkit prompt.
 
 `_partials/toolkit-skill-routing.md` was moved exactly from the former n8n skill-routing partial surface and renamed to make the generic ownership clear.
 
 `_partials/n8n-agent-rules.md` is the canonical editable full n8n operating ruleset. It moved from the former `n8n.local-setup` partial because it is an agent instruction block, not local setup material.
 
-The source-side generic inert templates under `_main/` are generated from declared `_partials/` entries by `npm run build:agent-rules`. They intentionally stay slim and do not include the full n8n operating ruleset or full skill-routing table.
+The source-side inert templates under `_main/` are generated from declared `_partials/` entries by `npm run build:agent-rules`. `AGENTS.template.md` carries the full reusable toolkit prompt payload. The Claude, Gemini, and Antigravity templates live under `_main/templates/` as tiny compatibility shims.
 
 The managed instruction shim partials are repo-authored toolkit source. `agent-toolkit-managed-block.md` and `agent-toolkit-n8n-adapter-block.md` publish into the canonical `AGENTS.template.md` payload and root `AGENTS.md`. `claude-shim.md`, `gemini-shim.md`, and `antigravity-bootstrap.md` provide import/bootstrap compatibility without duplicating the full `AGENTS.md` body.
 
 ## AI-Facing Surfaces
 
 - `skills/ai-coding-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
-- `skills/ai-coding-agent-rules/AGENTS.template.md`, `CLAUDE.template.md`, and `GEMINI.template.md` are generated from `_main/*.template.md`.
-- `skills/ai-coding-agent-rules/ANTIGRAVITY.bootstrap.template.md` is copied from `_main/_partials/antigravity-bootstrap.md` for portable `.agents/rules/00-agent-toolkit-bootstrap.md` setup.
+- `skills/ai-coding-agent-rules/AGENTS.template.md` is generated from `_main/AGENTS.template.md`.
+- `skills/ai-coding-agent-rules/CLAUDE.template.md`, `GEMINI.template.md`, and `antigravity-bootstrap.template.md` are generated from `_main/templates/*.template.md`.
 - Root `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` are checked by `repo/scripts/sync-agent-instruction-shims.cjs`; the script updates marker-owned blocks and preserves unmarked user/repo content.
 - `skills/n8n-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
 - `skills/n8n-agent-rules/n8n-agent-rules.md` is copied exactly from `_main/_partials/n8n-agent-rules.md`.

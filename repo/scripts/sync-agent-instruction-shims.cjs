@@ -20,7 +20,8 @@ const mode = process.argv.includes('--write') ? 'write' : 'check';
 const toolkitBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->';
 const toolkitEnd = '<!-- AI-AGENT-TOOLKIT:END toolkit -->';
 const n8nBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->';
-const n8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->';
+const n8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->';
+const legacyN8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->';
 
 const partials = {
   toolkit: '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md',
@@ -74,6 +75,12 @@ function stripManagedBlock(relPath, text, begin, end, errors) {
   return `${text.slice(0, start)}${text.slice(finish + end.length)}`;
 }
 
+function stripN8nManagedBlock(relPath, text, errors) {
+  if (markerCount(text, n8nBegin) === 0) return text;
+  const end = markerCount(text, n8nEnd) === 1 ? n8nEnd : legacyN8nEnd;
+  return stripManagedBlock(relPath, text, n8nBegin, end, errors);
+}
+
 function removeSupersededGitHubPrSection(text) {
   const heading = '## GitHub PR Completion Rules';
   const start = text.indexOf(`\n${heading}\n`);
@@ -102,16 +109,33 @@ function removeLeadingHeading(text, heading) {
   return trimmed;
 }
 
+function shimBody(sourceText, options) {
+  let body = sourceText;
+  if (options.importLine) body = removeExactLine(body, options.importLine);
+  if (options.heading) body = removeLeadingHeading(body, options.heading);
+  return body.trim();
+}
+
 function rootAgentsExpected(current, source, errors) {
   let body = stripManagedBlock('AGENTS.md', current, toolkitBegin, toolkitEnd, errors);
   if (body === null) return null;
-  body = stripManagedBlock('AGENTS.md', body, n8nBegin, n8nEnd, errors);
+  body = stripN8nManagedBlock('AGENTS.md', body, errors);
   if (body === null) return null;
   body = removeSupersededGitHubPrSection(body).trimStart();
   body = removeLeadingHeading(body, '# Existing user / repo content below');
 
-  const prefix = `${source.toolkit}\n\n${source.n8n}\n\n# Existing user / repo content below`;
-  return body ? `${prefix}\n\n${body.trimEnd()}\n` : `${prefix}\n`;
+  const heading = '# AI Agent Toolkit Repo Rules';
+  const normalizedBody = body.trimStart();
+  if (normalizedBody.startsWith(`${heading}\n`)) {
+    const rest = normalizedBody.slice(heading.length).replace(/^\n+/, '').trimEnd();
+    return rest
+      ? `${heading}\n\n${source.toolkit}\n\n${source.n8n}\n\n${rest}\n`
+      : `${heading}\n\n${source.toolkit}\n\n${source.n8n}\n`;
+  }
+
+  return normalizedBody
+    ? `${source.toolkit}\n\n${source.n8n}\n\n${normalizedBody.trimEnd()}\n`
+    : `${source.toolkit}\n\n${source.n8n}\n`;
 }
 
 function shimExpected(relPath, current, sourceText, options, errors) {
@@ -120,6 +144,10 @@ function shimExpected(relPath, current, sourceText, options, errors) {
   if (options.importLine) body = removeExactLine(body, options.importLine);
   if (options.heading) body = removeLeadingHeading(body, options.heading);
   body = body.trim();
+  const expectedBody = shimBody(sourceText, options);
+  while (expectedBody && (body === expectedBody || body.startsWith(`${expectedBody}\n`))) {
+    body = body.slice(expectedBody.length).trim();
+  }
   return body ? `${sourceText}\n\n${body}\n` : `${sourceText}\n`;
 }
 

@@ -102,7 +102,7 @@
     "title": "AI Coding Agent Rules",
     "version": "2.1.0",
     "version_policy": "semver",
-    "version_notes": "Adds managed marker blocks, repo/folder-local approval prompts, automatic instruction bootstrap guidance, and Claude, Gemini, and Antigravity compatibility shims around the canonical AGENTS.md contract.",
+    "version_notes": "Adds managed marker blocks, automatic instruction bootstrap guidance, tiny Claude, Gemini, and Antigravity compatibility shims, and a one-sentence n8n adapter around the canonical AGENTS.md execution prompt.",
     "project": {
       "name": "AI Coding Agent Rules",
       "category": "development",
@@ -124,11 +124,11 @@
     "main_path": "_projects/development/ai-coding-agent-rules/_main",
     "root_surfaces": [
       "skills/ai-coding-agent-rules/AGENTS.template.md",
-      "skills/ai-coding-agent-rules/ANTIGRAVITY.bootstrap.template.md",
       "skills/ai-coding-agent-rules/CLAUDE.template.md",
       "skills/ai-coding-agent-rules/GEMINI.template.md",
       "skills/ai-coding-agent-rules/README.md",
       "skills/ai-coding-agent-rules/SKILL.md",
+      "skills/ai-coding-agent-rules/antigravity-bootstrap.template.md",
       "skills/n8n-agent-rules/README.md",
       "skills/n8n-agent-rules/SKILL.md",
       "skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md",

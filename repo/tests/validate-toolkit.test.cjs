@@ -422,33 +422,20 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /Do not generate curated files automatically from `_main`/);
   assert.match(text, /AI-AGENT-TOOLKIT:BEGIN toolkit v1/);
   assert.match(text, /AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1/);
-  assert.match(text, /These instruction files are repo\/folder-local/);
-  assert.match(text, /GitHub repos, GitLab repos, Bitbucket repos, local Git repos with no remote, and plain project folders with no Git remote/);
-  assert.match(text, /Keep GitHub-specific approval wording only when the current project is actually linked to GitHub/);
-  assert.match(text, /If no GitHub context exists, do not invent one/);
-  assert.match(text, /Generic repo\/folder-change requests allow scoped local edits and validation only/);
-  assert.match(text, /They are not approval to commit, push, create a pull request, create a merge request, or update a remote review/);
-  assert.match(text, /GITHUB APPROVAL NEEDED/);
-  assert.match(text, /Should I push this branch and create a pull request now\?/);
-  assert.match(text, /Should I push these changes to the existing pull request now\?/);
-  assert.match(text, /Should I push this branch and create\/update the pull request now\?/);
-  assert.match(text, /VERSION CONTROL APPROVAL NEEDED/);
-  assert.match(text, /Should I commit these local changes now\?/);
-  assert.match(text, /REMOTE APPROVAL NEEDED/);
-  assert.match(text, /Should I push this branch to the configured remote now\?/);
-  assert.match(text, /LOCAL CHANGE APPROVAL NEEDED/);
-  assert.match(text, /Should I apply these file changes locally now\?/);
-  assert.match(text, /`GITHUB APPROVAL NEEDED` is only for GitHub push or PR actions/);
-  assert.match(text, /When the user provides a PR URL, treat the PR URL as remote source-of-truth/);
-  assert.match(text, /Do not report `PR: none` as a final completion state/);
-  assert.match(text, /Do not report `PR: none` unless GitHub has been checked or the user explicitly says no PR exists/);
-  assert.match(text, /Local `git status` alone is not enough to determine whether a PR exists/);
-  assert.match(text, /Never push directly to `main`/);
-  assert.match(text, /Do not commit, push, open, or update a PR or merge request when validation fails or unresolved safety blockers remain/);
+  assert.match(text, /## Role/);
+  assert.match(text, /You are an execution-first coding agent\./);
+  assert.match(text, /## Scope Control/);
+  assert.match(text, /use `skills\/n8n-agent-rules` before continuing/);
+  assert.doesNotMatch(text, /GitHub PR Completion Rules/);
+  assert.doesNotMatch(text, /GITHUB APPROVAL NEEDED/);
+  assert.doesNotMatch(text, /VERSION CONTROL APPROVAL NEEDED/);
+  assert.doesNotMatch(text, /REMOTE APPROVAL NEEDED/);
+  assert.doesNotMatch(text, /LOCAL CHANGE APPROVAL NEEDED/);
   assert.doesNotMatch(text, /PR: none yet/);
   assert.doesNotMatch(text, /If no PR exists yet, state `PR: none yet`/);
-  assert.doesNotMatch(text, /commit and push to that PR branch automatically after validation/);
-  assert.doesNotMatch(text, /If no working PR exists and changes were made, create a branch and open a PR after validation/);
+  assert.doesNotMatch(text, /PR lane/);
+  assert.doesNotMatch(text, /remote source-of-truth/);
+  assert.doesNotMatch(text, /Should I push this branch/);
   for (const doc of mandatoryDocs) {
     assert.ok(text.includes(`](${doc})`), `AGENTS.md links ${doc}`);
   }
@@ -458,7 +445,7 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   );
 });
 
-test('managed toolkit source includes GitHub-conditional and fallback approval rules', () => {
+test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', () => {
   const relPaths = [
     'AGENTS.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md',
@@ -468,31 +455,17 @@ test('managed toolkit source includes GitHub-conditional and fallback approval r
 
   for (const relPath of relPaths) {
     const text = readTextFile(path.join(repoRoot, relPath));
-    assert.match(text, /These instruction files are repo\/folder-local/, `${relPath} is repo/folder-local`);
-    assert.match(text, /GitHub repos, GitLab repos, Bitbucket repos, local Git repos with no remote, and plain project folders with no Git remote/, `${relPath} covers non-GitHub folders`);
-    assert.match(text, /Keep GitHub-specific approval wording only when the current project is actually linked to GitHub/, `${relPath} keeps GitHub approval conditional`);
-    assert.match(text, /If no GitHub context exists, do not invent one/, `${relPath} avoids invented GitHub context`);
-    assert.match(text, /Generic repo\/folder-change requests allow scoped local edits and validation only/, `${relPath} distinguishes local edits from publication`);
-    assert.match(text, /They are not approval to commit, push, create a pull request, create a merge request, or update a remote review/, `${relPath} requires explicit approval for publication`);
-    assert.match(text, /GITHUB APPROVAL NEEDED/, `${relPath} includes exact approval prompts`);
-    assert.match(text, /Should I push this branch and create a pull request now\?/, `${relPath} includes create-PR approval question`);
-    assert.match(text, /Should I push these changes to the existing pull request now\?/, `${relPath} includes update-PR approval question`);
-    assert.match(text, /Should I push this branch and create\/update the pull request now\?/, `${relPath} includes uncertain PR approval question`);
-    assert.match(text, /VERSION CONTROL APPROVAL NEEDED/, `${relPath} includes local commit approval`);
-    assert.match(text, /Should I commit these local changes now\?/, `${relPath} includes local commit approval question`);
-    assert.match(text, /REMOTE APPROVAL NEEDED/, `${relPath} includes non-GitHub remote approval`);
-    assert.match(text, /Should I push this branch to the configured remote now\?/, `${relPath} includes remote push approval question`);
-    assert.match(text, /LOCAL CHANGE APPROVAL NEEDED/, `${relPath} includes non-VCS approval`);
-    assert.match(text, /Should I apply these file changes locally now\?/, `${relPath} includes local file approval question`);
-    assert.match(text, /`GITHUB APPROVAL NEEDED` is only for GitHub push or PR actions/, `${relPath} scopes GitHub approval`);
-    assert.match(text, /When the user provides a PR URL, treat the PR URL as remote source-of-truth/, `${relPath} treats PR URL as source of truth`);
-    assert.match(text, /Do not report `PR: none` as a final completion state/, `${relPath} blocks PR none completion`);
-    assert.match(text, /Do not report `PR: none` unless GitHub has been checked or the user explicitly says no PR exists/, `${relPath} blocks unchecked PR-none reporting`);
-    assert.match(text, /Never push directly to `main`/, `${relPath} blocks direct main pushes`);
-    assert.match(text, /Do not commit, push, open, or update a PR or merge request when validation fails or unresolved safety blockers remain/, `${relPath} blocks unsafe completion actions`);
+    assert.match(text, /You are an execution-first coding agent\./, `${relPath} keeps reusable execution prompt`);
+    assert.match(text, /## Scope Control/, `${relPath} keeps generic execution guidance`);
+    assert.doesNotMatch(text, /GitHub PR Completion Rules/, `${relPath} removes GitHub PR completion rules`);
+    assert.doesNotMatch(text, /GITHUB APPROVAL NEEDED/, `${relPath} removes GitHub approval prompts`);
+    assert.doesNotMatch(text, /VERSION CONTROL APPROVAL NEEDED/, `${relPath} removes VCS approval prompts`);
+    assert.doesNotMatch(text, /REMOTE APPROVAL NEEDED/, `${relPath} removes remote approval prompts`);
+    assert.doesNotMatch(text, /LOCAL CHANGE APPROVAL NEEDED/, `${relPath} removes local-change approval prompts`);
     assert.doesNotMatch(text, /PR: none yet/, `${relPath} removes stale no-PR completion guidance`);
-    assert.doesNotMatch(text, /commit and push to that PR branch automatically after validation/, `${relPath} no longer auto-pushes from generic repo-change requests`);
-    assert.doesNotMatch(text, /If no working PR exists and changes were made, create a branch and open a PR after validation/, `${relPath} no longer auto-creates PRs from generic repo-change requests`);
+    assert.doesNotMatch(text, /PR lane/, `${relPath} removes PR lane management`);
+    assert.doesNotMatch(text, /remote source-of-truth/, `${relPath} removes PR URL source-of-truth rules`);
+    assert.doesNotMatch(text, /create a pull request|update a pull request|merge request/i, `${relPath} removes remote review workflow rules`);
   }
 });
 
@@ -678,11 +651,13 @@ test('build agent rule templates workflow tracks and verifies split template out
   ];
   const verifiedPaths = [
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md',
     'skills/ai-coding-agent-rules/AGENTS.template.md',
     'skills/ai-coding-agent-rules/CLAUDE.template.md',
     'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md',
     'skills/n8n-agent-rules/SKILL.md',
     'skills/n8n-agent-rules/README.md',
     'skills/n8n-agent-rules/n8n-agent-rules.md',
@@ -1010,7 +985,7 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
     ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
     ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
     ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
-    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md', '_projects/development/ai-coding-agent-rules/_main/GEMINI.md'), /final recheck must reject staged paths outside generated output scope/],
+    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md', '_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.md'), /final recheck must reject staged paths outside generated output scope/],
     ['commit step resets dangerous git environment', (text) => text.replace('unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /commit step must reset dangerous git environment state/],
     ['push step resets dangerous git environment', (text) => replaceLast(text, 'unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /push step must reset dangerous git environment state/]
   ];
@@ -1058,8 +1033,9 @@ test('auto-sync generated output path scope is explicit', () => {
     'README.md',
     'AGENTS.md',
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md',
     'mcp/registry/projects.registry.json',
     'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md'
   ]) {
@@ -1163,22 +1139,35 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
     },
     {
       file: 'CLAUDE.template.md',
+      sourceFile: path.join('templates', 'CLAUDE.shim.template.md'),
       destination: 'CLAUDE.md',
       labels: ['Claude Code'],
       paths: ['C:\\Users\\<your-user>\\.claude\\CLAUDE.md'],
-      payloadPattern: /^# Claude Code Instructions\n\n@AGENTS\.md\n\n<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->/,
+      payloadPattern: /^# Claude Code Instructions\n\n@AGENTS\.md\n\nRoot `AGENTS\.md` is canonical\./,
       sources: [
         '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md'
       ]
     },
     {
       file: 'GEMINI.template.md',
+      sourceFile: path.join('templates', 'GEMINI.shim.template.md'),
       destination: 'GEMINI.md',
       labels: ['Gemini CLI', 'Antigravity'],
       paths: ['C:\\Users\\<your-user>\\.gemini\\GEMINI.md'],
-      payloadPattern: /^# Gemini Instructions\n\n@\.\/AGENTS\.md\n\n<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->/,
+      payloadPattern: /^# Gemini Instructions\n\n@\.\/AGENTS\.md\n\nRoot `AGENTS\.md` is canonical\./,
       sources: [
         '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md'
+      ]
+    },
+    {
+      file: 'antigravity-bootstrap.template.md',
+      sourceFile: path.join('templates', 'antigravity-bootstrap.template.md'),
+      destination: '.agents/rules/00-agent-toolkit-bootstrap.md',
+      labels: ['Antigravity'],
+      paths: ['<repo>\\.agents\\rules\\00-agent-toolkit-bootstrap.md'],
+      payloadPattern: /^# Agent Toolkit Antigravity Bootstrap\n\nRoot `AGENTS\.md` is the canonical repo instruction file\./,
+      sources: [
+        '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md'
       ]
     }
   ];
@@ -1187,7 +1176,8 @@ test('generated agent-rule templates include install wrappers and 8-backtick pay
 
   for (const rootDir of [genericSourceDir, genericSkillDir]) {
     for (const spec of genericSpecs) {
-      const text = fs.readFileSync(path.join(rootDir, spec.file), 'utf8').replace(/\r\n/g, '\n');
+      const relFile = rootDir === genericSourceDir ? (spec.sourceFile || spec.file) : spec.file;
+      const text = fs.readFileSync(path.join(rootDir, relFile), 'utf8').replace(/\r\n/g, '\n');
       const openingFences = text.match(/^````````md$/gm) || [];
       const closingFences = text.match(/^````````$/gm) || [];
       assert.equal(openingFences.length, 1, spec.file);
@@ -1309,17 +1299,22 @@ test('agent-rule template freshness is driven by project-scoped specs', () => {
   assert.deepEqual(templateSources.get('GEMINI.template.md'), [
     '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md'
   ]);
+  assert.deepEqual(templateSources.get('antigravity-bootstrap.template.md'), [
+    '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md'
+  ]);
   assert.deepEqual(genericSpec.templates.map((template) => template.source), [
     '_main/AGENTS.template.md',
-    '_main/CLAUDE.template.md',
-    '_main/GEMINI.template.md'
+    '_main/templates/CLAUDE.shim.template.md',
+    '_main/templates/GEMINI.shim.template.md',
+    '_main/templates/antigravity-bootstrap.template.md'
   ]);
   assert.deepEqual(genericSpec.templates.map((template) => template.output), [
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
+    '_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md'
   ]);
-  assert.deepEqual(genericSpec.templates.map((template) => template.destination), ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']);
+  assert.deepEqual(genericSpec.templates.map((template) => template.destination), ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.agents/rules/00-agent-toolkit-bootstrap.md']);
   assert.equal(genericSpec.templates.every((template) => template.installSubject && Array.isArray(template.installExamples)), true);
 });
 
@@ -1451,7 +1446,8 @@ test('agent-rule source-template freshness check covers source-side specs withou
   const agentRuleOutputs = new Set([
     'skills/ai-coding-agent-rules/AGENTS.template.md',
     'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md'
+    'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
   ]);
 
   manifest.outputs = manifest.outputs.filter((output) => !agentRuleOutputs.has(output.output));

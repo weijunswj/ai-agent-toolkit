@@ -79,7 +79,7 @@ jobs:
 
           for path in "${changed_files[@]}"; do
             case "$path" in
-              repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md)
                 continue
                 ;;
             esac
@@ -110,7 +110,7 @@ jobs:
             esac
 
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md|README.md|AGENTS.md|skills/*|mcp/*)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md|README.md|AGENTS.md|skills/*|mcp/*)
                 ;;
               *)
                 echo "::error file=$path::Auto-sync only runs on deterministic source/routing/contract and generated surface paths: $path"
@@ -193,7 +193,7 @@ jobs:
 
           for path in "${dirty_files[@]}"; do
             case "$path" in
-              README.md|AGENTS.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              README.md|AGENTS.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
@@ -202,7 +202,7 @@ jobs:
             esac
           done
 
-          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp _projects/development/ai-coding-agent-rules/_main/AGENTS.template.md _projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md _projects/development/ai-coding-agent-rules/_main/GEMINI.template.md
+          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp _projects/development/ai-coding-agent-rules/_main/AGENTS.template.md _projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md _projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md _projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md
 
           mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           if [[ "${#staged_files[@]}" -eq 0 ]]; then
@@ -213,7 +213,7 @@ jobs:
 
           for path in "${staged_files[@]}"; do
             case "$path" in
-              README.md|AGENTS.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              README.md|AGENTS.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
@@ -264,7 +264,7 @@ jobs:
           mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           for path in "${staged_files[@]}"; do
             case "$path" in
-              README.md|AGENTS.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              README.md|AGENTS.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md|_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"

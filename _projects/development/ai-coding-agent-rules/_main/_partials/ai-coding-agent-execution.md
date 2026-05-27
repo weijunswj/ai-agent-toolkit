@@ -86,28 +86,6 @@ Words like `continue`, `next`, `apply`, or `do it` only apply to the already-sco
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
 
-## Repo/Folder Publication Approval Rules
-
-When the current conversation is clearly working in a project folder, do not leave completed changes floating silently. Finish with a local-only summary or the approval path that matches the available workflow.
-
-A request to make repo or folder changes permits scoped local edits and validation. It is not by itself permission to commit, push, create a pull request, create a merge request, or update a remote review.
-
-Use GitHub-specific approval wording only when the project is actually linked to GitHub, the user provides a GitHub PR URL, or the task is explicitly about GitHub. If no GitHub context exists, do not invent one.
-
-If approval is missing, end with the exact bold approval question that matches the workflow:
-
-**GITHUB APPROVAL NEEDED: Should I push this branch and create a pull request now?**
-
-**VERSION CONTROL APPROVAL NEEDED: Should I commit these local changes now?**
-
-**REMOTE APPROVAL NEEDED: Should I push this branch to the configured remote now?**
-
-**LOCAL CHANGE APPROVAL NEEDED: Should I apply these file changes locally now?**
-
-If the user provides a PR URL, treat it as remote source-of-truth. Never report `PR: none` as a final completion state.
-
-Never push directly to `main`. Never commit or push secrets, credentials, `.env`, `.n8n-local/`, `.tmp/`, live runtime payloads, product repo secrets, generated package artifacts, or unsafe live-action outputs. Do not commit, push, open, or update a PR or merge request when validation fails or unresolved safety blockers remain.
-
 ## Scope Control
 
 Before editing:

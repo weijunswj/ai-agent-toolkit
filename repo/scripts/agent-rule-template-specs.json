@@ -15,6 +15,10 @@
     "geminiShim": {
       "name": "gemini-shim.md",
       "rel": "_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md"
+    },
+    "antigravityBootstrap": {
+      "name": "antigravity-bootstrap.md",
+      "rel": "_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md"
     }
   },
   "templateSpecs": [
@@ -56,8 +60,8 @@
         },
         {
           "fileName": "CLAUDE.template.md",
-          "source": "_main/CLAUDE.template.md",
-          "output": "_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md",
+          "source": "_main/templates/CLAUDE.shim.template.md",
+          "output": "_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md",
           "title": "CLAUDE.template.md AI coding agent rules",
           "audience": "Claude Code",
           "destination": "CLAUDE.md",
@@ -78,8 +82,8 @@
         },
         {
           "fileName": "GEMINI.template.md",
-          "source": "_main/GEMINI.template.md",
-          "output": "_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md",
+          "source": "_main/templates/GEMINI.shim.template.md",
+          "output": "_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md",
           "title": "GEMINI.template.md AI coding agent rules",
           "audience": "Gemini CLI or Antigravity",
           "destination": "GEMINI.md",
@@ -94,6 +98,30 @@
               "commands": [
                 "mkdir $HOME\\.gemini -Force",
                 "notepad $HOME\\.gemini\\GEMINI.md"
+              ]
+            }
+          ]
+        },
+        {
+          "fileName": "antigravity-bootstrap.template.md",
+          "source": "_main/templates/antigravity-bootstrap.template.md",
+          "output": "_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md",
+          "title": "antigravity-bootstrap.template.md AI coding agent rules",
+          "audience": "Antigravity",
+          "destination": ".agents/rules/00-agent-toolkit-bootstrap.md",
+          "destinationDisplay": "`.agents/rules/00-agent-toolkit-bootstrap.md`",
+          "activeNameText": "it is not named `.agents/rules/00-agent-toolkit-bootstrap.md`",
+          "installSubject": "generic Antigravity bootstrap rules",
+          "payloadSources": [
+            "antigravityBootstrap"
+          ],
+          "installExamples": [
+            {
+              "heading": "Antigravity workspace bootstrap example",
+              "path": "<repo>\\.agents\\rules\\00-agent-toolkit-bootstrap.md",
+              "commands": [
+                "mkdir .agents\\rules -Force",
+                "notepad .agents\\rules\\00-agent-toolkit-bootstrap.md"
               ]
             }
           ]

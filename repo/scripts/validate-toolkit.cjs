@@ -99,7 +99,7 @@ const expectedFiles = [
   'skills/ai-coding-agent-rules/AGENTS.template.md',
   'skills/ai-coding-agent-rules/CLAUDE.template.md',
   'skills/ai-coding-agent-rules/GEMINI.template.md',
-  'skills/ai-coding-agent-rules/ANTIGRAVITY.bootstrap.template.md',
+  'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md',
   'skills/n8n-agent-rules/SKILL.md',
   'skills/n8n-agent-rules/README.md',
   'skills/n8n-agent-rules/n8n-agent-rules.md',
@@ -115,6 +115,9 @@ const expectedFiles = [
   '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md',
   '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md',
   '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md',
+  '_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md',
   'repo/scripts/agent-rule-template-specs.json',
   'repo/scripts/build-agent-rule-templates.ps1',
   'repo/scripts/_build-agent-rule-templates.cmd',
@@ -145,6 +148,7 @@ const expectedDirs = [
   '_projects/development/ai-coding-agent-rules',
   '_projects/development/ai-coding-agent-rules/_main',
   '_projects/development/ai-coding-agent-rules/_main/_partials',
+  '_projects/development/ai-coding-agent-rules/_main/templates',
   '_projects/n8n/workflow-toolkit',
   '_projects/n8n/workflow-toolkit/_main',
   '_projects/cicd/secure-installer',
@@ -364,8 +368,9 @@ const sourceWatchPrWorkflowPath = '.github/workflows/source-watch-pr.yml';
 const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.';
 const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
+  '_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md'
 ];
 const allowedCredentialExampleJsonPaths = new Set([
   '_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json'

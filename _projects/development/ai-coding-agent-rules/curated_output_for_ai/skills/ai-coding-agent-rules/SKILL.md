@@ -41,4 +41,4 @@ This automatic bootstrap is for local repo/folder instruction files only. It mus
 
 Do not install heavy global `AGENTS.md` or global `GEMINI.md` rules. After setup, the repo-local files are the source of truth.
 
-Use referenced files for full content: `AGENTS.template.md`, `CLAUDE.template.md`, `GEMINI.template.md`, and `ANTIGRAVITY.bootstrap.template.md`.
+Use referenced files for full content: `AGENTS.template.md`, `CLAUDE.template.md`, `GEMINI.template.md`, and `antigravity-bootstrap.template.md`.

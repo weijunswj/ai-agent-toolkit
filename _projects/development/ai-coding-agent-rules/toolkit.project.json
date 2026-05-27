@@ -7,7 +7,7 @@
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
   "version": "2.1.0",
   "version_policy": "semver",
-  "version_notes": "Adds managed marker blocks, repo/folder-local approval prompts, automatic instruction bootstrap guidance, and Claude, Gemini, and Antigravity compatibility shims around the canonical AGENTS.md contract.",
+  "version_notes": "Adds managed marker blocks, automatic instruction bootstrap guidance, tiny Claude, Gemini, and Antigravity compatibility shims, and a one-sentence n8n adapter around the canonical AGENTS.md execution prompt.",
   "outputs": [
     {
       "kind": "curated",
@@ -32,22 +32,22 @@
     },
     {
       "kind": "copy",
-      "source": "_main/CLAUDE.template.md",
+      "source": "_main/templates/CLAUDE.shim.template.md",
       "output": "skills/ai-coding-agent-rules/CLAUDE.template.md",
-      "notes": "Published inert Claude Code generic AI coding agent rule template generated from source-side assembled template.",
+      "notes": "Published inert Claude Code compatibility shim template generated from source-side assembled template.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/GEMINI.template.md",
+      "source": "_main/templates/GEMINI.shim.template.md",
       "output": "skills/ai-coding-agent-rules/GEMINI.template.md",
-      "notes": "Published inert Gemini/Antigravity generic AI coding agent rule template generated from source-side assembled template.",
+      "notes": "Published inert Gemini compatibility shim template generated from source-side assembled template.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/_partials/antigravity-bootstrap.md",
-      "output": "skills/ai-coding-agent-rules/ANTIGRAVITY.bootstrap.template.md",
+      "source": "_main/templates/antigravity-bootstrap.template.md",
+      "output": "skills/ai-coding-agent-rules/antigravity-bootstrap.template.md",
       "notes": "Published inert Antigravity bootstrap template for .agents/rules/00-agent-toolkit-bootstrap.md.",
       "fidelity": "exact"
     },
@@ -147,7 +147,7 @@
       "skills/ai-coding-agent-rules/AGENTS.template.md",
       "skills/ai-coding-agent-rules/CLAUDE.template.md",
       "skills/ai-coding-agent-rules/GEMINI.template.md",
-      "skills/ai-coding-agent-rules/ANTIGRAVITY.bootstrap.template.md",
+      "skills/ai-coding-agent-rules/antigravity-bootstrap.template.md",
       "skills/n8n-agent-rules/SKILL.md",
       "skills/n8n-agent-rules/README.md",
       "skills/n8n-agent-rules/n8n-agent-rules.md",
