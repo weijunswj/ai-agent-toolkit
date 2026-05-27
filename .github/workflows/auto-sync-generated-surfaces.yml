@@ -77,6 +77,15 @@ jobs:
               --jq '.[].filename'
           )
 
+          current_head_sha="$(
+            gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq '.head.sha'
+          )"
+
+          if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then
+            echo "::error::PR head changed after this workflow was queued; refusing stale auto-sync writeback."
+            exit 1
+          fi
+
           for path in "${changed_files[@]}"; do
             case "$path" in
               _projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
@@ -86,20 +95,12 @@ jobs:
 
             case "$path" in
               _projects/*/_main/*|repo/docs/*|repo/scripts/*|repo/tests/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
-                echo "::error file=${path}::Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate: ${path}. Commit generated outputs manually and rely on the normal read-only Validate workflow."
-                exit 1
+                echo "::notice file=${path}::Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits. Normal Validate checks remain the merge gate."
+                echo "should_sync=false" >> "$GITHUB_OUTPUT"
+                exit 0
                 ;;
             esac
           done
-
-          current_head_sha="$(
-            gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq '.head.sha'
-          )"
-
-          if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then
-            echo "::error::PR head changed after this workflow was queued; refusing stale auto-sync writeback."
-            exit 1
-          fi
 
           eligible=false
           for path in "${changed_files[@]}"; do

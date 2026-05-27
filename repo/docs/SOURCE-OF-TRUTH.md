@@ -64,7 +64,7 @@ The privileged workflow definition runs from the base/default branch, then write
 - The workflow stages and snapshots generated output after sync, then rechecks the index/workspace before commit so validation cannot add files to the writeback diff.
 - The workflow pins the PR checkout to the event head SHA, refuses stale queued runs if the PR head changed, verifies the remote PR branch before pushing, and never force pushes.
 - If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync skips successfully without checking out, writing, committing, or pushing. The author or Codex must commit any required generated outputs, source-lock/provenance updates, and audit baseline updates, then pass `npm run validate:all`.
-- If a writeback-eligible PR is mixed with forbidden workflow, maintenance-script, test, docs, package, lockfile, or other unsafe paths, the workflow fails instead of pushing.
+- If a writeback-eligible PR is mixed with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, the workflow skips successfully instead of pushing. The author or Codex must commit generated outputs manually and rely on normal read-only validation.
 
 ## Skill-Local Packs
 

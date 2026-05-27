@@ -1199,13 +1199,19 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       fail(errors, `${entry.relPath} must allow generated source-side agent-rule templates in the guarded PR file set`);
     }
   }
-  const unsafeFailMessage = 'Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate';
-  if (!preflightSection.includes(unsafeFailMessage) ||
-      !preflightSection.includes('Commit generated outputs manually and rely on the normal read-only Validate workflow.') ||
+  const unsafeSkipMessage = 'Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits. Normal Validate checks remain the merge gate.';
+  const currentHeadCheckIndex = preflightSection.indexOf('current_head_sha="$(');
+  const unsafeSkipIndex = preflightSection.indexOf(unsafeSkipMessage);
+  if (currentHeadCheckIndex === -1 || unsafeSkipIndex === -1 || currentHeadCheckIndex > unsafeSkipIndex) {
+    fail(errors, `${entry.relPath} preflight must reject stale PR heads before optional auto-sync skips`);
+  }
+  if (!preflightSection.includes(unsafeSkipMessage) ||
+      !preflightSection.includes('echo "should_sync=false" >> "$GITHUB_OUTPUT"') ||
       !preflightSection.includes('should_sync=true') ||
-      preflightSection.includes('should_sync=false') ||
-      !/Auto-sync refused:[\s\S]{0,400}exit 1/.test(preflightSection)) {
-    fail(errors, `${entry.relPath} preflight must fail unsafe mixed maintenance/source PRs before writeback`);
+      preflightSection.includes('Auto-sync refused: this PR mixes generated-sync-eligible changes') ||
+      /Auto-sync skipped:[\s\S]{0,400}exit 1/.test(preflightSection) ||
+      !/Auto-sync skipped:[\s\S]{0,400}exit 0/.test(preflightSection)) {
+    fail(errors, `${entry.relPath} preflight must skip unsafe mixed maintenance/source PRs without writeback`);
   }
 
   if (!text.includes('Forbidden post-sync change outside generated output scope') ||

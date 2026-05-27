@@ -817,6 +817,14 @@ test('auto-sync generated surfaces workflow pins and rechecks the guarded PR hea
     ['PR checkout using head.sha is required', (text) => text.replace('ref: ${{ github.event.pull_request.head.sha }}', 'ref: ${{ github.event.pull_request.head.repo.full_name }}'), /must check out the guarded PR head SHA to pr\//],
     ['preflight current-head SHA query is required', (text) => text.replace('gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq \'.head.sha\'', 'echo "$HEAD_SHA"'), /preflight must verify the current PR head SHA from PR metadata/],
     ['preflight stale-run rejection is required', (text) => text.replace('if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then', 'if false; then'), /preflight must reject stale runs when the PR head SHA changed/],
+    ['preflight stale-run rejection must happen before optional skip', (text) => {
+      const start = text.indexOf('          current_head_sha="$(');
+      const end = text.indexOf('          for path in "${changed_files[@]}"; do', start);
+      assert.notEqual(start, -1);
+      assert.notEqual(end, -1);
+      const currentHeadBlock = text.slice(start, end);
+      return `${text.slice(0, start)}${text.slice(end).replace('          eligible=false', `${currentHeadBlock}          eligible=false`)}`;
+    }, /preflight must reject stale PR heads before optional auto-sync skips/],
     ['post-checkout rev-parse verification is required', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" rev-parse HEAD', 'echo "$HEAD_SHA"'), /must verify the checked-out PR commit matches HEAD_SHA/],
     ['post-checkout verification must run before sync', (text) => moveWorkflowStepAfter(text, 'Verify checked-out PR commit', 'Sync deterministic generated surfaces'), /must verify the checked-out PR commit before running sync/],
     ['final remote branch SHA check is required before push', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" ls-remote origin "refs/heads/${HEAD_REF}"', 'echo "$HEAD_SHA"'), /final push must verify the PR branch still points to HEAD_SHA before pushing/],
@@ -1002,20 +1010,22 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
   }
 });
 
-test('auto-sync generated surfaces workflow fails unsafe mixed preflight paths before writeback', () => {
+test('auto-sync generated surfaces workflow skips unsafe mixed preflight paths before writeback', () => {
   const cases = [
-    ['repo docs fail is required', (text) => text.replace('repo/docs/*|', ''), /missing unsafe preflight fail handling for repo\/docs/],
-    ['_main fail is required', (text) => text.replace('_projects/*/_main/*|', ''), /missing unsafe preflight fail handling for _projects\/\*\*\/_main/],
-    ['.github fail is required', (text) => text.replace('.github/*|', ''), /missing unsafe preflight fail handling for \.github/],
-    ['repo scripts fail is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight fail handling for repo/' + 'scripts')],
-    ['repo tests fail is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight fail handling for repo\/tests/],
-    ['lockfile fail is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight fail handling for package\/lockfile changes/],
+    ['repo docs skip is required', (text) => text.replace('repo/docs/*|', ''), /missing unsafe preflight fail handling for repo\/docs/],
+    ['_main skip is required', (text) => text.replace('_projects/*/_main/*|', ''), /missing unsafe preflight fail handling for _projects\/\*\*\/_main/],
+    ['.github skip is required', (text) => text.replace('.github/*|', ''), /missing unsafe preflight fail handling for \.github/],
+    ['repo scripts skip is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight fail handling for repo/' + 'scripts')],
+    ['repo tests skip is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight fail handling for repo\/tests/],
+    ['lockfile skip is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight fail handling for package\/lockfile changes/],
     ['source-of-truth contract partial carve-out is required', (text) => text.replaceAll(contractPartialPath, '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/other-contract.md'), /must allow source-of-truth contract partial changes as auto-sync eligible inputs/],
     ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/_partials/*', '_projects/blocked/_main/_partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
     ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
-    ['clear fail-closed error is required', (text) => text.replace('Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate', 'Auto-sync did something else'), /preflight must fail unsafe mixed maintenance\/source PRs/],
-    ['manual generated-output guidance is required', (text) => text.replace('Commit generated outputs manually and rely on the normal read-only Validate workflow.', 'Generated outputs will be checked here.'), /preflight must fail unsafe mixed maintenance\/source PRs/],
-    ['unsafe path branch must exit non-zero', (text) => text.replace('Commit generated outputs manually and rely on the normal read-only Validate workflow."\n                exit 1', 'Commit generated outputs manually and rely on the normal read-only Validate workflow."\n                exit 0'), /preflight must fail unsafe mixed maintenance\/source PRs/]
+    ['clear skip notice is required', (text) => text.replace('Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits. Normal Validate checks remain the merge gate.', 'Auto-sync did something else'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
+    ['manual generated-output guidance is required', (text) => text.replace('Normal Validate checks remain the merge gate.', 'Generated outputs will be checked here.'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
+    ['unsafe path branch must set should_sync false', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"', 'echo "should_sync=true" >> "$GITHUB_OUTPUT"'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
+    ['unsafe path branch must exit successfully', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"\n                exit 0', 'echo "should_sync=false" >> "$GITHUB_OUTPUT"\n                exit 1'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
+    ['unsafe path branch must not red-fail', (text) => text.replace('Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits', 'Auto-sync refused: this PR mixes generated-sync-eligible changes'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
