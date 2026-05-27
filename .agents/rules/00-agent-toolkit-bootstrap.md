@@ -6,4 +6,4 @@ Root `AGENTS.md` is the canonical repo instruction file.
 
 **If root `AGENTS.md` is not loaded, read root `AGENTS.md` before repo edits.**
 
-Preserve existing `.agents/rules` files.
+Do not add extra `.agents/rules` files.
