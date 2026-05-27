@@ -179,7 +179,7 @@ Keep final reports concise but complete.
 If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.
 <!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->
 
-# This repo is the canonical reusable AI Agent Toolkit.
+This repo is the canonical reusable AI Agent Toolkit.
 
 <!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->
 ## Source-of-Truth Contract
@@ -203,7 +203,7 @@ This repo has a source layer and a published layer.
 - Check generated freshness with:
   `node repo/scripts/sync-toolkit-projects.cjs --check`
 - CI checks generated freshness and may auto-sync deterministic generated outputs from the base/default branch workflow definition only on guarded same-repo PR branches targeting `main`; fork PRs and `main` are never writeback targets.
-- Auto-sync only republishes approved generated/synced outputs in `README.md`, `AGENTS.md`, `skills/**`, `mcp/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not update other source files, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs.
+- Auto-sync only republishes approved generated/synced outputs in `README.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules/00-agent-toolkit-bootstrap.md`, `skills/**`, `mcp/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not update other source files, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs.
 - Because auto-sync writeback is privileged, it must not run generated test suites or PR-controlled generated executable code; full validation remains covered by normal read-only CI.
 - Auto-sync must not run full repo validation against raw PR heads; this avoids blocking otherwise valid behind-main PR branches.
 - Auto-sync static checks are limited to generated-surface freshness checks and git diff checks before committing generated output.

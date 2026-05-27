@@ -112,7 +112,7 @@ Templates are published material. Review them before copying into a consumer rep
 - [n8n workflow templates](../../skills/n8n-workflow-templates/templates/) contain public generic inactive workflow JSON templates.
 - [CI/CD templates](../../skills/secure-cicd-installer/templates/cicd/) contain CI/CD installer prompts and status templates.
 
-Generated template outputs are intentional. [PowerShell generator](../scripts/build-agent-rule-templates.ps1) and [CMD wrapper](../scripts/_build-agent-rule-templates.cmd) regenerate project-pure source-side generic baseline templates under `_projects/development/ai-coding-agent-rules/_main/`; toolkit sync publishes inert skill copies and the generated `n8n-agent-rules` skill.
+Generated template outputs are intentional. `node repo/scripts/sync-agent-instruction-shims.cjs --write` regenerates project-pure source-side baseline templates and root instruction shims from `_projects/development/ai-coding-agent-rules/_main/`; `node repo/scripts/sync-toolkit-projects.cjs --write` publishes inert skill copies and the generated `n8n-agent-rules` skill.
 
 For n8n work, install or load `skills/n8n-agent-rules`. The optional adapter installer can detect n8n repositories and preview patches to active instruction files, but it must be run with `--dry-run` first and must not be run with `--write` unless the user explicitly approves the current target file and operation. Do not copy the full n8n rules into global always-on instructions unless you intentionally accept the context cost.
 

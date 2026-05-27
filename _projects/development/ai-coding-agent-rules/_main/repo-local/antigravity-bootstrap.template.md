@@ -1,20 +1,14 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md
-Update the project source and run sync.
--->
-# antigravity-bootstrap.template.md AI coding agent rules
+# antigravity-bootstrap.template.md repo-local Antigravity bootstrap
 
-Use this generated template for Antigravity.
+Use this repo-local bootstrap template for Antigravity.
 
 This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-Copy or merge the fenced payload into the target repo root as `.agents/rules/00-agent-toolkit-bootstrap.md` only when the user explicitly wants generic Antigravity bootstrap rules installed.
+Copy or merge the fenced payload into the target repo root as `.agents/rules/00-agent-toolkit-bootstrap.md` only when the user explicitly wants repo-local Antigravity bootstrap instructions installed.
 
 If the target repo already has `.agents/rules/00-agent-toolkit-bootstrap.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-## Antigravity workspace bootstrap example
+## Repo-local bootstrap example
 
 Copy or merge the fenced payload into:
 

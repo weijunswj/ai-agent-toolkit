@@ -13,7 +13,7 @@
       "source_path": "templates/partials/ai-coding-agent-execution.md",
       "project_path": "_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md",
       "source_blob_sha": "33361f156446e64eb501c5fbc769e5ccab478236",
-      "notes": "Moved from the n8n local setup partial source during the source-ownership split, then relocated to _main/_partials during the agent-rule path cleanup. It remains toolkit-adapted relative to the retired upstream source, with GitHub/PR/VCS publication approval workflow wording omitted from the default reusable toolkit prompt."
+      "notes": "Moved from the n8n local setup partial source during the source-ownership split, then retained as the one canonical reusable toolkit prompt partial. It remains toolkit-adapted relative to the retired upstream source, with GitHub/PR/VCS publication approval workflow wording omitted from the default reusable toolkit prompt."
     },
     {
       "mode": "adapted",

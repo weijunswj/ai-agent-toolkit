@@ -96,9 +96,13 @@ const expectedFiles = [
   '_projects/n8n/workflow-toolkit/SOURCE-LOCK.json',
   '_projects/cicd/secure-installer/SOURCE-LOCK.json',
   '_projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
+  'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
   'skills/ai-coding-agent-rules/AGENTS.template.md',
+  'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
   'skills/ai-coding-agent-rules/CLAUDE.template.md',
+  'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
   'skills/ai-coding-agent-rules/GEMINI.template.md',
+  'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
   'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md',
   'skills/n8n-agent-rules/SKILL.md',
   'skills/n8n-agent-rules/README.md',
@@ -110,17 +114,12 @@ const expectedFiles = [
   'skills/n8n-local-setup/references/n8n-agent-rules.md',
   'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
   'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
-  '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md',
-  '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-n8n-adapter-block.md',
-  '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md',
-  '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md',
-  '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md',
-  '_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md',
-  'repo/scripts/agent-rule-template-specs.json',
-  'repo/scripts/build-agent-rule-templates.ps1',
-  'repo/scripts/_build-agent-rule-templates.cmd',
+  '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/CLAUDE.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/GEMINI.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/antigravity-bootstrap.template.md',
   'repo/scripts/sync-agent-instruction-shims.cjs',
   'repo/scripts/validate-toolkit.cjs',
   'repo/scripts/sync-toolkit-projects.cjs',
@@ -148,7 +147,8 @@ const expectedDirs = [
   '_projects/development/ai-coding-agent-rules',
   '_projects/development/ai-coding-agent-rules/_main',
   '_projects/development/ai-coding-agent-rules/_main/_partials',
-  '_projects/development/ai-coding-agent-rules/_main/templates',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local',
+  'skills/ai-coding-agent-rules/repo-local',
   '_projects/n8n/workflow-toolkit',
   '_projects/n8n/workflow-toolkit/_main',
   '_projects/cicd/secure-installer',
@@ -368,9 +368,14 @@ const sourceWatchPrWorkflowPath = '.github/workflows/source-watch-pr.yml';
 const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.';
 const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/templates/CLAUDE.shim.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/templates/GEMINI.shim.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/templates/antigravity-bootstrap.template.md'
+  '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md'
+];
+const autoSyncGeneratedRootInstructionOutputs = [
+  'CLAUDE.md',
+  'GEMINI.md',
+  '.agents/rules/00-agent-toolkit-bootstrap.md'
 ];
 const allowedCredentialExampleJsonPaths = new Set([
   '_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json'
@@ -381,6 +386,7 @@ function isAutoSyncGeneratedOutputPath(relPath) {
   return (
     rel === 'README.md' ||
     rel === 'AGENTS.md' ||
+    autoSyncGeneratedRootInstructionOutputs.includes(rel) ||
     rel.startsWith('skills/') ||
     rel.startsWith('mcp/') ||
     autoSyncGeneratedAgentRuleTemplateOutputs.includes(rel)
@@ -1136,11 +1142,12 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     }
   }
   const autoSyncAgentRulePartialInputs = [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/*'
+    '_projects/development/ai-coding-agent-rules/_main/_partials/*',
+    '_projects/development/ai-coding-agent-rules/_main/repo-local/*'
   ];
   for (const token of autoSyncAgentRulePartialInputs) {
     if (!preflightSection.includes(token)) {
-      fail(errors, `${entry.relPath} must allow agent-rule partial changes as auto-sync eligible inputs`);
+      fail(errors, `${entry.relPath} must allow agent-rule partial and repo-local template changes as auto-sync eligible inputs`);
     }
   }
   for (const token of autoSyncGeneratedAgentRuleTemplateOutputs) {
@@ -1163,8 +1170,12 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       !/git\s+-C\s+"\$PR_ROOT"\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
     fail(errors, `${entry.relPath} missing post-sync changed-path validation`);
   }
-  if (!text.includes('README.md|AGENTS.md|skills/*|mcp/*')) {
+  const generatedOutputScope = 'README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*';
+  if (!text.includes(generatedOutputScope)) {
     fail(errors, `${entry.relPath} missing approved generated output path allowlist`);
+  }
+  for (const token of autoSyncGeneratedRootInstructionOutputs) {
+    if (!text.includes(token)) fail(errors, `${entry.relPath} missing generated root instruction allowlist entry: ${token}`);
   }
   for (const token of autoSyncGeneratedAgentRuleTemplateOutputs) {
     if (!text.includes(token)) fail(errors, `${entry.relPath} missing generated source-side agent-rule template allowlist entry: ${token}`);
@@ -1224,9 +1235,10 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const trustedWorkspaceCommands = [
-    'pwsh -NoProfile -File "$TRUSTED_ROOT/repo/scripts/build-agent-rule-templates.ps1" -Workspace "$PR_ROOT"',
+    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --write',
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write',
     'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write',
+    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --check',
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check',
     'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check'
   ];
@@ -1258,11 +1270,12 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} final recheck must compare the staged index tree snapshot`);
   }
   if (!finalRecheckStep.includes('/usr/bin/git -C "$PR_ROOT" diff --cached --name-only') ||
-      !finalRecheckStep.includes('README.md|AGENTS.md|skills/*|mcp/*') ||
+      !finalRecheckStep.includes(generatedOutputScope) ||
       autoSyncGeneratedAgentRuleTemplateOutputs.some((token) => !finalRecheckStep.includes(token))) {
     fail(errors, `${entry.relPath} final recheck must reject staged paths outside generated output scope`);
   }
   const expectedStaticCheckCommands = [
+    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --check',
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check',
     'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check',
     '/usr/bin/git -C "$PR_ROOT" diff --cached --check',
@@ -1275,7 +1288,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const gitAddLines = (text.match(/^\s*(?:\/usr\/bin\/)?git(?:\s+-C\s+"\$PR_ROOT")?\s+add .+$/gm) || []).map((line) => line.trim());
-  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
+  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md CLAUDE.md GEMINI.md .agents/rules/00-agent-toolkit-bootstrap.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
   if (gitAddLines.length !== 1 || gitAddLines[0] !== expectedGitAddLine) {
     fail(errors, `${entry.relPath} must commit only approved generated output paths`);
   }

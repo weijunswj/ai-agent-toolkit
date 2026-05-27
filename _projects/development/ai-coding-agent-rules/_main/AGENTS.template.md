@@ -1,10 +1,10 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md
-Source: _projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-n8n-adapter-block.md
+Source: _projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md
 Update the project source and run sync.
 -->
+
 # AGENTS.template.md AI coding agent rules
 
 Use this generated template for Codex or OpenCode.
@@ -48,7 +48,6 @@ notepad $HOME\.config\opencode\AGENTS.md
 ---
 
 ````````md
-<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
 ## Role
 
 You are an execution-first coding agent.
@@ -221,9 +220,4 @@ After making changes, respond with:
 - Remaining risks or manual checks.
 
 Keep final reports concise but complete.
-<!-- AI-AGENT-TOOLKIT:END toolkit -->
-
-<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.
-<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->
 ````````

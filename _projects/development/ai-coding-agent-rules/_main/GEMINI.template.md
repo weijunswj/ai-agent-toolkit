@@ -5,34 +5,34 @@ Source: _projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-ag
 Update the project source and run sync.
 -->
 
-# AGENTS.managed.template.md repo-local managed AI coding agent rules
+# GEMINI.template.md AI coding agent rules
 
-Use this generated template for repo/folder-local Codex or OpenCode setup.
+Use this generated template for Gemini CLI or Antigravity.
 
-This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `AGENTS.md`.
+This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `GEMINI.md`.
 
-Copy or merge the fenced payload into the target repo root as `AGENTS.md` only when the user explicitly wants repo-local managed Codex/OpenCode rules installed.
+Copy or merge the fenced payload into the target repo root as `GEMINI.md` only when the user explicitly wants generic Gemini CLI/Antigravity rules installed.
 
-If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-## Repo-local rules example
+## Gemini CLI and Antigravity global rules example
 
 Copy or merge the fenced payload into:
 
 ```text
-<repo>\AGENTS.md
+C:\Users\<your-user>\.gemini\GEMINI.md
 ```
 
 Or create it with PowerShell:
 
 ```text
-notepad AGENTS.md
+mkdir $HOME\.gemini -Force
+notepad $HOME\.gemini\GEMINI.md
 ```
 
 ---
 
 ````````md
-<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
 ## Role
 
 You are an execution-first coding agent.
@@ -205,9 +205,4 @@ After making changes, respond with:
 - Remaining risks or manual checks.
 
 Keep final reports concise but complete.
-<!-- AI-AGENT-TOOLKIT:END toolkit -->
-
-<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.
-<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->
 ````````

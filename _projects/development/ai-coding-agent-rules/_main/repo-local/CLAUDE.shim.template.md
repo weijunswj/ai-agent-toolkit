@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/repo-local/CLAUDE.shim.template.md
-Update the project source and run sync.
--->
 # CLAUDE.shim.template.md repo-local Claude Code shim
 
 Use this repo-local shim template for Claude Code.

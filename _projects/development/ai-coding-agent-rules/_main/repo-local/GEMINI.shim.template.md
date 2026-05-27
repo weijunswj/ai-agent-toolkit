@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/repo-local/GEMINI.shim.template.md
-Update the project source and run sync.
--->
 # GEMINI.shim.template.md repo-local Gemini shim
 
 Use this repo-local shim template for Gemini CLI or Antigravity.

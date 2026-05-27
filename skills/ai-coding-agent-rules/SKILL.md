@@ -47,4 +47,6 @@ This automatic bootstrap is for local repo/folder instruction files only. It mus
 
 Do not install heavy global `AGENTS.md` or global `GEMINI.md` rules. After setup, the repo-local files are the source of truth.
 
-Use referenced files for full content: `AGENTS.template.md`, `CLAUDE.template.md`, `GEMINI.template.md`, and `antigravity-bootstrap.template.md`.
+Use referenced files for full repo-local content: `repo-local/AGENTS.managed.template.md`, `repo-local/CLAUDE.shim.template.md`, `repo-local/GEMINI.shim.template.md`, and `repo-local/antigravity-bootstrap.template.md`.
+
+For human/manual global setup reference docs, use `_projects/development/ai-coding-agent-rules/_main/`; do not treat those source docs as the published skill runtime path.

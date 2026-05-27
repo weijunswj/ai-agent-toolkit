@@ -14,14 +14,16 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 Instruction-only skill for automatically checking and installing repo/folder-local AI coding agent instruction files and lightweight compatibility shims.
 
-The copied skill folder includes inert generic baseline templates:
+The copied skill folder includes inert repo-local bootstrap templates:
 
-- [AGENTS.template.md](AGENTS.template.md) for Codex or OpenCode.
-- [CLAUDE.template.md](CLAUDE.template.md) for Claude Code.
-- [GEMINI.template.md](GEMINI.template.md) for Gemini CLI or Antigravity.
-- [antigravity-bootstrap.template.md](antigravity-bootstrap.template.md) for `.agents/rules/00-agent-toolkit-bootstrap.md`.
+- [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) for Codex or OpenCode.
+- [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) for Claude Code.
+- [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) for Gemini CLI or Antigravity.
+- [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) for `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-The baseline templates stay generic and compact. `AGENTS.template.md` carries the canonical shared contract, while `CLAUDE.template.md` and `GEMINI.template.md` are compatibility shims that import `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
+The repo-local templates stay generic and compact. `AGENTS.managed.template.md` carries the managed toolkit block and one-line n8n adapter, while the Claude, Gemini, and Antigravity templates are tiny compatibility shims that point to root `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
+
+Top-level `AGENTS.template.md`, `CLAUDE.template.md`, `GEMINI.template.md`, and `antigravity-bootstrap.template.md` are retained only as repo-local compatibility aliases for older links. New integrations should use the `repo-local/` paths above.
 
 Antigravity workspaces can use a tiny `.agents/rules/00-agent-toolkit-bootstrap.md` bootstrap when the folder also carries root `AGENTS.md`; do not full-import `AGENTS.md` into that bootstrap by default.
 
@@ -29,16 +31,19 @@ The skill is intended to run a cheap local check before coding work in GitHub, G
 
 Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Never overwrite existing `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`; produce a merge or diff plan instead.
 
+For human/manual global setup reference docs, use the source project under `_projects/development/ai-coding-agent-rules/_main/`. The published skill folder is copyable and self-contained for repo-local bootstrap use.
+
 ## Platform Entry Points
 
-| Platform | Rules template | Setup reference |
-|---|---|---|
-| Codex | [AGENTS.template.md](AGENTS.template.md) | [Codex reference](../n8n-local-setup/references/ai-agent-platforms/codex.md) |
-| OpenCode | [AGENTS.template.md](AGENTS.template.md) | [OpenCode reference](../n8n-local-setup/references/ai-agent-platforms/opencode.md) |
-| Claude Code | [CLAUDE.template.md](CLAUDE.template.md) | [Claude Code reference](../n8n-local-setup/references/ai-agent-platforms/claude-code.md) |
-| Antigravity | [antigravity-bootstrap.template.md](antigravity-bootstrap.template.md) | [Antigravity reference](../n8n-local-setup/references/ai-agent-platforms/antigravity.md) |
+| Platform | Repo-local template |
+|---|---|
+| Codex | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
+| OpenCode | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
+| Claude Code | [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) |
+| Gemini CLI | [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) |
+| Antigravity | [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) |
 
-Install copied skill folders according to the target platform's supported skill location. Use the setup references for platform-specific skill, MCP config, and restart notes.
+Install copied skill folders according to the target platform's supported skill location.
 
 For n8n-specific workflow and MCP safety rules, install or load [n8n-agent-rules](../n8n-agent-rules/). Do not copy the full n8n rules into global always-on generic instructions unless you intentionally accept the context cost.
 

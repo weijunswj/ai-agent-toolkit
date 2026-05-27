@@ -15,24 +15,88 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 
 const workspaceRoot = workspaceRootFromArgs();
 const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
+const rootReal = fs.realpathSync.native(root);
 const mode = process.argv.includes('--write') ? 'write' : 'check';
+
+const projectId = 'development.ai-coding-agent-rules';
+const fixCommand = 'node repo/scripts/sync-agent-instruction-shims.cjs --write';
+const executionPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md';
+const manualTemplatePaths = {
+  agents: '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+  claude: '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+  gemini: '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+  managedAgents: '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md'
+};
+const repoLocalTemplatePaths = {
+  claude: '_projects/development/ai-coding-agent-rules/_main/repo-local/CLAUDE.shim.template.md',
+  gemini: '_projects/development/ai-coding-agent-rules/_main/repo-local/GEMINI.shim.template.md',
+  antigravity: '_projects/development/ai-coding-agent-rules/_main/repo-local/antigravity-bootstrap.template.md'
+};
 
 const toolkitBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->';
 const toolkitEnd = '<!-- AI-AGENT-TOOLKIT:END toolkit -->';
 const n8nBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->';
 const n8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->';
 const legacyN8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->';
+const n8nSentence = 'If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.';
 
-const partials = {
-  toolkit: '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md',
-  n8n: '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-n8n-adapter-block.md',
-  claude: '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md',
-  gemini: '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md',
-  antigravity: '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md'
-};
+function slash(value) {
+  return value.split(path.sep).join('/');
+}
+
+function normalizeWorkspaceRel(value) {
+  return path.posix.normalize(String(value).replace(/\\/g, '/'));
+}
+
+function hasPathTraversal(value) {
+  const slashValue = String(value).replace(/\\/g, '/');
+  const normalized = normalizeWorkspaceRel(value);
+  return slashValue.split('/').includes('..') || normalized === '..' || normalized.startsWith('../') || normalized.includes('/../');
+}
+
+function isAbsolutePathLike(value) {
+  return path.isAbsolute(value) || path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
+}
+
+function isInsideRoot(realPath) {
+  const relative = path.relative(rootReal, realPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function safeWorkspacePath(relPath, label, options = {}) {
+  if (typeof relPath !== 'string' || !relPath.trim()) {
+    throw new Error(`${label} must be a non-empty workspace-relative path`);
+  }
+  if (isAbsolutePathLike(relPath) || hasPathTraversal(relPath)) {
+    throw new Error(`Unsafe workspace path for ${label}: ${relPath}`);
+  }
+
+  const normalized = normalizeWorkspaceRel(relPath);
+  const parts = normalized.split('/').filter(Boolean);
+  let current = root;
+  let existing = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    if (!fs.existsSync(current)) {
+      if (options.allowMissing) break;
+      throw new Error(`${label} does not exist: ${normalized}`);
+    }
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Unsafe symlink in ${label}: ${normalized}`);
+    }
+    existing = current;
+  }
+
+  const real = fs.realpathSync.native(existing);
+  if (!isInsideRoot(real)) {
+    throw new Error(`Unsafe path outside workspace for ${label}: ${normalized}`);
+  }
+  return path.join(root, normalized);
+}
 
 function resolveRel(relPath) {
-  return path.join(root, relPath);
+  return safeWorkspacePath(relPath, 'agent instruction path', { allowMissing: true });
 }
 
 function normalize(text) {
@@ -40,22 +104,188 @@ function normalize(text) {
 }
 
 function readRequired(relPath, errors) {
-  const full = resolveRel(relPath);
-  if (!fs.existsSync(full)) {
-    errors.push(`Missing agent instruction source: ${relPath}`);
+  let full;
+  try {
+    full = safeWorkspacePath(relPath, `agent instruction source ${relPath}`);
+  } catch (error) {
+    errors.push(`${error.message}. Run ${fixCommand}.`);
     return null;
   }
   return normalize(fs.readFileSync(full, 'utf8')).trimEnd();
 }
 
 function readOptional(relPath) {
-  const full = resolveRel(relPath);
+  const full = safeWorkspacePath(relPath, `agent instruction file ${relPath}`, { allowMissing: true });
   if (!fs.existsSync(full)) return '';
   return normalize(fs.readFileSync(full, 'utf8'));
 }
 
+function generatedNotice(sourcePaths) {
+  return [
+    '<!--',
+    'Generated from toolkit project source. Do not edit directly.',
+    `Project: ${projectId}`,
+    ...sourcePaths.map((sourcePath) => `Source: ${sourcePath}`),
+    'Update the project source and run sync.',
+    '-->',
+    ''
+  ].join('\n');
+}
+
+function fencedTemplate({ title, audience, destinationDisplay, activeNameText, installSubject, examples, payload, sourcePaths }) {
+  const body = [
+    generatedNotice(sourcePaths),
+    `# ${title}`,
+    '',
+    `Use this generated template for ${audience}.`,
+    '',
+    `This file is inert while it keeps the \`.template.md\` filename. It is safe to keep inside a skill folder because ${activeNameText}.`,
+    '',
+    `Copy or merge the fenced payload into the target repo root as ${destinationDisplay} only when the user explicitly wants ${installSubject} installed.`,
+    '',
+    `If the target repo already has ${destinationDisplay}, do not overwrite it. Merge manually or produce a diff/merge plan.`
+  ];
+
+  for (const example of examples) {
+    body.push('');
+    body.push(`## ${example.heading}`);
+    body.push('');
+    body.push('Copy or merge the fenced payload into:');
+    body.push('');
+    body.push('```text');
+    body.push(example.path);
+    body.push('```');
+    body.push('');
+    body.push('Or create it with PowerShell:');
+    body.push('');
+    body.push('```text');
+    for (const command of example.commands) body.push(command);
+    body.push('```');
+  }
+
+  body.push('');
+  body.push('---');
+  body.push('');
+  body.push('````````md');
+  body.push(payload.trimEnd());
+  body.push('````````');
+  return `${body.join('\n').trimEnd()}\n`;
+}
+
+function managedPayload(executionPrompt) {
+  return [
+    toolkitBegin,
+    executionPrompt.trimEnd(),
+    toolkitEnd,
+    '',
+    n8nBegin,
+    n8nSentence,
+    n8nEnd
+  ].join('\n');
+}
+
+function expectedSourceTemplates(executionPrompt) {
+  const sourcePaths = [executionPromptPath];
+  return {
+    [manualTemplatePaths.agents]: fencedTemplate({
+      title: 'AGENTS.template.md AI coding agent rules',
+      audience: 'Codex or OpenCode',
+      destinationDisplay: '`AGENTS.md`',
+      activeNameText: 'it is not named `AGENTS.md`',
+      installSubject: 'generic Codex/OpenCode rules',
+      examples: [
+        {
+          heading: 'Codex global rules example',
+          path: 'C:\\Users\\<your-user>\\.codex\\AGENTS.md',
+          commands: ['mkdir $HOME\\.codex -Force', 'notepad $HOME\\.codex\\AGENTS.md']
+        },
+        {
+          heading: 'OpenCode global rules example',
+          path: 'C:\\Users\\<your-user>\\.config\\opencode\\AGENTS.md',
+          commands: ['mkdir $HOME\\.config\\opencode -Force', 'notepad $HOME\\.config\\opencode\\AGENTS.md']
+        }
+      ],
+      payload: executionPrompt,
+      sourcePaths
+    }),
+    [manualTemplatePaths.claude]: fencedTemplate({
+      title: 'CLAUDE.template.md AI coding agent rules',
+      audience: 'Claude Code',
+      destinationDisplay: '`CLAUDE.md`',
+      activeNameText: 'it is not named `CLAUDE.md`',
+      installSubject: 'generic Claude Code rules',
+      examples: [
+        {
+          heading: 'Claude Code global rules example',
+          path: 'C:\\Users\\<your-user>\\.claude\\CLAUDE.md',
+          commands: ['mkdir $HOME\\.claude -Force', 'notepad $HOME\\.claude\\CLAUDE.md']
+        }
+      ],
+      payload: executionPrompt,
+      sourcePaths
+    }),
+    [manualTemplatePaths.gemini]: fencedTemplate({
+      title: 'GEMINI.template.md AI coding agent rules',
+      audience: 'Gemini CLI or Antigravity',
+      destinationDisplay: '`GEMINI.md`',
+      activeNameText: 'it is not named `GEMINI.md`',
+      installSubject: 'generic Gemini CLI/Antigravity rules',
+      examples: [
+        {
+          heading: 'Gemini CLI and Antigravity global rules example',
+          path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
+          commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
+        }
+      ],
+      payload: executionPrompt,
+      sourcePaths
+    }),
+    [manualTemplatePaths.managedAgents]: fencedTemplate({
+      title: 'AGENTS.managed.template.md repo-local managed AI coding agent rules',
+      audience: 'repo/folder-local Codex or OpenCode setup',
+      destinationDisplay: '`AGENTS.md`',
+      activeNameText: 'it is not named `AGENTS.md`',
+      installSubject: 'repo-local managed Codex/OpenCode rules',
+      examples: [
+        {
+          heading: 'Repo-local rules example',
+          path: '<repo>\\AGENTS.md',
+          commands: ['notepad AGENTS.md']
+        }
+      ],
+      payload: managedPayload(executionPrompt),
+      sourcePaths
+    })
+  };
+}
+
 function markerCount(text, marker) {
   return text.split(marker).length - 1;
+}
+
+function extractPayload(relPath, text, errors) {
+  const match = text.match(/\n````````md\n([\s\S]*?)\n````````\s*$/);
+  if (!match) {
+    errors.push(`Missing agent instruction template payload fence in ${relPath}. Run ${fixCommand}.`);
+    return null;
+  }
+  return match[1].trimEnd();
+}
+
+function extractManagedBlock(relPath, text, begin, end, errors) {
+  const beginCount = markerCount(text, begin);
+  const endCount = markerCount(text, end);
+  if (beginCount !== 1 || endCount !== 1) {
+    errors.push(`Malformed managed agent instruction source markers in ${relPath}. Run ${fixCommand}.`);
+    return null;
+  }
+  const start = text.indexOf(begin);
+  const finish = text.indexOf(end);
+  if (start > finish) {
+    errors.push(`Managed agent instruction source markers out of order in ${relPath}. Run ${fixCommand}.`);
+    return null;
+  }
+  return text.slice(start, finish + end.length).trimEnd();
 }
 
 function stripManagedBlock(relPath, text, begin, end, errors) {
@@ -63,13 +293,13 @@ function stripManagedBlock(relPath, text, begin, end, errors) {
   const endCount = markerCount(text, end);
   if (beginCount === 0 && endCount === 0) return text;
   if (beginCount !== 1 || endCount !== 1) {
-    errors.push(`Malformed managed agent instruction markers in ${relPath}`);
+    errors.push(`Malformed managed agent instruction markers in ${relPath}. Run ${fixCommand}.`);
     return null;
   }
   const start = text.indexOf(begin);
   const finish = text.indexOf(end);
   if (start > finish) {
-    errors.push(`Managed agent instruction markers out of order in ${relPath}`);
+    errors.push(`Managed agent instruction markers out of order in ${relPath}. Run ${fixCommand}.`);
     return null;
   }
   return `${text.slice(0, start)}${text.slice(finish + end.length)}`;
@@ -109,6 +339,13 @@ function removeLeadingHeading(text, heading) {
   return trimmed;
 }
 
+function normalizeRepoIntroHeading(text) {
+  return text.replace(
+    /^# This repo is the canonical reusable AI Agent Toolkit\.$/m,
+    'This repo is the canonical reusable AI Agent Toolkit.'
+  );
+}
+
 function shimBody(sourceText, options) {
   let body = sourceText;
   if (options.importLine) body = removeExactLine(body, options.importLine);
@@ -123,6 +360,7 @@ function rootAgentsExpected(current, source, errors) {
   if (body === null) return null;
   body = removeSupersededGitHubPrSection(body).trimStart();
   body = removeLeadingHeading(body, '# Existing user / repo content below');
+  body = normalizeRepoIntroHeading(body);
 
   const heading = '# AI Agent Toolkit Repo Rules';
   const normalizedBody = body.trimStart();
@@ -151,28 +389,46 @@ function shimExpected(relPath, current, sourceText, options, errors) {
   return body ? `${sourceText}\n\n${body}\n` : `${sourceText}\n`;
 }
 
-function writeOrCheck(relPath, expected, errors, runMode) {
+function writeOrCheck(relPath, expected, errors, runMode, label = 'managed agent instruction file') {
   if (expected === null) return;
   const current = readOptional(relPath);
   if (runMode === 'write') {
-    fs.mkdirSync(path.dirname(resolveRel(relPath)), { recursive: true });
-    fs.writeFileSync(resolveRel(relPath), expected, 'utf8');
+    const full = safeWorkspacePath(relPath, `agent instruction output ${relPath}`, { allowMissing: true });
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, expected, 'utf8');
     return;
   }
   if (current !== expected) {
-    errors.push(`Stale managed agent instruction file: ${relPath}`);
+    errors.push(`Stale ${label}: ${relPath}. Run ${fixCommand}.`);
   }
 }
 
 function validateAndSync(options = {}) {
   const runMode = options.mode || mode;
   const errors = [];
+  const executionPrompt = readRequired(executionPromptPath, errors);
+  if (executionPrompt === null) return { errors };
+
+  const sourceTemplates = expectedSourceTemplates(executionPrompt);
+  for (const [relPath, expected] of Object.entries(sourceTemplates)) {
+    writeOrCheck(relPath, expected, errors, runMode, 'agent instruction source template');
+  }
+
+  const managedAgentsTemplate = runMode === 'write'
+    ? sourceTemplates[manualTemplatePaths.managedAgents]
+    : readRequired(manualTemplatePaths.managedAgents, errors);
+  const claudeTemplate = readRequired(repoLocalTemplatePaths.claude, errors);
+  const geminiTemplate = readRequired(repoLocalTemplatePaths.gemini, errors);
+  const antigravityTemplate = readRequired(repoLocalTemplatePaths.antigravity, errors);
+  if ([managedAgentsTemplate, claudeTemplate, geminiTemplate, antigravityTemplate].some((value) => value === null)) return { errors };
+
+  const agentsPayload = extractPayload(manualTemplatePaths.managedAgents, managedAgentsTemplate, errors);
   const source = {
-    toolkit: readRequired(partials.toolkit, errors),
-    n8n: readRequired(partials.n8n, errors),
-    claude: readRequired(partials.claude, errors),
-    gemini: readRequired(partials.gemini, errors),
-    antigravity: readRequired(partials.antigravity, errors)
+    toolkit: agentsPayload ? extractManagedBlock(manualTemplatePaths.managedAgents, agentsPayload, toolkitBegin, toolkitEnd, errors) : null,
+    n8n: agentsPayload ? extractManagedBlock(manualTemplatePaths.managedAgents, agentsPayload, n8nBegin, n8nEnd, errors) : null,
+    claude: extractPayload(repoLocalTemplatePaths.claude, claudeTemplate, errors),
+    gemini: extractPayload(repoLocalTemplatePaths.gemini, geminiTemplate, errors),
+    antigravity: extractPayload(repoLocalTemplatePaths.antigravity, antigravityTemplate, errors)
   };
   if (Object.values(source).some((value) => value === null)) return { errors };
 

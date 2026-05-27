@@ -1,5 +1,3 @@
-# AGENTS.md
-
 ## Role
 
 You are an execution-first coding agent.
