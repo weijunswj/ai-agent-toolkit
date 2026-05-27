@@ -89,7 +89,7 @@ Proceed without extra confirmation for safe, clearly scoped local edits.
 
 ## Git Completion
 
-After completing requested repo edits, run relevant validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Never push to `main`, never push secrets, credentials, live/runtime files, failed validation, or safety-blocked changes.
+After completing requested repo edits, run the smallest relevant local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Do not run full local validation by default when CI already runs the full gate. Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
 
 ## Scope Control
 
@@ -216,8 +216,8 @@ This repo has a source layer and a published layer.
 - Auto-sync may run only deterministic generation, sync, check, or validator scripts from the protected base revision, with the PR checkout treated as data and passed through an explicit workspace target.
 - Auto-sync must stage and snapshot generated output after sync and recheck the index/workspace before commit so validation cannot add files to the writeback diff.
 - Auto-sync must pin the PR checkout to the event head SHA, refuse stale queued runs if the PR head changed, and refuse non-force pushes if the PR branch moved after checkout.
-- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required full validation gate for PRs and `main`.
-- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then pass `npm run validate:all`.
+- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required read-only CI and `main` validation gate.
+- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then rely on the normal read-only validation gate.
 - If a writeback-eligible PR mixes eligible source/routing/contract edits with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, auto-sync must skip successfully instead of pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit generated outputs manually and rely on normal read-only validation.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 - A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
@@ -284,7 +284,7 @@ When adding a new project module or changing a published skill/MCP surface:
 - Do not add shims by default. Add them only when exact copied docs would otherwise have broken relative links.
 - Update `SOURCE-MANIFEST.md` when a project uses shims, linked outputs, third-party source, or cross-surface composition.
 - Update `SOURCE-LOCK.json` when preserved/source-locked material changes.
-- Run `npm run validate:all` and `npm run audit:surfaces:check` before reporting completion.
+- Run targeted local validation before pushing. Run local `npm run validate:all` for broad or risky changes, workflow/sync/generator/package/security changes, or CI reproduction; CI remains the full merge gate.
 
 Keep the topology simple:
 
@@ -323,7 +323,7 @@ Keep the topology simple:
 
 ## Validation
 
-For expensive validation work, follow `repo/docs/VALIDATION-STRATEGY.md`: use targeted checks while developing, then run full validation before final PR-ready reporting. Do not loop `npm run validate:all` repeatedly when a narrower failing check can be isolated.
+For expensive validation work, follow `repo/docs/VALIDATION-STRATEGY.md`: use targeted checks while developing and before pushing. Do not loop `npm run validate:all` repeatedly when a narrower failing check can be isolated; run local full validation only when the change risk or CI state calls for it.
 
 Before reporting completion, run the relevant checks:
 

@@ -126,7 +126,7 @@ Proceed without extra confirmation for safe, clearly scoped local edits.
 
 ## Git Completion
 
-After completing requested repo edits, run relevant validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Never push to `main`, never push secrets, credentials, live/runtime files, failed validation, or safety-blocked changes.
+After completing requested repo edits, run the smallest relevant local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Do not run full local validation by default when CI already runs the full gate. Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
 
 ## Scope Control
 

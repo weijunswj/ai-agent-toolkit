@@ -472,6 +472,11 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
     const text = readTextFile(path.join(repoRoot, relPath));
     assert.match(text, /You are an execution-first coding agent\./, `${relPath} keeps reusable execution prompt`);
     assert.match(text, /## Scope Control/, `${relPath} keeps generic execution guidance`);
+    assert.match(text, /run the smallest relevant local validation/, `${relPath} keeps targeted local validation guidance`);
+    assert.match(text, /Do not run full local validation by default when CI already runs the full gate/, `${relPath} avoids default local full validation`);
+    assert.match(text, /failed targeted validation/, `${relPath} blocks failed targeted validation before push`);
+    assert.doesNotMatch(text, /run relevant validation/, `${relPath} removes broad validation wording`);
+    assert.doesNotMatch(text, /failed validation, or safety-blocked changes/, `${relPath} uses targeted validation wording`);
     assert.doesNotMatch(text, /GitHub PR Completion Rules/, `${relPath} removes GitHub PR completion rules`);
     assert.doesNotMatch(text, /GITHUB APPROVAL NEEDED/, `${relPath} removes GitHub approval prompts`);
     assert.doesNotMatch(text, /VERSION CONTROL APPROVAL NEEDED/, `${relPath} removes VCS approval prompts`);

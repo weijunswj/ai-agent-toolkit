@@ -19,7 +19,7 @@ Use audits to detect:
 
 Prefer the target repo's documented commands. If no commands exist, add small deterministic checks before adding broad automation.
 
-Use `validation-strategy.md` for validation cadence: targeted checks during iteration, full final validation before completion.
+Use `validation-strategy.md` for validation cadence: targeted checks during iteration, plus the target repo's CI or documented full gate for completion.
 
 For this toolkit repo, `npm run validate:all` is the canonical full validation command and required merge gate.
 
@@ -42,7 +42,7 @@ Update a baseline only when all of these are true:
 - No new undeclared, cross-owned, suspicious, or boundary findings were introduced accidentally.
 - The PR summary records the exact movement.
 
-For `_projects/**/_main/**` source or provenance PRs, do not rely on privileged auto-sync to bless or repair the change. The author or Codex must update source-lock or provenance metadata when needed, regenerate declared outputs, update inspected audit baselines when needed, and pass the full validation command. Read-only CI should fail when those steps are missed.
+For `_projects/**/_main/**` source or provenance PRs, do not rely on privileged auto-sync to bless or repair the change. The author or Codex must update source-lock or provenance metadata when needed, regenerate declared outputs, and update inspected audit baselines when needed. Read-only CI should fail when those steps are missed.
 
 ## PR Reporting
 
