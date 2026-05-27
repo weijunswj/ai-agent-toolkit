@@ -498,6 +498,25 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
   }
 });
 
+test('Git Completion includes pull-request description synchronization guidance', () => {
+  const relPaths = [
+    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
+  ];
+
+  for (const relPath of relPaths) {
+    const text = readTextFile(path.join(repoRoot, relPath));
+    assert.match(text, /## Git Completion/, relPath);
+    assert.match(text, /## Pull Request Description/, relPath);
+    assert.match(text, /full base-to-head diff/i, relPath);
+    assert.match(text, /Before final reporting after a push, update the PR body/i, relPath);
+  }
+});
+
 test('Project Module Standard documents the playbook boundary', () => {
   const text = readTextFile(path.join(repoRoot, 'repo', 'docs', 'PROJECT-MODULE-STANDARD.md'));
   assert.match(text, /## Playbook Boundary/);

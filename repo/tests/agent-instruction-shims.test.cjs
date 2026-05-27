@@ -97,6 +97,9 @@ test('source structure keeps reusable prompt and adapter partials with no tiny s
 
 test('manual global source templates exist and are generated from execution prompt partial', () => {
   const prompt = readText(executionPromptPath).trimEnd();
+  assert.match(prompt, /## Git Completion/);
+  assert.match(prompt, /## Pull Request Description/);
+  assert.match(prompt, /keep the PR description aligned with the full base-to-head diff/i);
   for (const relPath of [
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
