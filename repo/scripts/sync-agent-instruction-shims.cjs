@@ -55,7 +55,11 @@ const n8nMarkerPairs = [
     end: '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->'
   }
 ];
-const n8nSentence = 'If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.';
+const n8nAdapterText = [
+  'If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-agent-rules` before planning or editing.',
+  'If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.',
+  'Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.'
+].join('\n');
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -196,7 +200,7 @@ function managedPayload(executionPrompt) {
     toolkitEnd,
     '',
     n8nBegin,
-    n8nSentence,
+    n8nAdapterText,
     n8nEnd
   ].join('\n');
 }
@@ -449,7 +453,7 @@ function validateAndSync(options = {}) {
   };
   if (Object.values(source).some((value) => value === null)) return { errors };
   if (agentsPayload.trimEnd() !== managedPayload(executionPrompt).trimEnd()) {
-    errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath}, keep the one-sentence n8n adapter, then run sync.`);
+    errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath}, keep the compact fail-closed n8n adapter, then run sync.`);
     return { errors };
   }
 

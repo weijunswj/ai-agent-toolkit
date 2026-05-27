@@ -11,7 +11,9 @@ const toolkitEnd = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END 
 const n8nBegin = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->';
 const n8nEnd = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->';
 const expectedN8nBlock = `${n8nBegin}
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use \`skills/n8n-agent-rules\` before continuing.
+If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load \`skills/n8n-agent-rules\` before planning or editing.
+If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
+Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
 ${n8nEnd}`;
 
 const forbiddenDefaultPromptPhrases = [
@@ -189,7 +191,7 @@ test('managed toolkit block comes from the execution prompt partial', () => {
   assertNoForbiddenDefaultPromptPhrases(rootToolkit, 'root toolkit block');
 });
 
-test('n8n adapter is exactly one sentence pointing to n8n-agent-rules', () => {
+test('n8n adapter is compact and fail-closed', () => {
   for (const [label, text] of [
     ['root AGENTS.md', readText('AGENTS.md')],
     ['repo-local AGENTS managed template', generatedPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'))],
@@ -198,11 +200,26 @@ test('n8n adapter is exactly one sentence pointing to n8n-agent-rules', () => {
     const n8nBlock = block(text, n8nBegin, n8nEnd, label);
     assert.equal(n8nBlock.trim(), expectedN8nBlock, label);
     const inner = n8nBlock.slice(n8nBlock.indexOf(n8nBegin) + n8nBegin.length, n8nBlock.indexOf(n8nEnd)).trim();
-    assert.match(inner, /\.$/, `${label} ends as one sentence`);
-    assert.doesNotMatch(inner.slice(0, -1), /[.!?]/, `${label} has no extra sentence punctuation`);
-    assert.ok(n8nBlock.length < 500, `${label} under 500 characters`);
-    assert.match(n8nBlock, /skills\/n8n-agent-rules/, label);
-    assert.doesNotMatch(n8nBlock, /N8N RULES CHECK REQUIRED|Docker|activation|execution|publish\/unpublish|credential actions/i, label);
+    assert.ok(Buffer.byteLength(inner, 'utf8') < 700, `${label} adapter text stays compact`);
+    assert.ok(Buffer.byteLength(n8nBlock, 'utf8') < 900, `${label} block stays compact`);
+    assert.match(inner, /stop and load `skills\/n8n-agent-rules` before planning or editing/i, label);
+    assert.match(inner, /skill or its full rules are unavailable, stop and report the limitation instead of continuing/i, label);
+    assert.match(inner, /explicit current-turn approval naming the target and allowed operation/i, label);
+    for (const requiredTerm of [
+      /live n8n/i,
+      /Docker/i,
+      /import\/export/i,
+      /sync/i,
+      /activation/i,
+      /execution/i,
+      /publish\/unpublish/i,
+      /credential/i,
+      /deployment/i,
+      /production/i
+    ]) {
+      assert.match(inner, requiredTerm, `${label}: ${requiredTerm}`);
+    }
+    assert.doesNotMatch(inner, /n8n_docs|n8n_live|webhook IDs|archive\/delete|Adapter Auto-Check Protocol|Keep workflows inactive/i, label);
   }
 });
 

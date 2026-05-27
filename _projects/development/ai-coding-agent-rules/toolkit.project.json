@@ -7,7 +7,7 @@
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
   "version": "2.1.0",
   "version_policy": "semver",
-  "version_notes": "Separates manual global source templates from skill-facing repo-local automatic bootstrap templates and keeps the n8n adapter as a one-sentence pointer around the canonical execution prompt partial.",
+  "version_notes": "Separates manual global source templates from skill-facing repo-local automatic bootstrap templates and keeps a compact fail-closed n8n adapter around the canonical execution prompt partial.",
   "outputs": [
     {
       "kind": "curated",

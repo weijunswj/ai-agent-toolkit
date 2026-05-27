@@ -432,7 +432,9 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /## Role/);
   assert.match(text, /You are an execution-first coding agent\./);
   assert.match(text, /## Scope Control/);
-  assert.match(text, /use `skills\/n8n-agent-rules` before continuing/);
+  assert.match(text, /stop and load `skills\/n8n-agent-rules` before planning or editing/);
+  assert.match(text, /skill or its full rules are unavailable, stop and report the limitation instead of continuing/);
+  assert.match(text, /Do not run live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation/);
   assert.doesNotMatch(text, /GitHub PR Completion Rules/);
   assert.doesNotMatch(text, /GITHUB APPROVAL NEEDED/);
   assert.doesNotMatch(text, /VERSION CONTROL APPROVAL NEEDED/);

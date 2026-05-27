@@ -26,7 +26,7 @@ The manual global templates `_main/AGENTS.template.md`, `_main/CLAUDE.template.m
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md`
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md`
 
-The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap material. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md` plus the one-sentence n8n adapter; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
+The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap material. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md` plus the compact fail-closed n8n adapter; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
 
 ## AI-Facing Surfaces
 

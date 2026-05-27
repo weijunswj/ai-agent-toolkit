@@ -21,7 +21,7 @@ The copied skill folder includes inert repo-local bootstrap templates:
 - [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) for Gemini CLI or Antigravity.
 - [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) for `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-The repo-local templates stay generic and compact. `AGENTS.managed.template.md` is canonical for the managed toolkit block and carries the one-line n8n adapter. The Claude, Gemini, and Antigravity templates are tiny platform shims that point to root `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
+The repo-local templates stay generic and compact. `AGENTS.managed.template.md` is canonical for the managed toolkit block and carries the compact fail-closed n8n adapter. The Claude, Gemini, and Antigravity templates are tiny platform shims that point to root `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
 
 Do not install a shim alone. Shims require root `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), before they are useful.
 
