@@ -100,9 +100,9 @@
     "category": "development",
     "name": "ai-coding-agent-rules",
     "title": "AI Coding Agent Rules",
-    "version": "2.0.2",
+    "version": "2.1.0",
     "version_policy": "semver",
-    "version_notes": "Requires neutral n8n adapter target-choice prompts instead of defaulting to none during read-only tasks.",
+    "version_notes": "Separates manual global source templates from skill-facing repo-local automatic bootstrap templates and keeps the n8n adapter as a one-sentence pointer around the canonical execution prompt partial.",
     "project": {
       "name": "AI Coding Agent Rules",
       "category": "development",
@@ -113,7 +113,7 @@
       "skill": {
         "status": "published",
         "path": "skills/ai-coding-agent-rules",
-        "summary": "Provides slim generic AGENTS, CLAUDE, and GEMINI baseline templates and also publishes the n8n-agent-rules skill from the same project-owned rules source."
+        "summary": "Provides repo-local automatic AGENTS, CLAUDE, GEMINI, and Antigravity bootstrap templates and also publishes the n8n-agent-rules skill from the same project-owned rules source."
       },
       "mcp": {
         "status": "not_applicable",
@@ -128,6 +128,11 @@
       "skills/ai-coding-agent-rules/GEMINI.template.md",
       "skills/ai-coding-agent-rules/README.md",
       "skills/ai-coding-agent-rules/SKILL.md",
+      "skills/ai-coding-agent-rules/antigravity-bootstrap.template.md",
+      "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
+      "skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
+      "skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md",
+      "skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md",
       "skills/n8n-agent-rules/README.md",
       "skills/n8n-agent-rules/SKILL.md",
       "skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md",

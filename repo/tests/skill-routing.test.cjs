@@ -107,7 +107,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
 
   assert.match(readme, /^## Install Skills By Platform$/m);
   assert.match(readme, /\[How To Use: Use Skills Manually\]\(repo\/docs\/HOW-TO-USE\.md#use-skills-manually\)/);
-  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'Antigravity']) {
+  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'Gemini CLI', 'Antigravity']) {
     assert.match(readme, new RegExp(`\\| ${platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\|`), platform);
   }
 
@@ -134,9 +134,13 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`/);
   assert.match(readme, /`<workspace-root>\/\.agents\/skills\/<skill-name>\/`/);
   assert.match(readme, /`\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\/`/);
-  assert.match(readme, /\[`AGENTS\.template\.md`\]\(skills\/ai-coding-agent-rules\/AGENTS\.template\.md\)/);
-  assert.match(readme, /\[`CLAUDE\.template\.md`\]\(skills\/ai-coding-agent-rules\/CLAUDE\.template\.md\)/);
-  assert.match(readme, /\[`GEMINI\.template\.md`\]\(skills\/ai-coding-agent-rules\/GEMINI\.template\.md\)/);
+  assert.match(readme, /`AGENTS\.md` is the shared managed instruction file/);
+  assert.match(readme, /\[`repo-local\/AGENTS\.managed\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
+  assert.match(readme, /\[`repo-local\/CLAUDE\.shim\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/CLAUDE\.shim\.template\.md\)/);
+  assert.match(readme, /\[`repo-local\/GEMINI\.shim\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/GEMINI\.shim\.template\.md\)/);
+  assert.match(readme, /\[`repo-local\/antigravity-bootstrap\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/antigravity-bootstrap\.template\.md\)/);
+  assert.match(readme, /Top-level compatibility aliases inside `skills\/ai-coding-agent-rules\/` are legacy aliases only/);
+  assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
   assert.match(readme, /\(skills\/n8n-agent-rules\/\)/);
   assert.doesNotMatch(readme, /\$HOME\/\.gemini\/skills\/<skill-name>\//);
   assert.doesNotMatch(readme, /<workspace-root>\/\.agent\/skills\/<skill-name>\//);

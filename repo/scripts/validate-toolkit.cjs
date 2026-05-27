@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const docContractSync = require('./sync-repo-doc-contract.cjs');
+const agentInstructionSync = require('./sync-agent-instruction-shims.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
 const projectSync = require('./sync-toolkit-projects.cjs');
@@ -31,6 +32,9 @@ function escapeRegExp(value) {
 const expectedFiles = [
   'README.md',
   'AGENTS.md',
+  'CLAUDE.md',
+  'GEMINI.md',
+  '.agents/rules/00-agent-toolkit-bootstrap.md',
   'package.json',
   '.gitignore',
   '.gitattributes',
@@ -92,9 +96,14 @@ const expectedFiles = [
   '_projects/n8n/workflow-toolkit/SOURCE-LOCK.json',
   '_projects/cicd/secure-installer/SOURCE-LOCK.json',
   '_projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
+  'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
   'skills/ai-coding-agent-rules/AGENTS.template.md',
+  'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
   'skills/ai-coding-agent-rules/CLAUDE.template.md',
+  'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
   'skills/ai-coding-agent-rules/GEMINI.template.md',
+  'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+  'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md',
   'skills/n8n-agent-rules/SKILL.md',
   'skills/n8n-agent-rules/README.md',
   'skills/n8n-agent-rules/n8n-agent-rules.md',
@@ -105,9 +114,13 @@ const expectedFiles = [
   'skills/n8n-local-setup/references/n8n-agent-rules.md',
   'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
   'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
-  'repo/scripts/agent-rule-template-specs.json',
-  'repo/scripts/build-agent-rule-templates.ps1',
-  'repo/scripts/_build-agent-rule-templates.cmd',
+  '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+  'repo/scripts/sync-agent-instruction-shims.cjs',
   'repo/scripts/validate-toolkit.cjs',
   'repo/scripts/sync-toolkit-projects.cjs',
   'repo/scripts/audit-project-source-locks.cjs',
@@ -133,6 +146,9 @@ const expectedDirs = [
   '_projects/n8n/local-setup/_main',
   '_projects/development/ai-coding-agent-rules',
   '_projects/development/ai-coding-agent-rules/_main',
+  '_projects/development/ai-coding-agent-rules/_main/_partials',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local',
+  'skills/ai-coding-agent-rules/repo-local',
   '_projects/n8n/workflow-toolkit',
   '_projects/n8n/workflow-toolkit/_main',
   '_projects/cicd/secure-installer',
@@ -173,6 +189,8 @@ const expectedDirs = [
   'mcp/installer-mcp',
   'mcp/projects',
   'mcp/registry',
+  '.agents',
+  '.agents/rules',
   'repo/docs/partials',
   '.github/workflows'
 ];
@@ -202,7 +220,10 @@ const allowedRootEntries = new Set([
   '.github',
   '.gitattributes',
   '.gitignore',
+  '.agents',
   'AGENTS.md',
+  'CLAUDE.md',
+  'GEMINI.md',
   'README.md',
   '_projects',
   'mcp',
@@ -350,6 +371,11 @@ const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
   '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
 ];
+const autoSyncGeneratedRootInstructionOutputs = [
+  'CLAUDE.md',
+  'GEMINI.md',
+  '.agents/rules/00-agent-toolkit-bootstrap.md'
+];
 const allowedCredentialExampleJsonPaths = new Set([
   '_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json'
 ]);
@@ -359,6 +385,7 @@ function isAutoSyncGeneratedOutputPath(relPath) {
   return (
     rel === 'README.md' ||
     rel === 'AGENTS.md' ||
+    autoSyncGeneratedRootInstructionOutputs.includes(rel) ||
     rel.startsWith('skills/') ||
     rel.startsWith('mcp/') ||
     autoSyncGeneratedAgentRuleTemplateOutputs.includes(rel)
@@ -685,6 +712,11 @@ function validateDocContract(errors) {
   for (const error of result.errors) fail(errors, error);
 }
 
+function validateAgentInstructionShims(errors) {
+  const result = agentInstructionSync.validateAndSync({ mode: 'check' });
+  for (const error of result.errors) fail(errors, error);
+}
+
 function validateReadmeSurface(errors) {
   const text = readText('README.md');
   const requiredSections = [
@@ -766,6 +798,12 @@ function validateAgentRuleSources(errors) {
   const rootPartialFiles = listFiles().filter((entry) => /\/_partials\//.test(entry.relPath));
   for (const entry of rootPartialFiles) {
     if (entry.relPath.startsWith('skills/')) fail(errors, `Agent-rule partials must stay in project _main source, not published skill folders: ${entry.relPath}`);
+  }
+  for (const entry of walk()) {
+    if (entry.relPath === '_projects/development/ai-coding-agent-rules/_main/repo-local' ||
+        entry.relPath.startsWith('_projects/development/ai-coding-agent-rules/_main/repo-local/')) {
+      fail(errors, `Repo-local skill runtime templates must live under curated_output_for_ai, not _main: ${entry.relPath}`);
+    }
   }
 }
 
@@ -1136,8 +1174,12 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       !/git\s+-C\s+"\$PR_ROOT"\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
     fail(errors, `${entry.relPath} missing post-sync changed-path validation`);
   }
-  if (!text.includes('README.md|AGENTS.md|skills/*|mcp/*')) {
+  const generatedOutputScope = 'README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*';
+  if (!text.includes(generatedOutputScope)) {
     fail(errors, `${entry.relPath} missing approved generated output path allowlist`);
+  }
+  for (const token of autoSyncGeneratedRootInstructionOutputs) {
+    if (!text.includes(token)) fail(errors, `${entry.relPath} missing generated root instruction allowlist entry: ${token}`);
   }
   for (const token of autoSyncGeneratedAgentRuleTemplateOutputs) {
     if (!text.includes(token)) fail(errors, `${entry.relPath} missing generated source-side agent-rule template allowlist entry: ${token}`);
@@ -1197,9 +1239,10 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const trustedWorkspaceCommands = [
-    'pwsh -NoProfile -File "$TRUSTED_ROOT/repo/scripts/build-agent-rule-templates.ps1" -Workspace "$PR_ROOT"',
+    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --write',
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write',
     'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write',
+    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --check',
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check',
     'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check'
   ];
@@ -1231,11 +1274,12 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} final recheck must compare the staged index tree snapshot`);
   }
   if (!finalRecheckStep.includes('/usr/bin/git -C "$PR_ROOT" diff --cached --name-only') ||
-      !finalRecheckStep.includes('README.md|AGENTS.md|skills/*|mcp/*') ||
+      !finalRecheckStep.includes(generatedOutputScope) ||
       autoSyncGeneratedAgentRuleTemplateOutputs.some((token) => !finalRecheckStep.includes(token))) {
     fail(errors, `${entry.relPath} final recheck must reject staged paths outside generated output scope`);
   }
   const expectedStaticCheckCommands = [
+    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --check',
     'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check',
     'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check',
     '/usr/bin/git -C "$PR_ROOT" diff --cached --check',
@@ -1248,7 +1292,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const gitAddLines = (text.match(/^\s*(?:\/usr\/bin\/)?git(?:\s+-C\s+"\$PR_ROOT")?\s+add .+$/gm) || []).map((line) => line.trim());
-  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
+  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md CLAUDE.md GEMINI.md .agents/rules/00-agent-toolkit-bootstrap.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
   if (gitAddLines.length !== 1 || gitAddLines[0] !== expectedGitAddLine) {
     fail(errors, `${entry.relPath} must commit only approved generated output paths`);
   }
@@ -1557,6 +1601,7 @@ function runValidation() {
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
   validateDocContract(errors);
+  validateAgentInstructionShims(errors);
   validateReadmeSurface(errors);
   validateProjectModules(errors);
   validateProjectLandingCards(errors);

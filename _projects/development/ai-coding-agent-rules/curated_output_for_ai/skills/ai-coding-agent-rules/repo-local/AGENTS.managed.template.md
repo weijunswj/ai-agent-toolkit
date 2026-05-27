@@ -1,38 +1,37 @@
 <!--
-Generated from toolkit project source. Do not edit directly.
+Curated AI-facing source.
 Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md
-Update the project source and run sync.
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-# CLAUDE.template.md AI coding agent rules
+# AGENTS.managed.template.md repo-local managed AI coding agent rules
 
-Use this generated template for Claude Code.
+Use this generated template for repo/folder-local Codex or OpenCode setup.
 
-This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `CLAUDE.md`.
+This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `AGENTS.md`.
 
-Copy or merge the fenced payload into the target repo root as `CLAUDE.md` only when the user explicitly wants generic Claude Code rules installed.
+Copy or merge the fenced payload into the target repo root as `AGENTS.md` only when the user explicitly wants repo-local managed Codex/OpenCode rules installed.
 
-If the target repo already has `CLAUDE.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-## Claude Code global rules example
+## Repo-local rules example
 
 Copy or merge the fenced payload into:
 
 ```text
-C:\Users\<your-user>\.claude\CLAUDE.md
+<repo>\AGENTS.md
 ```
 
 Or create it with PowerShell:
 
 ```text
-mkdir $HOME\.claude -Force
-notepad $HOME\.claude\CLAUDE.md
+notepad AGENTS.md
 ```
 
 ---
 
 ````````md
+<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
 ## Role
 
 You are an execution-first coding agent.
@@ -205,4 +204,9 @@ After making changes, respond with:
 - Remaining risks or manual checks.
 
 Keep final reports concise but complete.
+<!-- AI-AGENT-TOOLKIT:END toolkit -->
+
+<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
+If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.
+<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->
 ````````

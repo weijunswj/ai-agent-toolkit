@@ -69,7 +69,7 @@ Never commit or install:
 
 Scoped writes are allowed only when the relevant template or helper is being run intentionally:
 
-- [Agent-rule generator](../scripts/build-agent-rule-templates.ps1) may regenerate only the project-pure source-side generic templates under `_projects/development/ai-coding-agent-rules/_main/`. Toolkit sync publishes inert generic skill copies and the generated `skills/n8n-agent-rules/` skill from the same development project source.
+- `node repo/scripts/sync-agent-instruction-shims.cjs --write` regenerates the source-side generic instruction templates and root shims from `_projects/development/ai-coding-agent-rules/_main/`. `node repo/scripts/sync-toolkit-projects.cjs --write` publishes inert skill copies and the generated `skills/n8n-agent-rules/` skill from the same development project source.
 - `n8n-agent-rules` owns the full n8n operating ruleset. Other n8n skills depend on it; optional adapters are brief pointers and are not automatically appended to generic always-on templates.
 - n8n sanitizer templates may write ignored `.to-sanitise/**` and `.sanitised/**` staging folders.
 - n8n sync helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, and ignored `.n8n-local/**` in a consumer repo after review.

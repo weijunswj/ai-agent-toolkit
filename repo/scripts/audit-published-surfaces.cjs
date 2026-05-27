@@ -576,6 +576,14 @@ function runtimeInstructionReasons(text) {
   return reasons;
 }
 
+function isRepoLocalAgentRuleTemplateEntry(entry) {
+  return entry.projectId === 'development.ai-coding-agent-rules' &&
+    /^skills\/ai-coding-agent-rules\/(?:repo-local\/)?(?:AGENTS|CLAUDE|GEMINI|antigravity-bootstrap)(?:\.(?:managed|shim))?\.template\.md$/.test(entry.path) &&
+    sourcePathsForEntry(entry).every((source) =>
+      source.startsWith('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/')
+    );
+}
+
 function recipeBoundaryReasons(root, entry) {
   const reasons = [];
   const reviewedTemplate = isReviewedTemplate(entry);
@@ -668,6 +676,7 @@ function classifyBoundaryRecipe(root, entry) {
   const hasMainSource = entryHasSource(entry, '/_main/');
 
   if (hasCuratedSource) {
+    if (isRepoLocalAgentRuleTemplateEntry(entry)) return 'curated_repo_local_agent_template';
     if (isReferenceShim(entry)) return 'curated_shim';
     if (isPackManifest(entry.path) || entry.kind === 'json') return 'curated_metadata';
     if (isAgentMetadata(entry.path)) return 'curated_agent_metadata';
@@ -733,6 +742,9 @@ function boundaryRecipes(root, entries) {
 }
 
 function curatedFileAllowedCategory(relPath) {
+  if (/^_projects\/development\/ai-coding-agent-rules\/curated_output_for_ai\/skills\/ai-coding-agent-rules\/repo-local\/[^/]+\.template\.md$/.test(relPath)) {
+    return 'curated_repo_local_agent_template';
+  }
   if (relPath.endsWith('/SKILL.md')) return 'curated_router';
   if (/\/curated_output_for_ai\/agents\/[^/]+\.(md|ya?ml)$/.test(relPath)) return 'curated_agent_metadata';
   if (/\/curated_output_for_ai\/overviews\/.*\.md$/.test(relPath)) return 'curated_index';
