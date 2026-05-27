@@ -123,12 +123,8 @@
     "module_path": "_projects/development/ai-coding-agent-rules",
     "main_path": "_projects/development/ai-coding-agent-rules/_main",
     "root_surfaces": [
-      "skills/ai-coding-agent-rules/AGENTS.template.md",
-      "skills/ai-coding-agent-rules/CLAUDE.template.md",
-      "skills/ai-coding-agent-rules/GEMINI.template.md",
       "skills/ai-coding-agent-rules/README.md",
       "skills/ai-coding-agent-rules/SKILL.md",
-      "skills/ai-coding-agent-rules/antigravity-bootstrap.template.md",
       "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
       "skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
       "skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md",

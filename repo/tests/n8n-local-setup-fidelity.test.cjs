@@ -482,14 +482,14 @@ test('n8n copied setup references use portable published baseline template links
     assert.doesNotMatch(text, /\.\.\/\.\.\/\.\.\/development\/ai-coding-agent-rules\/_main\//, relPath);
   }
 
-  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/n8n/local-setup.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/n8n/local-setup.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md/);
   assert.match(
     readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md'),
-    /\[skills\/ai-coding-agent-rules\/AGENTS\.template\.md\]\(\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md\)/
+    /\[skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\]\(\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/
   );
-  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/CLAUDE\.template\.md/);
-  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/AGENTS\.template\.md/);
-  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/GEMINI\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/repo-local\/CLAUDE\.shim\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md/);
+  assert.match(readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'), /\.\.\/\.\.\/\.\.\/ai-coding-agent-rules\/repo-local\/GEMINI\.shim\.template\.md/);
 });
 
 test('n8n local setup pack-installed references are declared by project recipes', () => {
@@ -513,7 +513,7 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
     'skills/n8n-local-setup/templates/local-stack/.env.example',
     'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
     'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
-    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/n8n-agent-rules/SKILL.md',
     'skills/n8n-agent-rules/README.md',
     'skills/n8n-agent-rules/n8n-agent-rules.md',
@@ -535,7 +535,8 @@ test('claude n8n local pack installs inert generic template and n8n-agent-rules 
     'skills/n8n-local-setup/templates/local-stack/.env.example',
     'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
     'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
-    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
     'skills/n8n-agent-rules/SKILL.md',
     'skills/n8n-agent-rules/README.md',
     'skills/n8n-agent-rules/n8n-agent-rules.md',

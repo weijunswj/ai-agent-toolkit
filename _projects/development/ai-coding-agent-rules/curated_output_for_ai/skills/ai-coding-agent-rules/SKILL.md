@@ -1,6 +1,6 @@
 ---
 name: ai-coding-agent-rules
-description: Use when starting repository or project-folder coding work and the canonical AGENTS.md or current-platform instruction shim may be missing, stale, unchecked, or lacking AI-AGENT-TOOLKIT managed marker blocks.
+description: Use when starting repository or project-folder coding work and the canonical AGENTS.md or current-platform instruction shim may be missing, stale, unchecked, or lacking ai-agent-toolkit:<project-id> managed marker blocks.
 ---
 
 <!--
@@ -17,7 +17,7 @@ Use this skill automatically before repository editing work when any of these ar
 
 - The repo has no `AGENTS.md`.
 - The current or target platform shim is missing and that platform needs one.
-- Existing active instruction files lack `AI-AGENT-TOOLKIT` managed marker blocks.
+- Existing active instruction files lack `ai-agent-toolkit:<project-id>` managed marker blocks.
 - Existing managed marker blocks in active instruction files are stale or out of order.
 - The session appears to be the first agent session after toolkit skills were installed.
 

@@ -6,10 +6,10 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const toolkitBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->';
-const toolkitEnd = '<!-- AI-AGENT-TOOLKIT:END toolkit -->';
-const n8nBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->';
-const n8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->';
+const toolkitBegin = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1 -->';
+const toolkitEnd = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END ai-coding-agent-execution -->';
+const n8nBegin = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->';
+const n8nEnd = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->';
 const expectedN8nBlock = `${n8nBegin}
 If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use \`skills/n8n-agent-rules\` before continuing.
 ${n8nEnd}`;
@@ -124,13 +124,6 @@ test('repo-local source and published skill templates are local bootstrap templa
       'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
     ]
   ]);
-  const compatibilityAliases = [
-    'skills/ai-coding-agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md',
-    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
-  ];
-
   for (const [source, published] of sourceToPublished) {
     assert.equal(exists(source), true, source);
     assert.equal(exists(published), true, published);
@@ -141,13 +134,13 @@ test('repo-local source and published skill templates are local bootstrap templa
     assertNoForbiddenDefaultPromptPhrases(publishedText, published);
   }
 
-  for (const relPath of compatibilityAliases) {
-    assert.equal(exists(relPath), true, relPath);
-    const text = readText(relPath);
-    assert.equal(generatedNoticeCount(text), 1, relPath);
-    assert.match(text, /repo-local/i, relPath);
-    assert.doesNotMatch(text, /C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)|global rules example/i, relPath);
-    assertNoForbiddenDefaultPromptPhrases(text, relPath);
+  for (const relPath of [
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
+  ]) {
+    assert.equal(exists(relPath), false, relPath);
   }
 });
 
@@ -200,8 +193,7 @@ test('n8n adapter is exactly one sentence pointing to n8n-agent-rules', () => {
   for (const [label, text] of [
     ['root AGENTS.md', readText('AGENTS.md')],
     ['repo-local AGENTS managed template', generatedPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'))],
-    ['published repo-local AGENTS managed template', generatedPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'))],
-    ['published compatibility AGENTS template', generatedPayload(readText('skills/ai-coding-agent-rules/AGENTS.template.md'))]
+    ['published repo-local AGENTS managed template', generatedPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'))]
   ]) {
     const n8nBlock = block(text, n8nBegin, n8nEnd, label);
     assert.equal(n8nBlock.trim(), expectedN8nBlock, label);
@@ -250,14 +242,31 @@ test('active and generated default instruction surfaces exclude PR/VCS workflow 
     'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
     'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
     'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
-    'skills/ai-coding-agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md',
-    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md',
     'skills/ai-coding-agent-rules/SKILL.md'
   ]) {
     assert.equal(exists(relPath), true, relPath);
     assertNoForbiddenDefaultPromptPhrases(readText(relPath), relPath);
+  }
+});
+
+test('current managed outputs use source-aware markers only', () => {
+  const staleMarkers = [
+    '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->',
+    '<!-- AI-AGENT-TOOLKIT:END toolkit -->',
+    '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
+    '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->',
+    '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->',
+    '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->',
+    '<!-- END SOURCE-OF-TRUTH-CONTRACT -->'
+  ];
+  for (const relPath of [
+    'AGENTS.md',
+    'README.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
+  ]) {
+    const text = readText(relPath);
+    for (const marker of staleMarkers) assert.equal(text.includes(marker), false, `${relPath}: ${marker}`);
   }
 });
 

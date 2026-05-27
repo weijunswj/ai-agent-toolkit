@@ -21,4 +21,4 @@ Files:
 
 All paths referenced by registries must exist.
 
-`playbooks.registry.json` is a legacy/manual discovery registry over reference documents. It does not make `playbooks/` a default source folder, and it must not be used to publish full runtime instructions from curated summaries.
+`playbooks.registry.json` is a manual discovery registry over reference documents. It does not make `playbooks/` a default source folder, and it must not be used to publish full runtime instructions from curated summaries.

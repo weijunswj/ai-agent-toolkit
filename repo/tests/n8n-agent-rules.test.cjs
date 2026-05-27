@@ -187,10 +187,10 @@ test('n8n-agent-rules README tells agents to dry-run then ask before write', () 
 
 test('generic AI coding agent templates stay slim and obsolete heavy templates are absent', () => {
   for (const relPath of [
-    'skills/ai-coding-agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md',
-    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+    'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+    'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
   ]) {
     const text = readText(relPath);
     assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);
@@ -204,6 +204,10 @@ test('generic AI coding agent templates stay slim and obsolete heavy templates a
     'skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md',
     'skills/ai-coding-agent-rules/CLAUDE.with-toolkit-skills.template.md',
     'skills/ai-coding-agent-rules/GEMINI.with-toolkit-skills.template.md',
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md',
     'skills/n8n-local-setup/agent-rules/AGENTS.n8n-full.template.md',
     'skills/n8n-local-setup/agent-rules/CLAUDE.n8n-full.template.md',
     'skills/n8n-local-setup/agent-rules/GEMINI.n8n-full.template.md',

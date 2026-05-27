@@ -97,13 +97,9 @@ const expectedFiles = [
   '_projects/cicd/secure-installer/SOURCE-LOCK.json',
   '_projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
   'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-  'skills/ai-coding-agent-rules/AGENTS.template.md',
   'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-  'skills/ai-coding-agent-rules/CLAUDE.template.md',
   'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-  'skills/ai-coding-agent-rules/GEMINI.template.md',
   'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
-  'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md',
   'skills/n8n-agent-rules/SKILL.md',
   'skills/n8n-agent-rules/README.md',
   'skills/n8n-agent-rules/n8n-agent-rules.md',
@@ -375,6 +371,16 @@ const autoSyncGeneratedRootInstructionOutputs = [
   'CLAUDE.md',
   'GEMINI.md',
   '.agents/rules/00-agent-toolkit-bootstrap.md'
+];
+const currentContractBegin = '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->';
+const staleManagedMarkerOutputs = [
+  '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->',
+  '<!-- AI-AGENT-TOOLKIT:END toolkit -->',
+  '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
+  '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->',
+  '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->',
+  '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->',
+  '<!-- END SOURCE-OF-TRUTH-CONTRACT -->'
 ];
 const allowedCredentialExampleJsonPaths = new Set([
   '_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json'
@@ -741,7 +747,7 @@ function validateReadmeSurface(errors) {
     lastIndex = index;
   }
   const appendixIndex = text.indexOf('## Appendix: Source-of-Truth Contract');
-  const contractIndex = text.indexOf('<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->');
+  const contractIndex = text.indexOf(currentContractBegin);
   if (appendixIndex === -1 || contractIndex === -1 || contractIndex < appendixIndex) {
     fail(errors, 'README.md source-of-truth contract block must live under the appendix');
   }
@@ -803,6 +809,26 @@ function validateAgentRuleSources(errors) {
     if (entry.relPath === '_projects/development/ai-coding-agent-rules/_main/repo-local' ||
         entry.relPath.startsWith('_projects/development/ai-coding-agent-rules/_main/repo-local/')) {
       fail(errors, `Repo-local skill runtime templates must live under curated_output_for_ai, not _main: ${entry.relPath}`);
+    }
+  }
+  for (const relPath of [
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
+  ]) {
+    if (existsRel(relPath)) fail(errors, `Removed top-level ai-coding-agent-rules template alias is still present: ${relPath}`);
+  }
+  for (const relPath of [
+    'AGENTS.md',
+    'README.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
+  ]) {
+    if (!existsRel(relPath)) continue;
+    const text = readText(relPath);
+    for (const marker of staleManagedMarkerOutputs) {
+      if (text.includes(marker)) fail(errors, `${relPath} contains stale generic managed marker: ${marker}`);
     }
   }
 }

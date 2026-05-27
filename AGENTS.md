@@ -1,6 +1,6 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
+<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1 -->
 ## Role
 
 You are an execution-first coding agent.
@@ -86,6 +86,10 @@ Do not treat previous approval as approval for a new risky action.
 Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped task.
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
+
+## Git Completion
+
+After completing requested repo edits, run relevant validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Never push to `main`, never push secrets, credentials, live/runtime files, failed validation, or safety-blocked changes.
 
 ## Scope Control
 
@@ -173,15 +177,15 @@ After making changes, respond with:
 - Remaining risks or manual checks.
 
 Keep final reports concise but complete.
-<!-- AI-AGENT-TOOLKIT:END toolkit -->
+<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END ai-coding-agent-execution -->
 
-<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
+<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->
 If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.
-<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->
+<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->
 
 This repo is the canonical reusable AI Agent Toolkit.
 
-<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->
+<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->
 ## Source-of-Truth Contract
 
 This repo has a source layer and a published layer.
@@ -216,7 +220,7 @@ This repo has a source layer and a published layer.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 - A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
 - Required runtime context for a skill or MCP surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
-<!-- END SOURCE-OF-TRUTH-CONTRACT -->
+<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:END source-of-truth-contract -->
 
 ## Agent Routing Rules
 
@@ -234,6 +238,15 @@ This repo has a source layer and a published layer.
 - Do not generate curated files automatically from `_main`; curated content is reviewed source.
 - Do not weaken safety rules around credentials, `.env`, `.tmp`, `.n8n-local`, live n8n actions, approval, attribution, or local-only constraints.
 - Run sync, check, and relevant tests before reporting completion.
+
+## Managed Marker Rules
+
+Use managed markers when a script inserts, replaces, appends, extracts, or assembles a source-owned section inside a larger Markdown file. Use:
+
+`<!-- ai-agent-toolkit:<project-id>:BEGIN <source-name> v1 -->`
+`<!-- ai-agent-toolkit:<project-id>:END <source-name> -->`
+
+`<project-id>` must match the owning `toolkit.project.json` id, and `<source-name>` must map to the source partial, contract, adapter, or generated section name. Change managed sections from the source file or generator, then run sync. Bump the marker version only when the managed section contract changes in a way the generator or consumers must distinguish.
 
 ## Mandatory Repo Docs By Task
 
@@ -265,7 +278,7 @@ When adding a new project module or changing a published skill/MCP surface:
 - Do not replace full working docs, prompts, templates, setup guides, troubleshooting notes, or examples with lossy summaries.
 - Use deterministic recipes in `toolkit.project.json`: `copy`, `extract`, `concat`, `curated`, `json`, or rare justified `linked`.
 - If publishing a full source doc into a skill folder, prefer exact `copy` or `extract`.
-- If exact copied docs contain old relative links that would break after publishing, add small compatibility shims under `curated_output_for_ai/reference-link-shims/` and declare them in `toolkit.project.json`.
+- If exact copied docs contain source-relative links that would break after publishing, add small reference-link shims under `curated_output_for_ai/reference-link-shims/` and declare them in `toolkit.project.json`.
 - Do not add shims by default. Add them only when exact copied docs would otherwise have broken relative links.
 - Update `SOURCE-MANIFEST.md` when a project uses shims, linked outputs, third-party source, or cross-surface composition.
 - Update `SOURCE-LOCK.json` when preserved/source-locked material changes.
@@ -294,7 +307,7 @@ Keep the topology simple:
 - Trading app code.
 - Credentials, credential exports, credential binding files, private keys, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, or live n8n import/export files.
 - Auto-merge, production deployment automation, or unscoped auto-commit. Any generated-output writeback must be same-repo PR-only, explicit, and validation-gated.
-- Deprecated compatibility placeholders for removed layout surfaces.
+- Removed-layout placeholders.
 
 ## Documentation Rules
 

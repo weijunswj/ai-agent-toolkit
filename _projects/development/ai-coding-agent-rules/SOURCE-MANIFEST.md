@@ -33,7 +33,6 @@ The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rul
 - `skills/ai-coding-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
 - `skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md` is generated from curated repo-local source.
 - `skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md`, `GEMINI.shim.template.md`, and `antigravity-bootstrap.template.md` are generated from curated repo-local source.
-- `skills/ai-coding-agent-rules/AGENTS.template.md`, `CLAUDE.template.md`, `GEMINI.template.md`, and `antigravity-bootstrap.template.md` are repo-local compatibility aliases generated from the same curated repo-local templates. New docs should prefer the `repo-local/` paths.
 - Root `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` are checked by `repo/scripts/sync-agent-instruction-shims.cjs`; run `node repo/scripts/sync-agent-instruction-shims.cjs --write` after changing the execution partial, manual templates, or curated repo-local templates. The script updates marker-owned blocks and preserves unmarked user/repo content.
 - `skills/n8n-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
 - `skills/n8n-agent-rules/n8n-agent-rules.md` is copied exactly from `_main/_partials/n8n-agent-rules.md`.
@@ -43,9 +42,9 @@ The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rul
 
 The published templates intentionally use inert `.template.md` filenames so the skill folder does not ship active nested `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` instruction files.
 
-## Link Shims
+## Link Surfaces
 
-No compatibility shims are used in this module.
+No reference-link shims are used in this module.
 
 ## Excluded
 

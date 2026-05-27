@@ -60,7 +60,7 @@ npx --version
 
 ### Follow the Gemini GEMINI.md Setup guide:
 
-* Install or copy generic AI coding agent rules from [GEMINI.template.md](../../../ai-coding-agent-rules/GEMINI.template.md), then copy or merge them into the target repo root as `GEMINI.md`.
+* Install or copy generic AI coding agent rules from [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md), then copy or merge them into the target repo root as `GEMINI.md`.
 * Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
 * Optionally merge the brief `GEMINI.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `GEMINI.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
 * If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.

@@ -16,7 +16,7 @@ Use a reviewed adapter layer for short files whose job is to route, package, or 
 - README or index files.
 - Manifest files.
 - Pack metadata.
-- Compatibility shims.
+- Platform shims.
 - Safety wrappers.
 - MCP or tool summaries.
 

@@ -33,11 +33,28 @@ const repoLocalTemplatePaths = {
   antigravity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
 };
 
-const toolkitBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->';
-const toolkitEnd = '<!-- AI-AGENT-TOOLKIT:END toolkit -->';
-const n8nBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->';
-const n8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->';
-const legacyN8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->';
+const toolkitBegin = `<!-- ai-agent-toolkit:${projectId}:BEGIN ai-coding-agent-execution v1 -->`;
+const toolkitEnd = `<!-- ai-agent-toolkit:${projectId}:END ai-coding-agent-execution -->`;
+const n8nBegin = `<!-- ai-agent-toolkit:${projectId}:BEGIN n8n-adapter v1 -->`;
+const n8nEnd = `<!-- ai-agent-toolkit:${projectId}:END n8n-adapter -->`;
+const toolkitMarkerPairs = [
+  { begin: toolkitBegin, end: toolkitEnd },
+  {
+    begin: '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:END toolkit -->'
+  }
+];
+const n8nMarkerPairs = [
+  { begin: n8nBegin, end: n8nEnd },
+  {
+    begin: '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->'
+  },
+  {
+    begin: '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->'
+  }
+];
 const n8nSentence = 'If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.';
 
 function slash(value) {
@@ -289,10 +306,28 @@ function stripManagedBlock(relPath, text, begin, end, errors) {
   return `${text.slice(0, start)}${text.slice(finish + end.length)}`;
 }
 
+function stripManagedBlockAny(relPath, text, markerPairs, errors) {
+  const matches = markerPairs
+    .map((pair) => ({
+      ...pair,
+      beginCount: markerCount(text, pair.begin),
+      endCount: markerCount(text, pair.end)
+    }))
+    .filter((pair) => pair.beginCount > 0 || pair.endCount > 0);
+  if (matches.length === 0) return text;
+
+  const completeMatches = matches.filter((pair) =>
+    pair.beginCount === 1 && pair.endCount === 1 && text.indexOf(pair.begin) < text.indexOf(pair.end)
+  );
+  if (completeMatches.length !== 1) {
+    errors.push(`Malformed managed agent instruction markers in ${relPath}. Run ${fixCommand}.`);
+    return null;
+  }
+  return stripManagedBlock(relPath, text, completeMatches[0].begin, completeMatches[0].end, errors);
+}
+
 function stripN8nManagedBlock(relPath, text, errors) {
-  if (markerCount(text, n8nBegin) === 0) return text;
-  const end = markerCount(text, n8nEnd) === 1 ? n8nEnd : legacyN8nEnd;
-  return stripManagedBlock(relPath, text, n8nBegin, end, errors);
+  return stripManagedBlockAny(relPath, text, n8nMarkerPairs, errors);
 }
 
 function removeSupersededGitHubPrSection(text) {
@@ -338,7 +373,7 @@ function shimBody(sourceText, options) {
 }
 
 function rootAgentsExpected(current, source, errors) {
-  let body = stripManagedBlock('AGENTS.md', current, toolkitBegin, toolkitEnd, errors);
+  let body = stripManagedBlockAny('AGENTS.md', current, toolkitMarkerPairs, errors);
   if (body === null) return null;
   body = stripN8nManagedBlock('AGENTS.md', body, errors);
   if (body === null) return null;
@@ -361,7 +396,7 @@ function rootAgentsExpected(current, source, errors) {
 }
 
 function shimExpected(relPath, current, sourceText, options, errors) {
-  let body = stripManagedBlock(relPath, current, toolkitBegin, toolkitEnd, errors);
+  let body = stripManagedBlockAny(relPath, current, toolkitMarkerPairs, errors);
   if (body === null) return null;
   if (options.importLine) body = removeExactLine(body, options.importLine);
   if (options.heading) body = removeLeadingHeading(body, options.heading);

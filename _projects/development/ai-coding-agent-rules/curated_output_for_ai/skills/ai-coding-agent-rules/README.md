@@ -6,7 +6,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # AI Coding Agent Rules Skill
 
-Instruction-only skill for automatically checking and installing repo/folder-local AI coding agent instruction files and lightweight compatibility shims.
+Instruction-only skill for automatically checking and installing repo/folder-local AI coding agent instruction files and tiny platform shims.
 
 The copied skill folder includes inert repo-local bootstrap templates:
 
@@ -15,15 +15,13 @@ The copied skill folder includes inert repo-local bootstrap templates:
 - [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) for Gemini CLI or Antigravity.
 - [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) for `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-The repo-local templates stay generic and compact. `AGENTS.managed.template.md` is canonical for the managed toolkit block and carries the one-line n8n adapter. The Claude, Gemini, and Antigravity templates are tiny compatibility shims that point to root `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
+The repo-local templates stay generic and compact. `AGENTS.managed.template.md` is canonical for the managed toolkit block and carries the one-line n8n adapter. The Claude, Gemini, and Antigravity templates are tiny platform shims that point to root `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
 
 Do not install a shim alone. Shims require root `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), before they are useful.
 
-Top-level `AGENTS.template.md`, `CLAUDE.template.md`, `GEMINI.template.md`, and `antigravity-bootstrap.template.md` are retained only as repo-local compatibility aliases for older links. New integrations should use the `repo-local/` paths above.
-
 Antigravity workspaces can use a tiny `.agents/rules/00-agent-toolkit-bootstrap.md` bootstrap when the folder also carries root `AGENTS.md`; do not full-import `AGENTS.md` into that bootstrap by default.
 
-The skill is intended to run a cheap local check before coding work in GitHub, GitLab, Bitbucket, local Git, and plain project folders. If the repo/folder instruction files already have current `AI-AGENT-TOOLKIT` managed marker blocks, continue the original task without rewriting them.
+The skill is intended to run a cheap local check before coding work in GitHub, GitLab, Bitbucket, local Git, and plain project folders. If the repo/folder instruction files already have current `ai-agent-toolkit:<project-id>` managed marker blocks, continue the original task without rewriting them.
 
 Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Never overwrite existing `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`; produce a merge or diff plan instead.
 

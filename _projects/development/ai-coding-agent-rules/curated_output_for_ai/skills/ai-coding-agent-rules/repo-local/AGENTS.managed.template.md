@@ -31,7 +31,7 @@ notepad AGENTS.md
 ---
 
 ````````md
-<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
+<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1 -->
 ## Role
 
 You are an execution-first coding agent.
@@ -117,6 +117,10 @@ Do not treat previous approval as approval for a new risky action.
 Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped task.
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
+
+## Git Completion
+
+After completing requested repo edits, run relevant validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Never push to `main`, never push secrets, credentials, live/runtime files, failed validation, or safety-blocked changes.
 
 ## Scope Control
 
@@ -204,9 +208,9 @@ After making changes, respond with:
 - Remaining risks or manual checks.
 
 Keep final reports concise but complete.
-<!-- AI-AGENT-TOOLKIT:END toolkit -->
+<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END ai-coding-agent-execution -->
 
-<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
+<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->
 If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.
-<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->
+<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->
 ````````

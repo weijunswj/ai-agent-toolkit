@@ -173,8 +173,8 @@ function manifestOutput(manifest, outputPath) {
 }
 
 function contractBlock(text) {
-  const begin = '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->';
-  const end = '<!-- END SOURCE-OF-TRUTH-CONTRACT -->';
+  const begin = '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->';
+  const end = '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:END source-of-truth-contract -->';
   const beginMatches = text.match(new RegExp(begin, 'g')) || [];
   const endMatches = text.match(new RegExp(end, 'g')) || [];
   assert.equal(beginMatches.length, 1, 'begin marker count');
@@ -383,7 +383,7 @@ test('README is a user-facing map with the contract in the appendix', () => {
     assert.ok(index > previous, section);
     previous = index;
   }
-  assert.ok(text.indexOf('<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->') > text.indexOf('## Appendix: Source-of-Truth Contract'));
+  assert.ok(text.indexOf('<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->') > text.indexOf('## Appendix: Source-of-Truth Contract'));
   assert.match(text, /`skills\/<skill-name>\/`/);
   assert.match(text, /`mcp\/`/);
   const skillRegistry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'skills.registry.json'), 'utf8'));
@@ -425,8 +425,10 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /toolkit\.project\.json/);
   assert.match(text, /Do not edit generated `skills\/` or `mcp\/` outputs directly/);
   assert.match(text, /Do not generate curated files automatically from `_main`/);
-  assert.match(text, /AI-AGENT-TOOLKIT:BEGIN toolkit v1/);
-  assert.match(text, /AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1/);
+  assert.match(text, /ai-agent-toolkit:development\.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1/);
+  assert.match(text, /ai-agent-toolkit:development\.ai-coding-agent-rules:BEGIN n8n-adapter v1/);
+  assert.match(text, /## Managed Marker Rules/);
+  assert.match(text, /ai-agent-toolkit:<project-id>:BEGIN <source-name> v1/);
   assert.match(text, /## Role/);
   assert.match(text, /You are an execution-first coding agent\./);
   assert.match(text, /## Scope Control/);
@@ -458,8 +460,7 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
     '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
     '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/ai-coding-agent-rules/AGENTS.template.md'
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
   ];
 
   for (const relPath of relPaths) {
@@ -475,6 +476,15 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
     assert.doesNotMatch(text, /PR lane/, `${relPath} removes PR lane management`);
     assert.doesNotMatch(text, /remote source-of-truth/, `${relPath} removes PR URL source-of-truth rules`);
     assert.doesNotMatch(text, /create a pull request|update a pull request|merge request/i, `${relPath} removes remote review workflow rules`);
+  }
+
+  for (const relPath of [
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
+  ]) {
+    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
   }
 });
 
@@ -1135,11 +1145,7 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
     'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
-    'skills/ai-coding-agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md',
-    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
+    'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
   ];
   for (const rel of localTemplates) {
     const text = readTextFile(path.join(repoRoot, rel));
@@ -1155,13 +1161,18 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
     'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
+  ]) {
+    assert.equal(generatedNoticeCount(readTextFile(path.join(repoRoot, rel))), 1, rel);
+  }
+
+  for (const rel of [
     'skills/ai-coding-agent-rules/AGENTS.template.md',
     'skills/ai-coding-agent-rules/CLAUDE.template.md',
     'skills/ai-coding-agent-rules/GEMINI.template.md',
     'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
   ]) {
-    assert.equal(generatedNoticeCount(readTextFile(path.join(repoRoot, rel))), 1, rel);
+    assert.equal(fs.existsSync(path.join(repoRoot, rel)), false, rel);
   }
 
   for (const rel of [
@@ -1292,11 +1303,11 @@ test('changing assembled _main agent-rule templates makes source-side templates 
 
 test('changing published agent-rule template copies makes skill copies stale', () => {
   const cwd = tempCopy();
-  const template = path.join(cwd, 'skills', 'ai-coding-agent-rules', 'AGENTS.template.md');
+  const template = path.join(cwd, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md');
   fs.appendFileSync(template, '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/ai-coding-agent-rules\/AGENTS\.template\.md/);
+  assert.match(result.stderr, /Stale generated output: skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md/);
 });
 
 test('changing declared agent-rule source partials makes source-side templates stale', () => {

@@ -77,7 +77,7 @@ claude --version
 
 ### Follow the Claude Code CLAUDE.md Setup guide:
 
-* Install or copy generic AI coding agent rules from [CLAUDE.template.md](../../../ai-coding-agent-rules/CLAUDE.template.md), then copy or merge them into the target repo root as `CLAUDE.md`.
+* Install or copy generic AI coding agent rules from [CLAUDE.template.md](../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md), then copy or merge them into the target repo root as `CLAUDE.md`.
 * Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
 * Optionally merge the brief `CLAUDE.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `CLAUDE.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
 * If the target repo already has `CLAUDE.md`, do not overwrite it. Merge manually or produce a diff/merge plan.

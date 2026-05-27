@@ -119,6 +119,10 @@ Words like `continue`, `next`, `apply`, or `do it` only apply to the already-sco
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
 
+## Git Completion
+
+After completing requested repo edits, run relevant validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Never push to `main`, never push secrets, credentials, live/runtime files, failed validation, or safety-blocked changes.
+
 ## Scope Control
 
 Before editing:

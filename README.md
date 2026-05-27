@@ -86,8 +86,6 @@ For deeper setup notes, use [How To Use: Use Skills Manually](repo/docs/HOW-TO-U
 | Gemini CLI | Supported Gemini CLI skill or extension location | Create or merge `AGENTS.md` first from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), then add `GEMINI.md` from [`repo-local/GEMINI.shim.template.md`](skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md). | Gemini CLI can share the same root `AGENTS.md` pattern as other agents. |
 | Antigravity | `<workspace-root>/.agents/skills/<skill-name>/` or `$HOME/.gemini/antigravity/skills/<skill-name>/` | Create or merge `AGENTS.md` first from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), then add `GEMINI.md` from [`repo-local/GEMINI.shim.template.md`](skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md) and/or `.agents/rules/00-agent-toolkit-bootstrap.md` from [`repo-local/antigravity-bootstrap.template.md`](skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md). | [Antigravity reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md); [Antigravity MCP config](skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md). |
 
-Top-level compatibility aliases inside `skills/ai-coding-agent-rules/` are legacy aliases only. New repo-local setup should use the `repo-local/` templates above.
-
 Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [skills/n8n-agent-rules/](skills/n8n-agent-rules/). Optional adapters in [skills/n8n-agent-rules/adapters/](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
 
 ## MCP
@@ -143,7 +141,7 @@ git diff --check
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->
+<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->
 ## Source-of-Truth Contract
 
 This repo has a source layer and a published layer.
@@ -178,4 +176,4 @@ This repo has a source layer and a published layer.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 - A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
 - Required runtime context for a skill or MCP surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
-<!-- END SOURCE-OF-TRUTH-CONTRACT -->
+<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:END source-of-truth-contract -->
