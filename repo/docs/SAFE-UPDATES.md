@@ -45,7 +45,8 @@ Their copied `_projects/**/_main/` files are canonical. SOURCE-LOCK hashes remai
 
 Allowed scoped writes:
 
-- Agent-rule generation may write only the generated source-side templates, root repo-local instruction shims, and published repo-local agent-rule template outputs.
+- Local agent-rule generation may write generated source-side templates, root repo-local instruction shims, and published repo-local agent-rule template outputs.
+- Privileged auto-sync may stage and push only passive generated/published outputs. It must not stage or push active root AI instruction files; `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` must be committed manually on the PR branch when source changes require them.
 - n8n sanitizer helpers may write ignored staging folders.
 - n8n sync helpers may write reviewed consumer repo workflow JSON plus ignored local `.tmp/**` and `.n8n-local/**`.
 

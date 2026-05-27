@@ -50,6 +50,17 @@ The sync script should be deterministic and boring:
 
 It should not use AI to summarise or rewrite source during normal publishing.
 
+## Managed Marker Layer
+
+Use managed markers when a script inserts, replaces, appends, extracts, or assembles a source-owned section inside a larger Markdown file:
+
+```md
+<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->
+<!-- AI-AGENT-TOOLKIT:<source-path>:END <BLOCK-NAME> -->
+```
+
+`<source-path>` is the workspace-relative path to the source partial, contract, adapter, or generator-owned section that supplies the managed text. `<BLOCK-NAME>` is a short uppercase label for the generated section, such as `GLOBAL-AGENTS.MD-TEMPLATE`, `N8N-AGENT-RULES-ADAPTER`, or `SOURCE-OF-TRUTH-CONTRACT`. Update managed sections from the mapped source file or generator, then rerun sync. Keep the version stable for text-only changes; bump it when the managed section contract changes in a way scripts or consumers must distinguish.
+
 ## Audit Layer
 
 Audits should verify that the manifest and generated surfaces stay honest. Start small, then add checks as the repo discovers failure modes.

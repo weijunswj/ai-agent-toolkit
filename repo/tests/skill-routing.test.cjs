@@ -139,7 +139,6 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /\[`repo-local\/CLAUDE\.shim\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/CLAUDE\.shim\.template\.md\)/);
   assert.match(readme, /\[`repo-local\/GEMINI\.shim\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/GEMINI\.shim\.template\.md\)/);
   assert.match(readme, /\[`repo-local\/antigravity-bootstrap\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/antigravity-bootstrap\.template\.md\)/);
-  assert.match(readme, /Top-level compatibility aliases inside `skills\/ai-coding-agent-rules\/` are legacy aliases only/);
   assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
   assert.match(readme, /\(skills\/n8n-agent-rules\/\)/);
   assert.doesNotMatch(readme, /\$HOME\/\.gemini\/skills\/<skill-name>\//);

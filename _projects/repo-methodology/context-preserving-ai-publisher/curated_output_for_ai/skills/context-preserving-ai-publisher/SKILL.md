@@ -51,7 +51,7 @@ When local repo law conflicts with this generic skill, local law wins.
 - `references/source-to-surface-decision-tree.md`: recipe and ownership choices.
 - `references/bootstrap-mode.md`: starting architecture in a new repo.
 - `references/maintenance-mode.md`: working inside an existing local contract.
-- `references/validation-strategy.md`: targeted iteration checks and full final validation.
+- `references/validation-strategy.md`: targeted local checks plus CI or documented full-gate validation.
 - `references/audit-and-baseline-workflow.md`: audit and baseline handling.
 - `references/deletion-policy.md`: deletion and retirement checks.
 - `references/enforcement-model.md`: docs, manifests, sync, audit, and CI.

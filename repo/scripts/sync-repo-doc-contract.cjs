@@ -15,10 +15,26 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 
 const workspaceRoot = workspaceRootFromArgs();
 const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
-const partialPath = 'repo/docs/partials/source-of-truth-contract.md';
+const partialPath = '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md';
 const targets = ['README.md', 'AGENTS.md'];
-const beginMarker = '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->';
-const endMarker = '<!-- END SOURCE-OF-TRUTH-CONTRACT -->';
+const projectId = 'repo-methodology.context-preserving-ai-publisher';
+const beginMarker = `<!-- AI-AGENT-TOOLKIT:${partialPath}:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->`;
+const endMarker = `<!-- AI-AGENT-TOOLKIT:${partialPath}:END SOURCE-OF-TRUTH-CONTRACT -->`;
+const markerPairs = [
+  { begin: beginMarker, end: endMarker },
+  {
+    begin: '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->'
+  },
+  {
+    begin: `<!-- ai-agent-toolkit:${projectId}:BEGIN source-of-truth-contract v1 -->`,
+    end: `<!-- ai-agent-toolkit:${projectId}:END source-of-truth-contract -->`
+  },
+  {
+    begin: '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->',
+    end: '<!-- END SOURCE-OF-TRUTH-CONTRACT -->'
+  }
+];
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 
 function resolveRel(relPath) {
@@ -47,25 +63,35 @@ function expectedBlock(partial) {
 }
 
 function replaceBlock(relPath, text, partial, errors) {
-  const beginCount = markerCount(text, beginMarker);
-  const endCount = markerCount(text, endMarker);
-  if (beginCount === 0 || endCount === 0) {
+  const matches = markerPairs
+    .map((pair) => ({
+      ...pair,
+      beginCount: markerCount(text, pair.begin),
+      endCount: markerCount(text, pair.end)
+    }))
+    .filter((pair) => pair.beginCount > 0 || pair.endCount > 0);
+  if (matches.length === 0) {
     errors.push(`Missing source-of-truth contract markers: ${relPath}`);
     return null;
   }
-  if (beginCount !== 1 || endCount !== 1) {
+
+  const completeMatches = matches.filter((pair) =>
+    pair.beginCount === 1 && pair.endCount === 1 && text.indexOf(pair.begin) < text.indexOf(pair.end)
+  );
+  if (completeMatches.length !== 1) {
     errors.push(`Duplicate source-of-truth contract markers: ${relPath}`);
     return null;
   }
 
-  const start = text.indexOf(beginMarker);
-  const end = text.indexOf(endMarker);
-  if (start > end) {
+  const { begin, end } = completeMatches[0];
+  const start = text.indexOf(begin);
+  const endIndex = text.indexOf(end);
+  if (start > endIndex) {
     errors.push(`Source-of-truth contract markers out of order: ${relPath}`);
     return null;
   }
 
-  const blockEnd = end + endMarker.length;
+  const blockEnd = endIndex + end.length;
   return `${text.slice(0, start)}${expectedBlock(partial)}${text.slice(blockEnd)}`.replace(/\n*$/, '\n');
 }
 

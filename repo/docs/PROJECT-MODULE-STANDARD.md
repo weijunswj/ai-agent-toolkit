@@ -137,7 +137,7 @@ When publishing full or near-full source docs into a copyable skill folder, pref
 
 Do not rewrite the copied guide body just to make moved relative links cleaner. Rewriting full source docs can create drift from the preserved source.
 
-If exact copied docs contain source-relative links that would break in the skill folder, add small local compatibility shims under `curated_output_for_ai/reference-link-shims/` and publish them into the skill folder with a declared recipe.
+If exact copied docs contain source-relative links that would break in the skill folder, add small local reference-link shims under `curated_output_for_ai/reference-link-shims/` and publish them into the skill folder with a declared recipe.
 
 Use shims only when all of these are true:
 

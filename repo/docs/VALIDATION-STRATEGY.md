@@ -1,8 +1,8 @@
 # Validation Strategy
 
-Use validation in two phases: fast targeted checks while editing, then full final validation before reporting PR-ready completion.
+Use validation in two phases: fast targeted local checks before pushing, then the full read-only CI gate for PR and `main` readiness.
 
-Targeted validation is an iteration strategy, not a quality downgrade. Final full validation remains mandatory before reporting PR-ready completion.
+Targeted validation is an iteration strategy, not a quality downgrade. Local `npm run validate:all` is not required before every push when CI already runs the full gate.
 
 ## Canonical Merge Gate
 
@@ -12,7 +12,7 @@ For this repo, the canonical full validation command is:
 npm run validate:all
 ```
 
-The read-only PR and `main` validation workflow must call that command directly instead of duplicating a partial checklist. `validate:all` is the required merge gate.
+The read-only PR and `main` validation workflow must call that command directly instead of duplicating a partial checklist. `validate:all` is the required CI and `main` merge gate.
 
 Do not run `--write` commands in the required validation workflow.
 
@@ -32,6 +32,8 @@ git diff --check
 ```
 
 Pick the smallest command that checks the thing you changed.
+
+Before pushing, run the smallest relevant targeted checks that cover the edited files and any generated outputs.
 
 ## Surface And Audit Checks
 
@@ -55,16 +57,16 @@ Auto-sync should skip cleanly when a PR includes `_projects/**/_main/**` source 
 
 CI should catch missed `_main` follow-up work by failing read-only validation, not by silently mutating source/provenance PRs.
 
-## Full Final Validation
+## Local Full Validation
 
-Before a PR-ready summary, run:
+Run local `npm run validate:all` when the change is broad or risky, touches workflow, sync, generator, packaging, or security-sensitive behavior, or when CI fails and local reproduction is needed:
 
 ```bash
 npm run validate:all
 git diff --check
 ```
 
-Do not remove or weaken this final validation requirement.
+For narrow docs, template, or generated-surface follow-ups, targeted local checks plus the read-only CI full gate are the expected workflow.
 
 ## Failure Loop Rule
 
@@ -74,4 +76,4 @@ If full validation fails, inspect the failing section and run the narrow relevan
 
 ## Reporting
 
-Report both targeted checks and final validation. If validation is skipped or cannot run, say why and identify the remaining risk.
+Report targeted checks, any local full validation that was run, and the CI gate expectation. If a local full check is skipped, say why and identify the remaining risk.

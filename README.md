@@ -86,8 +86,6 @@ For deeper setup notes, use [How To Use: Use Skills Manually](repo/docs/HOW-TO-U
 | Gemini CLI | Supported Gemini CLI skill or extension location | Create or merge `AGENTS.md` first from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), then add `GEMINI.md` from [`repo-local/GEMINI.shim.template.md`](skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md). | Gemini CLI can share the same root `AGENTS.md` pattern as other agents. |
 | Antigravity | `<workspace-root>/.agents/skills/<skill-name>/` or `$HOME/.gemini/antigravity/skills/<skill-name>/` | Create or merge `AGENTS.md` first from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), then add `GEMINI.md` from [`repo-local/GEMINI.shim.template.md`](skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md) and/or `.agents/rules/00-agent-toolkit-bootstrap.md` from [`repo-local/antigravity-bootstrap.template.md`](skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md). | [Antigravity reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md); [Antigravity MCP config](skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md). |
 
-Top-level compatibility aliases inside `skills/ai-coding-agent-rules/` are legacy aliases only. New repo-local setup should use the `repo-local/` templates above.
-
 Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [skills/n8n-agent-rules/](skills/n8n-agent-rules/). Optional adapters in [skills/n8n-agent-rules/adapters/](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
 
 ## MCP
@@ -127,7 +125,7 @@ For project module rules, follow [repo/docs/PROJECT-MODULE-STANDARD.md](repo/doc
 
 ## Validation
 
-Use targeted checks while iterating, then run full final validation before a PR-ready summary. See [repo/docs/VALIDATION-STRATEGY.md](repo/docs/VALIDATION-STRATEGY.md).
+Use targeted local checks before pushing. CI runs the full `npm run validate:all` merge gate; run it locally for broad or risky changes, workflow/sync/generator/package/security changes, or CI reproduction. See [repo/docs/VALIDATION-STRATEGY.md](repo/docs/VALIDATION-STRATEGY.md).
 
 ```powershell
 node repo/scripts/sync-repo-doc-contract.cjs --check
@@ -137,13 +135,12 @@ node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/*.test.cjs
 node repo/scripts/package-skills.cjs --check
 node repo/scripts/audit-skill-portability.cjs
-npm run validate:all
 git diff --check
 ```
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->
+<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract
 
 This repo has a source layer and a published layer.
@@ -165,17 +162,17 @@ This repo has a source layer and a published layer.
 - Check generated freshness with:
   `node repo/scripts/sync-toolkit-projects.cjs --check`
 - CI checks generated freshness and may auto-sync deterministic generated outputs from the base/default branch workflow definition only on guarded same-repo PR branches targeting `main`; fork PRs and `main` are never writeback targets.
-- Auto-sync only republishes approved generated/synced outputs in `README.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules/00-agent-toolkit-bootstrap.md`, `skills/**`, `mcp/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not update other source files, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs.
+- Auto-sync only republishes approved passive generated/synced outputs in `README.md`, `skills/**`, `mcp/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not write active root AI instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`), update other source files, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs. If source changes require active root instruction outputs to change, the PR author must commit those files manually on the PR branch.
 - Because auto-sync writeback is privileged, it must not run generated test suites or PR-controlled generated executable code; full validation remains covered by normal read-only CI.
 - Auto-sync must not run full repo validation against raw PR heads; this avoids blocking otherwise valid behind-main PR branches.
 - Auto-sync static checks are limited to generated-surface freshness checks and git diff checks before committing generated output.
 - Auto-sync may run only deterministic generation, sync, check, or validator scripts from the protected base revision, with the PR checkout treated as data and passed through an explicit workspace target.
 - Auto-sync must stage and snapshot generated output after sync and recheck the index/workspace before commit so validation cannot add files to the writeback diff.
 - Auto-sync must pin the PR checkout to the event head SHA, refuse stale queued runs if the PR head changed, and refuse non-force pushes if the PR branch moved after checkout.
-- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required full validation gate for PRs and `main`.
-- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or Codex must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then pass `npm run validate:all`.
-- If a writeback-eligible PR mixes eligible source/routing/contract edits with forbidden workflow, maintenance-script, test, docs, package, lockfile, or other unsafe paths, auto-sync must fail instead of pushing.
+- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required read-only CI and `main` validation gate.
+- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then rely on the normal read-only validation gate.
+- If a writeback-eligible PR mixes eligible source/routing/contract edits with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, auto-sync must skip successfully instead of pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit generated outputs manually and rely on normal read-only validation.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 - A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
 - Required runtime context for a skill or MCP surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
-<!-- END SOURCE-OF-TRUTH-CONTRACT -->
+<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->

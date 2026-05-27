@@ -134,7 +134,7 @@ Until the installer MCP exists, use packs as review checklists:
 Use:
 
 - [Codex reference](../../skills/n8n-local-setup/references/ai-agent-platforms/codex.md)
-- [Codex generic agent rules template](../../skills/ai-coding-agent-rules/AGENTS.template.md)
+- [Codex managed agent rules template](../../skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n agent rules skill](../../skills/n8n-agent-rules/)
 - [optional Codex n8n adapter](../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md)
 - [Codex MCP config](../../skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md)
@@ -147,7 +147,8 @@ Keep live n8n tokens in user environment variables, not repo files.
 Use:
 
 - [Claude Code reference](../../skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md)
-- [Claude Code generic agent rules template](../../skills/ai-coding-agent-rules/CLAUDE.template.md)
+- [Shared managed agent rules template](../../skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
+- [Claude Code shim template](../../skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md)
 - [n8n agent rules skill](../../skills/n8n-agent-rules/)
 - [optional Claude n8n adapter](../../skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md)
 - [Claude Code MCP config](../../skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md)
@@ -160,7 +161,7 @@ Use user-scoped MCP config unless a project intentionally needs project-scoped c
 Use:
 
 - [OpenCode reference](../../skills/n8n-local-setup/references/ai-agent-platforms/opencode.md)
-- [OpenCode generic agent rules template](../../skills/ai-coding-agent-rules/AGENTS.template.md)
+- [OpenCode managed agent rules template](../../skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n agent rules skill](../../skills/n8n-agent-rules/)
 - [optional OpenCode n8n adapter](../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md)
 - [OpenCode MCP config](../../skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md)
@@ -173,7 +174,9 @@ Use user-scoped OpenCode config unless a project intentionally needs project-spe
 Use:
 
 - [Antigravity reference](../../skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md)
-- [Antigravity generic agent rules template](../../skills/ai-coding-agent-rules/GEMINI.template.md)
+- [Shared managed agent rules template](../../skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
+- [Gemini shim template](../../skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md)
+- [Antigravity bootstrap template](../../skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md)
 - [n8n agent rules skill](../../skills/n8n-agent-rules/)
 - [optional Antigravity n8n adapter](../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md)
 - [Antigravity MCP config](../../skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md)

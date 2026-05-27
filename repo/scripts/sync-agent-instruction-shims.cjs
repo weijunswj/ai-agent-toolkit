@@ -21,6 +21,7 @@ const mode = process.argv.includes('--write') ? 'write' : 'check';
 const projectId = 'development.ai-coding-agent-rules';
 const fixCommand = 'node repo/scripts/sync-agent-instruction-shims.cjs --write';
 const executionPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md';
+const n8nAdapterPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md';
 const manualTemplatePaths = {
   agents: '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
   claude: '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
@@ -33,12 +34,36 @@ const repoLocalTemplatePaths = {
   antigravity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
 };
 
-const toolkitBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->';
-const toolkitEnd = '<!-- AI-AGENT-TOOLKIT:END toolkit -->';
-const n8nBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->';
-const n8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->';
-const legacyN8nEnd = '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->';
-const n8nSentence = 'If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.';
+const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
+const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
+const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
+const n8nEnd = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:END N8N-AGENT-RULES-ADAPTER -->`;
+const toolkitMarkerPairs = [
+  { begin: toolkitBegin, end: toolkitEnd },
+  {
+    begin: `<!-- ai-agent-toolkit:${projectId}:BEGIN ai-coding-agent-execution v1 -->`,
+    end: `<!-- ai-agent-toolkit:${projectId}:END ai-coding-agent-execution -->`
+  },
+  {
+    begin: '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:END toolkit -->'
+  }
+];
+const n8nMarkerPairs = [
+  { begin: n8nBegin, end: n8nEnd },
+  {
+    begin: `<!-- ai-agent-toolkit:${projectId}:BEGIN n8n-adapter v1 -->`,
+    end: `<!-- ai-agent-toolkit:${projectId}:END n8n-adapter -->`
+  },
+  {
+    begin: '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->'
+  },
+  {
+    begin: '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->'
+  }
+];
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -172,14 +197,14 @@ function fencedTemplate({ title, audience, destinationDisplay, activeNameText, i
   return `${body.join('\n').trimEnd()}\n`;
 }
 
-function managedPayload(executionPrompt) {
+function managedPayload(executionPrompt, n8nAdapter) {
   return [
     toolkitBegin,
     executionPrompt.trimEnd(),
     toolkitEnd,
     '',
     n8nBegin,
-    n8nSentence,
+    n8nAdapter.trimEnd(),
     n8nEnd
   ].join('\n');
 }
@@ -289,10 +314,28 @@ function stripManagedBlock(relPath, text, begin, end, errors) {
   return `${text.slice(0, start)}${text.slice(finish + end.length)}`;
 }
 
+function stripManagedBlockAny(relPath, text, markerPairs, errors) {
+  const matches = markerPairs
+    .map((pair) => ({
+      ...pair,
+      beginCount: markerCount(text, pair.begin),
+      endCount: markerCount(text, pair.end)
+    }))
+    .filter((pair) => pair.beginCount > 0 || pair.endCount > 0);
+  if (matches.length === 0) return text;
+
+  const completeMatches = matches.filter((pair) =>
+    pair.beginCount === 1 && pair.endCount === 1 && text.indexOf(pair.begin) < text.indexOf(pair.end)
+  );
+  if (completeMatches.length !== 1) {
+    errors.push(`Malformed managed agent instruction markers in ${relPath}. Run ${fixCommand}.`);
+    return null;
+  }
+  return stripManagedBlock(relPath, text, completeMatches[0].begin, completeMatches[0].end, errors);
+}
+
 function stripN8nManagedBlock(relPath, text, errors) {
-  if (markerCount(text, n8nBegin) === 0) return text;
-  const end = markerCount(text, n8nEnd) === 1 ? n8nEnd : legacyN8nEnd;
-  return stripManagedBlock(relPath, text, n8nBegin, end, errors);
+  return stripManagedBlockAny(relPath, text, n8nMarkerPairs, errors);
 }
 
 function removeSupersededGitHubPrSection(text) {
@@ -338,7 +381,7 @@ function shimBody(sourceText, options) {
 }
 
 function rootAgentsExpected(current, source, errors) {
-  let body = stripManagedBlock('AGENTS.md', current, toolkitBegin, toolkitEnd, errors);
+  let body = stripManagedBlockAny('AGENTS.md', current, toolkitMarkerPairs, errors);
   if (body === null) return null;
   body = stripN8nManagedBlock('AGENTS.md', body, errors);
   if (body === null) return null;
@@ -361,7 +404,7 @@ function rootAgentsExpected(current, source, errors) {
 }
 
 function shimExpected(relPath, current, sourceText, options, errors) {
-  let body = stripManagedBlock(relPath, current, toolkitBegin, toolkitEnd, errors);
+  let body = stripManagedBlockAny(relPath, current, toolkitMarkerPairs, errors);
   if (body === null) return null;
   if (options.importLine) body = removeExactLine(body, options.importLine);
   if (options.heading) body = removeLeadingHeading(body, options.heading);
@@ -391,7 +434,8 @@ function validateAndSync(options = {}) {
   const runMode = options.mode || mode;
   const errors = [];
   const executionPrompt = readRequired(executionPromptPath, errors);
-  if (executionPrompt === null) return { errors };
+  const n8nAdapter = readRequired(n8nAdapterPath, errors);
+  if (executionPrompt === null || n8nAdapter === null) return { errors };
 
   const sourceTemplates = expectedSourceTemplates(executionPrompt);
   for (const [relPath, expected] of Object.entries(sourceTemplates)) {
@@ -413,8 +457,8 @@ function validateAndSync(options = {}) {
     antigravity: extractPayload(repoLocalTemplatePaths.antigravity, antigravityTemplate, errors)
   };
   if (Object.values(source).some((value) => value === null)) return { errors };
-  if (agentsPayload.trimEnd() !== managedPayload(executionPrompt).trimEnd()) {
-    errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath}, keep the one-sentence n8n adapter, then run sync.`);
+  if (agentsPayload.trimEnd() !== managedPayload(executionPrompt, n8nAdapter).trimEnd()) {
+    errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath} and ${n8nAdapterPath}, keep the compact fail-closed n8n adapter, then run sync.`);
     return { errors };
   }
 

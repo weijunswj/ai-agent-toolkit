@@ -8,7 +8,7 @@ on:
       - "_projects/**/curated_output_for_ai/**"
       - "_projects/**/toolkit.project.json"
       - "_projects/development/ai-coding-agent-rules/_main/_partials/**"
-      - "repo/docs/partials/source-of-truth-contract.md"
+      - "_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md"
 
 permissions:
   contents: write
@@ -77,21 +77,6 @@ jobs:
               --jq '.[].filename'
           )
 
-          for path in "${changed_files[@]}"; do
-            case "$path" in
-              repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
-                continue
-                ;;
-            esac
-
-            case "$path" in
-              _projects/*/_main/*|repo/docs/*|repo/scripts/*|repo/tests/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
-                echo "::error file=${path}::Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate: ${path}. Commit generated outputs manually and rely on the normal read-only Validate workflow."
-                exit 1
-                ;;
-            esac
-          done
-
           current_head_sha="$(
             gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq '.head.sha'
           )"
@@ -101,16 +86,32 @@ jobs:
             exit 1
           fi
 
+          for path in "${changed_files[@]}"; do
+            case "$path" in
+              _projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+                continue
+                ;;
+            esac
+
+            case "$path" in
+              _projects/*/_main/*|repo/docs/*|repo/scripts/*|repo/tests/*|.github/*|package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|.gitignore|.gitattributes)
+                echo "::notice file=${path}::Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits. Normal Validate checks remain the merge gate."
+                echo "should_sync=false" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+          done
+
           eligible=false
           for path in "${changed_files[@]}"; do
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*)
                 eligible=true
                 ;;
             esac
 
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md|README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md|README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*)
                 ;;
               *)
                 echo "::error file=$path::Auto-sync only runs on deterministic source/routing/contract and generated surface paths: $path"
@@ -193,7 +194,11 @@ jobs:
 
           for path in "${dirty_files[@]}"; do
             case "$path" in
-              README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md)
+                echo "::error file=$path::Privileged auto-sync must not write active root AI instruction files. Commit this generated update on the PR branch manually and rely on the normal read-only Validate workflow."
+                exit 1
+                ;;
+              README.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
@@ -202,7 +207,7 @@ jobs:
             esac
           done
 
-          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md CLAUDE.md GEMINI.md .agents/rules/00-agent-toolkit-bootstrap.md skills mcp _projects/development/ai-coding-agent-rules/_main/AGENTS.template.md _projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md _projects/development/ai-coding-agent-rules/_main/GEMINI.template.md
+          /usr/bin/git -C "$PR_ROOT" add README.md skills mcp _projects/development/ai-coding-agent-rules/_main/AGENTS.template.md _projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md _projects/development/ai-coding-agent-rules/_main/GEMINI.template.md
 
           mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           if [[ "${#staged_files[@]}" -eq 0 ]]; then
@@ -213,7 +218,11 @@ jobs:
 
           for path in "${staged_files[@]}"; do
             case "$path" in
-              README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md)
+                echo "::error file=$path::Privileged auto-sync must not stage active root AI instruction files. Commit this generated update on the PR branch manually and rely on the normal read-only Validate workflow."
+                exit 1
+                ;;
+              README.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
@@ -265,7 +274,11 @@ jobs:
           mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           for path in "${staged_files[@]}"; do
             case "$path" in
-              README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md)
+                echo "::error file=$path::Privileged auto-sync must not stage active root AI instruction files. Commit this generated update on the PR branch manually and rely on the normal read-only Validate workflow."
+                exit 1
+                ;;
+              README.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"

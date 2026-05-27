@@ -92,7 +92,7 @@ For active third-party projects, read `SOURCE-LOCK.json` before discussing upstr
 
 ## Validation Strategy
 
-Prefer targeted validation while iterating. Before final reporting, run the required full validation suite. If full validation fails, inspect the failing area and rerun the narrow relevant command before retrying the full suite.
+Prefer targeted local validation before pushing. `npm run validate:all` remains the required read-only CI and `main` gate; run it locally for broad, risky, workflow, sync, generator, packaging, or security-sensitive changes, or when CI fails and local reproduction is needed. If full validation fails, inspect the failing area and rerun the narrow relevant command before retrying the full suite.
 
 ## Final Report Style
 

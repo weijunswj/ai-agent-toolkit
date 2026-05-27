@@ -13,6 +13,7 @@ This source folder owns the human/manual global agent instruction templates and 
 ## Source Partials
 
 - [_partials/ai-coding-agent-execution.md](_partials/ai-coding-agent-execution.md) is the one canonical reusable toolkit prompt source.
+- [_partials/n8n-agent-rules-adapter.md](_partials/n8n-agent-rules-adapter.md) is the compact fail-closed n8n adapter source used by root and repo-local managed `AGENTS.md` surfaces.
 - [_partials/toolkit-skill-routing.md](_partials/toolkit-skill-routing.md) is the toolkit skill-routing source partial.
 - [_partials/n8n-agent-rules.md](_partials/n8n-agent-rules.md) is the canonical full n8n operating ruleset source.
 

@@ -2,7 +2,7 @@
 
 This repo owns reusable AI-agent toolkit assets.
 
-The compact shared contract lives in [source-of-truth-contract.md](partials/source-of-truth-contract.md) and is synced into the main entry points with `node repo/scripts/sync-repo-doc-contract.cjs --write`.
+The compact shared contract lives in [_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md](../../_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md) and is synced into the main entry points with `node repo/scripts/sync-repo-doc-contract.cjs --write`.
 
 ## Toolkit-Owned
 
@@ -55,15 +55,16 @@ The privileged workflow definition runs from the base/default branch, then write
 
 - Fork PRs are never written to.
 - `main` is never written to.
-- The workflow only republishes declared generated/synced outputs such as `README.md`, `AGENTS.md`, `skills/**`, `mcp/**`, and the source-side agent-rule templates generated from declared agent-rule partials.
+- The workflow only republishes declared passive generated/synced outputs such as `README.md`, `skills/**`, `mcp/**`, and the source-side agent-rule templates generated from declared agent-rule partials.
+- The workflow must not write active root AI instruction files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`. If source changes require those outputs to change, the PR author must commit them manually on the PR branch and rely on the normal read-only validation workflow.
 - It does not update other sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
 - Because the workflow is privileged, it does not run generated test suites, PR-controlled generated executable code, or full repo validation against raw PR heads; full validation remains covered by normal read-only CI.
 - The privileged static checks are limited to generated-surface freshness checks and git diff checks before committing generated output, which avoids blocking otherwise valid behind-main PR branches.
 - The workflow only runs deterministic generation, sync, check, or validator scripts from the protected base revision. The PR checkout is treated as data and passed to those scripts through an explicit workspace target.
 - The workflow stages and snapshots generated output after sync, then rechecks the index/workspace before commit so validation cannot add files to the writeback diff.
 - The workflow pins the PR checkout to the event head SHA, refuses stale queued runs if the PR head changed, verifies the remote PR branch before pushing, and never force pushes.
-- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync skips successfully without checking out, writing, committing, or pushing. The author or Codex must commit any required generated outputs, source-lock/provenance updates, and audit baseline updates, then pass `npm run validate:all`.
-- If a writeback-eligible PR is mixed with forbidden workflow, maintenance-script, test, docs, package, lockfile, or other unsafe paths, the workflow fails instead of pushing.
+- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync skips successfully without checking out, writing, committing, or pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit any required generated outputs, source-lock/provenance updates, and audit baseline updates, then rely on the normal read-only validation gate.
+- If a writeback-eligible PR is mixed with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, the workflow skips successfully instead of pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit generated outputs manually and rely on normal read-only validation.
 
 ## Skill-Local Packs
 

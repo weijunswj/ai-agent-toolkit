@@ -39,15 +39,15 @@
       "text_rewrites": [
         {
           "from": "../../../development/ai-coding-agent-rules/_main/AGENTS.template.md",
-          "to": "../../../ai-coding-agent-rules/AGENTS.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md"
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md",
-          "to": "../../../ai-coding-agent-rules/CLAUDE.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md"
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
-          "to": "../../../ai-coding-agent-rules/GEMINI.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
         },
         {
           "from": "./templates/local-stack/docker-compose.yml",
@@ -218,15 +218,15 @@
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/AGENTS.template.md",
-          "to": "../../../ai-coding-agent-rules/AGENTS.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md"
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md",
-          "to": "../../../ai-coding-agent-rules/CLAUDE.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md"
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
-          "to": "../../../ai-coding-agent-rules/GEMINI.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
         }
       ]
     },
@@ -243,15 +243,15 @@
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/AGENTS.template.md",
-          "to": "../../../ai-coding-agent-rules/AGENTS.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md"
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md",
-          "to": "../../../ai-coding-agent-rules/CLAUDE.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md"
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
-          "to": "../../../ai-coding-agent-rules/GEMINI.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
         }
       ]
     },
@@ -268,15 +268,15 @@
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/AGENTS.template.md",
-          "to": "../../../ai-coding-agent-rules/AGENTS.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md"
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md",
-          "to": "../../../ai-coding-agent-rules/CLAUDE.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md"
         },
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
-          "to": "../../../ai-coding-agent-rules/GEMINI.template.md"
+          "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
         }
       ]
     },

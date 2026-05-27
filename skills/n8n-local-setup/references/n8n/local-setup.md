@@ -507,9 +507,9 @@ Use user-scoped Antigravity or Gemini-style config unless a project intentionall
 
 Use generic agent rules as the slim always-on baseline for coding agents:
 
-- [AGENTS.template.md](../../../ai-coding-agent-rules/AGENTS.template.md) for Codex or OpenCode.
-- [CLAUDE.template.md](../../../ai-coding-agent-rules/CLAUDE.template.md) for Claude Code.
-- [GEMINI.template.md](../../../ai-coding-agent-rules/GEMINI.template.md) for Gemini or Antigravity.
+- [AGENTS.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for Codex or OpenCode.
+- [CLAUDE.template.md](../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md) for Claude Code.
+- [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md) for Gemini or Antigravity.
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
@@ -535,7 +535,7 @@ Do not copy the full n8n rules into always-on instructions unless you intentiona
 
 Use Codex with:
 
-- [AGENTS.template.md](../../../ai-coding-agent-rules/AGENTS.template.md)
+- [AGENTS.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n Agent Rules](../../../n8n-agent-rules/)
 - [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md)
 
@@ -545,7 +545,7 @@ Restart Codex after changing `config.toml`, `AGENTS.md`, or `N8N_MCP_TOKEN`.
 
 Use Claude Code with:
 
-- [CLAUDE.template.md](../../../ai-coding-agent-rules/CLAUDE.template.md)
+- [CLAUDE.template.md](../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md)
 - [n8n Agent Rules](../../../n8n-agent-rules/)
 - [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md)
 - [Claude Code Integration appendix](../ai-agent-platforms/claude-code.md)
@@ -556,7 +556,7 @@ You do not need to open this repo in Claude Code just to use n8n MCP servers. Us
 
 Use OpenCode with:
 
-- [AGENTS.template.md](../../../ai-coding-agent-rules/AGENTS.template.md)
+- [AGENTS.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
 - [n8n Agent Rules](../../../n8n-agent-rules/)
 - [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md)
 - [OpenCode Integration appendix](../ai-agent-platforms/opencode.md)
@@ -567,7 +567,7 @@ You can start OpenCode from any folder. Open a specific repo only when you want 
 
 Use Antigravity with:
 
-- [GEMINI.template.md](../../../ai-coding-agent-rules/GEMINI.template.md)
+- [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md)
 - [n8n Agent Rules](../../../n8n-agent-rules/)
 - [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md)
 - [Antigravity Integration appendix](../ai-agent-platforms/antigravity.md)

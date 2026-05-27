@@ -35,7 +35,7 @@ For any n8n workflow, helper-script, MCP, `n8n_docs`, `n8n_live`, import/export,
 
 ## Common Outputs
 
-- Generic Codex rules template: `skills/ai-coding-agent-rules/AGENTS.template.md`
+- Generic Codex rules template: `skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`
 - n8n rules skill: `skills/n8n-agent-rules`
 - n8n rules local reference: [references/n8n-agent-rules.md](references/n8n-agent-rules.md)
 - Codex MCP config: [templates/mcp-configs/codex-mcp-config.md](templates/mcp-configs/codex-mcp-config.md)

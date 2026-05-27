@@ -1,6 +1,6 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
 ## Role
 
 You are an execution-first coding agent.
@@ -86,6 +86,14 @@ Do not treat previous approval as approval for a new risky action.
 Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped task.
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
+
+## Git Completion
+
+After completing requested repo edits, run the smallest relevant local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Do not run full local validation by default when CI already runs the full gate. Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
+
+## Pull Request Description
+
+When opening or updating a pull request, keep the PR description aligned with the full base-to-head diff, not only the latest commit. Before final reporting after a push, update the PR body when the cumulative scope, safety notes, validation, generated-output status, or user-facing behaviour changed. If you cannot update the PR body directly, provide exact replacement PR body text.
 
 ## Scope Control
 
@@ -173,15 +181,17 @@ After making changes, respond with:
 - Remaining risks or manual checks.
 
 Keep final reports concise but complete.
-<!-- AI-AGENT-TOOLKIT:END toolkit -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
 
-<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.
-<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
+If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-agent-rules` before planning or editing.
+If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
+Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
 
 This repo is the canonical reusable AI Agent Toolkit.
 
-<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->
+<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract
 
 This repo has a source layer and a published layer.
@@ -203,20 +213,20 @@ This repo has a source layer and a published layer.
 - Check generated freshness with:
   `node repo/scripts/sync-toolkit-projects.cjs --check`
 - CI checks generated freshness and may auto-sync deterministic generated outputs from the base/default branch workflow definition only on guarded same-repo PR branches targeting `main`; fork PRs and `main` are never writeback targets.
-- Auto-sync only republishes approved generated/synced outputs in `README.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules/00-agent-toolkit-bootstrap.md`, `skills/**`, `mcp/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not update other source files, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs.
+- Auto-sync only republishes approved passive generated/synced outputs in `README.md`, `skills/**`, `mcp/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not write active root AI instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`), update other source files, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs. If source changes require active root instruction outputs to change, the PR author must commit those files manually on the PR branch.
 - Because auto-sync writeback is privileged, it must not run generated test suites or PR-controlled generated executable code; full validation remains covered by normal read-only CI.
 - Auto-sync must not run full repo validation against raw PR heads; this avoids blocking otherwise valid behind-main PR branches.
 - Auto-sync static checks are limited to generated-surface freshness checks and git diff checks before committing generated output.
 - Auto-sync may run only deterministic generation, sync, check, or validator scripts from the protected base revision, with the PR checkout treated as data and passed through an explicit workspace target.
 - Auto-sync must stage and snapshot generated output after sync and recheck the index/workspace before commit so validation cannot add files to the writeback diff.
 - Auto-sync must pin the PR checkout to the event head SHA, refuse stale queued runs if the PR head changed, and refuse non-force pushes if the PR branch moved after checkout.
-- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required full validation gate for PRs and `main`.
-- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or Codex must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then pass `npm run validate:all`.
-- If a writeback-eligible PR mixes eligible source/routing/contract edits with forbidden workflow, maintenance-script, test, docs, package, lockfile, or other unsafe paths, auto-sync must fail instead of pushing.
+- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required read-only CI and `main` validation gate.
+- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then rely on the normal read-only validation gate.
+- If a writeback-eligible PR mixes eligible source/routing/contract edits with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, auto-sync must skip successfully instead of pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit generated outputs manually and rely on normal read-only validation.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 - A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
 - Required runtime context for a skill or MCP surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
-<!-- END SOURCE-OF-TRUTH-CONTRACT -->
+<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->
 
 ## Agent Routing Rules
 
@@ -234,6 +244,15 @@ This repo has a source layer and a published layer.
 - Do not generate curated files automatically from `_main`; curated content is reviewed source.
 - Do not weaken safety rules around credentials, `.env`, `.tmp`, `.n8n-local`, live n8n actions, approval, attribution, or local-only constraints.
 - Run sync, check, and relevant tests before reporting completion.
+
+## Managed Marker Rules
+
+Use managed markers when a script inserts, replaces, appends, extracts, or assembles a source-owned section inside a larger Markdown file. Use:
+
+`<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->`
+`<!-- AI-AGENT-TOOLKIT:<source-path>:END <BLOCK-NAME> -->`
+
+`<source-path>` must be the workspace-relative source partial, contract, adapter, or generator-owned file that supplies the managed text. `<BLOCK-NAME>` must be a short uppercase section name, such as `GLOBAL-AGENTS.MD-TEMPLATE`, `N8N-AGENT-RULES-ADAPTER`, or `SOURCE-OF-TRUTH-CONTRACT`. Change managed sections from the source file or generator, then run sync. Bump the marker version only when the managed section contract changes in a way the generator or consumers must distinguish.
 
 ## Mandatory Repo Docs By Task
 
@@ -265,11 +284,11 @@ When adding a new project module or changing a published skill/MCP surface:
 - Do not replace full working docs, prompts, templates, setup guides, troubleshooting notes, or examples with lossy summaries.
 - Use deterministic recipes in `toolkit.project.json`: `copy`, `extract`, `concat`, `curated`, `json`, or rare justified `linked`.
 - If publishing a full source doc into a skill folder, prefer exact `copy` or `extract`.
-- If exact copied docs contain old relative links that would break after publishing, add small compatibility shims under `curated_output_for_ai/reference-link-shims/` and declare them in `toolkit.project.json`.
+- If exact copied docs contain source-relative links that would break after publishing, add small reference-link shims under `curated_output_for_ai/reference-link-shims/` and declare them in `toolkit.project.json`.
 - Do not add shims by default. Add them only when exact copied docs would otherwise have broken relative links.
 - Update `SOURCE-MANIFEST.md` when a project uses shims, linked outputs, third-party source, or cross-surface composition.
 - Update `SOURCE-LOCK.json` when preserved/source-locked material changes.
-- Run `npm run validate:all` and `npm run audit:surfaces:check` before reporting completion.
+- Run targeted local validation before pushing. Run local `npm run validate:all` for broad or risky changes, workflow/sync/generator/package/security changes, or CI reproduction; CI remains the full merge gate.
 
 Keep the topology simple:
 
@@ -294,7 +313,7 @@ Keep the topology simple:
 - Trading app code.
 - Credentials, credential exports, credential binding files, private keys, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, or live n8n import/export files.
 - Auto-merge, production deployment automation, or unscoped auto-commit. Any generated-output writeback must be same-repo PR-only, explicit, and validation-gated.
-- Deprecated compatibility placeholders for removed layout surfaces.
+- Removed-layout placeholders.
 
 ## Documentation Rules
 
@@ -308,7 +327,7 @@ Keep the topology simple:
 
 ## Validation
 
-For expensive validation work, follow `repo/docs/VALIDATION-STRATEGY.md`: use targeted checks while developing, then run full validation before final PR-ready reporting. Do not loop `npm run validate:all` repeatedly when a narrower failing check can be isolated.
+For expensive validation work, follow `repo/docs/VALIDATION-STRATEGY.md`: use targeted checks while developing and before pushing. Do not loop `npm run validate:all` repeatedly when a narrower failing check can be isolated; run local full validation only when the change risk or CI state calls for it.
 
 Before reporting completion, run the relevant checks:
 

@@ -134,6 +134,14 @@ Words like `continue`, `next`, `apply`, or `do it` only apply to the already-sco
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
 
+## Git Completion
+
+After completing requested repo edits, run the smallest relevant local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Do not run full local validation by default when CI already runs the full gate. Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
+
+## Pull Request Description
+
+When opening or updating a pull request, keep the PR description aligned with the full base-to-head diff, not only the latest commit. Before final reporting after a push, update the PR body when the cumulative scope, safety notes, validation, generated-output status, or user-facing behaviour changed. If you cannot update the PR body directly, provide exact replacement PR body text.
+
 ## Scope Control
 
 Before editing:

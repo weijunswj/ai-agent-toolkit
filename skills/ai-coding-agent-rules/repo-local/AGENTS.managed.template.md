@@ -37,7 +37,7 @@ notepad AGENTS.md
 ---
 
 ````````md
-<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
 ## Role
 
 You are an execution-first coding agent.
@@ -123,6 +123,14 @@ Do not treat previous approval as approval for a new risky action.
 Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped task.
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
+
+## Git Completion
+
+After completing requested repo edits, run the smallest relevant local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Do not run full local validation by default when CI already runs the full gate. Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
+
+## Pull Request Description
+
+When opening or updating a pull request, keep the PR description aligned with the full base-to-head diff, not only the latest commit. Before final reporting after a push, update the PR body when the cumulative scope, safety notes, validation, generated-output status, or user-facing behaviour changed. If you cannot update the PR body directly, provide exact replacement PR body text.
 
 ## Scope Control
 
@@ -210,9 +218,11 @@ After making changes, respond with:
 - Remaining risks or manual checks.
 
 Keep final reports concise but complete.
-<!-- AI-AGENT-TOOLKIT:END toolkit -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
 
-<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.
-<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
+If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-agent-rules` before planning or editing.
+If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
+Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
 ````````

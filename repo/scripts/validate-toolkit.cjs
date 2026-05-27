@@ -40,7 +40,7 @@ const expectedFiles = [
   '.gitattributes',
   'repo/docs/HOW-TO-USE.md',
   'repo/docs/SKILL-PORTABILITY-AND-FIDELITY.md',
-  'repo/docs/partials/source-of-truth-contract.md',
+  '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md',
   'repo/docs/FOR_AI_AGENTS.md',
   'repo/docs/SAFE-UPDATES.md',
   'repo/docs/SOURCE-OF-TRUTH.md',
@@ -97,13 +97,9 @@ const expectedFiles = [
   '_projects/cicd/secure-installer/SOURCE-LOCK.json',
   '_projects/design/ui-ux-pro-max/SOURCE-LOCK.json',
   'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-  'skills/ai-coding-agent-rules/AGENTS.template.md',
   'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-  'skills/ai-coding-agent-rules/CLAUDE.template.md',
   'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-  'skills/ai-coding-agent-rules/GEMINI.template.md',
   'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
-  'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md',
   'skills/n8n-agent-rules/SKILL.md',
   'skills/n8n-agent-rules/README.md',
   'skills/n8n-agent-rules/n8n-agent-rules.md',
@@ -144,6 +140,7 @@ const expectedDirs = [
   '_projects',
   '_projects/n8n/local-setup',
   '_projects/n8n/local-setup/_main',
+  '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials',
   '_projects/development/ai-coding-agent-rules',
   '_projects/development/ai-coding-agent-rules/_main',
   '_projects/development/ai-coding-agent-rules/_main/_partials',
@@ -191,7 +188,6 @@ const expectedDirs = [
   'mcp/registry',
   '.agents',
   '.agents/rules',
-  'repo/docs/partials',
   '.github/workflows'
 ];
 
@@ -371,10 +367,29 @@ const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
   '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
 ];
-const autoSyncGeneratedRootInstructionOutputs = [
+const activeRootInstructionOutputs = [
+  'AGENTS.md',
   'CLAUDE.md',
   'GEMINI.md',
   '.agents/rules/00-agent-toolkit-bootstrap.md'
+];
+const currentContractBegin = '<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->';
+const staleManagedMarkerOutputs = [
+  '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->',
+  '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->',
+  '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1 -->',
+  '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END ai-coding-agent-execution -->',
+  '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->',
+  '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->',
+  '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->',
+  '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:END source-of-truth-contract -->',
+  '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->',
+  '<!-- AI-AGENT-TOOLKIT:END toolkit -->',
+  '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
+  '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->',
+  '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->',
+  '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->',
+  '<!-- END SOURCE-OF-TRUTH-CONTRACT -->'
 ];
 const allowedCredentialExampleJsonPaths = new Set([
   '_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json'
@@ -384,8 +399,6 @@ function isAutoSyncGeneratedOutputPath(relPath) {
   const rel = slash(relPath);
   return (
     rel === 'README.md' ||
-    rel === 'AGENTS.md' ||
-    autoSyncGeneratedRootInstructionOutputs.includes(rel) ||
     rel.startsWith('skills/') ||
     rel.startsWith('mcp/') ||
     autoSyncGeneratedAgentRuleTemplateOutputs.includes(rel)
@@ -410,10 +423,17 @@ function validateForbiddenFiles(errors) {
     const lower = rel.toLowerCase();
 
     if (entry.dirent.isDirectory()) {
+      if (rel.startsWith('.agents/rules/')) {
+        fail(errors, `Unexpected .agents/rules entry: ${rel}. Only .agents/rules/00-agent-toolkit-bootstrap.md is allowed.`);
+      }
       if (['_dist', 'dist', 'node_modules', 'coverage'].includes(name)) {
         fail(errors, `Forbidden directory present: ${rel}`);
       }
       continue;
+    }
+
+    if (rel.startsWith('.agents/rules/') && rel !== '.agents/rules/00-agent-toolkit-bootstrap.md') {
+      fail(errors, `Unexpected .agents/rules entry: ${rel}. Only .agents/rules/00-agent-toolkit-bootstrap.md is allowed.`);
     }
 
     if (name === '.env' || (name.startsWith('.env.') && name !== '.env.example')) fail(errors, `Forbidden env file: ${rel}`);
@@ -741,7 +761,7 @@ function validateReadmeSurface(errors) {
     lastIndex = index;
   }
   const appendixIndex = text.indexOf('## Appendix: Source-of-Truth Contract');
-  const contractIndex = text.indexOf('<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->');
+  const contractIndex = text.indexOf(currentContractBegin);
   if (appendixIndex === -1 || contractIndex === -1 || contractIndex < appendixIndex) {
     fail(errors, 'README.md source-of-truth contract block must live under the appendix');
   }
@@ -803,6 +823,26 @@ function validateAgentRuleSources(errors) {
     if (entry.relPath === '_projects/development/ai-coding-agent-rules/_main/repo-local' ||
         entry.relPath.startsWith('_projects/development/ai-coding-agent-rules/_main/repo-local/')) {
       fail(errors, `Repo-local skill runtime templates must live under curated_output_for_ai, not _main: ${entry.relPath}`);
+    }
+  }
+  for (const relPath of [
+    'skills/ai-coding-agent-rules/AGENTS.template.md',
+    'skills/ai-coding-agent-rules/CLAUDE.template.md',
+    'skills/ai-coding-agent-rules/GEMINI.template.md',
+    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
+  ]) {
+    if (existsRel(relPath)) fail(errors, `Removed top-level ai-coding-agent-rules template alias is still present: ${relPath}`);
+  }
+  for (const relPath of [
+    'AGENTS.md',
+    'README.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
+  ]) {
+    if (!existsRel(relPath)) continue;
+    const text = readText(relPath);
+    for (const marker of staleManagedMarkerOutputs) {
+      if (text.includes(marker)) fail(errors, `${relPath} contains stale generic managed marker: ${marker}`);
     }
   }
 }
@@ -1138,7 +1178,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight fail handling for ${label}`);
   }
   const autoSyncContractInputs = [
-    'repo/docs/partials/source-of-truth-contract.md'
+    '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md'
   ];
   for (const token of autoSyncContractInputs) {
     const preflightOccurrences = preflightSection.split(token).length - 1;
@@ -1159,13 +1199,19 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       fail(errors, `${entry.relPath} must allow generated source-side agent-rule templates in the guarded PR file set`);
     }
   }
-  const unsafeFailMessage = 'Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate';
-  if (!preflightSection.includes(unsafeFailMessage) ||
-      !preflightSection.includes('Commit generated outputs manually and rely on the normal read-only Validate workflow.') ||
+  const unsafeSkipMessage = 'Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits. Normal Validate checks remain the merge gate.';
+  const currentHeadCheckIndex = preflightSection.indexOf('current_head_sha="$(');
+  const unsafeSkipIndex = preflightSection.indexOf(unsafeSkipMessage);
+  if (currentHeadCheckIndex === -1 || unsafeSkipIndex === -1 || currentHeadCheckIndex > unsafeSkipIndex) {
+    fail(errors, `${entry.relPath} preflight must reject stale PR heads before optional auto-sync skips`);
+  }
+  if (!preflightSection.includes(unsafeSkipMessage) ||
+      !preflightSection.includes('echo "should_sync=false" >> "$GITHUB_OUTPUT"') ||
       !preflightSection.includes('should_sync=true') ||
-      preflightSection.includes('should_sync=false') ||
-      !/Auto-sync refused:[\s\S]{0,400}exit 1/.test(preflightSection)) {
-    fail(errors, `${entry.relPath} preflight must fail unsafe mixed maintenance/source PRs before writeback`);
+      preflightSection.includes('Auto-sync refused: this PR mixes generated-sync-eligible changes') ||
+      /Auto-sync skipped:[\s\S]{0,400}exit 1/.test(preflightSection) ||
+      !/Auto-sync skipped:[\s\S]{0,400}exit 0/.test(preflightSection)) {
+    fail(errors, `${entry.relPath} preflight must skip unsafe mixed maintenance/source PRs without writeback`);
   }
 
   if (!text.includes('Forbidden post-sync change outside generated output scope') ||
@@ -1174,12 +1220,9 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       !/git\s+-C\s+"\$PR_ROOT"\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
     fail(errors, `${entry.relPath} missing post-sync changed-path validation`);
   }
-  const generatedOutputScope = 'README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*';
+  const generatedOutputScope = 'README.md|skills/*|mcp/*';
   if (!text.includes(generatedOutputScope)) {
     fail(errors, `${entry.relPath} missing approved generated output path allowlist`);
-  }
-  for (const token of autoSyncGeneratedRootInstructionOutputs) {
-    if (!text.includes(token)) fail(errors, `${entry.relPath} missing generated root instruction allowlist entry: ${token}`);
   }
   for (const token of autoSyncGeneratedAgentRuleTemplateOutputs) {
     if (!text.includes(token)) fail(errors, `${entry.relPath} missing generated source-side agent-rule template allowlist entry: ${token}`);
@@ -1212,6 +1255,11 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     }
   }
   const generatedOutputGuardText = `${postSyncStep}\n${finalRecheckStep}`;
+  for (const token of activeRootInstructionOutputs) {
+    if (!generatedOutputGuardText.includes(`Privileged auto-sync must not`) || !generatedOutputGuardText.includes(token)) {
+      fail(errors, `${entry.relPath} must fail closed instead of staging active root AI instruction files: ${token}`);
+    }
+  }
   const forbiddenGeneratedOutputAllowlistTokens = [
     '_projects/*',
     'repo/*',
@@ -1292,9 +1340,14 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const gitAddLines = (text.match(/^\s*(?:\/usr\/bin\/)?git(?:\s+-C\s+"\$PR_ROOT")?\s+add .+$/gm) || []).map((line) => line.trim());
-  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md CLAUDE.md GEMINI.md .agents/rules/00-agent-toolkit-bootstrap.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
+  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
   if (gitAddLines.length !== 1 || gitAddLines[0] !== expectedGitAddLine) {
     fail(errors, `${entry.relPath} must commit only approved generated output paths`);
+  }
+  for (const token of activeRootInstructionOutputs) {
+    if (gitAddLines.some((line) => line.includes(token))) {
+      fail(errors, `${entry.relPath} must not stage active root AI instruction files: ${token}`);
+    }
   }
   if (/git(?:\s+-C\s+"\$PR_ROOT")?\s+add\b/.test(commitStep)) {
     fail(errors, `${entry.relPath} commit step must not run git add`);
@@ -1501,7 +1554,7 @@ function validateMarkdownLinks(errors) {
 
 function validateSourceWatchTruthfulness(errors) {
   for (const relPath of [
-    'repo/docs/partials/source-of-truth-contract.md',
+    '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md',
     'AGENTS.md',
     'README.md',
     '_projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md',
