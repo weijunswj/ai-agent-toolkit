@@ -179,7 +179,7 @@ Keep final reports concise but complete.
 If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, use `skills/n8n-agent-rules` before continuing.
 <!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->
 
-This repo is the canonical reusable AI Agent Toolkit.
+# This repo is the canonical reusable AI Agent Toolkit.
 
 <!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->
 ## Source-of-Truth Contract
