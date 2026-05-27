@@ -40,7 +40,7 @@ const expectedFiles = [
   '.gitattributes',
   'repo/docs/HOW-TO-USE.md',
   'repo/docs/SKILL-PORTABILITY-AND-FIDELITY.md',
-  'repo/docs/partials/source-of-truth-contract.md',
+  '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md',
   'repo/docs/FOR_AI_AGENTS.md',
   'repo/docs/SAFE-UPDATES.md',
   'repo/docs/SOURCE-OF-TRUTH.md',
@@ -140,6 +140,7 @@ const expectedDirs = [
   '_projects',
   '_projects/n8n/local-setup',
   '_projects/n8n/local-setup/_main',
+  '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials',
   '_projects/development/ai-coding-agent-rules',
   '_projects/development/ai-coding-agent-rules/_main',
   '_projects/development/ai-coding-agent-rules/_main/_partials',
@@ -187,7 +188,6 @@ const expectedDirs = [
   'mcp/registry',
   '.agents',
   '.agents/rules',
-  'repo/docs/partials',
   '.github/workflows'
 ];
 
@@ -372,8 +372,16 @@ const autoSyncGeneratedRootInstructionOutputs = [
   'GEMINI.md',
   '.agents/rules/00-agent-toolkit-bootstrap.md'
 ];
-const currentContractBegin = '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->';
+const currentContractBegin = '<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->';
 const staleManagedMarkerOutputs = [
+  '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->',
+  '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->',
+  '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1 -->',
+  '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END ai-coding-agent-execution -->',
+  '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->',
+  '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->',
+  '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->',
+  '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:END source-of-truth-contract -->',
   '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->',
   '<!-- AI-AGENT-TOOLKIT:END toolkit -->',
   '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
@@ -1164,7 +1172,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     if (!preflightSection.includes(token)) fail(errors, `${entry.relPath} missing unsafe preflight fail handling for ${label}`);
   }
   const autoSyncContractInputs = [
-    'repo/docs/partials/source-of-truth-contract.md'
+    '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md'
   ];
   for (const token of autoSyncContractInputs) {
     const preflightOccurrences = preflightSection.split(token).length - 1;
@@ -1527,7 +1535,7 @@ function validateMarkdownLinks(errors) {
 
 function validateSourceWatchTruthfulness(errors) {
   for (const relPath of [
-    'repo/docs/partials/source-of-truth-contract.md',
+    '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md',
     'AGENTS.md',
     'README.md',
     '_projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md',

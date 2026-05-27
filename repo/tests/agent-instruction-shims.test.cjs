@@ -6,10 +6,12 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const toolkitBegin = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1 -->';
-const toolkitEnd = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END ai-coding-agent-execution -->';
-const n8nBegin = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->';
-const n8nEnd = '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->';
+const executionPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md';
+const n8nAdapterPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md';
+const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
+const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
+const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
+const n8nEnd = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:END N8N-AGENT-RULES-ADAPTER -->`;
 const expectedN8nBlock = `${n8nBegin}
 If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load \`skills/n8n-agent-rules\` before planning or editing.
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
@@ -72,9 +74,10 @@ function assertImportCount(text, importLine, label) {
   assert.equal(text.split('\n').filter((line) => line.trim() === importLine).length, 1, label);
 }
 
-test('source structure keeps one reusable prompt partial and no tiny shim partials', () => {
+test('source structure keeps reusable prompt and adapter partials with no tiny shim partials', () => {
   const kept = [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
+    executionPromptPath,
+    n8nAdapterPath,
     '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md'
   ];
@@ -93,7 +96,7 @@ test('source structure keeps one reusable prompt partial and no tiny shim partia
 });
 
 test('manual global source templates exist and are generated from execution prompt partial', () => {
-  const prompt = readText('_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md').trimEnd();
+  const prompt = readText(executionPromptPath).trimEnd();
   for (const relPath of [
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
@@ -175,7 +178,7 @@ test('root AGENTS.md keeps managed blocks before repo contract sections', () => 
 });
 
 test('managed toolkit block comes from the execution prompt partial', () => {
-  const prompt = readText('_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md').trimEnd();
+  const prompt = readText(executionPromptPath).trimEnd();
   const rootToolkit = block(readText('AGENTS.md'), toolkitBegin, toolkitEnd, 'root toolkit block')
     .replace(toolkitBegin, '')
     .replace(toolkitEnd, '')
@@ -200,6 +203,7 @@ test('n8n adapter is compact and fail-closed', () => {
     const n8nBlock = block(text, n8nBegin, n8nEnd, label);
     assert.equal(n8nBlock.trim(), expectedN8nBlock, label);
     const inner = n8nBlock.slice(n8nBlock.indexOf(n8nBegin) + n8nBegin.length, n8nBlock.indexOf(n8nEnd)).trim();
+    assert.equal(inner, readText(n8nAdapterPath).trimEnd(), `${label} adapter comes from source partial`);
     assert.ok(Buffer.byteLength(inner, 'utf8') < 700, `${label} adapter text stays compact`);
     assert.ok(Buffer.byteLength(n8nBlock, 'utf8') < 900, `${label} block stays compact`);
     assert.match(inner, /stop and load `skills\/n8n-agent-rules` before planning or editing/i, label);
@@ -247,7 +251,8 @@ test('active and generated default instruction surfaces exclude PR/VCS workflow 
     'CLAUDE.md',
     'GEMINI.md',
     '.agents/rules/00-agent-toolkit-bootstrap.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
+    executionPromptPath,
+    n8nAdapterPath,
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
     '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
@@ -273,6 +278,10 @@ test('current managed outputs use source-aware markers only', () => {
     '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
     '<!-- AI-AGENT-TOOLKIT:END n8n-adapter v1 -->',
     '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->',
+    '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1 -->',
+    '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END ai-coding-agent-execution -->',
+    '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->',
+    '<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->',
     '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->',
     '<!-- END SOURCE-OF-TRUTH-CONTRACT -->'
   ];

@@ -15,13 +15,21 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 
 const workspaceRoot = workspaceRootFromArgs();
 const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
-const partialPath = 'repo/docs/partials/source-of-truth-contract.md';
+const partialPath = '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md';
 const targets = ['README.md', 'AGENTS.md'];
 const projectId = 'repo-methodology.context-preserving-ai-publisher';
-const beginMarker = `<!-- ai-agent-toolkit:${projectId}:BEGIN source-of-truth-contract v1 -->`;
-const endMarker = `<!-- ai-agent-toolkit:${projectId}:END source-of-truth-contract -->`;
+const beginMarker = `<!-- AI-AGENT-TOOLKIT:${partialPath}:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->`;
+const endMarker = `<!-- AI-AGENT-TOOLKIT:${partialPath}:END SOURCE-OF-TRUTH-CONTRACT -->`;
 const markerPairs = [
   { begin: beginMarker, end: endMarker },
+  {
+    begin: '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:repo/docs/partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->'
+  },
+  {
+    begin: `<!-- ai-agent-toolkit:${projectId}:BEGIN source-of-truth-contract v1 -->`,
+    end: `<!-- ai-agent-toolkit:${projectId}:END source-of-truth-contract -->`
+  },
   {
     begin: '<!-- BEGIN SOURCE-OF-TRUTH-CONTRACT -->',
     end: '<!-- END SOURCE-OF-TRUTH-CONTRACT -->'

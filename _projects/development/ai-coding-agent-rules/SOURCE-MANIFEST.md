@@ -3,6 +3,7 @@
 ## Preserved In `_main/`
 
 - `_partials/ai-coding-agent-execution.md`
+- `_partials/n8n-agent-rules-adapter.md`
 - `_partials/toolkit-skill-routing.md`
 - `_partials/n8n-agent-rules.md`
 - `scripts/install-n8n-agent-adapter.cjs`
@@ -12,6 +13,8 @@
 - `README.md`
 
 `_partials/ai-coding-agent-execution.md` is the one canonical reusable execution-first toolkit prompt source. It is used to generate the manual global templates and to validate the repo-local managed `AGENTS.md` template and root `AGENTS.md` managed toolkit block. GitHub/PR/VCS publication approval workflow wording is intentionally omitted from the default toolkit prompt.
+
+`_partials/n8n-agent-rules-adapter.md` is the compact fail-closed n8n adapter source appended beside the managed toolkit prompt in root `AGENTS.md` and repo-local managed `AGENTS.md` templates. It points agents to `skills/n8n-agent-rules` and does not duplicate the full n8n operating ruleset.
 
 `_partials/toolkit-skill-routing.md` was moved exactly from the former n8n skill-routing partial surface and renamed to make the generic ownership clear.
 
@@ -26,7 +29,7 @@ The manual global templates `_main/AGENTS.template.md`, `_main/CLAUDE.template.m
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md`
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md`
 
-The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap material. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md` plus the compact fail-closed n8n adapter; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
+The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap material. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md` plus `_partials/n8n-agent-rules-adapter.md`; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
 
 ## AI-Facing Surfaces
 

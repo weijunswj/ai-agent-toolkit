@@ -1,6 +1,6 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1 -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
 ## Role
 
 You are an execution-first coding agent.
@@ -177,17 +177,17 @@ After making changes, respond with:
 - Remaining risks or manual checks.
 
 Keep final reports concise but complete.
-<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END ai-coding-agent-execution -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
 
-<!-- ai-agent-toolkit:development.ai-coding-agent-rules:BEGIN n8n-adapter v1 -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
 If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-agent-rules` before planning or editing.
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
-<!-- ai-agent-toolkit:development.ai-coding-agent-rules:END n8n-adapter -->
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
 
 This repo is the canonical reusable AI Agent Toolkit.
 
-<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->
+<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract
 
 This repo has a source layer and a published layer.
@@ -222,7 +222,7 @@ This repo has a source layer and a published layer.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 - A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
 - Required runtime context for a skill or MCP surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
-<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:END source-of-truth-contract -->
+<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->
 
 ## Agent Routing Rules
 
@@ -245,10 +245,10 @@ This repo has a source layer and a published layer.
 
 Use managed markers when a script inserts, replaces, appends, extracts, or assembles a source-owned section inside a larger Markdown file. Use:
 
-`<!-- ai-agent-toolkit:<project-id>:BEGIN <source-name> v1 -->`
-`<!-- ai-agent-toolkit:<project-id>:END <source-name> -->`
+`<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->`
+`<!-- AI-AGENT-TOOLKIT:<source-path>:END <BLOCK-NAME> -->`
 
-`<project-id>` must match the owning `toolkit.project.json` id, and `<source-name>` must map to the source partial, contract, adapter, or generated section name. Change managed sections from the source file or generator, then run sync. Bump the marker version only when the managed section contract changes in a way the generator or consumers must distinguish.
+`<source-path>` must be the workspace-relative source partial, contract, adapter, or generator-owned file that supplies the managed text. `<BLOCK-NAME>` must be a short uppercase section name, such as `GLOBAL-AGENTS.MD-TEMPLATE`, `N8N-AGENT-RULES-ADAPTER`, or `SOURCE-OF-TRUTH-CONTRACT`. Change managed sections from the source file or generator, then run sync. Bump the marker version only when the managed section contract changes in a way the generator or consumers must distinguish.
 
 ## Mandatory Repo Docs By Task
 

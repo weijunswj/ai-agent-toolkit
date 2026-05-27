@@ -8,7 +8,7 @@ on:
       - "_projects/**/curated_output_for_ai/**"
       - "_projects/**/toolkit.project.json"
       - "_projects/development/ai-coding-agent-rules/_main/_partials/**"
-      - "repo/docs/partials/source-of-truth-contract.md"
+      - "_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md"
 
 permissions:
   contents: write
@@ -79,7 +79,7 @@ jobs:
 
           for path in "${changed_files[@]}"; do
             case "$path" in
-              repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              _projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
                 continue
                 ;;
             esac
@@ -104,13 +104,13 @@ jobs:
           eligible=false
           for path in "${changed_files[@]}"; do
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*)
                 eligible=true
                 ;;
             esac
 
             case "$path" in
-              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|repo/docs/partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md|README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*)
+              _projects/*/curated_output_for_ai/*|_projects/*/toolkit.project.json|_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md|_projects/development/ai-coding-agent-rules/_main/_partials/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md|README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*)
                 ;;
               *)
                 echo "::error file=$path::Auto-sync only runs on deterministic source/routing/contract and generated surface paths: $path"

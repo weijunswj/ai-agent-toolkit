@@ -18,6 +18,9 @@ const projectSync = require(syncScript);
 const safeSourceUpdate = require(path.join(repoRoot, 'repo', 'scripts', 'safe-source-update.cjs'));
 const sourceWatcher = require(path.join(repoRoot, 'repo', 'scripts', 'watch-project-sources.cjs'));
 
+const contractPartialPath = '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md';
+const contractBegin = `<!-- AI-AGENT-TOOLKIT:${contractPartialPath}:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->`;
+const contractEnd = `<!-- AI-AGENT-TOOLKIT:${contractPartialPath}:END SOURCE-OF-TRUTH-CONTRACT -->`;
 const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.';
 
 function tempCopy() {
@@ -173,8 +176,8 @@ function manifestOutput(manifest, outputPath) {
 }
 
 function contractBlock(text) {
-  const begin = '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->';
-  const end = '<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:END source-of-truth-contract -->';
+  const begin = contractBegin;
+  const end = contractEnd;
   const beginMatches = text.match(new RegExp(begin, 'g')) || [];
   const endMatches = text.match(new RegExp(end, 'g')) || [];
   assert.equal(beginMatches.length, 1, 'begin marker count');
@@ -342,7 +345,7 @@ test('validator expects durable retired source provenance doc instead of migrati
 });
 
 test('source-of-truth contract is synced into main entry points', () => {
-  const partial = readTextFile(path.join(repoRoot, 'repo', 'docs', 'partials', 'source-of-truth-contract.md')).trim();
+  const partial = readTextFile(path.join(repoRoot, contractPartialPath)).trim();
   for (const rel of ['README.md', 'AGENTS.md']) {
     const text = readTextFile(path.join(repoRoot, rel));
     assert.equal(contractBlock(text), partial, rel);
@@ -383,7 +386,7 @@ test('README is a user-facing map with the contract in the appendix', () => {
     assert.ok(index > previous, section);
     previous = index;
   }
-  assert.ok(text.indexOf('<!-- ai-agent-toolkit:repo-methodology.context-preserving-ai-publisher:BEGIN source-of-truth-contract v1 -->') > text.indexOf('## Appendix: Source-of-Truth Contract'));
+  assert.ok(text.indexOf(contractBegin) > text.indexOf('## Appendix: Source-of-Truth Contract'));
   assert.match(text, /`skills\/<skill-name>\/`/);
   assert.match(text, /`mcp\/`/);
   const skillRegistry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'skills.registry.json'), 'utf8'));
@@ -425,10 +428,10 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /toolkit\.project\.json/);
   assert.match(text, /Do not edit generated `skills\/` or `mcp\/` outputs directly/);
   assert.match(text, /Do not generate curated files automatically from `_main`/);
-  assert.match(text, /ai-agent-toolkit:development\.ai-coding-agent-rules:BEGIN ai-coding-agent-execution v1/);
-  assert.match(text, /ai-agent-toolkit:development\.ai-coding-agent-rules:BEGIN n8n-adapter v1/);
+  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v1/);
+  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/);
   assert.match(text, /## Managed Marker Rules/);
-  assert.match(text, /ai-agent-toolkit:<project-id>:BEGIN <source-name> v1/);
+  assert.match(text, /AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1/);
   assert.match(text, /## Role/);
   assert.match(text, /You are an execution-first coding agent\./);
   assert.match(text, /## Scope Control/);
@@ -636,7 +639,7 @@ test('source-watch advisory plan is manual-only', () => {
 
 test('source-watch PR-notification-only rule is durable and synced', () => {
   for (const relPath of [
-    'repo/docs/partials/source-of-truth-contract.md',
+    contractPartialPath,
     'AGENTS.md',
     'README.md',
     '_projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md',
@@ -1005,7 +1008,7 @@ test('auto-sync generated surfaces workflow fails unsafe mixed preflight paths b
     ['repo scripts fail is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight fail handling for repo/' + 'scripts')],
     ['repo tests fail is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight fail handling for repo\/tests/],
     ['lockfile fail is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight fail handling for package\/lockfile changes/],
-    ['source-of-truth contract partial carve-out is required', (text) => text.replaceAll('repo/docs/partials/source-of-truth-contract.md', 'repo/docs/partials/other-contract.md'), /must allow source-of-truth contract partial changes as auto-sync eligible inputs/],
+    ['source-of-truth contract partial carve-out is required', (text) => text.replaceAll(contractPartialPath, '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/other-contract.md'), /must allow source-of-truth contract partial changes as auto-sync eligible inputs/],
     ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/_partials/*', '_projects/blocked/_main/_partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
     ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
     ['clear fail-closed error is required', (text) => text.replace('Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate', 'Auto-sync did something else'), /preflight must fail unsafe mixed maintenance\/source PRs/],
@@ -1125,6 +1128,7 @@ test('validator rejects network, shell, and package-install strings in design ge
 
 test('generated agent-rule templates keep manual global and repo-local lanes separate', () => {
   const executionPrompt = readTextFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md')).trimEnd();
+  const n8nAdapter = readTextFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'n8n-agent-rules-adapter.md')).trimEnd();
 
   for (const rel of [
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
@@ -1157,6 +1161,11 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
     assert.doesNotMatch(text, /GitHub PR Completion Rules|GITHUB APPROVAL NEEDED|VERSION CONTROL APPROVAL NEEDED|REMOTE APPROVAL NEEDED|LOCAL CHANGE APPROVAL NEEDED|PR: none yet/i, rel);
     assert.equal((text.match(/^````````md$/gm) || []).length, 1, rel);
     assert.equal((text.match(/^````````$/gm) || []).length, 1, rel);
+    if (rel.endsWith('AGENTS.managed.template.md')) {
+      assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v1/, rel);
+      assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/, rel);
+      assert.ok(text.includes(n8nAdapter), rel);
+    }
   }
 
   for (const rel of [
@@ -1203,6 +1212,10 @@ test('generic agent-rule partials live in project _partials folders, not skill f
   assert.deepEqual(skillPartialFiles, []);
   assert.equal(
     fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md')),
+    true
+  );
+  assert.equal(
+    fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'n8n-agent-rules-adapter.md')),
     true
   );
   for (const removedPartial of [

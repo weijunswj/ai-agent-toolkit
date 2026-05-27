@@ -13,9 +13,11 @@
 - `deletion-policy.md`
 - `enforcement-model.md`
 - `examples.md`
+- `_partials/source-of-truth-contract.md`
 - `templates/**`
 
 The preserved files are first-party generic source authored for this module. They extract reusable publishing methods from this repo's architecture without copying this repo's local rules as universal law.
+The source-of-truth contract partial is the repo-managed contract block source used by `repo/scripts/sync-repo-doc-contract.cjs`.
 
 ## AI-Facing Surfaces
 
