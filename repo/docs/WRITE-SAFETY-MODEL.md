@@ -54,7 +54,9 @@ Denied writes include:
 
 CI must not run live actions, import/export n8n workflows, activate/deactivate workflows, mutate credentials, install packages from project modules, or execute scripts merely because they exist under `_projects/**/_main/`.
 
-Privileged generated-surface writeback may run only trusted deterministic maintenance scripts from the protected base revision against the PR checkout. The narrow agent-rule exception may regenerate declared source-side agent-rule templates from declared partials, refresh root repo-local instruction shims, then publish their generated skill copies.
+Privileged generated-surface writeback may run only trusted deterministic maintenance scripts from the protected base revision against the PR checkout. The narrow agent-rule exception may regenerate declared source-side agent-rule templates from declared partials and publish generated skill copies.
+
+Privileged auto-sync must not stage, commit, or push active root AI instruction files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`. If source changes require those files to change, the PR author or Codex must commit them manually on the PR branch and rely on normal read-only CI validation.
 
 ## Sync Enforcement
 

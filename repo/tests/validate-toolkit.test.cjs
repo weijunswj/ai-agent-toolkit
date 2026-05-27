@@ -737,7 +737,7 @@ test('validator rejects git push outside the auto-sync generated surfaces workfl
 });
 
 test('auto-sync generated surfaces workflow rejects forbidden events and missing guards', () => {
-  const generatedScopePrefix = 'README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*|';
+  const generatedScopePrefix = 'README.md|skills/*|mcp/*|';
   const cases = [
     ['pull_request is forbidden', (text) => text.replace('pull_request_target:', 'pull_request:'), /must use pull_request_target/],
     ['push is forbidden', (text) => text.replace('pull_request_target:', 'push:\n  pull_request_target:'), /must not trigger on push/],
@@ -769,7 +769,9 @@ test('auto-sync generated surfaces workflow rejects forbidden commands and broad
     ['workflow_dispatch is forbidden', (text) => text.replace('pull_request_target:', 'workflow_dispatch:\n  pull_request_target:'), /must not trigger on workflow_dispatch/],
     ['source-watch script is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'node "$TRUSTED_ROOT/repo/scripts/watch-project-sources.cjs" --workspace "$PR_ROOT"'), new RegExp('must not run source-watch or source-update ' + 'scripts')],
     ['live n8n export is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'scr' + 'ipts/export-n8n-workflows-live.ps1'), /must not run live n8n import\/export/],
-    ['git add scope is fixed', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md CLAUDE.md GEMINI.md .agents/rules/00-agent-toolkit-bootstrap.md skills mcp', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md CLAUDE.md GEMINI.md .agents/rules/00-agent-toolkit-bootstrap.md skills mcp repo'), /must commit only approved generated output paths/],
+    ['git add scope is fixed', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills mcp', '/usr/bin/git -C "$PR_ROOT" add README.md skills mcp repo'), /must commit only approved generated output paths/],
+    ['git add must not stage AGENTS.md', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills mcp', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
+    ['git add must not stage Claude shim', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills mcp', '/usr/bin/git -C "$PR_ROOT" add README.md CLAUDE.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
     ['commit bypasses hooks', (text) => text.replace('commit --no-verify -m', 'commit -m'), /must use git commit --no-verify/],
     ['final push resets remote', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" remote set-url origin', 'echo remote'), /must set push remote with the GitHub token only in the final push step/]
   ];
@@ -981,7 +983,7 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
     ['final recheck is required after validation', (text) => text.replace('      - name: Final pre-commit workspace recheck', '      - name: Removed pre-commit workspace recheck'), /must recheck the workspace and staged index after validation and before commit/],
     ['post-sync staged index snapshot is required', (text) => text.replace('expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"', 'expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" rev-parse HEAD)"'), /must snapshot the staged index after the post-sync guard/],
     ['staged index tree comparison is required', (text) => text.replace('if [[ "$current_index_tree" != "${EXPECTED_INDEX_TREE}" ]]; then', 'if false; then'), /final recheck must compare the staged index tree snapshot/],
-    ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
+    ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md skills mcp\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
     ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
     ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
     ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /final recheck must reject staged paths outside generated output scope/],
@@ -1030,10 +1032,6 @@ test('auto-sync generated surfaces workflow fails unsafe mixed preflight paths b
 test('auto-sync generated output path scope is explicit', () => {
   for (const rel of [
     'README.md',
-    'AGENTS.md',
-    'CLAUDE.md',
-    'GEMINI.md',
-    '.agents/rules/00-agent-toolkit-bootstrap.md',
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
     '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
@@ -1050,6 +1048,10 @@ test('auto-sync generated output path scope is explicit', () => {
     '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md',
     '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'AGENTS.md',
+    'CLAUDE.md',
+    'GEMINI.md',
+    '.agents/rules/00-agent-toolkit-bootstrap.md',
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.with-toolkit-skills.template.md',
     'repo/' + 'scr' + 'ipts/anything.cjs',
     '.github/workflows/anything.yml',
@@ -1243,6 +1245,16 @@ test('validator rejects active agent instruction filenames inside skill folders'
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Skill folder must use inert agent-rule template filenames: skills\/n8n-agent-rules\/AGENTS\.md/);
+});
+
+test('validator rejects unexpected Antigravity rule files', () => {
+  const cwd = tempCopy();
+  const extraRulePath = path.join(cwd, '.agents', 'rules', '99-evil.md');
+  fs.writeFileSync(extraRulePath, '# Unexpected rule\n');
+
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unexpected \.agents\/rules entry: \.agents\/rules\/99-evil\.md/);
 });
 
 test('validator rejects broken relative links in non-_main Markdown files', () => {

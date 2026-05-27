@@ -367,7 +367,8 @@ const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
   '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
 ];
-const autoSyncGeneratedRootInstructionOutputs = [
+const activeRootInstructionOutputs = [
+  'AGENTS.md',
   'CLAUDE.md',
   'GEMINI.md',
   '.agents/rules/00-agent-toolkit-bootstrap.md'
@@ -398,8 +399,6 @@ function isAutoSyncGeneratedOutputPath(relPath) {
   const rel = slash(relPath);
   return (
     rel === 'README.md' ||
-    rel === 'AGENTS.md' ||
-    autoSyncGeneratedRootInstructionOutputs.includes(rel) ||
     rel.startsWith('skills/') ||
     rel.startsWith('mcp/') ||
     autoSyncGeneratedAgentRuleTemplateOutputs.includes(rel)
@@ -424,10 +423,17 @@ function validateForbiddenFiles(errors) {
     const lower = rel.toLowerCase();
 
     if (entry.dirent.isDirectory()) {
+      if (rel.startsWith('.agents/rules/')) {
+        fail(errors, `Unexpected .agents/rules entry: ${rel}. Only .agents/rules/00-agent-toolkit-bootstrap.md is allowed.`);
+      }
       if (['_dist', 'dist', 'node_modules', 'coverage'].includes(name)) {
         fail(errors, `Forbidden directory present: ${rel}`);
       }
       continue;
+    }
+
+    if (rel.startsWith('.agents/rules/') && rel !== '.agents/rules/00-agent-toolkit-bootstrap.md') {
+      fail(errors, `Unexpected .agents/rules entry: ${rel}. Only .agents/rules/00-agent-toolkit-bootstrap.md is allowed.`);
     }
 
     if (name === '.env' || (name.startsWith('.env.') && name !== '.env.example')) fail(errors, `Forbidden env file: ${rel}`);
@@ -1208,12 +1214,9 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       !/git\s+-C\s+"\$PR_ROOT"\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
     fail(errors, `${entry.relPath} missing post-sync changed-path validation`);
   }
-  const generatedOutputScope = 'README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*';
+  const generatedOutputScope = 'README.md|skills/*|mcp/*';
   if (!text.includes(generatedOutputScope)) {
     fail(errors, `${entry.relPath} missing approved generated output path allowlist`);
-  }
-  for (const token of autoSyncGeneratedRootInstructionOutputs) {
-    if (!text.includes(token)) fail(errors, `${entry.relPath} missing generated root instruction allowlist entry: ${token}`);
   }
   for (const token of autoSyncGeneratedAgentRuleTemplateOutputs) {
     if (!text.includes(token)) fail(errors, `${entry.relPath} missing generated source-side agent-rule template allowlist entry: ${token}`);
@@ -1246,6 +1249,11 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     }
   }
   const generatedOutputGuardText = `${postSyncStep}\n${finalRecheckStep}`;
+  for (const token of activeRootInstructionOutputs) {
+    if (!generatedOutputGuardText.includes(`Privileged auto-sync must not`) || !generatedOutputGuardText.includes(token)) {
+      fail(errors, `${entry.relPath} must fail closed instead of staging active root AI instruction files: ${token}`);
+    }
+  }
   const forbiddenGeneratedOutputAllowlistTokens = [
     '_projects/*',
     'repo/*',
@@ -1326,9 +1334,14 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const gitAddLines = (text.match(/^\s*(?:\/usr\/bin\/)?git(?:\s+-C\s+"\$PR_ROOT")?\s+add .+$/gm) || []).map((line) => line.trim());
-  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md CLAUDE.md GEMINI.md .agents/rules/00-agent-toolkit-bootstrap.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
+  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
   if (gitAddLines.length !== 1 || gitAddLines[0] !== expectedGitAddLine) {
     fail(errors, `${entry.relPath} must commit only approved generated output paths`);
+  }
+  for (const token of activeRootInstructionOutputs) {
+    if (gitAddLines.some((line) => line.includes(token))) {
+      fail(errors, `${entry.relPath} must not stage active root AI instruction files: ${token}`);
+    }
   }
   if (/git(?:\s+-C\s+"\$PR_ROOT")?\s+add\b/.test(commitStep)) {
     fail(errors, `${entry.relPath} commit step must not run git add`);

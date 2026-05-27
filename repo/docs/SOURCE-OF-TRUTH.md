@@ -55,7 +55,8 @@ The privileged workflow definition runs from the base/default branch, then write
 
 - Fork PRs are never written to.
 - `main` is never written to.
-- The workflow only republishes declared generated/synced outputs such as `README.md`, `AGENTS.md`, `skills/**`, `mcp/**`, and the source-side agent-rule templates generated from declared agent-rule partials.
+- The workflow only republishes declared passive generated/synced outputs such as `README.md`, `skills/**`, `mcp/**`, and the source-side agent-rule templates generated from declared agent-rule partials.
+- The workflow must not write active root AI instruction files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`. If source changes require those outputs to change, the PR author must commit them manually on the PR branch and rely on the normal read-only validation workflow.
 - It does not update other sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
 - Because the workflow is privileged, it does not run generated test suites, PR-controlled generated executable code, or full repo validation against raw PR heads; full validation remains covered by normal read-only CI.
 - The privileged static checks are limited to generated-surface freshness checks and git diff checks before committing generated output, which avoids blocking otherwise valid behind-main PR branches.

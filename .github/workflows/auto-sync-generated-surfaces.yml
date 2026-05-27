@@ -193,7 +193,11 @@ jobs:
 
           for path in "${dirty_files[@]}"; do
             case "$path" in
-              README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md)
+                echo "::error file=$path::Privileged auto-sync must not write active root AI instruction files. Commit this generated update on the PR branch manually and rely on the normal read-only Validate workflow."
+                exit 1
+                ;;
+              README.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden post-sync change outside generated output scope: $path"
@@ -202,7 +206,7 @@ jobs:
             esac
           done
 
-          /usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md CLAUDE.md GEMINI.md .agents/rules/00-agent-toolkit-bootstrap.md skills mcp _projects/development/ai-coding-agent-rules/_main/AGENTS.template.md _projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md _projects/development/ai-coding-agent-rules/_main/GEMINI.template.md
+          /usr/bin/git -C "$PR_ROOT" add README.md skills mcp _projects/development/ai-coding-agent-rules/_main/AGENTS.template.md _projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md _projects/development/ai-coding-agent-rules/_main/GEMINI.template.md
 
           mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           if [[ "${#staged_files[@]}" -eq 0 ]]; then
@@ -213,7 +217,11 @@ jobs:
 
           for path in "${staged_files[@]}"; do
             case "$path" in
-              README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md)
+                echo "::error file=$path::Privileged auto-sync must not stage active root AI instruction files. Commit this generated update on the PR branch manually and rely on the normal read-only Validate workflow."
+                exit 1
+                ;;
+              README.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
@@ -265,7 +273,11 @@ jobs:
           mapfile -t staged_files < <(/usr/bin/git -C "$PR_ROOT" diff --cached --name-only)
           for path in "${staged_files[@]}"; do
             case "$path" in
-              README.md|AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
+              AGENTS.md|CLAUDE.md|GEMINI.md|.agents/rules/00-agent-toolkit-bootstrap.md)
+                echo "::error file=$path::Privileged auto-sync must not stage active root AI instruction files. Commit this generated update on the PR branch manually and rely on the normal read-only Validate workflow."
+                exit 1
+                ;;
+              README.md|skills/*|mcp/*|_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md|_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md|_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md)
                 ;;
               *)
                 echo "::error file=$path::Forbidden staged change outside generated output scope: $path"
