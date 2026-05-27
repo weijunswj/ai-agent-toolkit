@@ -457,7 +457,7 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
     '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/ai-coding-agent-rules/AGENTS.template.md'
   ];
@@ -657,8 +657,7 @@ test('auto-sync workflow owns agent instruction shim freshness', () => {
 
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'));
   for (const rel of [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/**',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/**'
+    '_projects/development/ai-coding-agent-rules/_main/_partials/**'
   ]) {
     assert.match(workflow, new RegExp(`- "${escapeRegExp(rel)}"`), rel);
   }
@@ -970,7 +969,7 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
     ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
     ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
     ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
-    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md', '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.md'), /final recheck must reject staged paths outside generated output scope/],
+    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /final recheck must reject staged paths outside generated output scope/],
     ['commit step resets dangerous git environment', (text) => text.replace('unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /commit step must reset dangerous git environment state/],
     ['push step resets dangerous git environment', (text) => replaceLast(text, 'unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /push step must reset dangerous git environment state/]
   ];
@@ -995,7 +994,7 @@ test('auto-sync generated surfaces workflow fails unsafe mixed preflight paths b
     ['repo tests fail is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight fail handling for repo\/tests/],
     ['lockfile fail is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight fail handling for package\/lockfile changes/],
     ['source-of-truth contract partial carve-out is required', (text) => text.replaceAll('repo/docs/partials/source-of-truth-contract.md', 'repo/docs/partials/other-contract.md'), /must allow source-of-truth contract partial changes as auto-sync eligible inputs/],
-    ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/_partials/*', '_projects/blocked/_main/_partials/*'), /must allow agent-rule partial and repo-local template changes as auto-sync eligible inputs/],
+    ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/_partials/*', '_projects/blocked/_main/_partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
     ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
     ['clear fail-closed error is required', (text) => text.replace('Auto-sync refused: this PR mixes generated-sync-eligible changes with paths that make privileged writeback inappropriate', 'Auto-sync did something else'), /preflight must fail unsafe mixed maintenance\/source PRs/],
     ['manual generated-output guidance is required', (text) => text.replace('Commit generated outputs manually and rely on the normal read-only Validate workflow.', 'Generated outputs will be checked here.'), /preflight must fail unsafe mixed maintenance\/source PRs/],
@@ -1023,7 +1022,6 @@ test('auto-sync generated output path scope is explicit', () => {
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
     '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md',
     'mcp/registry/projects.registry.json',
     'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md'
   ]) {
@@ -1036,6 +1034,7 @@ test('auto-sync generated output path scope is explicit', () => {
     '_projects/foo/_main/file.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.with-toolkit-skills.template.md',
     'repo/' + 'scr' + 'ipts/anything.cjs',
     '.github/workflows/anything.yml',
@@ -1129,10 +1128,10 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
   }
 
   const localTemplates = [
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/CLAUDE.shim.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/GEMINI.shim.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/antigravity-bootstrap.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
     'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
@@ -1207,6 +1206,7 @@ test('generic agent-rule partials live in project _partials folders, not skill f
     true
   );
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'partials')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'repo-local')), false);
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials')), false);
 });
 

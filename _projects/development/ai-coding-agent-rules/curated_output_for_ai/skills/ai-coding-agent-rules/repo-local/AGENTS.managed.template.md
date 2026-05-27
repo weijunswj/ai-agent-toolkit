@@ -1,8 +1,7 @@
 <!--
-Generated from toolkit project source. Do not edit directly.
+Curated AI-facing source.
 Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md
-Update the project source and run sync.
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
 # AGENTS.managed.template.md repo-local managed AI coding agent rules

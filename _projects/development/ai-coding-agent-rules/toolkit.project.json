@@ -7,7 +7,7 @@
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
   "version": "2.1.0",
   "version_policy": "semver",
-  "version_notes": "Adds managed marker blocks, manual global source templates, repo-local automatic bootstrap templates, and a one-sentence n8n adapter around the canonical execution prompt partial.",
+  "version_notes": "Separates manual global source templates from skill-facing repo-local automatic bootstrap templates and keeps the n8n adapter as a one-sentence pointer around the canonical execution prompt partial.",
   "outputs": [
     {
       "kind": "curated",
@@ -24,62 +24,60 @@
       "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/repo-local/AGENTS.managed.template.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
       "output": "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
-      "notes": "Published inert repo-local Codex/OpenCode managed instruction template generated from the execution prompt partial.",
-      "fidelity": "exact",
-      "notice": false
+      "notes": "Published inert repo-local Codex/OpenCode managed instruction template generated from reviewed skill-facing source.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/repo-local/AGENTS.managed.template.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
       "output": "skills/ai-coding-agent-rules/AGENTS.template.md",
-      "notes": "Compatibility repo-local Codex/OpenCode template path; prefer repo-local/AGENTS.managed.template.md for new docs.",
-      "fidelity": "exact",
-      "notice": false
+      "notes": "Compatibility repo-local Codex/OpenCode template path generated from reviewed skill-facing source; prefer repo-local/AGENTS.managed.template.md for new docs.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/repo-local/CLAUDE.shim.template.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
       "output": "skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
-      "notes": "Published inert repo-local Claude Code compatibility shim template.",
-      "fidelity": "exact"
+      "notes": "Published inert repo-local Claude Code compatibility shim template generated from reviewed skill-facing source.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/repo-local/CLAUDE.shim.template.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
       "output": "skills/ai-coding-agent-rules/CLAUDE.template.md",
-      "notes": "Compatibility repo-local Claude Code shim template path; prefer repo-local/CLAUDE.shim.template.md for new docs.",
-      "fidelity": "exact"
+      "notes": "Compatibility repo-local Claude Code shim template path generated from reviewed skill-facing source; prefer repo-local/CLAUDE.shim.template.md for new docs.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/repo-local/GEMINI.shim.template.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md",
       "output": "skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md",
-      "notes": "Published inert repo-local Gemini compatibility shim template.",
-      "fidelity": "exact"
+      "notes": "Published inert repo-local Gemini compatibility shim template generated from reviewed skill-facing source.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/repo-local/GEMINI.shim.template.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md",
       "output": "skills/ai-coding-agent-rules/GEMINI.template.md",
-      "notes": "Compatibility repo-local Gemini shim template path; prefer repo-local/GEMINI.shim.template.md for new docs.",
-      "fidelity": "exact"
+      "notes": "Compatibility repo-local Gemini shim template path generated from reviewed skill-facing source; prefer repo-local/GEMINI.shim.template.md for new docs.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/repo-local/antigravity-bootstrap.template.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md",
       "output": "skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md",
-      "notes": "Published inert repo-local Antigravity bootstrap template for .agents/rules/00-agent-toolkit-bootstrap.md.",
-      "fidelity": "exact"
+      "notes": "Published inert repo-local Antigravity bootstrap template for .agents/rules/00-agent-toolkit-bootstrap.md generated from reviewed skill-facing source.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/repo-local/antigravity-bootstrap.template.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md",
       "output": "skills/ai-coding-agent-rules/antigravity-bootstrap.template.md",
-      "notes": "Compatibility repo-local Antigravity bootstrap template path; prefer repo-local/antigravity-bootstrap.template.md for new docs.",
-      "fidelity": "exact"
+      "notes": "Compatibility repo-local Antigravity bootstrap template path generated from reviewed skill-facing source; prefer repo-local/antigravity-bootstrap.template.md for new docs.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",

@@ -116,10 +116,10 @@ const expectedFiles = [
   'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
   '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/repo-local/CLAUDE.shim.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/repo-local/GEMINI.shim.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/repo-local/antigravity-bootstrap.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
   'repo/scripts/sync-agent-instruction-shims.cjs',
   'repo/scripts/validate-toolkit.cjs',
   'repo/scripts/sync-toolkit-projects.cjs',
@@ -147,7 +147,7 @@ const expectedDirs = [
   '_projects/development/ai-coding-agent-rules',
   '_projects/development/ai-coding-agent-rules/_main',
   '_projects/development/ai-coding-agent-rules/_main/_partials',
-  '_projects/development/ai-coding-agent-rules/_main/repo-local',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local',
   'skills/ai-coding-agent-rules/repo-local',
   '_projects/n8n/workflow-toolkit',
   '_projects/n8n/workflow-toolkit/_main',
@@ -369,8 +369,7 @@ const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification
 const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-  '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md'
+  '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
 ];
 const autoSyncGeneratedRootInstructionOutputs = [
   'CLAUDE.md',
@@ -800,6 +799,12 @@ function validateAgentRuleSources(errors) {
   for (const entry of rootPartialFiles) {
     if (entry.relPath.startsWith('skills/')) fail(errors, `Agent-rule partials must stay in project _main source, not published skill folders: ${entry.relPath}`);
   }
+  for (const entry of walk()) {
+    if (entry.relPath === '_projects/development/ai-coding-agent-rules/_main/repo-local' ||
+        entry.relPath.startsWith('_projects/development/ai-coding-agent-rules/_main/repo-local/')) {
+      fail(errors, `Repo-local skill runtime templates must live under curated_output_for_ai, not _main: ${entry.relPath}`);
+    }
+  }
 }
 
 function validateNoActiveAgentInstructionFilesInSkills(errors) {
@@ -1142,12 +1147,11 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     }
   }
   const autoSyncAgentRulePartialInputs = [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/*',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/*'
+    '_projects/development/ai-coding-agent-rules/_main/_partials/*'
   ];
   for (const token of autoSyncAgentRulePartialInputs) {
     if (!preflightSection.includes(token)) {
-      fail(errors, `${entry.relPath} must allow agent-rule partial and repo-local template changes as auto-sync eligible inputs`);
+      fail(errors, `${entry.relPath} must allow agent-rule partial changes as auto-sync eligible inputs`);
     }
   }
   for (const token of autoSyncGeneratedAgentRuleTemplateOutputs) {

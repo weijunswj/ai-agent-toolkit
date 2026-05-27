@@ -146,6 +146,7 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     'generated_cross_skill_reference',
     'curated_pack_readme',
     'curated_shim',
+    'curated_repo_local_agent_template',
     'curated_spec',
     'curated_template',
     'curated_template_index',

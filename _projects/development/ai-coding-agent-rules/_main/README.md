@@ -1,12 +1,11 @@
 # AI Coding Agent Rule Templates
 
-This source folder owns the repo/folder-local managed shared agent instruction contract, compatibility shims, and the canonical n8n agent rules source.
+This source folder owns the human/manual global agent instruction templates and reusable partials for the AI Coding Agent Rules project.
 
 ## Templates
 
 - [AGENTS.template.md](AGENTS.template.md), [CLAUDE.template.md](CLAUDE.template.md), and [GEMINI.template.md](GEMINI.template.md) are human/manual global setup reference templates generated from the reusable execution prompt partial.
-- [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md), [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md), and [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) are repo-local automatic bootstrap templates.
-- Default repo-local templates keep `AGENTS.md` as the canonical shared contract and avoid duplicating full rules across agent-specific shims.
+- Repo-local automatic bootstrap templates are reviewed skill-facing material under [../curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/](../curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/) and publish to [skills/ai-coding-agent-rules/](../../../../skills/ai-coding-agent-rules/).
 - Optional n8n adapters publish under [skills/n8n-agent-rules/adapters/](../../../../skills/n8n-agent-rules/adapters/) after sync. They point to the n8n skill instead of duplicating the full ruleset.
 - Do not overwrite existing active instruction files.
 - After changing root instruction template sources, run `node repo/scripts/sync-agent-instruction-shims.cjs --write` to refresh root `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`, then run `node repo/scripts/sync-toolkit-projects.cjs --write` to publish skill copies.

@@ -9,29 +9,32 @@
 - `AGENTS.template.md`
 - `CLAUDE.template.md`
 - `GEMINI.template.md`
-- `repo-local/AGENTS.managed.template.md`
-- `repo-local/CLAUDE.shim.template.md`
-- `repo-local/GEMINI.shim.template.md`
-- `repo-local/antigravity-bootstrap.template.md`
 - `README.md`
 
-`_partials/ai-coding-agent-execution.md` is the one canonical reusable execution-first toolkit prompt source. It is used to generate manual global templates, the repo-local managed `AGENTS.md` template, and the root `AGENTS.md` managed toolkit block. GitHub/PR/VCS publication approval workflow wording is intentionally omitted from the default toolkit prompt.
+`_partials/ai-coding-agent-execution.md` is the one canonical reusable execution-first toolkit prompt source. It is used to generate the manual global templates and to validate the repo-local managed `AGENTS.md` template and root `AGENTS.md` managed toolkit block. GitHub/PR/VCS publication approval workflow wording is intentionally omitted from the default toolkit prompt.
 
 `_partials/toolkit-skill-routing.md` was moved exactly from the former n8n skill-routing partial surface and renamed to make the generic ownership clear.
 
 `_partials/n8n-agent-rules.md` is the canonical editable full n8n operating ruleset. It moved from the former `n8n.local-setup` partial because it is an agent instruction block, not local setup material.
 
-The manual global templates `_main/AGENTS.template.md`, `_main/CLAUDE.template.md`, and `_main/GEMINI.template.md` are human-facing reference docs generated from `_partials/ai-coding-agent-execution.md`.
+The manual global templates `_main/AGENTS.template.md`, `_main/CLAUDE.template.md`, and `_main/GEMINI.template.md` are human-facing reference docs generated from `_partials/ai-coding-agent-execution.md`. They may explain manual global setup.
 
-The repo-local templates under `_main/repo-local/` are for automatic folder-local bootstrap. `AGENTS.managed.template.md` is generated from `_partials/ai-coding-agent-execution.md`; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
+## Reviewed Skill-Facing Source
+
+- `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`
+- `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md`
+- `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md`
+- `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md`
+
+The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap material. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md` plus the one-sentence n8n adapter; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
 
 ## AI-Facing Surfaces
 
 - `skills/ai-coding-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
-- `skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md` is generated from `_main/repo-local/AGENTS.managed.template.md`.
-- `skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md`, `GEMINI.shim.template.md`, and `antigravity-bootstrap.template.md` are generated from `_main/repo-local/*.template.md`.
-- `skills/ai-coding-agent-rules/AGENTS.template.md`, `CLAUDE.template.md`, `GEMINI.template.md`, and `antigravity-bootstrap.template.md` are repo-local compatibility aliases generated from the same `_main/repo-local/` templates. New docs should prefer the `repo-local/` paths.
-- Root `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` are checked by `repo/scripts/sync-agent-instruction-shims.cjs`; run `node repo/scripts/sync-agent-instruction-shims.cjs --write` after changing the source templates. The script updates marker-owned blocks and preserves unmarked user/repo content.
+- `skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md` is generated from curated repo-local source.
+- `skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md`, `GEMINI.shim.template.md`, and `antigravity-bootstrap.template.md` are generated from curated repo-local source.
+- `skills/ai-coding-agent-rules/AGENTS.template.md`, `CLAUDE.template.md`, `GEMINI.template.md`, and `antigravity-bootstrap.template.md` are repo-local compatibility aliases generated from the same curated repo-local templates. New docs should prefer the `repo-local/` paths.
+- Root `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` are checked by `repo/scripts/sync-agent-instruction-shims.cjs`; run `node repo/scripts/sync-agent-instruction-shims.cjs --write` after changing the execution partial, manual templates, or curated repo-local templates. The script updates marker-owned blocks and preserves unmarked user/repo content.
 - `skills/n8n-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
 - `skills/n8n-agent-rules/n8n-agent-rules.md` is copied exactly from `_main/_partials/n8n-agent-rules.md`.
 - `skills/n8n-agent-rules/adapters/*.n8n-brief.template.md` are optional brief adapter snippets generated from curated source. They are not appended to generic templates automatically.

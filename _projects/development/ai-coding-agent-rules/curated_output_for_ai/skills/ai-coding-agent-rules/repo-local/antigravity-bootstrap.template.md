@@ -1,3 +1,9 @@
+<!--
+Curated AI-facing source.
+Project: development.ai-coding-agent-rules
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # antigravity-bootstrap.template.md repo-local Antigravity bootstrap
 
 Use this repo-local bootstrap template for Antigravity.

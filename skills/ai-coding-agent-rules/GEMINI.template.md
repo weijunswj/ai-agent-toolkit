@@ -1,9 +1,15 @@
 <!--
-Generated from toolkit project source. Do not edit directly.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/repo-local/GEMINI.shim.template.md
-Update the project source and run sync.
+Source: _projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md
+Update the curated output and run sync.
 -->
+<!--
+Curated AI-facing source.
+Project: development.ai-coding-agent-rules
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 # GEMINI.shim.template.md repo-local Gemini shim
 
 Use this repo-local shim template for Gemini CLI or Antigravity.

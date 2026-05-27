@@ -24,13 +24,13 @@ const executionPromptPath = '_projects/development/ai-coding-agent-rules/_main/_
 const manualTemplatePaths = {
   agents: '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
   claude: '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-  gemini: '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-  managedAgents: '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md'
+  gemini: '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
 };
 const repoLocalTemplatePaths = {
-  claude: '_projects/development/ai-coding-agent-rules/_main/repo-local/CLAUDE.shim.template.md',
-  gemini: '_projects/development/ai-coding-agent-rules/_main/repo-local/GEMINI.shim.template.md',
-  antigravity: '_projects/development/ai-coding-agent-rules/_main/repo-local/antigravity-bootstrap.template.md'
+  managedAgents: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+  claude: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+  gemini: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+  antigravity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
 };
 
 const toolkitBegin = '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->';
@@ -239,22 +239,6 @@ function expectedSourceTemplates(executionPrompt) {
       ],
       payload: executionPrompt,
       sourcePaths
-    }),
-    [manualTemplatePaths.managedAgents]: fencedTemplate({
-      title: 'AGENTS.managed.template.md repo-local managed AI coding agent rules',
-      audience: 'repo/folder-local Codex or OpenCode setup',
-      destinationDisplay: '`AGENTS.md`',
-      activeNameText: 'it is not named `AGENTS.md`',
-      installSubject: 'repo-local managed Codex/OpenCode rules',
-      examples: [
-        {
-          heading: 'Repo-local rules example',
-          path: '<repo>\\AGENTS.md',
-          commands: ['notepad AGENTS.md']
-        }
-      ],
-      payload: managedPayload(executionPrompt),
-      sourcePaths
     })
   };
 }
@@ -414,23 +398,25 @@ function validateAndSync(options = {}) {
     writeOrCheck(relPath, expected, errors, runMode, 'agent instruction source template');
   }
 
-  const managedAgentsTemplate = runMode === 'write'
-    ? sourceTemplates[manualTemplatePaths.managedAgents]
-    : readRequired(manualTemplatePaths.managedAgents, errors);
+  const managedAgentsTemplate = readRequired(repoLocalTemplatePaths.managedAgents, errors);
   const claudeTemplate = readRequired(repoLocalTemplatePaths.claude, errors);
   const geminiTemplate = readRequired(repoLocalTemplatePaths.gemini, errors);
   const antigravityTemplate = readRequired(repoLocalTemplatePaths.antigravity, errors);
   if ([managedAgentsTemplate, claudeTemplate, geminiTemplate, antigravityTemplate].some((value) => value === null)) return { errors };
 
-  const agentsPayload = extractPayload(manualTemplatePaths.managedAgents, managedAgentsTemplate, errors);
+  const agentsPayload = extractPayload(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, errors);
   const source = {
-    toolkit: agentsPayload ? extractManagedBlock(manualTemplatePaths.managedAgents, agentsPayload, toolkitBegin, toolkitEnd, errors) : null,
-    n8n: agentsPayload ? extractManagedBlock(manualTemplatePaths.managedAgents, agentsPayload, n8nBegin, n8nEnd, errors) : null,
+    toolkit: agentsPayload ? extractManagedBlock(repoLocalTemplatePaths.managedAgents, agentsPayload, toolkitBegin, toolkitEnd, errors) : null,
+    n8n: agentsPayload ? extractManagedBlock(repoLocalTemplatePaths.managedAgents, agentsPayload, n8nBegin, n8nEnd, errors) : null,
     claude: extractPayload(repoLocalTemplatePaths.claude, claudeTemplate, errors),
     gemini: extractPayload(repoLocalTemplatePaths.gemini, geminiTemplate, errors),
     antigravity: extractPayload(repoLocalTemplatePaths.antigravity, antigravityTemplate, errors)
   };
   if (Object.values(source).some((value) => value === null)) return { errors };
+  if (agentsPayload.trimEnd() !== managedPayload(executionPrompt).trimEnd()) {
+    errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath}, keep the one-sentence n8n adapter, then run sync.`);
+    return { errors };
+  }
 
   writeOrCheck('AGENTS.md', rootAgentsExpected(readOptional('AGENTS.md'), source, errors), errors, runMode);
   writeOrCheck('CLAUDE.md', shimExpected('CLAUDE.md', readOptional('CLAUDE.md'), source.claude, {

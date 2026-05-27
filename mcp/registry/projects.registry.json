@@ -102,7 +102,7 @@
     "title": "AI Coding Agent Rules",
     "version": "2.1.0",
     "version_policy": "semver",
-    "version_notes": "Adds managed marker blocks, manual global source templates, repo-local automatic bootstrap templates, and a one-sentence n8n adapter around the canonical execution prompt partial.",
+    "version_notes": "Separates manual global source templates from skill-facing repo-local automatic bootstrap templates and keeps the n8n adapter as a one-sentence pointer around the canonical execution prompt partial.",
     "project": {
       "name": "AI Coding Agent Rules",
       "category": "development",

@@ -83,7 +83,8 @@ test('source structure keeps one reusable prompt partial and no tiny shim partia
     '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-n8n-adapter-block.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md'
+    '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md',
+    '_projects/development/ai-coding-agent-rules/_main/repo-local'
   ]) {
     assert.equal(exists(relPath), false, relPath);
   }
@@ -107,19 +108,19 @@ test('manual global source templates exist and are generated from execution prom
 test('repo-local source and published skill templates are local bootstrap templates', () => {
   const sourceToPublished = new Map([
     [
-      '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md',
+      '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
       'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
     ],
     [
-      '_projects/development/ai-coding-agent-rules/_main/repo-local/CLAUDE.shim.template.md',
+      '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
       'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md'
     ],
     [
-      '_projects/development/ai-coding-agent-rules/_main/repo-local/GEMINI.shim.template.md',
+      '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
       'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md'
     ],
     [
-      '_projects/development/ai-coding-agent-rules/_main/repo-local/antigravity-bootstrap.template.md',
+      '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
       'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
     ]
   ]);
@@ -184,7 +185,7 @@ test('managed toolkit block comes from the execution prompt partial', () => {
     .replace(toolkitBegin, '')
     .replace(toolkitEnd, '')
     .trim();
-  const managedPayload = generatedPayload(readText('_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md'));
+  const managedPayload = generatedPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'));
   const sourceToolkit = block(managedPayload, toolkitBegin, toolkitEnd, 'repo-local managed toolkit block')
     .replace(toolkitBegin, '')
     .replace(toolkitEnd, '')
@@ -198,7 +199,7 @@ test('managed toolkit block comes from the execution prompt partial', () => {
 test('n8n adapter is exactly one sentence pointing to n8n-agent-rules', () => {
   for (const [label, text] of [
     ['root AGENTS.md', readText('AGENTS.md')],
-    ['repo-local AGENTS managed template', generatedPayload(readText('_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md'))],
+    ['repo-local AGENTS managed template', generatedPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'))],
     ['published repo-local AGENTS managed template', generatedPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'))],
     ['published compatibility AGENTS template', generatedPayload(readText('skills/ai-coding-agent-rules/AGENTS.template.md'))]
   ]) {
@@ -241,10 +242,10 @@ test('active and generated default instruction surfaces exclude PR/VCS workflow 
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
     '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/CLAUDE.shim.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/GEMINI.shim.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local/antigravity-bootstrap.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
     'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
@@ -271,5 +272,49 @@ test('published skill docs focus on repo-local automatic setup', () => {
     assert.match(text, /repo\/folder-local|repo-local/i, relPath);
     assert.match(text, /_projects\/development\/ai-coding-agent-rules\/_main\//, relPath);
     assert.doesNotMatch(text, /C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)|Claude Code global rules example|Gemini CLI and Antigravity global rules example/, relPath);
+  }
+});
+
+test('root README platform guidance requires AGENTS before platform shims', () => {
+  const text = readText('README.md');
+  const section = text.slice(text.indexOf('## Install Skills By Platform'), text.indexOf('\n## MCP'));
+  assert.match(section, /`AGENTS\.md` is the shared managed instruction file/);
+  assert.match(section, /\| Codex \|[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
+  assert.match(section, /\| OpenCode \|[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
+  assert.match(section, /\| Claude Code \|[^\n]*Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*then add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md/);
+  assert.match(section, /\| Gemini CLI \|[^\n]*Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*then add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md/);
+  assert.match(section, /\| Antigravity \|[^\n]*Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*then add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*00-agent-toolkit-bootstrap\.md[^\n]*repo-local\/antigravity-bootstrap\.template\.md/);
+  assert.doesNotMatch(section, /skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
+  assert.doesNotMatch(section, /start from \[`(?:CLAUDE|GEMINI)\.template\.md`\]/);
+});
+
+test('skill README documents required file sets and shim dependency', () => {
+  for (const relPath of [
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/README.md',
+    'skills/ai-coding-agent-rules/README.md'
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, /Do not install a shim alone/i, relPath);
+    assert.match(text, /Shims require root `AGENTS\.md`/i, relPath);
+    assert.match(text, /`AGENTS\.managed\.template\.md` is canonical for the managed toolkit block/i, relPath);
+    assert.match(text, /\| Claude Code \|[^\n]*`AGENTS\.md`[^\n]*`CLAUDE\.md`/i, relPath);
+    assert.match(text, /\| Gemini CLI \|[^\n]*`AGENTS\.md`[^\n]*`GEMINI\.md`/i, relPath);
+    assert.match(text, /\| Antigravity \|[^\n]*`AGENTS\.md`[^\n]*(?:`GEMINI\.md`|`\.agents\/rules\/00-agent-toolkit-bootstrap\.md`)/i, relPath);
+  }
+});
+
+test('skill instructions add only target platform shims by default', () => {
+  for (const relPath of [
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/SKILL.md',
+    'skills/ai-coding-agent-rules/SKILL.md'
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, /Check or install `AGENTS\.md` as the canonical managed file/i, relPath);
+    assert.match(text, /Add only the shim for the current\/target platform unless the user explicitly requests all platform shims/i, relPath);
+    assert.match(text, /Preserve existing active instruction files/i, relPath);
+    assert.match(text, /start a new agent session before continuing/i, relPath);
+    assert.doesNotMatch(text, /The repo has no `CLAUDE\.md`/i, relPath);
+    assert.doesNotMatch(text, /The repo has no `GEMINI\.md`/i, relPath);
+    assert.doesNotMatch(text, /The repo has no `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`/i, relPath);
   }
 });
