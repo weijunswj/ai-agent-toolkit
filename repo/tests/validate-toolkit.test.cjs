@@ -1178,6 +1178,11 @@ test('project modules use _projects/_main with no mandatory exports tree', () =>
 test('.gitattributes preserves _projects _main bytes for source locks', () => {
   const attrs = fs.readFileSync(path.join(repoRoot, '.gitattributes'), 'utf8');
   assert.match(attrs, /^_projects\/\*\*\/_main\/\*\* -text$/m);
+  assert.match(
+    attrs,
+    /^_projects\/development\/ai-coding-agent-rules\/curated_output_for_ai\/skills\/ai-coding-agent-rules\/\*\*\/\*\.md text eol=lf$/m
+  );
+  assert.match(attrs, /^skills\/ai-coding-agent-rules\/\*\*\/\*\.md text eol=lf$/m);
   assert.doesNotMatch(attrs, /^projects\/\*\*\/main\/\*\* -text$/m);
 });
 
