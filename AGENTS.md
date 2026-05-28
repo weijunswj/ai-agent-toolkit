@@ -236,11 +236,25 @@ This repo has a source layer and a published layer.
 - Keep managed marker blocks intact. If a marked block needs content changes, edit the source path named in the marker and run the matching sync/check command.
 - For AI-agent instruction changes, read [repo/docs/FOR_AI_AGENTS.md](repo/docs/FOR_AI_AGENTS.md) and [repo/docs/SOURCE-OF-TRUTH.md](repo/docs/SOURCE-OF-TRUTH.md).
 - For project modules or published skills/MCP surfaces, also read [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md) and [repo/docs/SURFACE-FIDELITY-AUDIT.md](repo/docs/SURFACE-FIDELITY-AUDIT.md).
-- For generated-output writeback, privileged workflow changes, cleanup, deletion, retirement, or provenance work, read the matching docs listed in [repo/docs/FOR_AI_AGENTS.md](repo/docs/FOR_AI_AGENTS.md).
+- For new or changed project modules, `repo/docs/PROJECT-MODULE-STANDARD.md` is the detailed rulebook.
+- For provenance and third-party source work, read [repo/docs/RETIRED-SOURCE-PROVENANCE.md](repo/docs/RETIRED-SOURCE-PROVENANCE.md), [repo/docs/THIRD-PARTY-SOURCE-NOTES.md](repo/docs/THIRD-PARTY-SOURCE-NOTES.md), and the project standard.
+- For generated-output writeback or privileged workflow changes, read [repo/docs/WRITE-SAFETY-MODEL.md](repo/docs/WRITE-SAFETY-MODEL.md) and [repo/docs/SAFE-UPDATES.md](repo/docs/SAFE-UPDATES.md).
+- For cleanup, deletion, retirement, or human usage/docs/navigation changes, read [repo/docs/CLEANUP-POLICY.md](repo/docs/CLEANUP-POLICY.md), retired-source provenance when applicable, [repo/docs/HOW-TO-USE.md](repo/docs/HOW-TO-USE.md), and [README.md](README.md).
+
+## Managed Marker Rules
+
+Use managed markers for source-owned inserted sections:
+
+`<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->`
+`<!-- AI-AGENT-TOOLKIT:<source-path>:END <BLOCK-NAME> -->`
+
+Change managed sections from the source file or generator, then run sync/check.
 
 ## Repo-Local Safety
 
 - Respect the source-of-truth contract above: update `_projects/**/_main/`, `_projects/**/curated_output_for_ai/`, manifests, or rare declared linked outputs before generated `skills/` or `mcp/` surfaces.
+- Do not edit generated `skills/` or `mcp/` outputs directly unless that output is declared as `linked`; update the source and run sync instead.
+- Do not generate curated files automatically from `_main`; curated content is reviewed source.
 - Do not copy this toolkit root `AGENTS.md` into other repos.
 - Do not introduce credentials, credential exports, private keys, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, product code, customer data, or business workflow JSON.
 - Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, production, destructive, or privileged external actions without explicit current-turn approval naming the target and allowed operation.
