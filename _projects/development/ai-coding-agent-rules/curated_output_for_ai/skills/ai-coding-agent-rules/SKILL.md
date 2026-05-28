@@ -30,7 +30,7 @@ Use this skill automatically before repository editing work when any of these ar
 1. Locate the selected/open target repo or use the explicit target path. If neither exists, stop and ask for a target path.
 2. Identify the current or user-requested target platform.
 3. Check or install `AGENTS.md` as the canonical managed file.
-4. Inspect only the active shim file needed for the current/target platform: `CLAUDE.md` for Claude Code, `GEMINI.md` for Gemini CLI or Antigravity, or `.agents/rules/00-agent-toolkit-bootstrap.md` when Antigravity needs that bootstrap.
+4. Inspect only the active shim file needed for the current/target platform: `CLAUDE.md` for Claude Code, `GEMINI.md` for Gemini CLI or Antigravity, and `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
 5. If all required files and markers for the current/target platform are current, do not rewrite anything; continue the original user task.
 6. If `AGENTS.md` is missing or stale, copy or merge `repo-local/AGENTS.managed.template.md` into target repo `AGENTS.md`.
 7. Add only the shim for the current/target platform unless the user explicitly requests all platform shims.
@@ -52,7 +52,7 @@ Use referenced files for full repo-local content:
 - Copy `repo-local/GEMINI.shim.template.md` to target repo `GEMINI.md` for Gemini CLI or Antigravity.
 - Copy `repo-local/antigravity-bootstrap.template.md` to target repo `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
 
-Do not create missing shims for platforms that are not in scope. A Claude Code setup needs root `AGENTS.md` plus `CLAUDE.md`; a Gemini CLI setup needs root `AGENTS.md` plus `GEMINI.md`; an Antigravity setup needs root `AGENTS.md` plus the requested Gemini shim and/or Antigravity bootstrap.
+Do not create missing shims for platforms that are not in scope. A Claude Code setup needs root `AGENTS.md` plus `CLAUDE.md`; a Gemini CLI setup needs root `AGENTS.md` plus `GEMINI.md`; an Antigravity setup needs root `AGENTS.md`, `.agents/rules/00-agent-toolkit-bootstrap.md`, and the requested Gemini shim when Gemini-style context is in scope.
 
 Manual global setup templates live in `_projects/development/ai-coding-agent-rules/_main/`; do not treat those source docs as the published skill runtime path.
 
