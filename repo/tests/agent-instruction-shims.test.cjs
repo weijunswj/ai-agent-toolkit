@@ -317,11 +317,12 @@ test('root README platform guidance requires AGENTS before platform shims', () =
   assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
   assert.match(section, /\| Codex \|[^\n]*<strong>Choose one:<\/strong>[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
   assert.match(section, /\| OpenCode \|[^\n]*<strong>Choose one:<\/strong>[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
-  assert.match(section, /\| Claude Code \|[^\n]*<strong>Choose one:<\/strong>[^\n]*1\) Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*2\) Add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md/);
-  assert.match(section, /\| Gemini CLI \|[^\n]*\$HOME\/\.gemini\/extensions\/ai-agent-toolkit\/gemini-extension\.json[^\n]*\$HOME\/\.gemini\/extensions\/ai-agent-toolkit\/skills\/<skill-name>\/SKILL\.md[^\n]*1\) Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*2\) Add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*\| N\/A \|/);
-  assert.match(section, /\| Antigravity \|[^\n]*1\) Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*2\) Add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*3\) Add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`[^\n]*repo-local\/antigravity-bootstrap\.template\.md/);
+  assert.match(section, /\| Claude Code \|[^\n]*<strong>Choose one:<\/strong>[^\n]*<ol><li>Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*<\/li><li>Add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md[^\n]*<\/li><\/ol>/);
+  assert.match(section, /\| Gemini CLI \|[^\n]*\$HOME\/\.gemini\/extensions\/ai-agent-toolkit\/gemini-extension\.json[^\n]*\$HOME\/\.gemini\/extensions\/ai-agent-toolkit\/skills\/<skill-name>\/SKILL\.md[^\n]*<ol><li>Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*<\/li><li>Add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*<\/li><\/ol>[^\n]*\| N\/A \|/);
+  assert.match(section, /\| Antigravity \|[^\n]*<ol><li>Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*<\/li><li>Add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*<\/li><li>Add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`[^\n]*repo-local\/antigravity-bootstrap\.template\.md[^\n]*<\/li><\/ol>/);
   assert.doesNotMatch(section, /if using the Gemini shim/);
   assert.doesNotMatch(section, /if using the Antigravity bootstrap/);
+  assert.doesNotMatch(section, /\b[1-9]\)/);
   assert.doesNotMatch(section, /and\/or/);
   assert.doesNotMatch(section, /skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
   assert.doesNotMatch(section, /start from \[`(?:CLAUDE|GEMINI)\.template\.md`\]/);
@@ -336,11 +337,12 @@ test('skill README documents required file sets and shim dependency', () => {
     assert.match(text, /Do not install a shim alone/i, relPath);
     assert.match(text, /Shims require root `AGENTS\.md`/i, relPath);
     assert.match(text, /`AGENTS\.managed\.template\.md` is canonical for the managed toolkit block/i, relPath);
-    assert.match(text, /\| Claude Code \|[^\n]*1\) `AGENTS\.md`[^\n]*2\) `CLAUDE\.md`[^\n]*1\) \[repo-local\/AGENTS\.managed\.template\.md\][^\n]*2\) \[repo-local\/CLAUDE\.shim\.template\.md\]/i, relPath);
-    assert.match(text, /\| Gemini CLI \|[^\n]*1\) `AGENTS\.md`[^\n]*2\) `GEMINI\.md`[^\n]*1\) \[repo-local\/AGENTS\.managed\.template\.md\][^\n]*2\) \[repo-local\/GEMINI\.shim\.template\.md\]/i, relPath);
-    assert.match(text, /\| Antigravity \|[^\n]*1\) `AGENTS\.md`[^\n]*2\) `GEMINI\.md`[^\n]*3\) `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`[^\n]*1\) \[repo-local\/AGENTS\.managed\.template\.md\][^\n]*2\) \[repo-local\/GEMINI\.shim\.template\.md\][^\n]*3\) \[repo-local\/antigravity-bootstrap\.template\.md\]/i, relPath);
+    assert.match(text, /\| Claude Code \|[^\n]*<ol><li>`AGENTS\.md`<\/li><li>`CLAUDE\.md`<\/li><\/ol>[^\n]*<ol><li>\[repo-local\/AGENTS\.managed\.template\.md\][^\n]*<\/li><li>\[repo-local\/CLAUDE\.shim\.template\.md\][^\n]*<\/li><\/ol>/i, relPath);
+    assert.match(text, /\| Gemini CLI \|[^\n]*<ol><li>`AGENTS\.md`<\/li><li>`GEMINI\.md`<\/li><\/ol>[^\n]*<ol><li>\[repo-local\/AGENTS\.managed\.template\.md\][^\n]*<\/li><li>\[repo-local\/GEMINI\.shim\.template\.md\][^\n]*<\/li><\/ol>/i, relPath);
+    assert.match(text, /\| Antigravity \|[^\n]*<ol><li>`AGENTS\.md`<\/li><li>`GEMINI\.md`<\/li><li>`\.agents\/rules\/00-agent-toolkit-bootstrap\.md`<\/li><\/ol>[^\n]*<ol><li>\[repo-local\/AGENTS\.managed\.template\.md\][^\n]*<\/li><li>\[repo-local\/GEMINI\.shim\.template\.md\][^\n]*<\/li><li>\[repo-local\/antigravity-bootstrap\.template\.md\][^\n]*<\/li><\/ol>/i, relPath);
     assert.doesNotMatch(text, /if using the Gemini shim/i, relPath);
     assert.doesNotMatch(text, /if using the Antigravity bootstrap/i, relPath);
+    assert.doesNotMatch(text, /\b[1-9]\)/, relPath);
     assert.doesNotMatch(text, /and\/or/i, relPath);
   }
 });
