@@ -95,13 +95,32 @@ Proceed without extra confirmation for safe, clearly scoped local edits.
 
 Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits. Unless the user asked for local-only/no-push work, finish by running relevant local validation, committing to a non-main branch, pushing, and opening or updating the pull request.
 
-Before pushing, run the smallest relevant local validation. Do not run local `npm run validate:all` by default when CI already runs the full gate; run local full validation only for broad/risky, workflow, sync, generator, package, security-sensitive changes, known CI failure reproduction, or when targeted checks do not cover the touched area.
+Before pushing:
 
-When opening or updating a pull request, keep the PR body aligned with the full base-to-head diff, including cumulative scope, safety notes, validation, generated-output status, and user-facing behaviour. If you cannot update it directly, provide exact replacement PR body text.
+- Run the smallest relevant local validation.
+- Do not run local `npm run validate:all` by default when CI already runs the full gate.
+- Run local full validation only for broad/risky, workflow, sync, generator, package, security-sensitive changes, known CI failure reproduction, or when targeted checks do not cover the touched area.
 
-After pushing, check PR CI/status before reporting completion. If CI is green, report completion. If pending, say it is pending and not yet verified, or wait when practical. If failed, inspect accessible logs, make one targeted safe fix, push, and re-check; after two failed fix attempts, stop and report the blocker. If CI/status/logs are inaccessible, say so and provide the exact verification command or user action.
+When opening or updating a pull request:
 
-Never push to `main`, secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes. Never claim CI passed unless checked, and never hide failing, pending, or inaccessible CI.
+- Keep the PR body aligned with the full base-to-head diff.
+- Include cumulative scope, safety notes, validation, generated-output status, and user-facing behaviour.
+- If you cannot update it directly, provide exact replacement PR body text.
+
+After pushing:
+
+- Check PR CI/status before reporting completion.
+- If CI is green, report completion.
+- If pending, say it is pending and not yet verified, or wait when practical.
+- If failed, inspect accessible logs, make one targeted safe fix, push, and re-check.
+- After two failed fix attempts, stop and report the blocker.
+- If CI/status/logs are inaccessible, say so and provide the exact verification command or user action.
+
+Never:
+
+- Push to `main`, secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
+- Claim CI passed unless checked.
+- Hide failing, pending, or inaccessible CI.
 
 ## Scope Control
 

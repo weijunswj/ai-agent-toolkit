@@ -129,7 +129,8 @@ test('manual global source templates exist and are generated from execution prom
   const prompt = readText(executionPromptPath).trimEnd();
   assert.match(prompt, /## Git Completion/);
   assert.match(prompt, /check PR CI\/status before reporting completion/i);
-  assert.match(prompt, /Never claim CI passed unless checked/);
+  assert.match(prompt, /Never:\n\n- Push to `main`/);
+  assert.match(prompt, /- Claim CI passed unless checked/);
   assert.doesNotMatch(prompt, /## Pull Request Description/);
   assert.match(prompt, /keep the PR body aligned with the full base-to-head diff/i);
   for (const relPath of [
