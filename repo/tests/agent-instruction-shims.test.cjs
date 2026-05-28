@@ -463,9 +463,14 @@ test('skill README documents required file sets and shim dependency', () => {
     assert.match(text, /Do not install a shim alone/i, relPath);
     assert.match(text, /Shims require root `AGENTS\.md`/i, relPath);
     assert.match(text, /`AGENTS\.managed\.template\.md` is canonical for the managed toolkit block/i, relPath);
+    assert.match(text, /Preserve unmarked user-authored content\./i, relPath);
+    assert.match(text, /toolkit-managed block is broken or edited during an explicit install\/check\/repair\/refresh\/bootstrap request/i, relPath);
+    assert.match(text, /back up the existing file under `\.agent-toolkit-backups\/` before replacing the toolkit-owned managed block from the current template/i, relPath);
     assert.match(text, /\| Claude Code \|[^\n]*<ol><li>`AGENTS\.md`<\/li><li>`CLAUDE\.md`<\/li><\/ol>[^\n]*<ol><li>\[repo-local\/AGENTS\.managed\.template\.md\][^\n]*<\/li><li>\[repo-local\/CLAUDE\.shim\.template\.md\][^\n]*<\/li><\/ol>/i, relPath);
     assert.doesNotMatch(text, /\| Gemini\s+CLI \|/i, relPath);
     assert.match(text, /\| Antigravity \|[^\n]*<ol><li>`AGENTS\.md`<\/li><li>`GEMINI\.md`<\/li><li>`\.agents\/rules\/00-agent-toolkit-bootstrap\.md`<\/li><\/ol>[^\n]*<ol><li>\[repo-local\/AGENTS\.managed\.template\.md\][^\n]*<\/li><li>\[repo-local\/GEMINI\.shim\.template\.md\][^\n]*<\/li><li>\[repo-local\/antigravity-bootstrap\.template\.md\][^\n]*<\/li><\/ol>/i, relPath);
+    assert.doesNotMatch(text, /Never overwrite existing `AGENTS\.md`, `CLAUDE\.md`, or `GEMINI\.md`/i, relPath);
+    assert.doesNotMatch(text, /produce a merge or diff plan instead/i, relPath);
     assert.doesNotMatch(text, /if using the Gemini shim/i, relPath);
     assert.doesNotMatch(text, /if using the Antigravity bootstrap/i, relPath);
     assert.doesNotMatch(text, /\b[1-9]\)/, relPath);
