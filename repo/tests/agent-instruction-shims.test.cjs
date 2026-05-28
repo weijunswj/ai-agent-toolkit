@@ -12,6 +12,38 @@ const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-
 const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
 const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
 const n8nEnd = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:END N8N-AGENT-RULES-ADAPTER -->`;
+const repoLocalShimTemplates = [
+  {
+    label: 'Claude Code shim',
+    sourcePath: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+    publishedPath: 'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+    activePath: 'CLAUDE.md',
+    sourceIdentity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+    blockName: 'CLAUDE.SHIM',
+    begin: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md:END CLAUDE.SHIM -->'
+  },
+  {
+    label: 'Antigravity Gemini shim',
+    sourcePath: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+    publishedPath: 'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+    activePath: 'GEMINI.md',
+    sourceIdentity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+    blockName: 'GEMINI.SHIM',
+    begin: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md:BEGIN GEMINI.SHIM v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md:END GEMINI.SHIM -->'
+  },
+  {
+    label: 'Antigravity bootstrap',
+    sourcePath: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    publishedPath: 'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    activePath: '.agents/rules/00-agent-toolkit-bootstrap.md',
+    sourceIdentity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    blockName: 'ANTIGRAVITY.BOOTSTRAP',
+    begin: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md:BEGIN ANTIGRAVITY.BOOTSTRAP v1 -->',
+    end: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md:END ANTIGRAVITY.BOOTSTRAP -->'
+  }
+];
 const expectedN8nBlock = `${n8nBegin}
 If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load \`skills/n8n-agent-rules\` before planning or editing.
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
@@ -104,6 +136,42 @@ function assertImportCount(text, importLine, label) {
   assert.equal(text.split('\n').filter((line) => line.trim() === importLine).length, 1, label);
 }
 
+function isStructurallyCurrentManagedText(text) {
+  const markerPattern = /<!-- AI-AGENT-TOOLKIT:([^:\n]+):(BEGIN|END) ([^>\n]+?) -->/g;
+  const markers = [...text.matchAll(markerPattern)].map((match) => {
+    const source = match[1];
+    const kind = match[2];
+    const rawLabel = match[3];
+    const beginVersion = kind === 'BEGIN' ? rawLabel.match(/^(.*) v\d+$/) : null;
+    if (kind === 'BEGIN' && !beginVersion) return { invalid: true };
+    return {
+      source,
+      kind,
+      label: kind === 'BEGIN' ? beginVersion[1] : rawLabel
+    };
+  });
+  if (!markers.length || markers.some((marker) => marker.invalid)) return false;
+
+  const stack = [];
+  const counts = new Map();
+  for (const marker of markers) {
+    const key = `${marker.source}:${marker.label}`;
+    const current = counts.get(key) || { begin: 0, end: 0 };
+    if (marker.kind === 'BEGIN') {
+      if (stack.length) return false;
+      current.begin += 1;
+      stack.push(key);
+    } else {
+      if (stack.length !== 1 || stack[0] !== key) return false;
+      current.end += 1;
+      stack.pop();
+    }
+    counts.set(key, current);
+  }
+
+  return stack.length === 0 && [...counts.values()].every((count) => count.begin === 1 && count.end === 1);
+}
+
 test('source structure keeps reusable prompt and adapter partials with no tiny shim partials', () => {
   const kept = [
     executionPromptPath,
@@ -146,6 +214,26 @@ test('manual global source templates exist and are generated from execution prom
   }
 });
 
+test('execution prompt requires full-bold user-action questions and generated surfaces stay synced', () => {
+  const requiredRule = /When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold\./;
+  const requiredClarifier = /The entire user-action question must be bolded\./;
+
+  assert.match(readText(executionPromptPath), /## User Action Questions/);
+  for (const relPath of [
+    executionPromptPath,
+    'AGENTS.md',
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, requiredRule, relPath);
+    assert.match(text, requiredClarifier, relPath);
+  }
+});
+
 test('repo-local source and published skill templates are local bootstrap templates', () => {
   const sourceToPublished = [
     [
@@ -176,6 +264,35 @@ test('repo-local source and published skill templates are local bootstrap templa
     assertNoForbiddenDefaultPromptPhrases(repoLocalPayload(publishedText, publishedPath), publishedPath);
   }
 });
+
+test('repo-local shim templates have structurally current managed marker pairs', () => {
+  for (const template of repoLocalShimTemplates) {
+    for (const relPath of [template.sourcePath, template.publishedPath, template.activePath]) {
+      const text = relPath === template.activePath ? readText(relPath) : repoLocalPayload(readText(relPath), relPath);
+      assert.equal(isStructurallyCurrentManagedText(text), true, `${relPath} has structurally current managed markers`);
+      assert.equal(markerCount(text, template.begin), 1, `${relPath} ${template.blockName} begin marker count`);
+      assert.equal(markerCount(text, template.end), 1, `${relPath} ${template.blockName} end marker count`);
+      const shimBlock = block(text, template.begin, template.end, `${relPath} ${template.blockName}`);
+      assert.match(shimBlock, new RegExp(`${template.sourceIdentity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:BEGIN ${template.blockName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} v1`), relPath);
+      assert.match(shimBlock, new RegExp(`${template.sourceIdentity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:END ${template.blockName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), relPath);
+    }
+  }
+});
+
+test('repo-local shim marker structural check rejects invalid marker states', () => {
+  const template = repoLocalShimTemplates[0];
+  const payload = block(repoLocalPayload(readText(template.sourcePath), template.sourcePath), template.begin, template.end, template.label);
+  const body = payload.replace(template.begin, '').replace(template.end, '');
+  const otherEnd = template.end.replace(template.blockName, 'OTHER.SHIM');
+
+  assert.equal(isStructurallyCurrentManagedText(body), false, 'zero-marker shim is not structurally current');
+  assert.equal(isStructurallyCurrentManagedText(`${template.begin}${body}`), false, 'missing end marker is not structurally current');
+  assert.equal(isStructurallyCurrentManagedText(`${payload}\n${payload}`), false, 'duplicated marker pair is not structurally current');
+  assert.equal(isStructurallyCurrentManagedText(`${template.begin}${body}${otherEnd}`), false, 'unmatched marker pair is not structurally current');
+  assert.equal(isStructurallyCurrentManagedText(`${template.begin}\n${template.begin}${body}${template.end}\n${template.end}`), false, 'nested marker pair is not structurally current');
+  assert.equal(isStructurallyCurrentManagedText(`${template.end}${body}${template.begin}`), false, 'out-of-order marker pair is not structurally current');
+});
+
 test('managed toolkit block comes from the execution prompt partial', () => {
   const prompt = readText(executionPromptPath).trimEnd();
   const rootToolkit = block(readText('AGENTS.md'), toolkitBegin, toolkitEnd, 'root toolkit block')
@@ -228,26 +345,26 @@ test('n8n adapter is compact and fail-closed', () => {
 
 test('root Claude, Gemini, and Antigravity shims stay tiny', () => {
   const claude = readText('CLAUDE.md');
-  assert.match(claude, /AI-AGENT-TOOLKIT:[^:\n]+CLAUDE\.shim\.template\.md:BEGIN CLAUDE-SHIM v1/);
+  assert.match(claude, /AI-AGENT-TOOLKIT:[^:\n]+CLAUDE\.shim\.template\.md:BEGIN CLAUDE\.SHIM v1/);
   assert.match(claude, /^# Claude Code Instructions$/m);
   assert.match(claude, /Root `AGENTS\.md` is canonical\./);
-  assert.match(claude, /AI-AGENT-TOOLKIT:[^:\n]+CLAUDE\.shim\.template\.md:END CLAUDE-SHIM/);
+  assert.match(claude, /AI-AGENT-TOOLKIT:[^:\n]+CLAUDE\.shim\.template\.md:END CLAUDE\.SHIM/);
   assertImportCount(claude, '@AGENTS.md', 'root CLAUDE.md import count');
   assert.ok(Buffer.byteLength(claude, 'utf8') < 1024, 'root CLAUDE.md under 1KB');
 
   const gemini = readText('GEMINI.md');
-  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:BEGIN ANTIGRAVITY-GEMINI-SHIM v1/);
+  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:BEGIN GEMINI\.SHIM v1/);
   assert.match(gemini, /^# Gemini Instructions$/m);
   assert.match(gemini, /Root `AGENTS\.md` is canonical\./);
-  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:END ANTIGRAVITY-GEMINI-SHIM/);
+  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:END GEMINI\.SHIM/);
   assertImportCount(gemini, '@./AGENTS.md', 'root GEMINI.md import count');
   assert.ok(Buffer.byteLength(gemini, 'utf8') < 1024, 'root GEMINI.md under 1KB');
 
   const antigravity = readText('.agents/rules/00-agent-toolkit-bootstrap.md');
-  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:BEGIN ANTIGRAVITY-BOOTSTRAP v1/);
+  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:BEGIN ANTIGRAVITY\.BOOTSTRAP v1/);
   assert.match(antigravity, /^# Agent Toolkit Antigravity Bootstrap$/m);
   assert.match(antigravity, /Root `AGENTS\.md` is the canonical repo instruction file\./);
-  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:END ANTIGRAVITY-BOOTSTRAP/);
+  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:END ANTIGRAVITY\.BOOTSTRAP/);
   assert.doesNotMatch(antigravity, /@\.\.\/\.\.\/AGENTS\.md/);
   assert.ok(Buffer.byteLength(antigravity, 'utf8') < 1024, 'Antigravity bootstrap under 1KB');
 });
@@ -364,8 +481,17 @@ test('skill instructions add only target platform shims by default', () => {
     const text = readText(relPath);
     assert.match(text, /Check only the required files for the selected platform/i, relPath);
     assert.match(text, /Do not create shims for platforms that are not in scope/i, relPath);
-    assert.match(text, /Preserve existing active instruction files/i, relPath);
+    assert.match(text, /### Missing Or Unmanaged Files/, relPath);
+    assert.match(text, /### Broken Or Edited Managed Blocks/, relPath);
+    assert.match(text, /automatically repair the affected repo-local instruction file/i, relPath);
+    assert.match(text, /\.agent-toolkit-backups\//, relPath);
+    assert.match(text, /Backup files are local repair artifacts/i, relPath);
+    assert.match(text, /do not commit, stage, delete, or move backup files unless the user explicitly asks/i, relPath);
+    assert.match(text, /If I repaired or backed up an instruction file, the previous version was saved under `\.agent-toolkit-backups\/` in this project folder\./, relPath);
     assert.match(text, /Start a new agent session in this folder/i, relPath);
+    assert.doesNotMatch(text, /repair\/overwrite questions/i, relPath);
+    assert.doesNotMatch(text, /do not guess destructively/i, relPath);
+    assert.doesNotMatch(text, /ask before rewriting/i, relPath);
     assert.doesNotMatch(text, /The repo has no `CLAUDE\.md`/i, relPath);
     assert.doesNotMatch(text, /The repo has no `GEMINI\.md`/i, relPath);
     assert.doesNotMatch(text, /The repo has no `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`/i, relPath);

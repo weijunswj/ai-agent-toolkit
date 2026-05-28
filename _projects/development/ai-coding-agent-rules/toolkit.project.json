@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "version_policy": "semver",
-  "version_notes": "Clarifies the repo-local bootstrap skill as a cheap structural managed-marker checker and marker-wraps all required repo-local shim templates for future cheap verification.",
+  "version_notes": "Adds full-bold user-action question guidance, structural managed-marker verification for repo-local shims, and backup-first repair instructions for broken repo-local managed blocks.",
   "outputs": [
     {
       "kind": "curated",
