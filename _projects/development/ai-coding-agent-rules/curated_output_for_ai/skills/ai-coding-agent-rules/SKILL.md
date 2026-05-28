@@ -15,7 +15,7 @@ Tiny automatic repo-instruction bootstrap/checker for local project instruction 
 
 Repo-local installs require a selected/open target repo or an explicit target path. Standalone chats with no workspace cannot safely infer where to install `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-The `repo-local/*.template.md` files are bare copy-ready destination payloads. Install instructions live in this skill and its README, not inside the files copied into target repos.
+The `repo-local/*.template.md` files are bare copy-ready destination payloads with an exact curated-source safety comment at the top. Install instructions live in this skill and its README, not inside the files copied into target repos.
 
 Use this skill automatically before repository editing work when any of these are true:
 

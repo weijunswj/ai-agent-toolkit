@@ -1,3 +1,9 @@
+<!--
+Curated AI-facing source.
+Project: development.ai-coding-agent-rules
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
+
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
 ## Role
 
@@ -87,7 +93,7 @@ Proceed without extra confirmation for safe, clearly scoped local edits.
 
 ## Git Completion
 
-After completing requested repo edits, run the smallest relevant local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Do not run full local validation by default when CI already runs the full gate. Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
+Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits. After completing requested repo edits, run the smallest relevant local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Do not run full local validation by default when CI already runs the full gate. Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
 
 ## Pull Request Description
 

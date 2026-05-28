@@ -8,7 +8,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 Instruction-only skill for automatically checking and installing repo/folder-local AI coding agent instruction files and tiny platform shims.
 
-The copied skill folder includes bare repo-local bootstrap payload templates. These files contain only destination-file content and are safe to copy wholesale:
+The copied skill folder includes bare repo-local bootstrap payload templates. These files contain only the curated-source safety comment plus destination-file content and are safe to copy wholesale:
 
 - [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) is copied or merged into target repo `AGENTS.md`.
 - [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) is copied to target repo `CLAUDE.md` only when Claude Code support is requested or the target platform is Claude Code.

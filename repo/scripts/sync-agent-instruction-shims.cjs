@@ -272,9 +272,16 @@ function markerCount(text, marker) {
   return text.split(marker).length - 1;
 }
 
+const repoLocalSafetyComment = [
+  '<!--',
+  'Curated AI-facing source.',
+  'Project: development.ai-coding-agent-rules',
+  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+  '-->'
+].join('\n');
+
 const repoLocalWrapperPatterns = [
   { pattern: /Generated from toolkit/i, description: 'generated toolkit notice' },
-  { pattern: /Curated AI-facing source/i, description: 'curated-source wrapper note' },
   { pattern: /This file is inert/i, description: 'inert template prose' },
   { pattern: /copy or merge the fenced payload/i, description: 'fenced-payload install prose' },
   { pattern: /^````````md$/m, description: 'opening 8-backtick payload fence' },
@@ -287,12 +294,20 @@ const repoLocalWrapperPatterns = [
 function readBareRepoLocalTemplate(relPath, errors) {
   const text = readRequired(relPath, errors);
   if (text === null) return null;
+  const safetyPrefix = `${repoLocalSafetyComment}\n\n`;
+  if (!text.startsWith(safetyPrefix)) {
+    errors.push(`Repo-local install template must start with the exact curated-source safety comment: ${relPath}. Run ${fixCommand}.`);
+  }
+  const payload = text.startsWith(safetyPrefix) ? text.slice(safetyPrefix.length) : text;
   for (const { pattern, description } of repoLocalWrapperPatterns) {
-    if (pattern.test(text)) {
+    if (pattern.test(payload)) {
       errors.push(`Repo-local install template must be a bare copy-ready payload without ${description}: ${relPath}. Run ${fixCommand}.`);
     }
   }
-  return text;
+  if (/Curated AI-facing source|Review rule:/i.test(payload)) {
+    errors.push(`Repo-local install template must not duplicate curated-source comments in the payload body: ${relPath}. Run ${fixCommand}.`);
+  }
+  return payload;
 }
 
 function extractManagedBlock(relPath, text, begin, end, errors) {

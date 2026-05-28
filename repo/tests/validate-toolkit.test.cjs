@@ -88,6 +88,14 @@ function generatedNoticeCount(text) {
   return (text.match(/Generated from toolkit (?:project source|curated output for AI)\. Do not edit directly\./g) || []).length;
 }
 
+const curatedRepoLocalSafetyComment = [
+  '<!--',
+  'Curated AI-facing source.',
+  'Project: development.ai-coding-agent-rules',
+  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+  '-->'
+].join('\n');
+
 function managedRepoLocalPayload(executionPrompt, n8nAdapter) {
   return [
     '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->',
@@ -102,9 +110,11 @@ function managedRepoLocalPayload(executionPrompt, n8nAdapter) {
 }
 
 function assertBareRepoLocalTemplate(rel, text) {
+  const safetyPrefix = `${curatedRepoLocalSafetyComment}\n\n`;
+  assert.ok(text.startsWith(safetyPrefix), `${rel} starts with the exact curated-source safety comment`);
+  const body = text.slice(safetyPrefix.length);
   const forbiddenPatterns = [
     [/Generated from toolkit/i, 'generated toolkit notice'],
-    [/Curated AI-facing source/i, 'curated-source wrapper note'],
     [/This file is inert/i, 'inert template prose'],
     [/copy or merge the fenced payload/i, 'fenced-payload install prose'],
     [/^````````md$/m, 'opening 8-backtick payload fence'],
@@ -115,8 +125,9 @@ function assertBareRepoLocalTemplate(rel, text) {
   ];
 
   for (const [pattern, label] of forbiddenPatterns) {
-    assert.doesNotMatch(text, pattern, `${rel} must be a bare payload without ${label}`);
+    assert.doesNotMatch(body, pattern, `${rel} must be a bare payload without ${label}`);
   }
+  assert.doesNotMatch(body, /Curated AI-facing source|Review rule:/i, `${rel} must not duplicate curated-source comments in the payload body`);
 }
 
 function sourceWatchPrBodyText(workflow) {
@@ -543,6 +554,7 @@ test('Git Completion includes pull-request description synchronization guidance'
     const text = readTextFile(path.join(repoRoot, relPath));
     assert.match(text, /## Git Completion/, relPath);
     assert.match(text, /## Pull Request Description/, relPath);
+    assert.match(text, /Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits/i, relPath);
     assert.match(text, /full base-to-head diff/i, relPath);
     assert.match(text, /Before final reporting after a push, update the PR body/i, relPath);
   }
@@ -1210,11 +1222,12 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
     assert.doesNotMatch(text, /GitHub PR Completion Rules|GITHUB APPROVAL NEEDED|VERSION CONTROL APPROVAL NEEDED|REMOTE APPROVAL NEEDED|LOCAL CHANGE APPROVAL NEEDED|PR: none yet/i, rel);
   }
 
+  const withSafetyComment = (payload) => `${curatedRepoLocalSafetyComment}\n\n${payload}`;
   const expectedPayloads = new Map([
-    ['AGENTS.managed.template.md', managedRepoLocalPayload(executionPrompt, n8nAdapter)],
-    ['CLAUDE.shim.template.md', readTextFile(path.join(repoRoot, 'CLAUDE.md'))],
-    ['GEMINI.shim.template.md', readTextFile(path.join(repoRoot, 'GEMINI.md'))],
-    ['antigravity-bootstrap.template.md', readTextFile(path.join(repoRoot, '.agents', 'rules', '00-agent-toolkit-bootstrap.md'))]
+    ['AGENTS.managed.template.md', withSafetyComment(managedRepoLocalPayload(executionPrompt, n8nAdapter))],
+    ['CLAUDE.shim.template.md', withSafetyComment(readTextFile(path.join(repoRoot, 'CLAUDE.md')))],
+    ['GEMINI.shim.template.md', withSafetyComment(readTextFile(path.join(repoRoot, 'GEMINI.md')))],
+    ['antigravity-bootstrap.template.md', withSafetyComment(readTextFile(path.join(repoRoot, '.agents', 'rules', '00-agent-toolkit-bootstrap.md')))]
   ]);
   const manifest = readJsonFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json'));
 
@@ -1410,6 +1423,32 @@ test('changing declared agent-rule source partials makes source-side templates s
     assert.notEqual(result.status, 0, partialRel);
     assert.match(result.stderr, /Stale agent instruction source template: _projects\/development\/ai-coding-agent-rules\/_main\/AGENTS\.template\.md/, partialRel);
   }
+});
+
+test('changing repo-local curated safety comment makes agent instruction templates stale', () => {
+  const cwd = tempCopy();
+  const template = path.join(
+    cwd,
+    '_projects',
+    'development',
+    'ai-coding-agent-rules',
+    'curated_output_for_ai',
+    'skills',
+    'ai-coding-agent-rules',
+    'repo-local',
+    'GEMINI.shim.template.md'
+  );
+  fs.writeFileSync(
+    template,
+    readTextFile(template).replace(
+      'Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+      'Avoid weakening credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.'
+    )
+  );
+
+  const result = spawnSync(process.execPath, [agentInstructionScript, '--check'], { cwd, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /must start with the exact curated-source safety comment/);
 });
 
 test('agent-rule source-template freshness check is scoped to declared modules', () => {
