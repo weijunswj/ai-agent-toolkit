@@ -66,6 +66,8 @@ When a target file exists but has no valid managed block, keep all existing file
 
 ### Broken Or Edited Managed Blocks
 
+Content inside `AI-AGENT-TOOLKIT` managed marker pairs is toolkit-owned. During repair, back up the file, replace edited or stale managed blocks from the current template, and preserve unmarked user-authored content outside the markers.
+
 When a target file has broken, duplicate, unmatched, nested, or out-of-order managed markers, automatically repair the affected repo-local instruction file instead of continuing unrelated repository edits.
 
 Before repairing, create a backup copy of the existing file under `.agent-toolkit-backups/` in the same target repo or project folder. Use this naming pattern:
@@ -78,8 +80,6 @@ Before repairing, create a backup copy of the existing file under `.agent-toolki
 Backup files are local repair artifacts. Report their paths clearly, but do not commit, stage, delete, or move backup files unless the user explicitly asks.
 
 After backing up, repair the required instruction file using the current repo-local template content. If unmarked user-authored content can be safely separated from the broken managed block, preserve it below the repaired managed block. If it cannot be safely separated, keep the repaired instruction file clean and tell the user the previous file was backed up.
-
-If a managed block appears manually edited, treat it as toolkit-owned content that needs repair. Back up the existing file, replace the managed block with the current repo-local template content, preserve safe unmarked content below it, and report the backup path.
 
 Do not delete duplicate, conflicting, or obsolete unmarked content automatically; preserve it when safe or keep it in the dirty backup and report it.
 

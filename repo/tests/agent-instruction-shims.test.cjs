@@ -483,12 +483,16 @@ test('skill instructions add only target platform shims by default', () => {
     assert.match(text, /Do not create shims for platforms that are not in scope/i, relPath);
     assert.match(text, /### Missing Or Unmanaged Files/, relPath);
     assert.match(text, /### Broken Or Edited Managed Blocks/, relPath);
+    assert.match(text, /Content inside `AI-AGENT-TOOLKIT` managed marker pairs is toolkit-owned/i, relPath);
+    assert.match(text, /replace edited or stale managed blocks from the current template/i, relPath);
+    assert.match(text, /preserve unmarked user-authored content outside the markers/i, relPath);
     assert.match(text, /automatically repair the affected repo-local instruction file/i, relPath);
     assert.match(text, /\.agent-toolkit-backups\//, relPath);
     assert.match(text, /Backup files are local repair artifacts/i, relPath);
     assert.match(text, /do not commit, stage, delete, or move backup files unless the user explicitly asks/i, relPath);
     assert.match(text, /If I repaired or backed up an instruction file, the previous version was saved under `\.agent-toolkit-backups\/` in this project folder\./, relPath);
     assert.match(text, /Start a new agent session in this folder/i, relPath);
+    assert.doesNotMatch(text, /If a managed block appears manually edited/i, relPath);
     assert.doesNotMatch(text, /repair\/overwrite questions/i, relPath);
     assert.doesNotMatch(text, /do not guess destructively/i, relPath);
     assert.doesNotMatch(text, /ask before rewriting/i, relPath);
