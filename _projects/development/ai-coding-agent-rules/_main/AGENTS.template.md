@@ -136,7 +136,24 @@ Proceed without extra confirmation for safe, clearly scoped local edits.
 
 ## Git Completion
 
-Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits. After completing requested repo edits, run the smallest relevant local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Do not run full local validation by default when CI already runs the full gate. Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
+Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits. After completing requested repo edits, run local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work.
+
+Before pushing:
+
+- Run the smallest relevant local validation for touched files.
+- Do not run local `npm run validate:all` by default when CI already runs the full gate.
+- Run local full validation for broad or risky changes, workflow, sync, generator, package, or security-sensitive changes, reproducing a known CI failure, or cases where targeted checks are not enough to cover the touched area.
+
+After pushing or updating a pull request:
+
+- Check PR CI/status before reporting completion.
+- If CI is green, report completion.
+- If CI is pending, say it is pending and not yet verified, or wait when practical.
+- If CI fails, inspect the failing check/logs when accessible, make a targeted safe fix, push, and re-check.
+- After two failed fix attempts, stop and report the blocker.
+- If CI/status/logs cannot be accessed, say so explicitly and provide the exact command or user action needed to verify it.
+
+Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes. Never claim CI passed unless CI/status was actually checked. Never hide failing, pending, or inaccessible CI state.
 
 ## Pull Request Description
 

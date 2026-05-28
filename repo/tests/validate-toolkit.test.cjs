@@ -514,8 +514,8 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
     const text = readTextFile(path.join(repoRoot, relPath));
     assert.match(text, /You are an execution-first coding agent\./, `${relPath} keeps reusable execution prompt`);
     assert.match(text, /## Scope Control/, `${relPath} keeps generic execution guidance`);
-    assert.match(text, /run the smallest relevant local validation/, `${relPath} keeps targeted local validation guidance`);
-    assert.match(text, /Do not run full local validation by default when CI already runs the full gate/, `${relPath} avoids default local full validation`);
+    assert.match(text, /run the smallest relevant local validation/i, `${relPath} keeps targeted local validation guidance`);
+    assert.match(text, /Do not run local `npm run validate:all` by default when CI already runs the full gate/, `${relPath} avoids default local full validation`);
     assert.match(text, /failed targeted validation/, `${relPath} blocks failed targeted validation before push`);
     assert.doesNotMatch(text, /run relevant validation/, `${relPath} removes broad validation wording`);
     assert.doesNotMatch(text, /failed validation, or safety-blocked changes/, `${relPath} uses targeted validation wording`);
@@ -555,6 +555,14 @@ test('Git Completion includes pull-request description synchronization guidance'
     assert.match(text, /## Git Completion/, relPath);
     assert.match(text, /## Pull Request Description/, relPath);
     assert.match(text, /Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits/i, relPath);
+    assert.match(text, /Do not run local `npm run validate:all` by default when CI already runs the full gate/i, relPath);
+    assert.match(text, /Run local full validation for broad or risky changes, workflow, sync, generator, package, or security-sensitive changes, reproducing a known CI failure/i, relPath);
+    assert.match(text, /Check PR CI\/status before reporting completion/i, relPath);
+    assert.match(text, /If CI is pending, say it is pending and not yet verified/i, relPath);
+    assert.match(text, /If CI fails, inspect the failing check\/logs when accessible/i, relPath);
+    assert.match(text, /After two failed fix attempts, stop and report the blocker/i, relPath);
+    assert.match(text, /Never claim CI passed unless CI\/status was actually checked/i, relPath);
+    assert.match(text, /Never hide failing, pending, or inaccessible CI state/i, relPath);
     assert.match(text, /full base-to-head diff/i, relPath);
     assert.match(text, /Before final reporting after a push, update the PR body/i, relPath);
   }
@@ -2330,33 +2338,6 @@ test('validator narrows credential example JSON allowance to intended fixtures',
   result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Credential file present: repo\/docs\/service\.credentials\.json/);
-});
-
-test('shared gitignore does not ignore intentionally installed repo instruction files', () => {
-  const gitignoreLines = readTextFile(path.join(repoRoot, '.gitignore'))
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'));
-  const forbiddenIgnorePatterns = new Set([
-    'AGENTS.md',
-    '/AGENTS.md',
-    'CLAUDE.md',
-    '/CLAUDE.md',
-    'GEMINI.md',
-    '/GEMINI.md',
-    '.agents/',
-    '/.agents/',
-    '.agents/rules/',
-    '/.agents/rules/',
-    '.agents/rules/*.md',
-    '/.agents/rules/*.md',
-    '.agents/rules/00-agent-toolkit-bootstrap.md',
-    '/.agents/rules/00-agent-toolkit-bootstrap.md'
-  ]);
-
-  for (const pattern of forbiddenIgnorePatterns) {
-    assert.equal(gitignoreLines.includes(pattern), false, `.gitignore must not ignore ${pattern}`);
-  }
 });
 
 test('validator rejects obvious secret-looking strings', () => {

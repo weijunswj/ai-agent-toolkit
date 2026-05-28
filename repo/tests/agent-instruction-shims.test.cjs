@@ -18,6 +18,13 @@ If that skill or its full rules are unavailable, stop and report the limitation 
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
 ${n8nEnd}`;
 
+const curatedRepoLocalSafetyComment = [
+  '<!--',
+  'Curated AI-facing source.',
+  'Project: development.ai-coding-agent-rules',
+  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+  '-->',
+].join('\n');
 const forbiddenDefaultPromptPhrases = [
   'GitHub PR Completion Rules',
   'GITHUB APPROVAL NEEDED',
@@ -60,6 +67,29 @@ function generatedPayload(text) {
   return match[1];
 }
 
+function repoLocalPayload(text, label) {
+  const exactPrefix = `${curatedRepoLocalSafetyComment}\n\n`;
+  assert.ok(
+    text.startsWith(exactPrefix),
+    `${label} starts with the exact curated-source safety comment`,
+  );
+  return text.slice(exactPrefix.length);
+}
+
+function assertBareRepoLocalTemplate(text, label) {
+  const payload = repoLocalPayload(text, label);
+
+  assert.equal(generatedNoticeCount(text), 0, `${label} has no generated toolkit notice`);
+  assert.doesNotMatch(text, /Generated from toolkit/, `${label} has no generated notice text`);
+  assert.doesNotMatch(text, /This file is inert/i, `${label} has no inert-template prose`);
+  assert.doesNotMatch(text, /copy or merge the fenced payload/i, `${label} has no fenced-payload install prose`);
+  assert.doesNotMatch(text, /^````````(?:md)?\s*$/m, `${label} has no 8-backtick install payload fence`);
+  assert.doesNotMatch(text, /Or create it with PowerShell/i, `${label} has no README-style PowerShell install example`);
+  assert.doesNotMatch(text, /mkdir -p "<repo>/i, `${label} has no README-style shell install example`);
+  assert.doesNotMatch(text, /cat > "<repo>/i, `${label} has no README-style shell payload example`);
+  assert.doesNotMatch(text, /Set-Content -LiteralPath/i, `${label} has no README-style PowerShell payload example`);
+  assert.doesNotMatch(payload, /Curated AI-facing source/, `${label} contains the curated-source comment only once at the top`);
+}
 function generatedNoticeCount(text) {
   return (text.match(/Generated from toolkit (?:project source|curated output for AI)\. Do not edit directly\./g) || []).length;
 }
@@ -98,6 +128,8 @@ test('source structure keeps reusable prompt and adapter partials with no tiny s
 test('manual global source templates exist and are generated from execution prompt partial', () => {
   const prompt = readText(executionPromptPath).trimEnd();
   assert.match(prompt, /## Git Completion/);
+  assert.match(prompt, /Check PR CI\/status before reporting completion/);
+  assert.match(prompt, /Never claim CI passed unless CI\/status was actually checked/);
   assert.match(prompt, /## Pull Request Description/);
   assert.match(prompt, /keep the PR description aligned with the full base-to-head diff/i);
   for (const relPath of [
@@ -114,79 +146,42 @@ test('manual global source templates exist and are generated from execution prom
 });
 
 test('repo-local source and published skill templates are local bootstrap templates', () => {
-  const sourceToPublished = new Map([
+  const sourceToPublished = [
     [
       '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-      'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
+      'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     ],
     [
       '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-      'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md'
+      'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
     ],
     [
       '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-      'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md'
+      'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
     ],
     [
       '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
-      'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
-    ]
-  ]);
-  for (const [source, published] of sourceToPublished) {
-    assert.equal(exists(source), true, source);
-    assert.equal(exists(published), true, published);
-    const publishedText = readText(published);
-    assert.equal(generatedNoticeCount(publishedText), 1, published);
-    assert.match(publishedText, /repo-local/i, published);
-    assert.doesNotMatch(publishedText, /C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)|global rules example/i, published);
-    assertNoForbiddenDefaultPromptPhrases(publishedText, published);
-  }
+      'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    ],
+  ];
 
-  for (const relPath of [
-    'skills/ai-coding-agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md',
-    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
-  ]) {
-    assert.equal(exists(relPath), false, relPath);
+  for (const [sourcePath, publishedPath] of sourceToPublished) {
+    const sourceText = readText(sourcePath);
+    const publishedText = readText(publishedPath);
+
+    assert.equal(publishedText, sourceText, `${publishedPath} matches curated source`);
+    assertBareRepoLocalTemplate(sourceText, sourcePath);
+    assertBareRepoLocalTemplate(publishedText, publishedPath);
+    assertNoForbiddenDefaultPromptPhrases(repoLocalPayload(publishedText, publishedPath), publishedPath);
   }
 });
-
-test('root AGENTS.md keeps managed blocks before repo-local router', () => {
-  const text = readText('AGENTS.md');
-  const h1s = text.match(/^# /gm) || [];
-  assert.equal(h1s.length, 1);
-  assert.match(text, /^# AI Agent Toolkit Repo Rules\n/);
-  assert.doesNotMatch(text, /^# This repo is the canonical reusable AI Agent Toolkit\.$/m);
-  assert.match(text, /\nThis repo is the canonical reusable AI Agent Toolkit\.\n/);
-  assert.ok(text.indexOf(toolkitBegin) < text.indexOf(n8nBegin), 'toolkit block before n8n adapter');
-
-  const n8nEndIndex = text.indexOf(n8nEnd);
-  assert.notEqual(n8nEndIndex, -1, 'root AGENTS.md has n8n end marker');
-  const portableWarningIndex = text.indexOf('This root `AGENTS.md` is toolkit-repo-specific.', n8nEndIndex);
-  assert.notEqual(portableWarningIndex, -1, 'root AGENTS.md has portable-template warning');
-  assert.ok(portableWarningIndex > n8nEndIndex, 'portable-template warning stays outside managed blocks');
-  assert.match(text, /Portable repo installs must use \[`skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
-  for (const section of [
-    '## Source-of-Truth Contract',
-    '## Repo-Local Router',
-    '## Repo-Local Safety',
-    '## Validation And PR Updates'
-  ]) {
-    const index = text.indexOf(section, n8nEndIndex);
-    assert.notEqual(index, -1, `root AGENTS.md contains ${section}`);
-    assert.ok(index > n8nEndIndex, `${section} stays below managed blocks`);
-  }
-  assert.doesNotMatch(text, /## Agent Routing Rules|## New Or Changed Project Checklist|Before reporting completion, run the relevant checks:/);
-});
-
 test('managed toolkit block comes from the execution prompt partial', () => {
   const prompt = readText(executionPromptPath).trimEnd();
   const rootToolkit = block(readText('AGENTS.md'), toolkitBegin, toolkitEnd, 'root toolkit block')
     .replace(toolkitBegin, '')
     .replace(toolkitEnd, '')
     .trim();
-  const managedPayload = generatedPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'));
+  const managedPayload = repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template');
   const sourceToolkit = block(managedPayload, toolkitBegin, toolkitEnd, 'repo-local managed toolkit block')
     .replace(toolkitBegin, '')
     .replace(toolkitEnd, '')
@@ -200,8 +195,8 @@ test('managed toolkit block comes from the execution prompt partial', () => {
 test('n8n adapter is compact and fail-closed', () => {
   for (const [label, text] of [
     ['root AGENTS.md', readText('AGENTS.md')],
-    ['repo-local AGENTS managed template', generatedPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'))],
-    ['published repo-local AGENTS managed template', generatedPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'))]
+    ['repo-local AGENTS managed template', repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template')],
+    ['published repo-local AGENTS managed template', repoLocalPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'published repo-local AGENTS managed template')]
   ]) {
     const n8nBlock = block(text, n8nBegin, n8nEnd, label);
     assert.equal(n8nBlock.trim(), expectedN8nBlock, label);

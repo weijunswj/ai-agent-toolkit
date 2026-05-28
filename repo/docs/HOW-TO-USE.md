@@ -90,7 +90,7 @@ OpenCode walks upward from the current working directory to the git worktree for
 For Antigravity, copy or symlink the whole skill folder into one of these locations:
 
 - Workspace-level: `<workspace-root>/.agents/skills/<skill-name>/SKILL.md`.
-- Global Antigravity: `$HOME/.gemini/antigravity/skills/<skill-name>/SKILL.md`.
+- Antigravity plugin-scoped: `$HOME/.gemini/config/plugins/ai-agent-toolkit/skills/<skill-name>/SKILL.md`.
 
 Use `GEMINI.md` or the configured context file for always-on Antigravity instructions.
 

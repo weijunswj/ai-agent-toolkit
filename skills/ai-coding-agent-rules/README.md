@@ -45,7 +45,10 @@ Manual global setup templates live in `_projects/development/ai-coding-agent-rul
 | Gemini CLI | `AGENTS.md` plus `GEMINI.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), then [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) |
 | Antigravity | `AGENTS.md` plus `GEMINI.md` and/or `.agents/rules/00-agent-toolkit-bootstrap.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), then [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) and/or [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) |
 
-Install copied skill folders according to the target platform's supported skill location.
+Install copied skill folders according to the target platform's supported skill location. For Antigravity, use the observed plugin-scoped custom skill path:
+`C:\Users\<user>\.gemini\config\plugins\ai-agent-toolkit\skills\<skill-name>\SKILL.md`.
+Keep that Antigravity skill-loading path distinct from repo-local bootstrap outputs, which still go into the target repo as `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
+Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity runtime or docs require plugin metadata.
 
 For n8n-specific workflow and MCP safety rules, install or load [n8n-agent-rules](../n8n-agent-rules/). Do not copy the full n8n rules into global always-on generic instructions unless you intentionally accept the context cost.
 

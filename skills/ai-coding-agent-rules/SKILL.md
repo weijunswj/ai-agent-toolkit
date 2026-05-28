@@ -61,3 +61,8 @@ Use referenced files for full repo-local content:
 Do not create missing shims for platforms that are not in scope. A Claude Code setup needs root `AGENTS.md` plus `CLAUDE.md`; a Gemini CLI setup needs root `AGENTS.md` plus `GEMINI.md`; an Antigravity setup needs root `AGENTS.md` plus the requested Gemini shim and/or Antigravity bootstrap.
 
 Manual global setup templates live in `_projects/development/ai-coding-agent-rules/_main/`; do not treat those source docs as the published skill runtime path.
+
+For Antigravity, install toolkit skills in the observed plugin-scoped custom skill folder:
+`C:\Users\<user>\.gemini\config\plugins\ai-agent-toolkit\skills\<skill-name>\SKILL.md`.
+Keep that skill-loading path distinct from repo-local bootstrap outputs, which still go into the target repo as `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
+Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity runtime or docs require plugin metadata.
