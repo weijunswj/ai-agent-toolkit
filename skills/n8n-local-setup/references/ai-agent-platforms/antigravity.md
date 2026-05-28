@@ -19,7 +19,7 @@ It gives Antigravity:
 * Global `n8n_docs` access for node search and workflow validation using the community MCP.
 * Global `n8n_live` access for your real n8n instance using the official MCP through a local `supergateway` bridge.
 * Global Antigravity MCP config in `C:\Users\<your-user>\.gemini\antigravity\mcp_config.json`.
-* Global Gemini rules in `C:\Users\<your-user>\.gemini\GEMINI.md`.
+* Global Antigravity `GEMINI.md` rules in `C:\Users\<your-user>\.gemini\GEMINI.md`.
 * A safe smoke-test path that keeps workflows inactive by default.
 
 ---
@@ -81,9 +81,9 @@ This plugin skill install path is only for loading the toolkit skill itself. Rep
 
 ---
 
-## 4. Create Global Gemini Rules
+## 4. Create Global Antigravity GEMINI.md Rules
 
-### Follow the Gemini GEMINI.md Setup guide:
+### Follow the Antigravity GEMINI.md setup guide:
 
 * Install or copy generic AI coding agent rules from [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md), then copy or merge them into the target repo root as `GEMINI.md`.
 * Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.

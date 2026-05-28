@@ -152,7 +152,7 @@ test('n8n-agent-rules skill documents the adapter auto-check approval protocol',
     assert.match(text, /does not block the adapter-target question/i, relPath);
     assert.match(text, /`AGENTS\.md` for Codex\/OpenCode/i, relPath);
     assert.match(text, /`CLAUDE\.md` for Claude Code/i, relPath);
-    assert.match(text, /`GEMINI\.md` for Gemini\/Antigravity/i, relPath);
+    assert.match(text, /`GEMINI\.md` for Antigravity/i, relPath);
     assert.match(text, /\ball\b/i, relPath);
     assert.match(text, /\bnone\b/i, relPath);
     assert.match(text, /present all five options neutrally/, relPath);

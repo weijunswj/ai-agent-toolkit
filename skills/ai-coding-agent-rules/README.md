@@ -18,12 +18,12 @@ The copied skill folder includes bare repo-local bootstrap payload templates. Th
 
 - [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) is copied or merged into target repo `AGENTS.md`.
 - [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) is copied to target repo `CLAUDE.md` only when Claude Code support is requested or the target platform is Claude Code.
-- [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) is copied to target repo `GEMINI.md` for Gemini CLI or Antigravity.
+- [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) is copied to target repo `GEMINI.md` for Antigravity.
 - [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) is copied to target repo `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
 
 Install only the current target platform shim unless the user explicitly requests all platform shims. Repo-local installs require a selected/open target repo or an explicit target path; standalone/no-workspace chats cannot safely infer where to install repo-local files.
 
-The repo-local templates stay generic and compact. `AGENTS.managed.template.md` is canonical for the managed toolkit block and carries the compact fail-closed n8n adapter. The Claude, Gemini, and Antigravity templates are tiny platform shims that point to root `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
+The repo-local templates stay generic and compact. `AGENTS.managed.template.md` is canonical for the managed toolkit block and carries the compact fail-closed n8n adapter. The Claude and Antigravity-facing templates are tiny platform shims that point to root `AGENTS.md`. They do not include full n8n rules or toolkit skill-routing tables.
 
 Do not install a shim alone. Shims require root `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), before they are useful.
 
@@ -42,7 +42,6 @@ Manual global setup templates live in `_projects/development/ai-coding-agent-rul
 | Codex | `AGENTS.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
 | OpenCode | `AGENTS.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
 | Claude Code | <ol><li>`AGENTS.md`</li><li>`CLAUDE.md`</li></ol> | <ol><li>[repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)</li><li>[repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md)</li></ol> |
-| Gemini CLI | <ol><li>`AGENTS.md`</li><li>`GEMINI.md`</li></ol> | <ol><li>[repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)</li><li>[repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md)</li></ol> |
 | Antigravity | <ol><li>`AGENTS.md`</li><li>`GEMINI.md`</li><li>`.agents/rules/00-agent-toolkit-bootstrap.md`</li></ol> | <ol><li>[repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)</li><li>[repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md)</li><li>[repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md)</li></ol> |
 
 Install copied skill folders according to the target platform's supported skill location. For Antigravity, use the observed plugin-scoped custom skill path:

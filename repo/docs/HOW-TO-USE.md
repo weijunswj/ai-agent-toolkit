@@ -175,14 +175,14 @@ Use:
 
 - [Antigravity reference](../../skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md)
 - [Shared managed agent rules template](../../skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
-- [Gemini shim template](../../skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md)
+- [Antigravity GEMINI shim template](../../skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md)
 - [Antigravity bootstrap template](../../skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md)
 - [n8n agent rules skill](../../skills/n8n-agent-rules/)
 - [optional Antigravity n8n adapter](../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md)
 - [Antigravity MCP config](../../skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md)
 - [Antigravity source guide](../../_projects/n8n/local-setup/_main/7.%20extra%20-%20antigravity%20integration.md)
 
-Use user-scoped Antigravity or Gemini-style config unless a project intentionally needs project-specific overrides.
+Use user-scoped Antigravity config unless a project intentionally needs project-specific overrides.
 
 ## ChatGPT Web And Claude Web
 

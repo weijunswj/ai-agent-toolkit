@@ -7,15 +7,15 @@ Update the project source and run sync.
 
 # GEMINI.template.md AI coding agent rules
 
-Use this generated template for Gemini CLI or Antigravity.
+Use this generated template for Antigravity.
 
 This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `GEMINI.md`.
 
-Copy or merge the fenced payload into the target repo root as `GEMINI.md` only when the user explicitly wants generic Gemini CLI/Antigravity rules installed.
+Copy or merge the fenced payload into the target repo root as `GEMINI.md` only when the user explicitly wants generic Antigravity rules installed.
 
 If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-## Gemini CLI and Antigravity global rules example
+## Antigravity global rules example
 
 Copy or merge the fenced payload into:
 

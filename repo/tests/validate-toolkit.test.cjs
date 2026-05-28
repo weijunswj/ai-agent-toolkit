@@ -1251,7 +1251,7 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
       const text = readTextFile(path.join(repoRoot, rel));
       assert.equal(text, expected, `${rel} is exactly the copy-ready destination payload`);
       assertBareRepoLocalTemplate(rel, text);
-      assert.doesNotMatch(text, /Claude Code global rules example|Gemini CLI and Antigravity global rules example|C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)/, rel);
+      assert.doesNotMatch(text, /Claude Code global rules example|Antigravity global rules example|Gemini\s+CLI and Antigravity global rules example|C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)/, rel);
       assert.doesNotMatch(text, /GitHub PR Completion Rules|GITHUB APPROVAL NEEDED|VERSION CONTROL APPROVAL NEEDED|REMOTE APPROVAL NEEDED|LOCAL CHANGE APPROVAL NEEDED|PR: none yet/i, rel);
     }
 

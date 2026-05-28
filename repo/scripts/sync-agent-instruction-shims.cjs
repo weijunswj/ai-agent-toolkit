@@ -251,13 +251,13 @@ function expectedSourceTemplates(executionPrompt) {
     }),
     [manualTemplatePaths.gemini]: fencedTemplate({
       title: 'GEMINI.template.md AI coding agent rules',
-      audience: 'Gemini CLI or Antigravity',
+      audience: 'Antigravity',
       destinationDisplay: '`GEMINI.md`',
       activeNameText: 'it is not named `GEMINI.md`',
-      installSubject: 'generic Gemini CLI/Antigravity rules',
+      installSubject: 'generic Antigravity rules',
       examples: [
         {
-          heading: 'Gemini CLI and Antigravity global rules example',
+          heading: 'Antigravity global rules example',
           path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
           commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
         }

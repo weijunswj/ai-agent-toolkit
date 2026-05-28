@@ -107,7 +107,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
 
   assert.match(readme, /^## Install Skills By Platform$/m);
   assert.match(readme, /\[How To Use: Use Skills Manually\]\(repo\/docs\/HOW-TO-USE\.md#use-skills-manually\)/);
-  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'Gemini CLI', 'Antigravity']) {
+  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'Antigravity']) {
     assert.match(readme, new RegExp(`\\| ${platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\|`), platform);
   }
 
