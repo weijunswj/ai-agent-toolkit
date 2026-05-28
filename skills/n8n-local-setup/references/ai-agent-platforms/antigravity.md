@@ -19,7 +19,7 @@ It gives Antigravity:
 * Global `n8n_docs` access for node search and workflow validation using the community MCP.
 * Global `n8n_live` access for your real n8n instance using the official MCP through a local `supergateway` bridge.
 * Global Antigravity MCP config in `C:\Users\<your-user>\.gemini\antigravity\mcp_config.json`.
-* Global Gemini rules in `C:\Users\<your-user>\.gemini\GEMINI.md`.
+* Global Antigravity `GEMINI.md` rules in `C:\Users\<your-user>\.gemini\GEMINI.md`.
 * A safe smoke-test path that keeps workflows inactive by default.
 
 ---
@@ -56,16 +56,41 @@ npx --version
 
 ---
 
-## 3. Create Global Gemini Rules
+## 3. Install Toolkit Skills For Antigravity
 
-### Follow the Gemini GEMINI.md Setup guide:
+Observed Antigravity runtimes load custom skills from plugin-scoped folders under:
+
+```text
+C:\Users\<user>\.gemini\config\plugins\ai-agent-toolkit\skills\<skill-name>\SKILL.md
+```
+
+Suggested structure:
+
+```text
+C:\Users\<user>\.gemini\config\plugins\
+`-- ai-agent-toolkit\
+    |-- plugin.json
+    `-- skills\
+        `-- ai-coding-agent-rules\
+            `-- SKILL.md
+```
+
+Use a minimal `plugin.json` only when the installed Antigravity runtime or docs require plugin metadata.
+
+This plugin skill install path is only for loading the toolkit skill itself. Repo-local bootstrap outputs still go into the target repo as `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
+
+---
+
+## 4. Create Global Antigravity GEMINI.md Rules
+
+### Follow the Antigravity GEMINI.md setup guide:
 
 * Install or copy generic AI coding agent rules from [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md), then copy or merge them into the target repo root as `GEMINI.md`.
 * Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
 * Optionally merge the brief `GEMINI.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `GEMINI.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
 * If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-## 4. Create The Global Antigravity MCP Config
+## 5. Create The Global Antigravity MCP Config
 
 ### Follow the Antigravity MCP Config guide:
 
@@ -73,7 +98,7 @@ npx --version
 
 ---
 
-## 5. Restart Antigravity
+## 6. Restart Antigravity
 
 ### After changing any of these:
 
@@ -88,7 +113,7 @@ npx --version
 
 ---
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 ### Antigravity agent stops replying after an update
 

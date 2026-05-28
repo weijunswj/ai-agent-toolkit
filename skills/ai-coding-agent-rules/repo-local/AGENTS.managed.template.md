@@ -1,42 +1,9 @@
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md
-Update the curated output and run sync.
--->
-<!--
 Curated AI-facing source.
 Project: development.ai-coding-agent-rules
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-# AGENTS.managed.template.md repo-local managed AI coding agent rules
-
-Use this generated template for repo/folder-local Codex or OpenCode setup.
-
-This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `AGENTS.md`.
-
-Copy or merge the fenced payload into the target repo root as `AGENTS.md` only when the user explicitly wants repo-local managed Codex/OpenCode rules installed.
-
-If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
-
-## Repo-local rules example
-
-Copy or merge the fenced payload into:
-
-```text
-<repo>\AGENTS.md
-```
-
-Or create it with PowerShell:
-
-```text
-notepad AGENTS.md
-```
-
----
-
-````````md
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
 ## Role
 
@@ -126,11 +93,34 @@ Proceed without extra confirmation for safe, clearly scoped local edits.
 
 ## Git Completion
 
-After completing requested repo edits, run the smallest relevant local validation, commit the finished work to a non-main branch, push it, and open or update the pull request unless the user asked for local-only/no-push work. Do not run full local validation by default when CI already runs the full gate. Never push to `main`, never push secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
+Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits. Unless the user asked for local-only/no-push work, finish by running relevant local validation, committing to a non-main branch, pushing, and opening or updating the pull request.
 
-## Pull Request Description
+Before pushing:
 
-When opening or updating a pull request, keep the PR description aligned with the full base-to-head diff, not only the latest commit. Before final reporting after a push, update the PR body when the cumulative scope, safety notes, validation, generated-output status, or user-facing behaviour changed. If you cannot update the PR body directly, provide exact replacement PR body text.
+- Run the smallest relevant local validation.
+- Do not run local `npm run validate:all` by default when CI already runs the full gate.
+- Run local full validation only for broad/risky, workflow, sync, generator, package, security-sensitive changes, known CI failure reproduction, or when targeted checks do not cover the touched area.
+
+When opening or updating a pull request:
+
+- Keep the PR body aligned with the full base-to-head diff.
+- Include cumulative scope, safety notes, validation, generated-output status, and user-facing behaviour.
+- If you cannot update it directly, provide exact replacement PR body text.
+
+After pushing:
+
+- Check PR CI/status before reporting completion.
+- If CI is green, report completion.
+- If pending, say it is pending and not yet verified, or wait when practical.
+- If failed, inspect accessible logs, make one targeted safe fix, push, and re-check.
+- After two failed fix attempts, stop and report the blocker.
+- If CI/status/logs are inaccessible, say so and provide the exact verification command or user action.
+
+Never:
+
+- Push to `main`, secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
+- Claim CI passed unless checked.
+- Hide failing, pending, or inaccessible CI.
 
 ## Scope Control
 
@@ -225,4 +215,3 @@ If the task involves n8n workflows, workflow templates, helper scripts, MCP, imp
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
-````````

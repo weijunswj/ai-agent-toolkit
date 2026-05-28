@@ -41,7 +41,7 @@ If no active instruction file exists, stop and ask the adapter-target question b
 
 - `AGENTS.md` for Codex/OpenCode
 - `CLAUDE.md` for Claude Code
-- `GEMINI.md` for Gemini/Antigravity
+- `GEMINI.md` for Antigravity
 - `all`
 - `none`
 

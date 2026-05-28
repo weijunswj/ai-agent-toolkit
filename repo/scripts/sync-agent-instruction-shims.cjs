@@ -251,13 +251,13 @@ function expectedSourceTemplates(executionPrompt) {
     }),
     [manualTemplatePaths.gemini]: fencedTemplate({
       title: 'GEMINI.template.md AI coding agent rules',
-      audience: 'Gemini CLI or Antigravity',
+      audience: 'Antigravity',
       destinationDisplay: '`GEMINI.md`',
       activeNameText: 'it is not named `GEMINI.md`',
-      installSubject: 'generic Gemini CLI/Antigravity rules',
+      installSubject: 'generic Antigravity rules',
       examples: [
         {
-          heading: 'Gemini CLI and Antigravity global rules example',
+          heading: 'Antigravity global rules example',
           path: 'C:\\Users\\<your-user>\\.gemini\\GEMINI.md',
           commands: ['mkdir $HOME\\.gemini -Force', 'notepad $HOME\\.gemini\\GEMINI.md']
         }
@@ -272,13 +272,42 @@ function markerCount(text, marker) {
   return text.split(marker).length - 1;
 }
 
-function extractPayload(relPath, text, errors) {
-  const match = text.match(/\n````````md\n([\s\S]*?)\n````````\s*$/);
-  if (!match) {
-    errors.push(`Missing agent instruction template payload fence in ${relPath}. Run ${fixCommand}.`);
-    return null;
+const repoLocalSafetyComment = [
+  '<!--',
+  'Curated AI-facing source.',
+  'Project: development.ai-coding-agent-rules',
+  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
+  '-->'
+].join('\n');
+
+const repoLocalWrapperPatterns = [
+  { pattern: /Generated from toolkit/i, description: 'generated toolkit notice' },
+  { pattern: /This file is inert/i, description: 'inert template prose' },
+  { pattern: /copy or merge the fenced payload/i, description: 'fenced-payload install prose' },
+  { pattern: /^````````md$/m, description: 'opening 8-backtick payload fence' },
+  { pattern: /^````````$/m, description: 'closing 8-backtick payload fence' },
+  { pattern: /^## Repo-local /m, description: 'README-style repo-local install heading' },
+  { pattern: /<repo>\\/i, description: 'README-style destination example' },
+  { pattern: /Or create it with PowerShell/i, description: 'README-style PowerShell install prose' }
+];
+
+function readBareRepoLocalTemplate(relPath, errors) {
+  const text = readRequired(relPath, errors);
+  if (text === null) return null;
+  const safetyPrefix = `${repoLocalSafetyComment}\n\n`;
+  if (!text.startsWith(safetyPrefix)) {
+    errors.push(`Repo-local install template must start with the exact curated-source safety comment: ${relPath}. Run ${fixCommand}.`);
   }
-  return match[1].trimEnd();
+  const payload = text.startsWith(safetyPrefix) ? text.slice(safetyPrefix.length) : text;
+  for (const { pattern, description } of repoLocalWrapperPatterns) {
+    if (pattern.test(payload)) {
+      errors.push(`Repo-local install template must be a bare copy-ready payload without ${description}: ${relPath}. Run ${fixCommand}.`);
+    }
+  }
+  if (/Curated AI-facing source|Review rule:/i.test(payload)) {
+    errors.push(`Repo-local install template must not duplicate curated-source comments in the payload body: ${relPath}. Run ${fixCommand}.`);
+  }
+  return payload;
 }
 
 function extractManagedBlock(relPath, text, begin, end, errors) {
@@ -442,22 +471,21 @@ function validateAndSync(options = {}) {
     writeOrCheck(relPath, expected, errors, runMode, 'agent instruction source template');
   }
 
-  const managedAgentsTemplate = readRequired(repoLocalTemplatePaths.managedAgents, errors);
-  const claudeTemplate = readRequired(repoLocalTemplatePaths.claude, errors);
-  const geminiTemplate = readRequired(repoLocalTemplatePaths.gemini, errors);
-  const antigravityTemplate = readRequired(repoLocalTemplatePaths.antigravity, errors);
+  const managedAgentsTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.managedAgents, errors);
+  const claudeTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.claude, errors);
+  const geminiTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.gemini, errors);
+  const antigravityTemplate = readBareRepoLocalTemplate(repoLocalTemplatePaths.antigravity, errors);
   if ([managedAgentsTemplate, claudeTemplate, geminiTemplate, antigravityTemplate].some((value) => value === null)) return { errors };
 
-  const agentsPayload = extractPayload(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, errors);
   const source = {
-    toolkit: agentsPayload ? extractManagedBlock(repoLocalTemplatePaths.managedAgents, agentsPayload, toolkitBegin, toolkitEnd, errors) : null,
-    n8n: agentsPayload ? extractManagedBlock(repoLocalTemplatePaths.managedAgents, agentsPayload, n8nBegin, n8nEnd, errors) : null,
-    claude: extractPayload(repoLocalTemplatePaths.claude, claudeTemplate, errors),
-    gemini: extractPayload(repoLocalTemplatePaths.gemini, geminiTemplate, errors),
-    antigravity: extractPayload(repoLocalTemplatePaths.antigravity, antigravityTemplate, errors)
+    toolkit: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, toolkitBegin, toolkitEnd, errors),
+    n8n: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, n8nBegin, n8nEnd, errors),
+    claude: claudeTemplate,
+    gemini: geminiTemplate,
+    antigravity: antigravityTemplate
   };
   if (Object.values(source).some((value) => value === null)) return { errors };
-  if (agentsPayload.trimEnd() !== managedPayload(executionPrompt, n8nAdapter).trimEnd()) {
+  if (managedAgentsTemplate.trimEnd() !== managedPayload(executionPrompt, n8nAdapter).trimEnd()) {
     errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath} and ${n8nAdapterPath}, keep the compact fail-closed n8n adapter, then run sync.`);
     return { errors };
   }

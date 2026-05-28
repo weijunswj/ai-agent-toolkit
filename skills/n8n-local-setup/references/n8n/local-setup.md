@@ -499,7 +499,7 @@ Use user-scoped OpenCode config unless a project intentionally needs project-spe
 
 Use the [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md).
 
-Use user-scoped Antigravity or Gemini-style config unless a project intentionally needs project-specific overrides. Fully close and reopen Antigravity after changing MCP config, `GEMINI.md`, or MCP environment variables.
+Use user-scoped Antigravity config unless a project intentionally needs project-specific overrides. Fully close and reopen Antigravity after changing MCP config, `GEMINI.md`, or MCP environment variables.
 
 ## Agent Rules And Adapters
 
@@ -509,7 +509,7 @@ Use generic agent rules as the slim always-on baseline for coding agents:
 
 - [AGENTS.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for Codex or OpenCode.
 - [CLAUDE.template.md](../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md) for Claude Code.
-- [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md) for Gemini or Antigravity.
+- [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md) for Antigravity.
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
@@ -525,7 +525,7 @@ Optional adapters are brief pointers for existing instruction files:
 
 - `AGENTS.n8n-brief.template.md` for Codex or OpenCode.
 - `CLAUDE.n8n-brief.template.md` for Claude Code.
-- `GEMINI.n8n-brief.template.md` for Gemini or Antigravity.
+- `GEMINI.n8n-brief.template.md` for Antigravity.
 
 Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
 

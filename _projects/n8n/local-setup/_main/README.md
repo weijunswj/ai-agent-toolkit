@@ -118,7 +118,7 @@ Use queue mode later when you need worker-based production scaling. Do not add R
 | --- | --- |
 | [AGENTS.template.md](../../../development/ai-coding-agent-rules/_main/AGENTS.template.md) | Generic Codex or OpenCode rules template. |
 | [CLAUDE.template.md](../../../development/ai-coding-agent-rules/_main/CLAUDE.template.md) | Generic Claude Code rules template. |
-| [GEMINI.template.md](../../../development/ai-coding-agent-rules/_main/GEMINI.template.md) | Generic Gemini or Antigravity rules template. |
+| [GEMINI.template.md](../../../development/ai-coding-agent-rules/_main/GEMINI.template.md) | Generic Antigravity rules template. |
 | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) | Full n8n workflow, MCP routing, live-instance, and manual-configuration rules. |
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.

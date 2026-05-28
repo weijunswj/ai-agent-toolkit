@@ -10,6 +10,23 @@ Collects [AI Coding Agent Rules](../../../ai-coding-agent-rules/), [n8n Agent Ru
 
 Review [pack.json](pack.json) before use.
 
-Copy or merge [repo-local/AGENTS.managed.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) into the target repo root as `AGENTS.md`, install or load [n8n Agent Rules](../../../n8n-agent-rules/), and optionally merge [AGENTS.n8n-brief.template.md](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md) into the same file. If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge/diff plan. Run the adapter installer with `--dry-run` first and only use `--write` after explicit current-turn approval.
+## Instruction files
 
-For local runtime, copy the local stack templates outside this repo, copy [.env.example](../../templates/local-stack/.env.example) to `.env`, fill placeholders locally, then start through [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd). Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live imports/exports.
+<ol>
+<li>Copy or merge [repo-local/AGENTS.managed.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) into the target repo root as `AGENTS.md`.</li>
+<li>Install or load [n8n Agent Rules](../../../n8n-agent-rules/).</li>
+<li>Optionally merge [AGENTS.n8n-brief.template.md](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md) into the same file.</li>
+</ol>
+
+If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge/diff plan. Run the adapter installer with `--dry-run` first and only use `--write` after explicit current-turn approval.
+
+## Local runtime
+
+<ol>
+<li>Copy the local stack templates outside this repo.</li>
+<li>Copy [.env.example](../../templates/local-stack/.env.example) to `.env`.</li>
+<li>Fill placeholders locally.</li>
+<li>Start through [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd).</li>
+</ol>
+
+Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live imports/exports.

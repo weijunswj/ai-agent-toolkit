@@ -17,4 +17,4 @@ For local setup, start with [local setup](../n8n/local-setup.md). The platform p
 | [chatgpt-web.md](chatgpt-web.md) | Using instruction-only skills in ChatGPT web. |
 | [claude-web.md](claude-web.md) | Using instruction-only skills in Claude web. |
 | [opencode.md](opencode.md) | Setting up OpenCode with agent rules and MCP config. |
-| [antigravity.md](antigravity.md) | Setting up Antigravity or Gemini-style rules and MCP config. |
+| [antigravity.md](antigravity.md) | Setting up Antigravity rules and MCP config. |

@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.1.0",
+  "version": "2.1.2",
   "version_policy": "semver",
-  "version_notes": "Separates manual global source templates from skill-facing repo-local automatic bootstrap templates and keeps a compact fail-closed n8n adapter around the canonical execution prompt partial.",
+  "version_notes": "Publishes repo-local automatic bootstrap templates as bare copy-ready payload files with an exact curated-source safety comment while keeping manual global source templates separate.",
   "outputs": [
     {
       "kind": "curated",
@@ -27,28 +27,32 @@
       "kind": "curated",
       "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
       "output": "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
-      "notes": "Published inert repo-local Codex/OpenCode managed instruction template generated from reviewed skill-facing source.",
+      "notes": "Published bare copy-ready repo-local Codex/OpenCode managed instruction payload generated from reviewed skill-facing source.",
+      "notice": false,
       "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
       "output": "skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
-      "notes": "Published inert repo-local Claude Code shim template generated from reviewed skill-facing source.",
+      "notes": "Published bare copy-ready repo-local Claude Code shim payload generated from reviewed skill-facing source.",
+      "notice": false,
       "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md",
       "output": "skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md",
-      "notes": "Published inert repo-local Gemini shim template generated from reviewed skill-facing source.",
+      "notes": "Published bare copy-ready repo-local Gemini shim payload generated from reviewed skill-facing source.",
+      "notice": false,
       "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
       "source": "curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md",
       "output": "skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md",
-      "notes": "Published inert repo-local Antigravity bootstrap template for .agents/rules/00-agent-toolkit-bootstrap.md generated from reviewed skill-facing source.",
+      "notes": "Published bare copy-ready repo-local Antigravity bootstrap payload for .agents/rules/00-agent-toolkit-bootstrap.md generated from reviewed skill-facing source.",
+      "notice": false,
       "fidelity": "reviewed_entrypoint"
     },
     {

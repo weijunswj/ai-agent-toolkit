@@ -107,7 +107,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
 
   assert.match(readme, /^## Install Skills By Platform$/m);
   assert.match(readme, /\[How To Use: Use Skills Manually\]\(repo\/docs\/HOW-TO-USE\.md#use-skills-manually\)/);
-  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'Gemini CLI', 'Antigravity']) {
+  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'Antigravity']) {
     assert.match(readme, new RegExp(`\\| ${platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\|`), platform);
   }
 
@@ -126,14 +126,14 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /User agent-compatible: `\$HOME\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
   assert.match(howToUse, /Use `AGENTS\.md`, `AGENTS\.override\.md`, or the configured OpenCode rules file/);
   assert.match(howToUse, /Workspace-level: `<workspace-root>\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(howToUse, /Global Antigravity: `\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(howToUse, /Antigravity plugin-scoped: `\$HOME\/\.gemini\/config\/plugins\/ai-agent-toolkit\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.doesNotMatch(howToUse, /\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\/SKILL\.md/);
   assert.doesNotMatch(howToUse, /\$HOME\/\.gemini\/skills\/<skill-name>\/SKILL\.md/);
   assert.doesNotMatch(howToUse, /<workspace-root>\/\.agent\/skills\/<skill-name>\/SKILL\.md/);
   assert.match(howToUse, /Use `GEMINI\.md` or the configured context file/);
   assert.match(readme, /`<repo>\/\.claude\/skills\/<skill-name>\/`/);
   assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`/);
-  assert.match(readme, /`<workspace-root>\/\.agents\/skills\/<skill-name>\/`/);
-  assert.match(readme, /`\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\/`/);
+  assert.match(readme, /`\$HOME\/\.gemini\/config\/plugins\/ai-agent-toolkit\/skills\/<skill-name>\/`/);
   assert.match(readme, /`AGENTS\.md` is the shared managed instruction file/);
   assert.match(readme, /\[`repo-local\/AGENTS\.managed\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
   assert.match(readme, /\[`repo-local\/CLAUDE\.shim\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/CLAUDE\.shim\.template\.md\)/);
@@ -141,6 +141,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /\[`repo-local\/antigravity-bootstrap\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/antigravity-bootstrap\.template\.md\)/);
   assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
   assert.match(readme, /\(skills\/n8n-agent-rules\/\)/);
+  assert.doesNotMatch(readme, /\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\//);
   assert.doesNotMatch(readme, /\$HOME\/\.gemini\/skills\/<skill-name>\//);
   assert.doesNotMatch(readme, /<workspace-root>\/\.agent\/skills\/<skill-name>\//);
   assert.match(howToUse, /\[OpenCode reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/opencode\.md\)/);

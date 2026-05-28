@@ -29,13 +29,13 @@ The manual global templates `_main/AGENTS.template.md`, `_main/CLAUDE.template.m
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md`
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md`
 
-The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap material. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md` plus `_partials/n8n-agent-rules-adapter.md`; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
+The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap payloads. They intentionally contain only the exact curated-source safety comment plus destination-file content so agents can copy them wholesale into target repos. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md` plus `_partials/n8n-agent-rules-adapter.md`; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
 
 ## AI-Facing Surfaces
 
 - `skills/ai-coding-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
-- `skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md` is generated from curated repo-local source.
-- `skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md`, `GEMINI.shim.template.md`, and `antigravity-bootstrap.template.md` are generated from curated repo-local source.
+- `skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md` is generated from curated repo-local source without a generated notice because it is copied wholesale into target repo `AGENTS.md`.
+- `skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md`, `GEMINI.shim.template.md`, and `antigravity-bootstrap.template.md` are generated from curated repo-local source without generated notices because they are copied wholesale into target repo instruction files.
 - Root `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` are checked by `repo/scripts/sync-agent-instruction-shims.cjs`; run `node repo/scripts/sync-agent-instruction-shims.cjs --write` after changing the execution partial, manual templates, or curated repo-local templates. The script updates marker-owned blocks and preserves unmarked user/repo content.
 - `skills/n8n-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
 - `skills/n8n-agent-rules/n8n-agent-rules.md` is copied exactly from `_main/_partials/n8n-agent-rules.md`.
