@@ -7,7 +7,7 @@
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
   "version": "2.1.4",
   "version_policy": "semver",
-  "version_notes": "Adds full-bold user-action question guidance, structural managed-marker verification for repo-local shims, and backup-first repair instructions for broken repo-local managed blocks.",
+  "version_notes": "Adds full-bold user-action question guidance, structural managed-marker verification for repo-local shims, backup-first repair instructions for broken repo-local managed blocks, and explicit refresh handling for stale managed content.",
   "outputs": [
     {
       "kind": "curated",

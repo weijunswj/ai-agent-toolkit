@@ -481,6 +481,12 @@ test('skill instructions add only target platform shims by default', () => {
     const text = readText(relPath);
     assert.match(text, /Check only the required files for the selected platform/i, relPath);
     assert.match(text, /Do not create shims for platforms that are not in scope/i, relPath);
+    assert.match(text, /install, check, repair, refresh, or bootstrap repo-local agent rules/i, relPath);
+    assert.match(text, /user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions/i, relPath);
+    assert.match(text, /For ordinary follow-up coding tasks, stop after the cheap structural managed-marker check/i, relPath);
+    assert.match(text, /For explicit install, check, repair, refresh, or bootstrap requests, do not stop at the cheap structural check/i, relPath);
+    assert.match(text, /compare toolkit-owned managed block content against the current template content/i, relPath);
+    assert.match(text, /If managed block content differs from the current template, treat it as edited or stale toolkit-owned content/i, relPath);
     assert.match(text, /### Missing Or Unmanaged Files/, relPath);
     assert.match(text, /### Broken Or Edited Managed Blocks/, relPath);
     assert.match(text, /Content inside `AI-AGENT-TOOLKIT` managed marker pairs is toolkit-owned/i, relPath);
@@ -492,7 +498,7 @@ test('skill instructions add only target platform shims by default', () => {
     assert.match(text, /do not commit, stage, delete, or move backup files unless the user explicitly asks/i, relPath);
     assert.match(text, /If I repaired or backed up an instruction file, the previous version was saved under `\.agent-toolkit-backups\/` in this project folder\./, relPath);
     assert.match(text, /Start a new agent session in this folder/i, relPath);
-    assert.doesNotMatch(text, /If a managed block appears manually edited/i, relPath);
+    assert.match(text, /If a managed block appears manually edited, treat it as toolkit-owned content that needs repair during explicit install, check, repair, refresh, or bootstrap requests/i, relPath);
     assert.doesNotMatch(text, /repair\/overwrite questions/i, relPath);
     assert.doesNotMatch(text, /do not guess destructively/i, relPath);
     assert.doesNotMatch(text, /ask before rewriting/i, relPath);

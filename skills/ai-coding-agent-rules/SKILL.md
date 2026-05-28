@@ -1,6 +1,6 @@
 ---
 name: ai-coding-agent-rules
-description: Bootstrap or repair repo-local AI coding agent instruction files. Use once before repository/project-folder edits for any unchecked target folder, including fresh folders or existing repos, when required repo-local instruction files may be missing, custom/unmanaged, stale, or lack structurally current AI-AGENT-TOOLKIT managed marker pairs; also use when the user asks to install, check, repair, or bootstrap repo-local agent rules. Do not use again after required files are checked and structurally current unless instruction-file state may have changed.
+description: Bootstrap or repair repo-local AI coding agent instruction files. Use once before repository/project-folder edits for any unchecked target folder, including fresh folders or existing repos, when required repo-local instruction files may be missing, custom/unmanaged, stale, or lack structurally current AI-AGENT-TOOLKIT managed marker pairs; also use when the user asks to install, check, repair, refresh, or bootstrap repo-local agent rules. Do not use again after required files are checked and structurally current unless instruction-file state may have changed.
 ---
 
 <!--
@@ -34,7 +34,7 @@ This works for GitHub, GitLab, Bitbucket, local git repos, and plain folders. Gi
    - Antigravity: `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
 3. Check only the required files for the selected platform.
 4. For each required file, check existence and `AI-AGENT-TOOLKIT` managed-marker structure.
-5. If every required file is structurally current enough, do not read templates, do not inspect or compare managed body content beyond marker structure, do not rewrite files, and continue the original user task.
+5. If every required file is structurally current enough and the user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions, do not read templates, do not inspect or compare managed body content beyond marker structure, do not rewrite files, and continue the original user task.
 
 A required file is structurally current enough only when:
 
@@ -50,6 +50,10 @@ A managed marker pair is valid only when:
 - `BEGIN` appears before `END`.
 
 Do not treat bare `AI-AGENT-TOOLKIT` text, a missing managed block, or balanced zero-block state as current. This cheap path is a structural managed-marker check, not a full template diff.
+
+For ordinary follow-up coding tasks, stop after the cheap structural managed-marker check when all required files are structurally current.
+
+For explicit install, check, repair, refresh, or bootstrap requests, do not stop at the cheap structural check. Read the current repo-local templates and compare toolkit-owned managed block content against the current template content. If managed block content differs from the current template, treat it as edited or stale toolkit-owned content, back up the affected file under `.agent-toolkit-backups/`, replace the managed block from the current template, preserve unmarked user-authored content outside managed markers, then stop with the session reset prompt.
 
 ## Install Or Repair
 
@@ -86,6 +90,8 @@ Before repairing, create a backup copy of the existing file under `.agent-toolki
 Backup files are local repair artifacts. Report their paths clearly, but do not commit, stage, delete, or move backup files unless the user explicitly asks.
 
 After backing up, repair the required instruction file using the current repo-local template content. If unmarked user-authored content can be safely separated from the broken managed block, preserve it below the repaired managed block. If it cannot be safely separated, keep the repaired instruction file clean and tell the user the previous file was backed up.
+
+If a managed block appears manually edited, treat it as toolkit-owned content that needs repair during explicit install, check, repair, refresh, or bootstrap requests. Back up the existing file, replace the managed block with the current repo-local template content, preserve safe unmarked content below it, and report the backup path.
 
 Do not delete duplicate, conflicting, or obsolete unmarked content automatically; preserve it when safe or keep it in the dirty backup and report it.
 
