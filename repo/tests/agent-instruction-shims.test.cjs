@@ -228,18 +228,26 @@ test('n8n adapter is compact and fail-closed', () => {
 
 test('root Claude, Gemini, and Antigravity shims stay tiny', () => {
   const claude = readText('CLAUDE.md');
-  assert.match(claude, /^# Claude Code Instructions\n\n@AGENTS\.md\n\nRoot `AGENTS\.md` is canonical\.\n$/);
+  assert.match(claude, /AI-AGENT-TOOLKIT:[^:\n]+CLAUDE\.shim\.template\.md:BEGIN CLAUDE-SHIM v1/);
+  assert.match(claude, /^# Claude Code Instructions$/m);
+  assert.match(claude, /Root `AGENTS\.md` is canonical\./);
+  assert.match(claude, /AI-AGENT-TOOLKIT:[^:\n]+CLAUDE\.shim\.template\.md:END CLAUDE-SHIM/);
   assertImportCount(claude, '@AGENTS.md', 'root CLAUDE.md import count');
   assert.ok(Buffer.byteLength(claude, 'utf8') < 1024, 'root CLAUDE.md under 1KB');
 
   const gemini = readText('GEMINI.md');
-  assert.match(gemini, /^# Gemini Instructions\n\n@\.\/AGENTS\.md\n\nRoot `AGENTS\.md` is canonical\.\n$/);
+  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:BEGIN ANTIGRAVITY-GEMINI-SHIM v1/);
+  assert.match(gemini, /^# Gemini Instructions$/m);
+  assert.match(gemini, /Root `AGENTS\.md` is canonical\./);
+  assert.match(gemini, /AI-AGENT-TOOLKIT:[^:\n]+GEMINI\.shim\.template\.md:END ANTIGRAVITY-GEMINI-SHIM/);
   assertImportCount(gemini, '@./AGENTS.md', 'root GEMINI.md import count');
   assert.ok(Buffer.byteLength(gemini, 'utf8') < 1024, 'root GEMINI.md under 1KB');
 
   const antigravity = readText('.agents/rules/00-agent-toolkit-bootstrap.md');
+  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:BEGIN ANTIGRAVITY-BOOTSTRAP v1/);
   assert.match(antigravity, /^# Agent Toolkit Antigravity Bootstrap$/m);
   assert.match(antigravity, /Root `AGENTS\.md` is the canonical repo instruction file\./);
+  assert.match(antigravity, /AI-AGENT-TOOLKIT:[^:\n]+antigravity-bootstrap\.template\.md:END ANTIGRAVITY-BOOTSTRAP/);
   assert.doesNotMatch(antigravity, /@\.\.\/\.\.\/AGENTS\.md/);
   assert.ok(Buffer.byteLength(antigravity, 'utf8') < 1024, 'Antigravity bootstrap under 1KB');
 });
@@ -354,10 +362,10 @@ test('skill instructions add only target platform shims by default', () => {
     'skills/ai-coding-agent-rules/SKILL.md'
   ]) {
     const text = readText(relPath);
-    assert.match(text, /Check or install `AGENTS\.md` as the canonical managed file/i, relPath);
-    assert.match(text, /Add only the shim for the current\/target platform unless the user explicitly requests all platform shims/i, relPath);
+    assert.match(text, /Check only the required files for the selected platform/i, relPath);
+    assert.match(text, /Do not create shims for platforms that are not in scope/i, relPath);
     assert.match(text, /Preserve existing active instruction files/i, relPath);
-    assert.match(text, /start a new agent session before continuing/i, relPath);
+    assert.match(text, /Start a new agent session in this folder/i, relPath);
     assert.doesNotMatch(text, /The repo has no `CLAUDE\.md`/i, relPath);
     assert.doesNotMatch(text, /The repo has no `GEMINI\.md`/i, relPath);
     assert.doesNotMatch(text, /The repo has no `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`/i, relPath);

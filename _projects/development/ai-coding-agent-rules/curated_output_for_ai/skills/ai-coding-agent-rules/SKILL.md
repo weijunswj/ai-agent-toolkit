@@ -1,6 +1,6 @@
 ---
 name: ai-coding-agent-rules
-description: Use when starting repository or project-folder coding work and the canonical AGENTS.md or current-platform instruction shim may be missing, stale, unchecked, or lacking AI-AGENT-TOOLKIT:<source-path> managed marker blocks.
+description: Bootstrap or repair repo-local AI coding agent instruction files. Use once before repository/project-folder edits for any unchecked target folder, including fresh folders or existing repos, when required repo-local instruction files may be missing, custom/unmanaged, stale, or lack structurally current AI-AGENT-TOOLKIT managed marker pairs; also use when the user asks to install, check, repair, or bootstrap repo-local agent rules. Do not use again after required files are checked and structurally current unless instruction-file state may have changed.
 ---
 
 <!--
@@ -11,52 +11,77 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # AI Coding Agent Rules
 
-Tiny automatic repo-instruction bootstrap/checker for local project instruction files.
+Tiny repo-instruction bootstrap/checker for local project instruction files.
 
-Repo-local installs require a selected/open target repo or an explicit target path. Standalone chats with no workspace cannot safely infer where to install `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
+This skill is not an always-on ruleset. Keep the steady-state path cheap. Use it to bootstrap or repair repo-local instructions only when they are missing, unchecked, suspected stale, structurally broken, changed since the last check, or explicitly requested.
 
-The `repo-local/*.template.md` files are bare copy-ready destination payloads with an exact curated-source safety comment at the top. Install instructions live in this skill and its README, not inside the files copied into target repos.
+All questions that require user action or confirmation must be fully bolded. This includes target-path questions, repair/overwrite questions, approval questions, and same-session continuation questions.
 
-Use this skill automatically before repository editing work when any of these are true:
+## Cheap State Check
 
-- The repo has no `AGENTS.md`.
-- The current or target platform shim is missing and that platform needs one.
-- Existing active instruction files lack `AI-AGENT-TOOLKIT:<source-path>` managed marker blocks.
-- Existing managed marker blocks in active instruction files are stale or out of order.
-- The session appears to be the first agent session after toolkit skills were installed.
+This works for GitHub, GitLab, Bitbucket, local git repos, and plain folders. Git metadata is helpful but never required.
 
-## Cheap Check First
+1. Locate the selected/open target repo or project folder, or use the explicit target path. If neither exists, stop and ask for a target path.
+2. Identify the current or requested platform. Only these platform scopes exist for this skill:
+   - Codex or unspecified: `AGENTS.md`.
+   - Claude Code: `AGENTS.md` and `CLAUDE.md`.
+   - Antigravity: `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
+3. Check only the required files for the selected platform.
+4. For each required file, check existence and `AI-AGENT-TOOLKIT` managed-marker structure.
+5. If every required file is structurally current enough, do not read templates, do not inspect or compare managed body content beyond marker structure, do not rewrite files, and continue the original user task.
 
-1. Locate the selected/open target repo or use the explicit target path. If neither exists, stop and ask for a target path.
-2. Identify the current or user-requested target platform.
-3. Check or install `AGENTS.md` as the canonical managed file.
-4. Inspect only the active shim file needed for the current/target platform: `CLAUDE.md` for Claude Code, `GEMINI.md` and `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
-5. If all required files and markers for the current/target platform are current, do not rewrite anything; continue the original user task.
-6. If `AGENTS.md` is missing or stale, copy or merge `repo-local/AGENTS.managed.template.md` into target repo `AGENTS.md`.
-7. Add only the shim for the current/target platform unless the user explicitly requests all platform shims.
-8. Preserve existing active instruction files. Preserve unmarked user-authored content, do not delete duplicate/conflicting unmarked content automatically, and report it.
-9. After creating/updating managed instruction files, stop and end with:
+A required file is structurally current enough only when:
 
-**SESSION RESET NEEDED: I loaded/updated agent instructions for this repo, so please start a new agent session before continuing the implementation task.**
+- The file exists.
+- The file contains at least one complete `AI-AGENT-TOOLKIT` managed marker pair.
+- Every `AI-AGENT-TOOLKIT` managed marker is part of a complete, balanced pair.
+- No `BEGIN` or `END` marker is missing, duplicated, unmatched, nested incorrectly, or out of order.
+
+A managed marker pair is valid only when:
+
+- A `BEGIN` marker has exactly one matching `END` marker.
+- The matching `END` marker uses the same `AI-AGENT-TOOLKIT` source identity and block label.
+- `BEGIN` appears before `END`.
+
+Do not treat bare `AI-AGENT-TOOLKIT` text, a missing managed block, or balanced zero-block state as current. This cheap path is a structural managed-marker check, not a full template diff.
+
+## Install Or Repair
+
+Use repo-local templates only when install or repair is needed:
+
+- `repo-local/AGENTS.managed.template.md` -> target repo `AGENTS.md`.
+- `repo-local/CLAUDE.shim.template.md` -> target repo `CLAUDE.md` only for Claude Code.
+- `repo-local/GEMINI.shim.template.md` -> target repo `GEMINI.md` only for Antigravity.
+- `repo-local/antigravity-bootstrap.template.md` -> target repo `.agents/rules/00-agent-toolkit-bootstrap.md` only for Antigravity.
+
+Before modifying repo-local instruction files, record enough state to preserve user work: target path, whether git metadata exists, branch/HEAD and dirty state when available, existing required files, and whether affected instruction files were already dirty or manually edited. For plain folders without git metadata, treat existing instruction files as user-authored unless complete managed markers identify toolkit-owned content.
+
+If an affected instruction file is already dirty/uncommitted, do not automatically modify it unless the user explicitly asked to install or repair repo-local instructions. If repair is needed but the affected file is dirty, report the dirty state and ask before rewriting.
+
+The installed template content for every required repo-local instruction file must include complete `AI-AGENT-TOOLKIT` managed marker pairs so future sessions can verify structural currency without reading templates.
+
+Preserve existing active instruction files and all unmarked user-authored content. When a target file exists but has no valid managed block, keep all existing file content and insert the required managed template content at the top of the file before unmarked user-authored content. Do not append the managed block below custom rules unless the user explicitly asks for that layout.
+
+When a target file has broken, duplicate, unmatched, or out-of-order managed markers, do not guess destructively. Repair only the managed toolkit-owned block when the safe replacement boundary is clear. If the boundary is not clear, report the issue and ask before rewriting.
+
+Do not delete duplicate, conflicting, or obsolete unmarked content automatically; report it. Do not create shims for platforms that are not in scope.
+
+If this skill creates or modifies `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`, stop immediately and end with this exact format:
+
+**SESSION RESET RECOMMENDED:**
+
+**I created/updated repo-local agent instructions. Start a new agent session in this folder so the agent loads `AGENTS.md` as startup instructions before continuing implementation.**
+
+**Should I continue in this same session best-effort after reading the updated instructions, or will you start a new agent session?**
+
+Keep the full reset message and question bolded exactly as shown. Do not continue implementation work until the user answers.
+
+If the user explicitly chooses to continue in the same session, read the updated repo-local instruction files first, state that same-session continuation is best-effort and not equivalent to a fresh startup instruction load, then continue only if the task remains safe and clearly scoped.
 
 ## Boundaries
 
-This automatic bootstrap is for local repo/folder instruction files only. It must not push, create or update a PR, touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product repos, workflow JSON, imports, exports, or runtime actions.
+This bootstrap is for local repo/folder instruction files only. It must not push, create or update a PR, touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product repos, workflow JSON, imports, exports, or runtime actions.
 
-Do not install heavy global `AGENTS.md` or global `GEMINI.md` rules. After setup, the repo-local files are the source of truth.
-
-Use referenced files for full repo-local content:
-
-- Copy or merge `repo-local/AGENTS.managed.template.md` into target repo `AGENTS.md`.
-- Copy `repo-local/CLAUDE.shim.template.md` to target repo `CLAUDE.md` only when Claude Code support is requested or the target platform is Claude Code.
-- Copy `repo-local/GEMINI.shim.template.md` to target repo `GEMINI.md` for Antigravity.
-- Copy `repo-local/antigravity-bootstrap.template.md` to target repo `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
-
-Do not create missing shims for platforms that are not in scope. A Claude Code setup needs root `AGENTS.md` plus `CLAUDE.md`; an Antigravity setup needs root `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
+Do not install heavy global `AGENTS.md` or global `GEMINI.md` rules. After setup, repo-local files are the source of truth.
 
 Manual global setup templates live in `_projects/development/ai-coding-agent-rules/_main/`; do not treat those source docs as the published skill runtime path.
-
-For Antigravity, install toolkit skills in the observed plugin-scoped custom skill folder:
-`C:\Users\<user>\.gemini\config\plugins\ai-agent-toolkit\skills\<skill-name>\SKILL.md`.
-Keep that skill-loading path distinct from repo-local bootstrap outputs, which still go into the target repo as `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
-Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity runtime or docs require plugin metadata.

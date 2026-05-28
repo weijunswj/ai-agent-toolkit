@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "version_policy": "semver",
-  "version_notes": "Publishes repo-local automatic bootstrap templates as bare copy-ready payload files with an exact curated-source safety comment while keeping manual global source templates separate.",
+  "version_notes": "Clarifies the repo-local bootstrap skill as a cheap structural managed-marker checker and marker-wraps all required repo-local shim templates for future cheap verification.",
   "outputs": [
     {
       "kind": "curated",
