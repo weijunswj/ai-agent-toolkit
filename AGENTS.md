@@ -189,6 +189,8 @@ If that skill or its full rules are unavailable, stop and report the limitation 
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
 
+This root `AGENTS.md` is toolkit-repo-specific. Do not use it as the portable install template for other repositories. Portable repo installs must use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
+
 This repo is the canonical reusable AI Agent Toolkit.
 
 <!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
@@ -228,122 +230,39 @@ This repo has a source layer and a published layer.
 - Required runtime context for a skill or MCP surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
 <!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->
 
-## Agent Routing Rules
+## Repo-Local Router
 
-- Do not edit generated `skills/` or `mcp/` outputs directly unless that output is declared as `linked` in the relevant `_projects/**/toolkit.project.json`.
-- If changing an internal skill, MCP doc, skill-local template, skill-local pack, or registry-backed MCP note, edit `_projects/**/curated_output_for_ai/` first, then run sync.
-- If changing preserved source, edit `_projects/**/_main/`.
-- If adding or moving a generated output, update the relevant `toolkit.project.json` recipe and `writes.allowed`.
-- If adding, removing, renaming, or materially changing a skill under `skills/**`, update `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`.
-- If adding, removing, renaming, or materially changing a project module that publishes a skill, update the toolkit skill-routing table when that skill should be invokable by supported agents.
-- If changing skill names, `SKILL.md` frontmatter, or skill descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, the toolkit skill-routing source partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
-- If a new skill should not be auto-routed, document why it is intentionally omitted in the toolkit skill-routing source partial.
-- Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
-- Projects link to projects, and skills link to skills. If a skill depends on another skill, declare that dependency in `SKILL.md`, the skill README/install docs, registry metadata when applicable, and any related pack or adapter docs.
-- If a copied cross-skill reference is needed for portability, generate it from canonical source, label it as generated cross-skill content, and do not edit it directly.
-- Do not generate curated files automatically from `_main`; curated content is reviewed source.
-- Do not weaken safety rules around credentials, `.env`, `.tmp`, `.n8n-local`, live n8n actions, approval, attribution, or local-only constraints.
-- Run sync, check, and relevant tests before reporting completion.
+- Use this root file as the router for this toolkit repo only; use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for portable installs.
+- Keep managed marker blocks intact. If a marked block needs content changes, edit the source path named in the marker and run the matching sync/check command.
+- For AI-agent instruction changes, read [repo/docs/FOR_AI_AGENTS.md](repo/docs/FOR_AI_AGENTS.md) and [repo/docs/SOURCE-OF-TRUTH.md](repo/docs/SOURCE-OF-TRUTH.md).
+- For project modules or published skills/MCP surfaces, also read [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md) and [repo/docs/SURFACE-FIDELITY-AUDIT.md](repo/docs/SURFACE-FIDELITY-AUDIT.md).
+- For new or changed project modules, `repo/docs/PROJECT-MODULE-STANDARD.md` is the detailed rulebook.
+- For provenance and third-party source work, read [repo/docs/RETIRED-SOURCE-PROVENANCE.md](repo/docs/RETIRED-SOURCE-PROVENANCE.md), [repo/docs/THIRD-PARTY-SOURCE-NOTES.md](repo/docs/THIRD-PARTY-SOURCE-NOTES.md), and the project standard.
+- For generated-output writeback or privileged workflow changes, read [repo/docs/WRITE-SAFETY-MODEL.md](repo/docs/WRITE-SAFETY-MODEL.md) and [repo/docs/SAFE-UPDATES.md](repo/docs/SAFE-UPDATES.md).
+- For cleanup, deletion, retirement, or human usage/docs/navigation changes, read [repo/docs/CLEANUP-POLICY.md](repo/docs/CLEANUP-POLICY.md), retired-source provenance when applicable, [repo/docs/HOW-TO-USE.md](repo/docs/HOW-TO-USE.md), and [README.md](README.md).
 
 ## Managed Marker Rules
 
-Use managed markers when a script inserts, replaces, appends, extracts, or assembles a source-owned section inside a larger Markdown file. Use:
+Use managed markers for source-owned inserted sections:
 
 `<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->`
 `<!-- AI-AGENT-TOOLKIT:<source-path>:END <BLOCK-NAME> -->`
 
-`<source-path>` must be the workspace-relative source partial, contract, adapter, or generator-owned file that supplies the managed text. `<BLOCK-NAME>` must be a short uppercase section name, such as `GLOBAL-AGENTS.MD-TEMPLATE`, `N8N-AGENT-RULES-ADAPTER`, or `SOURCE-OF-TRUTH-CONTRACT`. Change managed sections from the source file or generator, then run sync. Bump the marker version only when the managed section contract changes in a way the generator or consumers must distinguish.
+Change managed sections from the source file or generator, then run sync/check.
 
-## Mandatory Repo Docs By Task
+## Repo-Local Safety
 
-Before changing this repo, read the docs that match your task. These docs are part of the repo contract, not optional background reading.
+- Respect the source-of-truth contract above: update `_projects/**/_main/`, `_projects/**/curated_output_for_ai/`, manifests, or rare declared linked outputs before generated `skills/` or `mcp/` surfaces.
+- Do not edit generated `skills/` or `mcp/` outputs directly unless that output is declared as `linked`; update the source and run sync instead.
+- Do not generate curated files automatically from `_main`; curated content is reviewed source.
+- Do not copy this toolkit root `AGENTS.md` into other repos.
+- Do not introduce credentials, credential exports, private keys, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, product code, customer data, or business workflow JSON.
+- Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, production, destructive, or privileged external actions without explicit current-turn approval naming the target and allowed operation.
+- Do not weaken validation, schemas, guardrails, attribution, generated-output ownership, or local-only safety constraints just to make a check pass.
 
-| Task | Required docs |
-|---|---|
-| Any AI-agent change | [`repo/docs/FOR_AI_AGENTS.md`](repo/docs/FOR_AI_AGENTS.md), [`repo/docs/SOURCE-OF-TRUTH.md`](repo/docs/SOURCE-OF-TRUTH.md) |
-| New or changed project module | [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md), [`repo/docs/SURFACE-FIDELITY-AUDIT.md`](repo/docs/SURFACE-FIDELITY-AUDIT.md) |
-| New or changed skill/MCP/published surface | [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md), [`repo/docs/SURFACE-FIDELITY-AUDIT.md`](repo/docs/SURFACE-FIDELITY-AUDIT.md) |
-| Source locks, retired repos, provenance | [`repo/docs/RETIRED-SOURCE-PROVENANCE.md`](repo/docs/RETIRED-SOURCE-PROVENANCE.md), [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md) |
-| Third-party-attributed source | [`repo/docs/THIRD-PARTY-SOURCE-NOTES.md`](repo/docs/THIRD-PARTY-SOURCE-NOTES.md), [`repo/docs/PROJECT-MODULE-STANDARD.md`](repo/docs/PROJECT-MODULE-STANDARD.md) |
-| Generated-output writeback, sync, or privileged workflow changes | [`repo/docs/WRITE-SAFETY-MODEL.md`](repo/docs/WRITE-SAFETY-MODEL.md), [`repo/docs/SAFE-UPDATES.md`](repo/docs/SAFE-UPDATES.md) |
-| Cleanup, deletion, or retirement | [`repo/docs/CLEANUP-POLICY.md`](repo/docs/CLEANUP-POLICY.md), [`repo/docs/RETIRED-SOURCE-PROVENANCE.md`](repo/docs/RETIRED-SOURCE-PROVENANCE.md) |
-| Human usage/docs/navigation changes | [`repo/docs/HOW-TO-USE.md`](repo/docs/HOW-TO-USE.md), [`README.md`](README.md) |
+## Validation And PR Updates
 
-If a task touches multiple areas, read all matching docs.
-
-For new or changed project modules, `repo/docs/PROJECT-MODULE-STANDARD.md` is the detailed rulebook. `AGENTS.md` is the router; the project standard is the implementation contract.
-
-## New Or Changed Project Checklist
-
-When adding a new project module or changing a published skill/MCP surface:
-
-- Treat `_projects/**/_main/**` as preserved source/provenance.
-- Keep `SKILL.md` concise, but keep required runtime instructions local inside the copied skill folder.
-- Decide whether the project publishes an agent-usable skill, whether that skill belongs in toolkit skill routing, and whether the `SKILL.md` description is specific enough for implicit invocation where supported.
-- If the project publishes a skill, update README/registry/routing docs as applicable, regenerate generated AGENTS/CLAUDE/GEMINI equivalents, or document why the skill is intentionally omitted from routing.
-- Do not replace full working docs, prompts, templates, setup guides, troubleshooting notes, or examples with lossy summaries.
-- Use deterministic recipes in `toolkit.project.json`: `copy`, `extract`, `concat`, `curated`, `json`, or rare justified `linked`.
-- If publishing a full source doc into a skill folder, prefer exact `copy` or `extract`.
-- If exact copied docs contain source-relative links that would break after publishing, add small reference-link shims under `curated_output_for_ai/reference-link-shims/` and declare them in `toolkit.project.json`.
-- Do not add shims by default. Add them only when exact copied docs would otherwise have broken relative links.
-- Update `SOURCE-MANIFEST.md` when a project uses shims, linked outputs, third-party source, or cross-surface composition.
-- Update `SOURCE-LOCK.json` when preserved/source-locked material changes.
-- Run targeted local validation before pushing. Run local `npm run validate:all` for broad or risky changes, workflow/sync/generator/package/security changes, or CI reproduction; CI remains the full merge gate.
-
-Keep the topology simple:
-
-- `_projects/` preserves canonical human/source material. Full original docs and guides live in `_projects/**/_main/`.
-- Current `_projects/` categories are `cicd/`, `design/`, `development/`, `knowledge/`, `n8n/`, and `repo-methodology/`.
-- `skills/` contains copyable agent skills. Copy the whole skill folder, not only `SKILL.md`.
-- `mcp/` contains MCP specs, registries, project MCP notes, and any implemented commands/tools.
-- `repo/` contains repo maintenance assets: docs, scripts, tests, validation policy, and CI support.
-
-## What Belongs Here
-
-- Reusable AI skills under `skills/`.
-- Skill-specific references, examples, templates, helper scripts, tools, and pack metadata inside the owning `skills/<skill-name>/` folder.
-- JSON-only discovery registries and MCP design/spec material under `mcp/`.
-- Repo policy, scripts, and tests under `repo/`.
-- Preserved source material and reviewed source material under `_projects/`.
-
-## What Does Not Belong Here
-
-- Product repo code.
-- Customer or business workflow JSON.
-- Trading app code.
-- Credentials, credential exports, credential binding files, private keys, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, or live n8n import/export files.
-- Auto-merge, production deployment automation, or unscoped auto-commit. Any generated-output writeback must be same-repo PR-only, explicit, and validation-gated.
-- Removed-layout placeholders.
-
-## Documentation Rules
-
-- Humans should use `_projects/**/_main/` for full source docs and original guides.
-- Human-facing navigational paths and URLs must be clickable Markdown links. Do not leave important links only inside code fences or inline code. Code blocks are for commands, payloads, literal examples, and copy/paste prompts.
-- `_projects/**/README.md` files should stay tiny landing cards.
-- `skills/<skill-name>/README.md` files should explain how to copy/install/use the skill folder.
-- `mcp/README.md` must say plainly whether the MCP surface is runnable today or design/spec-only.
-- Do not present packs, playbooks, templates, registries, or tools as primary root user entrypoints.
-- Do not edit preserved source docs inside `_projects/**/_main/` unless needed for safety or broken internal references caused by a refactor.
-
-## Validation
-
-For expensive validation work, follow `repo/docs/VALIDATION-STRATEGY.md`: use targeted checks while developing and before pushing. Do not loop `npm run validate:all` repeatedly when a narrower failing check can be isolated; run local full validation only when the change risk or CI state calls for it.
-
-Before reporting completion, run the relevant checks:
-
-```powershell
-node repo/scripts/sync-repo-doc-contract.cjs --check
-node repo/scripts/sync-toolkit-projects.cjs --check
-node repo/scripts/audit-project-source-locks.cjs
-node repo/scripts/audit-skill-portability.cjs
-node repo/scripts/validate-toolkit.cjs
-node --test repo/tests/*.test.cjs
-node repo/scripts/package-skills.cjs --check
-node repo/scripts/package-packs.cjs --check
-node repo/scripts/run-design-tests.cjs
-git diff --check
-```
-
-## n8n Safety
-
-Do not run live n8n import, export, activation, deactivation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo unless a future user request explicitly asks for that live action and confirms the target instance.
+- Run the smallest relevant local validation before pushing. Use targeted tests/checks for touched scripts, docs, generated surfaces, or managed instruction files.
+- Do not run local `npm run validate:all` by default when CI runs the full gate. Use local full validation for broad, risky, workflow, sync, generator, package, or security-sensitive changes, or to reproduce CI failures.
+- If a generated-output or contract check fails on unrelated stale files, report the blocker and do not broaden the PR without user direction.
+- Before final reporting after a push, update the existing PR body when the cumulative diff, safety notes, validation, generated-output status, or user-facing behaviour changed.

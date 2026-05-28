@@ -248,7 +248,7 @@ async function checkProjectSourceUpdates({ workspace, report }, env = process.en
     return {
       report_written: false,
       updates,
-      summary: 'No active third-party source updates found.'
+      summary: `Checked ${activeLocks.length} active third-party source lock(s); all pinned commits are current.`
     };
   }
 

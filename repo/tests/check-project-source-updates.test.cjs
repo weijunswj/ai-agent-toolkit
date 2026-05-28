@@ -116,7 +116,7 @@ test('no active third-party changes exits cleanly without a PR-needed report', a
   await withMockGitHub(lockedSha, async (apiBaseUrl) => {
     const result = await runScript(workspace, reportRel, apiBaseUrl);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /No active third-party source updates found/);
+    assert.match(result.stdout, /Checked 1 active third-party source lock\(s\); all pinned commits are current\./);
     assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
   });
 });

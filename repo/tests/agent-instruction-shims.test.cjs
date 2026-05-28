@@ -152,7 +152,7 @@ test('repo-local source and published skill templates are local bootstrap templa
   }
 });
 
-test('root AGENTS.md keeps managed blocks before repo contract sections', () => {
+test('root AGENTS.md keeps managed blocks before repo-local router', () => {
   const text = readText('AGENTS.md');
   const h1s = text.match(/^# /gm) || [];
   assert.equal(h1s.length, 1);
@@ -163,21 +163,21 @@ test('root AGENTS.md keeps managed blocks before repo contract sections', () => 
 
   const n8nEndIndex = text.indexOf(n8nEnd);
   assert.notEqual(n8nEndIndex, -1, 'root AGENTS.md has n8n end marker');
+  const portableWarningIndex = text.indexOf('This root `AGENTS.md` is toolkit-repo-specific.', n8nEndIndex);
+  assert.notEqual(portableWarningIndex, -1, 'root AGENTS.md has portable-template warning');
+  assert.ok(portableWarningIndex > n8nEndIndex, 'portable-template warning stays outside managed blocks');
+  assert.match(text, /Portable repo installs must use \[`skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
   for (const section of [
     '## Source-of-Truth Contract',
-    '## Agent Routing Rules',
-    '## Mandatory Repo Docs By Task',
-    '## New Or Changed Project Checklist',
-    '## What Belongs Here',
-    '## What Does Not Belong Here',
-    '## Documentation Rules',
-    '## Validation',
-    '## n8n Safety'
+    '## Repo-Local Router',
+    '## Repo-Local Safety',
+    '## Validation And PR Updates'
   ]) {
     const index = text.indexOf(section, n8nEndIndex);
     assert.notEqual(index, -1, `root AGENTS.md contains ${section}`);
     assert.ok(index > n8nEndIndex, `${section} stays below managed blocks`);
   }
+  assert.doesNotMatch(text, /## Agent Routing Rules|## New Or Changed Project Checklist|Before reporting completion, run the relevant checks:/);
 });
 
 test('managed toolkit block comes from the execution prompt partial', () => {
@@ -316,7 +316,9 @@ test('published skill docs focus on repo-local automatic setup', () => {
 test('root README platform guidance requires AGENTS before platform shims', () => {
   const text = readText('README.md');
   const section = text.slice(text.indexOf('## Install Skills By Platform'), text.indexOf('\n## MCP'));
-  assert.match(section, /`AGENTS\.md` is the shared managed instruction file/);
+  assert.match(section, /`AGENTS\.md` is the shared managed instruction file inside the target repo/);
+  assert.match(section, /For portable installs, create or merge it from \[repo-local\/AGENTS\.managed\.template\.md\]/);
+  assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
   assert.match(section, /\| Codex \|[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
   assert.match(section, /\| OpenCode \|[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
   assert.match(section, /\| Claude Code \|[^\n]*Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*then add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md/);
