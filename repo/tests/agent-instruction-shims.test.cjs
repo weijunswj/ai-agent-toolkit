@@ -316,7 +316,9 @@ test('published skill docs focus on repo-local automatic setup', () => {
 test('root README platform guidance requires AGENTS before platform shims', () => {
   const text = readText('README.md');
   const section = text.slice(text.indexOf('## Install Skills By Platform'), text.indexOf('\n## MCP'));
-  assert.match(section, /`AGENTS\.md` is the shared managed instruction file/);
+  assert.match(section, /`AGENTS\.md` is the shared managed instruction file inside the target repo/);
+  assert.match(section, /For portable installs, create or merge it from \[repo-local\/AGENTS\.managed\.template\.md\]/);
+  assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
   assert.match(section, /\| Codex \|[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
   assert.match(section, /\| OpenCode \|[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
   assert.match(section, /\| Claude Code \|[^\n]*Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*then add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md/);
