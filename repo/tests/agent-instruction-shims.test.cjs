@@ -316,9 +316,9 @@ test('root README platform guidance requires AGENTS before platform shims', () =
   assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
   assert.match(section, /\| Codex \|[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
   assert.match(section, /\| OpenCode \|[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
-  assert.match(section, /\| Claude Code \|[^\n]*Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*then add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md/);
-  assert.match(section, /\| Gemini CLI \|[^\n]*Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*then add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md/);
-  assert.match(section, /\| Antigravity \|[^\n]*Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*then add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*00-agent-toolkit-bootstrap\.md[^\n]*repo-local\/antigravity-bootstrap\.template\.md/);
+  assert.match(section, /\| Claude Code \|[^\n]*<ul><li>Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*<li>Add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md/);
+  assert.match(section, /\| Gemini CLI \|[^\n]*<ul><li>Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*<li>Add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md/);
+  assert.match(section, /\| Antigravity \|[^\n]*<ul><li>Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*<li>Add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*<li>Optionally add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`[^\n]*repo-local\/antigravity-bootstrap\.template\.md/);
   assert.doesNotMatch(section, /skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
   assert.doesNotMatch(section, /start from \[`(?:CLAUDE|GEMINI)\.template\.md`\]/);
 });
