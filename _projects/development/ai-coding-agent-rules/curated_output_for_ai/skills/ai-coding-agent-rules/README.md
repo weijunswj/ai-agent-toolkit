@@ -35,9 +35,9 @@ Manual global setup templates live in `_projects/development/ai-coding-agent-rul
 |---|---|---|
 | Codex | `AGENTS.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
 | OpenCode | `AGENTS.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
-| Claude Code | `AGENTS.md` plus `CLAUDE.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), then [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) |
-| Gemini CLI | `AGENTS.md` plus `GEMINI.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), then [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) |
-| Antigravity | `AGENTS.md` plus `GEMINI.md` and/or `.agents/rules/00-agent-toolkit-bootstrap.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md), then [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) and/or [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) |
+| Claude Code | 1) `AGENTS.md`<br>2) `CLAUDE.md` | 1) [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)<br>2) [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) |
+| Gemini CLI | 1) `AGENTS.md`<br>2) `GEMINI.md` | 1) [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)<br>2) [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) |
+| Antigravity | 1) `AGENTS.md`<br>2) `GEMINI.md` if using the Gemini shim<br>3) `.agents/rules/00-agent-toolkit-bootstrap.md` if using the Antigravity bootstrap | 1) [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)<br>2) [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) if using the Gemini shim<br>3) [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) if using the Antigravity bootstrap |
 
 Install copied skill folders according to the target platform's supported skill location. For Antigravity, use the observed plugin-scoped custom skill path:
 `C:\Users\<user>\.gemini\config\plugins\ai-agent-toolkit\skills\<skill-name>\SKILL.md`.
