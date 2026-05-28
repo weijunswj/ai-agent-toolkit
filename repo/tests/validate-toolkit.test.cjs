@@ -88,6 +88,37 @@ function generatedNoticeCount(text) {
   return (text.match(/Generated from toolkit (?:project source|curated output for AI)\. Do not edit directly\./g) || []).length;
 }
 
+function managedRepoLocalPayload(executionPrompt, n8nAdapter) {
+  return [
+    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->',
+    executionPrompt.trimEnd(),
+    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->',
+    '',
+    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->',
+    n8nAdapter.trimEnd(),
+    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->',
+    ''
+  ].join('\n');
+}
+
+function assertBareRepoLocalTemplate(rel, text) {
+  const forbiddenPatterns = [
+    [/Generated from toolkit/i, 'generated toolkit notice'],
+    [/Curated AI-facing source/i, 'curated-source wrapper note'],
+    [/This file is inert/i, 'inert template prose'],
+    [/copy or merge the fenced payload/i, 'fenced-payload install prose'],
+    [/^````````md$/m, 'opening 8-backtick payload fence'],
+    [/^````````$/m, 'closing 8-backtick payload fence'],
+    [/^## Repo-local /m, 'README-style repo-local install heading'],
+    [/<repo>\\/i, 'README-style destination example'],
+    [/Or create it with PowerShell/i, 'README-style PowerShell install prose']
+  ];
+
+  for (const [pattern, label] of forbiddenPatterns) {
+    assert.doesNotMatch(text, pattern, `${rel} must be a bare payload without ${label}`);
+  }
+}
+
 function sourceWatchPrBodyText(workflow) {
   const normalized = workflow.replace(/\r\n/g, '\n');
   const marker = 'cat > "$PR_BODY" <<\'EOF\'';
@@ -1179,39 +1210,35 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
     assert.doesNotMatch(text, /GitHub PR Completion Rules|GITHUB APPROVAL NEEDED|VERSION CONTROL APPROVAL NEEDED|REMOTE APPROVAL NEEDED|LOCAL CHANGE APPROVAL NEEDED|PR: none yet/i, rel);
   }
 
-  const localTemplates = [
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
-  ];
-  for (const rel of localTemplates) {
-    const text = readTextFile(path.join(repoRoot, rel));
-    assert.match(text, /repo-local/i, rel);
-    assert.match(text, /<repo>\\(?:AGENTS|CLAUDE|GEMINI)\.md|<repo>\\\.agents\\rules\\00-agent-toolkit-bootstrap\.md/, rel);
-    assert.doesNotMatch(text, /Claude Code global rules example|Gemini CLI and Antigravity global rules example|C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)/, rel);
-    assert.doesNotMatch(text, /GitHub PR Completion Rules|GITHUB APPROVAL NEEDED|VERSION CONTROL APPROVAL NEEDED|REMOTE APPROVAL NEEDED|LOCAL CHANGE APPROVAL NEEDED|PR: none yet/i, rel);
-    assert.equal((text.match(/^````````md$/gm) || []).length, 1, rel);
-    assert.equal((text.match(/^````````$/gm) || []).length, 1, rel);
-    if (rel.endsWith('AGENTS.managed.template.md')) {
-      assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v1/, rel);
-      assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/, rel);
-      assert.ok(text.includes(n8nAdapter), rel);
+  const expectedPayloads = new Map([
+    ['AGENTS.managed.template.md', managedRepoLocalPayload(executionPrompt, n8nAdapter)],
+    ['CLAUDE.shim.template.md', readTextFile(path.join(repoRoot, 'CLAUDE.md'))],
+    ['GEMINI.shim.template.md', readTextFile(path.join(repoRoot, 'GEMINI.md'))],
+    ['antigravity-bootstrap.template.md', readTextFile(path.join(repoRoot, '.agents', 'rules', '00-agent-toolkit-bootstrap.md'))]
+  ]);
+  const manifest = readJsonFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json'));
+
+  for (const [fileName, expected] of expectedPayloads) {
+    const sourceRel = `_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/${fileName}`;
+    const outputRel = `skills/ai-coding-agent-rules/repo-local/${fileName}`;
+    for (const rel of [sourceRel, outputRel]) {
+      const text = readTextFile(path.join(repoRoot, rel));
+      assert.equal(text, expected, `${rel} is exactly the copy-ready destination payload`);
+      assertBareRepoLocalTemplate(rel, text);
+      assert.doesNotMatch(text, /Claude Code global rules example|Gemini CLI and Antigravity global rules example|C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)/, rel);
+      assert.doesNotMatch(text, /GitHub PR Completion Rules|GITHUB APPROVAL NEEDED|VERSION CONTROL APPROVAL NEEDED|REMOTE APPROVAL NEEDED|LOCAL CHANGE APPROVAL NEEDED|PR: none yet/i, rel);
     }
+
+    const output = manifest.outputs.find((entry) => entry.output === outputRel);
+    assert.equal(output?.notice, false, `${outputRel} suppresses generated notices because it is copied wholesale`);
   }
 
-  for (const rel of [
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
-  ]) {
-    assert.equal(generatedNoticeCount(readTextFile(path.join(repoRoot, rel))), 1, rel);
-  }
+  const rootAgents = readTextFile(path.join(repoRoot, 'AGENTS.md'));
+  const portableAgents = readTextFile(path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'));
+  assert.notEqual(rootAgents, portableAgents, 'root AGENTS.md is not the portable repo-local install source');
+  assert.match(rootAgents, /This root `AGENTS\.md` is toolkit-repo-specific/, 'root AGENTS.md stays toolkit-specific');
+  assert.match(rootAgents, /## Repo-Local Router/, 'root AGENTS.md keeps toolkit repo router');
+  assert.doesNotMatch(portableAgents, /This root `AGENTS\.md` is toolkit-repo-specific|## Repo-Local Router/, 'portable AGENTS template has no toolkit repo wrapper');
 
   for (const rel of [
     'skills/ai-coding-agent-rules/AGENTS.template.md',
@@ -2264,6 +2291,33 @@ test('validator narrows credential example JSON allowance to intended fixtures',
   result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Credential file present: repo\/docs\/service\.credentials\.json/);
+});
+
+test('shared gitignore does not ignore intentionally installed repo instruction files', () => {
+  const gitignoreLines = readTextFile(path.join(repoRoot, '.gitignore'))
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+  const forbiddenIgnorePatterns = new Set([
+    'AGENTS.md',
+    '/AGENTS.md',
+    'CLAUDE.md',
+    '/CLAUDE.md',
+    'GEMINI.md',
+    '/GEMINI.md',
+    '.agents/',
+    '/.agents/',
+    '.agents/rules/',
+    '/.agents/rules/',
+    '.agents/rules/*.md',
+    '/.agents/rules/*.md',
+    '.agents/rules/00-agent-toolkit-bootstrap.md',
+    '/.agents/rules/00-agent-toolkit-bootstrap.md'
+  ]);
+
+  for (const pattern of forbiddenIgnorePatterns) {
+    assert.equal(gitignoreLines.includes(pattern), false, `.gitignore must not ignore ${pattern}`);
+  }
 });
 
 test('validator rejects obvious secret-looking strings', () => {

@@ -1,42 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: development.ai-coding-agent-rules
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
--->
-
-# AGENTS.managed.template.md repo-local managed AI coding agent rules
-
-Use this generated template for repo/folder-local Codex or OpenCode setup.
-
-This file is inert while it keeps the `.template.md` filename. It is safe to keep inside a skill folder because it is not named `AGENTS.md`.
-
-Copy or merge the fenced payload into the target repo root as `AGENTS.md` only when the user explicitly wants repo-local managed Codex/OpenCode rules installed.
-
-If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
-
-## Repo-local rules example
-
-Copy or merge the fenced payload into:
-
-```text
-<repo>\AGENTS.md
-```
-
-Or create it with PowerShell:
-
-```text
-notepad AGENTS.md
-```
-
----
-
-````````md
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
 ## Role
 
@@ -225,4 +186,3 @@ If the task involves n8n workflows, workflow templates, helper scripts, MCP, imp
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
-````````

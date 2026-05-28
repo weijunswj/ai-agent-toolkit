@@ -76,6 +76,9 @@ Skills are copyable folder packages. Install by copying the whole `skills/<skill
 
 For deeper setup notes, use [How To Use: Use Skills Manually](repo/docs/HOW-TO-USE.md#use-skills-manually).
 
+> [!IMPORTANT]
+> Repo-local agent instruction installs require a selected/open target repo or an explicit target path. Standalone chats without a workspace cannot safely infer where to install `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
+
 `AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Gemini CLI use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity may use `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
 
 | Platform | Install location | Active instruction file | Notes |

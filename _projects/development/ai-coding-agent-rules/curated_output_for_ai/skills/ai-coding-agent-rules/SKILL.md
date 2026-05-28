@@ -13,6 +13,10 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 Tiny automatic repo-instruction bootstrap/checker for local project instruction files.
 
+Repo-local installs require a selected/open target repo or an explicit target path. Standalone chats with no workspace cannot safely infer where to install `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
+
+The `repo-local/*.template.md` files are bare copy-ready destination payloads. Install instructions live in this skill and its README, not inside the files copied into target repos.
+
 Use this skill automatically before repository editing work when any of these are true:
 
 - The repo has no `AGENTS.md`.
@@ -23,12 +27,12 @@ Use this skill automatically before repository editing work when any of these ar
 
 ## Cheap Check First
 
-1. Locate the project folder or repo root. This works for GitHub, GitLab, Bitbucket, local Git repos, and plain folders.
+1. Locate the selected/open target repo or use the explicit target path. If neither exists, stop and ask for a target path.
 2. Identify the current or user-requested target platform.
 3. Check or install `AGENTS.md` as the canonical managed file.
 4. Inspect only the active shim file needed for the current/target platform: `CLAUDE.md` for Claude Code, `GEMINI.md` for Gemini CLI or Antigravity, or `.agents/rules/00-agent-toolkit-bootstrap.md` when Antigravity needs that bootstrap.
 5. If all required files and markers for the current/target platform are current, do not rewrite anything; continue the original user task.
-6. If `AGENTS.md` is missing or stale, create/update only the toolkit-managed block from `repo-local/AGENTS.managed.template.md`.
+6. If `AGENTS.md` is missing or stale, copy or merge `repo-local/AGENTS.managed.template.md` into target repo `AGENTS.md`.
 7. Add only the shim for the current/target platform unless the user explicitly requests all platform shims.
 8. Preserve existing active instruction files. Preserve unmarked user-authored content, do not delete duplicate/conflicting unmarked content automatically, and report it.
 9. After creating/updating managed instruction files, stop and end with:
@@ -41,7 +45,12 @@ This automatic bootstrap is for local repo/folder instruction files only. It mus
 
 Do not install heavy global `AGENTS.md` or global `GEMINI.md` rules. After setup, the repo-local files are the source of truth.
 
-Use referenced files for full repo-local content: `repo-local/AGENTS.managed.template.md`, `repo-local/CLAUDE.shim.template.md`, `repo-local/GEMINI.shim.template.md`, and `repo-local/antigravity-bootstrap.template.md`.
+Use referenced files for full repo-local content:
+
+- Copy or merge `repo-local/AGENTS.managed.template.md` into target repo `AGENTS.md`.
+- Copy `repo-local/CLAUDE.shim.template.md` to target repo `CLAUDE.md` only when Claude Code support is requested or the target platform is Claude Code.
+- Copy `repo-local/GEMINI.shim.template.md` to target repo `GEMINI.md` for Gemini CLI or Antigravity.
+- Copy `repo-local/antigravity-bootstrap.template.md` to target repo `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
 
 Do not create missing shims for platforms that are not in scope. A Claude Code setup needs root `AGENTS.md` plus `CLAUDE.md`; a Gemini CLI setup needs root `AGENTS.md` plus `GEMINI.md`; an Antigravity setup needs root `AGENTS.md` plus the requested Gemini shim and/or Antigravity bootstrap.
 
