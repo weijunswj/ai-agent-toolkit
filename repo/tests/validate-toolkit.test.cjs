@@ -553,18 +553,19 @@ test('Git Completion includes pull-request description synchronization guidance'
   for (const relPath of relPaths) {
     const text = readTextFile(path.join(repoRoot, relPath));
     assert.match(text, /## Git Completion/, relPath);
-    assert.match(text, /## Pull Request Description/, relPath);
+    assert.doesNotMatch(text, /## Pull Request Description/, relPath);
     assert.match(text, /Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits/i, relPath);
     assert.match(text, /Do not run local `npm run validate:all` by default when CI already runs the full gate/i, relPath);
-    assert.match(text, /Run local full validation for broad or risky changes, workflow, sync, generator, package, or security-sensitive changes, reproducing a known CI failure/i, relPath);
-    assert.match(text, /Check PR CI\/status before reporting completion/i, relPath);
-    assert.match(text, /If CI is pending, say it is pending and not yet verified/i, relPath);
-    assert.match(text, /If CI fails, inspect the failing check\/logs when accessible/i, relPath);
-    assert.match(text, /After two failed fix attempts, stop and report the blocker/i, relPath);
-    assert.match(text, /Never claim CI passed unless CI\/status was actually checked/i, relPath);
-    assert.match(text, /Never hide failing, pending, or inaccessible CI state/i, relPath);
+    assert.match(text, /run local full validation only for broad\/risky, workflow, sync, generator, package, security-sensitive changes, known CI failure reproduction/i, relPath);
+    assert.match(text, /check PR CI\/status before reporting completion/i, relPath);
+    assert.match(text, /If pending, say it is pending and not yet verified/i, relPath);
+    assert.match(text, /If failed, inspect accessible logs/i, relPath);
+    assert.match(text, /after two failed fix attempts, stop and report the blocker/i, relPath);
+    assert.match(text, /Never claim CI passed unless checked/i, relPath);
+    assert.match(text, /never hide failing, pending, or inaccessible CI/i, relPath);
     assert.match(text, /full base-to-head diff/i, relPath);
-    assert.match(text, /Before final reporting after a push, update the PR body/i, relPath);
+    assert.match(text, /keep the PR body aligned with the full base-to-head diff/i, relPath);
+    assert.match(text, /If you cannot update it directly, provide exact replacement PR body text/i, relPath);
   }
 });
 
