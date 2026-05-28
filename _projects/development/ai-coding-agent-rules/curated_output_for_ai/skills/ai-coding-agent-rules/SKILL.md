@@ -52,7 +52,7 @@ Use referenced files for full repo-local content:
 - Copy `repo-local/GEMINI.shim.template.md` to target repo `GEMINI.md` for Gemini CLI or Antigravity.
 - Copy `repo-local/antigravity-bootstrap.template.md` to target repo `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
 
-Do not create missing shims for platforms that are not in scope. A Claude Code setup needs root `AGENTS.md` plus `CLAUDE.md`; a Gemini CLI setup needs root `AGENTS.md` plus `GEMINI.md`; an Antigravity setup needs root `AGENTS.md`, `.agents/rules/00-agent-toolkit-bootstrap.md`, and the requested Gemini shim when Gemini-style context is in scope.
+Do not create missing shims for platforms that are not in scope. A Claude Code setup needs root `AGENTS.md` plus `CLAUDE.md`; a Gemini CLI setup needs root `AGENTS.md` plus `GEMINI.md`; an Antigravity setup needs root `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
 Manual global setup templates live in `_projects/development/ai-coding-agent-rules/_main/`; do not treat those source docs as the published skill runtime path.
 
