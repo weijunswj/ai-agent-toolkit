@@ -33,20 +33,29 @@ Manual global setup templates live in `_projects/development/ai-coding-agent-rul
 
 ## Platform Entry Points
 
-| Platform | Required repo files | Repo-local templates |
-|---|---|---|
-| Codex | `AGENTS.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
-| OpenCode | `AGENTS.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
-| Claude Code | <ol><li>`AGENTS.md`</li><li>`CLAUDE.md`</li></ol> | <ol><li>[repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)</li><li>[repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md)</li></ol> |
-| Antigravity | <ol><li>`AGENTS.md`</li><li>`GEMINI.md`</li><li>`.agents/rules/00-agent-toolkit-bootstrap.md`</li></ol> | <ol><li>[repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)</li><li>[repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md)</li><li>[repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md)</li></ol> |
+| Platform | Repo-local entry point |
+|---|---|
+| Codex | `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md). |
+| OpenCode | `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md). |
+
+Claude Code:
+
+1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).
+2. Add `CLAUDE.md` from [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md).
+
+Antigravity:
+
+1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).
+2. Add `GEMINI.md` from [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md).
+3. Add `.agents/rules/00-agent-toolkit-bootstrap.md` from [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md).
 
 Install copied skill folders according to the target platform's supported skill package location.
 
 | Platform | Preferred skill install |
 |---|---|
-| Codex | Direct whole-skill-folder install under `.agents/skills/<skill-name>/`; choose any one supported Codex skill-folder location. |
-| Claude Code | Direct whole-skill-folder install under `.claude/skills/<skill-name>/`; choose any one supported Claude Code skill-folder location. |
-| OpenCode | Short manual whole-skill-folder install only; choose any one supported skill-folder location. |
+| Codex | Direct whole-skill-folder install under `.agents/skills/<skill-name>/`. Choose any one supported Codex skill-folder location. |
+| Claude Code | Direct whole-skill-folder install under `.claude/skills/<skill-name>/`. Choose any one supported Claude Code skill-folder location. |
+| OpenCode | Short manual whole-skill-folder install only. Choose any one supported skill-folder location. |
 | Antigravity | Plugin-scoped skill-folder install under `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
 
 Copy the whole `skills/<skill-name>/` folder, not just `SKILL.md`, and keep supporting files beside it.

@@ -468,9 +468,10 @@ test('skill README documents required file sets and shim dependency', () => {
     assert.match(text, /back up the existing file under `\.agent-toolkit-backups\/` before replacing the toolkit-owned managed block from the current template/i, relPath);
     assert.match(text, /Model expectation: Fresh-folder bootstrap and structurally-current cheap checks are designed to work broadly, but complex broken-marker or edited-managed-block auto-repair is best-effort below Codex GPT-5\.5 High\./, relPath);
     assert.match(text, /For perfect runtime behaviour, use Codex GPT-5\.5 High or an equivalent high-reasoning model\./, relPath);
-    assert.match(text, /\| Claude Code \|[^\n]*<ol><li>`AGENTS\.md`<\/li><li>`CLAUDE\.md`<\/li><\/ol>[^\n]*<ol><li>\[repo-local\/AGENTS\.managed\.template\.md\][^\n]*<\/li><li>\[repo-local\/CLAUDE\.shim\.template\.md\][^\n]*<\/li><\/ol>/i, relPath);
+    assert.match(text, /Claude Code:\n\n1\. Create or merge `AGENTS\.md` from \[repo-local\/AGENTS\.managed\.template\.md\][^\n]*\n2\. Add `CLAUDE\.md` from \[repo-local\/CLAUDE\.shim\.template\.md\]/i, relPath);
     assert.doesNotMatch(text, /\| Gemini\s+CLI \|/i, relPath);
-    assert.match(text, /\| Antigravity \|[^\n]*<ol><li>`AGENTS\.md`<\/li><li>`GEMINI\.md`<\/li><li>`\.agents\/rules\/00-agent-toolkit-bootstrap\.md`<\/li><\/ol>[^\n]*<ol><li>\[repo-local\/AGENTS\.managed\.template\.md\][^\n]*<\/li><li>\[repo-local\/GEMINI\.shim\.template\.md\][^\n]*<\/li><li>\[repo-local\/antigravity-bootstrap\.template\.md\][^\n]*<\/li><\/ol>/i, relPath);
+    assert.match(text, /Antigravity:\n\n1\. Create or merge `AGENTS\.md` from \[repo-local\/AGENTS\.managed\.template\.md\][^\n]*\n2\. Add `GEMINI\.md` from \[repo-local\/GEMINI\.shim\.template\.md\][^\n]*\n3\. Add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md` from \[repo-local\/antigravity-bootstrap\.template\.md\]/i, relPath);
+    assert.doesNotMatch(text, /<\/?(?:ol|li)>/i, relPath);
     assert.doesNotMatch(text, /Never overwrite existing `AGENTS\.md`, `CLAUDE\.md`, or `GEMINI\.md`/i, relPath);
     assert.doesNotMatch(text, /produce a merge or diff plan instead/i, relPath);
     assert.doesNotMatch(text, /if using the Gemini shim/i, relPath);

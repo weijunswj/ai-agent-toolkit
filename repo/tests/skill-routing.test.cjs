@@ -47,6 +47,27 @@ function duplicates(values) {
   return [...repeated].sort();
 }
 
+function markdownFilesIn(relRoots) {
+  const files = [];
+
+  function walk(fullPath) {
+    const stat = fs.statSync(fullPath);
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(fullPath)) {
+        walk(path.join(fullPath, entry));
+      }
+      return;
+    }
+    if (fullPath.endsWith('.md')) files.push(fullPath);
+  }
+
+  for (const relRoot of relRoots) {
+    walk(path.join(repoRoot, relRoot));
+  }
+
+  return files.sort();
+}
+
 test('toolkit skill routing covers current skill folders or documents omissions', () => {
   const routing = readText(routingPartial);
   const routedSection = section(routing, 'Current Toolkit Skill Routing');
@@ -91,6 +112,17 @@ test('toolkit skill routing stays routing-only', () => {
   assert.doesNotMatch(routing, /`~\/\.codex\/config\.toml`/);
   assert.doesNotMatch(routing, /`\/skills`/);
   assert.doesNotMatch(routing, /`\$skill-name`/);
+});
+
+test('markdown docs use markdown numbered steps instead of HTML or compressed step lists', () => {
+  const files = markdownFilesIn(['README.md', 'repo', '_projects', 'skills']);
+
+  for (const file of files) {
+    const relPath = path.relative(repoRoot, file).replace(/\\/g, '/');
+    const text = readText(file);
+    assert.doesNotMatch(text, /<\/?(?:ol|li)>/i, `${relPath} should use markdown numbered lists instead of HTML lists`);
+    assert.doesNotMatch(text, /;\s*choose any one/i, `${relPath} should split multi-step guidance instead of compressing it with semicolons`);
+  }
 });
 
 test('human setup docs cover platform-specific skill and rule setup fairly', () => {
