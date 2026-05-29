@@ -10,7 +10,7 @@ Codex can consume this toolkit through skills, `AGENTS.md`, and MCP config templ
 
 ## Boundary
 
-Short platform router; full setup details live in the local references and templates.
+This is not the full runtime setup guide; use the full-fidelity references and templates in this skill folder.
 
 ## Skill Install
 

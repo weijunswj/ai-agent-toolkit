@@ -94,23 +94,12 @@ Codex and Claude Code plugin/package support exists, but this repo does not make
 
 **Choose any one supported skill-folder location for the target platform:**
 
-| Platform | Supported skill-folder location |
-|---|---|
-| Codex | **Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. |
-| Claude Code | **Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. |
-| OpenCode | **Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. |
-| Antigravity | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\`. |
-
-Repo-local instruction outputs for Claude Code:
-
-1. Create or merge `AGENTS.md` from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
-2. Add `CLAUDE.md` from [`repo-local/CLAUDE.shim.template.md`](skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md).
-
-Repo-local instruction outputs stay separate from Antigravity skill loading:
-
-1. Create or merge `AGENTS.md` from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
-2. Add `GEMINI.md` from [`repo-local/GEMINI.shim.template.md`](skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md).
-3. Add `.agents/rules/00-agent-toolkit-bootstrap.md` from [`repo-local/antigravity-bootstrap.template.md`](skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md).
+| Platform | Supported skill-folder location | Repo-local instruction outputs |
+|---|---|---|
+| Codex | **Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. | `AGENTS.md` from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md). |
+| Claude Code | **Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. | 1. Create or merge `AGENTS.md` from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).<br>2. Add `CLAUDE.md` from [`repo-local/CLAUDE.shim.template.md`](skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md). |
+| OpenCode | **Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. | `AGENTS.md` from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md). |
+| Antigravity | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\`. | **Keep separate from Antigravity skill loading:**<br>1. Create or merge `AGENTS.md` from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).<br>2. Add `GEMINI.md` from [`repo-local/GEMINI.shim.template.md`](skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md).<br>3. Add `.agents/rules/00-agent-toolkit-bootstrap.md` from [`repo-local/antigravity-bootstrap.template.md`](skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md). |
 
 Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [skills/n8n-agent-rules/](skills/n8n-agent-rules/). Optional adapters in [skills/n8n-agent-rules/adapters/](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
 
