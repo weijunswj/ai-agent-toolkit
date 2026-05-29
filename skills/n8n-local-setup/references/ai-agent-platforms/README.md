@@ -16,6 +16,15 @@ These platform references explain how each AI platform should consume this toolk
 
 For local setup, start with [local setup](../n8n/local-setup.md). The platform pages below are secondary references for platform-specific config details.
 
+Preferred skill install model:
+
+| Platform | Skill install path |
+| --- | --- |
+| Codex | Plugin/package install first. |
+| Claude Code | Plugin/package install first. |
+| Antigravity | Plugin-scoped install under `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
+| OpenCode | Short manual skill-folder install note only. |
+
 | Reference | Use when |
 | --- | --- |
 | [codex.md](codex.md) | Codex platform router for local rules, references, and n8n MCP templates. |
