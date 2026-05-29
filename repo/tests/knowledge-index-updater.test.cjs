@@ -65,6 +65,19 @@ test('Knowledge Index tests use a clearly fake Notion data source ID sentinel', 
   assert.doesNotMatch(fakeDataSourceId, realDataSourceIdPattern);
 });
 
+test('Knowledge Index property-only Notion page updates include empty content updates', () => {
+  for (const filePath of [sourceSkill, generatedSkill]) {
+    const text = read(filePath);
+    const updatePayloads = section(text, '### Property-only Notion page updates', '###');
+
+    assert.match(updatePayloads, /"command": "update_properties"/, filePath);
+    assert.match(updatePayloads, /"content_updates": \[\]/, filePath);
+    assert.match(updatePayloads, /"GitHub Key"/, filePath);
+    assert.match(updatePayloads, /"Status"/, filePath);
+    assert.match(updatePayloads, /batched page updates/i, filePath);
+  }
+});
+
 test('Knowledge Index README documents only Notion and GitHub hard identity keys', () => {
   for (const filePath of [sourceReadme, generatedReadme]) {
     const text = read(filePath);

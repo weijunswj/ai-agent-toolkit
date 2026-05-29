@@ -88,6 +88,24 @@ If any key matches, update the existing row. Do not create a new row.
 
 Do not use `Canonical Key` for matching, creating, merging, or deduplication. It is removed from the clean default schema because it is AI-generated and can drift. If an existing database still has `Canonical Key`, ignore it during scheduled runs unless the user explicitly asks for legacy cleanup. Hide it from the default view before deleting it, and delete it only after the user confirms cleanup.
 
+## Notion update payload rule
+
+When using Notion MCP `notion_update_page` with `command: "update_properties"` for a property-only row update, always include `content_updates: []`.
+
+This applies to single row updates and every item in batched updates, even when no page body edits are intended. Keep property values, including `null` remove-value cases, inside `properties`. Do not change create or delete behaviour because of this rule.
+
+```json
+{
+  "page_id": "<page-id>",
+  "command": "update_properties",
+  "properties": {
+    "GitHub Key": "github.com/<owner>/<repo>",
+    "Status": "Active"
+  },
+  "content_updates": []
+}
+```
+
 ## Category rules
 
 Use these categories:

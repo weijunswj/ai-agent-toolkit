@@ -178,6 +178,51 @@ For each canonical item:
 
 Do not create separate `Notion Link`, `GitHub Link`, `Source Link`, or `Canonical Key` columns. The key columns are both identity fields and clickable source links.
 
+### Property-only Notion page updates
+
+When updating an existing row through the Notion MCP `notion_update_page` tool with `"command": "update_properties"` and no body edits, always include `"content_updates": []` in the request. This is required for single page updates and for every item in batched page updates, even when only page properties change.
+
+Keep all property values, including `null` or other remove-value markers, inside `properties`. Do not move property changes into `content_updates`. Do not change create or delete behaviour because of this rule.
+
+Single property-only page update:
+
+```json
+{
+  "page_id": "<page-id>",
+  "command": "update_properties",
+  "properties": {
+    "GitHub Key": "github.com/<owner>/<repo>",
+    "Status": "Active"
+  },
+  "content_updates": []
+}
+```
+
+Batched page updates must apply the same shape to each property-only `notion_update_page` payload:
+
+```json
+[
+  {
+    "page_id": "<page-id-1>",
+    "command": "update_properties",
+    "properties": {
+      "GitHub Key": "github.com/<owner>/<repo>",
+      "Status": "Active"
+    },
+    "content_updates": []
+  },
+  {
+    "page_id": "<page-id-2>",
+    "command": "update_properties",
+    "properties": {
+      "GitHub Key": null,
+      "Status": "Missing"
+    },
+    "content_updates": []
+  }
+]
+```
+
 ### 6. Handle existing duplicates
 
 When duplicate rows already exist:
@@ -240,6 +285,7 @@ Update rules:
   - visible columns ordered:
     `Category`, `Name`, `Description`, `GitHub Key`, `Notion Key`, `Source`, `Last checked`, `Status`, `Visibility`
 - Do not create separate Notion Link, GitHub Link, Source Link, or Canonical Key fields.
+- When calling Notion MCP `notion_update_page` with `command: "update_properties"` for a property-only page write, include `content_updates: []` in every single or batched request even when no body edits are intended.
 - Do not permanently delete anything.
 - Mark uncertain duplicates as `Needs review`.
 - Mark confirmed missing sources as `Missing`.
