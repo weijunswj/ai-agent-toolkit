@@ -119,6 +119,12 @@ Words like `continue`, `next`, `apply`, or `do it` only apply to the already-sco
 
 Proceed without extra confirmation for safe, clearly scoped local edits.
 
+## User Action Questions
+
+When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold.
+
+Do not only bold the first few words. The entire user-action question must be bolded.
+
 ## Git Completion
 
 Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits. Unless the user asked for local-only/no-push work, finish by running relevant local validation, committing to a non-main branch, pushing, and opening or updating the pull request.

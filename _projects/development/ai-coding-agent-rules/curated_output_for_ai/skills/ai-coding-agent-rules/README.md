@@ -8,7 +8,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 Instruction-only skill for automatically checking and installing repo/folder-local AI coding agent instruction files and tiny platform shims.
 
-The copied skill folder includes bare repo-local bootstrap payload templates. These files contain only the curated-source safety comment plus destination-file content and are safe to copy wholesale:
+The copied skill folder includes bare repo-local bootstrap payload templates. These files contain the curated-source safety comment plus marker-wrapped destination-file content and are safe to copy wholesale:
 
 - [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) is copied or merged into target repo `AGENTS.md`.
 - [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) is copied to target repo `CLAUDE.md` only when Claude Code support is requested or the target platform is Claude Code.
@@ -23,9 +23,11 @@ Do not install a shim alone. Shims require root `AGENTS.md`, created or merged f
 
 Antigravity workspaces can use a tiny `.agents/rules/00-agent-toolkit-bootstrap.md` bootstrap when the folder also carries root `AGENTS.md`; do not full-import `AGENTS.md` into that bootstrap by default.
 
-The skill is intended to run a cheap local check before coding work in GitHub, GitLab, Bitbucket, local Git, and plain project folders. If the repo/folder instruction files already have current `AI-AGENT-TOOLKIT:<source-path>` managed marker blocks, continue the original task without rewriting them.
+The skill is intended to run a cheap local check before coding work in GitHub, GitLab, Bitbucket, local Git, and plain project folders. If the required repo/folder instruction files already have complete, balanced `AI-AGENT-TOOLKIT` managed marker pairs, continue the original task without reading templates or rewriting files.
 
-Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Never overwrite existing `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`; produce a merge or diff plan instead.
+Model expectation: Fresh-folder bootstrap and structurally-current cheap checks are designed to work broadly, but complex broken-marker or edited-managed-block auto-repair is best-effort below Codex GPT-5.5 High. For perfect runtime behaviour, use Codex GPT-5.5 High or an equivalent high-reasoning model.
+
+Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Preserve unmarked user-authored content. If a toolkit-managed block is broken or edited during an explicit install/check/repair/refresh/bootstrap request, back up the existing file under `.agent-toolkit-backups/` before replacing the toolkit-owned managed block from the current template.
 
 Manual global setup templates live in `_projects/development/ai-coding-agent-rules/_main/`. The published skill folder is copyable and self-contained for repo-local bootstrap use.
 
