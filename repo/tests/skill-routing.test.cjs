@@ -207,15 +207,17 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /\*\*Choose any one supported Claude Code skill-folder location:\*\*/);
   assert.match(readme, /\*\*Choose any one supported OpenCode skill-folder location:\*\*/);
   assert.match(readme, /`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\`/);
-  assert.match(readme, /\| Platform \| Supported skill-folder location \| Repo-local instruction outputs \|/);
-  assert.match(readme, /\| Codex \| \*\*Choose any one supported Codex skill-folder location:\*\*<br>- `<repo>\/\.agents\/skills\/<skill-name>\/`/);
-  assert.match(readme, /\| Claude Code \| \*\*Choose any one supported Claude Code skill-folder location:\*\*<br>- `<repo>\/\.claude\/skills\/<skill-name>\/`/);
-  assert.match(readme, /\| OpenCode \| \*\*Choose any one supported OpenCode skill-folder location:\*\*<br>- `<repo>\/\.opencode\/skills\/<skill-name>\/`/);
-  assert.match(readme, /\| Antigravity \| `C:/);
-  assert.match(readme, /\| Codex \|[^\n]*\| `AGENTS\.md` from \[`repo-local\/AGENTS\.managed\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)\. \|/);
-  assert.match(readme, /\| Claude Code \|[^\n]*\| 1\. Create or merge `AGENTS\.md` from \[`repo-local\/AGENTS\.managed\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)\.<br>2\. Add `CLAUDE\.md` from \[`repo-local\/CLAUDE\.shim\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/CLAUDE\.shim\.template\.md\)\. \|/);
-  assert.match(readme, /\| OpenCode \|[^\n]*\| `AGENTS\.md` from \[`repo-local\/AGENTS\.managed\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)\. \|/);
-  assert.match(readme, /\| Antigravity \|[^\n]*\| \*\*Keep separate from Antigravity skill loading:\*\*<br>1\. Create or merge `AGENTS\.md` from \[`repo-local\/AGENTS\.managed\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)\.<br>2\. Add `GEMINI\.md` from \[`repo-local\/GEMINI\.shim\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/GEMINI\.shim\.template\.md\)\.<br>3\. Add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md` from \[`repo-local\/antigravity-bootstrap\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/antigravity-bootstrap\.template\.md\)\. \|/);
+  assert.match(readme, /\| Platform \| Preferred install \| Active instruction files \| References \|/);
+  assert.match(readme, /\| Codex \| Direct whole-skill-folder install\.<br>\*\*Choose any one supported Codex skill-folder location:\*\*<br>- `<repo>\/\.agents\/skills\/<skill-name>\/`/);
+  assert.match(readme, /\| Claude Code \| Direct whole-skill-folder install\.<br>\*\*Choose any one supported Claude Code skill-folder location:\*\*<br>- `<repo>\/\.claude\/skills\/<skill-name>\/`/);
+  assert.match(readme, /\| OpenCode \| Short manual whole-skill-folder install only\.<br>\*\*Choose any one supported OpenCode skill-folder location:\*\*<br>- `<repo>\/\.opencode\/skills\/<skill-name>\/`/);
+  assert.match(readme, /\| Antigravity \| Plugin-scoped skill-folder install\.<br>`C:/);
+  assert.match(readme, /\| Codex \|[^\n]*\| `AGENTS\.md` \|/);
+  assert.match(readme, /\| Claude Code \|[^\n]*\| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
+  assert.match(readme, /\| OpenCode \|[^\n]*\| `AGENTS\.md` \|/);
+  assert.match(readme, /\| Antigravity \|[^\n]*\| `AGENTS\.md`, `GEMINI\.md`, Antigravity bootstrap \|/);
+  assert.doesNotMatch(readme, /\| Platform \| Supported skill-folder location \| Repo-local instruction outputs \|/);
+  assert.doesNotMatch(readme, /Repo-local instruction outputs/);
 
   assert.match(howToUse, /\| Repo-level \| `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md` \|/);
   assert.match(howToUse, /\| User-level \| `\$HOME\/\.agents\/skills\/<skill-name>\/SKILL\.md` \|/);
@@ -239,10 +241,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /`<repo>\/\.claude\/skills\/<skill-name>\/`/);
   assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`/);
   assert.match(readme, /`AGENTS\.md` is the shared managed instruction file/);
-  assert.match(readme, /\[`repo-local\/AGENTS\.managed\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
-  assert.match(readme, /\[`repo-local\/CLAUDE\.shim\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/CLAUDE\.shim\.template\.md\)/);
-  assert.match(readme, /\[`repo-local\/GEMINI\.shim\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/GEMINI\.shim\.template\.md\)/);
-  assert.match(readme, /\[`repo-local\/antigravity-bootstrap\.template\.md`\]\(skills\/ai-coding-agent-rules\/repo-local\/antigravity-bootstrap\.template\.md\)/);
+  assert.match(readme, /\[repo-local\/AGENTS\.managed\.template\.md\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
   assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
   assert.match(readme, /\(skills\/n8n-agent-rules\/\)/);
   assert.doesNotMatch(readme, /\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\//);
