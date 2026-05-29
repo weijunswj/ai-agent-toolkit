@@ -12,9 +12,35 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # AI Agent Platforms
 
-These platform references explain how each AI platform should consume this toolkit. Generic AI coding agent rules live in [AI Coding Agent Rules](../../../ai-coding-agent-rules/); full n8n operating rules live in [n8n Agent Rules](../../../n8n-agent-rules/).
+These platform references explain how each AI platform should consume this toolkit. Generic rules live in [AI Coding Agent Rules](../../../ai-coding-agent-rules/); full n8n rules live in [n8n Agent Rules](../../../n8n-agent-rules/).
 
 For local setup, start with [local setup](../n8n/local-setup.md). The platform pages below are secondary references for platform-specific config details.
+
+Preferred skill install model:
+
+| Platform | Skill install path |
+| --- | --- |
+| Codex | Direct whole-skill-folder install. |
+| Claude Code | Direct whole-skill-folder install. |
+| OpenCode | Short manual whole-skill-folder install note only. |
+| Antigravity | Plugin-scoped skill-folder install. |
+
+**Choose any one supported skill-folder location for the target platform:**
+
+| Platform | Supported skill-folder location |
+| --- | --- |
+| Codex | **Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. |
+| Claude Code | **Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. |
+| OpenCode | **Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. |
+| Antigravity | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
+
+Antigravity repo-local bootstrap outputs still go into the target repo, not inside the plugin-scoped skill folder:
+
+1. `AGENTS.md`.
+2. `GEMINI.md`.
+3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
+
+Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
 
 | Reference | Use when |
 | --- | --- |

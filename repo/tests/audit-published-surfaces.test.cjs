@@ -154,7 +154,14 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
   ]) {
     assert.ok(report.boundaryClassifications[classification] > 0, classification);
   }
-  assert.equal(report.boundaryClassifications.suspicious_curated_runtime || 0, 0);
+  const expectedPackReadmeFindings = [
+    'skills/n8n-local-setup/packs/claude-code-n8n-local/README.md',
+    'skills/n8n-local-setup/packs/codex-n8n-local/README.md'
+  ];
+  assert.equal(
+    report.boundaryClassifications.suspicious_curated_runtime || 0,
+    expectedPackReadmeFindings.length
+  );
   for (const outputPath of [
     'skills/knowledge-index-updater/README.md',
     'skills/knowledge-index-updater/SKILL.md',
@@ -164,7 +171,10 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     const entry = report.boundaryRecipes.find((item) => item.path === outputPath);
     assert.equal(entry?.classification, 'main_full_fidelity', outputPath);
   }
-  assert.deepEqual(report.issues.boundaryRecipeFindings, []);
+  assert.deepEqual(
+    report.issues.boundaryRecipeFindings.map((entry) => entry.path).sort(),
+    [...expectedPackReadmeFindings].sort()
+  );
 });
 
 test('audit-published-surfaces does not baseline helper README import/export context', () => {
