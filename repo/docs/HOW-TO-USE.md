@@ -74,9 +74,11 @@ For Codex, use direct whole-skill-folder install first.
 
 **Choose any one supported Codex skill-folder location:**
 
-- Repo-level: `<repo>/.agents/skills/<skill-name>/SKILL.md`.
-- User-level: `$HOME/.agents/skills/<skill-name>/SKILL.md`.
-- Admin-level: `/etc/codex/skills/<skill-name>/SKILL.md`.
+| Scope | Skill folder location |
+|---|---|
+| Repo-level | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
+| User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
+| Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
 
 Codex scans repo skills from `.agents/skills` from the current working directory up to the repo root. It initially sees each skill's name, description, and file path, then loads the full `SKILL.md` only when selected. Use `/skills` or `$skill-name` for explicit invocation; implicit invocation depends on the `description` frontmatter. `~/.codex/config.toml` is for Codex configuration, including disabling skills by `SKILL.md` path, not the main skill install surface.
 
@@ -86,8 +88,10 @@ For Claude Code, use direct whole-skill-folder install first.
 
 **Choose any one supported Claude Code skill-folder location:**
 
-- Project-level: `<repo>/.claude/skills/<skill-name>/SKILL.md`.
-- User-level: `$HOME/.claude/skills/<skill-name>/SKILL.md`.
+| Scope | Skill folder location |
+|---|---|
+| Project-level | `<repo>/.claude/skills/<skill-name>/SKILL.md` |
+| User-level | `$HOME/.claude/skills/<skill-name>/SKILL.md` |
 
 Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Code instructions.
 
@@ -97,12 +101,14 @@ For OpenCode, use a short manual whole-skill-folder install only.
 
 **Choose any one supported OpenCode skill-folder location:**
 
-- Project OpenCode config: `<repo>/.opencode/skills/<skill-name>/SKILL.md`.
-- User OpenCode config: `$HOME/.config/opencode/skills/<skill-name>/SKILL.md`.
-- Project Claude-compatible: `<repo>/.claude/skills/<skill-name>/SKILL.md`.
-- User Claude-compatible: `$HOME/.claude/skills/<skill-name>/SKILL.md`.
-- Project agent-compatible: `<repo>/.agents/skills/<skill-name>/SKILL.md`.
-- User agent-compatible: `$HOME/.agents/skills/<skill-name>/SKILL.md`.
+| Scope | Skill folder location |
+|---|---|
+| Project OpenCode config | `<repo>/.opencode/skills/<skill-name>/SKILL.md` |
+| User OpenCode config | `$HOME/.config/opencode/skills/<skill-name>/SKILL.md` |
+| Project Claude-compatible | `<repo>/.claude/skills/<skill-name>/SKILL.md` |
+| User Claude-compatible | `$HOME/.claude/skills/<skill-name>/SKILL.md` |
+| Project agent-compatible | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
+| User agent-compatible | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
 
 OpenCode walks upward from the current working directory to the git worktree for project-local skill paths, and it also loads global skill definitions. Use `AGENTS.md`, `AGENTS.override.md`, or the configured OpenCode rules file for always-on OpenCode instructions.
 
@@ -112,7 +118,9 @@ For Antigravity, use the observed plugin-scoped install first.
 
 **Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
 
-- Plugin-scoped: `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`.
+| Location type | Skill folder path |
+|---|---|
+| Plugin-scoped | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` |
 
 Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder. This plugin-scoped folder is for loading toolkit skills.
 

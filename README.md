@@ -92,31 +92,19 @@ Codex and Claude Code plugin/package support exists, but this repo does not make
 | OpenCode | Short manual whole-skill-folder install only | `AGENTS.md` | [OpenCode reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md), [OpenCode MCP config](skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md). |
 | Antigravity | Plugin-scoped skill-folder install | `AGENTS.md`, `GEMINI.md`, Antigravity bootstrap | [Antigravity reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md), [Antigravity MCP config](skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md). |
 
-**Choose any one supported Codex skill-folder location:**
+**Choose any one supported skill-folder location for the target platform:**
 
-- `<repo>/.agents/skills/<skill-name>/`.
-- `$HOME/.agents/skills/<skill-name>/`.
-- `/etc/codex/skills/<skill-name>/`.
-
-**Choose any one supported Claude Code skill-folder location:**
-
-- `<repo>/.claude/skills/<skill-name>/`.
-- `$HOME/.claude/skills/<skill-name>/`.
+| Platform | Supported skill-folder location |
+|---|---|
+| Codex | **Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. |
+| Claude Code | **Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. |
+| OpenCode | **Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. |
+| Antigravity | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\`. |
 
 Repo-local instruction outputs for Claude Code:
 
 1. Create or merge `AGENTS.md` from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
 2. Add `CLAUDE.md` from [`repo-local/CLAUDE.shim.template.md`](skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md).
-
-**Choose any one supported OpenCode skill-folder location:**
-
-- `<repo>/.opencode/skills/<skill-name>/`.
-- `$HOME/.config/opencode/skills/<skill-name>/`.
-- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured.
-
-**Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
-
-- `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\`.
 
 Repo-local instruction outputs stay separate from Antigravity skill loading:
 

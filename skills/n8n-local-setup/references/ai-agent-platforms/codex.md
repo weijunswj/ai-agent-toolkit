@@ -16,9 +16,7 @@ Codex can consume this toolkit through skills, `AGENTS.md`, and MCP config templ
 
 ## Boundary
 
-This is a short platform router. It is not the full runtime setup guide.
-
-For full setup detail, use the local full-fidelity references and templates in this copied skill folder.
+Short platform router; full setup details live in the local references and templates.
 
 ## Skill Install
 
@@ -26,9 +24,11 @@ Copy the whole `skills/<skill-name>/` folder.
 
 **Choose any one supported Codex skill-folder location:**
 
-- `<repo>/.agents/skills/<skill-name>/SKILL.md`.
-- `$HOME/.agents/skills/<skill-name>/SKILL.md`.
-- `/etc/codex/skills/<skill-name>/SKILL.md`.
+| Scope | Skill folder location |
+| --- | --- |
+| Repo-level | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
+| User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
+| Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
 
 Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 

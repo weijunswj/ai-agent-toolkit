@@ -43,47 +43,17 @@ Manual global setup templates live in `_projects/development/ai-coding-agent-rul
 |---|---|
 | Codex | `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md). |
 | OpenCode | `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md). |
-
-Claude Code:
-
-1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).
-2. Add `CLAUDE.md` from [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md).
-
-Antigravity:
-
-1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).
-2. Add `GEMINI.md` from [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md).
-3. Add `.agents/rules/00-agent-toolkit-bootstrap.md` from [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md).
+| Claude Code | 1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).<br>2. Add `CLAUDE.md` from [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md). |
+| Antigravity | 1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).<br>2. Add `GEMINI.md` from [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md).<br>3. Add `.agents/rules/00-agent-toolkit-bootstrap.md` from [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md). |
 
 Install copied skill folders according to the target platform's supported skill package location.
 
-| Platform | Preferred skill install |
-|---|---|
-| Codex | Direct whole-skill-folder install. |
-| Claude Code | Direct whole-skill-folder install. |
-| OpenCode | Short manual whole-skill-folder install only. |
-| Antigravity | Plugin-scoped skill-folder install. |
-
-**Choose any one supported Codex skill-folder location:**
-
-- `<repo>/.agents/skills/<skill-name>/`.
-- `$HOME/.agents/skills/<skill-name>/`.
-- `/etc/codex/skills/<skill-name>/`.
-
-**Choose any one supported Claude Code skill-folder location:**
-
-- `<repo>/.claude/skills/<skill-name>/`.
-- `$HOME/.claude/skills/<skill-name>/`.
-
-**Choose any one supported OpenCode skill-folder location:**
-
-- `<repo>/.opencode/skills/<skill-name>/`.
-- `$HOME/.config/opencode/skills/<skill-name>/`.
-- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured.
-
-**Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
-
-- `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`.
+| Platform | Preferred skill install | Supported skill-folder location |
+|---|---|---|
+| Codex | Direct whole-skill-folder install. | **Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. |
+| Claude Code | Direct whole-skill-folder install. | **Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. |
+| OpenCode | Short manual whole-skill-folder install only. | **Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. |
+| Antigravity | Plugin-scoped skill-folder install. | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
 
 Copy the whole `skills/<skill-name>/` folder, not just `SKILL.md`, and keep supporting files beside it.
 Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.

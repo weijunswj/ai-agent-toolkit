@@ -61,9 +61,9 @@ Preferred install: use Antigravity plugin-scoped skill folders.
 
 **Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
 
-```text
-C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md
-```
+| Location type | Skill folder path |
+| --- | --- |
+| Plugin-scoped | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` |
 
 Suggested structure:
 

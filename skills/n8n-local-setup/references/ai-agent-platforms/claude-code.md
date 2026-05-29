@@ -77,8 +77,10 @@ Copy the whole `skills/<skill-name>/` folder.
 
 **Choose any one supported Claude Code skill-folder location:**
 
-- `<repo>/.claude/skills/<skill-name>/SKILL.md`.
-- `$HOME/.claude/skills/<skill-name>/SKILL.md`.
+| Scope | Skill folder location |
+| --- | --- |
+| Project-level | `<repo>/.claude/skills/<skill-name>/SKILL.md` |
+| User-level | `$HOME/.claude/skills/<skill-name>/SKILL.md` |
 
 Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 

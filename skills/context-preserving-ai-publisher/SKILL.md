@@ -87,10 +87,11 @@ When local repo law conflicts with this generic skill, local law wins.
 
 - Sequential instructions must use Markdown numbered steps: `1.`, `2.`, `3.`.
 - Non-sequential options must use bullets or compact tables.
+- Prefer tables for user-facing choices or comparisons when they make alternatives easier to scan.
 - Mutually exclusive choices must include a bold instruction before the options, such as `**Choose any one supported install location:**` or `**Choose only one setup path:**`.
-- Do not hide multi-step instructions inside long table cells.
-- Use tables for scanning/comparison, not long procedural text.
-- If a table cell needs multiple actions, move those actions below the table as numbered steps or bullets.
+- Compact bullets or numbered steps may stay inside table cells when the cell remains readable.
+- Do not force a table apart solely because a cell contains a short list.
+- Move content below the table only when a cell becomes too long, hard to scan, or mixes unrelated procedures.
 - Avoid semicolon chains for setup instructions.
 - Beginner-facing docs should say what to do, where to do it, and what not to do.
 
