@@ -466,6 +466,8 @@ test('skill README documents required file sets and shim dependency', () => {
     assert.match(text, /Preserve unmarked user-authored content\./i, relPath);
     assert.match(text, /toolkit-managed block is broken or edited during an explicit install\/check\/repair\/refresh\/bootstrap request/i, relPath);
     assert.match(text, /back up the existing file under `\.agent-toolkit-backups\/` before replacing the toolkit-owned managed block from the current template/i, relPath);
+    assert.match(text, /Model expectation: Fresh-folder bootstrap and structurally-current cheap checks are designed to work broadly, but complex broken-marker or edited-managed-block auto-repair is best-effort below Codex GPT-5\.5 High\./, relPath);
+    assert.match(text, /For perfect runtime behaviour, use Codex GPT-5\.5 High or an equivalent high-reasoning model\./, relPath);
     assert.match(text, /\| Claude Code \|[^\n]*<ol><li>`AGENTS\.md`<\/li><li>`CLAUDE\.md`<\/li><\/ol>[^\n]*<ol><li>\[repo-local\/AGENTS\.managed\.template\.md\][^\n]*<\/li><li>\[repo-local\/CLAUDE\.shim\.template\.md\][^\n]*<\/li><\/ol>/i, relPath);
     assert.doesNotMatch(text, /\| Gemini\s+CLI \|/i, relPath);
     assert.match(text, /\| Antigravity \|[^\n]*<ol><li>`AGENTS\.md`<\/li><li>`GEMINI\.md`<\/li><li>`\.agents\/rules\/00-agent-toolkit-bootstrap\.md`<\/li><\/ol>[^\n]*<ol><li>\[repo-local\/AGENTS\.managed\.template\.md\][^\n]*<\/li><li>\[repo-local\/GEMINI\.shim\.template\.md\][^\n]*<\/li><li>\[repo-local\/antigravity-bootstrap\.template\.md\][^\n]*<\/li><\/ol>/i, relPath);
