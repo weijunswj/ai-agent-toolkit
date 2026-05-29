@@ -6,13 +6,13 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # AI Agent Platforms
 
-These platform references explain how each AI platform should consume this toolkit. Generic rules live in [AI Coding Agent Rules](../../../ai-coding-agent-rules/); full n8n rules live in [n8n Agent Rules](../../../n8n-agent-rules/).
+These platform references route each AI platform to this toolkit. Generic rules live in [AI Coding Agent Rules](../../../ai-coding-agent-rules/); full n8n rules live in [n8n Agent Rules](../../../n8n-agent-rules/).
 
 For local setup, start with [local setup](../n8n/local-setup.md). The platform pages below are secondary references for platform-specific config details.
 
-Preferred skill install model:
+Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`.
 
-| Platform | Skill install path |
+| Platform | Preferred skill install model |
 | --- | --- |
 | Codex | Direct whole-skill-folder install. |
 | Claude Code | Direct whole-skill-folder install. |
@@ -38,9 +38,9 @@ Codex and Claude Code plugin/package support exists, but this repo does not make
 
 | Reference | Use when |
 | --- | --- |
-| [codex.md](codex.md) | Codex platform router for local rules, references, and n8n MCP templates. |
-| [claude-code.md](claude-code.md) | Setting up Claude Code skills, rules, and n8n MCP templates. |
-| [chatgpt-web.md](chatgpt-web.md) | Using instruction-only skills in ChatGPT web. |
-| [claude-web.md](claude-web.md) | Using instruction-only skills in Claude web. |
-| [opencode.md](opencode.md) | Setting up OpenCode with agent rules and MCP config. |
-| [antigravity.md](antigravity.md) | Setting up Antigravity rules and MCP config. |
+| [codex.md](codex.md) | Codex rules, references, and n8n MCP templates. |
+| [claude-code.md](claude-code.md) | Claude Code skills, rules, and n8n MCP templates. |
+| [chatgpt-web.md](chatgpt-web.md) | Instruction-only skills in ChatGPT web. |
+| [claude-web.md](claude-web.md) | Instruction-only skills in Claude web. |
+| [opencode.md](opencode.md) | OpenCode rules and MCP config. |
+| [antigravity.md](antigravity.md) | Antigravity rules and MCP config. |

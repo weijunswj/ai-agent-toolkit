@@ -4,112 +4,77 @@ Project: n8n.local-setup
 Source: _projects/n8n/local-setup/_main/3. tunneling guide.md
 Update the project source and run sync.
 -->
-# 3. Tunneling Guide
+# 3. Hostinger Domain And Tunnel Notes
 
-The primary local setup guide is [1. Local Setup](local-setup.md). This page is retained as an appendix/reference for focused tunnel details, not as a separate start path.
+The primary local ngrok setup is in [1. Local Setup](local-setup.md). This page is a focused Hostinger transition note, not a second local tunnel guide.
 
-This guide is for local development only.
+Use it when you are moving from local ngrok testing to a real Hostinger public domain.
 
-The only supported local tunnel path in this guide is ngrok running as a Docker Compose service. Cloudflare tunnels and the built-in n8n tunnel are intentionally out of scope here so beginners and agents follow one path.
+For the full hosting flow, use [4. VPS Hosting](./4.%20vps%20hosting.md).
 
-Do not use tunneling as permanent hosting. If you need always-on public n8n, use [4. VPS Hosting](./4.%20vps%20hosting.md).
+## What Is This Page For?
 
-## When You Need A Tunnel
+| Situation | Use |
+| --- | --- |
+| Local testing with ngrok | [1. Local Setup](local-setup.md) |
+| Real public n8n on Hostinger | [4. VPS Hosting](./4.%20vps%20hosting.md) |
+| Moving webhook/OAuth URLs from ngrok to Hostinger | This page |
 
-Use the local ngrok tunnel when an outside service needs to call your local n8n. Create the owner account locally before starting the public tunnel.
+## Hostinger Domain Checklist
 
-Examples:
+1. Choose a subdomain such as `n8n.company.com`.
+2. Point the DNS record to the Hostinger VPS IP.
+3. Confirm Hostinger or the VPS reverse proxy has HTTPS ready.
+4. Set n8n's public URL to the real domain.
+5. Confirm webhook URLs start with the real domain.
 
-- Stripe webhooks
-- Telegram webhooks
-- GitHub webhooks
-- Typeform webhooks
-- Meta webhooks
-- OAuth callbacks
+Use a subdomain, not the main company homepage domain.
 
-You do not need a public tunnel just for Codex talking to local `n8n_live` if Codex can reach `http://localhost:5678`.
+## Move From ngrok To Hostinger
 
-## Blessed Tunnel Shape
+1. Keep the local ngrok setup for local testing only.
+2. Put the real public n8n instance on Hostinger or another VPS.
+3. Update external webhook providers to use the Hostinger n8n URL.
+4. Update OAuth callback URLs to use the Hostinger n8n URL.
+5. Test with sample data before activating workflows that touch real systems.
 
-The local stack runs:
-
-```text
-outside service
--> https://your-reserved-domain.ngrok.app
--> ngrok Compose service
--> n8n Compose service on n8n:5678
-```
-
-The n8n container remains bound to loopback on your host:
+Example public URL:
 
 ```text
-http://localhost:5678
+https://n8n.company.com/
 ```
 
-The public URL comes from ngrok.
+Example webhook base:
 
-The tunnel exposes the full local n8n UI, API, webhook, and MCP surface reachable through the tunnel URL. It is not a webhook-only pipe.
-
-## Required `.env` Values
-
-Set these in the local `.env` copied from [.env.example](../../templates/local-stack/.env.example):
-
-```dotenv
-NGROK_AUTHTOKEN=replace-with-ngrok-authtoken
-NGROK_DOMAIN=your-reserved-domain.ngrok.app
-WEBHOOK_URL=https://your-reserved-domain.ngrok.app/
-N8N_HOST=your-reserved-domain.ngrok.app
-N8N_PROTOCOL=https
-N8N_PROXY_HOPS=1
+```text
+https://n8n.company.com/webhook/
 ```
 
-Use the same reserved ngrok domain in `NGROK_DOMAIN`, `N8N_HOST`, and `WEBHOOK_URL`. `WEBHOOK_URL` includes `https://` and a trailing slash. `NGROK_DOMAIN` and `N8N_HOST` do not.
+## Hostinger Settings To Check
 
-Do not commit `.env`.
+| Setting | Expected shape |
+| --- | --- |
+| Public URL | `https://n8n.company.com/` |
+| `WEBHOOK_URL` | `https://n8n.company.com/` |
+| `N8N_PROXY_HOPS` | `1` when n8n is behind a reverse proxy |
+| DNS | A record from `n8n.company.com` to the VPS IP |
+| HTTPS | Valid certificate for the subdomain |
 
-## Start Or Refresh The Tunnel
+## Do Not Repeat Local Tunnel Setup Here
 
-Run this in PowerShell from the local stack folder after the owner account exists:
-
-```powershell
-docker compose up -d
-```
-
-If you changed `.env`, recreate the stack:
-
-```powershell
-docker compose up -d --force-recreate
-```
-
-Open this URL in your browser for local n8n:
-
-[http://localhost:5678](http://localhost:5678)
-
-Open this URL in your browser if you need to debug tunnel requests:
-
-[http://127.0.0.1:4040](http://127.0.0.1:4040)
-
-Use the ngrok HTTPS URL from `WEBHOOK_URL` when configuring external webhooks.
-
-## Unsupported In This Guide
-
-These are not supported Fast Path options here:
-
-- Manual Windows ngrok install or helper scripts.
-- Cloudflare Quick Tunnel.
-- Cloudflare named tunnels.
-- n8n's built-in tunnel.
-- Random temporary tunnel URLs that require rewriting `.env` every run.
-
-Those paths may exist elsewhere, but they are deliberately outside this local setup guide.
+- Do not add another ngrok setup path on this page.
+- Do not add Cloudflare tunnel instructions here.
+- Do not treat ngrok as production hosting.
+- Do not keep random temporary tunnel URLs in production webhook providers.
 
 ## Safety Notes
 
-- Do not expose the n8n container directly to the LAN or internet.
-- Do not paste webhook URLs, tokens, or secrets into repo files.
-- Do not treat ngrok as production hosting.
-- Do not run live imports, exports, workflow execution, activation, deactivation, or credential changes from this toolkit repo.
+- Store Hostinger, VPS, n8n, and API secrets in a password manager.
+- Do not save `.env`, API tokens, webhook secrets, backups, or live exports into GitHub.
+- Do not activate workflows that touch live systems until the domain, backups, and smoke tests are checked.
 
-## Template Details
+## References
 
-Use [3a. Docker Compose + ngrok](./3a.%20docker%20compose%20%2B%20ngrok.md) for the full Compose template explanation.
+- [4. VPS Hosting](./4.%20vps%20hosting.md)
+- [Hostinger - Changing the Domain for n8n on VPS at Hostinger](https://www.hostinger.com/support/11927159-changing-the-domain-for-n8n-on-vps-at-hostinger/)
+- [n8n Docs - Configure webhook URLs with reverse proxy](https://docs.n8n.io/hosting/configuration/configuration-examples/webhook-url/)

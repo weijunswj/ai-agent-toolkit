@@ -6,47 +6,38 @@ Update the project source and run sync.
 -->
 # 1. Local Setup
 
-This is the primary one-stop-shop guide for local n8n on Windows.
+This is the beginner-first guide for running local n8n on Windows.
 
-Use it when you want a simple local stack with Docker Compose, Postgres, ngrok, the `n8n-local.cmd` menu, MCP setup, and agent platform setup in one place.
+Use it when you want one local setup path with Docker Compose, Postgres, ngrok, the `n8n-local.cmd` menu, MCP setup, and AI agent platform notes.
 
-For always-on public hosting, keep using [4. VPS Hosting](vps-hosting.md). VPS and Hostinger hosting are separate from this local Docker Desktop setup.
+For always-on public hosting, use [4. VPS Hosting](vps-hosting.md). VPS and Hostinger hosting are separate from this local Docker Desktop setup.
 
-## What This Guide Creates
+## Fast Path ( Full Guide Below )
 
-The local Fast Path creates:
+| Step | What to do | Where | Result |
+| --- | --- | --- | --- |
+| 1. | Install Docker Desktop and Node.js LTS. | Your Windows computer. | Docker and Node are available. |
+| 2. | Create `Desktop\n8n-local`. | Windows Explorer or PowerShell. | You have a local folder outside this repo. |
+| 3. | Copy everything inside the [local stack template folder](../../templates/local-stack/) into `Desktop\n8n-local`. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, launcher, and `scripts\`. |
+| 4. | Copy `.env.example` to a new file named `.env`. | `Desktop\n8n-local`. | You have a local settings file. |
+| 5. | Replace placeholder values inside `.env`. | `.env`, not PowerShell. | n8n, Postgres, and ngrok have local settings. |
+| 6. | Double-click `n8n-local.cmd`. | `Desktop\n8n-local`. | The guided menu opens. |
+| 7. | Start local n8n first and create the owner account at [http://localhost:5678](http://localhost:5678). | Browser. | n8n is owned before any public tunnel starts. |
+| 8. | Start ngrok only when an outside service needs to call local n8n. | `n8n-local.cmd` menu. | Webhooks or OAuth callbacks can reach your local n8n. |
+| 9. | Enable MCP in n8n, then use the matching platform config template. | n8n plus your agent app. | Codex, Claude Code, OpenCode, or Antigravity can connect. |
 
-- `n8n`: the local n8n app.
-- `postgres`: n8n's internal runtime database.
-- `ngrok`: the supported local public tunnel when you choose to expose local n8n.
-- `n8n_data` and `postgres_data`: persistent Docker volumes.
-- `.env`: local-only runtime configuration copied from placeholder-only [.env.example](../../templates/local-stack/.env.example).
-- [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd): the Windows launcher for the PowerShell menu.
-- [n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1): the guided menu for start, updates, logs, status, browser URLs, and Postgres backups.
-
-The local Postgres service is only n8n's internal runtime database. It is not Vercel, it is not Supabase, and it must not connect to the user's app database.
-
-ngrok is the only supported local public tunnel path in this guide. Cloudflare Quick Tunnel, Cloudflare named tunnels, manual Windows ngrok installs, and n8n's built-in tunnel are intentionally out of scope so beginners and agents have one path to follow.
-
-## Fast Path
-
-1. Install Docker Desktop, Node.js LTS, and your agent app.
-2. Create the local stack folder. The folder can live anywhere, but this guide uses `%USERPROFILE%\Desktop\n8n-local`.
-3. Copy [docker-compose.yml](../../templates/local-stack/docker-compose.yml), [.env.example](../../templates/local-stack/.env.example), [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd), and the [scripts folder](../../templates/local-stack/scripts/) into that local stack folder.
-4. Copy `.env.example` to `.env`.
-5. Paste placeholder replacements into `.env`, not PowerShell.
-6. Start local-only n8n first and create the owner account at [http://localhost:5678](http://localhost:5678).
-7. Start the ngrok tunnel only after the owner account exists.
-8. Enable MCP in n8n, then configure Codex, Claude Code, OpenCode, or Antigravity with the matching MCP config template.
-9. Use `n8n-local.cmd` for daily start, stop, status, logs, update checks, selected updates, URL opening, and Postgres backup.
-
-Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live n8n imports/exports.
+Do not save local secrets, `.env`, backups, runtime files, or live n8n import/export files into GitHub.
 
 ## Before You Start
 
-### Install Docker Desktop
+### What Do I Need First?
 
-Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+| Need | Install or open | Quick check |
+| --- | --- | --- |
+| Docker runtime | [Docker Desktop](https://www.docker.com/products/docker-desktop/) | Docker Desktop says the engine is running. |
+| Node.js for MCP helpers | [Node.js LTS](https://nodejs.org/en/download) | `node -v` works in PowerShell. |
+| AI agent app | [Codex](https://openai.com/index/introducing-the-codex-app/), [Claude](https://claude.com/download), [OpenCode](https://opencode.ai/docs/), or [Antigravity](https://antigravity.google/) | The app opens and signs in. |
+| ngrok account | [ngrok dashboard](https://dashboard.ngrok.com/) | You can copy an authtoken and reserve a domain. |
 
 Run this in PowerShell from any folder after installing Docker Desktop:
 
@@ -54,12 +45,6 @@ Run this in PowerShell from any folder after installing Docker Desktop:
 docker --version
 docker compose version
 ```
-
-If Docker is installed but not running, start Docker Desktop and wait until it says the engine is ready.
-
-### Install Node.js LTS
-
-Install [Node.js LTS](https://nodejs.org/en/download).
 
 Run this in PowerShell from any folder after installing Node.js:
 
@@ -69,116 +54,115 @@ npm -v
 npx --version
 ```
 
-Node.js is needed for MCP helper commands used by the platform config templates.
+If Docker is installed but not running, open Docker Desktop and wait until it says the engine is ready.
 
-### Install Your Agent App
+### Create And Reserve Your ngrok Domain
 
-Install whichever agent app you want to connect to n8n:
+1. Open the [ngrok dashboard](https://dashboard.ngrok.com/).
+2. Reserve a stable domain if your ngrok plan supports it.
+3. Open the [ngrok authtoken page](https://dashboard.ngrok.com/get-started/your-authtoken).
+4. Copy the authtoken.
+5. Paste the authtoken from your ngrok dashboard into your local `.env` file. Do not share this value or commit it to GitHub.
 
-- [Codex app](https://openai.com/index/introducing-the-codex-app/)
-- [Claude Desktop / Claude Code](https://claude.com/download)
-- [OpenCode](https://opencode.ai/docs/)
-- [Google Antigravity](https://antigravity.google/)
+### Do I Need ngrok Right Away?
 
-You can set up one platform first and add others later.
+No.
 
-### Create Or Reserve Your ngrok Domain
+If you are only opening n8n on your own computer, you do not need ngrok.
 
-Use the [ngrok dashboard](https://dashboard.ngrok.com/) to get an authtoken and, ideally, reserve a stable domain.
-
-Do not paste the real authtoken into this repo. It belongs only in your local `.env` file or a password manager.
+Use ngrok when another online service must call your local n8n webhook or OAuth callback.
 
 ## Create The Local Stack Folder
 
-### Recommended Example Path
+### A. Windows Explorer Path
 
-The local stack folder can live anywhere. For this guide, the example location is the user's Desktop:
+1. Open your Desktop.
+2. Create a folder named `n8n-local`.
+3. Keep this folder outside the toolkit repo.
 
-```text
-%USERPROFILE%\Desktop\n8n-local
-```
+### B. PowerShell Path
 
-Run this in PowerShell from any folder:
+Run this in PowerShell from any folder to create the folder on your Desktop:
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\Desktop\n8n-local"
-Set-Location "$env:USERPROFILE\Desktop\n8n-local"
 ```
 
 ### Can I Put This Somewhere Else?
 
 Yes. The folder can live anywhere you control.
 
-If you choose another location, replace `%USERPROFILE%\Desktop\n8n-local` in this guide with your chosen folder. Keep it outside this toolkit repo so local `.env`, backups, Docker runtime files, and private setup notes do not end up in Git.
+If you choose another location:
+
+1. Replace `Desktop\n8n-local` in this guide with your chosen folder.
+2. Keep it outside this toolkit repo.
+3. Do not place local `.env`, backups, Docker runtime files, or private setup notes in GitHub-tracked folders.
 
 ## Copy The Local Stack Templates
 
-### Files To Copy
+### Copy The Whole Template Folder Contents
 
-Copy these toolkit templates into the local stack folder:
+The local stack template folder is [templates/local-stack/](../../templates/local-stack/).
 
-- [docker-compose.yml](../../templates/local-stack/docker-compose.yml)
-- [.env.example](../../templates/local-stack/.env.example)
-- [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd)
-- [n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1), inside the `scripts` folder
+Key files:
 
-Run this from the copied `n8n-local-setup` skill folder:
+| File or folder | Link |
+| --- | --- |
+| Docker Compose template | [docker-compose.yml](../../templates/local-stack/docker-compose.yml) |
+| Environment template | [.env.example](../../templates/local-stack/.env.example) |
+| Windows launcher | [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd) |
+| Menu script | [n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1) |
+
+1. Open [templates/local-stack/](../../templates/local-stack/).
+2. Select everything inside that folder.
+3. Copy the selected files and folders.
+4. Paste them into `Desktop\n8n-local`.
+
+Copy the whole folder contents. Do not pull out only the `.ps1` file. Keep `docker-compose.yml`, `.env.example`, `n8n-local.cmd`, and `scripts\` together.
+
+Or run this from the copied `n8n-local-setup` skill folder instead:
 
 ```powershell
-Copy-Item -LiteralPath "templates\local-stack\docker-compose.yml" -Destination "$env:USERPROFILE\Desktop\n8n-local\docker-compose.yml" -Force
-Copy-Item -LiteralPath "templates\local-stack\.env.example" -Destination "$env:USERPROFILE\Desktop\n8n-local\.env.example" -Force
-Copy-Item -LiteralPath "templates\local-stack\n8n-local.cmd" -Destination "$env:USERPROFILE\Desktop\n8n-local\n8n-local.cmd" -Force
-Copy-Item -LiteralPath "templates\local-stack\scripts" -Destination "$env:USERPROFILE\Desktop\n8n-local\" -Recurse -Force
-```
-
-### Folder Should Look Like This
-
-Run this in PowerShell from `%USERPROFILE%\Desktop\n8n-local`:
-
-```powershell
-Get-ChildItem -Force
-Get-ChildItem -Force .\scripts
-```
-
-The folder should contain:
-
-```text
-%USERPROFILE%\Desktop\n8n-local
-  docker-compose.yml
-  n8n-local.cmd
-  scripts\
-    n8n-local-menu.ps1
-  .env.example
+New-Item -ItemType Directory -Force "$env:USERPROFILE\Desktop\n8n-local"
+Copy-Item -LiteralPath "templates\local-stack\*" -Destination "$env:USERPROFILE\Desktop\n8n-local" -Recurse -Force
 ```
 
 ## Create And Fill `.env`
 
 ### Copy `.env.example` To `.env`
 
-Run this in PowerShell from the local stack folder:
+1. Open `Desktop\n8n-local`.
+2. Copy `.env.example`.
+3. Paste the copy into the same folder.
+4. Rename the copy to `.env`.
+5. Do not edit `.env.example`.
+
+If Windows creates `.env.txt`, rename it again so the file name is exactly `.env`.
+
+Or run this in PowerShell:
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
 Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force
 ```
 
-Open `.env` in your editor.
+### Replace Placeholder Values
 
-### Values You Must Replace
+1. Open `.env`.
+2. Find the placeholder value.
+3. Replace only the value after `=`.
+4. Save the file.
 
-Paste this into .env, not PowerShell.
-
-```dotenv
-POSTGRES_PASSWORD=replace-with-local-postgres-password
-N8N_ENCRYPTION_KEY=replace-with-long-random-value
-NGROK_AUTHTOKEN=replace-with-ngrok-authtoken
-NGROK_DOMAIN=your-reserved-domain.ngrok.app
-WEBHOOK_URL=https://your-reserved-domain.ngrok.app/
-N8N_HOST=your-reserved-domain.ngrok.app
-N8N_PROTOCOL=https
-N8N_PROXY_HOPS=1
-```
-
-Replace only placeholder values in your local `.env`. Keep the template [.env.example](../../templates/local-stack/.env.example) placeholder-only.
+| Variable | What to paste | Example / format | Notes |
+| --- | --- | --- | --- |
+| `POSTGRES_PASSWORD` | A local database password. | `replace-with-local-postgres-password` becomes a private password. | Store it in a password manager. |
+| `N8N_ENCRYPTION_KEY` | A long random value. | 32+ random characters. | n8n needs the same key after restarts to decrypt saved credentials. |
+| `NGROK_AUTHTOKEN` | Your ngrok authtoken. | Value from the [ngrok authtoken page](https://dashboard.ngrok.com/get-started/your-authtoken). | Do not share it or commit it to GitHub. |
+| `NGROK_DOMAIN` | Your reserved ngrok domain. | `your-name.ngrok.app` | No `https://`. |
+| `WEBHOOK_URL` | The public n8n URL. | `https://your-name.ngrok.app/` | Include `https://` and the trailing slash. |
+| `N8N_HOST` | The same reserved ngrok domain. | `your-name.ngrok.app` | No `https://`. |
+| `N8N_PROTOCOL` | The public protocol. | `https` | Keep this as `https` for ngrok. |
+| `N8N_PROXY_HOPS` | Proxy hop count. | `1` | Keep this as `1` for the local ngrok stack. |
 
 Use the same reserved ngrok domain in `NGROK_DOMAIN`, `N8N_HOST`, and `WEBHOOK_URL`.
 
@@ -186,65 +170,98 @@ Use the same reserved ngrok domain in `NGROK_DOMAIN`, `N8N_HOST`, and `WEBHOOK_U
 - `N8N_HOST` has no `https://`.
 - `WEBHOOK_URL` includes `https://` and a trailing slash.
 
-Use a long random value for `N8N_ENCRYPTION_KEY` and store it in your password manager. n8n needs the same key after restarts to decrypt saved credentials.
+Use a long random value for `N8N_ENCRYPTION_KEY`. Store it in a password manager. n8n needs the same key after restarts to decrypt saved credentials.
 
-### What Not To Commit
+### Check The Folder
 
-Do not commit:
+Run this in PowerShell:
 
-- `.env`
-- `.env.*` files with real values
-- credentials
-- webhook secrets
-- private keys
-- `.n8n-local/`
-- `.tmp/`
-- live n8n imports or exports
-- local Postgres backups
+```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
+Get-ChildItem -Force
+Get-ChildItem -Force .\scripts
+```
+
+The folder should look like this after `.env` exists:
+
+```text
+Desktop\n8n-local
+|-- docker-compose.yml
+|-- .env.example
+|-- .env
+|-- n8n-local.cmd
+`-- scripts\
+    `-- n8n-local-menu.ps1
+```
+
+## What Not To Commit
+
+Commit means save into Git/GitHub.
+
+Do not save these files or values into GitHub:
+
+- `.env` files.
+- Real ngrok authtokens.
+- Real passwords.
+- Real n8n encryption keys.
+- Real API tokens, webhook secrets, or MCP tokens.
+- `.n8n-local/`, `.tmp/`, backups, and live export/import files.
 
 ## Start The Local Menu
 
-### Run From The Local Stack Folder
+### Use The Launcher
 
-Run this in PowerShell from the local stack folder:
+1. Open the `n8n-local` folder on your Desktop.
+2. Double-click `n8n-local.cmd`.
+3. Follow the menu prompts.
 
-```powershell
-.\n8n-local.cmd
-```
+Do not launch n8n directly from Docker Desktop. Launch it from `n8n-local.cmd` instead.
 
-The launcher opens the PowerShell menu from [n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1).
+Docker Desktop direct launch bypasses:
+
+- Guided checks.
+- Selected updates.
+- Backups.
+- Clear status output.
 
 ### What The Menu Does
 
-Use the menu for normal daily work:
+| Menu area | Use it for |
+| --- | --- |
+| Start | Start local n8n, Postgres, and optionally ngrok. |
+| Updates | Check for newer images and apply selected updates. |
+| Status | Show running containers and service health. |
+| Logs | Open all logs or service-specific logs. |
+| URLs | Open n8n or the ngrok inspector. |
+| Backup | Create a local Postgres backup before risky changes. |
 
-- Start the stack.
-- Check for updates.
-- Apply selected updates.
-- Restart or stop the stack.
-- Show status.
-- View all logs or service-specific logs.
-- Open n8n.
-- Open the ngrok inspector.
-- Back up Postgres.
-- Show the command reference.
+If double-click does not work, run this in PowerShell:
 
-Docker Desktop can also view containers and logs. Docker Desktop Play bypasses the menu and update checks, so start through `n8n-local.cmd` when you want guided checks, selected updates, backups, and clear status output.
+```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
+.\n8n-local.cmd
+```
 
 ## First Launch: Local-Only Owner Setup
 
-### Start Local Stack
+### Start Local n8n First
 
 Create the owner account before exposing n8n through ngrok.
 
-Run this in PowerShell from `%USERPROFILE%\Desktop\n8n-local`:
+**Choose one launch path:**
+
+| Path | What to do |
+| --- | --- |
+| Menu | Double-click `n8n-local.cmd`, then choose the local start option before starting ngrok. |
+| Raw command | Use the fallback command below only if you are comfortable with PowerShell. |
+
+Fallback command:
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
 docker compose up -d postgres n8n
 docker compose ps
 ```
-
-This starts local n8n and Postgres without starting the ngrok tunnel.
 
 ### Open n8n Locally
 
@@ -254,169 +271,120 @@ Open this URL in your browser:
 
 Create the owner account locally on first launch.
 
-### Create Owner Account Before Public Tunnel
-
 Do not start the public tunnel until the owner account exists.
 
 The tunnel exposes the full local n8n surface reachable through that URL path, including UI, API, webhook, and MCP routes. Treat it as public access to local n8n, not as a webhook-only pipe.
 
 ## Public Tunnel With ngrok
 
-### What The Tunnel Exposes
+### When Should I Use ngrok?
 
-The local tunnel shape is:
+If you are only opening n8n on your own computer, you do not need ngrok.
 
-```text
-outside service
--> https://your-reserved-domain.ngrok.app
--> ngrok Compose service
--> n8n Compose service on n8n:5678
-```
+Use ngrok when another online service must call your local n8n webhook or OAuth callback.
 
-Use the ngrok HTTPS URL when outside services need to reach local n8n for webhooks or OAuth callbacks.
+Examples:
 
-You do not need ngrok just for a local agent talking to `http://localhost:5678`.
+- Stripe webhooks.
+- GitHub webhooks.
+- Telegram webhooks.
+- OAuth callbacks.
 
-### Start Public Tunnel
+### Start The Public Tunnel
 
-Run this in PowerShell from the local stack folder after the owner account exists:
+1. Make sure the owner account already exists.
+2. Double-click `n8n-local.cmd`.
+3. Choose the ngrok or tunnel start option if the menu separates it.
+
+Fallback command:
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
 docker compose up -d ngrok
 docker compose ps
 ```
 
-If you changed `.env`, recreate affected services from the local stack folder:
+Use the `WEBHOOK_URL` value from `.env` for external webhook and OAuth callback configuration.
+
+### If You Changed Tunnel Settings
+
+1. Close the existing `n8n-local.cmd` window.
+2. Save `.env`.
+3. Double-click `n8n-local.cmd` again.
+4. Start with the ngrok/tunnel option if the menu separates it.
+
+Fallback command:
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
 docker compose up -d --force-recreate n8n ngrok
 ```
 
-### Stop Public Tunnel
+### Stop The Public Tunnel
 
-Run this in PowerShell from the local stack folder:
+Use the menu first.
+
+Fallback command:
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
 docker compose stop ngrok
 ```
 
 This stops the public tunnel while leaving local n8n and Postgres running.
 
-To stop everything while keeping Docker volumes, run this in PowerShell from the local stack folder:
+### Useful URLs
 
-```powershell
-docker compose down
-```
+| URL | Use |
+| --- | --- |
+| [http://localhost:5678](http://localhost:5678) | Open local n8n on your computer. |
+| [http://127.0.0.1:4040](http://127.0.0.1:4040) | Open the local ngrok inspector. |
+| `WEBHOOK_URL` from `.env` | Configure external webhooks and OAuth callbacks. |
 
-### Show URLs
-
-The menu shows the local n8n URL and ngrok inspector after a successful start, and it has browser actions for n8n and the ngrok inspector.
-
-Run this in PowerShell from the local stack folder when you want to print the main URLs without opening a browser:
-
-```powershell
-Write-Host "n8n local:        http://localhost:5678"
-Write-Host "ngrok inspector: http://127.0.0.1:4040"
-Select-String -Path ".env" -Pattern "^(WEBHOOK_URL|NGROK_DOMAIN)="
-```
-
-Open this URL in your browser for local n8n:
-
-[http://localhost:5678](http://localhost:5678)
-
-Use the `WEBHOOK_URL` value from `.env` for external webhook and OAuth callback configuration.
-
-### Open ngrok Inspector
-
-Open this URL in your browser:
-
-[http://127.0.0.1:4040](http://127.0.0.1:4040)
-
-Use the inspector to see incoming tunnel requests, response codes, and request bodies while debugging local webhooks. Do not paste secrets or real customer data into repo files while debugging.
+Use the inspector to debug incoming tunnel requests. Do not paste secrets or real customer data into repo files while debugging.
 
 ## Daily Use
 
-### Start Stack
+### Start, Stop, Restart, Status, And Logs
 
-Run this in PowerShell from the local stack folder:
+Start with the menu:
 
-```powershell
-.\n8n-local.cmd
-```
+1. Open `Desktop\n8n-local`.
+2. Double-click `n8n-local.cmd`.
+3. Choose the action you need.
 
-Choose `Start stack` from the menu.
+| Need | Menu action |
+| --- | --- |
+| Start local stack | Start stack |
+| Stop containers but keep data | Stop stack |
+| Restart containers | Restart stack |
+| Show status | Show status |
+| View logs | View logs |
+| View n8n logs | View n8n logs |
+| View ngrok logs | View ngrok logs |
+| View Postgres logs | View Postgres logs |
 
-### Stop Stack
+Press `Ctrl+C` to stop following logs.
 
-Run this in PowerShell from the local stack folder:
-
-```powershell
-.\n8n-local.cmd
-```
-
-Choose `Stop stack` from the menu. This keeps `n8n_data` and `postgres_data` volumes.
-
-### Restart Stack
-
-Run this in PowerShell from the local stack folder:
-
-```powershell
-.\n8n-local.cmd
-```
-
-Choose `Restart stack` from the menu.
-
-### Show Status
-
-Run this in PowerShell from the local stack folder:
+PowerShell fallback commands:
 
 ```powershell
-.\n8n-local.cmd
-```
-
-Choose `Show status` from the menu.
-
-The raw command behind the menu is:
-
-```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
+docker compose up -d
+docker compose down
+docker compose restart
 docker compose ps
-```
-
-### View Logs
-
-Run this in PowerShell from the local stack folder:
-
-```powershell
-.\n8n-local.cmd
-```
-
-Choose one of the log actions:
-
-- `View all logs`
-- `View n8n logs`
-- `View ngrok logs`
-- `View Postgres logs`
-
-The raw commands behind the menu are:
-
-```powershell
 docker compose logs -f
 docker compose logs -f n8n
 docker compose logs -f ngrok
 docker compose logs -f postgres
 ```
 
-Press `Ctrl+C` to stop following logs.
-
 ### Back Up Postgres
 
-Run this in PowerShell from the local stack folder:
-
-```powershell
-.\n8n-local.cmd
-```
-
-Choose `Backup Postgres database` from the menu.
+1. Double-click `n8n-local.cmd`.
+2. Choose `Backup Postgres database`.
+3. Keep the backup local and private.
 
 The menu writes a timestamped SQL dump under a local `backups` folder. Do not commit backup files.
 
@@ -424,31 +392,22 @@ The menu writes a timestamped SQL dump under a local `backups` folder. Do not co
 
 ### Check For Updates
 
-Run this in PowerShell from the local stack folder:
-
-```powershell
-.\n8n-local.cmd
-```
-
-Choose `Check for updates`.
+1. Double-click `n8n-local.cmd`.
+2. Choose `Check for updates`.
 
 The check compares local image tag IDs before and after `docker compose pull`. It may pull newer images into the local Docker cache, but it does not restart or recreate running services.
 
 ### Apply Selected Updates
 
-Run this in PowerShell from the local stack folder:
+1. Double-click `n8n-local.cmd`.
+2. Choose `Update selected services`.
+3. Back up first if Postgres is selected.
 
-```powershell
-.\n8n-local.cmd
-```
-
-Choose `Update selected services`.
-
-If Postgres is selected, the menu warns you to back up first. Postgres is pinned to major version 16 in [docker-compose.yml](../../templates/local-stack/docker-compose.yml).
+Postgres is pinned to major version 16 in [docker-compose.yml](../../templates/local-stack/docker-compose.yml).
 
 ### Why Updates Are Not Silent
 
-The stack does not silently auto-update. Updating images and recreating containers are separate choices so a local user can:
+Updating images and recreating containers are separate choices so you can:
 
 - Back up first.
 - Avoid surprise restarts.
@@ -477,102 +436,41 @@ If you use MCP through the ngrok domain, use the MCP URL shown by n8n for that s
 
 Reference: [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/).
 
-### Codex MCP Config
+### Choose Your Platform Config
 
-Use the [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md).
+**Choose only one setup path first:**
 
-Put `N8N_MCP_TOKEN` in a user environment variable, not in repo files. Restart Codex after changing MCP config, `AGENTS.md`, or `N8N_MCP_TOKEN`.
+| Platform | Config guide | Secret handling |
+| --- | --- | --- |
+| Codex | [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md) | Put `N8N_MCP_TOKEN` in a user environment variable, not repo files. |
+| Claude Code | [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md) | Put `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage. |
+| OpenCode | [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md) | Use user-scoped OpenCode config unless a project intentionally needs overrides. |
+| Antigravity | [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md) | Use user-scoped Antigravity config unless a project intentionally needs overrides. |
 
-### Claude Code MCP Config
-
-Use the [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md).
-
-Put `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or the platform's supported secret storage, not in repo files. Fully close and reopen Claude Desktop after changing MCP config, `CLAUDE.md`, or MCP environment variables.
-
-### OpenCode MCP Config
-
-Use the [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md).
-
-Use user-scoped OpenCode config unless a project intentionally needs project-specific overrides. Restart OpenCode from a fresh PowerShell window after changing MCP config, `AGENTS.md`, or MCP environment variables.
-
-### Antigravity MCP Config
-
-Use the [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md).
-
-Use user-scoped Antigravity config unless a project intentionally needs project-specific overrides. Fully close and reopen Antigravity after changing MCP config, `GEMINI.md`, or MCP environment variables.
+Restart your agent app after changing MCP config, agent rules, or user environment variables.
 
 ## Agent Rules And Adapters
 
-### Generic Agent Rules
+**If the [AI Coding Agent Rules](../../../ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
 
-Use generic agent rules as the slim always-on baseline for coding agents:
-
-- [AGENTS.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for Codex or OpenCode.
-- [CLAUDE.template.md](../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md) for Claude Code.
-- [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md) for Antigravity.
-
-If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
-
-### n8n Agent Rules
+| Need | Use |
+| --- | --- |
+| Generic AI coding-agent rules | [AI Coding Agent Rules](../../../ai-coding-agent-rules/) |
+| Full n8n workflow and live-action rules | [n8n Agent Rules](../../../n8n-agent-rules/) |
+| Portable n8n rules copy | [references/n8n-agent-rules.md](../../../../skills/n8n-local-setup/references/n8n-agent-rules.md) after sync |
 
 Install or load [n8n Agent Rules](../../../n8n-agent-rules/) before n8n workflow, MCP, helper-script, import/export, credential, execution, repo/live sync, or live n8n work.
 
-The local setup project references the n8n rules; it does not own them. Use the published [n8n Agent Rules](../../../n8n-agent-rules/) skill for the full operating contract.
-
-### Optional Adapter
-
-Optional adapters are brief pointers for existing instruction files:
-
-- `AGENTS.n8n-brief.template.md` for Codex or OpenCode.
-- `CLAUDE.n8n-brief.template.md` for Claude Code.
-- `GEMINI.n8n-brief.template.md` for Antigravity.
-
-Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
+If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge/apply the managed templates or produce a diff plan.
 
 ## Agent Platform Setup
 
-### Codex
-
-Use Codex with:
-
-- [AGENTS.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
-- [n8n Agent Rules](../../../n8n-agent-rules/)
-- [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md)
-
-Restart Codex after changing `config.toml`, `AGENTS.md`, or `N8N_MCP_TOKEN`.
-
-### Claude Code
-
-Use Claude Code with:
-
-- [CLAUDE.template.md](../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md)
-- [n8n Agent Rules](../../../n8n-agent-rules/)
-- [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md)
-- [Claude Code Integration appendix](../ai-agent-platforms/claude-code.md)
-
-You do not need to open this repo in Claude Code just to use n8n MCP servers. Use the folder you actually want Claude Code to work in.
-
-### OpenCode
-
-Use OpenCode with:
-
-- [AGENTS.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
-- [n8n Agent Rules](../../../n8n-agent-rules/)
-- [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md)
-- [OpenCode Integration appendix](../ai-agent-platforms/opencode.md)
-
-You can start OpenCode from any folder. Open a specific repo only when you want OpenCode to inspect or edit that repo.
-
-### Antigravity
-
-Use Antigravity with:
-
-- [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md)
-- [n8n Agent Rules](../../../n8n-agent-rules/)
-- [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md)
-- [Antigravity Integration appendix](../ai-agent-platforms/antigravity.md)
-
-You can open any folder. Open a specific repo only when you want Antigravity to inspect or edit that repo.
+| Platform | Use |
+| --- | --- |
+| Codex | [Codex platform router](../ai-agent-platforms/codex.md) and [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md). |
+| Claude Code | [Claude Code Integration appendix](../ai-agent-platforms/claude-code.md) and [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md). |
+| OpenCode | [OpenCode Integration appendix](../ai-agent-platforms/opencode.md) and [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md). |
+| Antigravity | [Antigravity Integration appendix](../ai-agent-platforms/antigravity.md) and [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md). |
 
 ## Troubleshooting
 
@@ -584,21 +482,22 @@ Run this in PowerShell from any folder:
 docker info
 ```
 
-If Docker reports that the engine is unavailable, start Docker Desktop and wait for it to finish. Then rerun the menu from the local stack folder:
+If Docker reports that the engine is unavailable:
 
-```powershell
-.\n8n-local.cmd
-```
+1. Open Docker Desktop.
+2. Wait for the engine to finish starting.
+3. Double-click `n8n-local.cmd` again.
 
 ### `.env` Missing
 
-Run this in PowerShell from the local stack folder:
+Run this in PowerShell:
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
 Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force
 ```
 
-Then open `.env` and replace the placeholders. Paste values into .env, not PowerShell.
+Then open `.env`, replace the placeholders, and save the file.
 
 ### ngrok Tunnel Not Available
 
@@ -611,9 +510,17 @@ NGROK_DOMAIN=your-reserved-domain.ngrok.app
 
 `NGROK_DOMAIN` should be a reserved ngrok domain without `https://`.
 
-Run this in PowerShell from the local stack folder after editing `.env`:
+After editing `.env`:
+
+1. Close the existing `n8n-local.cmd` window.
+2. Save `.env`.
+3. Double-click `n8n-local.cmd` again.
+4. Start with the ngrok/tunnel option if the menu separates it.
+
+Fallback command:
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
 docker compose up -d --force-recreate ngrok
 docker compose logs -f ngrok
 ```
@@ -629,9 +536,16 @@ N8N_PROTOCOL=https
 N8N_PROXY_HOPS=1
 ```
 
-Run this in PowerShell from the local stack folder after editing `.env`:
+After editing `.env`:
+
+1. Close the existing `n8n-local.cmd` window.
+2. Save `.env`.
+3. Double-click `n8n-local.cmd` again.
+
+Fallback command:
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
 docker compose up -d --force-recreate n8n ngrok
 ```
 
@@ -662,7 +576,10 @@ Use docs/search MCP tools before live n8n tools. Use live n8n tools only when th
 
 ## Advanced Queue Mode
 
-The default local Fast Path is normal mode: one n8n service runs the UI, API, webhooks, scheduler, and executions. Postgres stores durable n8n workflow, credential, user, and execution state.
+The default local path is normal mode:
+
+- One n8n service handles the UI, API, webhooks, scheduler, and executions.
+- Postgres stores durable n8n workflow, credential, user, and execution state.
 
 Queue mode is a future production scaling path:
 
@@ -671,7 +588,7 @@ Queue mode is a future production scaling path:
 - n8n worker containers run executions.
 - Postgres stores durable workflow, credential, user, and execution state.
 
-Do not add Redis or workers to the default local Fast Path. Use queue mode later when production workloads need worker-based scaling.
+Do not add Redis or workers to the default local setup. Use queue mode later when production workloads need worker-based scaling.
 
 ## Safety Rules
 
@@ -681,16 +598,18 @@ Do not add Redis or workers to the default local Fast Path. Use queue mode later
 - Do not expose the n8n container directly to the LAN or internet.
 - Do not run live n8n import/export, activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
 - Do not paste real API tokens, webhook secrets, passwords, encryption keys, or MCP tokens into repo files.
-- Do not commit `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports.
+- Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 - Do not remove `n8n_data` or `postgres_data` Docker volumes unless you intentionally want to delete local runtime data.
 - Keep VPS/Hostinger setup separate in [4. VPS Hosting](vps-hosting.md).
 
 ## Appendices And References
 
-- [2. Upgrading](upgrading.md) for focused local, VPS, and npm update notes.
-- [3. Tunneling Guide](tunnelling.md) for focused ngrok tunnel behavior.
-- [3a. Docker Compose + ngrok](docker-compose-ngrok.md) for template details.
-- [4. VPS Hosting](vps-hosting.md) for Hostinger, VPS, Coolify, and production hosting.
-- [5. Claude Code Integration](../ai-agent-platforms/claude-code.md) for Claude-specific setup detail.
-- [6. OpenCode Integration](../ai-agent-platforms/opencode.md) for OpenCode-specific setup detail.
-- [7. Antigravity Integration](../ai-agent-platforms/antigravity.md) for Antigravity-specific setup detail.
+| Reference | Use when |
+| --- | --- |
+| [2. Upgrading](upgrading.md) | You need focused update notes for local, VPS, or npm installs. |
+| [3. Hostinger Domain And Tunnel Notes](tunnelling.md) | You are moving from local/ngrok testing to a Hostinger public domain. |
+| [3a. Compose Template Reference](docker-compose-ngrok.md) | You need to inspect the Compose template and placeholder `.env.example`. |
+| [4. VPS Hosting](vps-hosting.md) | You need always-on public hosting, Hostinger, VPS, or Coolify guidance. |
+| [5. Claude Code Integration](../ai-agent-platforms/claude-code.md) | You need Claude Code setup detail. |
+| [6. OpenCode Integration](../ai-agent-platforms/opencode.md) | You need OpenCode setup detail. |
+| [7. Antigravity Integration](../ai-agent-platforms/antigravity.md) | You need Antigravity setup detail. |

@@ -364,8 +364,8 @@ function Show-Help {
   Write-Host 'Recommended entrypoint:' -ForegroundColor Cyan
   Write-Host '  n8n-local.cmd' -ForegroundColor White
   Write-Host ''
-  Write-Host 'Docker Desktop can view containers and logs, but Docker Desktop Play bypasses the menu and update checks.' -ForegroundColor Yellow
-  Write-Host 'Start through n8n-local.cmd when you want guided checks, selected updates, backups, and clear status output.' -ForegroundColor Cyan
+  Write-Host 'Do not launch n8n directly from Docker Desktop. Launch it from n8n-local.cmd instead.' -ForegroundColor Yellow
+  Write-Host 'Docker Desktop direct launch bypasses guided checks, selected updates, backups, and clear status output.' -ForegroundColor Cyan
   Write-Host ''
   Write-Host 'Raw commands behind the menu:' -ForegroundColor Cyan
   Write-Host '  Start stack:              docker compose up -d'

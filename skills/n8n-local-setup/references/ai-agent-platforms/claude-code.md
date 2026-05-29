@@ -6,22 +6,16 @@ Update the project source and run sync.
 -->
 # EXTRA: Claude Code Desktop Integration ( Windows )
 
-The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This page is retained as a secondary platform reference for Claude Code details, not as a required local setup path.
+The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This page is a secondary Claude Code reference, not a required local setup path.
 
-This extra guide adds Claude Code Desktop to the same n8n setup used by the Codex guide.
+## What This Adds
 
-- It does not replace Codex.
-- This guide is only for setting up Claude Code Desktop's global/user MCP config and global `CLAUDE.md` rules.
-- You do not need to clone this repo, open this repo, select this repo folder, or create repo-level config files.
-
-It gives Claude Code Desktop:
-
-- `n8n_docs` for node search and workflow validation using the community MCP.
-- `n8n_live` for your real n8n instance using the official MCP.
-- Global Claude Code workflow rules in `C:\Users\<your-user>\.claude\CLAUDE.md`.
-- A safe smoke-test path that keeps workflows inactive by default.
-
----
+| Item | Use |
+| --- | --- |
+| `n8n_docs` | Node search and workflow validation using the community MCP. |
+| `n8n_live` | Read or mutate the real n8n instance only after explicit approval. |
+| Claude Code rules | Repo or user instructions for safer agent behavior. |
+| Claude MCP config | User-scoped MCP server setup. |
 
 ## 1. Before You Start
 
@@ -31,31 +25,29 @@ You should already have:
 
 1. Docker Desktop installed if you are running local n8n.
 2. Node.js installed.
-3. Claude Desktop installed.
-4. An n8n instance running locally, through a tunnel, or on a hosted domain.
+3. Claude Desktop or Claude Code installed.
+4. n8n running locally, through a tunnel, or on a hosted domain.
 5. Instance-level MCP enabled in n8n.
 6. The live n8n MCP server URL copied from n8n.
 7. A live n8n MCP token copied from n8n.
 
----
+## 2. Install Claude Code
 
-## 2. Install Claude Desktop
+| Need | Link |
+| --- | --- |
+| Claude Desktop / Claude Code | [https://claude.com/download](https://claude.com/download) |
+| Node.js LTS | [https://nodejs.org/en/download](https://nodejs.org/en/download) |
+| Git for Windows | [https://git-scm.com/download/win](https://git-scm.com/download/win) |
 
-### Install these first:
-
-1. Claude Desktop: [https://claude.com/download](https://claude.com/download)
-2. Node.js LTS: [https://nodejs.org/en/download](https://nodejs.org/en/download)
-3. Git for Windows: [https://git-scm.com/download/win](https://git-scm.com/download/win)
-
-### Then:
+Then:
 
 1. Launch Claude from the Windows Start menu.
 2. Sign in with your Anthropic account.
-3. Click the `Code` tab at the top.
+3. Open the `Code` tab.
 
-- Claude Code Desktop requires a Pro, Max, Team, or Enterprise subscription.
+Claude Code Desktop requires a Pro, Max, Team, or Enterprise subscription.
 
-### Verify Node.js and npm in PowerShell:
+Run this in PowerShell from any folder:
 
 ```powershell
 node -v
@@ -63,13 +55,11 @@ npm -v
 npx --version
 ```
 
-### If the `claude` command is available, you can also verify:
+If the `claude` command is available, you can also check:
 
 ```powershell
 claude --version
 ```
-
----
 
 ## 3. Install Toolkit Skills For Claude Code
 
@@ -86,40 +76,36 @@ Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `age
 
 Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Claude Code plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Claude Code should use direct whole-skill-folder installs.
 
----
+## 4. Agent Rules
 
-## 4. Create Claude Code Rules
+**If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
 
-### Follow the Claude Code CLAUDE.md Setup guide:
+| Need | Use |
+| --- | --- |
+| Generic Claude Code rules | [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) |
+| Full n8n operating contract | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) |
+| Optional n8n pointer | `CLAUDE.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
 
-- Install or copy generic AI coding agent rules from [CLAUDE.template.md](../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md), then copy or merge them into the target repo root as `CLAUDE.md`.
-- Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
-- Optionally merge the brief `CLAUDE.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `CLAUDE.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
-- If the target repo already has `CLAUDE.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+If the target repo already has `CLAUDE.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-## 5. Create The Claude Code MCP Config
+## 5. Claude Code MCP Config
 
-### Follow the Claude Code MCP Config guide:
+Use the [Claude MCP config](./templates/claude-mcp-config.md).
 
-- [templates/claude-mcp-config.md](./templates/claude-mcp-config.md)
+Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or Claude Code's supported secret storage, not repo files.
 
----
+## 6. Restart Claude
 
-## 6. Restart Claude Desktop
-
-### After changing any of these:
+After changing any of these:
 
 - User-scoped MCP servers.
 - `$HOME\.claude\CLAUDE.md`.
 - `N8N_MCP_URL`.
 - `N8N_MCP_TOKEN`.
 
-### Fully close and reopen Claude Desktop.
+Fully close and reopen Claude Desktop, then open the `Code` tab.
 
-- Then open the `Code` tab.
-- You do not need to select this repo folder. Use whatever folder you actually want Claude Code Desktop to work in.
-
----
+You do not need to select this repo folder. Use the folder you actually want Claude Code Desktop to work in.
 
 ## References
 

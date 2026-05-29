@@ -6,22 +6,16 @@ Update the project source and run sync.
 -->
 # EXTRA: Antigravity Integration ( Windows )
 
-The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This page is retained as a secondary platform reference for Antigravity details, not as a required local setup path.
+The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This page is a secondary Antigravity reference, not a required local setup path.
 
-This extra guide adds Google Antigravity to the same n8n setup used by the Codex guide.
+## What This Adds
 
-- It does not replace Codex.
-- This guide is written for a global Antigravity setup. You do not need to open this repo in Antigravity just to use the n8n MCP servers.
-
-It gives Antigravity:
-
-- Global `n8n_docs` access for node search and workflow validation using the community MCP.
-- Global `n8n_live` access for your real n8n instance using the official MCP through a local `supergateway` bridge.
-- Global Antigravity MCP config in `C:\Users\<your-user>\.gemini\antigravity\mcp_config.json`.
-- Global Antigravity `GEMINI.md` rules in `C:\Users\<your-user>\.gemini\GEMINI.md`.
-- A safe smoke-test path that keeps workflows inactive by default.
-
----
+| Item | Use |
+| --- | --- |
+| `n8n_docs` | Node search and workflow validation using the community MCP. |
+| `n8n_live` | Read or mutate the real n8n instance only after explicit approval. |
+| Antigravity skills | Plugin-scoped skill folders. |
+| Antigravity MCP config | User-scoped MCP server setup. |
 
 ## 1. Before You Start
 
@@ -32,18 +26,16 @@ You should already have:
 1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed if you are running local n8n.
 2. [Node.js](https://nodejs.org/en/download) installed.
 3. [Antigravity](https://antigravity.google/) installed.
-4. An n8n instance running locally, through a tunnel, or on a hosted domain.
+4. n8n running locally, through a tunnel, or on a hosted domain.
 5. Instance-level MCP enabled in n8n.
 6. The live n8n MCP server URL copied from n8n.
 7. A live n8n MCP token copied from n8n.
 
----
-
 ## 2. Install Antigravity
 
-### Install Antigravity using the official install method for your machine.
+Install Antigravity using the official install method for your machine.
 
-### Also verify Node.js and npm in a fresh PowerShell window:
+Run this in a fresh PowerShell window:
 
 ```powershell
 node -v
@@ -51,9 +43,7 @@ npm -v
 npx --version
 ```
 
-- The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
-
----
+The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
 
 ## 3. Install Toolkit Skills For Antigravity
 
@@ -91,47 +81,44 @@ This plugin-scoped folder is for loading toolkit skills.
 2. `GEMINI.md`.
 3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
----
+## 4. Agent Rules
 
-## 4. Create Global Antigravity GEMINI.md Rules
+**If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
 
-### Follow the Antigravity GEMINI.md setup guide:
+| Need | Use |
+| --- | --- |
+| Generic Antigravity rules | [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) |
+| Full n8n operating contract | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) |
+| Optional n8n pointer | `GEMINI.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
 
-- Install or copy generic AI coding agent rules from [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md), then copy or merge them into the target repo root as `GEMINI.md`.
-- Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
-- Optionally merge the brief `GEMINI.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `GEMINI.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
-- If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-## 5. Create The Global Antigravity MCP Config
+If Antigravity does not invoke skills automatically, keep any global `GEMINI.md` nudge tiny: remind it to use `ai-coding-agent-rules` before the first repo file edit. Do not add a huge global rules file.
 
-### Follow the Antigravity MCP Config guide:
+## 5. Antigravity MCP Config
 
-- [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md)
+Use the [Antigravity MCP config](./templates/antigravity-mcp-config.md).
 
----
+Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
 
 ## 6. Restart Antigravity
 
-### After changing any of these:
+After changing any of these:
 
 - `$HOME\.gemini\antigravity\mcp_config.json`
 - `$HOME\.gemini\GEMINI.md`
 - `N8N_MCP_URL`
 - `N8N_MCP_TOKEN`
 
-### Fully close and reopen Antigravity.
+Fully close and reopen Antigravity.
 
-- You can open any folder. Open a specific repo only when you actually want Antigravity to inspect or edit that repo.
-
----
+You can open any folder. Open a specific repo only when you actually want Antigravity to inspect or edit that repo.
 
 ## 7. Troubleshooting
 
-### Antigravity agent stops replying after an update
+### Antigravity Agent Stops Replying After An Update
 
-If Antigravity opens normally but the agent stops replying inside a specific project, check whether the repo's hidden Git config contains the `worktreeConfig = true` extension.
-
-This can happen after an Antigravity update. In this failure mode, a blank folder may work, but Antigravity stops responding after you open a project that contains the affected `.git` folder.
+If Antigravity opens normally but the agent stops replying inside one project, check whether the repo's hidden Git config contains `worktreeConfig = true`.
 
 From the affected project folder, run:
 
@@ -141,9 +128,7 @@ ls
 antigravity config
 ```
 
-The `antigravity config` command opens the hidden `.git/config` file in Antigravity.
-
-Inside that file, look for this section:
+Inside `.git/config`, look for:
 
 ```ini
 [extensions]
@@ -161,8 +146,6 @@ Save the file, fully close Antigravity, then reopen the project.
 - Do not delete random lines from `.git/config`.
 - If `[extensions]` becomes empty after removing the line, it is safe to remove the empty `[extensions]` header too.
 - This fix is only for the bug where Antigravity stops replying because of `worktreeConfig = true` in `.git/config`.
-
----
 
 ## References
 

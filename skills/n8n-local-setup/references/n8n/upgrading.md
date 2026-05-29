@@ -107,9 +107,10 @@ That is also the flow used in n8n's official Docker Compose based VPS guides.
 
 If you followed the local setup from this repo, update from the local stack folder that contains [docker-compose.yml](../../templates/local-stack/docker-compose.yml) and the local `.env`.
 
-Run this in PowerShell from the local stack folder:
+Run this in PowerShell:
 
 ```powershell
+cd "$env:USERPROFILE\Desktop\n8n-local"
 docker compose pull
 docker compose up -d --force-recreate
 ```
