@@ -73,7 +73,20 @@ claude --version
 
 ---
 
-## 3. Create Claude Code Rules
+## 3. Install Toolkit Skills For Claude Code
+
+Preferred install: use Claude Code plugin/package skills support with whole `skills/<skill-name>/` folders.
+
+If the installed Claude Code runtime does not document a plugin manifest schema, keep the safe folder package layout and avoid invented metadata. Manual fallback paths are:
+
+1. `<repo>/.claude/skills/<skill-name>/SKILL.md`.
+2. `C:\Users\<your-user>\.claude\skills\<skill-name>\SKILL.md`.
+
+Keep the full skill folder together. Do not copy just `SKILL.md`.
+
+---
+
+## 4. Create Claude Code Rules
 
 ### Follow the Claude Code CLAUDE.md Setup guide:
 
@@ -82,7 +95,7 @@ claude --version
 * Optionally merge the brief `CLAUDE.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `CLAUDE.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
 * If the target repo already has `CLAUDE.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-## 4. Create The Claude Code MCP Config
+## 5. Create The Claude Code MCP Config
 
 ### Follow the Claude Code MCP Config guide:
 
@@ -90,7 +103,7 @@ claude --version
 
 ---
 
-## 5. Restart Claude Desktop
+## 6. Restart Claude Desktop
 
 ### After changing any of these:
 

@@ -440,9 +440,9 @@ test('root README platform guidance requires AGENTS before platform shims', () =
   assert.match(section, /`AGENTS\.md` is the shared managed instruction file inside the target repo/);
   assert.match(section, /For portable installs, create or merge it from \[repo-local\/AGENTS\.managed\.template\.md\]/);
   assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
-  assert.match(section, /\| Codex \|[^\n]*<strong>Choose one:<\/strong>[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
-  assert.match(section, /\| OpenCode \|[^\n]*<strong>Choose one:<\/strong>[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
-  assert.match(section, /\| Claude Code \|[^\n]*<strong>Choose one:<\/strong>[^\n]*<ol><li>Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*<\/li><li>Add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md[^\n]*<\/li><\/ol>/);
+  assert.match(section, /\| Codex \|[^\n]*Plugin\/package install first[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
+  assert.match(section, /\| OpenCode \|[^\n]*Short manual skill-folder install only[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
+  assert.match(section, /\| Claude Code \|[^\n]*Plugin\/package install first[^\n]*<ol><li>Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*<\/li><li>Add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md[^\n]*<\/li><\/ol>/);
   assert.doesNotMatch(section, /\| Gemini\s+CLI \|/);
   assert.doesNotMatch(section, /\.gemini\/extensions\/ai-agent-toolkit/);
   assert.match(section, /\| Antigravity \|[^\n]*<ol><li>Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*<\/li><li>Add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*<\/li><li>Add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`[^\n]*repo-local\/antigravity-bootstrap\.template\.md[^\n]*<\/li><\/ol>/);

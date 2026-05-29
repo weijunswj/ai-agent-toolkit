@@ -14,6 +14,12 @@ This is a short platform router. It is not the full runtime setup guide.
 
 For full setup detail, use the local full-fidelity references and templates in this copied skill folder.
 
+## Skill Install
+
+Preferred install: use the Codex plugin/package path with whole skill folders under `skills/<skill-name>/`. A Codex plugin package can use `.codex-plugin/plugin.json` with `skills` pointing at `./skills/`.
+
+Use direct `.agents/skills/` folders only as a fallback. Keep `README.md`, references, templates, and any supporting files beside `SKILL.md`.
+
 ## Local Routes
 
 - Use [local setup](../n8n/local-setup.md) for the full Docker Compose local n8n and Codex setup guide.
