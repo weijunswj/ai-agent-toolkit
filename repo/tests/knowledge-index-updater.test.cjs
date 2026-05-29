@@ -78,6 +78,49 @@ test('Knowledge Index property-only Notion page updates include empty content up
   }
 });
 
+test('Knowledge Index requires confirmation before non-trivial existing row updates', () => {
+  for (const filePath of [sourceSkill, generatedSkill]) {
+    const text = read(filePath);
+    const matching = section(text, '### 4. Match before creating rows', '###');
+    const updateConfirmation = section(text, '### Existing row update confirmation', '###');
+    const scheduled = section(text, '### 7. Scheduled updater behaviour');
+
+    assert.match(matching, /propose merging into one row and setting `Source` to `Notion \+ GitHub`; apply only after confirmation when an existing row would be changed\./, filePath);
+    assert.doesNotMatch(matching, /merge into one row and set `Source` to `Notion \+ GitHub`/, filePath);
+    assert.match(updateConfirmation, /Existing rows are treated as user-confirmed unless the user explicitly asks for automatic updates\./, filePath);
+    assert.match(updateConfirmation, /When an existing Knowledge Index row already exists and a non-trivial update seems needed, do not write immediately\./, filePath);
+    assert.match(updateConfirmation, /1\. \*\*<NAME>:\*\*[\s\S]*- \*\*Current data:\*\* `<current value or compact current row summary>`[\s\S]*- \*\*Suggested data:\*\* `<suggested replacement>`[\s\S]*- \*\*Reason:\*\* `<why this update is suggested>`/, filePath);
+    assert.match(updateConfirmation, /2\. \*\*<NAME>:\*\*[\s\S]*- \*\*Current data:\*\* `<current value or compact current row summary>`[\s\S]*- \*\*Suggested data:\*\* `<suggested replacement>`[\s\S]*- \*\*Reason:\*\* `<why this update is suggested>`/, filePath);
+    assert.match(updateConfirmation, /\*\*Do you want me to apply these suggested updates\?\*\*/, filePath);
+    assert.match(updateConfirmation, /Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation\./, filePath);
+    assert.match(updateConfirmation, /Adding keys or source data to an existing row is a meaningful update\./, filePath);
+    assert.match(updateConfirmation, /Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation\./, filePath);
+    assert.match(updateConfirmation, /Safe refresh fields such as `Last checked` may be updated only if the user requested a check\/update run/, filePath);
+    assert.match(updateConfirmation, /If confirmation is unavailable, report the suggested changes instead of applying them\./, filePath);
+    assert.match(scheduled, /Treat existing rows as user-confirmed unless I explicitly ask for automatic updates\./, filePath);
+    assert.match(scheduled, /Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation\./, filePath);
+    assert.match(scheduled, /propose merging them into one row and setting `Source` to `Notion \+ GitHub`; apply only after confirmation when an existing row would be changed\./, filePath);
+    assert.match(scheduled, /Adding keys or source data to an existing row is a meaningful update\. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation\./, filePath);
+    assert.doesNotMatch(scheduled, /Update `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, and `Last checked`\./, filePath);
+    assert.doesNotMatch(scheduled, /For safe non-destructive creates and updates, proceed without asking me for extra confirmation\./, filePath);
+    assert.doesNotMatch(scheduled, /merge them into one row and set `Source` to `Notion \+ GitHub`/, filePath);
+  }
+});
+
+test('Knowledge Index README documents existing row update confirmation', () => {
+  for (const filePath of [sourceReadme, generatedReadme]) {
+    const text = read(filePath);
+    const updateConfirmation = section(text, '## Existing row update confirmation');
+
+    assert.match(updateConfirmation, /Existing rows are treated as user-confirmed unless the user explicitly asks for automatic updates\./, filePath);
+    assert.match(updateConfirmation, /1\. \*\*<NAME>:\*\*[\s\S]*- \*\*Current data:\*\* `<current value or compact current row summary>`[\s\S]*- \*\*Suggested data:\*\* `<suggested replacement>`[\s\S]*- \*\*Reason:\*\* `<why this update is suggested>`/, filePath);
+    assert.match(updateConfirmation, /\*\*Do you want me to apply these suggested updates\?\*\*/, filePath);
+    assert.match(updateConfirmation, /Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation\./, filePath);
+    assert.match(updateConfirmation, /Adding keys or source data to an existing row is a meaningful update\./, filePath);
+    assert.match(updateConfirmation, /Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation\./, filePath);
+  }
+});
+
 test('Knowledge Index README documents only Notion and GitHub hard identity keys', () => {
   for (const filePath of [sourceReadme, generatedReadme]) {
     const text = read(filePath);

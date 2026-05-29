@@ -7,7 +7,7 @@ description: Update, clean, and maintain a personal notion knowledge index that 
 
 ## Overview
 
-Maintain a simple Notion Knowledge Index backed by Notion and GitHub. The index must stay lightweight: one canonical row per real project, guide, reference, repo, or portfolio item. Use `Notion Key` and `GitHub Key` as the only hard identity fields so repeated runs update existing rows instead of creating duplicates.
+Maintain a simple Notion Knowledge Index backed by Notion and GitHub. The index must stay lightweight: one canonical row per real project, guide, reference, repo, or portfolio item. Use `Notion Key` and `GitHub Key` as the only hard identity fields so repeated runs match existing rows instead of creating duplicates. Treat existing rows as user-confirmed; propose non-trivial updates before changing meaningful fields.
 
 ## Platform Support
 
@@ -37,6 +37,8 @@ For Claude-specific notes, see `agents/claude.md`.
    - Store short descriptions and source keys, not full guides or READMEs.
 4. Be conservative.
    - Never permanently delete rows automatically.
+   - Treat existing rows as user-confirmed unless the user explicitly asks for automatic updates.
+   - Propose non-trivial updates to existing rows before writing them.
    - Mark uncertain duplicates as `Needs review`.
    - Mark confirmed missing sources as `Missing` only after checking the source.
 5. Make links clickable.
@@ -148,13 +150,39 @@ Before creating any row, query existing rows by `Notion Key` and `GitHub Key`.
 
 1. Exact `Notion Key` match wins.
 2. Exact `GitHub Key` match wins.
-3. If either key already exists in another row, update that row instead of creating a duplicate.
-4. If a Notion page and GitHub repo clearly describe the same real thing, merge into one row and set `Source` to `Notion + GitHub`.
+3. If either key already exists in another row, use that existing row instead of creating a duplicate.
+4. If a Notion page and GitHub repo clearly describe the same real thing, propose merging into one row and setting `Source` to `Notion + GitHub`; apply only after confirmation when an existing row would be changed.
 5. Do not use `Canonical Key` for matching.
 
-If any strong match exists, update that row. Do not create a new row.
+If any strong match exists, work from that existing row. Do not create a new row.
 
 If unsure whether two items are the same, do not merge silently. Mark or create an item with `Status = Needs review` and explain the uncertainty.
+
+### Existing row update confirmation
+
+Existing rows are treated as user-confirmed unless the user explicitly asks for automatic updates. When an existing Knowledge Index row already exists and a non-trivial update seems needed, do not write immediately. First list all suggested changes and ask for confirmation.
+
+Use this exact proposal style:
+
+```markdown
+1. **<NAME>:**
+   - **Current data:** `<current value or compact current row summary>`
+   - **Suggested data:** `<suggested replacement>`
+   - **Reason:** `<why this update is suggested>`
+
+2. **<NAME>:**
+   - **Current data:** `<current value or compact current row summary>`
+   - **Suggested data:** `<suggested replacement>`
+   - **Reason:** `<why this update is suggested>`
+
+**Do you want me to apply these suggested updates?**
+```
+
+Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation. Adding keys or source data to an existing row is a meaningful update. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation. Safe refresh fields such as `Last checked` may be updated only if the user requested a check/update run and the change is only a check timestamp refresh.
+
+If the platform requires connector approval anyway, batch all proposed writes into one compact approval request after the user confirms the suggested changes. If confirmation is unavailable, report the suggested changes instead of applying them.
+
+This rule does not change safe create behaviour for new rows when no existing row matches. It does not change delete behaviour: never permanently delete rows unless the user explicitly asks.
 
 ### 5. Canonical row shape
 
@@ -244,7 +272,8 @@ When the user asks for a recurring updater, create a scheduled task that:
 
 - Searches Notion and GitHub for new, changed, removed, or renamed items.
 - Uses `Notion Key` and `GitHub Key` as the only hard identity checks before writing.
-- Updates existing canonical rows.
+- Proposes non-trivial changes to existing canonical rows before writing unless the user explicitly requested automatic updates.
+- May refresh safe check-only fields such as `Last checked` when the user requested a check/update run.
 - Adds new canonical rows only when no key or clear real-world match exists.
 - Marks uncertain items as `Needs review` and confirmed missing sources as `Missing`.
 - Does not permanently delete anything.
@@ -269,15 +298,29 @@ Hard identity rules:
 - `Notion Key` must use `notion.so/<page-id>`.
 - `GitHub Key` must use `github.com/<owner>/<repo>`.
 - Before creating any row, first query existing rows for the same `Notion Key` or `GitHub Key`.
-- If either key already exists in another row, update that existing row instead of creating a duplicate.
+- If either key already exists in another row, use that existing row instead of creating a duplicate.
 - Do not create duplicate repo-only rows for projects that already have a Notion + GitHub row.
-- If a Notion page and GitHub repo clearly describe the same real thing, merge them into one row and set `Source` to `Notion + GitHub`.
+- If a Notion page and GitHub repo clearly describe the same real thing, propose merging them into one row and setting `Source` to `Notion + GitHub`; apply only after confirmation when an existing row would be changed.
 - Do not use `Canonical Key` for matching, creating, merging, or deduplication.
 - If an existing row still has a `Canonical Key`, ignore it unless I explicitly ask for legacy cleanup.
 
 Update rules:
 
-- Update `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, and `Last checked`.
+- Treat existing rows as user-confirmed unless I explicitly ask for automatic updates.
+- Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation.
+- Adding keys or source data to an existing row is a meaningful update. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation.
+- If an existing row needs a non-trivial update, first list suggested changes in this exact style:
+  1. **<NAME>:**
+     - **Current data:** `<current value or compact current row summary>`
+     - **Suggested data:** `<suggested replacement>`
+     - **Reason:** `<why this update is suggested>`
+  2. **<NAME>:**
+     - **Current data:** `<current value or compact current row summary>`
+     - **Suggested data:** `<suggested replacement>`
+     - **Reason:** `<why this update is suggested>`
+- Then ask: **Do you want me to apply these suggested updates?**
+- If confirmation is unavailable, report the suggested changes instead of applying them.
+- Safe refresh fields such as `Last checked` may be updated during this requested check/update run when no meaningful field changes are included.
 - Keep descriptions short: one sentence.
 - Preserve the current default table view behaviour where possible:
   - grouped by `Category`
@@ -289,7 +332,7 @@ Update rules:
 - Do not permanently delete anything.
 - Mark uncertain duplicates as `Needs review`.
 - Mark confirmed missing sources as `Missing`.
-- For safe non-destructive creates and updates, proceed without asking me for extra confirmation.
+- For safe non-destructive creates, proceed without asking me for extra confirmation.
 - If the platform requires explicit confirmation for connector writes, batch all proposed writes into one compact approval request instead of asking repeatedly.
 
 At the end, tell me:
@@ -338,7 +381,7 @@ Before finalising:
 - Confirm rows with Notion sources have `Notion Key`.
 - Confirm rows with GitHub sources have `GitHub Key`.
 - Confirm there are no redundant `Notion Link`, `GitHub Link`, `Source Link`, or `Canonical Key` columns unless the user explicitly asked for them.
-- Confirm merged rows use `Source = Notion + GitHub`.
+- Confirm confirmed merges or newly created rows with both keys use `Source = Notion + GitHub`.
 - Confirm no duplicate active rows share the same `Notion Key` or `GitHub Key`.
 - Confirm the default view is grouped by `Category` and hides empty category groups when supported.
 - Confirm the visible columns are ordered: `Category`, `Name`, `Description`, `GitHub Key`, `Notion Key`, `Source`, `Last checked`, `Status`, `Visibility`.
