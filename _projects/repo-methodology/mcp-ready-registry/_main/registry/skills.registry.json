@@ -4,7 +4,7 @@
     "title": "AI Coding Agent Rules",
     "category": "development",
     "path": "skills/ai-coding-agent-rules/",
-    "purpose": "Slim generic execution-first AI coding agent rule templates for AGENTS.md, CLAUDE.md, and GEMINI.md.",
+    "purpose": "Bootstrap, check, and repair repo-local AI coding agent instruction files and platform shims for Codex, Claude Code, Antigravity, and compatible agents.",
     "supported_platforms": [
       "ChatGPT",
       "Codex",
@@ -15,6 +15,10 @@
       "OpenCode"
     ],
     "auto_use_triggers": [
+      "repo-local agent rules",
+      "bootstrap repo-local instructions",
+      "repair AGENTS.md",
+      "AI-AGENT-TOOLKIT managed markers",
       "agent rules",
       "AGENTS.md",
       "CLAUDE.md",

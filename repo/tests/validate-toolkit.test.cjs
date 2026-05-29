@@ -264,6 +264,30 @@ test('skill discovery includes migrated skills', () => {
   }
 });
 
+test('skill registry metadata describes the repo-local agent rules bootstrap skill', () => {
+  const expectedPurpose = 'Bootstrap, check, and repair repo-local AI coding agent instruction files and platform shims for Codex, Claude Code, Antigravity, and compatible agents.';
+  const expectedTriggers = [
+    'repo-local agent rules',
+    'bootstrap repo-local instructions',
+    'repair AGENTS.md',
+    'AI-AGENT-TOOLKIT managed markers'
+  ];
+
+  for (const relPath of [
+    '_projects/repo-methodology/mcp-ready-registry/_main/registry/skills.registry.json',
+    'mcp/registry/skills.registry.json'
+  ]) {
+    const registry = readJsonFile(path.join(repoRoot, relPath));
+    const skill = registry.find((entry) => entry.id === 'ai-coding-agent-rules');
+    assert.ok(skill, `${relPath}: ai-coding-agent-rules registry entry`);
+    assert.equal(skill.purpose, expectedPurpose, relPath);
+    assert.doesNotMatch(skill.purpose, /Slim generic execution-first/i, relPath);
+    for (const trigger of expectedTriggers) {
+      assert.ok(skill.auto_use_triggers.includes(trigger), `${relPath}: ${trigger}`);
+    }
+  }
+});
+
 test('project registry includes the project modules', () => {
   const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'projects.registry.json'), 'utf8'));
   const ids = registry.map((entry) => entry.id).sort();
@@ -1178,6 +1202,11 @@ test('project modules use _projects/_main with no mandatory exports tree', () =>
 test('.gitattributes preserves _projects _main bytes for source locks', () => {
   const attrs = fs.readFileSync(path.join(repoRoot, '.gitattributes'), 'utf8');
   assert.match(attrs, /^_projects\/\*\*\/_main\/\*\* -text$/m);
+  assert.match(
+    attrs,
+    /^_projects\/development\/ai-coding-agent-rules\/curated_output_for_ai\/skills\/ai-coding-agent-rules\/\*\*\/\*\.md text eol=lf$/m
+  );
+  assert.match(attrs, /^skills\/ai-coding-agent-rules\/\*\*\/\*\.md text eol=lf$/m);
   assert.doesNotMatch(attrs, /^projects\/\*\*\/main\/\*\* -text$/m);
 });
 
