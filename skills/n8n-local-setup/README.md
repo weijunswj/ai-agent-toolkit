@@ -23,6 +23,10 @@ The copied skill folder includes:
 
 Start with [references/n8n/local-setup.md](references/n8n/local-setup.md). It is the primary one-stop-shop local guide for setup, menu use, update checks, tunnel behavior, URLs, MCP, platform setup, troubleshooting, and daily commands.
 
+For skill installation, use direct whole-skill-folder installs for Codex and Claude Code, plugin-scoped skill-folder install for Antigravity, and a short manual whole-skill-folder install note for OpenCode. Copy whole skill folders, not just `SKILL.md`.
+
+Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
+
 The local Fast Path is `n8n + postgres + ngrok` through Docker Compose. Start it through [templates/local-stack/n8n-local.cmd](templates/local-stack/n8n-local.cmd) for the guided menu, update checks, logs, status, browser links, and Postgres backup action. ngrok is the only supported local tunnel path in this guide, and [.env.example](templates/local-stack/.env.example) is placeholder-only.
 
 Normal use of this skill does not require `_projects/`.

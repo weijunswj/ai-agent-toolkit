@@ -39,16 +39,31 @@ Manual global setup templates live in `_projects/development/ai-coding-agent-rul
 
 ## Platform Entry Points
 
-| Platform | Required repo files | Repo-local templates |
-|---|---|---|
-| Codex | `AGENTS.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
-| OpenCode | `AGENTS.md` | [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) |
-| Claude Code | <ol><li>`AGENTS.md`</li><li>`CLAUDE.md`</li></ol> | <ol><li>[repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)</li><li>[repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md)</li></ol> |
-| Antigravity | <ol><li>`AGENTS.md`</li><li>`GEMINI.md`</li><li>`.agents/rules/00-agent-toolkit-bootstrap.md`</li></ol> | <ol><li>[repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md)</li><li>[repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md)</li><li>[repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md)</li></ol> |
+| Platform | Repo-local entry point |
+|---|---|
+| Codex | `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md). |
+| OpenCode | `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md). |
+| Claude Code | 1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).<br>2. Add `CLAUDE.md` from [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md). |
+| Antigravity | 1. Create or merge `AGENTS.md` from [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md).<br>2. Add `GEMINI.md` from [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md).<br>3. Add `.agents/rules/00-agent-toolkit-bootstrap.md` from [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md). |
 
-Install copied skill folders according to the target platform's supported skill location. For Antigravity, use the observed plugin-scoped custom skill path:
-`C:\Users\<user>\.gemini\config\plugins\ai-agent-toolkit\skills\<skill-name>\SKILL.md`.
-Keep that Antigravity skill-loading path distinct from repo-local bootstrap outputs, which still go into the target repo as `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
+Install copied skill folders according to the target platform's supported skill package location.
+
+| Platform | Preferred skill install | Supported skill-folder location |
+|---|---|---|
+| Codex | Direct whole-skill-folder install. | **Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. |
+| Claude Code | Direct whole-skill-folder install. | **Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. |
+| OpenCode | Short manual whole-skill-folder install only. | **Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. |
+| Antigravity | Plugin-scoped skill-folder install. | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
+
+Copy the whole `skills/<skill-name>/` folder, not just `SKILL.md`, and keep supporting files beside it.
+Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
+
+Keep Antigravity skill loading distinct from repo-local bootstrap outputs, which still go into the target repo:
+
+1. `AGENTS.md`.
+2. `GEMINI.md`.
+3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
+
 Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity runtime or docs require plugin metadata.
 
 For n8n-specific workflow and MCP safety rules, install or load [n8n-agent-rules](../n8n-agent-rules/). Do not copy the full n8n rules into global always-on generic instructions unless you intentionally accept the context cost.

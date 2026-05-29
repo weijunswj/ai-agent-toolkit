@@ -16,7 +16,7 @@ This repo keeps reusable AI-agent material in a source-first layout:
 | What you want | Start here |
 |---|---|
 | Full guide or source context | Open a project under [_projects/](_projects/), then its `_main/` folder. |
-| Install a skill | Copy the whole folder from [skills/](skills/) into your agent's skills directory. |
+| Install a skill | Copy the whole skill folder using [Install Skills By Platform](#install-skills-by-platform). |
 | MCP-ready registry material | Open [mcp/](mcp/) for current status, design/spec docs, registries, and notes. |
 | Maintenance work | Start with [repo/docs/](repo/docs/) and the validation commands below. |
 
@@ -57,7 +57,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 
 ## Skills
 
-Skills are copyable folder packages. Install by copying the whole `skills/<skill-name>/` folder; do not copy only `SKILL.md`.
+Skills are copyable folder packages. The portable package unit is `skills/<skill-name>/`. Copy whole skill folders, not just `SKILL.md`.
 
 | Skill | Use |
 |---|---|
@@ -74,19 +74,23 @@ Skills are copyable folder packages. Install by copying the whole `skills/<skill
 
 ## Install Skills By Platform
 
-For deeper setup notes, use [How To Use: Use Skills Manually](repo/docs/HOW-TO-USE.md#use-skills-manually).
+For deeper setup notes, use [How To Use: Install Toolkit Skills](repo/docs/HOW-TO-USE.md#install-toolkit-skills).
 
 > [!IMPORTANT]
 > Repo-local agent instruction installs require a selected/open target repo or an explicit target path. Standalone chats without a workspace cannot safely infer where to install `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
+Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+
+Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
+
 `AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
 
-| Platform | Install location | Active instruction file | Notes |
+| Platform | Preferred install | Active instruction files | References |
 |---|---|---|---|
-| Codex | <strong>Choose one:</strong><ul><li>`<repo>/.agents/skills/<skill-name>/`</li><li>`$HOME/.agents/skills/<skill-name>/`</li><li>`/etc/codex/skills/<skill-name>/`</li></ul> | Create or merge `AGENTS.md` from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md). | <strong>Resources:</strong><ul><li>[Codex reference](skills/n8n-local-setup/references/ai-agent-platforms/codex.md)</li><li>[Codex MCP config](skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md)</li></ul> |
-| Claude Code | <strong>Choose one:</strong><ul><li>`<repo>/.claude/skills/<skill-name>/`</li><li>`$HOME/.claude/skills/<skill-name>/`</li></ul> | <ol><li>Create or merge `AGENTS.md` first from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).</li><li>Add `CLAUDE.md` from [`repo-local/CLAUDE.shim.template.md`](skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md).</li></ol> | <strong>Resources:</strong><ul><li>[Claude Code reference](skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md)</li><li>[Claude Code MCP config](skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md)</li></ul> |
-| OpenCode | <strong>Choose one:</strong><ul><li>`<repo>/.opencode/skills/<skill-name>/`</li><li>`$HOME/.config/opencode/skills/<skill-name>/`</li><li>Compatible `.agents/skills/` or `.claude/skills/` location</li></ul> | Create or merge `AGENTS.md` from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md). | <strong>Resources:</strong><ul><li>[OpenCode reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md)</li><li>[OpenCode MCP config](skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md)</li></ul> |
-| Antigravity | `$HOME/.gemini/config/plugins/ai-agent-toolkit/skills/<skill-name>/` | <ol><li>Create or merge `AGENTS.md` first from [`repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).</li><li>Add `GEMINI.md` from [`repo-local/GEMINI.shim.template.md`](skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md).</li><li>Add `.agents/rules/00-agent-toolkit-bootstrap.md` from [`repo-local/antigravity-bootstrap.template.md`](skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md).</li></ol> | <strong>Resources:</strong><ul><li>[Antigravity reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md)</li><li>[Antigravity MCP config](skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md)</li></ul> |
+| Codex | Direct whole-skill-folder install.<br>**Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. | `AGENTS.md` | [Codex reference](skills/n8n-local-setup/references/ai-agent-platforms/codex.md), [Codex MCP config](skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md). |
+| Claude Code | Direct whole-skill-folder install.<br>**Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. | `AGENTS.md`, `CLAUDE.md` shim | [Claude Code reference](skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md), [Claude Code MCP config](skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md). |
+| OpenCode | Short manual whole-skill-folder install only.<br>**Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. | `AGENTS.md` | [OpenCode reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md), [OpenCode MCP config](skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md). |
+| Antigravity | Plugin-scoped skill-folder install.<br>`C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\`. | `AGENTS.md`, `GEMINI.md`, Antigravity bootstrap | [Antigravity reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md), [Antigravity MCP config](skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md). |
 
 Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [skills/n8n-agent-rules/](skills/n8n-agent-rules/). Optional adapters in [skills/n8n-agent-rules/adapters/](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
 

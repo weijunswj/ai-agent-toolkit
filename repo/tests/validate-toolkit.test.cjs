@@ -245,6 +245,16 @@ test('JSON registries parse in the current repo', () => {
   }
 });
 
+test('advanced Codex and Claude plugin manifests stay out of the simple install PR', () => {
+  for (const relPath of [
+    '.codex-plugin/plugin.json',
+    '.claude-plugin/plugin.json',
+    '.claude-plugin/marketplace.json'
+  ]) {
+    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
+  }
+});
+
 test('skill discovery includes migrated skills', () => {
   const skills = validator.skillDirs();
   assert.ok(skills.includes('skills/context-preserving-ai-publisher'));

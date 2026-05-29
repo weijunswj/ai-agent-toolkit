@@ -33,6 +33,8 @@ For any n8n workflow, helper-script, MCP, `n8n_docs`, `n8n_live`, import/export,
 - Use the local stack templates in [templates/local-stack/](templates/local-stack/) for `n8n + postgres + ngrok`.
 - Treat [templates/local-stack/n8n-local.cmd](templates/local-stack/n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, and Postgres backup actions.
 - Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, and Claude web routing.
+- Use direct whole-skill-folder installs for Codex and Claude Code, plugin-scoped skill-folder install for Antigravity, and short manual whole-skill-folder install notes for OpenCode. Keep whole skill folders together when copying.
+- Defer Codex and Claude Code plugin/package packaging until the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup.
 - Use `skills/ai-coding-agent-rules` for generic AI coding agent rules.
 - Use `skills/n8n-agent-rules` or [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for the full n8n operating ruleset.
 - Keep tokens, API keys, webhook secrets, and MCP credentials out of repo files.
