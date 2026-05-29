@@ -83,6 +83,17 @@ When local repo law conflicts with this generic skill, local law wins.
 - Do not add live-system, credential, deployment, or destructive automation without explicit local approval.
 - Do not update an audit baseline until the movement is inspected and intentional.
 
+## Published Surface Readability
+
+- Sequential instructions must use Markdown numbered steps: `1.`, `2.`, `3.`.
+- Non-sequential options must use bullets or compact tables.
+- Mutually exclusive choices must include a bold instruction before the options, such as `**Choose any one supported install location:**` or `**Choose only one setup path:**`.
+- Do not hide multi-step instructions inside long table cells.
+- Use tables for scanning/comparison, not long procedural text.
+- If a table cell needs multiple actions, move those actions below the table as numbered steps or bullets.
+- Avoid semicolon chains for setup instructions.
+- Beginner-facing docs should say what to do, where to do it, and what not to do.
+
 ## Output
 
 Report:

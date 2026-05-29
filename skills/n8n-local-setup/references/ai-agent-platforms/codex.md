@@ -22,7 +22,9 @@ For full setup detail, use the local full-fidelity references and templates in t
 
 ## Skill Install
 
-Preferred install: copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:
+Copy the whole `skills/<skill-name>/` folder.
+
+**Choose any one supported Codex skill-folder location:**
 
 - `<repo>/.agents/skills/<skill-name>/SKILL.md`.
 - `$HOME/.agents/skills/<skill-name>/SKILL.md`.

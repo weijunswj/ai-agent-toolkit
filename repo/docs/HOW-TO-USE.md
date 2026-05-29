@@ -59,12 +59,12 @@ Codex and Claude Code plugin/package support exists, but this repo does not make
 
 ### Preferred Routes
 
-| Platform | Preferred route | Whole skill folder location | Notes |
+| Platform | Preferred route | Location guidance | Notes |
 |---|---|---|---|
-| Codex | Direct whole-skill-folder install | `<repo>/.agents/skills/<skill-name>/` or `$HOME/.agents/skills/<skill-name>/` or `/etc/codex/skills/<skill-name>/` | Choose one location. |
-| Claude Code | Direct whole-skill-folder install | `<repo>/.claude/skills/<skill-name>/` or `$HOME/.claude/skills/<skill-name>/` | Choose one location. |
-| OpenCode | Short manual whole-skill-folder note only | `<repo>/.opencode/skills/<skill-name>/` or `$HOME/.config/opencode/skills/<skill-name>/` | Choose one supported OpenCode location. |
-| Antigravity | Plugin-scoped skill-folder install | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` | This plugin-scoped folder is for loading toolkit skills. Repo-local bootstrap outputs still go into the target repo. |
+| Codex | Direct whole-skill-folder install | See Codex locations below. | Current path for Codex skills. |
+| Claude Code | Direct whole-skill-folder install | See Claude Code locations below. | Current path for Claude Code skills. |
+| OpenCode | Short manual whole-skill-folder note only | See OpenCode locations below. | No OpenCode plugin packaging is introduced here. |
+| Antigravity | Plugin-scoped skill-folder install | See Antigravity path below. | Skill loading stays separate from repo-local bootstrap outputs. |
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
@@ -72,7 +72,7 @@ This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` ar
 
 For Codex, use direct whole-skill-folder install first.
 
-**Copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:**
+**Choose any one supported Codex skill-folder location:**
 
 - Repo-level: `<repo>/.agents/skills/<skill-name>/SKILL.md`.
 - User-level: `$HOME/.agents/skills/<skill-name>/SKILL.md`.
@@ -84,7 +84,7 @@ Codex scans repo skills from `.agents/skills` from the current working directory
 
 For Claude Code, use direct whole-skill-folder install first.
 
-**Copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:**
+**Choose any one supported Claude Code skill-folder location:**
 
 - Project-level: `<repo>/.claude/skills/<skill-name>/SKILL.md`.
 - User-level: `$HOME/.claude/skills/<skill-name>/SKILL.md`.
@@ -95,7 +95,7 @@ Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Cod
 
 For OpenCode, use a short manual whole-skill-folder install only.
 
-**Copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:**
+**Choose any one supported OpenCode skill-folder location:**
 
 - Project OpenCode config: `<repo>/.opencode/skills/<skill-name>/SKILL.md`.
 - User OpenCode config: `$HOME/.config/opencode/skills/<skill-name>/SKILL.md`.
@@ -108,11 +108,21 @@ OpenCode walks upward from the current working directory to the git worktree for
 
 ### Antigravity
 
-For Antigravity, use the observed plugin-scoped install first:
+For Antigravity, use the observed plugin-scoped install first.
+
+**Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
 
 - Plugin-scoped: `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`.
 
-Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder. This plugin-scoped folder is for loading toolkit skills. Repo-local bootstrap outputs still go into the target repo as `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`. Use `GEMINI.md` or the configured context file for always-on Antigravity instructions.
+Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder. This plugin-scoped folder is for loading toolkit skills.
+
+**Put repo-local bootstrap outputs in the target repo, not inside the Antigravity plugin folder:**
+
+1. `AGENTS.md`.
+2. `GEMINI.md`.
+3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
+
+Use `GEMINI.md` or the configured context file for always-on Antigravity instructions.
 
 `skills/**/SKILL.md` files are published toolkit surfaces. If a generated notice is present, update the source path named in that notice and run `node repo/scripts/sync-toolkit-projects.cjs --write`. Directly maintained `linked` skills should be rare and justified in the related project manifest.
 

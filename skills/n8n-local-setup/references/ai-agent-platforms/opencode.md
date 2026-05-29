@@ -64,7 +64,9 @@ npx --version
 
 OpenCode stays on a short manual whole-skill-folder install note only.
 
-**Copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:**
+Copy the whole `skills/<skill-name>/` folder.
+
+**Choose any one supported OpenCode skill-folder location:**
 
 - `<repo>/.opencode/skills/<skill-name>/SKILL.md`.
 - `C:\Users\<your-user>\.config\opencode\skills\<skill-name>\SKILL.md`.

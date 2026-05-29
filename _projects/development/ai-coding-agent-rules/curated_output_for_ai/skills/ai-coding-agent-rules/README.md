@@ -53,15 +53,41 @@ Install copied skill folders according to the target platform's supported skill 
 
 | Platform | Preferred skill install |
 |---|---|
-| Codex | Direct whole-skill-folder install under `.agents/skills/<skill-name>/`. Choose any one supported Codex skill-folder location. |
-| Claude Code | Direct whole-skill-folder install under `.claude/skills/<skill-name>/`. Choose any one supported Claude Code skill-folder location. |
-| OpenCode | Short manual whole-skill-folder install only. Choose any one supported skill-folder location. |
-| Antigravity | Plugin-scoped skill-folder install under `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
+| Codex | Direct whole-skill-folder install. |
+| Claude Code | Direct whole-skill-folder install. |
+| OpenCode | Short manual whole-skill-folder install only. |
+| Antigravity | Plugin-scoped skill-folder install. |
+
+**Choose any one supported Codex skill-folder location:**
+
+- `<repo>/.agents/skills/<skill-name>/`.
+- `$HOME/.agents/skills/<skill-name>/`.
+- `/etc/codex/skills/<skill-name>/`.
+
+**Choose any one supported Claude Code skill-folder location:**
+
+- `<repo>/.claude/skills/<skill-name>/`.
+- `$HOME/.claude/skills/<skill-name>/`.
+
+**Choose any one supported OpenCode skill-folder location:**
+
+- `<repo>/.opencode/skills/<skill-name>/`.
+- `$HOME/.config/opencode/skills/<skill-name>/`.
+- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured.
+
+**Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
+
+- `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`.
 
 Copy the whole `skills/<skill-name>/` folder, not just `SKILL.md`, and keep supporting files beside it.
 Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
 
-Keep Antigravity skill loading distinct from repo-local bootstrap outputs, which still go into the target repo as `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
+Keep Antigravity skill loading distinct from repo-local bootstrap outputs, which still go into the target repo:
+
+1. `AGENTS.md`.
+2. `GEMINI.md`.
+3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
+
 Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity runtime or docs require plugin metadata.
 
 For n8n-specific workflow and MCP safety rules, install or load [n8n-agent-rules](../n8n-agent-rules/). Do not copy the full n8n rules into global always-on generic instructions unless you intentionally accept the context cost.

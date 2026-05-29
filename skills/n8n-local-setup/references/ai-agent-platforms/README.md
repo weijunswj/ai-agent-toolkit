@@ -20,10 +20,37 @@ Preferred skill install model:
 
 | Platform | Skill install path |
 | --- | --- |
-| Codex | Direct whole-skill-folder install under `.agents/skills/<skill-name>/`. Choose any one supported Codex skill-folder location. |
-| Claude Code | Direct whole-skill-folder install under `.claude/skills/<skill-name>/`. Choose any one supported Claude Code skill-folder location. |
-| OpenCode | Short manual whole-skill-folder install note only. Choose any one supported skill-folder location. |
-| Antigravity | Plugin-scoped skill-folder install under `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
+| Codex | Direct whole-skill-folder install. |
+| Claude Code | Direct whole-skill-folder install. |
+| OpenCode | Short manual whole-skill-folder install note only. |
+| Antigravity | Plugin-scoped skill-folder install. |
+
+**Choose any one supported Codex skill-folder location:**
+
+- `<repo>/.agents/skills/<skill-name>/`.
+- `$HOME/.agents/skills/<skill-name>/`.
+- `/etc/codex/skills/<skill-name>/`.
+
+**Choose any one supported Claude Code skill-folder location:**
+
+- `<repo>/.claude/skills/<skill-name>/`.
+- `$HOME/.claude/skills/<skill-name>/`.
+
+**Choose any one supported OpenCode skill-folder location:**
+
+- `<repo>/.opencode/skills/<skill-name>/`.
+- `$HOME/.config/opencode/skills/<skill-name>/`.
+- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured.
+
+**Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
+
+- `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`.
+
+Antigravity repo-local bootstrap outputs still go into the target repo, not inside the plugin-scoped skill folder:
+
+1. `AGENTS.md`.
+2. `GEMINI.md`.
+3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
 Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
 

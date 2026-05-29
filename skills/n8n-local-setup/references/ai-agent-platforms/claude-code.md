@@ -73,7 +73,9 @@ claude --version
 
 ## 3. Install Toolkit Skills For Claude Code
 
-Preferred install: copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:
+Copy the whole `skills/<skill-name>/` folder.
+
+**Choose any one supported Claude Code skill-folder location:**
 
 - `<repo>/.claude/skills/<skill-name>/SKILL.md`.
 - `$HOME/.claude/skills/<skill-name>/SKILL.md`.
