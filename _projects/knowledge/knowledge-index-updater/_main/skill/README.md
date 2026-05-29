@@ -84,9 +84,33 @@ Before creating a row, always query whether an existing row already has the same
 1. Notion Key.
 2. GitHub Key.
 
-If any key matches, update the existing row. Do not create a new row.
+If any key matches, use the existing row. Do not create a new row.
 
 Do not use `Canonical Key` for matching, creating, merging, or deduplication. It is removed from the clean default schema because it is AI-generated and can drift. If an existing database still has `Canonical Key`, ignore it during scheduled runs unless the user explicitly asks for legacy cleanup. Hide it from the default view before deleting it, and delete it only after the user confirms cleanup.
+
+## Existing row update confirmation
+
+Existing rows are treated as user-confirmed unless the user explicitly asks for automatic updates.
+
+When an existing Knowledge Index row already exists and a non-trivial update seems needed, do not write immediately. First list all suggested changes and ask for confirmation.
+
+Use this exact proposal style:
+
+```markdown
+1. **<NAME>:**
+   - **Current data:** `<current value or compact current row summary>`
+   - **Suggested data:** `<suggested replacement>`
+   - **Reason:** `<why this update is suggested>`
+
+2. **<NAME>:**
+   - **Current data:** `<current value or compact current row summary>`
+   - **Suggested data:** `<suggested replacement>`
+   - **Reason:** `<why this update is suggested>`
+
+**Do you want me to apply these suggested updates?**
+```
+
+Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation. Safe refresh fields such as `Last checked` may be updated only if the user requested a check/update run and the change is only a check timestamp refresh.
 
 ## Notion update payload rule
 
