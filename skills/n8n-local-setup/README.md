@@ -27,7 +27,7 @@ The local Fast Path is `n8n + postgres + ngrok` through Docker Compose. Start it
 
 Normal use of this skill does not require `_projects/`.
 
-Install [AI Coding Agent Rules](../ai-coding-agent-rules/) for generic agent rules. Install or load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, MCP, import/export, credential, execution, repo/live sync, or live-instance work.
+Before repo file edits, automatically check repo-local agent instructions. If they are missing, unmanaged, stale, or structurally broken, bootstrap/repair them first. Install or load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, MCP, import/export, credential, execution, repo/live sync, or live-instance work.
 
 A generated cross-skill copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for portability. It is generated from the canonical `development.ai-coding-agent-rules` source and must not be edited directly.
 

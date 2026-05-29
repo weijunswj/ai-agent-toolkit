@@ -480,6 +480,19 @@ test('skill README documents required file sets and shim dependency', () => {
   }
 });
 
+test('n8n local setup README describes automatic repo-local instruction checks', () => {
+  for (const relPath of [
+    '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md',
+    'skills/n8n-local-setup/README.md'
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, /Before repo file edits, automatically check repo-local agent instructions\./, relPath);
+    assert.match(text, /If they are missing, unmanaged, stale, or structurally broken, bootstrap\/repair them first\./, relPath);
+    assert.doesNotMatch(text, /Install \[AI Coding Agent Rules\]\([^)]*\) for generic agent rules/i, relPath);
+    assert.doesNotMatch(text, /use [`']?(?:skills\/)?ai-coding-agent-rules[`']? to check repo-local instructions/i, relPath);
+  }
+});
+
 test('skill instructions add only target platform shims by default', () => {
   for (const relPath of [
     '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/SKILL.md',
