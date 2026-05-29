@@ -58,8 +58,8 @@ OpenCode stays on a short manual skill-folder install note for now.
 
 | Platform | Preferred route | Package layout | Notes |
 |---|---|---|---|
-| Codex | Plugin/package install first | `ai-agent-toolkit/.codex-plugin/plugin.json` plus `ai-agent-toolkit/skills/<skill-name>/SKILL.md` | Use Codex plugin/package install when available. Use direct skill-folder locations below only as a fallback. |
-| Claude Code | Plugin/package install first | `ai-agent-toolkit/skills/<skill-name>/SKILL.md` | Use Claude Code plugin-provided or package-provided skills when available. If manifest schema is uncertain, keep the safe folder package layout and avoid fake metadata. |
+| Codex | Plugin/package install first | `ai-agent-toolkit/.codex-plugin/plugin.json` plus `ai-agent-toolkit/skills/<skill-name>/SKILL.md` | Use Codex plugin/package install when available. Do not place a plugin root inside `.agents/skills/`; use direct skill-folder locations below only as a fallback. |
+| Claude Code | Plugin/package install first | `ai-agent-toolkit/.claude-plugin/plugin.json` plus `ai-agent-toolkit/skills/<skill-name>/SKILL.md` | Use Claude Code marketplace/plugin install when available. Do not place a plugin root inside `.claude/skills/`; use direct skill-folder locations below only as a fallback. |
 | Antigravity | Plugin-scoped install first | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` | Use the observed plugin-scoped folder layout. Add a minimal `plugin.json` beside `skills/` only when the installed Antigravity runtime or docs require plugin metadata. |
 | OpenCode | Short manual skill-folder note only | `skills/<skill-name>/SKILL.md` copied into an OpenCode-supported skills folder | Do not overbuild a fake OpenCode plugin package in this PR. |
 
@@ -71,6 +71,9 @@ Use this folder shape when creating a local plugin/package from this repo:
 ai-agent-toolkit/
 |-- .codex-plugin/
 |   `-- plugin.json
+|-- .claude-plugin/
+|   |-- plugin.json
+|   `-- marketplace.json
 `-- skills/
     `-- <skill-name>/
         |-- SKILL.md
@@ -79,7 +82,9 @@ ai-agent-toolkit/
         `-- templates/
 ```
 
-The `.codex-plugin/plugin.json` file is for Codex plugin packages. Do not add Claude Code or Antigravity manifest fields unless the target platform documents them for the installed runtime.
+Codex and Claude Code plugin packages are plugin roots with manifests beside `skills/`. Direct skill fallback folders are separate install locations. Do not put a plugin root inside `.agents/skills/` or `.claude/skills/`.
+
+The `.codex-plugin/plugin.json` file is for Codex plugin packages. The `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` files are for Claude Code plugin and marketplace install. Do not add Antigravity manifest fields unless the installed runtime documents them.
 
 Minimal Codex plugin manifest shape:
 
@@ -97,13 +102,32 @@ Minimal Codex plugin manifest shape:
   "interface": {
     "displayName": "AI Agent Toolkit",
     "shortDescription": "Reusable agent skills and safe setup notes.",
-    "longDescription": "Source-traceable AI-agent skills, local setup references, and safety-first workflow guidance.",
+    "longDescription": "Source-traceable AI-agent skills, local setup references, MCP config templates, and safety-first workflow guidance.",
     "developerName": "weijunswj",
     "category": "Productivity",
     "capabilities": [
-      "Skills"
+      "Interactive",
+      "Read",
+      "Write"
     ]
   }
+}
+```
+
+Minimal Claude Code plugin manifest shape:
+
+```json
+{
+  "name": "ai-agent-toolkit",
+  "displayName": "AI Agent Toolkit",
+  "version": "0.1.0",
+  "description": "Reusable AI-agent toolkit skills.",
+  "author": {
+    "name": "weijunswj"
+  },
+  "repository": "https://github.com/weijunswj/ai-agent-toolkit",
+  "license": "UNLICENSED",
+  "skills": "./skills/"
 }
 ```
 
@@ -111,7 +135,11 @@ This repo does not commit generated package archives. If you run package scripts
 
 ### Codex
 
-For Codex, use plugin/package install first. Fallback locations for whole skill folders:
+For Codex, use plugin/package install first. This repo root is the plugin package because `.codex-plugin/plugin.json` sits beside `skills/`. A Codex plugin install is not a plugin folder copied under `.agents/skills/`; `.agents/skills/` is only for direct skill fallback.
+
+For local personal Codex plugin development, keep the plugin source as a plugin root such as `%USERPROFILE%\plugins\ai-agent-toolkit\`, then point the personal marketplace entry at that source from `%USERPROFILE%\.agents\plugins\marketplace.json`. After install, Codex may copy the plugin into its own plugin cache; do not hand-edit the cache as the source of truth.
+
+Fallback locations for whole skill folders:
 
 - Fallback repo-level: `<repo>/.agents/skills/<skill-name>/SKILL.md`.
 - Fallback user-level: `$HOME/.agents/skills/<skill-name>/SKILL.md`.
@@ -121,16 +149,22 @@ Codex scans repo skills from `.agents/skills` from the current working directory
 
 ### Claude Code
 
-For Claude Code, use plugin/package install first. Fallback locations for whole skill folders:
+For Claude Code, use plugin/package install first. This repo root is a Claude Code plugin package because `.claude-plugin/plugin.json` sits beside `skills/`; `.claude-plugin/marketplace.json` lets a marketplace install point back to this root.
+
+Use `claude --plugin-dir <path-to-ai-agent-toolkit>` for local plugin testing. For marketplace install, add the marketplace that contains `.claude-plugin/marketplace.json`, then install `ai-agent-toolkit@ai-agent-toolkit`.
+
+Fallback locations for whole skill folders:
 
 - Fallback project-level: `<repo>/.claude/skills/<skill-name>/SKILL.md`.
 - Fallback user-level: `$HOME/.claude/skills/<skill-name>/SKILL.md`.
 
-If a Claude Code plugin manifest schema is not available for the installed runtime, keep the package as a safe `skills/<skill-name>/` folder tree and avoid invented metadata. Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Code instructions.
+Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Code instructions.
 
 ### OpenCode
 
-For OpenCode, use a short manual skill-folder install only. Copy or symlink the whole skill folder into one of these locations:
+For OpenCode, use a short manual skill-folder install only.
+
+**Copy or symlink the whole `skills/<skill-name>/` folder into ANY ONE supported location:**
 
 - Project OpenCode config: `<repo>/.opencode/skills/<skill-name>/SKILL.md`.
 - User OpenCode config: `$HOME/.config/opencode/skills/<skill-name>/SKILL.md`.

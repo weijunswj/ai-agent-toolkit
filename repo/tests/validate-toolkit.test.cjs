@@ -245,6 +245,23 @@ test('JSON registries parse in the current repo', () => {
   }
 });
 
+test('repo root plugin manifests expose the whole skills folder', () => {
+  const codexPlugin = readJsonFile(path.join(repoRoot, '.codex-plugin', 'plugin.json'));
+  assert.equal(codexPlugin.name, 'ai-agent-toolkit');
+  assert.equal(codexPlugin.skills, './skills/');
+  assert.equal(codexPlugin.interface.displayName, 'AI Agent Toolkit');
+
+  const claudePlugin = readJsonFile(path.join(repoRoot, '.claude-plugin', 'plugin.json'));
+  assert.equal(claudePlugin.name, 'ai-agent-toolkit');
+  assert.equal(claudePlugin.skills, './skills/');
+
+  const marketplace = readJsonFile(path.join(repoRoot, '.claude-plugin', 'marketplace.json'));
+  assert.equal(marketplace.name, 'ai-agent-toolkit');
+  const entry = marketplace.plugins.find((plugin) => plugin.name === 'ai-agent-toolkit');
+  assert.ok(entry);
+  assert.equal(entry.source, './');
+});
+
 test('skill discovery includes migrated skills', () => {
   const skills = validator.skillDirs();
   assert.ok(skills.includes('skills/context-preserving-ai-publisher'));

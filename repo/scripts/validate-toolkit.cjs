@@ -34,6 +34,9 @@ const expectedFiles = [
   'AGENTS.md',
   'CLAUDE.md',
   'GEMINI.md',
+  '.codex-plugin/plugin.json',
+  '.claude-plugin/plugin.json',
+  '.claude-plugin/marketplace.json',
   '.agents/rules/00-agent-toolkit-bootstrap.md',
   'package.json',
   '.gitignore',
@@ -188,6 +191,8 @@ const expectedDirs = [
   'mcp/registry',
   '.agents',
   '.agents/rules',
+  '.codex-plugin',
+  '.claude-plugin',
   '.github/workflows'
 ];
 
@@ -217,6 +222,8 @@ const allowedRootEntries = new Set([
   '.gitattributes',
   '.gitignore',
   '.agents',
+  '.codex-plugin',
+  '.claude-plugin',
   'AGENTS.md',
   'CLAUDE.md',
   'GEMINI.md',
@@ -641,6 +648,54 @@ function validateSkills(errors) {
   for (const entry of listFiles().filter((item) => item.relPath.startsWith('skills/ui-ux-secure-frontend-design/') && item.relPath.endsWith('.md'))) {
     const raw = fs.readFileSync(entry.fullPath, 'utf8');
     if (raw.includes('\r\n')) fail(errors, `Design skill Markdown is not LF-normalized: ${entry.relPath}`);
+  }
+}
+
+function validatePluginManifests(errors) {
+  let codexPlugin;
+  try {
+    codexPlugin = readJson('.codex-plugin/plugin.json');
+  } catch (error) {
+    fail(errors, `.codex-plugin/plugin.json is not valid JSON: ${error.message}`);
+  }
+  if (codexPlugin) {
+    if (codexPlugin.name !== 'ai-agent-toolkit') fail(errors, '.codex-plugin/plugin.json must use name ai-agent-toolkit');
+    if (codexPlugin.skills !== './skills/') fail(errors, '.codex-plugin/plugin.json skills must point to ./skills/');
+    if (!codexPlugin.interface || codexPlugin.interface.displayName !== 'AI Agent Toolkit') {
+      fail(errors, '.codex-plugin/plugin.json interface.displayName must be AI Agent Toolkit');
+    }
+  }
+
+  let claudePlugin;
+  try {
+    claudePlugin = readJson('.claude-plugin/plugin.json');
+  } catch (error) {
+    fail(errors, `.claude-plugin/plugin.json is not valid JSON: ${error.message}`);
+  }
+  if (claudePlugin) {
+    if (claudePlugin.name !== 'ai-agent-toolkit') fail(errors, '.claude-plugin/plugin.json must use name ai-agent-toolkit');
+    if (claudePlugin.skills !== './skills/') fail(errors, '.claude-plugin/plugin.json skills must point to ./skills/');
+  }
+
+  let claudeMarketplace;
+  try {
+    claudeMarketplace = readJson('.claude-plugin/marketplace.json');
+  } catch (error) {
+    fail(errors, `.claude-plugin/marketplace.json is not valid JSON: ${error.message}`);
+  }
+  if (claudeMarketplace) {
+    if (claudeMarketplace.name !== 'ai-agent-toolkit') fail(errors, '.claude-plugin/marketplace.json must use marketplace name ai-agent-toolkit');
+    if (!claudeMarketplace.owner || claudeMarketplace.owner.name !== 'weijunswj') {
+      fail(errors, '.claude-plugin/marketplace.json owner.name must be weijunswj');
+    }
+    const plugin = Array.isArray(claudeMarketplace.plugins)
+      ? claudeMarketplace.plugins.find((entry) => entry.name === 'ai-agent-toolkit')
+      : null;
+    if (!plugin) {
+      fail(errors, '.claude-plugin/marketplace.json must list ai-agent-toolkit plugin');
+    } else if (plugin.source !== './') {
+      fail(errors, '.claude-plugin/marketplace.json ai-agent-toolkit source must be ./');
+    }
   }
 }
 
@@ -1651,6 +1706,7 @@ function runValidation() {
   validateSourceRepoRegistry(errors);
   validatePacks(errors);
   validateSkills(errors);
+  validatePluginManifests(errors);
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
   validateDocContract(errors);

@@ -1,0 +1,36 @@
+{
+  "name": "ai-agent-toolkit",
+  "version": "0.1.0",
+  "description": "Source-traceable reusable AI-agent skills, local setup references, MCP config templates, and safety-first workflow guidance.",
+  "author": {
+    "name": "weijunswj"
+  },
+  "repository": "https://github.com/weijunswj/ai-agent-toolkit",
+  "license": "UNLICENSED",
+  "keywords": [
+    "agent-skills",
+    "n8n",
+    "mcp",
+    "codex",
+    "claude-code",
+    "antigravity",
+    "opencode"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "AI Agent Toolkit",
+    "shortDescription": "Reusable agent skills and safe setup notes",
+    "longDescription": "Source-traceable AI-agent skills, local setup references, MCP config templates, and safety-first workflow guidance.",
+    "developerName": "weijunswj",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use the AI Agent Toolkit skills for this repository.",
+      "Load the n8n agent rules before n8n workflow work."
+    ]
+  }
+}

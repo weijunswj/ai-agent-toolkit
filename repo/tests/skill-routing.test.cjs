@@ -124,6 +124,10 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /Antigravity \| Plugin-scoped install first/);
   assert.match(howToUse, /OpenCode \| Short manual skill-folder note only/);
   assert.match(howToUse, /`\.codex-plugin\/plugin\.json`/);
+  assert.match(howToUse, /`\.claude-plugin\/plugin\.json`/);
+  assert.match(howToUse, /`\.claude-plugin\/marketplace\.json`/);
+  assert.match(howToUse, /Do not put a plugin root inside `\.agents\/skills\/` or `\.claude\/skills\/`/);
+  assert.match(howToUse, /ANY ONE supported location/);
   assert.match(howToUse, /`skills\/<skill-name>\/README\.md`/);
   assert.match(howToUse, /`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\SKILL\.md`/);
 
@@ -131,6 +135,10 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /Claude Code \| Plugin\/package install first/);
   assert.match(readme, /Antigravity \| Plugin-scoped install first/);
   assert.match(readme, /OpenCode \| Short manual skill-folder install only/);
+  assert.match(readme, /\.codex-plugin\/plugin\.json/);
+  assert.match(readme, /\.claude-plugin\/plugin\.json/);
+  assert.match(readme, /\.claude-plugin\/marketplace\.json/);
+  assert.match(readme, /choose \*\*ANY ONE\*\* supported location/);
   assert.match(readme, /`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\`/);
 
   assert.match(howToUse, /Fallback repo-level: `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);

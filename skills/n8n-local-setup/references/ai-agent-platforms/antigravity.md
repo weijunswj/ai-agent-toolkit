@@ -10,17 +10,16 @@ The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This p
 
 This extra guide adds Google Antigravity to the same n8n setup used by the Codex guide.
 
-* It does not replace Codex.
-
-* This guide is written for a global Antigravity setup. You do not need to open this repo in Antigravity just to use the n8n MCP servers.
+- It does not replace Codex.
+- This guide is written for a global Antigravity setup. You do not need to open this repo in Antigravity just to use the n8n MCP servers.
 
 It gives Antigravity:
 
-* Global `n8n_docs` access for node search and workflow validation using the community MCP.
-* Global `n8n_live` access for your real n8n instance using the official MCP through a local `supergateway` bridge.
-* Global Antigravity MCP config in `C:\Users\<your-user>\.gemini\antigravity\mcp_config.json`.
-* Global Antigravity `GEMINI.md` rules in `C:\Users\<your-user>\.gemini\GEMINI.md`.
-* A safe smoke-test path that keeps workflows inactive by default.
+- Global `n8n_docs` access for node search and workflow validation using the community MCP.
+- Global `n8n_live` access for your real n8n instance using the official MCP through a local `supergateway` bridge.
+- Global Antigravity MCP config in `C:\Users\<your-user>\.gemini\antigravity\mcp_config.json`.
+- Global Antigravity `GEMINI.md` rules in `C:\Users\<your-user>\.gemini\GEMINI.md`.
+- A safe smoke-test path that keeps workflows inactive by default.
 
 ---
 
@@ -52,7 +51,7 @@ npm -v
 npx --version
 ```
 
-* The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
+- The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
 
 ---
 
@@ -90,16 +89,16 @@ This plugin skill install path is only for loading the toolkit skill itself. Rep
 
 ### Follow the Antigravity GEMINI.md setup guide:
 
-* Install or copy generic AI coding agent rules from [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md), then copy or merge them into the target repo root as `GEMINI.md`.
-* Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
-* Optionally merge the brief `GEMINI.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `GEMINI.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
-* If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+- Install or copy generic AI coding agent rules from [GEMINI.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md), then copy or merge them into the target repo root as `GEMINI.md`.
+- Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
+- Optionally merge the brief `GEMINI.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `GEMINI.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
+- If the target repo already has `GEMINI.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 ## 5. Create The Global Antigravity MCP Config
 
 ### Follow the Antigravity MCP Config guide:
 
-* [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md)
+- [templates/antigravity-mcp-config.md](./templates/antigravity-mcp-config.md)
 
 ---
 
@@ -107,14 +106,14 @@ This plugin skill install path is only for loading the toolkit skill itself. Rep
 
 ### After changing any of these:
 
-  * `$HOME\.gemini\antigravity\mcp_config.json`
-  * `$HOME\.gemini\GEMINI.md`
-  * `N8N_MCP_URL`
-  * `N8N_MCP_TOKEN`
+- `$HOME\.gemini\antigravity\mcp_config.json`
+- `$HOME\.gemini\GEMINI.md`
+- `N8N_MCP_URL`
+- `N8N_MCP_TOKEN`
 
 ### Fully close and reopen Antigravity.
 
-* You can open any folder. Open a specific repo only when you actually want Antigravity to inspect or edit that repo.
+- You can open any folder. Open a specific repo only when you actually want Antigravity to inspect or edit that repo.
 
 ---
 
@@ -151,15 +150,15 @@ Delete only this line:
 
 Save the file, fully close Antigravity, then reopen the project.
 
-* Do not delete random lines from `.git/config`.
-* If `[extensions]` becomes empty after removing the line, it is safe to remove the empty `[extensions]` header too.
-* This fix is only for the bug where Antigravity stops replying because of `worktreeConfig = true` in `.git/config`.
+- Do not delete random lines from `.git/config`.
+- If `[extensions]` becomes empty after removing the line, it is safe to remove the empty `[extensions]` header too.
+- This fix is only for the bug where Antigravity stops replying because of `worktreeConfig = true` in `.git/config`.
 
 ---
 
 ## References
 
-* [Google Antigravity documentation](https://antigravity.im/documentation)
-* [Antigravity MCP setup notes](https://antigravity.codes/blog/antigravity-mcp-tutorial)
-* [GEMINI.md setup notes for Antigravity](https://docs.endorlabs.com/setup-deployment/mcp/antigravity)
-* [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/)
+- [Google Antigravity documentation](https://antigravity.im/documentation)
+- [Antigravity MCP setup notes](https://antigravity.codes/blog/antigravity-mcp-tutorial)
+- [GEMINI.md setup notes for Antigravity](https://docs.endorlabs.com/setup-deployment/mcp/antigravity)
+- [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/)

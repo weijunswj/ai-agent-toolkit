@@ -16,9 +16,11 @@ For full setup detail, use the local full-fidelity references and templates in t
 
 ## Skill Install
 
-Preferred install: use the Codex plugin/package path with whole skill folders under `skills/<skill-name>/`. A Codex plugin package can use `.codex-plugin/plugin.json` with `skills` pointing at `./skills/`.
+Preferred install: use the Codex plugin/package path. This repo root is a Codex plugin package because `.codex-plugin/plugin.json` sits beside `skills/`.
 
-Use direct `.agents/skills/` folders only as a fallback. Keep `README.md`, references, templates, and any supporting files beside `SKILL.md`.
+Do not copy a whole plugin root into `.agents/skills/`. Use direct `.agents/skills/` folders only as a fallback for individual skill folders. Keep `README.md`, references, templates, and any supporting files beside `SKILL.md`.
+
+For local personal plugin development, keep the source as a plugin root such as `%USERPROFILE%\plugins\ai-agent-toolkit\`, then point `%USERPROFILE%\.agents\plugins\marketplace.json` at it. Treat cache copies as runtime state, not source.
 
 ## Local Routes
 

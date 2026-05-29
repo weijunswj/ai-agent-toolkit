@@ -1,0 +1,38 @@
+{
+  "name": "ai-agent-toolkit",
+  "owner": {
+    "name": "weijunswj"
+  },
+  "description": "Marketplace catalog for the AI Agent Toolkit Claude Code plugin.",
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "ai-agent-toolkit",
+      "source": "./",
+      "displayName": "AI Agent Toolkit",
+      "description": "Source-traceable reusable AI-agent skills, local setup references, MCP config templates, and safety-first workflow guidance.",
+      "version": "0.1.0",
+      "author": {
+        "name": "weijunswj"
+      },
+      "repository": "https://github.com/weijunswj/ai-agent-toolkit",
+      "license": "UNLICENSED",
+      "keywords": [
+        "agent-skills",
+        "n8n",
+        "mcp",
+        "codex",
+        "claude-code",
+        "antigravity",
+        "opencode"
+      ],
+      "category": "productivity",
+      "tags": [
+        "skills",
+        "n8n",
+        "mcp",
+        "agent-rules"
+      ]
+    }
+  ]
+}

@@ -44,10 +44,10 @@ Install copied skill folders according to the target platform's supported skill 
 
 | Platform | Preferred skill install |
 |---|---|
-| Codex | Plugin/package install first; fallback to `.agents/skills/` only when needed. |
-| Claude Code | Plugin/package install first; fallback to `.claude/skills/` only when needed. |
+| Codex | Plugin/package install first from a plugin root with `.codex-plugin/plugin.json` beside `skills/`; fallback to `.agents/skills/` only for direct skill folders. |
+| Claude Code | Plugin/package install first from a plugin root with `.claude-plugin/plugin.json` beside `skills/`; fallback to `.claude/skills/` only for direct skill folders. |
 | Antigravity | Plugin-scoped install under `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
-| OpenCode | Short manual skill-folder install only. |
+| OpenCode | Short manual skill-folder install only; choose any one supported skill-folder location. |
 
 Keep Antigravity skill loading distinct from repo-local bootstrap outputs, which still go into the target repo as `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
 Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity runtime or docs require plugin metadata.

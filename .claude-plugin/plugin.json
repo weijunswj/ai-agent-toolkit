@@ -1,0 +1,21 @@
+{
+  "name": "ai-agent-toolkit",
+  "displayName": "AI Agent Toolkit",
+  "version": "0.1.0",
+  "description": "Source-traceable reusable AI-agent skills, local setup references, MCP config templates, and safety-first workflow guidance.",
+  "author": {
+    "name": "weijunswj"
+  },
+  "repository": "https://github.com/weijunswj/ai-agent-toolkit",
+  "license": "UNLICENSED",
+  "keywords": [
+    "agent-skills",
+    "n8n",
+    "mcp",
+    "codex",
+    "claude-code",
+    "antigravity",
+    "opencode"
+  ],
+  "skills": "./skills/"
+}

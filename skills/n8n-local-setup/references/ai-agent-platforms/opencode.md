@@ -10,17 +10,16 @@ The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This p
 
 This extra guide adds OpenCode to the same n8n setup used by the Codex guide.
 
-* It does not replace Codex.
-
-* This guide is written for a global OpenCode setup. You do not need to open this repo in OpenCode just to use the n8n MCP servers.
+- It does not replace Codex.
+- This guide is written for a global OpenCode setup. You do not need to open this repo in OpenCode just to use the n8n MCP servers.
 
 It gives OpenCode:
 
-* Global `n8n_docs` access for node search and workflow validation using the community MCP.
-* Global `n8n_live` access for your real n8n instance using the official MCP.
-* Global OpenCode MCP config in `C:\Users\<your-user>\.config\opencode\opencode.json`.
-* Global OpenCode rules in `C:\Users\<your-user>\.config\opencode\AGENTS.md`.
-* A safe smoke-test path that keeps workflows inactive by default.
+- Global `n8n_docs` access for node search and workflow validation using the community MCP.
+- Global `n8n_live` access for your real n8n instance using the official MCP.
+- Global OpenCode MCP config in `C:\Users\<your-user>\.config\opencode\opencode.json`.
+- Global OpenCode rules in `C:\Users\<your-user>\.config\opencode\AGENTS.md`.
+- A safe smoke-test path that keeps workflows inactive by default.
 
 ---
 
@@ -57,7 +56,7 @@ npm -v
 npx --version
 ```
 
-* If `opencode` is not found, close and reopen PowerShell first. If it is still not found, check that the OpenCode install location is on your Windows `PATH`.
+- If `opencode` is not found, close and reopen PowerShell first. If it is still not found, check that the OpenCode install location is on your Windows `PATH`.
 
 ---
 
@@ -65,11 +64,11 @@ npx --version
 
 OpenCode does not get a toolkit plugin package in this PR. Use a short manual skill-folder install note only.
 
-Copy the whole `skills/<skill-name>/` folder into one supported location:
+**Copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:**
 
-1. `<repo>/.opencode/skills/<skill-name>/SKILL.md`.
-2. `C:\Users\<your-user>\.config\opencode\skills\<skill-name>\SKILL.md`.
-3. A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured.
+- `<repo>/.opencode/skills/<skill-name>/SKILL.md`.
+- `C:\Users\<your-user>\.config\opencode\skills\<skill-name>\SKILL.md`.
+- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured.
 
 Keep `README.md`, references, templates, and supporting files with `SKILL.md`.
 
@@ -79,16 +78,16 @@ Keep `README.md`, references, templates, and supporting files with `SKILL.md`.
 
 ### Follow the OpenCode AGENTS.md Setup guide:
 
-* Install or copy generic AI coding agent rules from [AGENTS.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), then copy or merge them into the target repo root as `AGENTS.md`.
-* Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
-* Optionally merge the brief `AGENTS.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `AGENTS.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
-* If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+- Install or copy generic AI coding agent rules from [AGENTS.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), then copy or merge them into the target repo root as `AGENTS.md`.
+- Install or load `skills/n8n-agent-rules` for the full n8n operating contract before workflow, MCP, helper-script, or live n8n work.
+- Optionally merge the brief `AGENTS.n8n-brief.template.md` adapter from `skills/n8n-agent-rules/adapters/` into the same `AGENTS.md`. Do not copy the full n8n rules into always-on instructions unless you intentionally accept the context cost.
+- If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 ## 5. Create The Global OpenCode MCP Config
 
 ### Follow the OpenCode MCP Config guide:
 
-* [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md)
+- [templates/opencode-mcp-config.md](./templates/opencode-mcp-config.md)
 
 ---
 
@@ -96,10 +95,10 @@ Keep `README.md`, references, templates, and supporting files with `SKILL.md`.
 
 ### After changing any of these:
 
-  * `$HOME\.config\opencode\opencode.json`
-  * `$HOME\.config\opencode\AGENTS.md`
-  * `N8N_MCP_URL`
-  * `N8N_MCP_TOKEN`
+- `$HOME\.config\opencode\opencode.json`
+- `$HOME\.config\opencode\AGENTS.md`
+- `N8N_MCP_URL`
+- `N8N_MCP_TOKEN`
 
 ### Restart OpenCode from a fresh PowerShell window:
 
@@ -107,13 +106,13 @@ Keep `README.md`, references, templates, and supporting files with `SKILL.md`.
 opencode
 ```
 
-* You can start OpenCode from any folder. Open a specific repo only when you actually want OpenCode to inspect or edit that repo.
+- You can start OpenCode from any folder. Open a specific repo only when you actually want OpenCode to inspect or edit that repo.
 
 ---
 
 ## References
 
-* [OpenCode config docs](https://opencode.ai/docs/config/)
-* [OpenCode rules docs](https://opencode.ai/docs/rules/)
-* [OpenCode MCP servers docs](https://opencode.ai/docs/mcp-servers/)
-* [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/)
+- [OpenCode config docs](https://opencode.ai/docs/config/)
+- [OpenCode rules docs](https://opencode.ai/docs/rules/)
+- [OpenCode MCP servers docs](https://opencode.ai/docs/mcp-servers/)
+- [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/)

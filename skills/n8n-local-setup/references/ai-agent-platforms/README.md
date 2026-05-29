@@ -20,10 +20,10 @@ Preferred skill install model:
 
 | Platform | Skill install path |
 | --- | --- |
-| Codex | Plugin/package install first. |
-| Claude Code | Plugin/package install first. |
+| Codex | Plugin/package install first from a plugin root with `.codex-plugin/plugin.json` beside `skills/`. |
+| Claude Code | Plugin/package install first from a plugin root with `.claude-plugin/plugin.json` beside `skills/`. |
 | Antigravity | Plugin-scoped install under `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
-| OpenCode | Short manual skill-folder install note only. |
+| OpenCode | Short manual skill-folder install note only; choose any one supported skill-folder location. |
 
 | Reference | Use when |
 | --- | --- |
