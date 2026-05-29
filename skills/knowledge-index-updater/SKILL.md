@@ -157,7 +157,7 @@ Before creating any row, query existing rows by `Notion Key` and `GitHub Key`.
 1. Exact `Notion Key` match wins.
 2. Exact `GitHub Key` match wins.
 3. If either key already exists in another row, use that existing row instead of creating a duplicate.
-4. If a Notion page and GitHub repo clearly describe the same real thing, merge into one row and set `Source` to `Notion + GitHub`.
+4. If a Notion page and GitHub repo clearly describe the same real thing, propose merging into one row and setting `Source` to `Notion + GitHub`; apply only after confirmation when an existing row would be changed.
 5. Do not use `Canonical Key` for matching.
 
 If any strong match exists, work from that existing row. Do not create a new row.
@@ -184,7 +184,7 @@ Use this exact proposal style:
 **Do you want me to apply these suggested updates?**
 ```
 
-Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation. Safe refresh fields such as `Last checked` may be updated only if the user requested a check/update run and the change is only a check timestamp refresh.
+Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation. Adding keys or source data to an existing row is a meaningful update. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation. Safe refresh fields such as `Last checked` may be updated only if the user requested a check/update run and the change is only a check timestamp refresh.
 
 If the platform requires connector approval anyway, batch all proposed writes into one compact approval request after the user confirms the suggested changes. If confirmation is unavailable, report the suggested changes instead of applying them.
 
@@ -306,7 +306,7 @@ Hard identity rules:
 - Before creating any row, first query existing rows for the same `Notion Key` or `GitHub Key`.
 - If either key already exists in another row, use that existing row instead of creating a duplicate.
 - Do not create duplicate repo-only rows for projects that already have a Notion + GitHub row.
-- If a Notion page and GitHub repo clearly describe the same real thing, merge them into one row and set `Source` to `Notion + GitHub`.
+- If a Notion page and GitHub repo clearly describe the same real thing, propose merging them into one row and setting `Source` to `Notion + GitHub`; apply only after confirmation when an existing row would be changed.
 - Do not use `Canonical Key` for matching, creating, merging, or deduplication.
 - If an existing row still has a `Canonical Key`, ignore it unless I explicitly ask for legacy cleanup.
 
@@ -314,6 +314,7 @@ Update rules:
 
 - Treat existing rows as user-confirmed unless I explicitly ask for automatic updates.
 - Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation.
+- Adding keys or source data to an existing row is a meaningful update. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation.
 - If an existing row needs a non-trivial update, first list suggested changes in this exact style:
   1. **<NAME>:**
      - **Current data:** `<current value or compact current row summary>`
@@ -386,7 +387,7 @@ Before finalising:
 - Confirm rows with Notion sources have `Notion Key`.
 - Confirm rows with GitHub sources have `GitHub Key`.
 - Confirm there are no redundant `Notion Link`, `GitHub Link`, `Source Link`, or `Canonical Key` columns unless the user explicitly asked for them.
-- Confirm merged rows use `Source = Notion + GitHub`.
+- Confirm confirmed merges or newly created rows with both keys use `Source = Notion + GitHub`.
 - Confirm no duplicate active rows share the same `Notion Key` or `GitHub Key`.
 - Confirm the default view is grouped by `Category` and hides empty category groups when supported.
 - Confirm the visible columns are ordered: `Category`, `Name`, `Description`, `GitHub Key`, `Notion Key`, `Source`, `Last checked`, `Status`, `Visibility`.

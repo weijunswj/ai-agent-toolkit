@@ -116,7 +116,7 @@ Use this exact proposal style:
 **Do you want me to apply these suggested updates?**
 ```
 
-Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation. Safe refresh fields such as `Last checked` may be updated only if the user requested a check/update run and the change is only a check timestamp refresh.
+Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation. Adding keys or source data to an existing row is a meaningful update. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation. Safe refresh fields such as `Last checked` may be updated only if the user requested a check/update run and the change is only a check timestamp refresh.
 
 ## Notion update payload rule
 
