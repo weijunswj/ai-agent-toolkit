@@ -50,10 +50,13 @@ Install copied skill folders according to the target platform's supported skill 
 
 | Platform | Preferred skill install |
 |---|---|
-| Codex | Plugin/package install first from a plugin root with `.codex-plugin/plugin.json` beside `skills/`; fallback to `.agents/skills/` only for direct skill folders. |
-| Claude Code | Plugin/package install first from a plugin root with `.claude-plugin/plugin.json` beside `skills/`; fallback to `.claude/skills/` only for direct skill folders. |
-| Antigravity | Plugin-scoped install under `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
-| OpenCode | Short manual skill-folder install only; choose any one supported skill-folder location. |
+| Codex | Direct whole-skill-folder install under `.agents/skills/<skill-name>/`; choose any one supported Codex skill-folder location. |
+| Claude Code | Direct whole-skill-folder install under `.claude/skills/<skill-name>/`; choose any one supported Claude Code skill-folder location. |
+| OpenCode | Short manual whole-skill-folder install only; choose any one supported skill-folder location. |
+| Antigravity | Plugin-scoped skill-folder install under `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md`. |
+
+Copy the whole `skills/<skill-name>/` folder, not just `SKILL.md`, and keep supporting files beside it.
+Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
 
 Keep Antigravity skill loading distinct from repo-local bootstrap outputs, which still go into the target repo as `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
 Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity runtime or docs require plugin metadata.

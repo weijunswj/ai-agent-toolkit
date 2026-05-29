@@ -245,21 +245,14 @@ test('JSON registries parse in the current repo', () => {
   }
 });
 
-test('repo root plugin manifests expose the whole skills folder', () => {
-  const codexPlugin = readJsonFile(path.join(repoRoot, '.codex-plugin', 'plugin.json'));
-  assert.equal(codexPlugin.name, 'ai-agent-toolkit');
-  assert.equal(codexPlugin.skills, './skills/');
-  assert.equal(codexPlugin.interface.displayName, 'AI Agent Toolkit');
-
-  const claudePlugin = readJsonFile(path.join(repoRoot, '.claude-plugin', 'plugin.json'));
-  assert.equal(claudePlugin.name, 'ai-agent-toolkit');
-  assert.equal(claudePlugin.skills, './skills/');
-
-  const marketplace = readJsonFile(path.join(repoRoot, '.claude-plugin', 'marketplace.json'));
-  assert.equal(marketplace.name, 'ai-agent-toolkit');
-  const entry = marketplace.plugins.find((plugin) => plugin.name === 'ai-agent-toolkit');
-  assert.ok(entry);
-  assert.equal(entry.source, './');
+test('advanced Codex and Claude plugin manifests stay out of the simple install PR', () => {
+  for (const relPath of [
+    '.codex-plugin/plugin.json',
+    '.claude-plugin/plugin.json',
+    '.claude-plugin/marketplace.json'
+  ]) {
+    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
+  }
 });
 
 test('skill discovery includes migrated skills', () => {

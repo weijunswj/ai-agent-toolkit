@@ -16,11 +16,15 @@ For full setup detail, use the local full-fidelity references and templates in t
 
 ## Skill Install
 
-Preferred install: use the Codex plugin/package path. This repo root is a Codex plugin package because `.codex-plugin/plugin.json` sits beside `skills/`.
+Preferred install: copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:
 
-Do not copy a whole plugin root into `.agents/skills/`. Use direct `.agents/skills/` folders only as a fallback for individual skill folders. Keep `README.md`, references, templates, and any supporting files beside `SKILL.md`.
+- `<repo>/.agents/skills/<skill-name>/SKILL.md`.
+- `$HOME/.agents/skills/<skill-name>/SKILL.md`.
+- `/etc/codex/skills/<skill-name>/SKILL.md`.
 
-For local personal plugin development, keep the source as a plugin root such as `%USERPROFILE%\plugins\ai-agent-toolkit\`, then point `%USERPROFILE%\.agents\plugins\marketplace.json` at it. Treat cache copies as runtime state, not source.
+Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+
+Codex plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex should use direct whole-skill-folder installs.
 
 ## Local Routes
 

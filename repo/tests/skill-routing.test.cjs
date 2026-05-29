@@ -115,38 +115,35 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
     assert.match(readme, new RegExp(`\\| ${platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\|`), platform);
   }
 
-  assert.match(howToUse, /Preferred install: use plugin\/package install for Codex, Claude Code, and Antigravity/);
-  assert.match(howToUse, /OpenCode stays on a short manual skill-folder install note for now/);
+  assert.match(howToUse, /Preferred install: copy the whole `skills\/<skill-name>\/` folder into one supported location/);
+  assert.match(howToUse, /Codex and Claude Code plugin\/package support exists, but this repo does not make it the primary install path yet/);
+  assert.match(howToUse, /Only introduce Codex\/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy \/ drag-and-drop setup/);
+  assert.match(howToUse, /OpenCode stays on a short manual whole-skill-folder install note for now/);
   assert.match(howToUse, /Copy whole skill folders, not just `SKILL\.md`/);
+  assert.match(howToUse, /Keep `README\.md`, `references\/`, `templates\/`, `agents\/`, `packs\/`, and other supporting files beside `SKILL\.md` when present/);
   assert.match(howToUse, /Do not paste secrets, tokens, `.env` values, or credentials into repo files/);
-  assert.match(howToUse, /Codex \| Plugin\/package install first/);
-  assert.match(howToUse, /Claude Code \| Plugin\/package install first/);
-  assert.match(howToUse, /Antigravity \| Plugin-scoped install first/);
-  assert.match(howToUse, /OpenCode \| Short manual skill-folder note only/);
-  assert.match(howToUse, /`\.codex-plugin\/plugin\.json`/);
-  assert.match(howToUse, /`\.claude-plugin\/plugin\.json`/);
-  assert.match(howToUse, /`\.claude-plugin\/marketplace\.json`/);
-  assert.match(howToUse, /Do not put a plugin root inside `\.agents\/skills\/` or `\.claude\/skills\/`/);
+  assert.match(howToUse, /Codex \| Direct whole-skill-folder install/);
+  assert.match(howToUse, /Claude Code \| Direct whole-skill-folder install/);
+  assert.match(howToUse, /Antigravity \| Plugin-scoped skill-folder install/);
+  assert.match(howToUse, /OpenCode \| Short manual whole-skill-folder note only/);
   assert.match(howToUse, /ANY ONE supported location/);
-  assert.match(howToUse, /`skills\/<skill-name>\/README\.md`/);
+  assert.match(howToUse, /Use the whole `skills\/<skill-name>\/` folder as the install unit/);
   assert.match(howToUse, /`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\SKILL\.md`/);
 
-  assert.match(readme, /Codex \| Plugin\/package install first/);
-  assert.match(readme, /Claude Code \| Plugin\/package install first/);
-  assert.match(readme, /Antigravity \| Plugin-scoped install first/);
-  assert.match(readme, /OpenCode \| Short manual skill-folder install only/);
-  assert.match(readme, /\.codex-plugin\/plugin\.json/);
-  assert.match(readme, /\.claude-plugin\/plugin\.json/);
-  assert.match(readme, /\.claude-plugin\/marketplace\.json/);
-  assert.match(readme, /choose \*\*ANY ONE\*\* supported location/);
+  assert.match(readme, /Codex \| Direct whole-skill-folder install/);
+  assert.match(readme, /Claude Code \| Direct whole-skill-folder install/);
+  assert.match(readme, /Antigravity \| Plugin-scoped skill-folder install/);
+  assert.match(readme, /OpenCode \| Short manual whole-skill-folder install only/);
+  assert.match(readme, /Codex and Claude Code plugin\/package support exists, but this repo does not make it the primary install path yet/);
+  assert.match(readme, /into \*\*ANY ONE\*\* supported location/);
   assert.match(readme, /`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\`/);
 
-  assert.match(howToUse, /Fallback repo-level: `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(howToUse, /Fallback user-level: `\$HOME\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(howToUse, /Fallback admin-level: `\/etc\/codex\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(howToUse, /Repo-level: `<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(howToUse, /User-level: `\$HOME\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(howToUse, /Admin-level: `\/etc\/codex\/skills\/<skill-name>\/SKILL\.md`/);
   assert.match(howToUse, /`~\/\.codex\/config\.toml` is for Codex configuration/);
-  assert.match(howToUse, /Fallback project-level: `<repo>\/\.claude\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(howToUse, /Fallback user-level: `\$HOME\/\.claude\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(howToUse, /Project-level: `<repo>\/\.claude\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(howToUse, /User-level: `\$HOME\/\.claude\/skills\/<skill-name>\/SKILL\.md`/);
   assert.match(howToUse, /Use `CLAUDE\.md`, `CLAUDE\.local\.md`, or `\.claude\/rules\/`/);
   assert.match(howToUse, /Project OpenCode config: `<repo>\/\.opencode\/skills\/<skill-name>\/SKILL\.md`/);
   assert.match(howToUse, /User OpenCode config: `\$HOME\/\.config\/opencode\/skills\/<skill-name>\/SKILL\.md`/);
@@ -175,13 +172,25 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\[OpenCode reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/opencode\.md\)/);
   assert.match(howToUse, /\[Antigravity reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/antigravity\.md\)/);
 
-  assert.match(codexRef, /Preferred install: use the Codex plugin\/package path/);
-  assert.match(claudeCodeRef, /Preferred install: use Claude Code plugin\/package skills support/);
-  assert.match(opencodeRef, /OpenCode does not get a toolkit plugin package in this PR/);
+  assert.match(codexRef, /Preferred install: copy the whole `skills\/<skill-name>\/` folder into ANY ONE supported location/);
+  assert.match(codexRef, /`<repo>\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(codexRef, /`\$HOME\/\.agents\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(codexRef, /`\/etc\/codex\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(claudeCodeRef, /Preferred install: copy the whole `skills\/<skill-name>\/` folder into ANY ONE supported location/);
+  assert.match(claudeCodeRef, /`<repo>\/\.claude\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(claudeCodeRef, /`\$HOME\/\.claude\/skills\/<skill-name>\/SKILL\.md`/);
+  assert.match(opencodeRef, /OpenCode stays on a short manual whole-skill-folder install note/);
   assert.doesNotMatch(opencodeRef, /plugin\/package install first/i);
   assert.match(antigravityRef, /C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\SKILL\.md/);
+  assert.match(antigravityRef, /plugin-scoped folder is for loading toolkit skills/);
 
   const installDocs = [howToUse, readme, codexRef, claudeCodeRef, opencodeRef, antigravityRef].join('\n');
+  assert.doesNotMatch(installDocs, /\.codex-plugin\/plugin\.json/);
+  assert.doesNotMatch(installDocs, /\.claude-plugin\/plugin\.json/);
+  assert.doesNotMatch(installDocs, /\.claude-plugin\/marketplace\.json/);
+  assert.doesNotMatch(installDocs, /marketplace install/i);
+  assert.doesNotMatch(installDocs, /Minimal Codex plugin manifest/i);
+  assert.doesNotMatch(installDocs, /Minimal Claude Code plugin manifest/i);
   assert.doesNotMatch(
     installDocs,
     /^(?!.*\b(?:do not|don't|not)\b).*copy only\s+`?SKILL\.md`?/gim,

@@ -440,12 +440,12 @@ test('root README platform guidance requires AGENTS before platform shims', () =
   assert.match(section, /`AGENTS\.md` is the shared managed instruction file inside the target repo/);
   assert.match(section, /For portable installs, create or merge it from \[repo-local\/AGENTS\.managed\.template\.md\]/);
   assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
-  assert.match(section, /\| Codex \|[^\n]*Plugin\/package install first[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
-  assert.match(section, /\| OpenCode \|[^\n]*Short manual skill-folder install only[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
-  assert.match(section, /\| Claude Code \|[^\n]*Plugin\/package install first[^\n]*1\. Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*2\. Add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md/);
+  assert.match(section, /\| Codex \|[^\n]*Direct whole-skill-folder install[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
+  assert.match(section, /\| OpenCode \|[^\n]*Short manual whole-skill-folder install only[^\n]*repo-local\/AGENTS\.managed\.template\.md/);
+  assert.match(section, /\| Claude Code \|[^\n]*Direct whole-skill-folder install[^\n]*1\. Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*2\. Add `CLAUDE\.md`[^\n]*repo-local\/CLAUDE\.shim\.template\.md/);
   assert.doesNotMatch(section, /\| Gemini\s+CLI \|/);
   assert.doesNotMatch(section, /\.gemini\/extensions\/ai-agent-toolkit/);
-  assert.match(section, /\| Antigravity \|[^\n]*1\. Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*2\. Add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*3\. Add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`[^\n]*repo-local\/antigravity-bootstrap\.template\.md/);
+  assert.match(section, /\| Antigravity \|[^\n]*Plugin-scoped skill-folder install[^\n]*1\. Create or merge `AGENTS\.md` first[^\n]*repo-local\/AGENTS\.managed\.template\.md[^\n]*2\. Add `GEMINI\.md`[^\n]*repo-local\/GEMINI\.shim\.template\.md[^\n]*3\. Add `\.agents\/rules\/00-agent-toolkit-bootstrap\.md`[^\n]*repo-local\/antigravity-bootstrap\.template\.md/);
   assert.doesNotMatch(section, /if using the Gemini shim/);
   assert.doesNotMatch(section, /if using the Antigravity bootstrap/);
   assert.doesNotMatch(section, /\b[1-9]\)/);

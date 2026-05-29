@@ -73,21 +73,14 @@ claude --version
 
 ## 3. Install Toolkit Skills For Claude Code
 
-Preferred install: use Claude Code plugin/package skills support with whole `skills/<skill-name>/` folders.
-
-This repo root is a Claude Code plugin package because `.claude-plugin/plugin.json` sits beside `skills/`; `.claude-plugin/marketplace.json` lets a marketplace install point back to this root.
-
-- For local plugin testing, run `claude --plugin-dir <path-to-ai-agent-toolkit>`.
-- For marketplace install, add the marketplace that contains `.claude-plugin/marketplace.json`, then install `ai-agent-toolkit@ai-agent-toolkit`.
-
-Manual fallback paths, only when plugin install is not available:
-
-**Copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:**
+Preferred install: copy the whole `skills/<skill-name>/` folder into ANY ONE supported location:
 
 - `<repo>/.claude/skills/<skill-name>/SKILL.md`.
-- `C:\Users\<your-user>\.claude\skills\<skill-name>\SKILL.md`.
+- `$HOME/.claude/skills/<skill-name>/SKILL.md`.
 
-Keep the full skill folder together. Do not copy just `SKILL.md`. Do not copy a whole plugin root into `.claude/skills/`.
+Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+
+Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Claude Code plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Claude Code should use direct whole-skill-folder installs.
 
 ---
 
