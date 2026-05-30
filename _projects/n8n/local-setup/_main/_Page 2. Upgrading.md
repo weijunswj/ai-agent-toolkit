@@ -1,4 +1,4 @@
-# 2. Upgrading
+# Upgrading
 
 This guide covers the safest low-friction ways to update a self-hosted n8n instance.
 
@@ -10,7 +10,7 @@ Important:
 
 ---
 
-## 2.1 Upgrade This Guide’s Local Setup
+## 1. Upgrade This Guide’s Local Setup
 
 If you followed the local setup from this repo, update from the local stack folder that contains `docker-compose.yml` and the local `.env`.
 
@@ -26,16 +26,16 @@ The `n8n_data` and `postgres_data` Docker volumes keep local runtime data during
 
 ---
 
-## 2.2 Upgrade Hostinger n8n
+## 2. Upgrade Hostinger n8n
 
-### Option A. Docker Manager UI
+### 2.1. Option A. Docker Manager UI
 
 If your n8n instance was deployed through Hostinger Docker Manager:
 1. Open Docker Manager.
 2. Find the n8n project.
 3. Use **Update**.
 
-### Option B. SSH / Browser Terminal
+### 2.2. Option B. SSH / Browser Terminal
 
 For Hostinger VPS templates or Docker Catalog deployments, the n8n project commonly lives under `/docker/n8n` or `/root`.
 
@@ -50,7 +50,7 @@ docker compose up -d
 
 ---
 
-## 2.3 Upgrade Other VPS / Docker Compose n8n
+## 3. Upgrade Other VPS / Docker Compose n8n
 
 If you are running a standard Docker Compose based install on any provider:
 
@@ -63,15 +63,15 @@ docker compose up -d
 
 ---
 
-## 2.4 Verify The Upgrade
+## 4. Verify The Upgrade
 
-### Check containers
+### 4.1. Check containers
 
 ```bash
 docker compose ps
 ```
 
-### Check the app itself
+### 4.2. Check the app itself
 
 After the stack comes back:
 1. Open the n8n editor.
@@ -80,7 +80,7 @@ After the stack comes back:
 
 ---
 
-## 2.5 Rollback Plan
+## 5. Rollback Plan
 
 If you want easier rollbacks, pin a specific n8n image tag instead of always tracking `stable` or `latest`.
 
@@ -88,7 +88,7 @@ If something breaks, switch the image tag back to the last known-good version an
 
 ---
 
-## 2.6 When Not To Update Immediately
+## 6. When Not To Update Immediately
 
 If your instance runs business-critical automations, do not update blindly the moment a new release lands.
 
@@ -96,7 +96,7 @@ Wait long enough to read the release notes, then update with a backup or snapsho
 
 ---
 
-## 2.7 References
+## 7. References
 
 * [n8n Docs - Update self-hosted n8n](https://docs.n8n.io/hosting/installation/updating/)
 * [n8n Docs - Release notes](https://docs.n8n.io/release-notes/)
