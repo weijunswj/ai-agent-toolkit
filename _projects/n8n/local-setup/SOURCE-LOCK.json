@@ -9,22 +9,22 @@
   "files": [
     {
       "mode": "adapted",
-      "source_path": "Page 1.md",
-      "project_path": "_projects/n8n/local-setup/_main/Page 1.md",
+      "source_path": "Page 1 - Local Setup.md",
+      "project_path": "_projects/n8n/local-setup/_main/Page 1 - Local Setup.md",
       "source_blob_sha": "a08f0b83ed5722b5b8ecbc560f1ccfe89baf4563",
       "notes": "Toolkit-adapted after migration to route Codex agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies. The local Fast Path now uses Docker Compose with n8n, Postgres, and ngrok as a service; ngrok is the only supported local tunnel path."
     },
     {
       "mode": "adapted",
-      "source_path": "Page 2.md",
-      "project_path": "_projects/n8n/local-setup/_main/Page 2.md",
+      "source_path": "Page 2 - Upgrading.md",
+      "project_path": "_projects/n8n/local-setup/_main/Page 2 - Upgrading.md",
       "source_blob_sha": "a155cef59f93e9b31104ac91289490665ef32e47",
       "notes": "Toolkit-adapted after migration to prefer the local Docker Compose stack for updates while preserving explicit public-exposure safety guidance."
     },
     {
       "mode": "adapted",
-      "source_path": "Page 3.md",
-      "project_path": "_projects/n8n/local-setup/_main/Page 3.md",
+      "source_path": "Page 3 - VPS Hosting.md",
+      "project_path": "_projects/n8n/local-setup/_main/Page 3 - VPS Hosting.md",
       "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2",
       "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
     },

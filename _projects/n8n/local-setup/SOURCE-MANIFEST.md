@@ -3,8 +3,8 @@
 ## Preserved In `_main/`
 
 - `README.md`
-- `Page 1.md`
-- `Page 2.md`
+- `Page 1 - Local Setup.md`
+- `Page 2 - Upgrading.md`
 - `3. tunneling guide.md`
 - `3a. docker compose + ngrok.md`
 - `4. vps hosting.md`
