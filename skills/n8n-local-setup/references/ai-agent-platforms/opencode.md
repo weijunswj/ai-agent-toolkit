@@ -33,34 +33,32 @@ You should already have:
 
 ## 2. Install OpenCode
 
-Install OpenCode using the official install method for your machine.
-
-Run this in a fresh PowerShell window:
-
-```powershell
-opencode --version
-node -v
-npm -v
-npx --version
-```
-
-If `opencode` is not found, close and reopen PowerShell first. If it is still not found, check that the OpenCode install location is on your Windows `PATH`.
+1. Install OpenCode using the official install method for your machine.
+2. Run this in a fresh PowerShell window:
+   ```powershell
+   opencode --version
+   node -v
+   npm -v
+   npx --version
+   ```
+   A) If `opencode` is not found, close and reopen PowerShell first.
+   B) If it is still not found, check that the OpenCode install location is on your Windows `PATH`.
 
 ## 3. Install Toolkit Skills For OpenCode
 
 OpenCode stays on a short manual whole-skill-folder install note only.
 
-Copy the whole `skills/<skill-name>/` folder.
+1. Copy the whole `skills/<skill-name>/` folder.
+2. **Choose any one supported OpenCode skill-folder location:**
 
-**Choose any one supported OpenCode skill-folder location:**
+   | Scope | Skill folder location |
+   | --- | --- |
+   | Project OpenCode config | `<repo>/.opencode/skills/<skill-name>/SKILL.md` |
+   | User OpenCode config | `C:\Users\<your-user>\.config\opencode\skills\<skill-name>\SKILL.md` |
+   | Compatible fallback | `.agents/skills/` or `.claude/skills/`, if that is how the target OpenCode runtime is configured |
 
-| Scope | Skill folder location |
-| --- | --- |
-| Project OpenCode config | `<repo>/.opencode/skills/<skill-name>/SKILL.md` |
-| User OpenCode config | `C:\Users\<your-user>\.config\opencode\skills\<skill-name>\SKILL.md` |
-| Compatible fallback | `.agents/skills/` or `.claude/skills/`, if that is how the target OpenCode runtime is configured |
-
-Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+   A) Do not copy only `SKILL.md`.
+   B) Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
 ## 4. Agent Rules
 
@@ -76,26 +74,22 @@ If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually 
 
 ## 5. OpenCode MCP Config
 
-Use the [OpenCode MCP config](./templates/opencode-mcp-config.md).
-
-Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
+1. Use the [OpenCode MCP config](./templates/opencode-mcp-config.md).
+2. Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
 
 ## 6. Restart OpenCode
 
-After changing any of these:
-
-- `$HOME\.config\opencode\opencode.json`
-- `$HOME\.config\opencode\AGENTS.md`
-- `N8N_MCP_URL`
-- `N8N_MCP_TOKEN`
-
-Restart OpenCode from a fresh PowerShell window:
-
-```powershell
-opencode
-```
-
-You can start OpenCode from any folder. Open a specific repo only when you actually want OpenCode to inspect or edit that repo.
+1. After changing any of these:
+   A) `$HOME\.config\opencode\opencode.json`
+   B) `$HOME\.config\opencode\AGENTS.md`
+   C) `N8N_MCP_URL`
+   D) `N8N_MCP_TOKEN`
+2. Restart OpenCode from a fresh PowerShell window:
+   ```powershell
+   opencode
+   ```
+   A) You can start OpenCode from any folder.
+   B) Open a specific repo only when you actually want OpenCode to inspect or edit that repo.
 
 ## References
 

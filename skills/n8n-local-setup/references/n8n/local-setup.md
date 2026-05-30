@@ -78,7 +78,7 @@ Use ngrok when another online service must call your local n8n webhook or OAuth 
 
 1. Open your Desktop.
 2. Create a folder named `n8n-local`.
-3. Keep this folder outside the toolkit repo.
+   i) Keep this folder outside the toolkit repo.
 
 ### B. PowerShell Path
 
@@ -96,7 +96,7 @@ If you choose another location:
 
 1. Replace `Desktop\n8n-local` in this guide with your chosen folder.
 2. Keep it outside this toolkit repo.
-3. Do not place local `.env`, backups, Docker runtime files, or private setup notes in GitHub-tracked folders.
+   i) Do not place local `.env`, backups, Docker runtime files, or private setup notes in GitHub-tracked folders.
 
 ## Copy The Local Stack Templates
 
@@ -117,15 +117,13 @@ Key files:
 2. Select everything inside that folder.
 3. Copy the selected files and folders.
 4. Paste them into `Desktop\n8n-local`.
+   i) Copy the whole folder contents. Do not pull out only the `.ps1` file. Keep `docker-compose.yml`, `.env.example`, `n8n-local.cmd`, and `scripts\` together.
+   ii) Or run this from the copied `n8n-local-setup` skill folder instead:
 
-Copy the whole folder contents. Do not pull out only the `.ps1` file. Keep `docker-compose.yml`, `.env.example`, `n8n-local.cmd`, and `scripts\` together.
-
-Or run this from the copied `n8n-local-setup` skill folder instead:
-
-```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\Desktop\n8n-local"
-Copy-Item -LiteralPath "templates\local-stack\*" -Destination "$env:USERPROFILE\Desktop\n8n-local" -Recurse -Force
-```
+   ```powershell
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\Desktop\n8n-local"
+   Copy-Item -LiteralPath "templates\local-stack\*" -Destination "$env:USERPROFILE\Desktop\n8n-local" -Recurse -Force
+   ```
 
 ## Create And Fill `.env`
 
@@ -135,16 +133,14 @@ Copy-Item -LiteralPath "templates\local-stack\*" -Destination "$env:USERPROFILE\
 2. Copy `.env.example`.
 3. Paste the copy into the same folder.
 4. Rename the copy to `.env`.
-5. Do not edit `.env.example`.
+   i) Do not edit `.env.example`.
+   ii) If Windows creates `.env.txt`, rename it again so the file name is exactly `.env`.
+   iii) Or run this in PowerShell:
 
-If Windows creates `.env.txt`, rename it again so the file name is exactly `.env`.
-
-Or run this in PowerShell:
-
-```powershell
-cd "$env:USERPROFILE\Desktop\n8n-local"
-Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force
-```
+   ```powershell
+   cd "$env:USERPROFILE\Desktop\n8n-local"
+   Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force
+   ```
 
 ### Replace Placeholder Values
 
@@ -213,16 +209,13 @@ Do not save these files or values into GitHub:
 
 1. Open the `n8n-local` folder on your Desktop.
 2. Double-click `n8n-local.cmd`.
+   i) Do not launch n8n directly from Docker Desktop. Launch it from `n8n-local.cmd` instead.
+   ii) Docker Desktop direct launch bypasses:
+       A) Guided checks.
+       B) Selected updates.
+       C) Backups.
+       D) Clear status output.
 3. Follow the menu prompts.
-
-Do not launch n8n directly from Docker Desktop. Launch it from `n8n-local.cmd` instead.
-
-Docker Desktop direct launch bypasses:
-
-- Guided checks.
-- Selected updates.
-- Backups.
-- Clear status output.
 
 ### What The Menu Does
 
@@ -265,15 +258,10 @@ docker compose ps
 
 ### Open n8n Locally
 
-Open this URL in your browser:
-
-[http://localhost:5678](http://localhost:5678)
-
-Create the owner account locally on first launch.
-
-Do not start the public tunnel until the owner account exists.
-
-The tunnel exposes the full local n8n surface reachable through that URL path, including UI, API, webhook, and MCP routes. Treat it as public access to local n8n, not as a webhook-only pipe.
+1. Open this URL in your browser: [http://localhost:5678](http://localhost:5678)
+2. Create the owner account locally on first launch.
+   i) Do not start the public tunnel until the owner account exists.
+   ii) The tunnel exposes the full local n8n surface reachable through that URL path, including UI, API, webhook, and MCP routes. Treat it as public access to local n8n, not as a webhook-only pipe.
 
 ## Public Tunnel With ngrok
 
@@ -295,16 +283,15 @@ Examples:
 1. Make sure the owner account already exists.
 2. Double-click `n8n-local.cmd`.
 3. Choose the ngrok or tunnel start option if the menu separates it.
+   i) Fallback command:
 
-Fallback command:
+   ```powershell
+   cd "$env:USERPROFILE\Desktop\n8n-local"
+   docker compose up -d ngrok
+   docker compose ps
+   ```
 
-```powershell
-cd "$env:USERPROFILE\Desktop\n8n-local"
-docker compose up -d ngrok
-docker compose ps
-```
-
-Use the `WEBHOOK_URL` value from `.env` for external webhook and OAuth callback configuration.
+   ii) Use the `WEBHOOK_URL` value from `.env` for external webhook and OAuth callback configuration.
 
 ### If You Changed Tunnel Settings
 
@@ -312,26 +299,24 @@ Use the `WEBHOOK_URL` value from `.env` for external webhook and OAuth callback 
 2. Save `.env`.
 3. Double-click `n8n-local.cmd` again.
 4. Start with the ngrok/tunnel option if the menu separates it.
+   i) Fallback command:
 
-Fallback command:
-
-```powershell
-cd "$env:USERPROFILE\Desktop\n8n-local"
-docker compose up -d --force-recreate n8n ngrok
-```
+   ```powershell
+   cd "$env:USERPROFILE\Desktop\n8n-local"
+   docker compose up -d --force-recreate n8n ngrok
+   ```
 
 ### Stop The Public Tunnel
 
-Use the menu first.
+1. Use the menu first.
+   i) Fallback command:
 
-Fallback command:
+   ```powershell
+   cd "$env:USERPROFILE\Desktop\n8n-local"
+   docker compose stop ngrok
+   ```
 
-```powershell
-cd "$env:USERPROFILE\Desktop\n8n-local"
-docker compose stop ngrok
-```
-
-This stops the public tunnel while leaving local n8n and Postgres running.
+   ii) This stops the public tunnel while leaving local n8n and Postgres running.
 
 ### Useful URLs
 
@@ -385,8 +370,7 @@ docker compose logs -f postgres
 1. Double-click `n8n-local.cmd`.
 2. Choose `Backup Postgres database`.
 3. Keep the backup local and private.
-
-The menu writes a timestamped SQL dump under a local `backups` folder. Do not commit backup files.
+   i) The menu writes a timestamped SQL dump under a local `backups` folder. Do not commit backup files.
 
 ## Updates
 
@@ -394,16 +378,14 @@ The menu writes a timestamped SQL dump under a local `backups` folder. Do not co
 
 1. Double-click `n8n-local.cmd`.
 2. Choose `Check for updates`.
-
-The check compares local image tag IDs before and after `docker compose pull`. It may pull newer images into the local Docker cache, but it does not restart or recreate running services.
+   i) The check compares local image tag IDs before and after `docker compose pull`. It may pull newer images into the local Docker cache, but it does not restart or recreate running services.
 
 ### Apply Selected Updates
 
 1. Double-click `n8n-local.cmd`.
 2. Choose `Update selected services`.
 3. Back up first if Postgres is selected.
-
-Postgres is pinned to major version 16 in [docker-compose.yml](../../templates/local-stack/docker-compose.yml).
+   i) Postgres is pinned to major version 16 in [docker-compose.yml](../../templates/local-stack/docker-compose.yml).
 
 ### Why Updates Are Not Silent
 
@@ -425,16 +407,14 @@ Inside n8n:
 3. Enable MCP access.
 4. Copy the server URL.
 5. Copy the access token.
+   i) For the default local stack, the local MCP URL is:
 
-For the default local stack, the local MCP URL is:
+   ```text
+   http://localhost:5678/mcp-server/http
+   ```
 
-```text
-http://localhost:5678/mcp-server/http
-```
-
-If you use MCP through the ngrok domain, use the MCP URL shown by n8n for that setup.
-
-Reference: [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/).
+   ii) If you use MCP through the ngrok domain, use the MCP URL shown by n8n for that setup.
+   iii) Reference: [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/).
 
 ### Choose Your Platform Config
 
@@ -476,103 +456,95 @@ If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not 
 
 ### Docker Is Not Running
 
-Run this in PowerShell from any folder:
+1. Run this in PowerShell from any folder:
 
-```powershell
-docker info
-```
+   ```powershell
+   docker info
+   ```
 
-If Docker reports that the engine is unavailable:
-
-1. Open Docker Desktop.
-2. Wait for the engine to finish starting.
-3. Double-click `n8n-local.cmd` again.
+2. If Docker reports that the engine is unavailable:
+   i) Open Docker Desktop.
+   ii) Wait for the engine to finish starting.
+   iii) Double-click `n8n-local.cmd` again.
 
 ### `.env` Missing
 
-Run this in PowerShell:
+1. Run this in PowerShell:
 
-```powershell
-cd "$env:USERPROFILE\Desktop\n8n-local"
-Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force
-```
+   ```powershell
+   cd "$env:USERPROFILE\Desktop\n8n-local"
+   Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force
+   ```
 
-Then open `.env`, replace the placeholders, and save the file.
+2. Then open `.env`, replace the placeholders, and save the file.
 
 ### ngrok Tunnel Not Available
 
-Check `.env`:
+1. Check `.env`:
 
-```dotenv
-NGROK_AUTHTOKEN=replace-with-ngrok-authtoken
-NGROK_DOMAIN=your-reserved-domain.ngrok.app
-```
+   ```dotenv
+   NGROK_AUTHTOKEN=replace-with-ngrok-authtoken
+   NGROK_DOMAIN=your-reserved-domain.ngrok.app
+   ```
 
-`NGROK_DOMAIN` should be a reserved ngrok domain without `https://`.
+   i) `NGROK_DOMAIN` should be a reserved ngrok domain without `https://`.
 
-After editing `.env`:
+2. After editing `.env`:
+   i) Close the existing `n8n-local.cmd` window.
+   ii) Save `.env`.
+   iii) Double-click `n8n-local.cmd` again.
+   iv) Start with the ngrok/tunnel option if the menu separates it.
+   v) Fallback command:
 
-1. Close the existing `n8n-local.cmd` window.
-2. Save `.env`.
-3. Double-click `n8n-local.cmd` again.
-4. Start with the ngrok/tunnel option if the menu separates it.
-
-Fallback command:
-
-```powershell
-cd "$env:USERPROFILE\Desktop\n8n-local"
-docker compose up -d --force-recreate ngrok
-docker compose logs -f ngrok
-```
+   ```powershell
+   cd "$env:USERPROFILE\Desktop\n8n-local"
+   docker compose up -d --force-recreate ngrok
+   docker compose logs -f ngrok
+   ```
 
 ### Webhook URL Still Shows Localhost
 
-Check `.env`:
+1. Check `.env`:
 
-```dotenv
-WEBHOOK_URL=https://your-reserved-domain.ngrok.app/
-N8N_HOST=your-reserved-domain.ngrok.app
-N8N_PROTOCOL=https
-N8N_PROXY_HOPS=1
-```
+   ```dotenv
+   WEBHOOK_URL=https://your-reserved-domain.ngrok.app/
+   N8N_HOST=your-reserved-domain.ngrok.app
+   N8N_PROTOCOL=https
+   N8N_PROXY_HOPS=1
+   ```
 
-After editing `.env`:
+2. After editing `.env`:
+   i) Close the existing `n8n-local.cmd` window.
+   ii) Save `.env`.
+   iii) Double-click `n8n-local.cmd` again.
+   iv) Fallback command:
 
-1. Close the existing `n8n-local.cmd` window.
-2. Save `.env`.
-3. Double-click `n8n-local.cmd` again.
+   ```powershell
+   cd "$env:USERPROFILE\Desktop\n8n-local"
+   docker compose up -d --force-recreate n8n ngrok
+   ```
 
-Fallback command:
-
-```powershell
-cd "$env:USERPROFILE\Desktop\n8n-local"
-docker compose up -d --force-recreate n8n ngrok
-```
-
-Then refresh n8n and check the webhook node again.
+3. Then refresh n8n and check the webhook node again.
 
 ### Port 5678 Already In Use
 
-Run this in PowerShell from any folder:
+1. Run this in PowerShell from any folder:
 
-```powershell
-docker ps
-```
+   ```powershell
+   docker ps
+   ```
 
-Another local n8n process may already be running. Stop an old local test container only if you know it is disposable.
-
-Do not remove Docker volumes unless you intentionally want to delete local n8n runtime data.
+   i) Another local n8n process may already be running. Stop an old local test container only if you know it is disposable.
+   ii) Do not remove Docker volumes unless you intentionally want to delete local n8n runtime data.
 
 ### MCP Tools Do Not Appear
 
-Check:
-
-- MCP is enabled inside n8n.
-- The MCP URL matches your local or ngrok setup.
-- `N8N_MCP_TOKEN` is set in the user environment, not pasted into repo files.
-- The agent app was fully restarted after config changes.
-
-Use docs/search MCP tools before live n8n tools. Use live n8n tools only when the user clearly asks for real instance inspection or mutation.
+1. Check the following:
+   i) MCP is enabled inside n8n.
+   ii) The MCP URL matches your local or ngrok setup.
+   iii) `N8N_MCP_TOKEN` is set in the user environment, not pasted into repo files.
+   iv) The agent app was fully restarted after config changes.
+   v) Use docs/search MCP tools before live n8n tools. Use live n8n tools only when the user clearly asks for real instance inspection or mutation.
 
 ## Advanced Queue Mode
 
