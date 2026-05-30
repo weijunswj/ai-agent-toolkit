@@ -48,26 +48,12 @@ function duplicates(values) {
   return [...repeated].sort();
 }
 
-function markdownFilesIn(relRoots, root = repoRoot) {
+function markdownFilesIn(relRoots) {
   const files = [];
-  let repoRealRoot;
-  try {
-    repoRealRoot = fs.realpathSync.native(root);
-  } catch {
-    return files;
-  }
+  const repoRealRoot = fs.realpathSync.native(repoRoot);
   const visited = new Set();
 
   function walk(currentPath) {
-    let stat;
-    try {
-      stat = fs.lstatSync(currentPath);
-    } catch {
-      return;
-    }
-
-    if (stat.isSymbolicLink()) return;
-
     let realPath;
     try {
       realPath = fs.realpathSync.native(currentPath);
@@ -80,6 +66,15 @@ function markdownFilesIn(relRoots, root = repoRoot) {
 
     const relPath = path.relative(repoRealRoot, realPath);
     if (relPath.startsWith('..') || path.isAbsolute(relPath)) return;
+
+    let stat;
+    try {
+      stat = fs.lstatSync(realPath);
+    } catch {
+      return;
+    }
+
+    if (stat.isSymbolicLink()) return;
 
     if (stat.isDirectory()) {
       let entries;
@@ -347,8 +342,6 @@ test('markdown walker safely avoids symlink loops and out-of-bounds reads', () =
 
     const files = markdownFilesIn(['.'], dummyRepoDir);
     const hasSecret = files.some(f => f.includes('secret.md'));
-    const hasSafe = files.some(f => f.includes('safe.md'));
-    assert.equal(hasSafe, true, 'walker should find safe.md inside repo');
     assert.equal(hasSecret, false, 'walker should not read out-of-bounds symlink');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

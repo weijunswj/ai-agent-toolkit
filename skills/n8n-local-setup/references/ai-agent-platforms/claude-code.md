@@ -85,7 +85,7 @@ Then:
 
 ## 5. Claude Code MCP Config
 
-1. Use the [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md).
+1. Use the [Claude MCP config](./templates/claude-mcp-config.md).
     A) Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or Claude Code's supported secret storage, not repo files.
 
 ## 6. Restart Claude

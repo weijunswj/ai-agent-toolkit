@@ -31,7 +31,7 @@ For any n8n workflow, helper-script, MCP, `n8n_docs`, `n8n_live`, import/export,
 - Use the local full-fidelity references in [references/n8n/](references/n8n/) for setup, upgrade, ngrok tunneling, Docker Compose plus Postgres, and VPS hosting details.
 - Treat ngrok as the only supported local tunnel path in this guide; Cloudflare tunnels and the built-in n8n tunnel are out of scope.
 - Use the local stack templates in [templates/local-stack/](templates/local-stack/) for `n8n + postgres + ngrok`.
-- Treat [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, and Postgres backup actions.
+- Treat [templates/local-stack/n8n-local.cmd](templates/local-stack/n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, and Postgres backup actions.
 - Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, and Claude web routing.
 - Use direct whole-skill-folder installs for Codex and Claude Code, plugin-scoped skill-folder install for Antigravity, and short manual whole-skill-folder install notes for OpenCode. Keep whole skill folders together when copying.
 - Defer Codex and Claude Code plugin/package packaging until the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup.
@@ -49,7 +49,7 @@ For any n8n workflow, helper-script, MCP, `n8n_docs`, `n8n_live`, import/export,
 - Codex MCP config: [templates/mcp-configs/codex-mcp-config.md](templates/mcp-configs/codex-mcp-config.md)
 - Docker Compose local stack: [templates/local-stack/docker-compose.yml](templates/local-stack/docker-compose.yml)
 - Placeholder environment template: [templates/local-stack/.env.example](templates/local-stack/.env.example)
-- Guided local stack launcher: [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd)
+- Guided local stack launcher: [templates/local-stack/n8n-local.cmd](templates/local-stack/n8n-local.cmd)
 - PowerShell local stack menu: [templates/local-stack/scripts/n8n-local-menu.ps1](templates/local-stack/scripts/n8n-local-menu.ps1)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
 - Upgrade reference: [references/n8n/upgrading.md](references/n8n/upgrading.md)

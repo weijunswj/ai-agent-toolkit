@@ -14,7 +14,7 @@ Start with [local-setup.md](local-setup.md). It is the primary beginner local gu
 
 | Guide | Use when |
 | --- | --- |
-| [local-setup.md](local-setup.md) | Running the Docker Compose local setup with n8n, Postgres, ngrok, the `_n8n-local.cmd` menu, updates, URLs, MCP, platform setup, troubleshooting, and daily commands. |
+| [local-setup.md](local-setup.md) | Running the Docker Compose local setup with n8n, Postgres, ngrok, the `n8n-local.cmd` menu, updates, URLs, MCP, platform setup, troubleshooting, and daily commands. |
 
 ## Appendices And References
 

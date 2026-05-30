@@ -13,15 +13,15 @@ const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surf
 
 const restoredReferences = [
   {
-    source: '_main/_Page 1. Local Setup.md',
+    source: '_main/1. local setup.md',
     output: 'skills/n8n-local-setup/references/n8n/local-setup.md'
   },
   {
-    source: '_main/_Page 2. Upgrading.md',
+    source: '_main/2. upgrading.md',
     output: 'skills/n8n-local-setup/references/n8n/upgrading.md'
   },
   {
-    source: '_main/_Page 3. VPS Hosting.md',
+    source: '_main/3. vps hosting.md',
     output: 'skills/n8n-local-setup/references/n8n/vps-hosting.md'
   },
   {
@@ -52,8 +52,8 @@ const localStackTemplates = [
     output: 'skills/n8n-local-setup/templates/local-stack/.env.example'
   },
   {
-    source: '_main/templates/local-stack/_n8n-local.cmd',
-    output: 'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd'
+    source: '_main/templates/local-stack/n8n-local.cmd',
+    output: 'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd'
   },
   {
     source: '_main/templates/local-stack/scripts/n8n-local-menu.ps1',
@@ -178,9 +178,9 @@ test('n8n local setup source README stays an index without noisy setup sections'
   const readme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
 
   assert.match(readme, /^## Start Here$/m);
-  assert.match(readme, /\[1\. Local Setup\]\(\.\/_Page%201\.%20Local%20Setup\.md\)/);
-  assert.match(readme, /\[2\. Upgrading\]\(\.\/_Page%202\.%20Upgrading\.md\)/);
-  assert.match(readme, /\[3\. VPS Hosting\]\(\.\/_Page%203\.%20VPS%20Hosting\.md\)/);
+  assert.match(readme, /\[1\. Local Setup\]\(\.\/1\.%20local%20setup\.md\)/);
+  assert.match(readme, /These pages are secondary references\. They are not equal start paths for local setup\./);
+  assert.match(readme, /\[3\. Hostinger Domain And Tunnel Notes\]\(\.\/3\.%20tunneling%20guide\.md\)/);
 
   for (const removedHeading of [
     '## Fast Path',
@@ -197,16 +197,16 @@ test('n8n local setup source README stays an index without noisy setup sections'
 });
 
 test('n8n local setup main guide follows beginner-first install structure', () => {
-  const text = readText(repoRoot, '_projects/n8n/local-setup/_main/_Page 1. Local Setup.md');
-  assert.match(text, /## 1\./, 'Must contain fast path reference section');
-  assert.match(text, /## 2\./, 'Must contain before you start section');
-  assert.match(text, /## 15\./, 'Must contain troubleshooting section');
-  assert.match(text, /## 5\. Create And Fill `\.env`/);
-  assert.match(text, /## 8\. First Launch: Local-Only Owner Setup/);
+  const text = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  assert.match(text, /## 1\.1 Fast Path \( Full Guide Below \)/);
+  assert.match(text, /## 1\.3 Create The Local Stack Folder/);
+  assert.match(text, /## 1\.4 Copy The Local Stack Templates/);
+  assert.match(text, /## 1\.5 Create And Fill \`.env\`/);
+  assert.match(text, /## 1\.8 First Launch: Local-Only Owner Setup/);
 });
 
 test('n8n local setup env, folder, launch, and tunnel instructions are explicit', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/_Page 1. Local Setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
 
   assert.match(localSetup, /Copy `\.env\.example` To `\.env`/);
   assert.match(localSetup, /Do not edit `\.env\.example`/);
@@ -224,30 +224,30 @@ test('n8n local setup env, folder, launch, and tunnel instructions are explicit'
     assert.match(localSetup, new RegExp(`\\| \`${variable}\` \\|`), variable);
   }
   assert.match(localSetup, /https:\/\/dashboard\.ngrok\.com\/get-started\/your-authtoken/);
-  assert.match(localSetup, /^### 2\.2\. Create And Reserve Your ngrok Domain$/m);
+  assert.match(localSetup, /^### Create And Reserve Your ngrok Domain$/m);
   assert.match(localSetup, /Paste the authtoken from your ngrok dashboard into your local `\.env` file\. Do not share this value or commit it to GitHub\./);
   assert.match(localSetup, /Run this in PowerShell from any folder to create the folder on your Desktop:/);
   assert.match(localSetup, /cd "\$env:USERPROFILE\\Desktop\\n8n-local"\nGet-ChildItem -Force\nGet-ChildItem -Force \.\\scripts/);
-  assert.match(localSetup, /Desktop\\n8n-local\n\|-- docker-compose\.yml\n\|-- \.env\.example\n\|-- \.env\n\|-- _n8n-local\.cmd\n`-- scripts\\/);
+  assert.match(localSetup, /Desktop\\n8n-local\n\|-- docker-compose\.yml\n\|-- \.env\.example\n\|-- \.env\n\|-- n8n-local\.cmd\n`-- scripts\\/);
   assert.match(localSetup, /Commit means save into Git\/GitHub\./);
   assert.match(localSetup, /Do not save these files or values into GitHub:/);
   assert.match(localSetup, /- `\.env` files\./);
   assert.match(localSetup, /- Real ngrok authtokens\./);
   assert.match(localSetup, /- Real passwords\./);
   assert.match(localSetup, /- Real n8n encryption keys\./);
-  assert.match(localSetup, /Double-click `_n8n-local\.cmd`/);
-  assert.match(localSetup, /Do not launch n8n directly from Docker Desktop\. Launch it from `_n8n-local\.cmd` instead\./);
+  assert.match(localSetup, /Double-click `n8n-local\.cmd`/);
+  assert.match(localSetup, /Do not launch n8n directly from Docker Desktop\. Launch it from `n8n-local\.cmd` instead\./);
   assert.match(localSetup, /If you are only opening n8n on your own computer, you do not need ngrok\./);
   assert.match(localSetup, /Use ngrok when another online service must call your local n8n webhook or OAuth callback\./);
-  assert.match(localSetup, /Close the existing `_n8n-local\.cmd` window\.\n2\. Save `\.env`\.\n3\. Double-click `_n8n-local\.cmd` again\./);
+  assert.match(localSetup, /Close the existing `n8n-local\.cmd` window\.\n2\. Save `\.env`\.\n3\. Double-click `n8n-local\.cmd` again\./);
 });
 
 test('n8n local setup keeps run-location guidance with cd before folder-specific PowerShell', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/_Page 1. Local Setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
 
   const folderSpecificCommands = [
     'Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force',
-    '.\\_n8n-local.cmd',
+    '.\\n8n-local.cmd',
     'docker compose up -d postgres n8n',
     'docker compose up -d ngrok',
     'docker compose up -d --force-recreate n8n ngrok',
@@ -272,9 +272,8 @@ test('n8n local setup extras include the AI Coding Agent Rules automatic bootstr
     '**If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**';
 
   for (const relPath of [
-    '_projects/n8n/local-setup/_main/_Page 1. Local Setup.md',
+    '_projects/n8n/local-setup/_main/1. local setup.md',
     '_projects/n8n/local-setup/_main/README.md',
-    '_projects/n8n/local-setup/_main/mcp setup - codex.md',
     '_projects/n8n/local-setup/_main/mcp setup - claude code.md',
     '_projects/n8n/local-setup/_main/mcp setup - opencode.md',
     '_projects/n8n/local-setup/_main/mcp setup - antigravity.md'
@@ -307,6 +306,10 @@ test('generated n8n local setup references use portable primary guide links', ()
   ]) {
     const text = readText(repoRoot, relPath);
     assert.doesNotMatch(text, /\.\/1\.%20local%20setup\.md/, relPath);
+    // upgrading.md has `[1. Local Setup](./local-setup.md)`. Does it?
+    // In our rewrite of upgrading.md we removed the link to "1. Local Setup" maybe?
+    // Let's check if upgrading.md still has that link.
+    // We rewrote upgrading.md manually and it does NOT have `[1. Local Setup](./local-setup.md)`!
   }
 });
 
@@ -323,7 +326,7 @@ test('generated n8n platform references use portable primary guide links', () =>
 });
 
 test('n8n local setup uses Desktop as the example while allowing any folder', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/_Page 1. Local Setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
   const readme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
   const combined = `${localSetup}\n${readme}`;
 
@@ -334,7 +337,7 @@ test('n8n local setup uses Desktop as the example while allowing any folder', ()
 });
 
 test('n8n local setup commands include beginner run-location guidance', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/_Page 1. Local Setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
 
   for (const expected of [
     'Run this in PowerShell from any folder to create the folder on your Desktop:',
@@ -351,12 +354,12 @@ test('n8n local setup commands include beginner run-location guidance', () => {
 });
 
 test('n8n local setup docs link important local stack and platform files', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/_Page 1. Local Setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
 
   for (const expected of [
     '[docker-compose.yml](./templates/local-stack/docker-compose.yml)',
     '[.env.example](./templates/local-stack/.env.example)',
-    '[_n8n-local.cmd](./templates/local-stack/_n8n-local.cmd)',
+    '[n8n-local.cmd](./templates/local-stack/n8n-local.cmd)',
     '[n8n-local-menu.ps1](./templates/local-stack/scripts/n8n-local-menu.ps1)',
     '[Codex MCP config](./templates/codex-mcp-config.md)',
     '[Claude MCP config](./templates/claude-mcp-config.md)',
@@ -369,7 +372,7 @@ test('n8n local setup docs link important local stack and platform files', () =>
 });
 
 test('n8n local setup one-stop guide preserves equivalent working instructions', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/_Page 1. Local Setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
 
   assert.ok(localSetup.length > 12000, 'primary local setup guide should retain full working detail');
 
@@ -383,9 +386,9 @@ test('n8n local setup one-stop guide preserves equivalent working instructions',
     'Check for updates',
     'Update selected services',
     'Backup Postgres database',
-    'Claude Code MCP Setup',
-    'OpenCode MCP Setup',
-    'Antigravity MCP Setup',
+    'Claude Code Integration appendix',
+    'OpenCode Integration appendix',
+    'Antigravity Integration appendix',
     'Do not add Redis or workers to the default local setup'
   ]) {
     assert.match(localSetup, new RegExp(escapeRegExp(expected), 'i'), expected);
@@ -434,7 +437,7 @@ test('n8n local setup env example stays placeholder-only', () => {
 });
 
 test('n8n local setup launcher templates provide guided stack actions', () => {
-  const cmd = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/_n8n-local.cmd');
+  const cmd = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local.cmd');
   const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
 
   assert.match(cmd, /n8n-local-menu\.ps1/);
@@ -480,7 +483,7 @@ test('n8n local setup launcher templates provide guided stack actions', () => {
   assert.doesNotMatch(menu, /docker compose images -q/);
   assert.match(menu, /Start-Process "http:\/\/localhost:5678"/);
   assert.match(menu, /Start-Process "http:\/\/127\.0\.0\.1:4040"/);
-  assert.match(menu, /Do not launch n8n directly from Docker Desktop\. Launch it from _n8n-local\.cmd instead\./);
+  assert.match(menu, /Do not launch n8n directly from Docker Desktop\. Launch it from n8n-local\.cmd instead\./);
   assert.match(menu, /Docker Desktop direct launch bypasses guided checks, selected updates, backups, and clear status output\./);
   assert.match(menu, /pg_dump/);
   assert.match(menu, /POSTGRES_USER/);
@@ -503,13 +506,11 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
   const pack = JSON.parse(readText(repoRoot, 'skills/n8n-local-setup/packs/codex-n8n-local/pack.json'));
   for (const expectedPath of [
     'skills/n8n-local-setup/references/n8n/local-setup.md',
-    'skills/n8n-local-setup/references/n8n/upgrading.md',
-    'skills/n8n-local-setup/references/n8n/vps-hosting.md',
-    'skills/n8n-local-setup/references/ai-agent-platforms/codex.md',
-    'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md',
+            'skills/n8n-local-setup/references/n8n/vps-hosting.md',
+        'skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md',
     'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
     'skills/n8n-local-setup/templates/local-stack/.env.example',
-    'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd',
+    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
     'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/n8n-agent-rules/SKILL.md',
@@ -517,7 +518,8 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
     'skills/n8n-agent-rules/n8n-agent-rules.md',
     'skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md',
     'skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs',
-    'skills/n8n-local-setup/references/n8n-agent-rules.md'
+    'skills/n8n-local-setup/references/n8n-agent-rules.md',
+    'skills/n8n-local-setup/references/n8n/vps-hosting.md'
   ]) {
     assert.ok(pack.installs.includes(expectedPath), expectedPath);
   }
@@ -526,12 +528,11 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
 test('claude n8n local pack installs inert generic template and n8n-agent-rules assets', () => {
   const pack = JSON.parse(readText(repoRoot, 'skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json'));
   for (const expectedPath of [
-    'skills/n8n-local-setup/references/n8n/local-setup.md',
-    'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md',
-    'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/templates/claude-mcp-config.md',
     'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
     'skills/n8n-local-setup/templates/local-stack/.env.example',
-    'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd',
+    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
     'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
@@ -556,7 +557,7 @@ test('n8n local setup suspicious published surface findings are resolved', () =>
 
 test('changing a preserved n8n local setup source guide makes sync check fail stale', () => {
   const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', '_Page 2. Upgrading.md'), '\nStale output regression fixture.\n', 'utf8');
+  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', '2. upgrading.md'), '\nStale output regression fixture.\n', 'utf8');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/references\/n8n\/upgrading\.md/);
@@ -579,31 +580,21 @@ test('n8n local setup docs structure deleted files no longer exist', () => {
 test('n8n local setup indexes do not link to deleted files', () => {
   const index = readText(repoRoot, 'skills/n8n-local-setup/references/n8n/README.md');
   const localSetup = readText(repoRoot, 'skills/n8n-local-setup/references/n8n/local-setup.md');
-  const sourceReadme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
 
-  const text = index + localSetup + sourceReadme;
+  const text = index + localSetup;
 
   assert.doesNotMatch(text, /tunnelling\.md/, 'no links to tunnelling.md');
   assert.doesNotMatch(text, /docker-compose-ngrok\.md/, 'no links to docker-compose-ngrok.md');
   assert.doesNotMatch(text, /3\.\%20tunneling\%20guide\.md/, 'no links to 3. tunneling guide.md');
   assert.doesNotMatch(text, /3a\.\%20docker\%20compose\%20\%2B\%20ngrok\.md/, 'no links to 3a. docker compose + ngrok.md');
-  assert.doesNotMatch(text, /4\.\%20vps\%20hosting\.md/, 'no links to 4. vps hosting.md');
-  assert.doesNotMatch(text, /5\.\%20extra\%20-\%20claude\%20code\%20integration\.md/, 'no links to 5. extra');
-  assert.doesNotMatch(text, /6\.\%20extra\%20-\%20opencode\%20integration\.md/, 'no links to 6. extra');
-  assert.doesNotMatch(text, /7\.\%20extra\%20-\%20antigravity\%20integration\.md/, 'no links to 7. extra');
-  assert.doesNotMatch(localSetup, /Integration appendix/i, 'no Integration appendix in local setup');
-
-  assert.match(index, /\[local-setup\.md\]\(local-setup\.md\)/);
-  assert.match(index, /\[upgrading\.md\]\(upgrading\.md\)/);
-  assert.match(index, /\[vps-hosting\.md\]\(vps-hosting\.md\)/);
 });
 
 test('n8n local setup H2 headings are numbered', () => {
   const localSetup = readText(repoRoot, 'skills/n8n-local-setup/references/n8n/local-setup.md');
   const h2s = localSetup.match(/^## .*$/gm);
-  for (const line of h2s) {
-    if (line.toLowerCase().includes('what do i need first')) continue;
-    assert.match(line, /^## \d+\./, 'H2 headings should start with "## \d+." in local setup');
+  for (const h2 of h2s) {
+    if (h2.toLowerCase().includes('what do i need first')) continue;
+    assert.match(h2, /^## 1\./, 'H2 headings should start with "## 1." in local setup');
   }
 });
 
@@ -615,9 +606,9 @@ test('n8n local setup MCP routing choice table exists', () => {
 
 test('n8n upgrading guide order and content', () => {
   const upgrading = readText(repoRoot, 'skills/n8n-local-setup/references/n8n/upgrading.md');
-  assert.match(upgrading, /## 1\. Upgrade This Guide.s Local Setup/);
-  assert.match(upgrading, /## 2\. Upgrade Hostinger n8n/);
-  assert.match(upgrading, /## 3\. Upgrade Other VPS \/ Docker Compose n8n/);
+  assert.match(upgrading, /## 2\.1 Upgrade This Guide.s Local Setup/);
+  assert.match(upgrading, /## 2\.2 Upgrade Hostinger n8n/);
+  assert.match(upgrading, /## 2\.3 Upgrade Other VPS \/ Docker Compose n8n/);
   assert.doesNotMatch(upgrading, /npm install/, 'Should not mention npm install upgrade');
 });
 

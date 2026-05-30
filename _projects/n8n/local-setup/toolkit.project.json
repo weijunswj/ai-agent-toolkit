@@ -32,7 +32,7 @@
     },
     {
       "kind": "copy",
-      "source": "_main/_Page 1. Local Setup.md",
+      "source": "_main/1. local setup.md",
       "output": "skills/n8n-local-setup/references/n8n/local-setup.md",
       "notes": "Full local setup guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
@@ -58,8 +58,8 @@
           "to": "../../templates/local-stack/.env.example"
         },
         {
-          "from": "./templates/local-stack/_n8n-local.cmd",
-          "to": "../../templates/local-stack/_n8n-local.cmd"
+          "from": "./templates/local-stack/n8n-local.cmd",
+          "to": "../../templates/local-stack/n8n-local.cmd"
         },
         {
           "from": "./templates/local-stack/scripts/",
@@ -106,8 +106,32 @@
           "to": "../../../ai-coding-agent-rules/"
         },
         {
-          "from": "./_Page%202.%20Upgrading.md",
+          "from": "./2.%20upgrading.md",
           "to": "upgrading.md"
+        },
+        {
+          "from": "./3.%20tunneling%20guide.md",
+          "to": "tunnelling.md"
+        },
+        {
+          "from": "./3a.%20docker%20compose%20%2B%20ngrok.md",
+          "to": "docker-compose-ngrok.md"
+        },
+        {
+          "from": "./4.%20vps%20hosting.md",
+          "to": "vps-hosting.md"
+        },
+        {
+          "from": "./5.%20extra%20-%20claude%20code%20integration.md",
+          "to": "../ai-agent-platforms/claude-code.md"
+        },
+        {
+          "from": "./6.%20extra%20-%20opencode%20integration.md",
+          "to": "../ai-agent-platforms/opencode.md"
+        },
+        {
+          "from": "./7.%20extra%20-%20antigravity%20integration.md",
+          "to": "../ai-agent-platforms/antigravity.md"
         },
         {
           "from": "./mcp%20setup%20-%20codex.md",
@@ -126,20 +150,20 @@
           "to": "../ai-agent-platforms/antigravity.md"
         },
         {
-          "from": "./_Page%203.%20VPS%20Hosting.md",
+          "from": "./3.%20vps%20hosting.md",
           "to": "./vps-hosting.md"
         }
       ]
     },
     {
       "kind": "copy",
-      "source": "_main/_Page 2. Upgrading.md",
+      "source": "_main/2. upgrading.md",
       "output": "skills/n8n-local-setup/references/n8n/upgrading.md",
       "notes": "Full upgrade guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./_Page%201.%20Local%20Setup.md",
+          "from": "./1.%20local%20setup.md",
           "to": "local-setup.md"
         },
         {
@@ -150,18 +174,14 @@
     },
     {
       "kind": "copy",
-      "source": "_main/_Page 3. VPS Hosting.md",
+      "source": "_main/3. vps hosting.md",
       "output": "skills/n8n-local-setup/references/n8n/vps-hosting.md",
       "notes": "Full VPS hosting guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./_Page%202.%20Upgrading.md",
-          "to": "upgrading.md"
-        },
-        {
-          "from": "./_Page%201.%20Local%20Setup.md",
-          "to": "local-setup.md"
+          "from": "./2.%20upgrading.md",
+          "to": "./upgrading.md"
         }
       ]
     },
@@ -170,17 +190,7 @@
       "source": "_main/mcp setup - codex.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
       "notes": "Full Codex integration guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact",
-      "text_rewrites": [
-        {
-          "from": "./_Page%201.%20Local%20Setup.md",
-          "to": "../n8n/local-setup.md"
-        },
-        {
-          "from": "./templates/codex-mcp-config.md",
-          "to": "../../templates/mcp-configs/codex-mcp-config.md"
-        }
-      ]
+      "fidelity": "exact"
     },
     {
       "kind": "copy",
@@ -190,7 +200,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./_Page%201.%20Local%20Setup.md",
+          "from": "./1.%20local%20setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
@@ -204,10 +214,6 @@
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
           "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
-        },
-        {
-          "from": "./templates/claude-mcp-config.md",
-          "to": "../../templates/mcp-configs/claude-mcp-config.md"
         }
       ]
     },
@@ -219,7 +225,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./_Page%201.%20Local%20Setup.md",
+          "from": "./1.%20local%20setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
@@ -233,10 +239,6 @@
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
           "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
-        },
-        {
-          "from": "./templates/opencode-mcp-config.md",
-          "to": "../../templates/mcp-configs/opencode-mcp-config.md"
         }
       ]
     },
@@ -248,7 +250,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./_Page%201.%20Local%20Setup.md",
+          "from": "./1.%20local%20setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
@@ -262,10 +264,6 @@
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
           "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
-        },
-        {
-          "from": "./templates/antigravity-mcp-config.md",
-          "to": "../../templates/mcp-configs/antigravity-mcp-config.md"
         }
       ]
     },
@@ -344,8 +342,8 @@
     },
     {
       "kind": "copy",
-      "source": "_main/templates/local-stack/_n8n-local.cmd",
-      "output": "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
+      "source": "_main/templates/local-stack/n8n-local.cmd",
+      "output": "skills/n8n-local-setup/templates/local-stack/n8n-local.cmd",
       "notes": "Windows launcher for the guided local n8n stack menu.",
       "fidelity": "exact"
     },
@@ -415,7 +413,7 @@
       "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md",
       "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
       "skills/n8n-local-setup/templates/local-stack/.env.example",
-      "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
+      "skills/n8n-local-setup/templates/local-stack/n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
       "skills/n8n-local-setup/templates/mcp-configs/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
