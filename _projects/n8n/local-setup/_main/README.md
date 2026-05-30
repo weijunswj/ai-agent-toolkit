@@ -1,4 +1,4 @@
-# Codex + n8n Local Setup
+# n8n Local Setup
 
 Beginner-friendly local n8n setup source index.
 

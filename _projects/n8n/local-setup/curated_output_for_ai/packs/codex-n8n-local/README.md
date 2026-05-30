@@ -16,7 +16,7 @@ Review [pack.json](pack.json) before use.
 2. Install or load [n8n Agent Rules](../../../n8n-agent-rules/).
 3. Optionally merge [AGENTS.n8n-brief.template.md](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md) into the same file.
 
-If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge/diff plan. Run the adapter installer with `--dry-run` first and only use `--write` after explicit current-turn approval.
+If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge/diff plan first. Only merge/append the adapter rules after explicit current-turn approval.
 
 ## Local runtime
 

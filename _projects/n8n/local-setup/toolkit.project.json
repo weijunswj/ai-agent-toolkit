@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "version_policy": "semver",
-  "version_notes": "Refactors the local setup guide around a Docker Compose stack with n8n, Postgres, ngrok as the only supported local tunnel path, and a guided n8n-local.cmd launcher.",
+  "version_notes": "Refactors the local setup docs for a beginner-first flow without noisy setup sections.",
   "outputs": [
     {
       "kind": "curated",
