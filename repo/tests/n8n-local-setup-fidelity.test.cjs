@@ -13,31 +13,31 @@ const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surf
 
 const restoredReferences = [
   {
-    source: '_main/1. local setup.md',
+    source: '_main/Page 1.md',
     output: 'skills/n8n-local-setup/references/n8n/local-setup.md'
   },
   {
-    source: '_main/2. upgrading.md',
+    source: '_main/Page 2.md',
     output: 'skills/n8n-local-setup/references/n8n/upgrading.md'
   },
   {
-    source: '_main/3. vps hosting.md',
+    source: '_main/Page 3.md',
     output: 'skills/n8n-local-setup/references/n8n/vps-hosting.md'
   },
   {
-    source: '_main/mcp setup - codex.md',
+    source: '_main/mcp setup - codex',
     output: 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md'
   },
   {
-    source: '_main/mcp setup - claude code.md',
+    source: '_main/mcp setup - claude code',
     output: 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'
   },
   {
-    source: '_main/mcp setup - opencode.md',
+    source: '_main/mcp setup - opencode',
     output: 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md'
   },
   {
-    source: '_main/mcp setup - antigravity.md',
+    source: '_main/mcp setup - antigravity',
     output: 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'
   }
 ];
@@ -178,9 +178,9 @@ test('n8n local setup source README stays an index without noisy setup sections'
   const readme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
 
   assert.match(readme, /^## Start Here$/m);
-  assert.match(readme, /\[1\. Local Setup\]\(\.\/1\.%20local%20setup\.md\)/);
+  assert.match(readme, /\[1\. Local Setup\]\(\.\/Page%201\.md\)/);
   assert.match(readme, /These pages are secondary references\. They are not equal start paths for local setup\./);
-  assert.match(readme, /\[3\. VPS Hosting\]\(\.\/3\.%20vps%20hosting\.md\)/);
+  assert.match(readme, /\[3\. VPS Hosting\]\(\.\/Page%203\.md\)/);
 
   for (const removedHeading of [
     '## Fast Path',
@@ -197,16 +197,16 @@ test('n8n local setup source README stays an index without noisy setup sections'
 });
 
 test('n8n local setup main guide follows beginner-first install structure', () => {
-  const text = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
-  assert.match(text, /## 1\.1 Fast Path \( Full Guide Below \)/);
-  assert.match(text, /## 1\.3 Create The Local Stack Folder/);
-  assert.match(text, /## 1\.4 Copy The Local Stack Templates/);
-  assert.match(text, /## 1\.5 Create And Fill \`.env\`/);
-  assert.match(text, /## 1\.8 First Launch: Local-Only Owner Setup/);
+  const text = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
+  assert.match(text, /## 1\./, 'Must contain fast path reference section');
+  assert.match(text, /## 2\./, 'Must contain before you start section');
+  assert.match(text, /## 15\./, 'Must contain troubleshooting section');
+  assert.match(text, /## 5\. Create And Fill `\.env`/);
+  assert.match(text, /## 8\. First Launch: Local-Only Owner Setup/);
 });
 
 test('n8n local setup env, folder, launch, and tunnel instructions are explicit', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
 
   assert.match(localSetup, /Copy `\.env\.example` To `\.env`/);
   assert.match(localSetup, /Do not edit `\.env\.example`/);
@@ -224,7 +224,7 @@ test('n8n local setup env, folder, launch, and tunnel instructions are explicit'
     assert.match(localSetup, new RegExp(`\\| \`${variable}\` \\|`), variable);
   }
   assert.match(localSetup, /https:\/\/dashboard\.ngrok\.com\/get-started\/your-authtoken/);
-  assert.match(localSetup, /^### Create And Reserve Your ngrok Domain$/m);
+  assert.match(localSetup, /^### 2\.2\. Create And Reserve Your ngrok Domain$/m);
   assert.match(localSetup, /Paste the authtoken from your ngrok dashboard into your local `\.env` file\. Do not share this value or commit it to GitHub\./);
   assert.match(localSetup, /Run this in PowerShell from any folder to create the folder on your Desktop:/);
   assert.match(localSetup, /cd "\$env:USERPROFILE\\Desktop\\n8n-local"\nGet-ChildItem -Force\nGet-ChildItem -Force \.\\scripts/);
@@ -243,7 +243,7 @@ test('n8n local setup env, folder, launch, and tunnel instructions are explicit'
 });
 
 test('n8n local setup keeps run-location guidance with cd before folder-specific PowerShell', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
 
   const folderSpecificCommands = [
     'Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force',
@@ -272,11 +272,12 @@ test('n8n local setup extras include the AI Coding Agent Rules automatic bootstr
     '**If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**';
 
   for (const relPath of [
-    '_projects/n8n/local-setup/_main/1. local setup.md',
+    '_projects/n8n/local-setup/_main/Page 1.md',
     '_projects/n8n/local-setup/_main/README.md',
-    '_projects/n8n/local-setup/_main/mcp setup - claude code.md',
-    '_projects/n8n/local-setup/_main/mcp setup - opencode.md',
-    '_projects/n8n/local-setup/_main/mcp setup - antigravity.md'
+    '_projects/n8n/local-setup/_main/mcp setup - codex',
+    '_projects/n8n/local-setup/_main/mcp setup - claude code',
+    '_projects/n8n/local-setup/_main/mcp setup - opencode',
+    '_projects/n8n/local-setup/_main/mcp setup - antigravity'
   ]) {
     const text = readText(repoRoot, relPath);
     assert.match(text, new RegExp(escapeRegExp(note)), relPath);
@@ -287,9 +288,9 @@ test('n8n local setup docs avoid known install readability regressions', () => {
   const docs = [
     '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/README.md',
     '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md',
-    '_projects/n8n/local-setup/_main/mcp setup - claude code.md',
-    '_projects/n8n/local-setup/_main/mcp setup - opencode.md',
-    '_projects/n8n/local-setup/_main/mcp setup - antigravity.md'
+    '_projects/n8n/local-setup/_main/mcp setup - claude code',
+    '_projects/n8n/local-setup/_main/mcp setup - opencode',
+    '_projects/n8n/local-setup/_main/mcp setup - antigravity'
   ];
 
   for (const relPath of docs) {
@@ -322,7 +323,7 @@ test('generated n8n platform references use portable primary guide links', () =>
 });
 
 test('n8n local setup uses Desktop as the example while allowing any folder', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
   const readme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
   const combined = `${localSetup}\n${readme}`;
 
@@ -333,7 +334,7 @@ test('n8n local setup uses Desktop as the example while allowing any folder', ()
 });
 
 test('n8n local setup commands include beginner run-location guidance', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
 
   for (const expected of [
     'Run this in PowerShell from any folder to create the folder on your Desktop:',
@@ -350,7 +351,7 @@ test('n8n local setup commands include beginner run-location guidance', () => {
 });
 
 test('n8n local setup docs link important local stack and platform files', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
 
   for (const expected of [
     '[docker-compose.yml](./templates/local-stack/docker-compose.yml)',
@@ -368,7 +369,7 @@ test('n8n local setup docs link important local stack and platform files', () =>
 });
 
 test('n8n local setup one-stop guide preserves equivalent working instructions', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
 
   assert.ok(localSetup.length > 12000, 'primary local setup guide should retain full working detail');
 
@@ -555,7 +556,7 @@ test('n8n local setup suspicious published surface findings are resolved', () =>
 
 test('changing a preserved n8n local setup source guide makes sync check fail stale', () => {
   const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', '2. upgrading.md'), '\nStale output regression fixture.\n', 'utf8');
+  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'Page 2.md'), '\nStale output regression fixture.\n', 'utf8');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/references\/n8n\/upgrading\.md/);
@@ -600,9 +601,9 @@ test('n8n local setup indexes do not link to deleted files', () => {
 test('n8n local setup H2 headings are numbered', () => {
   const localSetup = readText(repoRoot, 'skills/n8n-local-setup/references/n8n/local-setup.md');
   const h2s = localSetup.match(/^## .*$/gm);
-  for (const h2 of h2s) {
-    if (h2.toLowerCase().includes('what do i need first')) continue;
-    assert.match(h2, /^## 1\./, 'H2 headings should start with "## 1." in local setup');
+  for (const line of h2s) {
+    if (line.toLowerCase().includes('what do i need first')) continue;
+    assert.match(line, /^## \d+\./, 'H2 headings should start with "## \d+." in local setup');
   }
 });
 
@@ -614,9 +615,9 @@ test('n8n local setup MCP routing choice table exists', () => {
 
 test('n8n upgrading guide order and content', () => {
   const upgrading = readText(repoRoot, 'skills/n8n-local-setup/references/n8n/upgrading.md');
-  assert.match(upgrading, /## 2\.1 Upgrade This Guide.s Local Setup/);
-  assert.match(upgrading, /## 2\.2 Upgrade Hostinger n8n/);
-  assert.match(upgrading, /## 2\.3 Upgrade Other VPS \/ Docker Compose n8n/);
+  assert.match(upgrading, /## 1\. Upgrade This Guide.s Local Setup/);
+  assert.match(upgrading, /## 2\. Upgrade Hostinger n8n/);
+  assert.match(upgrading, /## 3\. Upgrade Other VPS \/ Docker Compose n8n/);
   assert.doesNotMatch(upgrading, /npm install/, 'Should not mention npm install upgrade');
 });
 

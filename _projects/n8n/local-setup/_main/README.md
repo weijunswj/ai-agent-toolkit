@@ -8,8 +8,8 @@ Use this project when you want local n8n on Windows with Docker Compose, Postgre
 
 | Need | Open |
 | --- | --- |
-| Full beginner setup | [1. Local Setup](./1.%20local%20setup.md) |
-| Always-on public hosting | [3. VPS Hosting](./3.%20vps%20hosting.md) |
+| Full beginner setup | [1. Local Setup](./Page%201.md) |
+| Always-on public hosting | [3. VPS Hosting](./Page%203.md) |
 | Source template folder | [templates/local-stack/](./templates/local-stack/) |
 
 ## References
@@ -18,7 +18,7 @@ These pages are secondary references. They are not equal start paths for local s
 
 | Need | Open |
 | --- | --- |
-| Focused update notes | [2. Upgrading](./2.%20upgrading.md) |
+| Focused update notes | [2. Upgrading](./Page%202.md) |
 | Codex platform details | [Codex MCP Setup](./mcp%20setup%20-%20codex.md) |
 | Claude Code platform details | [Claude Code MCP Setup](./mcp%20setup%20-%20claude%20code.md) |
 | OpenCode platform details | [OpenCode MCP Setup](./mcp%20setup%20-%20opencode.md) |
