@@ -1,7 +1,7 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/mcp setup - antigravity
+Source: _projects/n8n/local-setup/_main/mcp setup - antigravity.md
 Update the project source and run sync.
 -->
 # Antigravity MCP Setup

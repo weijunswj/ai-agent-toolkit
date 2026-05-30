@@ -3,11 +3,9 @@
 ## Preserved In `_main/`
 
 - `README.md`
-- `Page 1 - Local Setup.md`
-- `Page 2 - Upgrading.md`
-- `3. tunneling guide.md`
-- `3a. docker compose + ngrok.md`
-- `4. vps hosting.md`
+- `_Page 1. Local Setup.md`
+- `_Page 2. Upgrading.md`
+- `_Page 3. VPS Hosting.md`
 - `5. extra - claude code integration.md`
 - `6. extra - opencode integration.md`
 - `7. extra - antigravity integration.md`

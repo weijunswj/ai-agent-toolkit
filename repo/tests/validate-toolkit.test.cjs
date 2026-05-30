@@ -1670,9 +1670,9 @@ test('internal AI-facing surfaces are generated from declared project output', (
     ['cicd.secure-installer', 'skills/secure-cicd-installer/templates/cicd/README.md', 'curated_output_for_ai/templates/cicd/README.md'],
   ];
   const expectedExactCopies = [
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/local-setup.md', '_main/1. local setup.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/upgrading.md', '_main/2. upgrading.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/vps-hosting.md', '_main/3. vps hosting.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/local-setup.md', '_main/_Page 1. Local Setup.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/upgrading.md', '_main/_Page 2. Upgrading.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/vps-hosting.md', '_main/_Page 3. VPS Hosting.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md', '_main/mcp setup - codex.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md', '_main/mcp setup - claude code.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md', '_main/mcp setup - opencode.md'],

@@ -190,7 +190,7 @@ Use:
 - [n8n agent rules skill](../../skills/n8n-agent-rules/)
 - [optional Claude n8n adapter](../../skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md)
 - [Claude Code MCP config](../../skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md)
-- [Claude Code source guide](../../_projects/n8n/local-setup/_main/mcp%20setup%20-%20claude%20code)
+- [Claude Code source guide](../../_projects/n8n/local-setup/_main/mcp%20setup%20-%20claude%20code.md)
 
 Use user-scoped MCP config unless a project intentionally needs project-scoped config.
 
@@ -203,7 +203,7 @@ Use:
 - [n8n agent rules skill](../../skills/n8n-agent-rules/)
 - [optional OpenCode n8n adapter](../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md)
 - [OpenCode MCP config](../../skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md)
-- [OpenCode source guide](../../_projects/n8n/local-setup/_main/mcp%20setup%20-%20opencode)
+- [OpenCode source guide](../../_projects/n8n/local-setup/_main/mcp%20setup%20-%20opencode.md)
 
 Use user-scoped OpenCode config unless a project intentionally needs project-specific overrides.
 
@@ -218,7 +218,7 @@ Use:
 - [n8n agent rules skill](../../skills/n8n-agent-rules/)
 - [optional Antigravity n8n adapter](../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md)
 - [Antigravity MCP config](../../skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md)
-- [Antigravity source guide](../../_projects/n8n/local-setup/_main/mcp%20setup%20-%20antigravity)
+- [Antigravity source guide](../../_projects/n8n/local-setup/_main/mcp%20setup%20-%20antigravity.md)
 
 Use user-scoped Antigravity config unless a project intentionally needs project-specific overrides.
 

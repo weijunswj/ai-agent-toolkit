@@ -9,7 +9,7 @@ It is written for people who want a **real public n8n** with:
 * Updates.
 * A setup that can survive beyond local testing.
 
-If you are only testing locally, stick to [1. Local Setup](./Page%201%20-%20Local%20Setup.md).
+If you are only testing locally, stick to [1. Local Setup](./_Page%201.%20Local%20Setup.md).
 
 ---
 
@@ -57,4 +57,4 @@ If the template uses queue mode, ensure the `n8n-worker` and `redis` containers 
 
 1. Hostinger provides snapshot backups on most VPS plans. Enable them.
 2. Never commit your production `.env` file or credentials anywhere public.
-3. For updates, see the [Upgrading Guide](./Page%202%20-%20Upgrading.md).
+3. For updates, see the [Upgrading Guide](./_Page%202.%20Upgrading.md).

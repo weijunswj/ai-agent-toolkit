@@ -1,6 +1,6 @@
 # OpenCode MCP Setup
 
-The primary local setup guide is [1. Local Setup](./Page%201%20-%20Local%20Setup.md). This page is a secondary OpenCode reference, not a required local setup path.
+The primary local setup guide is [1. Local Setup](./_Page%201.%20Local%20Setup.md). This page is a secondary OpenCode reference, not a required local setup path.
 
 ## What This Adds
 
@@ -13,7 +13,7 @@ The primary local setup guide is [1. Local Setup](./Page%201%20-%20Local%20Setup
 
 ## 1. Before You Start
 
-Finish [1. Local Setup](./Page%201%20-%20Local%20Setup.md) first if you are using local n8n.
+Finish [1. Local Setup](./_Page%201.%20Local%20Setup.md) first if you are using local n8n.
 
 You should already have:
 
