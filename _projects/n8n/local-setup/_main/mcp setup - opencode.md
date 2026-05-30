@@ -1,4 +1,4 @@
-# EXTRA: OpenCode Integration ( Windows )
+# OpenCode MCP Setup
 
 The primary local setup guide is [1. Local Setup](./1.%20local%20setup.md). This page is a secondary OpenCode reference, not a required local setup path.
 

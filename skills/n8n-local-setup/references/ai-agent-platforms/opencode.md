@@ -1,10 +1,10 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/6. extra - opencode integration.md
+Source: _projects/n8n/local-setup/_main/mcp setup - opencode.md
 Update the project source and run sync.
 -->
-# EXTRA: OpenCode Integration ( Windows )
+# OpenCode MCP Setup
 
 The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This page is a secondary OpenCode reference, not a required local setup path.
 

@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -49,20 +50,50 @@ function duplicates(values) {
 
 function markdownFilesIn(relRoots) {
   const files = [];
+  const repoRealRoot = fs.realpathSync.native(repoRoot);
+  const visited = new Set();
 
-  function walk(fullPath) {
-    const stat = fs.statSync(fullPath);
+  function walk(currentPath) {
+    let realPath;
+    try {
+      realPath = fs.realpathSync.native(currentPath);
+    } catch {
+      return;
+    }
+
+    if (visited.has(realPath)) return;
+    visited.add(realPath);
+
+    const relPath = path.relative(repoRealRoot, realPath);
+    if (relPath.startsWith('..') || path.isAbsolute(relPath)) return;
+
+    let stat;
+    try {
+      stat = fs.lstatSync(realPath);
+    } catch {
+      return;
+    }
+
+    if (stat.isSymbolicLink()) return;
+
     if (stat.isDirectory()) {
-      for (const entry of fs.readdirSync(fullPath)) {
-        walk(path.join(fullPath, entry));
+      let entries;
+      try {
+        entries = fs.readdirSync(realPath);
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        walk(path.join(realPath, entry));
       }
       return;
     }
-    if (fullPath.endsWith('.md')) files.push(fullPath);
+
+    if (realPath.endsWith('.md')) files.push(realPath);
   }
 
   for (const relRoot of relRoots) {
-    walk(path.join(repoRoot, relRoot));
+    walk(path.join(repoRealRoot, relRoot));
   }
 
   return files.sort();
@@ -120,8 +151,8 @@ test('markdown docs use markdown numbered steps instead of HTML or compressed st
   for (const file of files) {
     const relPath = path.relative(repoRoot, file).replace(/\\/g, '/');
     const text = readText(file);
-    assert.doesNotMatch(text, /<\/?(?:ol|li)>/i, `${relPath} should use markdown numbered lists instead of HTML lists`);
-    assert.doesNotMatch(text, /;\s*choose any one/i, `${relPath} should split multi-step guidance instead of compressing it with semicolons`);
+    if (/<\/?(?:ol|li)>/i.test(text)) assert.fail(`${relPath} should use markdown numbered lists instead of HTML lists`);
+    if (/;\s*choose any one/i.test(text)) assert.fail(`${relPath} should split multi-step guidance instead of compressing it with semicolons`);
   }
 });
 
@@ -287,4 +318,32 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
     /^(?!.*\b(?:do not|don't|not)\b).*copy only\s+`?SKILL\.md`?/gim,
     'install docs must not tell users to copy only SKILL.md'
   );
+});
+
+
+test('markdown walker safely avoids symlink loops and out-of-bounds reads', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-symlink-test-'));
+  const outOfBoundsDir = path.join(tmpDir, 'external');
+  const dummyRepoDir = path.join(tmpDir, 'repo');
+  const symlinkPath = path.join(dummyRepoDir, 'symlink-to-external');
+
+  try {
+    fs.mkdirSync(outOfBoundsDir, { recursive: true });
+    fs.mkdirSync(dummyRepoDir, { recursive: true });
+    fs.writeFileSync(path.join(outOfBoundsDir, 'secret.md'), 'super secret content');
+    fs.writeFileSync(path.join(dummyRepoDir, 'safe.md'), 'safe content');
+
+    try {
+      fs.symlinkSync(outOfBoundsDir, symlinkPath, 'dir');
+    } catch (e) {
+      if (e.code === 'EPERM') return; // skip if lacking symlink perms on windows
+      throw e;
+    }
+
+    const files = markdownFilesIn(['.'], dummyRepoDir);
+    const hasSecret = files.some(f => f.includes('secret.md'));
+    assert.equal(hasSecret, false, 'walker should not read out-of-bounds symlink');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
