@@ -228,7 +228,7 @@ test('n8n local setup env, folder, launch, and tunnel instructions are explicit'
   assert.match(localSetup, /Paste the authtoken from your ngrok dashboard into your local `\.env` file\. Do not share this value or commit it to GitHub\./);
   assert.match(localSetup, /Run this in PowerShell from any folder to create the folder on your Desktop:/);
   assert.match(localSetup, /cd "\$env:USERPROFILE\\Desktop\\n8n-local"\nGet-ChildItem -Force\nGet-ChildItem -Force \.\\scripts/);
-  assert.match(localSetup, /Desktop\\n8n-local\n\|-- docker-compose\.yml\n\|-- \.env\.example\n\|-- \.env\n\|-- n8n-local\.cmd\n`-- scripts\\/);
+  assert.match(localSetup, /Desktop\\n8n-local\n\|-- docker-compose\.yml\n\|-- \.env\.example\n\|-- \.env\n\|-- _n8n-local\.cmd\n`-- scripts\\/);
   assert.match(localSetup, /Commit means save into Git\/GitHub\./);
   assert.match(localSetup, /Do not save these files or values into GitHub:/);
   assert.match(localSetup, /- `\.env` files\./);
