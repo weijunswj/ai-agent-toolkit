@@ -7,16 +7,16 @@ Use this for the normal Codex + n8n MCP setup.
 
 1. Common Windows path for Codex MCP config:
 
-```text
-C:\Users\<your-user>\.codex\config.toml
-```
+   ```text
+   C:\Users\<your-user>\.codex\config.toml
+   ```
 
 2. Or create it in PowerShell:
 
-```text
-mkdir $HOME\.codex -Force
-notepad $HOME\.codex\config.toml
-```
+   ```text
+   mkdir $HOME\.codex -Force
+   notepad $HOME\.codex\config.toml
+   ```
 
 ---
 
@@ -24,33 +24,33 @@ notepad $HOME\.codex\config.toml
 
 1. Decide which MCP URL you will use.
 
-   A) For normal local n8n on the default port:
+   1. For normal local n8n on the default port:
 
-   ```text
-   http://localhost:5678/mcp-server/http
-   ```
+      ```text
+      http://localhost:5678/mcp-server/http
+      ```
 
-   B) If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
+   2. If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
 
-   ```text
-   https://your-n8n-domain.com/mcp-server/http
-   ```
+      ```text
+      https://your-n8n-domain.com/mcp-server/http
+      ```
 
    **Codex treats `url` as a literal string, so do not use `${N8N_MCP_URL}` in the Codex config. You will paste the URL directly into the config in the next section.**
 
 2. Save the live MCP token at user scope in PowerShell:
 
-```powershell
-[Environment]::SetEnvironmentVariable('N8N_MCP_TOKEN', '<paste-token-here>', 'User')
-```
+   ```powershell
+   [Environment]::SetEnvironmentVariable('N8N_MCP_TOKEN', '<paste-token-here>', 'User')
+   ```
 
 3. Close and reopen PowerShell after changing the token.
 
 4. Verify the token is available:
 
-```powershell
-[Environment]::GetEnvironmentVariable('N8N_MCP_TOKEN', 'User')
-```
+   ```powershell
+   [Environment]::GetEnvironmentVariable('N8N_MCP_TOKEN', 'User')
+   ```
 
    * Codex reads `N8N_MCP_TOKEN` from the environment at startup, so the Codex desktop app must be restarted after changing this value.
 
@@ -60,26 +60,26 @@ notepad $HOME\.codex\config.toml
 
 1. Paste the following into `config.toml` and set the `url` value to the MCP URL you chose in Section 1:
 
-```toml
-[mcp_servers.n8n_docs]
-command = "npx"
-args = ["-y", "n8n-mcp@latest"]
-env = { MCP_MODE = "stdio", LOG_LEVEL = "error", DISABLE_CONSOLE_OUTPUT = "true" }
+   ```toml
+   [mcp_servers.n8n_docs]
+   command = "npx"
+   args = ["-y", "n8n-mcp@latest"]
+   env = { MCP_MODE = "stdio", LOG_LEVEL = "error", DISABLE_CONSOLE_OUTPUT = "true" }
 
-[mcp_servers.n8n_live]
-url = "http://localhost:5678/mcp-server/http"
-bearer_token_env_var = "N8N_MCP_TOKEN"
-enabled = true
-```
+   [mcp_servers.n8n_live]
+   url = "http://localhost:5678/mcp-server/http"
+   bearer_token_env_var = "N8N_MCP_TOKEN"
+   enabled = true
+   ```
 
 2. If `npx` is blocked on Windows, replace the `n8n_docs` block with this:
 
-```toml
-[mcp_servers.n8n_docs]
-command = "C:\\Program Files\\nodejs\\npx.cmd"
-args = ["-y", "n8n-mcp@latest"]
-env = { MCP_MODE = "stdio", LOG_LEVEL = "error", DISABLE_CONSOLE_OUTPUT = "true" }
-```
+   ```toml
+   [mcp_servers.n8n_docs]
+   command = "C:\\Program Files\\nodejs\\npx.cmd"
+   args = ["-y", "n8n-mcp@latest"]
+   env = { MCP_MODE = "stdio", LOG_LEVEL = "error", DISABLE_CONSOLE_OUTPUT = "true" }
+   ```
 
 ---
 
@@ -87,9 +87,9 @@ env = { MCP_MODE = "stdio", LOG_LEVEL = "error", DISABLE_CONSOLE_OUTPUT = "true"
 
 1. In Codex, open:
 
-```text
-Settings -> MCP servers
-```
+   ```text
+   Settings -> MCP servers
+   ```
 
 2. You should see:
 
@@ -108,15 +108,15 @@ Settings -> MCP servers
 
 1. Perform docs-only smoke test:
 
-```text
-Use n8n_docs. Find the smallest no-credentials workflow pattern that uses Manual Trigger and Set. Do not create anything yet.
-```
+   ```text
+   Use n8n_docs. Find the smallest no-credentials workflow pattern that uses Manual Trigger and Set. Do not create anything yet.
+   ```
 
 2. Perform live read-only smoke test:
 
-```text
-Use n8n_live. List workflows. Do not modify anything.
-```
+   ```text
+   Use n8n_live. List workflows. Do not modify anything.
+   ```
 
 ---
 
@@ -131,15 +131,15 @@ Use n8n_live. List workflows. Do not modify anything.
 
 2. Use this prompt in Codex:
 
-```text
-Use n8n_docs first. Design and validate a tiny no-credentials workflow with Manual Trigger and Set. Then use n8n_live to create it in my n8n instance as INACTIVE. Name it "Codex Smoke Test".
-```
+   ```text
+   Use n8n_docs first. Design and validate a tiny no-credentials workflow with Manual Trigger and Set. Then use n8n_live to create it in my n8n instance as INACTIVE. Name it "Codex Smoke Test".
+   ```
 
 3. After Codex creates it, ask Codex to read it back and confirm:
 
-```text
-Use n8n_live. Read back "Codex Smoke Test" and confirm it is inactive.
-```
+   ```text
+   Use n8n_live. Read back "Codex Smoke Test" and confirm it is inactive.
+   ```
 
 ---
 

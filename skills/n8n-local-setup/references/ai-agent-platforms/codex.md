@@ -6,7 +6,9 @@ Update the project source and run sync.
 -->
 # Codex MCP Setup
 
-The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This page is a secondary Codex reference, not a required local setup path.
+The primary local setup guide is [1. Local Setup](../n8n/local-setup.md).
+
+This page is a secondary Codex reference, not a required local setup path.
 
 ## What This Adds
 
@@ -21,53 +23,58 @@ The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This p
 
 1. Finish [1. Local Setup](../n8n/local-setup.md) first if you are using local n8n.
 2. You should already have:
-    A) Docker Desktop installed if you are running local n8n.
-    B) n8n running locally, through a tunnel, or on a hosted domain.
-    C) Instance-level MCP enabled in n8n.
-    D) The live n8n MCP server URL copied from n8n.
-    E) A live n8n MCP token copied from n8n.
+   1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed if you are running local n8n.
+   2. [Node.js](https://nodejs.org/en/download) installed.
+   3. [Codex](https://openai.com/index/introducing-the-codex-app/) installed.
+   4. n8n running locally, through a tunnel, or on a hosted domain.
+   5. Instance-level MCP enabled in n8n.
+   6. The live n8n MCP server URL copied from n8n.
+   7. A live n8n MCP token copied from n8n.
 
 ## 2. Install Codex
 
-Codex is a platform extension. Ensure you have the Codex extension installed in your IDE.
+1. Install Codex using the official install method for your machine.
+2. Run this in a fresh PowerShell window:
+
+   ```powershell
+   node -v
+   npm -v
+   npx --version
+   ```
 
 ## 3. Install Toolkit Skills For Codex
 
-1. Copy the whole `skills/<skill-name>/` folder.
-    A) **Choose any one supported Codex skill-folder location:**
+Copy the whole `skills/<skill-name>/` folder.
+- **Choose any one supported Codex skill-folder location:**
 
-        | Scope | Skill folder location |
-        | --- | --- |
-        | Repo-local | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
-        | User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
-        | Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
+   | Scope | Skill folder location |
+   | --- | --- |
+   | Repo-local | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
+   | User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
+   | Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
 
-    B) Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+- Do not copy only `SKILL.md`.
+- Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
 ## 4. Agent Rules
 
-1. **If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
-    A) Consider the following tools:
+**If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
 
-        | Need | Use |
-        | --- | --- |
-        | Generic Codex rules | [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) |
-        | Full n8n operating contract | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) |
+   | Need | Use |
+   | --- | --- |
+   | Generic Codex rules | [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) |
+   | Full n8n operating contract | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) |
+   | Optional n8n pointer | `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
+
+- If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
 ## 5. Codex MCP Config
 
-1. Use the [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md).
-    A) Add the configuration to your Codex setup.
+Use the [Codex MCP config](https://developers.openai.com/codex/mcp).
+   - Add the configuration to your Codex setup.
 
-## 6. Smoke Testing
+## References
 
-Use docs-first/live-read-only smoke tests to verify the setup:
-
-* Read workflows and test retrieving data.
-* Do not perform live mutations without explicit confirmation.
-* Ensure you always keep explicit confirmation enabled before live mutations.
-
-## 7. Safety
-
-* Keep your MCP token safe. Do not commit it to your repository.
-* Avoid granting arbitrary shell-execution MCP tools.
+- [Codex Docs](https://openai.com/index/introducing-the-codex-app/)
+- [Codex MCP config](https://developers.openai.com/codex/mcp)
+- [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/)

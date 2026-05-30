@@ -6,7 +6,9 @@ Update the project source and run sync.
 -->
 # Antigravity MCP Setup
 
-The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This page is a secondary Antigravity reference, not a required local setup path.
+The primary local setup guide is [1. Local Setup](../n8n/local-setup.md).
+
+This page is a secondary Antigravity reference, not a required local setup path.
 
 ## What This Adds
 
@@ -21,13 +23,13 @@ The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This p
 
 1. Finish [1. Local Setup](../n8n/local-setup.md) first if you are using local n8n.
 2. You should already have:
-   A) [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed if you are running local n8n.
-   B) [Node.js](https://nodejs.org/en/download) installed.
-   C) [Antigravity](https://antigravity.google/) installed.
-   D) n8n running locally, through a tunnel, or on a hosted domain.
-   E) Instance-level MCP enabled in n8n.
-   F) The live n8n MCP server URL copied from n8n.
-   G) A live n8n MCP token copied from n8n.
+   1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed if you are running local n8n.
+   2. [Node.js](https://nodejs.org/en/download) installed.
+   3. [Antigravity](https://antigravity.google/) installed.
+   4. n8n running locally, through a tunnel, or on a hosted domain.
+   5. Instance-level MCP enabled in n8n.
+   6. The live n8n MCP server URL copied from n8n.
+   7. A live n8n MCP token copied from n8n.
 
 ## 2. Install Antigravity
 
@@ -39,39 +41,34 @@ The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This p
    npm -v
    npx --version
    ```
-   
-   A) The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
+      
+   - The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
 
 ## 3. Install Toolkit Skills For Antigravity
 
-1. Preferred install: use Antigravity plugin-scoped skill folders.
-   A) **Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
-   
+1. **Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
+      
    | Location type | Skill folder path |
    | --- | --- |
    | Plugin-scoped | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` |
+      
+   - Suggested structure:
    
-   B) Suggested structure:
-   
-   ```text
-   C:\Users\<user>\.gemini\config\plugins\
-   `-- <plugin-name>\
-       |-- plugin.json
-       `-- skills\
-           `-- ai-coding-agent-rules\
-               |-- README.md
-               `-- SKILL.md
-   ```
+      ```text
+      C:\Users\<user>\.gemini\config\plugins\
+      `-- <plugin-name>\
+         |-- plugin.json
+         `-- skills\
+            `-- ai-coding-agent-rules\
+                  |-- README.md
+                  `-- SKILL.md
+      ```
 
-2. Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder.
-3. Do not copy only `SKILL.md`. 
-   A) Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
-4. Use a minimal `plugin.json` only when the installed Antigravity runtime or docs require plugin metadata.
-   A) This plugin-scoped folder is for loading toolkit skills.
-5. **Put repo-local bootstrap outputs in the target repo, not inside the Antigravity plugin folder:**
-   A) `AGENTS.md`.
-   B) `GEMINI.md`.
-   C) `.agents/rules/00-agent-toolkit-bootstrap.md`.
+2. Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder
+3. Use a minimal `plugin.json` only when the installed Antigravity runtime or docs require plugin metadata.
+   - This plugin-scoped folder is for loading toolkit skills.
+4. Do not copy only `SKILL.md`.
+5. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
 ## 4. Agent Rules
 
@@ -84,9 +81,12 @@ The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This p
    | Optional n8n pointer | `GEMINI.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
 
 2. If the target repo already has `GEMINI.md`, do not overwrite it. 
-   A) Merge manually or produce a diff/merge plan.
+   - Merge manually or produce a diff/merge plan.
 3. If Antigravity does not invoke skills automatically, keep any global `GEMINI.md` nudge tiny: remind it to use `ai-coding-agent-rules` before the first repo file edit. 
-   A) Do not add a huge global rules file.
+
+   ```text
+   Before editing files in any repository, always use the `ai-coding-agent-rules` skill once per new chat/session to check, bootstrap, or repair repo-local instructions. If the skill is unavailable, report that before editing.
+   ```
 
 ## 5. Antigravity MCP Config
 
@@ -96,13 +96,13 @@ The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This p
 ## 6. Restart Antigravity
 
 1. After changing any of these:
-   A) `$HOME\.gemini\antigravity\mcp_config.json`
-   B) `$HOME\.gemini\GEMINI.md`
-   C) `N8N_MCP_URL`
-   D) `N8N_MCP_TOKEN`
+   - `$HOME\.gemini\antigravity\mcp_config.json`
+   - `$HOME\.gemini\GEMINI.md`
+   - `N8N_MCP_URL`
+   - `N8N_MCP_TOKEN`
 2. Fully close and reopen Antigravity.
-   A) You can open any folder. 
-   B) Open a specific repo only when you actually want Antigravity to inspect or edit that repo.
+   - You can open any folder. 
+   - Open a specific repo only when you actually want Antigravity to inspect or edit that repo.
 
 ## 7. Troubleshooting
 
@@ -131,9 +131,9 @@ The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This p
    ```
 
 5. Save the file, fully close Antigravity, then reopen the project.
-   A) Do not delete random lines from `.git/config`.
-   B) If `[extensions]` becomes empty after removing the line, it is safe to remove the empty `[extensions]` header too.
-   C) This fix is only for the bug where Antigravity stops replying because of `worktreeConfig = true` in `.git/config`.
+   - Do not delete random lines from `.git/config`.
+   - If `[extensions]` becomes empty after removing the line, it is safe to remove the empty `[extensions]` header too.
+   - This fix is only for the bug where Antigravity stops replying because of `worktreeConfig = true` in `.git/config`.
 
 ## References
 

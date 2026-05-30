@@ -11,7 +11,6 @@ $script:ServiceImages = @{
 function Write-Header {
   param([string]$Title)
 
-  Write-Host ''
   Write-Host '============================================================' -ForegroundColor DarkCyan
   Write-Host "  $Title" -ForegroundColor Cyan
   Write-Host '============================================================' -ForegroundColor DarkCyan

@@ -1,6 +1,8 @@
 # Antigravity MCP Setup
 
-The primary local setup guide is [1. Local Setup](./_Page%201.%20Local%20Setup.md). This page is a secondary Antigravity reference, not a required local setup path.
+The primary local setup guide is [1. Local Setup](./_Page%201.%20Local%20Setup.md).
+
+This page is a secondary Antigravity reference, not a required local setup path.
 
 ## What This Adds
 
@@ -33,17 +35,16 @@ The primary local setup guide is [1. Local Setup](./_Page%201.%20Local%20Setup.m
    npm -v
    npx --version
    ```
-   
-   A) The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
+      
+   - The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
 
 ## 3. Install Toolkit Skills For Antigravity
 
-1. Preferred install: use Antigravity plugin-scoped skill folders.
-   - **Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
+1. **Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
       
-      | Location type | Skill folder path |
-      | --- | --- |
-      | Plugin-scoped | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` |
+   | Location type | Skill folder path |
+   | --- | --- |
+   | Plugin-scoped | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` |
       
    - Suggested structure:
    
@@ -57,15 +58,11 @@ The primary local setup guide is [1. Local Setup](./_Page%201.%20Local%20Setup.m
                   `-- SKILL.md
       ```
 
-2. Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder.
-3. Do not copy only `SKILL.md`. 
-   - Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
-4. Use a minimal `plugin.json` only when the installed Antigravity runtime or docs require plugin metadata.
+2. Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder
+3. Use a minimal `plugin.json` only when the installed Antigravity runtime or docs require plugin metadata.
    - This plugin-scoped folder is for loading toolkit skills.
-5. **Put repo-local bootstrap outputs in the target repo, not inside the Antigravity plugin folder:**
-   1. `AGENTS.md`.
-   2. `GEMINI.md`.
-   3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
+4. Do not copy only `SKILL.md`.
+5. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
 ## 4. Agent Rules
 
@@ -80,7 +77,10 @@ The primary local setup guide is [1. Local Setup](./_Page%201.%20Local%20Setup.m
 2. If the target repo already has `GEMINI.md`, do not overwrite it. 
    - Merge manually or produce a diff/merge plan.
 3. If Antigravity does not invoke skills automatically, keep any global `GEMINI.md` nudge tiny: remind it to use `ai-coding-agent-rules` before the first repo file edit. 
-   - Do not add a huge global rules file.
+
+   ```text
+   Before editing files in any repository, always use the `ai-coding-agent-rules` skill once per new chat/session to check, bootstrap, or repair repo-local instructions. If the skill is unavailable, report that before editing.
+   ```
 
 ## 5. Antigravity MCP Config
 
