@@ -2,7 +2,7 @@
 
 Beginner-friendly local n8n setup source index.
 
-Use this project when you want local n8n on Windows with Docker Compose, Postgres, ngrok, the `n8n-local.cmd` menu, MCP setup, and AI-agent platform references.
+Use this project when you want local n8n on Windows with Docker Compose, Postgres, ngrok, the `_n8n-local.cmd` menu, MCP setup, and AI-agent platform references.
 
 ## Start Here
 

@@ -8,7 +8,7 @@ Update the project source and run sync.
 
 This is the beginner-first guide for running local n8n on Windows.
 
-Use it when you want one local setup path with Docker Compose, Postgres, ngrok, the `n8n-local.cmd` menu, MCP setup, and AI agent platform notes.
+Use it when you want one local setup path with Docker Compose, Postgres, ngrok, the `_n8n-local.cmd` menu, MCP setup, and AI agent platform notes.
 
 For always-on public hosting, use [3. VPS Hosting](./vps-hosting.md). VPS and Hostinger hosting are separate from this local Docker Desktop setup.
 
@@ -21,9 +21,9 @@ For always-on public hosting, use [3. VPS Hosting](./vps-hosting.md). VPS and Ho
 | 3. | Copy everything inside the [local stack template folder](../../templates/local-stack/) into `Desktop\n8n-local`. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, launcher, and `scripts\`. |
 | 4. | Copy `.env.example` to a new file named `.env`. | `Desktop\n8n-local`. | You have a local settings file. |
 | 5. | Replace placeholder values inside `.env`. | `.env`, not PowerShell. | n8n, Postgres, and ngrok have local settings. |
-| 6. | Double-click `n8n-local.cmd`. | `Desktop\n8n-local`. | The guided menu opens. |
+| 6. | Double-click `_n8n-local.cmd`. | `Desktop\n8n-local`. | The guided menu opens. |
 | 7. | Start local n8n first and create the owner account at [http://localhost:5678](http://localhost:5678). | Browser. | n8n is owned before any public tunnel starts. |
-| 8. | Start ngrok only when an outside service needs to call local n8n. | `n8n-local.cmd` menu. | Webhooks or OAuth callbacks can reach your local n8n. |
+| 8. | Start ngrok only when an outside service needs to call local n8n. | `_n8n-local.cmd` menu. | Webhooks or OAuth callbacks can reach your local n8n. |
 | 9. | Enable MCP in n8n, then use the matching platform config template. | n8n plus your agent app. | Codex, Claude Code, OpenCode, or Antigravity can connect. |
 
 Do not save local secrets, `.env`, backups, runtime files, or live n8n import/export files into GitHub.
@@ -110,14 +110,14 @@ Key files:
 | --- | --- |
 | Docker Compose template | [docker-compose.yml](../../templates/local-stack/docker-compose.yml) |
 | Environment template | [.env.example](../../templates/local-stack/.env.example) |
-| Windows launcher | [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd) |
+| Windows launcher | [_n8n-local.cmd](../../templates/local-stack/_n8n-local.cmd) |
 | Menu script | [n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1) |
 
 1. Open [templates/local-stack/](../../templates/local-stack/).
 2. Select everything inside that folder.
 3. Copy the selected files and folders.
 4. Paste them into `Desktop\n8n-local`.
-   i) Copy the whole folder contents. Do not pull out only the `.ps1` file. Keep `docker-compose.yml`, `.env.example`, `n8n-local.cmd`, and `scripts\` together.
+   i) Copy the whole folder contents. Do not pull out only the `.ps1` file. Keep `docker-compose.yml`, `.env.example`, `_n8n-local.cmd`, and `scripts\` together.
    ii) Or run this from the copied `n8n-local-setup` skill folder instead:
 
    ```powershell
@@ -185,7 +185,7 @@ Desktop\n8n-local
 |-- docker-compose.yml
 |-- .env.example
 |-- .env
-|-- n8n-local.cmd
+|-- _n8n-local.cmd
 `-- scripts\
     `-- n8n-local-menu.ps1
 ```
@@ -208,8 +208,8 @@ Do not save these files or values into GitHub:
 ### 7.1. Use The Launcher
 
 1. Open the `n8n-local` folder on your Desktop.
-2. Double-click `n8n-local.cmd`.
-   i) Do not launch n8n directly from Docker Desktop. Launch it from `n8n-local.cmd` instead.
+2. Double-click `_n8n-local.cmd`.
+   i) Do not launch n8n directly from Docker Desktop. Launch it from `_n8n-local.cmd` instead.
    ii) Docker Desktop direct launch bypasses:
        A) Guided checks.
        B) Selected updates.
@@ -232,7 +232,7 @@ If double-click does not work, run this in PowerShell:
 
 ```powershell
 cd "$env:USERPROFILE\Desktop\n8n-local"
-.\n8n-local.cmd
+.\_n8n-local.cmd
 ```
 
 ## 8. First Launch: Local-Only Owner Setup
@@ -245,7 +245,7 @@ Create the owner account before exposing n8n through ngrok.
 
 | Path | What to do |
 | --- | --- |
-| Menu | Double-click `n8n-local.cmd`, then choose the local start option before starting ngrok. |
+| Menu | Double-click `_n8n-local.cmd`, then choose the local start option before starting ngrok. |
 | Raw command | Use the fallback command below only if you are comfortable with PowerShell. |
 
 Fallback command:
@@ -281,7 +281,7 @@ Examples:
 ### 9.2. Start The Public Tunnel
 
 1. Make sure the owner account already exists.
-2. Double-click `n8n-local.cmd`.
+2. Double-click `_n8n-local.cmd`.
 3. Choose the ngrok or tunnel start option if the menu separates it.
    i) Fallback command:
 
@@ -295,9 +295,9 @@ Examples:
 
 ### 9.3. If You Changed Tunnel Settings
 
-1. Close the existing `n8n-local.cmd` window.
+1. Close the existing `_n8n-local.cmd` window.
 2. Save `.env`.
-3. Double-click `n8n-local.cmd` again.
+3. Double-click `_n8n-local.cmd` again.
 4. Start with the ngrok/tunnel option if the menu separates it.
    i) Fallback command:
 
@@ -335,7 +335,7 @@ Use the inspector to debug incoming tunnel requests. Do not paste secrets or rea
 Start with the menu:
 
 1. Open `Desktop\n8n-local`.
-2. Double-click `n8n-local.cmd`.
+2. Double-click `_n8n-local.cmd`.
 3. Choose the action you need.
 
 | Need | Menu action |
@@ -367,7 +367,7 @@ docker compose logs -f postgres
 
 ### 10.2. Back Up Postgres
 
-1. Double-click `n8n-local.cmd`.
+1. Double-click `_n8n-local.cmd`.
 2. Choose `Backup Postgres database`.
 3. Keep the backup local and private.
    i) The menu writes a timestamped SQL dump under a local `backups` folder. Do not commit backup files.
@@ -376,13 +376,13 @@ docker compose logs -f postgres
 
 ### 11.1. Check For Updates
 
-1. Double-click `n8n-local.cmd`.
+1. Double-click `_n8n-local.cmd`.
 2. Choose `Check for updates`.
    i) The check compares local image tag IDs before and after `docker compose pull`. It may pull newer images into the local Docker cache, but it does not restart or recreate running services.
 
 ### 11.2. Apply Selected Updates
 
-1. Double-click `n8n-local.cmd`.
+1. Double-click `_n8n-local.cmd`.
 2. Choose `Update selected services`.
 3. Back up first if Postgres is selected.
    i) Postgres is pinned to major version 16 in [docker-compose.yml](../../templates/local-stack/docker-compose.yml).
@@ -466,7 +466,7 @@ If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not 
 2. If Docker reports that the engine is unavailable:
    i) Open Docker Desktop.
    ii) Wait for the engine to finish starting.
-   iii) Double-click `n8n-local.cmd` again.
+   iii) Double-click `_n8n-local.cmd` again.
 
 ### 15.2. `.env` Missing
 
@@ -491,9 +491,9 @@ If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not 
    i) `NGROK_DOMAIN` should be a reserved ngrok domain without `https://`.
 
 2. After editing `.env`:
-   i) Close the existing `n8n-local.cmd` window.
+   i) Close the existing `_n8n-local.cmd` window.
    ii) Save `.env`.
-   iii) Double-click `n8n-local.cmd` again.
+   iii) Double-click `_n8n-local.cmd` again.
    iv) Start with the ngrok/tunnel option if the menu separates it.
    v) Fallback command:
 
@@ -515,9 +515,9 @@ If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not 
    ```
 
 2. After editing `.env`:
-   i) Close the existing `n8n-local.cmd` window.
+   i) Close the existing `_n8n-local.cmd` window.
    ii) Save `.env`.
-   iii) Double-click `n8n-local.cmd` again.
+   iii) Double-click `_n8n-local.cmd` again.
    iv) Fallback command:
 
    ```powershell

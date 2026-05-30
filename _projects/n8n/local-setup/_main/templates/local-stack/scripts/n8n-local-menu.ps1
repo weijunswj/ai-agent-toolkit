@@ -362,9 +362,9 @@ function Backup-Postgres {
 function Show-Help {
   Write-Header 'Help / Command Reference'
   Write-Host 'Recommended entrypoint:' -ForegroundColor Cyan
-  Write-Host '  n8n-local.cmd' -ForegroundColor White
+  Write-Host '  _n8n-local.cmd' -ForegroundColor White
   Write-Host ''
-  Write-Host 'Do not launch n8n directly from Docker Desktop. Launch it from n8n-local.cmd instead.' -ForegroundColor Yellow
+  Write-Host 'Do not launch n8n directly from Docker Desktop. Launch it from _n8n-local.cmd instead.' -ForegroundColor Yellow
   Write-Host 'Docker Desktop direct launch bypasses guided checks, selected updates, backups, and clear status output.' -ForegroundColor Cyan
   Write-Host ''
   Write-Host 'Raw commands behind the menu:' -ForegroundColor Cyan

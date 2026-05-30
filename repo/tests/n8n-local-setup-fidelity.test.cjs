@@ -52,8 +52,8 @@ const localStackTemplates = [
     output: 'skills/n8n-local-setup/templates/local-stack/.env.example'
   },
   {
-    source: '_main/templates/local-stack/n8n-local.cmd',
-    output: 'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd'
+    source: '_main/templates/local-stack/_n8n-local.cmd',
+    output: 'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd'
   },
   {
     source: '_main/templates/local-stack/scripts/n8n-local-menu.ps1',
@@ -247,7 +247,7 @@ test('n8n local setup keeps run-location guidance with cd before folder-specific
 
   const folderSpecificCommands = [
     'Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force',
-    '.\\n8n-local.cmd',
+    '.\\_n8n-local.cmd',
     'docker compose up -d postgres n8n',
     'docker compose up -d ngrok',
     'docker compose up -d --force-recreate n8n ngrok',
@@ -356,7 +356,7 @@ test('n8n local setup docs link important local stack and platform files', () =>
   for (const expected of [
     '[docker-compose.yml](./templates/local-stack/docker-compose.yml)',
     '[.env.example](./templates/local-stack/.env.example)',
-    '[n8n-local.cmd](./templates/local-stack/n8n-local.cmd)',
+    '[_n8n-local.cmd](./templates/local-stack/_n8n-local.cmd)',
     '[n8n-local-menu.ps1](./templates/local-stack/scripts/n8n-local-menu.ps1)',
     '[Codex MCP config](./templates/codex-mcp-config.md)',
     '[Claude MCP config](./templates/claude-mcp-config.md)',
@@ -434,7 +434,7 @@ test('n8n local setup env example stays placeholder-only', () => {
 });
 
 test('n8n local setup launcher templates provide guided stack actions', () => {
-  const cmd = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local.cmd');
+  const cmd = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/_n8n-local.cmd');
   const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
 
   assert.match(cmd, /n8n-local-menu\.ps1/);
@@ -509,7 +509,7 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
     'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md',
     'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
     'skills/n8n-local-setup/templates/local-stack/.env.example',
-    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
+    'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd',
     'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/n8n-agent-rules/SKILL.md',
@@ -531,7 +531,7 @@ test('claude n8n local pack installs inert generic template and n8n-agent-rules 
     'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md',
     'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
     'skills/n8n-local-setup/templates/local-stack/.env.example',
-    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
+    'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd',
     'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
