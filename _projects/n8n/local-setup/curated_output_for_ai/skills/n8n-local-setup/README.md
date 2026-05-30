@@ -31,11 +31,13 @@ Copy whole skill folders, not just `SKILL.md`.
 | OpenCode | Short manual whole-skill-folder install note only. |
 | Antigravity | Plugin-scoped skill-folder install. |
 
-Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup.
+Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet.
 
 ## Agent Rules And Adapters
 
 **If the [AI Coding Agent Rules](../ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
+
+**Before repo file edits, automatically check repo-local agent instructions. If they are missing, unmanaged, stale, or structurally broken, bootstrap/repair them first.**
 
 Install or load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, MCP, import/export, credential, execution, repo/live sync, or live-instance work.
 

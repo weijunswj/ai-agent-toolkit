@@ -8,6 +8,12 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 Codex can consume this toolkit through skills, `AGENTS.md`, and MCP config templates. This is a router; use the linked full-fidelity files for runtime setup detail.
 
+## Boundary
+
+This is a short platform overview and routing note. It is not the full runtime setup guide.
+
+For full setup detail, use the local full-fidelity references and templates in this copied skill folder.
+
 ## Skill Install
 
 Copy the whole `skills/<skill-name>/` folder.
