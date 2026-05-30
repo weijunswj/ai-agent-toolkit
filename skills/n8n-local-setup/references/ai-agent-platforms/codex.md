@@ -8,8 +8,18 @@ Update the project source and run sync.
 
 This setup connects Codex to your local n8n instance via MCP.
 
+Copy the whole `skills/<skill-name>/` folder. Do not just copy `SKILL.md`.
+
+**Choose any one supported Codex skill-folder location:**
+
+| Scope | Skill folder location |
+| --- | --- |
+| Repo-local | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
+| User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
+| Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
+
 1. Create a skill folder for Codex in a supported location (e.g. `~/.agents/skills/n8n-local-setup/`).
-2. Copy the entire contents of `skills/n8n-local-setup/` into it. Do not just copy `SKILL.md`.
+2. Copy the whole `skills/<skill-name>/` folder. Do not just copy `SKILL.md`.
 3. Locate `templates/mcp-configs/codex-mcp-config.md` from the copied folder.
 4. Add the configuration to your Codex setup.
 
