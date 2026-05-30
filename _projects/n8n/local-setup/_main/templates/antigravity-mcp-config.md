@@ -5,13 +5,13 @@ Use this to connect Google Antigravity globally to the same n8n setup.
 * Do not paste real n8n tokens into this file or any repo file.
 * Open Antigravity MCP settings, then use the raw MCP config editor if available.
 
-### Common Windows path for Antigravity/Gemini MCP config:
+Common Windows path for Antigravity/Gemini MCP config:
 
 ```text
 C:\Users\<your-user>\.gemini\antigravity\mcp_config.json
 ```
 
-### Or create it in PowerShell:
+Or create it in PowerShell:
 
 ```text
 mkdir $HOME\.gemini\antigravity -Force
@@ -22,29 +22,29 @@ notepad $HOME\.gemini\antigravity\mcp_config.json
 
 ## 1. Save The Live MCP URL And Token
 
-### Set the live MCP URL at user scope.
+Set the live MCP URL at user scope.
 
-#### For normal local n8n on the default port:
+For normal local n8n on the default port:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'http://localhost:5678/mcp-server/http', 'User')
 ```
 
-#### If your n8n is exposed through ngrok or another tunnel, use the actual MCP URL shown by n8n instead:
+If your n8n is exposed through ngrok or another tunnel, use the actual MCP URL shown by n8n instead:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'https://your-ngrok-or-domain.example/mcp-server/http', 'User')
 ```
 
-### Then save the live MCP token at user scope:
+Then save the live MCP token at user scope:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('N8N_MCP_TOKEN', '<paste-token-here>', 'User')
 ```
 
-### Close and reopen Antigravity after changing either value.
+Close and reopen Antigravity after changing either value.
 
-### Verify both values are available from a fresh PowerShell:
+Verify both values are available from a fresh PowerShell:
 
 ```powershell
 [Environment]::GetEnvironmentVariable('N8N_MCP_URL', 'User')
@@ -55,7 +55,7 @@ notepad $HOME\.gemini\antigravity\mcp_config.json
 
 ## 2. Add The Global Antigravity MCP Config
 
-### Paste the following into `mcp_config.json`:
+Paste the following into `mcp_config.json`:
 
 ```json
 {
@@ -87,12 +87,12 @@ notepad $HOME\.gemini\antigravity\mcp_config.json
 
 ## 3. Verify Both MCP Servers
 
-### Use Antigravity's MCP server UI to confirm both servers are configured:
+Use Antigravity's MCP server UI to confirm both servers are configured:
 
   * `n8n_docs`
   * `n8n_live`
 
-### If `n8n_live` fails:
+If `n8n_live` fails:
 
 * Confirm `N8N_MCP_URL` is the MCP endpoint, not just the n8n UI URL.
 * Confirm `N8N_MCP_TOKEN` is set at user scope.
@@ -103,13 +103,13 @@ notepad $HOME\.gemini\antigravity\mcp_config.json
 
 ## 4. Test The MCP Setup
 
-### Perform docs-only smoke test inside Antigravity:
+Perform docs-only smoke test inside Antigravity:
 
 ```text
 Use n8n_docs. Find the smallest no-credentials workflow pattern that uses Manual Trigger and Set. Do not create anything yet.
 ```
 
-### Perform live read-only smoke test inside Antigravity:
+Perform live read-only smoke test inside Antigravity:
 
 ```text
 Use n8n_live. List workflows. Do not modify anything.
@@ -119,20 +119,20 @@ Use n8n_live. List workflows. Do not modify anything.
 
 ## 5. Create A Tiny Live Smoke-Test Workflow
 
-### This is the safest first workflow:
+This is the safest first workflow:
 
   * Manual Trigger.
   * Set.
   * No credentials.
   * Inactive by default.
 
-### Use this prompt in Antigravity:
+Use this prompt in Antigravity:
 
 ```text
 Use n8n_docs first. Design and validate a tiny no-credentials workflow with Manual Trigger and Set. Then use n8n_live to create it in my n8n instance as INACTIVE. Name it "Antigravity Smoke Test".
 ```
 
-### After Antigravity creates it, ask Antigravity to read it back and confirm:
+After Antigravity creates it, ask Antigravity to read it back and confirm:
 
 ```text
 Use n8n_live. Read back "Antigravity Smoke Test" and confirm it is inactive.
@@ -153,12 +153,12 @@ Use n8n_live. Read back "Antigravity Smoke Test" and confirm it is inactive.
 
 ## 7. Troubleshooting
 
-### If `n8n_docs` fails:
+If `n8n_docs` fails:
 
 * Confirm Node.js and `npx` are installed.
 * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
 
-### If `n8n_live` fails:
+If `n8n_live` fails:
 
 * Confirm `N8N_MCP_URL` is set to the MCP endpoint, not just the n8n UI URL.
 * Confirm `N8N_MCP_TOKEN` is set at user scope.

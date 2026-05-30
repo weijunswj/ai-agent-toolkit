@@ -6,13 +6,13 @@ Use this to connect OpenCode globally to the same n8n setup.
 * Keep `{env:N8N_MCP_URL}` and `{env:N8N_MCP_TOKEN}` exactly as shown.
 * Do not put this in a repo-level `opencode.json` unless you intentionally want project-specific OpenCode overrides.
 
-### Common Windows path for OpenCode MCP config:
+Common Windows path for OpenCode MCP config:
 
 ```text
 C:\Users\<your-user>\.config\opencode\opencode.json
 ```
 
-### Or create it in PowerShell:
+Or create it in PowerShell:
 
 ```text
 mkdir $HOME\.config\opencode -Force
@@ -23,29 +23,29 @@ notepad $HOME\.config\opencode\opencode.json
 
 ## 1. Save The Live MCP URL And Token
 
-### Set the live MCP URL at user scope.
+Set the live MCP URL at user scope.
 
-#### For normal local n8n on the default port:
+For normal local n8n on the default port:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'http://localhost:5678/mcp-server/http', 'User')
 ```
 
-#### If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
+If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'https://your-n8n-domain.com/mcp-server/http', 'User')
 ```
 
-### Then save the live MCP token:
+Then save the live MCP token:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('N8N_MCP_TOKEN', '<paste-token-here>', 'User')
 ```
 
-### Close and reopen PowerShell after changing either value.
+Close and reopen PowerShell after changing either value.
 
-### Verify both values are available:
+Verify both values are available:
 
 ```powershell
 [Environment]::GetEnvironmentVariable('N8N_MCP_URL', 'User')
@@ -56,7 +56,7 @@ notepad $HOME\.config\opencode\opencode.json
 
 ## 2. Add The Global OpenCode Config
 
-### Paste the following into `opencode.json`:
+Paste the following into `opencode.json`:
 
 ```jsonc
 {
@@ -97,25 +97,25 @@ notepad $HOME\.config\opencode\opencode.json
 
 ## 3. Verify Both MCP Servers
 
-### List configured MCP servers:
+List configured MCP servers:
 
 ```powershell
 opencode mcp list
 ```
 
-### You should see:
+You should see:
 
   * `n8n_docs`
   * `n8n_live`
 
-### If `n8n_live` fails:
+If `n8n_live` fails:
 
 * Confirm `N8N_MCP_URL` is set to the MCP endpoint, not just the n8n UI URL.
 * Confirm `N8N_MCP_TOKEN` is set at user scope.
 * Restart OpenCode after changing environment variables.
 * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
 
-### If `n8n_live` is enabled and authentication fails, debug it:
+If `n8n_live` is enabled and authentication fails, debug it:
 
 ```powershell
 opencode mcp debug n8n_live
@@ -125,13 +125,13 @@ opencode mcp debug n8n_live
 
 ## 4. Test The MCP Setup
 
-### Perform docs-only smoke test:
+Perform docs-only smoke test:
 
 ```powershell
 opencode run "Use n8n_docs. Find the smallest no-credentials workflow pattern that uses Manual Trigger and Set. Do not create anything yet."
 ```
 
-### Perform live read-only smoke test:
+Perform live read-only smoke test:
 
 ```powershell
 opencode run "Use n8n_live. List workflows. Do not modify anything."
@@ -141,20 +141,20 @@ opencode run "Use n8n_live. List workflows. Do not modify anything."
 
 ## 5. Create A Tiny Live Smoke-Test Workflow
 
-### This is the safest first workflow:
+This is the safest first workflow:
 
   * Manual Trigger.
   * Set.
   * No credentials.
   * Inactive by default.
 
-### Use this prompt in OpenCode:
+Use this prompt in OpenCode:
 
 ```powershell
 opencode run "Use n8n_docs first. Design and validate a tiny no-credentials workflow with Manual Trigger and Set. Then use n8n_live to create it in my n8n instance as INACTIVE. Name it OpenCode Smoke Test."
 ```
 
-### After OpenCode creates it, ask OpenCode to read it back and confirm:
+After OpenCode creates it, ask OpenCode to read it back and confirm:
 
 ```powershell
 opencode run "Use n8n_live. Read back OpenCode Smoke Test and confirm it is inactive."
@@ -175,12 +175,12 @@ opencode run "Use n8n_live. Read back OpenCode Smoke Test and confirm it is inac
 
 ## 7. Troubleshooting
 
-### If `n8n_docs` fails:
+If `n8n_docs` fails:
 
 * Confirm Node.js and `npx` are installed.
 * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
 
-### If `n8n_live` fails:
+If `n8n_live` fails:
 
 * Confirm `N8N_MCP_URL` is set to the MCP endpoint, not just the n8n UI URL.
 * Confirm `N8N_MCP_TOKEN` is set at user scope.
