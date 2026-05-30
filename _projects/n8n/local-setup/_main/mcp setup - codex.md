@@ -15,11 +15,11 @@ The primary local setup guide is [1. Local Setup](./_Page%201.%20Local%20Setup.m
 
 1. Finish [1. Local Setup](./_Page%201.%20Local%20Setup.md) first if you are using local n8n.
 2. You should already have:
-    A) Docker Desktop installed if you are running local n8n.
-    B) n8n running locally, through a tunnel, or on a hosted domain.
-    C) Instance-level MCP enabled in n8n.
-    D) The live n8n MCP server URL copied from n8n.
-    E) A live n8n MCP token copied from n8n.
+   1. Docker Desktop installed if you are running local n8n.
+   2. n8n running locally, through a tunnel, or on a hosted domain.
+   3. Instance-level MCP enabled in n8n.
+   4. The live n8n MCP server URL copied from n8n.
+   5. A live n8n MCP token copied from n8n.
 
 ## 2. Install Codex
 
@@ -28,30 +28,30 @@ Codex is a platform extension. Ensure you have the Codex extension installed in 
 ## 3. Install Toolkit Skills For Codex
 
 1. Copy the whole `skills/<skill-name>/` folder.
-    A) **Choose any one supported Codex skill-folder location:**
+   - **Choose any one supported Codex skill-folder location:**
 
-        | Scope | Skill folder location |
-        | --- | --- |
-        | Repo-local | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
-        | User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
-        | Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
+      | Scope | Skill folder location |
+      | --- | --- |
+      | Repo-local | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
+      | User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
+      | Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
 
-    B) Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+   - Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
 ## 4. Agent Rules
 
 1. **If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
-    A) Consider the following tools:
+   - Consider the following tools:
 
-        | Need | Use |
-        | --- | --- |
-        | Generic Codex rules | [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) |
-        | Full n8n operating contract | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) |
+      | Need | Use |
+      | --- | --- |
+      | Generic Codex rules | [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) |
+      | Full n8n operating contract | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) |
 
 ## 5. Codex MCP Config
 
 1. Use the [Codex MCP config](./templates/codex-mcp-config.md).
-    A) Add the configuration to your Codex setup.
+   - Add the configuration to your Codex setup.
 
 ## 6. Smoke Testing
 

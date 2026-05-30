@@ -35,8 +35,8 @@ You should already have:
    npm -v
    npx --version
    ```
-   A) If `opencode` is not found, close and reopen PowerShell first.
-   B) If it is still not found, check that the OpenCode install location is on your Windows `PATH`.
+   - If `opencode` is not found, close and reopen PowerShell first.
+   - If it is still not found, check that the OpenCode install location is on your Windows `PATH`.
 
 ## 3. Install Toolkit Skills For OpenCode
 
@@ -51,8 +51,9 @@ OpenCode stays on a short manual whole-skill-folder install note only.
    | User OpenCode config | `C:\Users\<your-user>\.config\opencode\skills\<skill-name>\SKILL.md` |
    | Compatible fallback | `.agents/skills/` or `.claude/skills/`, if that is how the target OpenCode runtime is configured |
 
-   A) Do not copy only `SKILL.md`.
-   B) Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+   - Do not copy only `SKILL.md`.
+   - Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+
 
 ## 4. Agent Rules
 
@@ -74,16 +75,16 @@ If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually 
 ## 6. Restart OpenCode
 
 1. After changing any of these:
-   A) `$HOME\.config\opencode\opencode.json`
-   B) `$HOME\.config\opencode\AGENTS.md`
-   C) `N8N_MCP_URL`
-   D) `N8N_MCP_TOKEN`
+   - `$HOME\.config\opencode\opencode.json`
+   - `$HOME\.config\opencode\AGENTS.md`
+   - `N8N_MCP_URL`
+   - `N8N_MCP_TOKEN`
 2. Restart OpenCode from a fresh PowerShell window:
    ```powershell
    opencode
    ```
-   A) You can start OpenCode from any folder.
-   B) Open a specific repo only when you actually want OpenCode to inspect or edit that repo.
+   - You can start OpenCode from any folder.
+   - Open a specific repo only when you actually want OpenCode to inspect or edit that repo.
 
 ## References
 
