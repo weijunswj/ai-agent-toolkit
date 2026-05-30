@@ -42,13 +42,13 @@ Use this to connect Claude Code globally to the same n8n setup.
 
 1. Set the live MCP URL at user scope.
 
-   1. For normal local n8n on the default port:
+   - For normal local n8n on the default port:
 
       ```powershell
       [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'http://localhost:5678/mcp-server/http', 'User')
       ```
 
-   2. If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
+   - If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
 
       ```powershell
       [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'https://your-n8n-domain.com/mcp-server/http', 'User')

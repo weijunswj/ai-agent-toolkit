@@ -25,13 +25,13 @@ Use this to connect OpenCode globally to the same n8n setup.
 
 1. Set the live MCP URL at user scope.
 
-   1. For normal local n8n on the default port:
+   - For normal local n8n on the default port:
 
       ```powershell
       [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'http://localhost:5678/mcp-server/http', 'User')
       ```
 
-   2. If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
+   - If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
 
       ```powershell
       [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'https://your-n8n-domain.com/mcp-server/http', 'User')
@@ -177,8 +177,8 @@ Use this to connect OpenCode globally to the same n8n setup.
 
 1. If `n8n_docs` fails:
 
-  * Confirm Node.js and `npx` are installed.
-  * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
+   * Confirm Node.js and `npx` are installed.
+   * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
 
 2. If `n8n_live` fails:
 

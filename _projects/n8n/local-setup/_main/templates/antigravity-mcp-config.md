@@ -24,13 +24,13 @@ Use this to connect Google Antigravity globally to the same n8n setup.
 
 1. Set the live MCP URL at user scope.
 
-   1. For normal local n8n on the default port:
+   - For normal local n8n on the default port:
 
       ```powershell
       [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'http://localhost:5678/mcp-server/http', 'User')
       ```
 
-   2. If your n8n is exposed through ngrok or another tunnel, use the actual MCP URL shown by n8n instead:
+   - If your n8n is exposed through ngrok or another tunnel, use the actual MCP URL shown by n8n instead:
 
       ```powershell
       [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'https://your-ngrok-or-domain.example/mcp-server/http', 'User')
@@ -166,3 +166,4 @@ Use this to connect Google Antigravity globally to the same n8n setup.
     * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
 
     * Do not replace the environment variables with real token values in this repo.
+

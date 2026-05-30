@@ -30,19 +30,19 @@ Use this for the normal Codex + n8n MCP setup.
 
 1. Decide which MCP URL you will use.
 
-   1. For normal local n8n on the default port:
+   - For normal local n8n on the default port:
 
       ```text
       http://localhost:5678/mcp-server/http
       ```
 
-   2. If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
+   - If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
 
       ```text
       https://your-n8n-domain.com/mcp-server/http
       ```
 
-   **Codex treats `url` as a literal string, so do not use `${N8N_MCP_URL}` in the Codex config. You will paste the URL directly into the config in the next section.**
+      **Codex treats `url` as a literal string, so do not use `${N8N_MCP_URL}` in the Codex config. You will paste the URL directly into the config in the next section.**
 
 2. Save the live MCP token at user scope in PowerShell:
 
@@ -99,14 +99,14 @@ Use this for the normal Codex + n8n MCP setup.
 
 2. You should see:
 
-  * `n8n_docs`
-  * `n8n_live`
+   * `n8n_docs`
+   * `n8n_live`
 
 3. If `n8n_live` fails:
 
-  * Confirm the `url` in `config.toml` matches your actual n8n MCP endpoint.
-  * Confirm `N8N_MCP_TOKEN` is set at user scope.
-  * Restart Codex after changing the token or config.
+   * Confirm the `url` in `config.toml` matches your actual n8n MCP endpoint.
+   * Confirm `N8N_MCP_TOKEN` is set at user scope.
+   * Restart Codex after changing the token or config.
 
 ---
 
@@ -130,10 +130,10 @@ Use this for the normal Codex + n8n MCP setup.
 
 1. This is the safest first workflow:
 
-  * Manual Trigger.
-  * Set.
-  * No credentials.
-  * Inactive by default.
+   * Manual Trigger.
+   * Set.
+   * No credentials.
+   * Inactive by default.
 
 2. Use this prompt in Codex:
 
@@ -163,15 +163,15 @@ Use this for the normal Codex + n8n MCP setup.
 
 1. If `n8n_docs` fails:
 
-  * Confirm Node.js and `npx` are installed.
-  * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
-  * If `npx` is blocked, use the full path fallback from Section 2.
+   * Confirm Node.js and `npx` are installed.
+   * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
+   * If `npx` is blocked, use the full path fallback from Section 2.
 
 2. If `n8n_live` fails:
 
-  * Confirm the `url` in `config.toml` is the MCP endpoint, not just the n8n UI URL.
-  * Confirm `N8N_MCP_TOKEN` is set at user scope.
-  * Restart Codex after changing environment variables or config.
-  * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
+   * Confirm the `url` in `config.toml` is the MCP endpoint, not just the n8n UI URL.
+   * Confirm `N8N_MCP_TOKEN` is set at user scope.
+   * Restart Codex after changing environment variables or config.
+   * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
 
-  * Do not replace the environment variables with real token values in this repo.
+   * Do not replace the environment variables with real token values in this repo.
