@@ -1,7 +1,7 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/Page 2.md
+Source: _projects/n8n/local-setup/_main/Page 2 - Upgrading.md
 Update the project source and run sync.
 -->
 # Upgrading

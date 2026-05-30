@@ -13,15 +13,15 @@ const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surf
 
 const restoredReferences = [
   {
-    source: '_main/Page 1.md',
+    source: '_main/Page 1 - Local Setup.md',
     output: 'skills/n8n-local-setup/references/n8n/local-setup.md'
   },
   {
-    source: '_main/Page 2.md',
+    source: '_main/Page 2 - Upgrading.md',
     output: 'skills/n8n-local-setup/references/n8n/upgrading.md'
   },
   {
-    source: '_main/Page 3.md',
+    source: '_main/Page 3 - VPS Hosting.md',
     output: 'skills/n8n-local-setup/references/n8n/vps-hosting.md'
   },
   {
@@ -178,9 +178,9 @@ test('n8n local setup source README stays an index without noisy setup sections'
   const readme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
 
   assert.match(readme, /^## Start Here$/m);
-  assert.match(readme, /\[1\. Local Setup\]\(\.\/Page%201\.md\)/);
-  assert.match(readme, /These pages are secondary references\. They are not equal start paths for local setup\./);
-  assert.match(readme, /\[3\. VPS Hosting\]\(\.\/Page%203\.md\)/);
+  assert.match(readme, /\[1\. Local Setup\]\(\.\/Page%201%20-%20Local%20Setup\.md\)/);
+  assert.match(readme, /\[2\. Upgrading\]\(\.\/Page%202%20-%20Upgrading\.md\)/);
+  assert.match(readme, /\[3\. VPS Hosting\]\(\.\/Page%203%20-%20VPS%20Hosting\.md\)/);
 
   for (const removedHeading of [
     '## Fast Path',
@@ -197,7 +197,7 @@ test('n8n local setup source README stays an index without noisy setup sections'
 });
 
 test('n8n local setup main guide follows beginner-first install structure', () => {
-  const text = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
+  const text = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   assert.match(text, /## 1\./, 'Must contain fast path reference section');
   assert.match(text, /## 2\./, 'Must contain before you start section');
   assert.match(text, /## 15\./, 'Must contain troubleshooting section');
@@ -206,7 +206,7 @@ test('n8n local setup main guide follows beginner-first install structure', () =
 });
 
 test('n8n local setup env, folder, launch, and tunnel instructions are explicit', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
 
   assert.match(localSetup, /Copy `\.env\.example` To `\.env`/);
   assert.match(localSetup, /Do not edit `\.env\.example`/);
@@ -243,7 +243,7 @@ test('n8n local setup env, folder, launch, and tunnel instructions are explicit'
 });
 
 test('n8n local setup keeps run-location guidance with cd before folder-specific PowerShell', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
 
   const folderSpecificCommands = [
     'Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force',
@@ -272,7 +272,7 @@ test('n8n local setup extras include the AI Coding Agent Rules automatic bootstr
     '**If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**';
 
   for (const relPath of [
-    '_projects/n8n/local-setup/_main/Page 1.md',
+    '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md',
     '_projects/n8n/local-setup/_main/README.md',
     '_projects/n8n/local-setup/_main/mcp setup - codex',
     '_projects/n8n/local-setup/_main/mcp setup - claude code',
@@ -323,7 +323,7 @@ test('generated n8n platform references use portable primary guide links', () =>
 });
 
 test('n8n local setup uses Desktop as the example while allowing any folder', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   const readme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
   const combined = `${localSetup}\n${readme}`;
 
@@ -334,7 +334,7 @@ test('n8n local setup uses Desktop as the example while allowing any folder', ()
 });
 
 test('n8n local setup commands include beginner run-location guidance', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
 
   for (const expected of [
     'Run this in PowerShell from any folder to create the folder on your Desktop:',
@@ -351,7 +351,7 @@ test('n8n local setup commands include beginner run-location guidance', () => {
 });
 
 test('n8n local setup docs link important local stack and platform files', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
 
   for (const expected of [
     '[docker-compose.yml](./templates/local-stack/docker-compose.yml)',
@@ -369,7 +369,7 @@ test('n8n local setup docs link important local stack and platform files', () =>
 });
 
 test('n8n local setup one-stop guide preserves equivalent working instructions', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
 
   assert.ok(localSetup.length > 12000, 'primary local setup guide should retain full working detail');
 
@@ -556,7 +556,7 @@ test('n8n local setup suspicious published surface findings are resolved', () =>
 
 test('changing a preserved n8n local setup source guide makes sync check fail stale', () => {
   const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'Page 2.md'), '\nStale output regression fixture.\n', 'utf8');
+  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'Page 2 - Upgrading.md'), '\nStale output regression fixture.\n', 'utf8');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/references\/n8n\/upgrading\.md/);

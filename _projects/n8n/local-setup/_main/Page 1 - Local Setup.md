@@ -4,7 +4,7 @@ This is the beginner-first guide for running local n8n on Windows.
 
 Use it when you want one local setup path with Docker Compose, Postgres, ngrok, the `n8n-local.cmd` menu, MCP setup, and AI agent platform notes.
 
-For always-on public hosting, use [3. VPS Hosting](./Page%203.md). VPS and Hostinger hosting are separate from this local Docker Desktop setup.
+For always-on public hosting, use [3. VPS Hosting](./Page%203%20-%20VPS%20Hosting.md). VPS and Hostinger hosting are separate from this local Docker Desktop setup.
 
 ## 1. Fast Path ( Full Guide Below )
 
@@ -567,11 +567,11 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 - Do not paste real API tokens, webhook secrets, passwords, encryption keys, or MCP tokens into repo files.
 - Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 - Do not remove `n8n_data` or `postgres_data` Docker volumes unless you intentionally want to delete local runtime data.
-- Keep VPS/Hostinger setup separate in [3. VPS Hosting](./Page%203.md).
+- Keep VPS/Hostinger setup separate in [3. VPS Hosting](./Page%203%20-%20VPS%20Hosting.md).
 
 ## 18. Appendices And References
 
 | Reference | Use when |
 | --- | --- |
-| [2. Upgrading](./Page%202.md) | You need focused update notes for local, VPS, or npm installs. |
-| [3. VPS Hosting](./Page%203.md) | You need always-on public hosting on Hostinger. |
+| [2. Upgrading](./Page%202%20-%20Upgrading.md) | You need focused update notes for local, VPS, or npm installs. |
+| [3. VPS Hosting](./Page%203%20-%20VPS%20Hosting.md) | You need always-on public hosting on Hostinger. |

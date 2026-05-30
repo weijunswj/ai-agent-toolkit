@@ -32,7 +32,7 @@
     },
     {
       "kind": "copy",
-      "source": "_main/Page 1.md",
+      "source": "_main/Page 1 - Local Setup.md",
       "output": "skills/n8n-local-setup/references/n8n/local-setup.md",
       "notes": "Full local setup guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
@@ -106,7 +106,7 @@
           "to": "../../../ai-coding-agent-rules/"
         },
         {
-          "from": "./Page%202.md",
+          "from": "./Page%202%20-%20Upgrading.md",
           "to": "upgrading.md"
         },
         {
@@ -126,20 +126,20 @@
           "to": "../ai-agent-platforms/antigravity.md"
         },
         {
-          "from": "./Page%203.md",
+          "from": "./Page%203%20-%20VPS%20Hosting.md",
           "to": "./vps-hosting.md"
         }
       ]
     },
     {
       "kind": "copy",
-      "source": "_main/Page 2.md",
+      "source": "_main/Page 2 - Upgrading.md",
       "output": "skills/n8n-local-setup/references/n8n/upgrading.md",
       "notes": "Full upgrade guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./Page%201.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "local-setup.md"
         },
         {
@@ -150,17 +150,17 @@
     },
     {
       "kind": "copy",
-      "source": "_main/Page 3.md",
+      "source": "_main/Page 3 - VPS Hosting.md",
       "output": "skills/n8n-local-setup/references/n8n/vps-hosting.md",
       "notes": "Full VPS hosting guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./Page%202.md",
+          "from": "./Page%202%20-%20Upgrading.md",
           "to": "upgrading.md"
         },
         {
-          "from": "./Page%201.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "local-setup.md"
         }
       ]
@@ -173,7 +173,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./Page%201.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
@@ -190,7 +190,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./Page%201.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
@@ -219,7 +219,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./Page%201.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
@@ -248,7 +248,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./Page%201.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
