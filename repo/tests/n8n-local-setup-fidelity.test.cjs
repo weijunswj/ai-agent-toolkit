@@ -235,11 +235,11 @@ test('n8n local setup env, folder, launch, and tunnel instructions are explicit'
   assert.match(localSetup, /- Real ngrok authtokens\./);
   assert.match(localSetup, /- Real passwords\./);
   assert.match(localSetup, /- Real n8n encryption keys\./);
-  assert.match(localSetup, /Double-click `n8n-local\.cmd`/);
-  assert.match(localSetup, /Do not launch n8n directly from Docker Desktop\. Launch it from `n8n-local\.cmd` instead\./);
+  assert.match(localSetup, /Double-click `_n8n-local\.cmd`/);
+  assert.match(localSetup, /Do not launch n8n directly from Docker Desktop\. Launch it from `_n8n-local\.cmd` instead\./);
   assert.match(localSetup, /If you are only opening n8n on your own computer, you do not need ngrok\./);
   assert.match(localSetup, /Use ngrok when another online service must call your local n8n webhook or OAuth callback\./);
-  assert.match(localSetup, /Close the existing `n8n-local\.cmd` window\.\n2\. Save `\.env`\.\n3\. Double-click `n8n-local\.cmd` again\./);
+  assert.match(localSetup, /Close the existing `_n8n-local\.cmd` window\.\n2\. Save `\.env`\.\n3\. Double-click `_n8n-local\.cmd` again\./);
 });
 
 test('n8n local setup keeps run-location guidance with cd before folder-specific PowerShell', () => {
@@ -480,7 +480,7 @@ test('n8n local setup launcher templates provide guided stack actions', () => {
   assert.doesNotMatch(menu, /docker compose images -q/);
   assert.match(menu, /Start-Process "http:\/\/localhost:5678"/);
   assert.match(menu, /Start-Process "http:\/\/127\.0\.0\.1:4040"/);
-  assert.match(menu, /Do not launch n8n directly from Docker Desktop\. Launch it from n8n-local\.cmd instead\./);
+  assert.match(menu, /Do not launch n8n directly from Docker Desktop\. Launch it from _n8n-local\.cmd instead\./);
   assert.match(menu, /Docker Desktop direct launch bypasses guided checks, selected updates, backups, and clear status output\./);
   assert.match(menu, /pg_dump/);
   assert.match(menu, /POSTGRES_USER/);
