@@ -36,10 +36,11 @@
       "notes": "Toolkit-adapted after migration to make Docker Compose the local stack control plane for n8n, Postgres, and ngrok, with placeholder-only environment configuration and queue mode documented as advanced future scaling only."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "4. vps hosting.md",
       "project_path": "_projects/n8n/local-setup/_main/4. vps hosting.md",
-      "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2"
+      "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2",
+      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
     },
     {
       "mode": "adapted",
@@ -91,28 +92,32 @@
       "notes": "Toolkit-adapted after migration to bind the local ngrok launcher container port to loopback by default while ngrok provides the public tunnel endpoint."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/antigravity-mcp-config.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/antigravity-mcp-config.md",
-      "source_blob_sha": "e366f703f5f8de45f3715628cec0a4c195fee274"
+      "source_blob_sha": "e366f703f5f8de45f3715628cec0a4c195fee274",
+      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/claude-mcp-config.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/claude-mcp-config.md",
-      "source_blob_sha": "1d050c7f8430aad5a2b09c476ec955cbdb5b765d"
+      "source_blob_sha": "1d050c7f8430aad5a2b09c476ec955cbdb5b765d",
+      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/codex-mcp-config.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/codex-mcp-config.md",
-      "source_blob_sha": "66015cf2c0c9cdf01ad5fe5daa2b5656a2ba57c6"
+      "source_blob_sha": "66015cf2c0c9cdf01ad5fe5daa2b5656a2ba57c6",
+      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/opencode-mcp-config.md",
       "project_path": "_projects/n8n/local-setup/_main/templates/opencode-mcp-config.md",
-      "source_blob_sha": "31502fdc926cc1c4c9343945afd4dd477d1f7278"
+      "source_blob_sha": "31502fdc926cc1c4c9343945afd4dd477d1f7278",
+      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
     },
     {
       "mode": "excluded",

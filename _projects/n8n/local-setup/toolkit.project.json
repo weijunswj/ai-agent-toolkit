@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "version_policy": "semver",
-  "version_notes": "Refactors the local setup guide around a Docker Compose stack with n8n, Postgres, ngrok as the only supported local tunnel path, and a guided n8n-local.cmd launcher.",
+  "version_notes": "Refactors the local setup docs for a beginner-first flow without noisy setup sections.",
   "outputs": [
     {
       "kind": "curated",
@@ -66,6 +66,10 @@
           "to": "../../templates/local-stack/scripts/"
         },
         {
+          "from": "](./templates/local-stack/)",
+          "to": "](../../templates/local-stack/)"
+        },
+        {
           "from": "./templates/codex-mcp-config.md",
           "to": "../../templates/mcp-configs/codex-mcp-config.md"
         },
@@ -84,6 +88,10 @@
         {
           "from": "Run this from the toolkit repo root:",
           "to": "Run this from the copied `n8n-local-setup` skill folder:"
+        },
+        {
+          "from": "Or run this from the toolkit repo root instead:",
+          "to": "Or run this from the copied `n8n-local-setup` skill folder instead:"
         },
         {
           "from": "_projects\\n8n\\local-setup\\_main\\templates\\local-stack\\",
@@ -195,6 +203,10 @@
         {
           "from": "./templates/local-stack/scripts/n8n-local-menu.ps1",
           "to": "../../templates/local-stack/scripts/n8n-local-menu.ps1"
+        },
+        {
+          "from": "](./templates/local-stack/)",
+          "to": "](../../templates/local-stack/)"
         }
       ]
     },

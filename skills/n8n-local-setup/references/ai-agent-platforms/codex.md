@@ -12,11 +12,13 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Codex Platform Router
 
-Codex can consume this toolkit through skills, `AGENTS.md`, and MCP config templates. This note routes to the local full-fidelity files that carry the actual runtime setup detail.
+Codex can consume this toolkit through skills, `AGENTS.md`, and MCP config templates. This is a router; use the linked full-fidelity files for runtime setup detail.
 
 ## Boundary
 
-This is not the full runtime setup guide; use the full-fidelity references and templates in this skill folder.
+This is a short platform overview and routing note. It is not the full runtime setup guide.
+
+For full setup detail, use the local full-fidelity references and templates in this copied skill folder.
 
 ## Skill Install
 
@@ -30,16 +32,16 @@ Copy the whole `skills/<skill-name>/` folder.
 | User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
 | Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
 
-Do not copy only `SKILL.md`. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
 Codex plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex should use direct whole-skill-folder installs.
 
 ## Local Routes
 
-- Use [local setup](../n8n/local-setup.md) for the full Docker Compose local n8n and Codex setup guide.
-- Use [local stack templates](../../templates/local-stack/) for the `n8n + postgres + ngrok` Fast Path.
+- Use [local setup](../n8n/local-setup.md) for the full local n8n and Codex setup guide.
+- Use [local stack templates](../../templates/local-stack/) for `n8n + postgres + ngrok`.
 - Use [skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for generic Codex agent rules. Copy or merge it into the target repo root as `AGENTS.md` only when the user explicitly wants Codex rules installed.
-- Use `skills/n8n-agent-rules` or [n8n-agent-rules.md](../n8n-agent-rules.md) for the full n8n operating rules before workflow, MCP, helper-script, or live n8n work.
+- Use `skills/n8n-agent-rules` or [n8n-agent-rules.md](../n8n-agent-rules.md) before workflow, MCP, helper-script, or live n8n work.
 - Optionally merge `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` into `AGENTS.md`; it is a pointer, not the full ruleset.
 - Use [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md) for the full Codex MCP config template.
 - Restart Codex after changing MCP config, agent rules, or user environment variables.

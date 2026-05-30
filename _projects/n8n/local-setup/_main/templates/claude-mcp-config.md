@@ -6,31 +6,31 @@ Use this to connect Claude Code globally to the same n8n setup.
 * This uses Claude Code user scope, so the MCP servers are available across projects.
 * Do not create `.mcp.json` unless you intentionally want project-specific Claude Code MCP config.
 
-### Claude Code stores user-scoped MCP config here:
+1. Claude Code stores user-scoped MCP config here:
 
 ```text
 C:\Users\<your-user>\.claude.json
 ```
 
-### Do not manually create or edit this file for the normal setup. The `claude mcp add-json ... --scope user` commands below will update it for you.
+2. Do not manually create or edit this file for the normal setup. The `claude mcp add-json ... --scope user` commands below will update it for you.
 
 ---
 
 ## 1. Verify Claude Code CLI
 
-### Check that the `claude` command is available:
+1. Check that the `claude` command is available:
 
 ```powershell
 claude --version
 ```
 
-### If PowerShell says `claude` is not recognised, install Claude Code first:
+2. If PowerShell says `claude` is not recognised, install Claude Code first:
 
 ```powershell
 irm https://claude.ai/install.ps1 | iex
 ```
 
-### Close and reopen PowerShell, then verify again:
+3. Close and reopen PowerShell, then verify again:
 
 ```powershell
 claude --version
@@ -40,29 +40,29 @@ claude --version
 
 ## 2. Save The Live MCP URL And Token
 
-### Set the live MCP URL at user scope.
+1. Set the live MCP URL at user scope.
 
-#### For normal local n8n on the default port:
+   A) For normal local n8n on the default port:
 
-```powershell
-[Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'http://localhost:5678/mcp-server/http', 'User')
-```
+   ```powershell
+   [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'http://localhost:5678/mcp-server/http', 'User')
+   ```
 
-#### If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
+   B) If your n8n is not on `localhost:5678`, use your actual MCP URL instead:
 
-```powershell
-[Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'https://your-n8n-domain.com/mcp-server/http', 'User')
-```
+   ```powershell
+   [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'https://your-n8n-domain.com/mcp-server/http', 'User')
+   ```
 
-### Then save the live MCP token:
+2. Then save the live MCP token:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('N8N_MCP_TOKEN', '<paste-token-here>', 'User')
 ```
 
-### Close and reopen PowerShell after changing either value.
+3. Close and reopen PowerShell after changing either value.
 
-### Verify both values are available:
+4. Verify both values are available:
 
 ```powershell
 [Environment]::GetEnvironmentVariable('N8N_MCP_URL', 'User')
@@ -73,28 +73,28 @@ claude --version
 
 ## 3. Add The Claude Code MCP Config
 
-### Add `n8n_docs` in PowerShell:
+1. Add `n8n_docs` in PowerShell:
 
 ```powershell
 claude mcp add-json n8n_docs '{"type":"stdio","command":"cmd","args":["/c","npx","-y","n8n-mcp@latest"],"env":{"MCP_MODE":"stdio","LOG_LEVEL":"error","DISABLE_CONSOLE_OUTPUT":"true"}}' --scope user
 ```
 
-### Add `n8n_live` with environment-backed URL and auth header:
+2. Add `n8n_live` with environment-backed URL and auth header:
 
 ```powershell
 claude mcp add-json n8n_live '{"type":"http","url":"${N8N_MCP_URL}","headers":{"Authorization":"Bearer ${N8N_MCP_TOKEN}"}}' --scope user
 ```
 
-### Do not use a command that expands the URL or token before saving the MCP server. The saved config must stay environment-backed:
+3. Do not use a command that expands the URL or token before saving the MCP server. The saved config must stay environment-backed:
 
 ```text
 url = ${N8N_MCP_URL}
 Authorization = Bearer ${N8N_MCP_TOKEN}
 ```
 
-* If the n8n MCP URL or token changes later, update `N8N_MCP_URL` or `N8N_MCP_TOKEN` and restart Claude Code Desktop.
+   * If the n8n MCP URL or token changes later, update `N8N_MCP_URL` or `N8N_MCP_TOKEN` and restart Claude Code Desktop.
 
-### If you previously added `n8n_live` with a fixed URL or fixed token value, remove and re-add it:
+4. If you previously added `n8n_live` with a fixed URL or fixed token value, remove and re-add it:
 
 ```powershell
 claude mcp remove n8n_live
@@ -105,7 +105,7 @@ claude mcp add-json n8n_live '{"type":"http","url":"${N8N_MCP_URL}","headers":{"
 
 ## 4. Verify Both MCP Servers
 
-### Run this in PowerShell:
+1. Run this in PowerShell:
 
 ```powershell
 claude mcp list
@@ -113,29 +113,29 @@ claude mcp get n8n_docs
 claude mcp get n8n_live
 ```
 
-### You should see:
+2. You should see:
 
   * `n8n_docs`
   * `n8n_live`
 
-### If `n8n_live` fails:
+3. If `n8n_live` fails:
 
-* Confirm `N8N_MCP_URL` is the MCP endpoint, not just the n8n UI URL.
-* Confirm `N8N_MCP_TOKEN` is set at user scope.
-* Restart Claude Code Desktop after changing environment variables.
-* Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
+  * Confirm `N8N_MCP_URL` is the MCP endpoint, not just the n8n UI URL.
+  * Confirm `N8N_MCP_TOKEN` is set at user scope.
+  * Restart Claude Code Desktop after changing environment variables.
+  * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
 
 ---
 
 ## 5. Test The MCP Setup
 
-### Perform docs-only smoke test:
+1. Perform docs-only smoke test:
 
 ```text
 Use n8n_docs. Find the smallest no-credentials workflow pattern that uses Manual Trigger and Set. Do not create anything yet.
 ```
 
-### Perform live read-only smoke test:
+2. Perform live read-only smoke test:
 
 ```text
 Use n8n_live. List workflows. Do not modify anything.
@@ -145,20 +145,20 @@ Use n8n_live. List workflows. Do not modify anything.
 
 ## 6. Create A Tiny Live Smoke-Test Workflow
 
-### This is the safest first workflow:
+1. This is the safest first workflow:
 
   * Manual Trigger.
   * Set.
   * No credentials.
   * Inactive by default.
 
-### Use this prompt in Claude Code:
+2. Use this prompt in Claude Code:
 
 ```text
 Use n8n_docs first. Design and validate a tiny no-credentials workflow with Manual Trigger and Set. Then use n8n_live to create it in my n8n instance as INACTIVE. Name it "Claude Code Smoke Test".
 ```
 
-### After Claude creates it, ask Claude to read it back and confirm:
+3. After Claude creates it, ask Claude to read it back and confirm:
 
 ```text
 Use n8n_live. Read back "Claude Code Smoke Test" and confirm it is inactive.
@@ -180,17 +180,17 @@ Use n8n_live. Read back "Claude Code Smoke Test" and confirm it is inactive.
 
 ## 8. Troubleshooting
 
-### If `n8n_docs` fails:
+1. If `n8n_docs` fails:
 
-* Confirm Node.js and `npx` are installed.
-* Try running `npx -y n8n-mcp@latest` from a fresh terminal.
+  * Confirm Node.js and `npx` are installed.
+  * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
 
-### If `n8n_live` fails:
+2. If `n8n_live` fails:
 
-* Confirm `N8N_MCP_URL` is set to the MCP endpoint, not just the n8n UI URL.
-* Confirm `N8N_MCP_TOKEN` is set at user scope.
-* Restart Claude Code Desktop after changing environment variables.
-* Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
-* If you previously added `n8n_live` with a hardcoded URL or token, remove and re-add it with the environment-backed version.
+  * Confirm `N8N_MCP_URL` is set to the MCP endpoint, not just the n8n UI URL.
+  * Confirm `N8N_MCP_TOKEN` is set at user scope.
+  * Restart Claude Code Desktop after changing environment variables.
+  * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
+  * If you previously added `n8n_live` with a hardcoded URL or token, remove and re-add it with the environment-backed version.
 
-* Do not replace the environment variables with real token values in this repo.
+  * Do not replace the environment variables with real token values in this repo.
