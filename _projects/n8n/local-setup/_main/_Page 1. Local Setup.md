@@ -225,9 +225,9 @@ Create the owner account before exposing n8n through ngrok.
 1. Make sure the owner account already exists.
 2. Launch `_n8n-local.cmd`:
 
-| File | What to do | Alternative PowerShell command |
-| --- | --- | --- |
-| `_n8n-local.cmd` | Choose the ngrok / tunnel start option. | cd "$env:USERPROFILE\OneDrive\Desktop\n8n-local"<br>docker compose up -d ngrok<br>docker compose ps |
+   | File | What to do | Alternative PowerShell command |
+   | --- | --- | --- |
+   | `_n8n-local.cmd` | Choose the ngrok / tunnel start option. | cd "$env:USERPROFILE\OneDrive\Desktop\n8n-local"<br>docker compose up -d ngrok<br>docker compose ps |
 
 - Use the `WEBHOOK_URL` value from `.env` for external webhook and OAuth callback configuration.
 
@@ -245,9 +245,9 @@ Create the owner account before exposing n8n through ngrok.
 2. Update `.env`.
 3. Re-launch `_n8n-local.cmd`:
 
-| File | What to do | Alternative PowerShell command |
-| --- | --- | --- |
-| `_n8n-local.cmd` | Choose the ngrok / tunnel start option. | cd "$env:USERPROFILE\OneDrive\Desktop\n8n-local"<br>docker compose up -d --force-recreate n8n ngrok |
+   | File | What to do | Alternative PowerShell command |
+   | --- | --- | --- |
+   | `_n8n-local.cmd` | Choose the ngrok / tunnel start option. | cd "$env:USERPROFILE\OneDrive\Desktop\n8n-local"<br>docker compose up -d --force-recreate n8n ngrok |
 
 ### 9.5. Useful URLs
 
@@ -325,9 +325,9 @@ Inside n8n:
 5. Copy the access token.
    1. For the default local stack, the local MCP URL is:
 
-   ```text
-   http://localhost:5678/mcp-server/http
-   ```
+      ```text
+      http://localhost:5678/mcp-server/http
+      ```
 
    2. If you use MCP through the ngrok domain, use the MCP URL shown by n8n for that setup.
    3. Reference: [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/).
