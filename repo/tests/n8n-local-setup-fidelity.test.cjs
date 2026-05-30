@@ -180,7 +180,7 @@ test('n8n local setup source README stays an index without noisy setup sections'
   assert.match(readme, /^## Start Here$/m);
   assert.match(readme, /\[1\. Local Setup\]\(\.\/1\.%20local%20setup\.md\)/);
   assert.match(readme, /These pages are secondary references\. They are not equal start paths for local setup\./);
-  assert.match(readme, /\[3\. Hostinger Domain And Tunnel Notes\]\(\.\/3\.%20tunneling%20guide\.md\)/);
+  assert.match(readme, /\[3\. VPS Hosting\]\(\.\/3\.%20vps%20hosting\.md\)/);
 
   for (const removedHeading of [
     '## Fast Path',
@@ -306,10 +306,6 @@ test('generated n8n local setup references use portable primary guide links', ()
   ]) {
     const text = readText(repoRoot, relPath);
     assert.doesNotMatch(text, /\.\/1\.%20local%20setup\.md/, relPath);
-    // upgrading.md has `[1. Local Setup](./local-setup.md)`. Does it?
-    // In our rewrite of upgrading.md we removed the link to "1. Local Setup" maybe?
-    // Let's check if upgrading.md still has that link.
-    // We rewrote upgrading.md manually and it does NOT have `[1. Local Setup](./local-setup.md)`!
   }
 });
 
@@ -386,9 +382,9 @@ test('n8n local setup one-stop guide preserves equivalent working instructions',
     'Check for updates',
     'Update selected services',
     'Backup Postgres database',
-    'Claude Code Integration appendix',
-    'OpenCode Integration appendix',
-    'Antigravity Integration appendix',
+    'Claude Code MCP Setup',
+    'OpenCode MCP Setup',
+    'Antigravity MCP Setup',
     'Do not add Redis or workers to the default local setup'
   ]) {
     assert.match(localSetup, new RegExp(escapeRegExp(expected), 'i'), expected);
@@ -506,8 +502,10 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
   const pack = JSON.parse(readText(repoRoot, 'skills/n8n-local-setup/packs/codex-n8n-local/pack.json'));
   for (const expectedPath of [
     'skills/n8n-local-setup/references/n8n/local-setup.md',
-            'skills/n8n-local-setup/references/n8n/vps-hosting.md',
-        'skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md',
+    'skills/n8n-local-setup/references/n8n/upgrading.md',
+    'skills/n8n-local-setup/references/n8n/vps-hosting.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/codex.md',
+    'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md',
     'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
     'skills/n8n-local-setup/templates/local-stack/.env.example',
     'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
@@ -518,8 +516,7 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
     'skills/n8n-agent-rules/n8n-agent-rules.md',
     'skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md',
     'skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs',
-    'skills/n8n-local-setup/references/n8n-agent-rules.md',
-    'skills/n8n-local-setup/references/n8n/vps-hosting.md'
+    'skills/n8n-local-setup/references/n8n-agent-rules.md'
   ]) {
     assert.ok(pack.installs.includes(expectedPath), expectedPath);
   }
@@ -528,8 +525,9 @@ test('codex n8n local pack installs inert generic template and n8n-agent-rules a
 test('claude n8n local pack installs inert generic template and n8n-agent-rules assets', () => {
   const pack = JSON.parse(readText(repoRoot, 'skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json'));
   for (const expectedPath of [
-    'skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md',
-    'skills/n8n-local-setup/references/ai-agent-platforms/templates/claude-mcp-config.md',
+    'skills/n8n-local-setup/references/n8n/local-setup.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md',
+    'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md',
     'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
     'skills/n8n-local-setup/templates/local-stack/.env.example',
     'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
@@ -580,13 +578,23 @@ test('n8n local setup docs structure deleted files no longer exist', () => {
 test('n8n local setup indexes do not link to deleted files', () => {
   const index = readText(repoRoot, 'skills/n8n-local-setup/references/n8n/README.md');
   const localSetup = readText(repoRoot, 'skills/n8n-local-setup/references/n8n/local-setup.md');
+  const sourceReadme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
 
-  const text = index + localSetup;
+  const text = index + localSetup + sourceReadme;
 
   assert.doesNotMatch(text, /tunnelling\.md/, 'no links to tunnelling.md');
   assert.doesNotMatch(text, /docker-compose-ngrok\.md/, 'no links to docker-compose-ngrok.md');
   assert.doesNotMatch(text, /3\.\%20tunneling\%20guide\.md/, 'no links to 3. tunneling guide.md');
   assert.doesNotMatch(text, /3a\.\%20docker\%20compose\%20\%2B\%20ngrok\.md/, 'no links to 3a. docker compose + ngrok.md');
+  assert.doesNotMatch(text, /4\.\%20vps\%20hosting\.md/, 'no links to 4. vps hosting.md');
+  assert.doesNotMatch(text, /5\.\%20extra\%20-\%20claude\%20code\%20integration\.md/, 'no links to 5. extra');
+  assert.doesNotMatch(text, /6\.\%20extra\%20-\%20opencode\%20integration\.md/, 'no links to 6. extra');
+  assert.doesNotMatch(text, /7\.\%20extra\%20-\%20antigravity\%20integration\.md/, 'no links to 7. extra');
+  assert.doesNotMatch(localSetup, /Integration appendix/i, 'no Integration appendix in local setup');
+
+  assert.match(index, /\[local-setup\.md\]\(local-setup\.md\)/);
+  assert.match(index, /\[upgrading\.md\]\(upgrading\.md\)/);
+  assert.match(index, /\[vps-hosting\.md\]\(vps-hosting\.md\)/);
 });
 
 test('n8n local setup H2 headings are numbered', () => {

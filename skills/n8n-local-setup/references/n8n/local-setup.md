@@ -10,7 +10,7 @@ This is the beginner-first guide for running local n8n on Windows.
 
 Use it when you want one local setup path with Docker Compose, Postgres, ngrok, the `n8n-local.cmd` menu, MCP setup, and AI agent platform notes.
 
-For always-on public hosting, use [4. VPS Hosting](vps-hosting.md). VPS and Hostinger hosting are separate from this local Docker Desktop setup.
+For always-on public hosting, use [3. VPS Hosting](./vps-hosting.md). VPS and Hostinger hosting are separate from this local Docker Desktop setup.
 
 ## 1.1 Fast Path ( Full Guide Below )
 
@@ -453,13 +453,6 @@ If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not 
 | Antigravity | [Antigravity MCP Setup](../ai-agent-platforms/antigravity.md) | You use Antigravity plugin-scoped skills and MCP config. |
 
 
-| Platform | Use |
-| --- | --- |
-| Codex | [Codex platform router](../ai-agent-platforms/codex.md) and [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md). |
-| Claude Code | [Claude Code Integration appendix](../ai-agent-platforms/claude-code.md) and [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md). |
-| OpenCode | [OpenCode Integration appendix](../ai-agent-platforms/opencode.md) and [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md). |
-| Antigravity | [Antigravity Integration appendix](../ai-agent-platforms/antigravity.md) and [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md). |
-
 ## 1.15 Troubleshooting
 
 ### Docker Is Not Running
@@ -580,7 +573,7 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 - Do not paste real API tokens, webhook secrets, passwords, encryption keys, or MCP tokens into repo files.
 - Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 - Do not remove `n8n_data` or `postgres_data` Docker volumes unless you intentionally want to delete local runtime data.
-- Keep VPS/Hostinger setup separate in [4. VPS Hosting](vps-hosting.md).
+- Keep VPS/Hostinger setup separate in [3. VPS Hosting](./vps-hosting.md).
 
 ## 1.18 Appendices And References
 

@@ -25,8 +25,6 @@
   ],
   "installs": [
     "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
-    "skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md",
-    "skills/n8n-local-setup/references/ai-agent-platforms/templates/claude-mcp-config.md",
     "skills/n8n-local-setup/references/n8n/local-setup.md",
     "skills/n8n-local-setup/references/n8n/upgrading.md",
     "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",

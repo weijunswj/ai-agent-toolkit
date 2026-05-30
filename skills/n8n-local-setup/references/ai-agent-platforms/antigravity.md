@@ -90,7 +90,7 @@ The primary local setup guide is [1. Local Setup](../n8n/local-setup.md). This p
 
 ## 5. Antigravity MCP Config
 
-1. Use the [Antigravity MCP config](./templates/antigravity-mcp-config.md).
+1. Use the [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md).
 2. Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
 
 ## 6. Restart Antigravity

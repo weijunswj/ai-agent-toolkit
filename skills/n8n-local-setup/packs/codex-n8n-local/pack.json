@@ -27,9 +27,6 @@
   "installs": [
     "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
     "skills/n8n-local-setup/references/n8n/local-setup.md",
-    "skills/n8n-local-setup/references/n8n/1. local setup.md",
-    "skills/n8n-local-setup/references/n8n/vps-hosting.md",
-    "skills/n8n-local-setup/references/n8n/templates/codex-mcp-config.md",
     "skills/n8n-local-setup/references/n8n/upgrading.md",
     "skills/n8n-local-setup/references/n8n/vps-hosting.md",
     "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",

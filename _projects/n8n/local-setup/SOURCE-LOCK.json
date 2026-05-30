@@ -110,6 +110,31 @@
       "source_path": "templates/partials/n8n-mcp-rules.md",
       "source_blob_sha": "ed961cd1b9a5ff25b7a077d98fa32f0e8b790e72",
       "notes": "The full n8n ruleset no longer belongs to n8n.local-setup. It moved to _projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md and publishes through skills/n8n-agent-rules/."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "3. tunneling guide.md",
+      "notes": "Deleted in toolkit adaptation to remove noisy options. Ngrok is now the only supported local tunnel path."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "3a. docker compose + ngrok.md",
+      "notes": "Deleted in toolkit adaptation to remove noisy options. Merged into core local setup."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "5. extra - claude code integration.md",
+      "notes": "Deleted in toolkit adaptation. Replaced by mcp setup pages."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "6. extra - opencode integration.md",
+      "notes": "Deleted in toolkit adaptation. Replaced by mcp setup pages."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "7. extra - antigravity integration.md",
+      "notes": "Deleted in toolkit adaptation. Replaced by mcp setup pages."
     }
   ]
 }

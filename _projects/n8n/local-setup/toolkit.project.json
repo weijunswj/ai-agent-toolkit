@@ -110,30 +110,6 @@
           "to": "upgrading.md"
         },
         {
-          "from": "./3.%20tunneling%20guide.md",
-          "to": "tunnelling.md"
-        },
-        {
-          "from": "./3a.%20docker%20compose%20%2B%20ngrok.md",
-          "to": "docker-compose-ngrok.md"
-        },
-        {
-          "from": "./4.%20vps%20hosting.md",
-          "to": "vps-hosting.md"
-        },
-        {
-          "from": "./5.%20extra%20-%20claude%20code%20integration.md",
-          "to": "../ai-agent-platforms/claude-code.md"
-        },
-        {
-          "from": "./6.%20extra%20-%20opencode%20integration.md",
-          "to": "../ai-agent-platforms/opencode.md"
-        },
-        {
-          "from": "./7.%20extra%20-%20antigravity%20integration.md",
-          "to": "../ai-agent-platforms/antigravity.md"
-        },
-        {
           "from": "./mcp%20setup%20-%20codex.md",
           "to": "../ai-agent-platforms/codex.md"
         },
@@ -190,7 +166,17 @@
       "source": "_main/mcp setup - codex.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
       "notes": "Full Codex integration guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact"
+      "fidelity": "exact",
+      "text_rewrites": [
+        {
+          "from": "./1.%20local%20setup.md",
+          "to": "../n8n/local-setup.md"
+        },
+        {
+          "from": "./templates/codex-mcp-config.md",
+          "to": "../../templates/mcp-configs/codex-mcp-config.md"
+        }
+      ]
     },
     {
       "kind": "copy",
@@ -214,6 +200,10 @@
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
           "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
+        },
+        {
+          "from": "./templates/claude-mcp-config.md",
+          "to": "../../templates/mcp-configs/claude-mcp-config.md"
         }
       ]
     },
@@ -239,6 +229,10 @@
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
           "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
+        },
+        {
+          "from": "./templates/opencode-mcp-config.md",
+          "to": "../../templates/mcp-configs/opencode-mcp-config.md"
         }
       ]
     },
@@ -264,6 +258,10 @@
         {
           "from": "../../../development/ai-coding-agent-rules/_main/GEMINI.template.md",
           "to": "../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md"
+        },
+        {
+          "from": "./templates/antigravity-mcp-config.md",
+          "to": "../../templates/mcp-configs/antigravity-mcp-config.md"
         }
       ]
     },

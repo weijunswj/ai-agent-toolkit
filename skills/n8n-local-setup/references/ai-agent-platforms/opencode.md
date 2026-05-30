@@ -74,7 +74,7 @@ If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually 
 
 ## 5. OpenCode MCP Config
 
-1. Use the [OpenCode MCP config](./templates/opencode-mcp-config.md).
+1. Use the [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md).
 2. Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
 
 ## 6. Restart OpenCode
