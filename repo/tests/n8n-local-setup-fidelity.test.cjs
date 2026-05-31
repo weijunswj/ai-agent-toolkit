@@ -575,6 +575,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /function Write-CommandListItem/);
   assert.match(menu, /function Write-ImageVersions/);
   assert.match(menu, /function Write-BackupImageLog/);
+  assert.match(functionBody(menu, 'Get-ServiceImageIds'), /docker compose ps -q \$service[\s\S]*docker inspect \$containerId --format '\{\{\.Image\}\}'[\s\S]*docker image inspect \$image --format '\{\{\.Id\}\}'/);
+  assert.match(functionBody(menu, 'Get-ShortImageId'), /return 'not found'/);
   assert.doesNotMatch(menu, /function Show-Help/);
   assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
   assert.match(menu, /while \(-not \$script:ExitRequested\)/);

@@ -353,21 +353,39 @@ function Get-ServiceImageIds {
 
   $ids = @{}
   foreach ($service in $Services) {
+    $imageId = ''
+
+    try {
+      $containerId = (& docker compose ps -q $service 2>$null | Select-Object -First 1)
+      $containerId = ([string]$containerId).Trim()
+      if ($LASTEXITCODE -eq 0 -and $containerId) {
+        $imageId = (& docker inspect $containerId --format '{{.Image}}' 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0) {
+          $imageId = ''
+        }
+      }
+    } catch {
+      $imageId = ''
+    }
+
     $image = $script:ServiceImages[$service]
     if (-not $image) {
-      $ids[$service] = ''
+      $ids[$service] = ([string]$imageId).Trim()
       continue
     }
 
-    try {
-      $imageId = (& docker image inspect $image --format '{{.Id}}' 2>$null | Select-Object -First 1)
-      if ($LASTEXITCODE -ne 0) {
+    if (-not $imageId) {
+      try {
+        $imageId = (& docker image inspect $image --format '{{.Id}}' 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0) {
+          $imageId = ''
+        }
+      } catch {
         $imageId = ''
       }
-      $ids[$service] = ([string]$imageId).Trim()
-    } catch {
-      $ids[$service] = ''
     }
+
+    $ids[$service] = ([string]$imageId).Trim()
   }
   return $ids
 }
@@ -377,7 +395,7 @@ function Get-ShortImageId {
 
   $value = ([string]$ImageId).Trim() -replace '^sha256:', ''
   if (-not $value) {
-    return 'not pulled'
+    return 'not found'
   }
   if ($value.Length -gt 12) {
     return $value.Substring(0, 12)
