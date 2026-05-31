@@ -165,7 +165,11 @@ PowerShell fallback:
 
 ```powershell
 cd "$env:USERPROFILE\.n8n-local"
-Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force
+if (-not (Test-Path -LiteralPath ".env")) {
+  Copy-Item -LiteralPath ".env.example" -Destination ".env"
+} else {
+  Write-Host ".env already exists; leaving it unchanged."
+}
 ```
 
 Replace only the value after `=`. Do not add quotes unless the value itself requires them.
