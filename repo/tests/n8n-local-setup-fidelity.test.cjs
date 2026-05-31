@@ -411,6 +411,9 @@ test('Local Setup separates .env and public URL values without MCP setup values'
 
   assert.match(localSetup, /Copy `\.env\.example` to `\.env`/);
   assert.match(localSetup, /Do not edit `\.env\.example`/);
+  assert.match(localSetup, /if \(-not \(Test-Path -LiteralPath "\.env"\)\) \{/);
+  assert.match(localSetup, /Write-Host "\.env already exists; leaving it unchanged\."/);
+  assert.doesNotMatch(localSetup, /Copy-Item -LiteralPath "\.env\.example" -Destination "\.env" -Force/);
   assert.match(localSetup, /Replace only the value after `=`/);
   assert.match(localSetup, /^### STEP 1: Fill These Before First Launch$/m);
   assert.match(localSetup, /^#### Postgres$/m);
@@ -735,7 +738,7 @@ test('Hostinger VPS page restores Hostinger-specific production content only', (
     'Server IP',
     'IPv4',
     'Dedicated IP',
-    'ssh root@<your-vps-ip>',
+    'ssh root@123.123.123.123',
     'https://n8n.<your-vps-hostname>',
     '/docker/n8n',
     '/root',
@@ -755,6 +758,8 @@ test('Hostinger VPS page restores Hostinger-specific production content only', (
   assert.match(vps, /KVM 4\+ is for heavier workflows/);
   assert.match(vps, /A record/);
   assert.match(vps, /DNS propagation/);
+  assert.match(vps, /Replace `123\.123\.123\.123` with the IP address from hPanel/);
+  assert.doesNotMatch(vps, /ssh root@<your-vps-ip>/);
   assert.match(vps, /Do not copy the Hostinger dashboard URL\. You need the server IP address\./);
   assert.match(vps, /Terminal commands go in Browser Terminal or SSH\. Website URLs go in your web browser\./);
   assert.match(vps, /Do not type the n8n URL into Browser Terminal or SSH\. It belongs in a web browser\./);

@@ -125,10 +125,10 @@ If you prefer SSH from your computer:
 2. Run:
 
    ```powershell
-   ssh root@<your-vps-ip>
+   ssh root@123.123.123.123
    ```
 
-3. Replace `<your-vps-ip>` with the IP address from hPanel.
+3. Replace `123.123.123.123` with the IP address from hPanel.
 4. If Windows asks whether to trust the host, read the prompt and type `yes` only if the IP is your VPS.
 5. Enter the VPS password or use the SSH key configured in Hostinger.
 
