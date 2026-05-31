@@ -96,27 +96,60 @@ Do not use `Canonical Key` for matching, creating, merging, or deduplication. It
 
 ## Existing row update confirmation
 
-Existing rows are treated as user-confirmed unless the user explicitly asks for automatic updates.
+Default mode is **audit/propose first**.
 
-When an existing Knowledge Index row already exists and a non-trivial update seems needed, do not write immediately. First list all suggested changes and ask for confirmation.
+No meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes.
+
+Meaningful writes that always require confirmation:
+
+- Creating a Notion page/row.
+- Updating `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`.
+- Adding, changing, or merging `Source`, `Notion Key`, `GitHub Key`, or `Canonical Key`.
+- Appending source identity data to an existing row.
+- Archiving rows.
+- Deleting rows.
+- Any GitHub write, issue, branch, PR, file, label, metadata, or repository mutation if the skill routes such work.
+
+Allowed without confirmation:
+
+- Search/read Notion.
+- Search/read GitHub.
+- Compare current data against desired data.
+- Produce a proposed change list.
+- Explain what would be written if approved.
+- Refresh only `Last checked` when the row already exists, no meaningful change is needed for that row, and the user requested a check/update run.
 
 Use this exact proposal style:
 
 ```markdown
 1. **<NAME>:**
+   - **Target:** `<Notion page / GitHub item / canonical row>`
+   - **Write type:** `<create / update / archive / delete / key merge / source merge / status update / visibility update / description update>`
    - **Current data:** `<current value or compact current row summary>`
    - **Suggested data:** `<suggested replacement>`
    - **Reason:** `<why this update is suggested>`
 
 2. **<NAME>:**
+   - **Target:** `<Notion page / GitHub item / canonical row>`
+   - **Write type:** `<create / update / archive / delete / key merge / source merge / status update / visibility update / description update>`
    - **Current data:** `<current value or compact current row summary>`
    - **Suggested data:** `<suggested replacement>`
    - **Reason:** `<why this update is suggested>`
 
-**Do you want me to apply these suggested updates?**
+**Do you want me to apply these proposed writes?**
 ```
 
-Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation. Adding keys or source data to an existing row is a meaningful update. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation. Safe refresh fields such as `Last checked` may be updated only if the user requested a check/update run and the change is only a check timestamp refresh.
+Do not apply any meaningful write without confirmation.
+
+If approval is not available, report the proposed writes and reasons instead of applying them.
+
+If the user approves only some items, apply only those approved items.
+
+If a row already has a proposed meaningful change, do not refresh `Last checked` for that row until the proposal is approved or rejected.
+
+If a batch contains even one meaningful write, propose meaningful writes first and request confirmation before applying anything.
+
+Batch refresh without confirmation is allowed only when every batch item is a pure `Last checked` refresh for a row with no meaningful changes.
 
 ## Notion update payload rule
 
