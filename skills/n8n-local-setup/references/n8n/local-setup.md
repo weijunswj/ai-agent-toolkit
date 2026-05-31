@@ -189,13 +189,21 @@ Use this rule:
 
 Fill these before starting n8n for the first time:
 
+#### Postgres
+
 | Variable | What to paste | Example / format | Notes |
 | --- | --- | --- | --- |
 | `POSTGRES_DB` | Local database name. | `n8n` | Keep as `n8n` unless you intentionally run multiple local stacks. |
 | `POSTGRES_USER` | Local database user. | `n8n` | Keep aligned with this stack. You can change it for a separate stack. |
 | `POSTGRES_PASSWORD` | A local database password. | `replace-with-local-postgres-password` becomes a private password. | You make this up. Store it in a password manager. |
+
+#### n8n
+
+| Variable | What to paste | Example / format | Notes |
+| --- | --- | --- | --- |
 | `N8N_ENCRYPTION_KEY` | A long random value. | 32+ random characters. | You make this up once, then keep it forever for this stack. n8n needs the same key after restarts to decrypt saved credentials. |
 | `LOCAL_TIMEZONE` | Your local timezone. | `Asia/Singapore` | This is a predefined timezone name. Compose uses it for both n8n timezone values. |
+| `N8N_LOCAL_PORT` | Local browser port. | `5678` | Choose this before first launch. If `http://localhost:5678` is already used, change this to an unused port such as `5679`. |
 
 For `POSTGRES_PASSWORD`, choose any strong random password. It does not come from Docker, n8n, ngrok, or Hostinger.
 
@@ -203,13 +211,7 @@ For `N8N_ENCRYPTION_KEY`, choose any long random value. It does not come from n8
 
 `POSTGRES_DB` and `POSTGRES_USER` stay in `.env` on purpose. Most people can leave both as `n8n`, but they are useful when you intentionally run more than one local n8n stack and want each stack to have its own database name or user.
 
-### STEP 2: Local URL Choices
-
-These are the only local URL values most users need to see:
-
-| Variable | First-launch value | Notes |
-| --- | --- | --- |
-| `N8N_LOCAL_PORT` | `5678` | This is the browser port on your computer. If `http://localhost:5678` is already used, change this to an unused port such as `5679`. |
+Choose `N8N_LOCAL_PORT` before first launch. Docker uses this value when it creates the local n8n container. If you change it after n8n is already running, use `_n8n-local.cmd` to restart or recreate n8n so the new port is applied.
 
 This local stack still sets `N8N_HOST=localhost`, `N8N_PROXY_HOPS=1`, `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true`, and `N8N_RUNNERS_ENABLED=true` in `docker-compose.yml`. They are fixed for this guide, so they do not need to clutter `.env`.
 
@@ -224,7 +226,9 @@ What that means:
 - When you choose `Start ngrok tunnel`, the active `WEBHOOK_URL` is built from `NGROK_DOMAIN`.
 - Advanced reverse-proxy or custom-domain hosting may use different host settings, but that is outside this local setup guide.
 
-### STEP 3: Fill These Later Only After Local n8n Works
+You will not see `.env.active` in a fresh copied stack folder. `_n8n-local.cmd` creates it automatically in `<LOCAL_STACK_FOLDER>` after you choose `Localhost only` or `Start ngrok tunnel`. Do not create or edit it by hand.
+
+### STEP 2: Fill These Later Only After Local n8n Works
 
 Use these only when you are ready to expose local n8n through the Compose ngrok service:
 
@@ -232,8 +236,10 @@ You get these values from your ngrok account:
 
 1. Open the ngrok authtoken page: [https://dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken).
 2. Copy the authtoken into `NGROK_AUTHTOKEN`.
-3. On that same ngrok authtoken/get-started page, find the free domain shown by ngrok.
-4. Copy only the hostname into `NGROK_DOMAIN`.
+3. Open the ngrok Docker setup dashboard page: [https://dashboard.ngrok.com/get-started/setup/docker](https://dashboard.ngrok.com/get-started/setup/docker).
+4. This is the ngrok dashboard Docker page, not Docker Desktop.
+5. Near the bottom of section 1, find the free domain shown by ngrok.
+6. Copy only the hostname into `NGROK_DOMAIN`.
 
 If ngrok shows this domain:
 
@@ -257,7 +263,7 @@ Notice the difference:
 | Variable | What to paste | Example / format | Notes |
 | --- | --- | --- | --- |
 | `NGROK_AUTHTOKEN` | Your ngrok authtoken. | Value from the ngrok authtoken page. | Copy this from ngrok. Do not make this up. |
-| `NGROK_DOMAIN` | The free domain shown by ngrok. | `your-name.ngrok.app` | Copy this from the ngrok authtoken/get-started page. Do not include `https://`. |
+| `NGROK_DOMAIN` | The free domain shown by ngrok. | `your-name.ngrok.app` | Copy this from the ngrok Docker setup dashboard page, near the bottom of section 1. Do not include `https://`. |
 
 Do not add `N8N_HOST` to `.env` for this guide. The Compose file already sets it to `localhost`, and the ngrok domain belongs in `NGROK_DOMAIN`.
 
@@ -350,8 +356,10 @@ Before you start:
 1. Create or sign in to an ngrok account.
 2. Open the ngrok authtoken page: [https://dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken).
 3. Copy the authtoken into `NGROK_AUTHTOKEN` in `.env`.
-4. On that same ngrok authtoken/get-started page, find the free domain shown by ngrok.
-5. Copy only the hostname into `NGROK_DOMAIN`.
+4. Open the ngrok Docker setup dashboard page: [https://dashboard.ngrok.com/get-started/setup/docker](https://dashboard.ngrok.com/get-started/setup/docker).
+5. This is the ngrok dashboard Docker page, not Docker Desktop.
+6. Near the bottom of section 1, find the free domain shown by ngrok.
+7. Copy only the hostname into `NGROK_DOMAIN`.
 
 Example:
 
@@ -406,7 +414,7 @@ docker compose up -d --force-recreate n8n ngrok
 docker compose logs --tail 200 ngrok
 ```
 
-Free ngrok accounts get an assigned Dev Domain. For this guide, use the free domain shown on the ngrok authtoken/get-started page unless you already know you have a paid or custom ngrok domain.
+Free ngrok accounts get an assigned Dev Domain. For this guide, use the free domain shown on the ngrok Docker setup dashboard page, near the bottom of section 1, unless you already know you have a paid or custom ngrok domain.
 
 Stopping the `ngrok` Docker service stops the tunnel. It does not delete or release a reserved ngrok domain.
 

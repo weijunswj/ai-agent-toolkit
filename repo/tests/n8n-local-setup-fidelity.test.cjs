@@ -383,7 +383,9 @@ test('Local Setup keeps the corrected beginner flow', () => {
   assert.match(localSetup, /Choose `Start ngrok tunnel`/);
   assert.match(localSetup, /Read the quick status at the top of the main menu and confirm `ngrok: running`/);
   assert.match(localSetup, /choose `Show Compose status` to see service state, health, container names, and ports/);
-  assert.match(localSetup, /same ngrok authtoken\/get-started page/);
+  assert.match(localSetup, /ngrok Docker setup dashboard page/);
+  assert.match(localSetup, /not Docker Desktop/);
+  assert.match(localSetup, /bottom of section 1/);
   assert.match(localSetup, /Free ngrok accounts get an assigned Dev Domain/);
   assert.match(localSetup, /Stopping the `ngrok` Docker service stops the tunnel/);
   assert.match(localSetup, /OneDrive Desktop redirection/);
@@ -411,17 +413,23 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   assert.match(localSetup, /Do not edit `\.env\.example`/);
   assert.match(localSetup, /Replace only the value after `=`/);
   assert.match(localSetup, /^### STEP 1: Fill These Before First Launch$/m);
-  assert.match(localSetup, /^### STEP 2: Local URL Choices$/m);
-  assert.match(localSetup, /^### STEP 3: Fill These Later Only After Local n8n Works$/m);
+  assert.match(localSetup, /^#### Postgres$/m);
+  assert.match(localSetup, /^#### n8n$/m);
+  assert.match(localSetup, /^### STEP 2: Fill These Later Only After Local n8n Works$/m);
+  assert.doesNotMatch(localSetup, /^### STEP 3:/m);
   assert.match(localSetup, /you are allowed to invent any strong random value yourself/);
   assert.match(localSetup, /copy the real value from there/);
   assert.match(localSetup, /Compose uses it for both n8n timezone values/);
   assert.match(localSetup, /Keep as `n8n` unless you intentionally run multiple local stacks/);
   assert.match(localSetup, /`POSTGRES_DB` and `POSTGRES_USER` stay in `\.env` on purpose/);
+  assert.match(localSetup, /Choose `N8N_LOCAL_PORT` before first launch/);
+  assert.match(localSetup, /Docker uses this value when it creates the local n8n container/);
   assert.match(localSetup, /The launcher chooses the right active `WEBHOOK_URL` for n8n and writes it to `\.env\.active`/);
   assert.match(localSetup, /The launcher builds the localhost webhook URL from `N8N_LOCAL_PORT`/);
   assert.match(localSetup, /When you choose `Localhost only`, the active `WEBHOOK_URL` is built from `localhost` plus `N8N_LOCAL_PORT`/);
   assert.match(localSetup, /When you choose `Start ngrok tunnel`, the active `WEBHOOK_URL` is built from `NGROK_DOMAIN`/);
+  assert.match(localSetup, /You will not see `\.env\.active` in a fresh copied stack folder/);
+  assert.match(localSetup, /creates it automatically in `<LOCAL_STACK_FOLDER>`/);
   assert.match(localSetup, /You still open the n8n editor in your browser at `http:\/\/localhost:5678`/);
   assert.match(localSetup, /`WEBHOOK_URL` controls the public webhook and callback links n8n shows or builds/);
   assert.match(localSetup, /If the active `WEBHOOK_URL` in `\.env\.active` is an ngrok URL while `ngrok` is stopped, the menu warns you/);
@@ -431,10 +439,11 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   assert.match(localSetup, /It reads `N8N_LOCAL_PORT` from `\.env` automatically/);
   assert.match(localSetup, /"127\.0\.0\.1:\$\{N8N_LOCAL_PORT:-5678\}:5678"/);
   assert.match(localSetup, /https:\/\/dashboard\.ngrok\.com\/get-started\/your-authtoken/);
-  assert.match(localSetup, /same ngrok authtoken\/get-started page/);
+  assert.match(localSetup, /https:\/\/dashboard\.ngrok\.com\/get-started\/setup\/docker/);
+  assert.match(localSetup, /ngrok dashboard Docker page, not Docker Desktop/);
+  assert.match(localSetup, /bottom of section 1/);
   assert.match(localSetup, /do not need `N8N_PROTOCOL` in this local `\.env`/i);
-  assert.doesNotMatch(localSetup, /Open the ngrok Docker setup page/);
-  assert.doesNotMatch(localSetup, /bottom of section 1/);
+  assert.doesNotMatch(localSetup, /ngrok Docker Desktop extension/);
   assert.doesNotMatch(envExample, /N8N_PROTOCOL=/);
   assert.doesNotMatch(envExample, /N8N_HOST=/);
   assert.doesNotMatch(envExample, /N8N_PROXY_HOPS=/);
@@ -449,9 +458,13 @@ test('Local Setup separates .env and public URL values without MCP setup values'
 
   for (const expected of [
     '# [ STEP 1: Fill These Before First Launch ]',
+    '# Postgres',
     '# Keep POSTGRES_DB and POSTGRES_USER visible so separate local stacks can use separate names.',
-    '# [ STEP 2: Local Browser Port ]',
-    '# [ STEP 3: Fill These Later Only After Local n8n Works ]'
+    '# n8n',
+    '# Choose the browser port before first launch.',
+    '# https://dashboard.ngrok.com/get-started/setup/docker',
+    '# The free domain is near the bottom of section 1.',
+    '# [ STEP 2: Fill These Later Only After Local n8n Works ]'
   ]) {
     assert.match(envExample, new RegExp(escapeRegExp(expected)), expected);
   }
@@ -656,8 +669,12 @@ test('local stack templates stay placeholder-only and local-first', () => {
 
   for (const expected of [
     '# [ STEP 1: Fill These Before First Launch ]',
-    '# [ STEP 2: Local Browser Port ]',
-    '# [ STEP 3: Fill These Later Only After Local n8n Works ]',
+    '# Postgres',
+    '# n8n',
+    '# Choose the browser port before first launch.',
+    '# https://dashboard.ngrok.com/get-started/setup/docker',
+    '# The free domain is near the bottom of section 1.',
+    '# [ STEP 2: Fill These Later Only After Local n8n Works ]',
     'POSTGRES_DB=n8n',
     'POSTGRES_USER=n8n',
     'POSTGRES_PASSWORD=replace-with-local-postgres-password',
