@@ -132,6 +132,26 @@
         {
           "from": "./7.%20extra%20-%20antigravity%20integration.md",
           "to": "../ai-agent-platforms/antigravity.md"
+        },
+        {
+          "from": "./mcp%20setup%20-%20codex.md",
+          "to": "../ai-agent-platforms/codex.md"
+        },
+        {
+          "from": "./mcp%20setup%20-%20claude%20code.md",
+          "to": "../ai-agent-platforms/claude-code.md"
+        },
+        {
+          "from": "./mcp%20setup%20-%20opencode.md",
+          "to": "../ai-agent-platforms/opencode.md"
+        },
+        {
+          "from": "./mcp%20setup%20-%20antigravity.md",
+          "to": "../ai-agent-platforms/antigravity.md"
+        },
+        {
+          "from": "./3.%20vps%20hosting.md",
+          "to": "./vps-hosting.md"
         }
       ]
     },
@@ -154,72 +174,27 @@
     },
     {
       "kind": "copy",
-      "source": "_main/3. tunneling guide.md",
-      "output": "skills/n8n-local-setup/references/n8n/tunnelling.md",
-      "notes": "Full tunneling guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact",
-      "text_rewrites": [
-        {
-          "from": "./1.%20local%20setup.md",
-          "to": "local-setup.md"
-        },
-        {
-          "from": "./templates/local-stack/.env.example",
-          "to": "../../templates/local-stack/.env.example"
-        },
-        {
-          "from": "./templates/local-stack/n8n-local.cmd",
-          "to": "../../templates/local-stack/n8n-local.cmd"
-        },
-        {
-          "from": "./templates/local-stack/scripts/n8n-local-menu.ps1",
-          "to": "../../templates/local-stack/scripts/n8n-local-menu.ps1"
-        }
-      ]
-    },
-    {
-      "kind": "copy",
-      "source": "_main/3a. docker compose + ngrok.md",
-      "output": "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md",
-      "notes": "Full Docker Compose plus ngrok guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact",
-      "text_rewrites": [
-        {
-          "from": "./1.%20local%20setup.md",
-          "to": "local-setup.md"
-        },
-        {
-          "from": "./templates/local-stack/docker-compose.yml",
-          "to": "../../templates/local-stack/docker-compose.yml"
-        },
-        {
-          "from": "./templates/local-stack/.env.example",
-          "to": "../../templates/local-stack/.env.example"
-        },
-        {
-          "from": "./templates/local-stack/n8n-local.cmd",
-          "to": "../../templates/local-stack/n8n-local.cmd"
-        },
-        {
-          "from": "./templates/local-stack/scripts/n8n-local-menu.ps1",
-          "to": "../../templates/local-stack/scripts/n8n-local-menu.ps1"
-        },
-        {
-          "from": "](./templates/local-stack/)",
-          "to": "](../../templates/local-stack/)"
-        }
-      ]
-    },
-    {
-      "kind": "copy",
-      "source": "_main/4. vps hosting.md",
+      "source": "_main/3. vps hosting.md",
       "output": "skills/n8n-local-setup/references/n8n/vps-hosting.md",
       "notes": "Full VPS hosting guide copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact",
+      "text_rewrites": [
+        {
+          "from": "./2.%20upgrading.md",
+          "to": "./upgrading.md"
+        }
+      ]
+    },
+    {
+      "kind": "copy",
+      "source": "_main/mcp setup - codex.md",
+      "output": "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
+      "notes": "Full Codex integration guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/5. extra - claude code integration.md",
+      "source": "_main/mcp setup - claude code.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
       "notes": "Full Claude Code integration guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
@@ -244,7 +219,7 @@
     },
     {
       "kind": "copy",
-      "source": "_main/6. extra - opencode integration.md",
+      "source": "_main/mcp setup - opencode.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",
       "notes": "Full OpenCode integration guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
@@ -269,7 +244,7 @@
     },
     {
       "kind": "copy",
-      "source": "_main/7. extra - antigravity integration.md",
+      "source": "_main/mcp setup - antigravity.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md",
       "notes": "Full Antigravity integration guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
@@ -304,13 +279,6 @@
       "source": "curated_output_for_ai/references/ai-agent-platforms/README.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/README.md",
       "notes": "Skill-local platform reference index generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/references/ai-agent-platforms/codex.md",
-      "output": "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
-      "notes": "Codex platform router generated from project-owned curated AI output.",
       "fidelity": "reviewed_entrypoint"
     },
     {
@@ -429,8 +397,6 @@
       "mcp/projects/n8n-local-setup.md",
       "skills/n8n-local-setup/references/n8n/local-setup.md",
       "skills/n8n-local-setup/references/n8n/upgrading.md",
-      "skills/n8n-local-setup/references/n8n/tunnelling.md",
-      "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md",
       "skills/n8n-local-setup/references/n8n/vps-hosting.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",

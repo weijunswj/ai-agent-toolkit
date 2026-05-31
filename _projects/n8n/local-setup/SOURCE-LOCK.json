@@ -23,43 +23,29 @@
     },
     {
       "mode": "adapted",
-      "source_path": "3. tunneling guide.md",
-      "project_path": "_projects/n8n/local-setup/_main/3. tunneling guide.md",
-      "source_blob_sha": "3c3b252811c024803123c44459ff9f6c23c4cc24",
-      "notes": "Toolkit-adapted after migration to replace scattered local tunneling paths with ngrok as the only supported local tunnel, running as a Docker Compose service."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "3a. docker compose + ngrok.md",
-      "project_path": "_projects/n8n/local-setup/_main/3a. docker compose + ngrok.md",
-      "source_blob_sha": "e0819653c14f2a05819fecd1ea113f949194c223",
-      "notes": "Toolkit-adapted after migration to make Docker Compose the local stack control plane for n8n, Postgres, and ngrok, with placeholder-only environment configuration and queue mode documented as advanced future scaling only."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "4. vps hosting.md",
-      "project_path": "_projects/n8n/local-setup/_main/4. vps hosting.md",
+      "source_path": "3. vps hosting.md",
+      "project_path": "_projects/n8n/local-setup/_main/3. vps hosting.md",
       "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2",
       "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
     },
     {
       "mode": "adapted",
-      "source_path": "5. extra - claude code integration.md",
-      "project_path": "_projects/n8n/local-setup/_main/5. extra - claude code integration.md",
+      "source_path": "mcp setup - claude code.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - claude code.md",
       "source_blob_sha": "ad785430bd6c1fdbbf441e5c593d4be6e501aa36",
       "notes": "Toolkit-adapted after migration to route Claude Code agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies."
     },
     {
       "mode": "adapted",
-      "source_path": "6. extra - opencode integration.md",
-      "project_path": "_projects/n8n/local-setup/_main/6. extra - opencode integration.md",
+      "source_path": "mcp setup - opencode.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - opencode.md",
       "source_blob_sha": "8ff55220c401813eddf8cb882717bbc834ac8e75",
       "notes": "Toolkit-adapted after migration to route OpenCode agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies."
     },
     {
       "mode": "adapted",
-      "source_path": "7. extra - antigravity integration.md",
-      "project_path": "_projects/n8n/local-setup/_main/7. extra - antigravity integration.md",
+      "source_path": "mcp setup - antigravity.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - antigravity.md",
       "source_blob_sha": "bd611a73f3b9ac035e35c752951f5a845240ad45",
       "notes": "Toolkit-adapted after migration to route Gemini/Antigravity agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies."
     },

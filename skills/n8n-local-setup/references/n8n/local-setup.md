@@ -12,7 +12,7 @@ Use it when you want one local setup path with Docker Compose, Postgres, ngrok, 
 
 For always-on public hosting, use [4. VPS Hosting](vps-hosting.md). VPS and Hostinger hosting are separate from this local Docker Desktop setup.
 
-## Fast Path ( Full Guide Below )
+## 1.1 Fast Path ( Full Guide Below )
 
 | Step | What to do | Where | Result |
 | --- | --- | --- | --- |
@@ -28,7 +28,7 @@ For always-on public hosting, use [4. VPS Hosting](vps-hosting.md). VPS and Host
 
 Do not save local secrets, `.env`, backups, runtime files, or live n8n import/export files into GitHub.
 
-## Before You Start
+## 1.2 Before You Start
 
 ### What Do I Need First?
 
@@ -72,7 +72,7 @@ If you are only opening n8n on your own computer, you do not need ngrok.
 
 Use ngrok when another online service must call your local n8n webhook or OAuth callback.
 
-## Create The Local Stack Folder
+## 1.3 Create The Local Stack Folder
 
 ### A. Windows Explorer Path
 
@@ -98,7 +98,7 @@ If you choose another location:
 2. Keep it outside this toolkit repo.
    i) Do not place local `.env`, backups, Docker runtime files, or private setup notes in GitHub-tracked folders.
 
-## Copy The Local Stack Templates
+## 1.4 Copy The Local Stack Templates
 
 ### Copy The Whole Template Folder Contents
 
@@ -125,7 +125,7 @@ Key files:
    Copy-Item -LiteralPath "templates\local-stack\*" -Destination "$env:USERPROFILE\Desktop\n8n-local" -Recurse -Force
    ```
 
-## Create And Fill `.env`
+## 1.5 Create And Fill `.env`
 
 ### Copy `.env.example` To `.env`
 
@@ -190,7 +190,7 @@ Desktop\n8n-local
     `-- n8n-local-menu.ps1
 ```
 
-## What Not To Commit
+## 1.6 What Not To Commit
 
 Commit means save into Git/GitHub.
 
@@ -203,7 +203,7 @@ Do not save these files or values into GitHub:
 - Real API tokens, webhook secrets, or MCP tokens.
 - `.n8n-local/`, `.tmp/`, backups, and live export/import files.
 
-## Start The Local Menu
+## 1.7 Start The Local Menu
 
 ### Use The Launcher
 
@@ -235,7 +235,7 @@ cd "$env:USERPROFILE\Desktop\n8n-local"
 .\n8n-local.cmd
 ```
 
-## First Launch: Local-Only Owner Setup
+## 1.8 First Launch: Local-Only Owner Setup
 
 ### Start Local n8n First
 
@@ -263,7 +263,7 @@ docker compose ps
    i) Do not start the public tunnel until the owner account exists.
    ii) The tunnel exposes the full local n8n surface reachable through that URL path, including UI, API, webhook, and MCP routes. Treat it as public access to local n8n, not as a webhook-only pipe.
 
-## Public Tunnel With ngrok
+## 1.9 Public Tunnel With ngrok
 
 ### When Should I Use ngrok?
 
@@ -328,7 +328,7 @@ Examples:
 
 Use the inspector to debug incoming tunnel requests. Do not paste secrets or real customer data into repo files while debugging.
 
-## Daily Use
+## 1.10 Daily Use
 
 ### Start, Stop, Restart, Status, And Logs
 
@@ -372,7 +372,7 @@ docker compose logs -f postgres
 3. Keep the backup local and private.
    i) The menu writes a timestamped SQL dump under a local `backups` folder. Do not commit backup files.
 
-## Updates
+## 1.11 Updates
 
 ### Check For Updates
 
@@ -396,7 +396,7 @@ Updating images and recreating containers are separate choices so you can:
 - Update only selected services.
 - Smoke test after changes.
 
-## MCP Setup
+## 1.12 MCP Setup
 
 ### Enable MCP In n8n
 
@@ -429,7 +429,7 @@ Inside n8n:
 
 Restart your agent app after changing MCP config, agent rules, or user environment variables.
 
-## Agent Rules And Adapters
+## 1.13 Agent Rules And Adapters
 
 **If the [AI Coding Agent Rules](../../../ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
 
@@ -443,7 +443,15 @@ Install or load [n8n Agent Rules](../../../n8n-agent-rules/) before n8n workflow
 
 If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not overwrite it. Merge/apply the managed templates or produce a diff plan.
 
-## Agent Platform Setup
+## 1.14 Choose Your MCP Setup Page
+
+| Platform | Use this setup page | Use when |
+| --- | --- | --- |
+| Codex | [Codex MCP Setup](../ai-agent-platforms/codex.md) | You use Codex with n8n MCP. |
+| Claude Code | [Claude Code MCP Setup](../ai-agent-platforms/claude-code.md) | You use Claude Code / Claude Desktop Code tab. |
+| OpenCode | [OpenCode MCP Setup](../ai-agent-platforms/opencode.md) | You use OpenCode. |
+| Antigravity | [Antigravity MCP Setup](../ai-agent-platforms/antigravity.md) | You use Antigravity plugin-scoped skills and MCP config. |
+
 
 | Platform | Use |
 | --- | --- |
@@ -452,7 +460,7 @@ If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not 
 | OpenCode | [OpenCode Integration appendix](../ai-agent-platforms/opencode.md) and [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md). |
 | Antigravity | [Antigravity Integration appendix](../ai-agent-platforms/antigravity.md) and [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md). |
 
-## Troubleshooting
+## 1.15 Troubleshooting
 
 ### Docker Is Not Running
 
@@ -546,7 +554,7 @@ If the target repo already has `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`, do not 
    iv) The agent app was fully restarted after config changes.
    v) Use docs/search MCP tools before live n8n tools. Use live n8n tools only when the user clearly asks for real instance inspection or mutation.
 
-## Advanced Queue Mode
+## 1.16 Advanced Queue Mode
 
 The default local path is normal mode:
 
@@ -562,7 +570,7 @@ Queue mode is a future production scaling path:
 
 Do not add Redis or workers to the default local setup. Use queue mode later when production workloads need worker-based scaling.
 
-## Safety Rules
+## 1.17 Safety Rules
 
 - Create the owner account locally before starting the public tunnel.
 - Treat the ngrok URL as public access to local n8n UI, API, webhooks, and MCP routes.
@@ -574,14 +582,9 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 - Do not remove `n8n_data` or `postgres_data` Docker volumes unless you intentionally want to delete local runtime data.
 - Keep VPS/Hostinger setup separate in [4. VPS Hosting](vps-hosting.md).
 
-## Appendices And References
+## 1.18 Appendices And References
 
 | Reference | Use when |
 | --- | --- |
 | [2. Upgrading](upgrading.md) | You need focused update notes for local, VPS, or npm installs. |
-| [3. Hostinger Domain And Tunnel Notes](tunnelling.md) | You are moving from local/ngrok testing to a Hostinger public domain. |
-| [3a. Compose Template Reference](docker-compose-ngrok.md) | You need to inspect the Compose template and placeholder `.env.example`. |
-| [4. VPS Hosting](vps-hosting.md) | You need always-on public hosting, Hostinger, VPS, or Coolify guidance. |
-| [5. Claude Code Integration](../ai-agent-platforms/claude-code.md) | You need Claude Code setup detail. |
-| [6. OpenCode Integration](../ai-agent-platforms/opencode.md) | You need OpenCode setup detail. |
-| [7. Antigravity Integration](../ai-agent-platforms/antigravity.md) | You need Antigravity setup detail. |
+| [3. VPS Hosting](./vps-hosting.md) | You need always-on public hosting on Hostinger. |

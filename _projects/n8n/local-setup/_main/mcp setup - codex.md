@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/mcp setup - codex.md
-Update the project source and run sync.
--->
 # Codex MCP Setup
 
 This setup connects Codex to your local n8n instance via MCP.

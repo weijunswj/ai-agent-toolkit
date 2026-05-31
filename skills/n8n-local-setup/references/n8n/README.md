@@ -27,6 +27,4 @@ Start with [local-setup.md](local-setup.md). It is the primary beginner local gu
 | Guide | Use when |
 | --- | --- |
 | [upgrading.md](upgrading.md) | Upgrading n8n, n8n MCP, and related local tooling safely. |
-| [tunnelling.md](tunnelling.md) | Moving from local/ngrok testing to a Hostinger public domain. |
-| [docker-compose-ngrok.md](docker-compose-ngrok.md) | Inspecting the Docker Compose stack, guided launcher, and local stack templates. |
 | [vps-hosting.md](vps-hosting.md) | Moving from local development to always-on VPS hosting. |
