@@ -572,6 +572,7 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /function Invoke-MenuAction/);
   assert.match(menu, /function Invoke-NativeCommand/);
   assert.match(menu, /function Show-CommandList/);
+  assert.match(menu, /function Write-CommandListItem/);
   assert.doesNotMatch(menu, /function Show-Help/);
   assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
   assert.match(menu, /while \(-not \$script:ExitRequested\)/);
@@ -605,7 +606,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Show-Status'), /Invoke-Compose -Arguments @\('ps'\)/);
   assert.match(functionBody(menu, 'Apply-Update'), /This update includes Postgres[\s\S]*Backup-Postgres -Required[\s\S]*Update cancelled because the automatic Postgres backup did not complete/);
   assert.match(functionBody(menu, 'Backup-Postgres'), /param\(\[switch\]\$Required\)[\s\S]*return \$true[\s\S]*return \$false/);
-  assert.match(functionBody(menu, 'Show-CommandList'), /Back up: Writes a local Postgres SQL backup under \.\\backups/);
+  assert.match(functionBody(menu, 'Write-CommandListItem'), /\$itemLabelWidth = 19[\s\S]*\$itemPrefix = \("  \{0\}\. \{1,-\$itemLabelWidth\}: " -f \$Number, \$Name\)/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a local Postgres SQL backup under \.\\backups\.'/);
   assert.match(menu, /function Show-UpdateMenu/);
   assert.match(menu, /Checking for updates first\. Selection opens only after this check finishes\./);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Check-Updates -Services \$script:Services[\s\S]*Read-Host 'Enter a number'/);

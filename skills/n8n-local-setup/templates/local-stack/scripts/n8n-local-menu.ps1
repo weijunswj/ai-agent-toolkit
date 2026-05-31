@@ -788,6 +788,19 @@ function Backup-Postgres {
   }
 }
 
+function Write-CommandListItem {
+  param(
+    [string]$Number,
+    [string]$Name,
+    [string]$Description
+  )
+
+  $itemLabelWidth = 19
+  $itemPrefix = ("  {0}. {1,-$itemLabelWidth}: " -f $Number, $Name)
+  Write-Host $itemPrefix -NoNewline
+  Write-Host $Description
+}
+
 function Show-CommandList {
   Write-Header 'Command List'
   Write-Host 'Recommended entrypoint:' -ForegroundColor Cyan
@@ -803,13 +816,13 @@ function Show-CommandList {
   Write-Host 'The launcher writes the active WEBHOOK_URL into .env.active automatically.' -ForegroundColor Cyan
   Write-Host ''
   Write-Host 'Use the numbered menu options for normal work:' -ForegroundColor Cyan
-  Write-Host '  1. Start n8n: Starts local n8n, or starts n8n with ngrok.'
-  Write-Host '  2. Restart n8n: Recreates only the n8n app container so .env changes are applied.'
-  Write-Host '  3. Stop n8n: Stops ngrok only, or stops the local stack.'
-  Write-Host '  4. Update: Checks for image updates before applying them.'
-  Write-Host '  5. Show Compose status: Shows service state, health, container names, and ports.'
-  Write-Host '  6. View logs: Shows recent logs for all services or one service.'
-  Write-Host '  7. Back up: Writes a local Postgres SQL backup under .\backups.'
+  Write-CommandListItem -Number '1' -Name 'Start n8n' -Description 'Starts local n8n, or starts n8n with ngrok.'
+  Write-CommandListItem -Number '2' -Name 'Restart n8n' -Description 'Recreates only the n8n app container so .env changes are applied.'
+  Write-CommandListItem -Number '3' -Name 'Stop n8n' -Description 'Stops ngrok only, or stops the local stack.'
+  Write-CommandListItem -Number '4' -Name 'Update' -Description 'Checks for image updates before applying them.'
+  Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state, health, container names, and ports.'
+  Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
+  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a local Postgres SQL backup under .\backups.'
   Write-Host ''
   Write-Host 'Updates are user-approved. Pulling images does not recreate or restart containers until you choose an update action.' -ForegroundColor Yellow
 }
