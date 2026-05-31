@@ -362,13 +362,22 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(cmd, /n8n-local-menu\.ps1/);
   assert.match(cmd, /-ExecutionPolicy Bypass/);
   assert.match(cmd, /%~dp0/);
+  assert.match(cmd, /:run_menu/);
+  assert.match(cmd, /if "%EXIT_CODE%"=="0" goto done/);
+  assert.match(cmd, /The n8n local menu stopped unexpectedly with exit code %EXIT_CODE%\./);
+  assert.match(cmd, /goto run_menu/);
+  assert.match(cmd, /exit \/b 0/);
   assert.doesNotMatch(cmd, /NGROK_AUTHTOKEN|POSTGRES_PASSWORD|N8N_ENCRYPTION_KEY/);
-  assert.match(menu, /while \(\$true\)/);
+  assert.match(menu, /\$script:ExitRequested = \$false/);
+  assert.match(menu, /function Invoke-MenuAction/);
+  assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
+  assert.match(menu, /while \(-not \$script:ExitRequested\)/);
   assert.match(menu, /Pause-Menu/);
-  assert.match(menu, /'16' \{ Clear-Host; Write-Success 'Bye\.'; return \}/);
+  assert.match(menu, /'16' \{ Clear-Host; Write-Success 'Bye\.'; \$script:ExitRequested = \$true \}/);
+  assert.match(menu, /exit 0/);
 
   for (let option = 1; option <= 15; option += 1) {
-    assert.match(menu, new RegExp(`'${option}' \\{[^\\n]+; Pause-Menu \\}`), `option ${option} pauses`);
+    assert.match(menu, new RegExp(`'${option}' \\{ Invoke-MenuAction \\{[^\\n]+\\} \\}`), `option ${option} returns through Invoke-MenuAction`);
   }
 
   assert.match(menu, /Open-NgrokDockerDesktopGuide/);

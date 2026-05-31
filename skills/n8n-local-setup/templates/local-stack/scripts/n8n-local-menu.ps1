@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $script:StackRoot = (Get-Location).Path
 $script:CoreServices = @('postgres', 'n8n')
 $script:Services = @('n8n', 'postgres', 'ngrok')
+$script:ExitRequested = $false
 $script:ServiceImages = @{
   n8n = 'docker.n8n.io/n8nio/n8n:stable'
   postgres = 'postgres:16-alpine'
@@ -43,6 +44,18 @@ function Pause-Menu {
   Write-Host ''
   Write-Host 'Press Enter to return to the menu...' -ForegroundColor DarkCyan
   [void](Read-Host)
+}
+
+function Invoke-MenuAction {
+  param([scriptblock]$Action)
+
+  try {
+    & $Action
+  } catch {
+    Write-ErrorMessage $_.Exception.Message
+  }
+
+  Pause-Menu
 }
 
 function Invoke-Compose {
@@ -434,30 +447,31 @@ function Show-MainMenu {
   Write-Host ''
 }
 
-while ($true) {
+while (-not $script:ExitRequested) {
   Show-MainMenu
   $choice = Read-Host 'Enter a number'
 
   switch ($choice) {
-    '1' { Start-LocalStack; Pause-Menu }
-    '2' { Stop-Stack; Pause-Menu }
-    '3' { Restart-Stack; Pause-Menu }
-    '4' { Show-Status; Pause-Menu }
-    '5' { Show-Logs; Pause-Menu }
-    '6' { Show-Logs -Service 'n8n'; Pause-Menu }
-    '7' { Show-Logs -Service 'postgres'; Pause-Menu }
-    '8' { Show-Logs -Service 'ngrok'; Pause-Menu }
-    '9' { Backup-Postgres; Pause-Menu }
-    '10' { [void](Check-Updates -Services $script:Services); Pause-Menu }
-    '11' { Update-SelectedServices; Pause-Menu }
-    '12' { Update-AllServices; Pause-Menu }
-    '13' { Open-N8n; Pause-Menu }
-    '14' { Open-NgrokDockerDesktopGuide; Pause-Menu }
-    '15' { Show-Help; Pause-Menu }
-    '16' { Clear-Host; Write-Success 'Bye.'; return }
+    '1' { Invoke-MenuAction { Start-LocalStack } }
+    '2' { Invoke-MenuAction { Stop-Stack } }
+    '3' { Invoke-MenuAction { Restart-Stack } }
+    '4' { Invoke-MenuAction { Show-Status } }
+    '5' { Invoke-MenuAction { Show-Logs } }
+    '6' { Invoke-MenuAction { Show-Logs -Service 'n8n' } }
+    '7' { Invoke-MenuAction { Show-Logs -Service 'postgres' } }
+    '8' { Invoke-MenuAction { Show-Logs -Service 'ngrok' } }
+    '9' { Invoke-MenuAction { Backup-Postgres } }
+    '10' { Invoke-MenuAction { [void](Check-Updates -Services $script:Services) } }
+    '11' { Invoke-MenuAction { Update-SelectedServices } }
+    '12' { Invoke-MenuAction { Update-AllServices } }
+    '13' { Invoke-MenuAction { Open-N8n } }
+    '14' { Invoke-MenuAction { Open-NgrokDockerDesktopGuide } }
+    '15' { Invoke-MenuAction { Show-Help } }
+    '16' { Clear-Host; Write-Success 'Bye.'; $script:ExitRequested = $true }
     default {
-      Write-Warning 'Choose a number from 1 to 16.'
-      Pause-Menu
+      Invoke-MenuAction { Write-Warning 'Choose a number from 1 to 16.' }
     }
   }
 }
+
+exit 0
