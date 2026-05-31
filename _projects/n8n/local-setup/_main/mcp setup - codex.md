@@ -1,12 +1,6 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/mcp setup - codex.md
-Update the project source and run sync.
--->
 # Codex MCP Setup
 
-The primary local setup guide is [1. Local Setup](../n8n/local-setup.md).
+The primary local setup guide is [1. Local Setup](./1.%20local%20setup.md).
 
 This page is a secondary Codex reference, not a required local setup path.
 
@@ -21,7 +15,7 @@ This page is a secondary Codex reference, not a required local setup path.
 
 ## 1. Before You Start
 
-1. Finish [1. Local Setup](../n8n/local-setup.md) first if you are using local n8n.
+1. Finish [1. Local Setup](./1.%20local%20setup.md) first if you are using local n8n.
 2. You should already have:
    1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed if you are running local n8n.
    2. [Node.js](https://nodejs.org/en/download) installed.
@@ -70,7 +64,7 @@ Copy the whole `skills/<skill-name>/` folder.
 
 ## 5. Codex MCP Config
 
-Use the [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md).
+Use the [Codex MCP config](./codex-mcp-config.md).
    - Add the configuration to your Codex setup.
 
 ## References

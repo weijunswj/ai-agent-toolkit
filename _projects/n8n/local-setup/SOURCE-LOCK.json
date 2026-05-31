@@ -12,63 +12,100 @@
       "source_path": "1. local setup.md",
       "project_path": "_projects/n8n/local-setup/_main/1. local setup.md",
       "source_blob_sha": "a08f0b83ed5722b5b8ecbc560f1ccfe89baf4563",
-      "notes": "Toolkit-adapted after migration to route Codex agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies. The local Fast Path now uses Docker Compose with n8n, Postgres, and ngrok as a service; ngrok is the only supported local tunnel path."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "2. upgrading.md",
-      "project_path": "_projects/n8n/local-setup/_main/2. upgrading.md",
-      "source_blob_sha": "a155cef59f93e9b31104ac91289490665ef32e47",
-      "notes": "Toolkit-adapted after migration to prefer the local Docker Compose stack for updates while preserving explicit public-exposure safety guidance."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "3. tunneling guide.md",
-      "project_path": "_projects/n8n/local-setup/_main/3. tunneling guide.md",
-      "source_blob_sha": "3c3b252811c024803123c44459ff9f6c23c4cc24",
-      "notes": "Toolkit-adapted after migration to replace scattered local tunneling paths with ngrok as the only supported local tunnel, running as a Docker Compose service."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "3a. docker compose + ngrok.md",
-      "project_path": "_projects/n8n/local-setup/_main/3a. docker compose + ngrok.md",
-      "source_blob_sha": "e0819653c14f2a05819fecd1ea113f949194c223",
-      "notes": "Toolkit-adapted after migration to make Docker Compose the local stack control plane for n8n, Postgres, and ngrok, with placeholder-only environment configuration and queue mode documented as advanced future scaling only."
+      "notes": "Clean-rebuilt as the single local Windows Docker Desktop guide. The default public tunnel path now uses the ngrok Docker Desktop extension, the advanced Compose ngrok service remains documented as optional, MCP setup is routed after local/public URL setup, and the supported launcher is _n8n-local.cmd."
     },
     {
       "mode": "adapted",
       "source_path": "4. vps hosting.md",
-      "project_path": "_projects/n8n/local-setup/_main/4. vps hosting.md",
+      "project_path": "_projects/n8n/local-setup/_main/2. hostinger vps.md",
       "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2",
-      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "5. extra - claude code integration.md",
-      "project_path": "_projects/n8n/local-setup/_main/5. extra - claude code integration.md",
-      "source_blob_sha": "ad785430bd6c1fdbbf441e5c593d4be6e501aa36",
-      "notes": "Toolkit-adapted after migration to route Claude Code agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "6. extra - opencode integration.md",
-      "project_path": "_projects/n8n/local-setup/_main/6. extra - opencode integration.md",
-      "source_blob_sha": "8ff55220c401813eddf8cb882717bbc834ac8e75",
-      "notes": "Toolkit-adapted after migration to route OpenCode agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "7. extra - antigravity integration.md",
-      "project_path": "_projects/n8n/local-setup/_main/7. extra - antigravity integration.md",
-      "source_blob_sha": "bd611a73f3b9ac035e35c752951f5a845240ad45",
-      "notes": "Toolkit-adapted after migration to route Gemini/Antigravity agent-rule setup through the generic ai-coding-agent-rules skill plus the n8n-agent-rules skill and optional adapter, while avoiding active nested instruction filenames in skill copies."
+      "notes": "Clean-rebuilt into a Hostinger-only VPS page, with current Hostinger n8n plan/template/update/domain references verified on 2026-05-31."
     },
     {
       "mode": "adapted",
       "source_path": "README.md",
       "project_path": "_projects/n8n/local-setup/_main/README.md",
       "source_blob_sha": "19815dff51b90aaef1d5125dff4b2f188ee54436",
-      "notes": "Toolkit-adapted after migration to document the generic ai-coding-agent-rules split, the n8n-agent-rules skill, optional adapters, and the opinionated local Docker Compose Fast Path with Postgres and ngrok-only tunneling."
+      "notes": "Clean-rebuilt into a two-page source index: Local Setup and Hostinger VPS. MCP setup/config files are supporting references, not primary setup paths."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "5. extra - claude code integration.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - claude code.md",
+      "source_blob_sha": "ad785430bd6c1fdbbf441e5c593d4be6e501aa36",
+      "notes": "Replaced by the user-confirmed final Claude Code MCP setup guide. Structure and tone were preserved; only source-local routing was corrected."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "6. extra - opencode integration.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - opencode.md",
+      "source_blob_sha": "8ff55220c401813eddf8cb882717bbc834ac8e75",
+      "notes": "Replaced by the user-confirmed final OpenCode MCP setup guide. Structure and tone were preserved; only source-local routing was corrected."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "7. extra - antigravity integration.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - antigravity.md",
+      "source_blob_sha": "bd611a73f3b9ac035e35c752951f5a845240ad45",
+      "notes": "Replaced by the user-confirmed final Antigravity MCP setup guide. Structure and tone were preserved; only source-local routing was corrected."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "user-supplied-final/mcp setup - codex.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - codex.md",
+      "notes": "User-confirmed final Codex MCP setup guide supplied with the rebuild request. Structure and tone were preserved; only source-local routing was corrected."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/antigravity-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/antigravity-mcp-config.md",
+      "source_blob_sha": "e366f703f5f8de45f3715628cec0a4c195fee274",
+      "notes": "Moved out of the source templates folder to match the user-confirmed final source layout. Published output still routes to templates/mcp-configs/."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/claude-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/claude-mcp-config.md",
+      "source_blob_sha": "1d050c7f8430aad5a2b09c476ec955cbdb5b765d",
+      "notes": "Moved out of the source templates folder to match the user-confirmed final source layout. Published output still routes to templates/mcp-configs/."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/codex-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/codex-mcp-config.md",
+      "source_blob_sha": "66015cf2c0c9cdf01ad5fe5daa2b5656a2ba57c6",
+      "notes": "Moved out of the source templates folder to match the user-confirmed final source layout. Published output still routes to templates/mcp-configs/."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/opencode-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/opencode-mcp-config.md",
+      "source_blob_sha": "31502fdc926cc1c4c9343945afd4dd477d1f7278",
+      "notes": "Moved out of the source templates folder to match the user-confirmed final source layout. Published output still routes to templates/mcp-configs/."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/local-stack/docker-compose.yml",
+      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/docker-compose.yml",
+      "notes": "Local Compose stack remains source-owned here. It is local-first with Postgres and n8n; the ngrok service is retained for the advanced Compose tunnel path."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/local-stack/.env.example",
+      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/.env.example",
+      "notes": "Placeholder-only environment template updated to separate local runtime values from optional public URL and MCP values."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/local-stack/n8n-local.cmd",
+      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/_n8n-local.cmd",
+      "notes": "Renamed by adding an underscore prefix. _n8n-local.cmd is now the supported launcher entrypoint."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/local-stack/scripts/n8n-local-menu.ps1",
+      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1",
+      "notes": "Clean-rebuilt menu with exact guide option names. The menu loops after actions and closes only when the user selects Exit or closes the window."
     },
     {
       "mode": "adapted",
@@ -85,39 +122,28 @@
       "notes": "Toolkit-adapted after migration to delegate to the current inert .template.md agent-rule generator instead of regenerating retired active-name template docs."
     },
     {
-      "mode": "adapted",
+      "mode": "excluded",
+      "source_path": "2. upgrading.md",
+      "source_blob_sha": "a155cef59f93e9b31104ac91289490665ef32e47",
+      "notes": "Collapsed into the Local Setup and Hostinger VPS update sections during the clean rebuild. The standalone upgrade page is no longer published."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "3. tunneling guide.md",
+      "source_blob_sha": "3c3b252811c024803123c44459ff9f6c23c4cc24",
+      "notes": "Collapsed into Local Setup. The supported beginner path now uses the ngrok Docker Desktop extension, with Compose ngrok kept as an advanced option."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "3a. docker compose + ngrok.md",
+      "source_blob_sha": "e0819653c14f2a05819fecd1ea113f949194c223",
+      "notes": "Collapsed into Local Setup and local stack templates. The standalone Compose/ngrok reference is no longer published."
+    },
+    {
+      "mode": "excluded",
       "source_path": "scripts/windows/start-n8n-ngrok.bat",
-      "project_path": "_projects/n8n/local-setup/_main/scripts/windows/start-n8n-ngrok.bat",
       "source_blob_sha": "2f3b40bdcf4e3cd9e54dce86e33b85653fb51c4a",
-      "notes": "Toolkit-adapted after migration to bind the local ngrok launcher container port to loopback by default while ngrok provides the public tunnel endpoint."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "templates/antigravity-mcp-config.md",
-      "project_path": "_projects/n8n/local-setup/_main/templates/antigravity-mcp-config.md",
-      "source_blob_sha": "e366f703f5f8de45f3715628cec0a4c195fee274",
-      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "templates/claude-mcp-config.md",
-      "project_path": "_projects/n8n/local-setup/_main/templates/claude-mcp-config.md",
-      "source_blob_sha": "1d050c7f8430aad5a2b09c476ec955cbdb5b765d",
-      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "templates/codex-mcp-config.md",
-      "project_path": "_projects/n8n/local-setup/_main/templates/codex-mcp-config.md",
-      "source_blob_sha": "66015cf2c0c9cdf01ad5fe5daa2b5656a2ba57c6",
-      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "templates/opencode-mcp-config.md",
-      "project_path": "_projects/n8n/local-setup/_main/templates/opencode-mcp-config.md",
-      "source_blob_sha": "31502fdc926cc1c4c9343945afd4dd477d1f7278",
-      "notes": "Toolkit-adapted to use numbered lists and sub-steps for easier readability."
+      "notes": "Obsolete BAT launcher removed. The supported launcher is _n8n-local.cmd."
     },
     {
       "mode": "excluded",

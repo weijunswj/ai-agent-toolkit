@@ -1550,7 +1550,7 @@ test('changing canonical n8n agent rules source makes generated skill copies sta
 
 test('changing declared _main MCP config source makes root MCP config stale', () => {
   const cwd = tempCopy();
-  const source = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'codex-mcp-config.md');
+  const source = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'codex-mcp-config.md');
   fs.appendFileSync(source, '\n\n<!-- drift test -->\n');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
@@ -1580,7 +1580,7 @@ test('sync applies text_rewrites to concat outputs', () => {
   const outputPath = 'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md';
   const output = manifest.outputs.find((entry) => entry.output === outputPath);
   assert.equal(output?.kind, 'copy');
-  assert.equal(output?.source, '_main/templates/codex-mcp-config.md');
+  assert.equal(output?.source, '_main/codex-mcp-config.md');
 
   output.kind = 'concat';
   output.sources = [output.source];
@@ -1671,13 +1671,12 @@ test('internal AI-facing surfaces are generated from declared project output', (
   ];
   const expectedExactCopies = [
     ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/local-setup.md', '_main/1. local setup.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/upgrading.md', '_main/2. upgrading.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/tunnelling.md', '_main/3. tunneling guide.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md', '_main/3a. docker compose + ngrok.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/vps-hosting.md', '_main/4. vps hosting.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md', '_main/5. extra - claude code integration.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md', '_main/6. extra - opencode integration.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md', '_main/7. extra - antigravity integration.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/hostinger-vps.md', '_main/2. hostinger vps.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md', '_main/mcp setup - codex.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md', '_main/mcp setup - claude code.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md', '_main/mcp setup - opencode.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md', '_main/mcp setup - antigravity.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd', '_main/templates/local-stack/_n8n-local.cmd'],
     ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/README.md', '_main/skill/README.md'],
     ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/SKILL.md', '_main/skill/SKILL.md'],
     ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/agents/claude.md', '_main/skill/agents/claude.md'],
@@ -2215,11 +2214,22 @@ test('sync rejects symlinked curated source files outside the workspace', (t) =>
 
 test('sync rejects symlinked source directories outside the workspace', (t) => {
   const cwd = tempCopy();
-  const sourceDir = path.join(cwd, '_projects', 'n8n', 'local-setup', 'curated_output_for_ai', 'reference-link-shims');
+  const sourceDir = path.join(cwd, '_projects', 'n8n', 'local-setup', 'curated_output_for_ai', 'symlink-dir-fixture');
   const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-sync-outside-'));
   fs.writeFileSync(path.join(outsideDir, 'README.md'), '# Outside directory source\n');
 
   if (!createSymlinkOrSkip(t, outsideDir, sourceDir, process.platform === 'win32' ? 'junction' : 'dir')) return;
+
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.outputs.push({
+    kind: 'copy',
+    source: 'curated_output_for_ai/symlink-dir-fixture',
+    output: 'skills/n8n-local-setup/references/symlink-dir-fixture',
+    fidelity: 'reviewed_entrypoint'
+  });
+  manifest.writes.allowed.push('skills/n8n-local-setup/references/symlink-dir-fixture');
+  writeJsonFile(manifestPath, manifest);
 
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);

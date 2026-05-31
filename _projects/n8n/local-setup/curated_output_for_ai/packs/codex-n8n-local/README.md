@@ -6,7 +6,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Codex n8n Local Pack
 
-Collects [AI Coding Agent Rules](../../../ai-coding-agent-rules/), [n8n Agent Rules](../../../n8n-agent-rules/), the optional [Codex n8n adapter](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md), [local Docker Compose stack templates](../../templates/local-stack/), [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md), and local n8n setup guides.
+Collects [AI Coding Agent Rules](../../../ai-coding-agent-rules/), [n8n Agent Rules](../../../n8n-agent-rules/), the optional [Codex n8n adapter](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md), [local Docker Compose stack templates](../../templates/local-stack/), [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md), and local/Hostinger n8n setup guides.
 
 Review [pack.json](pack.json) before use.
 
@@ -23,6 +23,6 @@ If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge
 1. Copy everything inside [templates/local-stack/](../../templates/local-stack/) into `Desktop\n8n-local` or another local folder outside this repo.
 2. Copy [.env.example](../../templates/local-stack/.env.example) to a new file named `.env`.
 3. Fill placeholders locally in `.env`; do not edit `.env.example`.
-4. Start through [n8n-local.cmd](../../templates/local-stack/n8n-local.cmd).
+4. Start through [_n8n-local.cmd](../../templates/local-stack/_n8n-local.cmd).
 
 Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live imports/exports.

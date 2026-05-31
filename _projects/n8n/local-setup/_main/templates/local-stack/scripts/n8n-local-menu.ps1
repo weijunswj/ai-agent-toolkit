@@ -1,12 +1,14 @@
 $ErrorActionPreference = 'Stop'
 
 $script:StackRoot = (Get-Location).Path
-$script:Services = @('n8n', 'ngrok', 'postgres')
+$script:CoreServices = @('postgres', 'n8n')
+$script:Services = @('n8n', 'postgres', 'ngrok')
 $script:ServiceImages = @{
   n8n = 'docker.n8n.io/n8nio/n8n:stable'
-  ngrok = 'ngrok/ngrok:latest'
   postgres = 'postgres:16-alpine'
+  ngrok = 'ngrok/ngrok:latest'
 }
+$script:NgrokDockerDesktopGuide = 'https://dashboard.ngrok.com/get-started/setup/docker-desktop'
 
 function Write-Header {
   param([string]$Title)
@@ -163,7 +165,7 @@ function Check-Updates {
   if (-not (Test-DockerReady)) { return @() }
 
   Write-Header 'Check For Updates'
-  Write-Info 'This compares local image tag IDs before and after pull.'
+  Write-Info 'This compares local image tag IDs before and after docker compose pull.'
   Write-Info 'This may pull newer images into the local Docker cache.'
   Write-Info 'It does not restart or recreate running services.'
 
@@ -193,7 +195,7 @@ function Check-Updates {
     Write-Success 'Images are already current. No action needed.'
   } else {
     Write-Warning "Updates were pulled but not applied: $($updated -join ', ')"
-    Write-Warning 'Use Update selected services to recreate containers when ready.'
+    Write-Warning 'Use Update selected services or Update all services to recreate containers when ready.'
   }
 
   return $updated.ToArray()
@@ -206,15 +208,15 @@ function Read-ServiceSelection {
   )
 
   Write-Host ''
-  Write-Host 'Choices: all, n8n, ngrok, postgres, ' -NoNewline -ForegroundColor DarkCyan
+  Write-Host 'Choices: all, n8n, postgres, ngrok, ' -NoNewline -ForegroundColor DarkCyan
   Write-Host $CancelWord -ForegroundColor Yellow
   $choice = (Read-Host $Prompt).Trim().ToLowerInvariant()
 
   switch ($choice) {
     'all' { return $script:Services }
     'n8n' { return @('n8n') }
-    'ngrok' { return @('ngrok') }
     'postgres' { return @('postgres') }
+    'ngrok' { return @('ngrok') }
     default { return @() }
   }
 }
@@ -255,51 +257,32 @@ function Apply-Update {
   Write-Success 'Selected services were recreated.'
 }
 
-function Start-Stack {
-  Write-Header 'Start Stack'
+function Start-LocalStack {
+  Write-Header 'Start Local n8n Stack'
   if (-not (Test-StackFiles)) { return }
   if (-not (Test-DockerReady)) { return }
 
-  $check = Read-Host 'Check for updates before starting? (Y/n)'
-  if ($check -notmatch '^(n|no)$') {
-    $updated = @(Check-Updates -Services $script:Services)
-    if ($updated.Count -gt 0) {
-      $selection = Read-ServiceSelection -Prompt 'Update before starting?'
-      if ($selection.Count -gt 0) {
-        Apply-Update -Services $selection
-      } else {
-        Write-Warning 'Skipping updates for now.'
-      }
-    }
-  }
-
-  if ((Invoke-Compose -Arguments @('up', '-d')) -eq 0) {
+  if ((Invoke-Compose -Arguments @('up', '-d', 'postgres', 'n8n')) -eq 0) {
     [void](Invoke-Compose -Arguments @('ps'))
-    Write-Success 'Stack started.'
+    Write-Success 'Local n8n stack started.'
     Write-Host ''
-    Write-Host 'n8n:             http://localhost:5678' -ForegroundColor Green
-    Write-Host 'ngrok inspector: http://127.0.0.1:4040' -ForegroundColor Green
-  }
-}
-
-function Update-SelectedServices {
-  Write-Header 'Update Selected Services'
-  $selection = Read-ServiceSelection -Prompt 'Which service should be updated?'
-  Apply-Update -Services $selection
-}
-
-function Restart-Stack {
-  Write-Header 'Restart Stack'
-  if ((Test-StackFiles) -and (Test-DockerReady)) {
-    [void](Invoke-Compose -Arguments @('restart'))
+    Write-Host 'n8n: http://localhost:5678' -ForegroundColor Green
+    Write-Host 'Use the ngrok Docker Desktop extension for the beginner public tunnel path.' -ForegroundColor Cyan
   }
 }
 
 function Stop-Stack {
-  Write-Header 'Stop Stack'
+  Write-Header 'Stop Local n8n Stack'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
     [void](Invoke-Compose -Arguments @('down'))
     Write-Success 'Stack stopped. Docker volumes were not removed.'
+  }
+}
+
+function Restart-Stack {
+  Write-Header 'Restart Local n8n Stack'
+  if ((Test-StackFiles) -and (Test-DockerReady)) {
+    [void](Invoke-Compose -Arguments @('restart', 'postgres', 'n8n'))
   }
 }
 
@@ -325,16 +308,27 @@ function Show-Logs {
   }
 }
 
-function Open-N8n {
-  Write-Header 'Open n8n'
-  Start-Process "http://localhost:5678"
-  Write-Success 'Opened n8n in your browser.'
+function Update-SelectedServices {
+  Write-Header 'Update Selected Services'
+  $selection = Read-ServiceSelection -Prompt 'Which service should be updated?'
+  Apply-Update -Services $selection
 }
 
-function Open-NgrokInspector {
-  Write-Header 'Open ngrok Inspector'
-  Start-Process "http://127.0.0.1:4040"
-  Write-Success 'Opened the local ngrok inspector in your browser.'
+function Update-AllServices {
+  Write-Header 'Update All Services'
+  Apply-Update -Services $script:Services
+}
+
+function Open-N8n {
+  Write-Header 'Open Local n8n URL'
+  Start-Process "http://localhost:5678"
+  Write-Success 'Opened local n8n in your browser.'
+}
+
+function Open-NgrokDockerDesktopGuide {
+  Write-Header 'Open ngrok Docker Desktop Extension Guide'
+  Start-Process $script:NgrokDockerDesktopGuide
+  Write-Success 'Opened the ngrok Docker Desktop extension guide in your browser.'
 }
 
 function Backup-Postgres {
@@ -362,23 +356,26 @@ function Backup-Postgres {
 function Show-Help {
   Write-Header 'Help / Command Reference'
   Write-Host 'Recommended entrypoint:' -ForegroundColor Cyan
-  Write-Host '  n8n-local.cmd' -ForegroundColor White
+  Write-Host '  _n8n-local.cmd' -ForegroundColor White
   Write-Host ''
-  Write-Host 'Do not launch n8n directly from Docker Desktop. Launch it from n8n-local.cmd instead.' -ForegroundColor Yellow
+  Write-Host 'Do not launch n8n directly from Docker Desktop. Launch it from _n8n-local.cmd instead.' -ForegroundColor Yellow
   Write-Host 'Docker Desktop direct launch bypasses guided checks, selected updates, backups, and clear status output.' -ForegroundColor Cyan
   Write-Host ''
+  Write-Host 'Beginner public tunnel path:' -ForegroundColor Cyan
+  Write-Host "  $script:NgrokDockerDesktopGuide"
+  Write-Host ''
   Write-Host 'Raw commands behind the menu:' -ForegroundColor Cyan
-  Write-Host '  Start stack:              docker compose up -d'
+  Write-Host '  Start local n8n stack:    docker compose up -d postgres n8n'
   Write-Host '  Check for updates:        docker compose pull'
   Write-Host '  Update all services:      docker compose up -d --force-recreate'
   Write-Host '  Update one service:       docker compose up -d --force-recreate <service>'
-  Write-Host '  Stop stack:               docker compose down'
-  Write-Host '  Restart stack:            docker compose restart'
+  Write-Host '  Stop local n8n stack:     docker compose down'
+  Write-Host '  Restart local n8n stack:  docker compose restart postgres n8n'
   Write-Host '  Status:                   docker compose ps'
   Write-Host '  All logs:                 docker compose logs -f'
   Write-Host '  n8n logs:                 docker compose logs -f n8n'
-  Write-Host '  ngrok logs:               docker compose logs -f ngrok'
   Write-Host '  Postgres logs:            docker compose logs -f postgres'
+  Write-Host '  Compose ngrok logs:       docker compose logs -f ngrok'
   Write-Host '  Postgres backup:          docker compose exec -T postgres pg_dump'
   Write-Host ''
   Write-Host 'Updates are user-approved. Pulling images does not recreate or restart containers until you choose an update action.' -ForegroundColor Yellow
@@ -418,21 +415,22 @@ function Show-MainMenu {
   Show-LaunchStatus
   Write-Host ''
   Write-Host 'Choose an action:' -ForegroundColor Cyan
-  Write-Host '  1. Start stack'
-  Write-Host '  2. Check for updates'
-  Write-Host '  3. Update selected services'
-  Write-Host '  4. Restart stack'
-  Write-Host '  5. Stop stack'
-  Write-Host '  6. Show status'
-  Write-Host '  7. View all logs'
-  Write-Host '  8. View n8n logs'
-  Write-Host '  9. View ngrok logs'
-  Write-Host ' 10. View Postgres logs'
-  Write-Host ' 11. Open n8n'
-  Write-Host ' 12. Open ngrok inspector'
-  Write-Host ' 13. Backup Postgres database'
-  Write-Host ' 14. Help / command reference'
-  Write-Host ' 15. Exit'
+  Write-Host '  1. Start local n8n stack'
+  Write-Host '  2. Stop local n8n stack'
+  Write-Host '  3. Restart local n8n stack'
+  Write-Host '  4. Show status'
+  Write-Host '  5. View all logs'
+  Write-Host '  6. View n8n logs'
+  Write-Host '  7. View Postgres logs'
+  Write-Host '  8. View ngrok logs (advanced Compose tunnel)'
+  Write-Host '  9. Backup Postgres database'
+  Write-Host ' 10. Check for updates'
+  Write-Host ' 11. Update selected services'
+  Write-Host ' 12. Update all services'
+  Write-Host ' 13. Open local n8n URL'
+  Write-Host ' 14. Open ngrok Docker Desktop extension guide'
+  Write-Host ' 15. Help / command reference'
+  Write-Host ' 16. Exit'
   Write-Host ''
 }
 
@@ -441,23 +439,24 @@ while ($true) {
   $choice = Read-Host 'Enter a number'
 
   switch ($choice) {
-    '1' { Start-Stack; Pause-Menu }
-    '2' { [void](Check-Updates -Services $script:Services); Pause-Menu }
-    '3' { Update-SelectedServices; Pause-Menu }
-    '4' { Restart-Stack; Pause-Menu }
-    '5' { Stop-Stack; Pause-Menu }
-    '6' { Show-Status; Pause-Menu }
-    '7' { Show-Logs; Pause-Menu }
-    '8' { Show-Logs -Service 'n8n'; Pause-Menu }
-    '9' { Show-Logs -Service 'ngrok'; Pause-Menu }
-    '10' { Show-Logs -Service 'postgres'; Pause-Menu }
-    '11' { Open-N8n; Pause-Menu }
-    '12' { Open-NgrokInspector; Pause-Menu }
-    '13' { Backup-Postgres; Pause-Menu }
-    '14' { Show-Help; Pause-Menu }
-    '15' { Clear-Host; Write-Success 'Bye.'; return }
+    '1' { Start-LocalStack; Pause-Menu }
+    '2' { Stop-Stack; Pause-Menu }
+    '3' { Restart-Stack; Pause-Menu }
+    '4' { Show-Status; Pause-Menu }
+    '5' { Show-Logs; Pause-Menu }
+    '6' { Show-Logs -Service 'n8n'; Pause-Menu }
+    '7' { Show-Logs -Service 'postgres'; Pause-Menu }
+    '8' { Show-Logs -Service 'ngrok'; Pause-Menu }
+    '9' { Backup-Postgres; Pause-Menu }
+    '10' { [void](Check-Updates -Services $script:Services); Pause-Menu }
+    '11' { Update-SelectedServices; Pause-Menu }
+    '12' { Update-AllServices; Pause-Menu }
+    '13' { Open-N8n; Pause-Menu }
+    '14' { Open-NgrokDockerDesktopGuide; Pause-Menu }
+    '15' { Show-Help; Pause-Menu }
+    '16' { Clear-Host; Write-Success 'Bye.'; return }
     default {
-      Write-Warning 'Choose a number from 1 to 15.'
+      Write-Warning 'Choose a number from 1 to 16.'
       Pause-Menu
     }
   }
