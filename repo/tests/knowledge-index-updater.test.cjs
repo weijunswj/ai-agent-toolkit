@@ -108,6 +108,34 @@ test('Knowledge Index proposes meaningful writes with explicit format and confir
   }
 });
 
+test('Knowledge Index scheduled updater prompt requires explicit approval for meaningful writes', () => {
+  for (const filePath of [sourceSkill, generatedSkill]) {
+    const text = read(filePath);
+    const scheduled = section(text, '### 7. Scheduled updater behaviour');
+
+    assert.doesNotMatch(scheduled, /unless the user\s+explicitly requested automatic updates/i, filePath);
+    assert.match(scheduled, /Do not apply meaningful writes to existing rows without current-turn confirmation\./, filePath);
+    assert.match(scheduled, /Any meaningful write still requires explicit current-turn confirmation, including row creation\./, filePath);
+    assert.match(scheduled, /Do not add or update rows, identity keys, source fields, archive\/delete state, or merge operations without explicit current-turn confirmation\./, filePath);
+    assert.match(scheduled, /Do not refresh `Last checked` for rows with pending proposed meaningful changes until the proposal is approved or rejected\./, filePath);
+  }
+});
+
+test('Knowledge Index scheduled updater proposal format includes required fields', () => {
+  for (const filePath of [sourceSkill, generatedSkill]) {
+    const text = read(filePath);
+    const scheduled = section(text, '### 7. Scheduled updater behaviour');
+
+    assert.match(scheduled, /- \*\*Target:\*\* /, filePath);
+    assert.match(scheduled, /- \*\*Write type:\*\* /, filePath);
+    assert.match(scheduled, /- \*\*Current data:\*\* /, filePath);
+    assert.match(scheduled, /- \*\*Suggested data:\*\* /, filePath);
+    assert.match(scheduled, /- \*\*Reason:\*\* /, filePath);
+    assert.match(scheduled, /If confirmation is unavailable, report the proposed writes instead of applying them\./, filePath);
+    assert.match(scheduled, /\*\*Do you want me to apply these proposed writes\?\*\*/, filePath);
+  }
+});
+
 test('Knowledge Index explicitly requires confirmation for meaningful writes and row creation', () => {
   for (const filePath of [sourceSkill, generatedSkill]) {
     const text = read(filePath);
@@ -115,6 +143,7 @@ test('Knowledge Index explicitly requires confirmation for meaningful writes and
 
     const requiredMeanings = [
       'Creating a Notion page/row.',
+      'Updating `Category`.',
       'Updating `Name`.',
       'Updating `Description`.',
       'Updating `Status`.',
@@ -123,6 +152,8 @@ test('Knowledge Index explicitly requires confirmation for meaningful writes and
       'Updating `Notion Key`.',
       'Updating `GitHub Key`.',
       'Updating `Canonical Key`.',
+      'Archiving rows.',
+      'Deleting rows.',
       'Appending source identity data to an existing row.',
       'Adding, changing, or merging `Source`.',
       'Adding, changing, or merging `Notion Key`.',
@@ -174,13 +205,16 @@ test('Knowledge Index allows only pure Last checked refreshes without confirmati
 });
 
 test('Knowledge Index documents the required Last checked refresh reporting format', () => {
-  const text = read(sourceSkill);
-  const updateSection = section(text, '### Existing row update confirmation', '###');
-  assert.match(updateSection, /## Refreshed without confirmation/i, sourceSkill);
-  assert.match(updateSection, /- `<NAME>` — `Last checked` refreshed because no meaningful changes were found\./, sourceSkill);
-  assert.match(updateSection, /If approval is not available, report the proposed writes and reasons instead of applying them\./, sourceSkill);
-});
+  for (const filePath of [sourceSkill, generatedSkill]) {
+    const text = read(filePath);
+    const updateSection = section(text, '### Existing row update confirmation', '###');
 
+    assert.match(updateSection, /#### Refreshed without confirmation/i, filePath);
+    assert.match(updateSection, /- `<NAME>` - `Last checked` refreshed because no meaningful changes were found\./, filePath);
+    assert.doesNotMatch(updateSection, /- `<NAME>`\s*[\u2013\u2014\u2015]\s*`Last checked` refreshed because no meaningful changes were found\./, filePath);
+    assert.match(updateSection, /If approval is not available, report the proposed writes and reasons instead of applying them\./, filePath);
+  }
+});
 test('Knowledge Index README documents same proposal-first rule', () => {
   for (const filePath of [sourceReadme, generatedReadme]) {
     const text = read(filePath);
