@@ -76,7 +76,8 @@ Use:
 
 ```text
 Notion Key = notion.so/<page-id>
-GitHub Key = github.com/<owner>/<repo>
+GitHub Key = github.com/<owner>/<repo> for repo rows
+GitHub Key = github.com/<owner>/<repo>/... for guide, reference, tool, or portfolio rows that intentionally point at a specific repo path
 ```
 
 Before creating a row, always query whether an existing row already has the same:
@@ -92,16 +93,24 @@ Do not use `Canonical Key` for matching, creating, merging, or deduplication. It
 
 Default mode is **audit/propose first**.
 
-No meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes.
+When no active user request or automation prompt grants write permission, no meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes.
 
-Meaningful writes that always require confirmation:
+If the active user request or automation prompt explicitly allows safe non-destructive creates and updates, apply those writes without asking again only when identity is certain and the write does not delete, archive, hide, or merge uncertain rows. Still batch all proposed writes into one compact approval request if the platform or connector requires explicit confirmation.
+
+Meaningful writes that require confirmation unless the active request explicitly authorizes safe non-destructive writes:
 
 - Creating a Notion page/row.
 - Updating `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`.
 - Adding, changing, or merging `Source`, `Notion Key`, `GitHub Key`, or `Canonical Key`.
 - Appending source identity data to an existing row.
+
+Meaningful writes that always require explicit confirmation:
+
 - Archiving rows.
 - Deleting rows.
+- Hiding rows or changing archive/delete state.
+- Merging rows when identity is uncertain.
+- Normalizing an intentional GitHub repo subpath to a root repo key.
 - Any GitHub write, issue, branch, PR, file, label, metadata, or repository mutation if the skill routes such work.
 
 Allowed without confirmation:
@@ -133,7 +142,7 @@ Use this exact proposal style:
 **Do you want me to apply these proposed writes?**
 ```
 
-Do not apply any meaningful write without confirmation.
+Do not apply any meaningful write without confirmation unless the active request explicitly authorizes safe non-destructive creates and updates.
 
 If approval is not available, report the proposed writes and reasons instead of applying them.
 
@@ -141,7 +150,7 @@ If the user approves only some items, apply only those approved items.
 
 If a row already has a proposed meaningful change, do not refresh `Last checked` for that row until the proposal is approved or rejected.
 
-If a batch contains even one meaningful write, propose meaningful writes first and request confirmation before applying anything.
+If a batch contains even one meaningful write and the active request did not explicitly authorize safe non-destructive writes, propose meaningful writes first and request confirmation before applying anything.
 
 Batch refresh without confirmation is allowed only when every batch item is a pure `Last checked` refresh for a row with no meaningful changes.
 
