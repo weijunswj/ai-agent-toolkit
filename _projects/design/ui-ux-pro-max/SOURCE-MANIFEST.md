@@ -26,7 +26,6 @@ The preserved scripts are the toolkit-adapted local-only subset used by [skills/
 
 - UI/UX skill files under `skills/ui-ux-secure-frontend-design/**` are generated from `_main/skill/**` or copied from `_main/src/ui-ux-pro-max/**`.
 - AI-facing design generator scripts and CSV data are copied from `_main/src/ui-ux-pro-max/`.
-- `mcp/projects/ui-ux-pro-max.md` remains a narrow linked MCP project note. This UI/UX skill ownership pass does not attempt MCP registry or MCP reference cleanup.
 
 ## Excluded
 

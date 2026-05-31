@@ -1,6 +1,6 @@
 # AI Agent Toolkit
 
-A practical skills-first toolkit of reusable AI-agent skills, preserved source projects, and design/spec-only MCP metadata.
+A practical skills-first toolkit of reusable AI-agent skills and preserved source projects.
 
 ## What this repo is
 
@@ -8,8 +8,9 @@ This repo keeps reusable AI-agent material in a source-first layout:
 
 - [_projects/](_projects/) preserves project source, provenance, and reviewed AI-facing source.
 - [skills/](skills/) contains copyable AI-agent skill folders.
-- [mcp/](mcp/) contains design/spec-only registry docs and metadata. No runnable MCP server is shipped today.
 - [repo/](repo/) contains repo maintenance docs, scripts, tests, and validation policy.
+
+Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. Optional n8n AI-coding-agent MCP feature references remain inside [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material.
 
 ## Quick Start
 
@@ -17,7 +18,6 @@ This repo keeps reusable AI-agent material in a source-first layout:
 |---|---|
 | Full guide or source context | Open a project under [_projects/](_projects/), then its `_main/` folder. |
 | Install a skill | Copy the whole skill folder using [Install Skills By Platform](#install-skills-by-platform). |
-| MCP design/spec material | Open [mcp/](mcp/) for current status, design/spec docs, registries, and notes. |
 | Maintenance work | Start with [repo/docs/](repo/docs/) and the validation commands below. |
 
 ## Terms
@@ -26,8 +26,8 @@ This repo keeps reusable AI-agent material in a source-first layout:
 |---|---|
 | Project | The source/provenance area where the real material is maintained. |
 | Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files. |
-| MCP | Design/spec docs and metadata for future MCP usage. No runnable server is shipped today. Optional n8n AI-coding-agent MCP feature references live inside the n8n local setup skill as secondary material. |
-| Generated surface | A published file under [skills/](skills/) or [mcp/](mcp/) that is rebuilt from project source by a deterministic sync script. |
+| MCP | Not a repo-wide shipped/generated surface in this repo right now. Optional n8n AI-coding-agent MCP feature references live inside the n8n local setup skill as secondary material. |
+| Generated surface | A published file under [skills/](skills/) that is rebuilt from project source by a deterministic sync script. |
 
 ## Project Categories
 
@@ -67,7 +67,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
 | [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
 | [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |
-| [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, MCP notes, templates, manifests, and audits. |
+| [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, templates, manifests, and audits. |
 | [Secure UI/UX Frontend Design](skills/ui-ux-secure-frontend-design/) | Design or review frontend work with accessibility, responsive, privacy, and security guardrails. |
 | [Windows Localhost Workflows](skills/windows-localhost-workflows/) | Start and verify Windows localhost dev services. |
 | [Knowledge Index Updater](skills/knowledge-index-updater/) | Maintain a Notion/GitHub knowledge index with stable source keys and no duplicate rows. |
@@ -96,18 +96,13 @@ Humans use `_projects/**` for source review and maintenance. Agents use generate
 
 Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [skills/n8n-agent-rules/](skills/n8n-agent-rules/). Optional adapters in [skills/n8n-agent-rules/adapters/](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
 
-## MCP
+## MCP Status
 
-MCP material lives in [mcp/](mcp/) as design/spec-only metadata. This repo does not ship a runnable MCP server, package, CLI, or executable MCP tools today. Optional n8n AI-coding-agent MCP feature references are packaged under [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary setup material.
+Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now.
 
-| MCP area | Status | Use |
-|---|---|---|
-| [mcp/](mcp/) | Overview | Current design/spec-only MCP status. |
-| [mcp/registry/](mcp/registry/) | MCP-ready registry metadata | JSON registry data for future discovery. |
-| [mcp/registry-mcp/](mcp/registry-mcp/) | Design/spec-only | Future read-only registry query design. |
-| [mcp/installer-mcp/](mcp/installer-mcp/) | Design/spec-only | Future approval-gated installer design. |
-| [mcp/projects/](mcp/projects/) | Project notes | Project-specific MCP specs, safety notes, and boundaries. |
-| [mcp/references/](mcp/references/) | Supporting docs | Security, registry, and installer notes. |
+The supported path is skills-first: humans use `_projects/**`; agents use `skills/**`.
+
+Optional n8n AI-coding-agent MCP feature references remain under [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material. They are not a repo-wide MCP surface.
 
 ## Folder Map
 
@@ -115,7 +110,6 @@ MCP material lives in [mcp/](mcp/) as design/spec-only metadata. This repo does 
 |---|---|
 | [_projects/](_projects/) | You want full preserved project guides/source material. |
 | [skills/](skills/) | You want copyable agent skills. |
-| [mcp/](mcp/) | You want MCP-ready registry, design/spec docs, and metadata. |
 | [repo/](repo/) | You are maintaining this toolkit. |
 
 ## For Maintainers
@@ -127,7 +121,7 @@ Edit source first, then publish:
 3. Update `_projects/**/toolkit.project.json` when routing or surface metadata changes.
 4. Run [`repo/scripts/sync-toolkit-projects.cjs`](repo/scripts/sync-toolkit-projects.cjs) with `--write`.
 
-Do not edit generated [skills/](skills/) or [mcp/](mcp/) outputs directly unless the output is explicitly declared as `linked`.
+Do not edit generated [skills/](skills/) outputs directly unless the output is explicitly declared as `linked`.
 
 For project module rules, follow [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md).
 
@@ -155,22 +149,22 @@ This repo has a source layer and a published layer.
 
 - `_projects/**/_main/` preserves full source material and original docs. Do not casually rewrite preserved source.
 - `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source material. Curated files may be AI-assisted, but they are source files and must be reviewed before publishing.
-- `_projects/**/toolkit.project.json` is the routing and toolkit project-version contract. It declares which `_main/` or `curated_output_for_ai/` files publish to `skills/` and `mcp/` outputs.
+- `_projects/**/toolkit.project.json` is the routing and toolkit project-version contract. It declares which `_main/` or `curated_output_for_ai/` files publish to `skills/` outputs.
 - Toolkit project `version` is the toolkit adaptation/module version, uses `version_policy: "semver"`, and must not be replaced by Git tags, package tags, GitHub release tags, upstream versions, or per-file versions.
 - `_projects/**/SOURCE-LOCK.json` records upstream/source provenance, exact source pins, blob pins, lifecycle, role, attribution requirement, and update policy.
 - For third-party projects, `toolkit.project.json` version is the toolkit adaptation version only; scheduled source-watch tracking must read upstream repo, source ref, locked commit, `source_update_policy`, attribution requirement, allowlisted files, and exact blob pins from `SOURCE-LOCK.json`.
 - Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.
 - `skills/` contains copyable AI-agent skill folders. The whole skill folder is the install unit.
 - Toolkit skill-routing source lives in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`; keep it aligned with current `skills/*/SKILL.md` when skills or skill-publishing project modules change, and document any intentionally omitted skill.
-- `mcp/` contains MCP-ready registry, design/spec docs, metadata, and status documentation for future MCP usage.
-- Generated `skills/` and `mcp/` files must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
+- This repo intentionally does not ship or maintain a repo-wide MCP generated surface for now. Optional n8n AI-coding-agent MCP feature references remain under `skills/n8n-local-setup/` as secondary n8n setup material.
+- Generated `skills/` files must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
 - `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
 - Publish declared outputs with:
   `node repo/scripts/sync-toolkit-projects.cjs --write`
 - Check generated freshness with:
   `node repo/scripts/sync-toolkit-projects.cjs --check`
 - CI checks generated freshness and may auto-sync deterministic generated outputs from the base/default branch workflow definition only on guarded same-repo PR branches targeting `main`; fork PRs and `main` are never writeback targets.
-- Auto-sync only republishes approved passive generated/synced outputs in `README.md`, `skills/**`, `mcp/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not write active root AI instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`), update other source files, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs. If source changes require active root instruction outputs to change, the PR author must commit those files manually on the PR branch.
+- Auto-sync only republishes approved passive generated/synced outputs in `README.md`, `skills/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not write active root AI instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`), update other source files, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs. If source changes require active root instruction outputs to change, the PR author must commit those files manually on the PR branch.
 - Because auto-sync writeback is privileged, it must not run generated test suites or PR-controlled generated executable code; full validation remains covered by normal read-only CI.
 - Auto-sync must not run full repo validation against raw PR heads; this avoids blocking otherwise valid behind-main PR branches.
 - Auto-sync static checks are limited to generated-surface freshness checks and git diff checks before committing generated output.
@@ -182,5 +176,5 @@ This repo has a source layer and a published layer.
 - If a writeback-eligible PR mixes eligible source/routing/contract edits with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, auto-sync must skip successfully instead of pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit generated outputs manually and rely on normal read-only validation.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 - A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
-- Required runtime context for a skill or MCP surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
+- Required runtime context for a skill surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
 <!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->

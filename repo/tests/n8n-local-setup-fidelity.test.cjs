@@ -862,7 +862,7 @@ test('repo README and usage docs route to n8n skills-first local setup surfaces'
 
   assert.match(combined, /Humans use `_projects\/\*\*`/);
   assert.match(combined, /Agents use (generated )?`skills\/\*\*`/);
-  assert.match(combined, /No runnable MCP server, package, CLI, or executable MCP tools are shipped from this repo today\./);
+  assert.match(combined, /Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now\./);
   assert.match(combined, /Optional n8n AI-coding-agent MCP feature references are secondary and not the beginner local setup path\./);
 
   for (const forbidden of [

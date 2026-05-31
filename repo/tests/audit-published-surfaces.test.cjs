@@ -114,7 +114,7 @@ test('audit-published-surfaces records declared n8n cross-skill references', () 
   );
 });
 
-test('audit-published-surfaces preserves legitimate curated references and MCP specs', () => {
+test('audit-published-surfaces preserves legitimate curated references without MCP specs', () => {
   const report = runAuditJson();
   const findings = report.issues.boundaryRecipeFindings.map((entry) => entry.path);
   const reviewedReference = report.boundaryRecipes.find((entry) =>
@@ -123,14 +123,11 @@ test('audit-published-surfaces preserves legitimate curated references and MCP s
   const importExportSafetyReference = report.boundaryRecipes.find((entry) =>
     entry.path === 'skills/n8n-workflow-helper-scripts/references/import-export-flow.md'
   );
-  const mcpSpec = report.boundaryRecipes.find((entry) => entry.path === 'mcp/installer-mcp/SPEC.md');
-
   assert.equal(reviewedReference?.classification, 'curated_reference');
   assert.equal(importExportSafetyReference?.classification, 'curated_reference');
-  assert.equal(mcpSpec?.classification, 'main_full_fidelity');
   assert.equal(findings.includes('skills/n8n-workflow-helper-scripts/references/workflow-sync.md'), false);
   assert.equal(findings.includes('skills/n8n-workflow-helper-scripts/references/import-export-flow.md'), false);
-  assert.equal(findings.includes('mcp/installer-mcp/SPEC.md'), false);
+  assert.equal(report.files.some((entry) => entry.path.startsWith('mcp/')), false);
 });
 
 test('audit-published-surfaces classifies curated boundary recipes', () => {
@@ -146,10 +143,9 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     'generated_cross_skill_reference',
     'curated_pack_readme',
     'curated_repo_local_agent_template',
-    'curated_spec',
     'curated_template',
     'curated_template_index',
-    'linked_exception'
+    'curated_template_index'
   ]) {
     assert.ok(report.boundaryClassifications[classification] > 0, classification);
   }
@@ -255,12 +251,12 @@ test('audit-published-surfaces detects new undeclared published files in a temp 
 
 test('audit-published-surfaces --check fails when a new undeclared published file is introduced', () => {
   const cwd = tempCopy();
-  const newFile = path.join(cwd, 'mcp', 'registry', 'new-audit-fixture.registry.json');
-  fs.writeFileSync(newFile, '[]\n', 'utf8');
+  const newFile = path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'n8n', 'new-audit-fixture-check.md');
+  fs.writeFileSync(newFile, '# New audit fixture\n', 'utf8');
 
   const result = runAudit(['--check'], cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /new undeclared published surface: mcp\/registry\/new-audit-fixture\.registry\.json/);
+  assert.match(result.stderr, /new undeclared published surface: skills\/n8n-local-setup\/references\/n8n\/new-audit-fixture-check\.md/);
 });
 
 test('audit-published-surfaces --check fails when a new cross-owned output lacks shared metadata', () => {
@@ -548,32 +544,10 @@ test('audit-published-surfaces rejects overview metadata on runtime recipes', ()
   assert.equal(finding.classification, 'suspicious_curated_runtime');
 });
 
-test('audit-published-surfaces rejects runtime MCP surfaces from the MCP-ready registry module', () => {
-  const cwd = tempCopy();
-  const outputRel = addDeclaredOutputFixture(cwd, ['repo-methodology', 'mcp-ready-registry'], {
-    kind: 'copy',
-    sourceRel: '_main/server-package/README.md',
-    outputRel: 'mcp/server-package/README.md',
-    sourceText: [
-      '# Runtime MCP Server Package',
-      '',
-      '## Setup',
-      '',
-      '1. Install the server package.',
-      '2. Start the MCP server.',
-      '3. Import runtime tools.',
-      ''
-    ].join('\n'),
-    metadata: {
-      notes: 'Published runtime MCP server package generated from project-owned source.',
-      fidelity: 'exact'
-    }
-  });
-
-  const report = runAuditJson(cwd);
-  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
-  assert.ok(finding);
-  assert.equal(finding.classification, 'suspicious_main_adapter');
+test('audit-published-surfaces reports no repo-wide MCP published files', () => {
+  const report = runAuditJson();
+  assert.equal(report.files.some((entry) => entry.path.startsWith('mcp/')), false);
+  assert.equal(report.inputs.projectManifests.some((entry) => entry.includes('mcp-ready-registry')), false);
 });
 
 test('audit-published-surfaces --check fails when a new curated runtime recipe is introduced', () => {

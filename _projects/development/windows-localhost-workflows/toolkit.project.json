@@ -35,8 +35,7 @@
     "allowed": [
       "skills/windows-localhost-workflows/SKILL.md",
       "skills/windows-localhost-workflows/README.md",
-      "skills/windows-localhost-workflows/agents/openai.yaml",
-      "mcp/registry/projects.registry.json"
+      "skills/windows-localhost-workflows/agents/openai.yaml"
     ],
     "denied": [
       ".env*",
@@ -67,8 +66,7 @@
       "summary": "Helps agents find the correct local launch command, handle Windows startup failures, and verify localhost services with logs and HTTP checks."
     },
     "mcp": {
-      "status": "not_applicable",
-      "summary": "No MCP surface is published for this standalone skill."
+      "status": "not_applicable"
     }
   }
 }

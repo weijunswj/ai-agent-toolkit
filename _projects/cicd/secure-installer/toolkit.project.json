@@ -25,13 +25,6 @@
     },
     {
       "kind": "curated",
-      "source": "curated_output_for_ai/mcp/secure-cicd-installer.md",
-      "output": "mcp/projects/secure-cicd-installer.md",
-      "notes": "Published MCP doc generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "curated",
       "source": "curated_output_for_ai/overviews/secure-cicd-installer.md",
       "output": "skills/secure-cicd-installer/references/secure-cicd-installer.md",
       "notes": "Short skill-local operating overview and safety wrapper generated from project-owned curated AI output; the full CI/CD prompt is extracted from _main.",
@@ -94,7 +87,6 @@
     "allowed": [
       "skills/secure-cicd-installer/SKILL.md",
       "skills/secure-cicd-installer/README.md",
-      "mcp/projects/secure-cicd-installer.md",
       "skills/secure-cicd-installer/references/secure-cicd-installer.md",
       "skills/secure-cicd-installer/templates/cicd/README.md",
       "skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md",
@@ -102,8 +94,7 @@
       "skills/secure-cicd-installer/templates/github-actions/README.md",
       "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md",
       "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
-      "skills/secure-cicd-installer/packs/secure-cicd/README.md",
-      "mcp/registry/projects.registry.json"
+      "skills/secure-cicd-installer/packs/secure-cicd/README.md"
     ],
     "denied": [
       ".env*",
@@ -128,16 +119,14 @@
     "summary": "Approval-gated CI/CD installer guidance, GitHub Actions hardening notes, and status templates."
   },
   "surface": {
-    "publish_as": "both",
+    "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/secure-cicd-installer",
       "summary": "Helps an agent plan and apply secure CI/CD installer materials while keeping writes, commands, credentials, and live actions gated."
     },
     "mcp": {
-      "status": "published",
-      "path": "mcp/projects/secure-cicd-installer.md",
-      "summary": "Spec-only MCP notes for future deterministic CI/CD and repository checks."
+      "status": "not_applicable"
     }
   }
 }

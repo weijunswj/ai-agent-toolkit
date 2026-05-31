@@ -29,10 +29,10 @@ const knownRetiredInternalSourceRepos = new Set([
 // SOURCE-LOCK source_path values must usually describe upstream repo paths,
 // not toolkit-local layout paths. A narrow exception exists for retired
 // same-repo migrations from former root published surfaces, where skills/
-// or mcp/ is the real pinned upstream path.
+// is the real pinned upstream path.
 const toolkitLocalSourcePathPrefixes = ['_projects/', 'repo/'];
-const sameRepoRootSurfaceSourcePathPrefixes = ['skills/', 'mcp/'];
-const rootSurfacePathPrefixes = ['skills/', 'mcp/'];
+const sameRepoRootSurfaceSourcePathPrefixes = ['skills/'];
+const rootSurfacePathPrefixes = ['skills/'];
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -224,7 +224,7 @@ function validateLocalPathTopology(file, relPath, label, errors) {
   if (Object.prototype.hasOwnProperty.call(file, 'root_surface_path')) {
     const normalized = normalizeRepoRelativePath(file.root_surface_path, 'root_surface_path', relPath, label, errors);
     if (normalized && !rootSurfacePathPrefixes.some((prefix) => normalized.startsWith(prefix))) {
-      errors.push(`${relPath} root_surface_path must point under skills/ or mcp/: ${label} uses ${file.root_surface_path}`);
+      errors.push(`${relPath} root_surface_path must point under skills/: ${label} uses ${file.root_surface_path}`);
     }
   }
 }

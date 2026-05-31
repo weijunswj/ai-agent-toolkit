@@ -2,7 +2,7 @@
 
 Date: 2026-05-18
 Branch: `codex/surface-fidelity-audit`
-Latest update: 2026-05-21 (`codex/mcp-ready-registry-ownership`)
+Latest update: 2026-06-01 (`codex/remove-repo-wide-mcp-surface`)
 
 ## Executive summary
 
@@ -14,8 +14,8 @@ The current audit finds:
 
 - 8 project modules under `_projects/`.
 - 8 current skill folders.
-- 25 tracked files under `mcp/`.
-- 188 tracked published-surface files under `skills/` and `mcp/`.
+- 0 tracked files under `mcp/`; repo-wide MCP is not shipped or maintained for now.
+- 188 tracked published-surface files under `skills/`.
 - 188 expanded declared/generated project outputs after the MCP-ready registry ownership pass.
 - 0 tracked published-surface files still manually present and not declared by project sync recipes.
 - 0 files covered by a pack install path but still not individually declared by project sync recipes.
@@ -41,7 +41,7 @@ The existing standalone skill folders are promoted into `_main/skill/**` and reg
 Audit baseline movement from the previous baseline:
 
 - `projects`: 5 to 7.
-- `publishedFiles`: 160 to 187 after refreshing the baseline against the current tracked `skills/` and `mcp/` files.
+- `publishedFiles`: 160 to 187 after refreshing the baseline against the current tracked `skills/` files.
 - `declaredOutputFiles`: 143 to 151.
 - `undeclaredPublishedFiles`: 44 to 37.
 - `boundaryRecipeOutputs`: 143 to 151.
@@ -204,7 +204,7 @@ npm run audit:surfaces
 npm run audit:surfaces:check
 ```
 
-The command inspects local Git-tracked `skills/` and `mcp/` files, `_projects/**/toolkit.project.json`, and `skills/**/packs/**/pack.json`. It does not call the network, run project scripts, install packages, summarize with AI, or touch live n8n.
+The command inspects local Git-tracked `skills/` files, `_projects/**/toolkit.project.json`, and `skills/**/packs/**/pack.json`. It does not call the network, run project scripts, install packages, summarize with AI, or touch live n8n.
 
 `--check` compares the current findings with `repo/docs/published-surface-audit-baseline.json`. The baseline intentionally records the current known manual, pack-installed undeclared, unresolved cross-owned, declared shared-surface, and suspicious surfaces so validation can fail when new surfaces appear before the existing follow-up cleanup is complete.
 
@@ -601,7 +601,7 @@ none
 ```
 
 Recommended fix:
-None for undeclared published files. Future PRs should keep new `skills/` and `mcp/` outputs source-owned through project modules.
+None for undeclared published files. Future PRs should keep new `skills/` outputs source-owned through project modules.
 
 ## Cross-project ownership issues
 

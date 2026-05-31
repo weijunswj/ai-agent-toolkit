@@ -19,8 +19,8 @@ const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT ||
 const rootReal = fs.realpathSync.native(root);
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 const projectRoot = '_projects';
-const approvedOutputPrefixes = ['skills/', 'mcp/'];
-const rootSurfacePrefixes = ['skills/', 'mcp/'];
+const approvedOutputPrefixes = ['skills/'];
+const rootSurfacePrefixes = ['skills/'];
 const forbiddenNames = new Set([
   '.n8n-local',
   '.tmp',
@@ -38,7 +38,7 @@ const forbiddenNames = new Set([
 const forbiddenDeniedPolicy = ['.env*', '**/*credential*', '**/*.key', '**/*.pem'];
 const supportedKinds = new Set(['copy', 'concat', 'curated', 'extract', 'json', 'linked']);
 const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
-const supportedPublishSurfaces = new Set(['skill', 'mcp', 'both', 'source_only']);
+const supportedPublishSurfaces = new Set(['skill', 'source_only']);
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
 const projectVersionPattern = /^\d+\.\d+\.\d+$/;
@@ -267,7 +267,7 @@ function validateProjectShape(errors, relPath) {
     fail(errors, `${relPath} missing surface metadata`);
   } else {
     if (!supportedPublishSurfaces.has(project.surface.publish_as)) {
-      fail(errors, `${relPath} surface.publish_as must be one of skill, mcp, both, source_only`);
+      fail(errors, `${relPath} surface.publish_as must be one of skill, source_only`);
     }
     for (const key of ['skill', 'mcp']) {
       const surface = project.surface[key];
@@ -607,19 +607,9 @@ function validateAndSync() {
   }
   if (errors.length) return { errors, projects, expanded };
 
+  const managedOutputs = new Set(expanded.map((item) => item.output));
   syncExpanded(expanded, errors);
 
-  const registryPath = 'mcp/registry/projects.registry.json';
-  const expectedRegistry = JSON.stringify(registryEntries(projects), null, 2) + '\n';
-  if (mode === 'write') {
-    writeText(registryPath, expectedRegistry);
-  } else {
-    const currentRegistry = safeExists(registryPath, 'generated output') ? readText(registryPath) : null;
-    if (currentRegistry !== expectedRegistry) fail(errors, `Stale generated output: ${registryPath}`);
-  }
-
-  const managedOutputs = new Set(expanded.map((item) => item.output));
-  managedOutputs.add(registryPath);
   validateNoUnmanagedMirrors(errors, managedOutputs);
 
   return { errors, projects, expanded };

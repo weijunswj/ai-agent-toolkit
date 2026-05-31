@@ -299,8 +299,7 @@
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
-      "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
-      "mcp/registry/projects.registry.json"
+      "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json"
     ],
     "denied": [
       ".env*",

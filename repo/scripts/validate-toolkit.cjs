@@ -83,14 +83,6 @@ const expectedFiles = [
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/angular.csv',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/data/stacks/laravel.csv',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/test_local_only.py',
-  'mcp/registry/skills.registry.json',
-  'mcp/registry/playbooks.registry.json',
-  'mcp/registry/templates.registry.json',
-  'mcp/registry/packs.registry.json',
-  'mcp/registry/projects.registry.json',
-  'mcp/registry/tools.registry.json',
-  'mcp/registry/source-repos.registry.json',
-  'mcp/registry/consumers.registry.json',
   '_projects/n8n/local-setup/SOURCE-LOCK.json',
   '_projects/development/ai-coding-agent-rules/SOURCE-LOCK.json',
   '_projects/n8n/workflow-toolkit/SOURCE-LOCK.json',
@@ -166,7 +158,6 @@ const expectedDirs = [
   'skills/n8n-local-setup/references/ai-agent-platforms',
   'skills/n8n-workflow-helper-scripts/references',
   'skills/n8n-workflow-templates/references',
-  'mcp/references',
   'skills/n8n-local-setup/references/n8n',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer',
@@ -181,25 +172,12 @@ const expectedDirs = [
   'skills/n8n-local-setup/packs/codex-n8n-local',
   'skills/n8n-local-setup/packs/claude-code-n8n-local',
   'skills/secure-cicd-installer/packs/secure-cicd',
-  'mcp/registry-mcp',
-  'mcp/installer-mcp',
-  'mcp/projects',
-  'mcp/registry',
   '.agents',
   '.agents/rules',
   '.github/workflows'
 ];
 
-const registryFiles = [
-  'mcp/registry/skills.registry.json',
-  'mcp/registry/playbooks.registry.json',
-  'mcp/registry/templates.registry.json',
-  'mcp/registry/packs.registry.json',
-  'mcp/registry/projects.registry.json',
-  'mcp/registry/tools.registry.json',
-  'mcp/registry/source-repos.registry.json',
-  'mcp/registry/consumers.registry.json'
-];
+const registryFiles = [];
 
 const activeThirdPartySources = new Map([
   ['nextlevelbuilder/ui-ux-pro-max-skill', {
@@ -221,7 +199,6 @@ const allowedRootEntries = new Set([
   'GEMINI.md',
   'README.md',
   '_projects',
-  'mcp',
   'package.json',
   'repo',
   'skills'
@@ -399,7 +376,6 @@ function isAutoSyncGeneratedOutputPath(relPath) {
   return (
     rel === 'README.md' ||
     rel.startsWith('skills/') ||
-    rel.startsWith('mcp/') ||
     autoSyncGeneratedAgentRuleTemplateOutputs.includes(rel)
   );
 }
@@ -500,44 +476,6 @@ function validateRootTopology(errors) {
     if (ignoredLocalDirs.has(entry.name)) continue;
     if (!allowedRootEntries.has(entry.name)) {
       fail(errors, `Unexpected root entry: ${entry.name}`);
-    }
-  }
-}
-
-function validateSourceRepoRegistry(errors) {
-  const retiredInternalSourceRepos = retiredInternalSourceReposFromLocks();
-  let registry;
-  try {
-    registry = readJson('mcp/registry/source-repos.registry.json');
-  } catch (error) {
-    fail(errors, `mcp/registry/source-repos.registry.json is not valid JSON: ${error.message}`);
-    return;
-  }
-  if (!Array.isArray(registry)) {
-    fail(errors, 'mcp/registry/source-repos.registry.json must be an array');
-    return;
-  }
-
-  for (const entry of registry) {
-    if (retiredInternalSourceRepos.has(entry.source)) {
-      fail(errors, `mcp/registry/source-repos.registry.json retired internal repo must not be listed as active source-watch target: ${entry.source}`);
-    }
-    const thirdParty = activeThirdPartySources.get(entry.source);
-    if (!thirdParty) continue;
-    if (entry.risk !== thirdParty.risk) {
-      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing risk metadata: ${entry.source}`);
-    }
-    if (entry.review_policy !== thirdParty.review_policy) {
-      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing manual-review metadata: ${entry.source}`);
-    }
-    if (!thirdParty.requiredStatus.test(entry.status || '')) {
-      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing attribution status: ${entry.source}`);
-    }
-    if (!thirdParty.requiredRole.test(entry.role || '')) {
-      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing attribution role: ${entry.source}`);
-    }
-    if (!entry.last_reviewed) {
-      fail(errors, `mcp/registry/source-repos.registry.json active third-party source missing last_reviewed: ${entry.source}`);
     }
   }
 }
@@ -743,7 +681,7 @@ function validateReadmeSurface(errors) {
     '## Quick Start',
     '## Projects',
     '## Skills',
-    '## MCP',
+    '## MCP Status',
     '## Folder Map',
     '## For Maintainers',
     '## Validation',
@@ -764,8 +702,8 @@ function validateReadmeSurface(errors) {
   if (appendixIndex === -1 || contractIndex === -1 || contractIndex < appendixIndex) {
     fail(errors, 'README.md source-of-truth contract block must live under the appendix');
   }
-  if (!text.includes('skills/') || !text.includes('mcp/')) {
-    fail(errors, 'README.md must use root-level skills/ and mcp/ surfaces');
+  if (!text.includes('skills/') || !/repo-wide MCP is intentionally not shipped/i.test(text)) {
+    fail(errors, 'README.md must use skills-first surfaces and state repo-wide MCP is intentionally not shipped');
   }
   if (removedForAiPathPattern.test(text)) {
     fail(errors, 'README.md must not reference the removed legacy AI surface');
@@ -919,8 +857,7 @@ function validateNoOldForAiReferences(errors) {
       rel.startsWith('.github/') ||
       rel.startsWith('repo/docs/') ||
       rel.startsWith('repo/scripts/') ||
-      rel.startsWith('skills/') ||
-      rel.startsWith('mcp/')
+      rel.startsWith('skills/')
     );
   });
   for (const entry of files) {
@@ -1219,7 +1156,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
       !/git\s+-C\s+"\$PR_ROOT"\s+ls-files\s+--others\s+--exclude-standard/.test(text)) {
     fail(errors, `${entry.relPath} missing post-sync changed-path validation`);
   }
-  const generatedOutputScope = 'README.md|skills/*|mcp/*';
+  const generatedOutputScope = 'README.md|skills/*';
   if (!text.includes(generatedOutputScope)) {
     fail(errors, `${entry.relPath} missing approved generated output path allowlist`);
   }
@@ -1339,7 +1276,7 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
   }
 
   const gitAddLines = (text.match(/^\s*(?:\/usr\/bin\/)?git(?:\s+-C\s+"\$PR_ROOT")?\s+add .+$/gm) || []).map((line) => line.trim());
-  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md skills mcp ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
+  const expectedGitAddLine = `/usr/bin/git -C "$PR_ROOT" add README.md skills ${autoSyncGeneratedAgentRuleTemplateOutputs.join(' ')}`;
   if (gitAddLines.length !== 1 || gitAddLines[0] !== expectedGitAddLine) {
     fail(errors, `${entry.relPath} must commit only approved generated output paths`);
   }
@@ -1588,7 +1525,7 @@ function validateSourceWatchTruthfulness(errors) {
     if (rel.startsWith('repo/docs/')) return true;
     if (rel === 'repo/scripts/watch-project-sources.cjs') return true;
     if (rel === 'repo/scripts/check-project-source-updates.cjs') return true;
-    if ((rel.startsWith('skills/') || rel.startsWith('mcp/')) && /\.(md|json|ya?ml)$/i.test(rel)) return true;
+    if (rel.startsWith('skills/') && /\.(md|json|ya?ml)$/i.test(rel)) return true;
     return false;
   });
   const forbiddenClaims = [
@@ -1631,11 +1568,24 @@ function validateSourceWatchTruthfulness(errors) {
   }
 }
 
-function validateMcpDocs(errors) {
-  for (const entry of listFiles().filter((item) => item.relPath.startsWith('mcp/'))) {
-    const text = fs.readFileSync(entry.fullPath, 'utf8');
-    if (/tool\s*:\s*(shell|write|exec)|execute_shell|write_file|read_any_file/i.test(text)) {
-      fail(errors, `${entry.relPath} appears to define arbitrary MCP shell/write/read tools`);
+function validateNoRepoWideMcpSurface(errors) {
+  if (existsRel('mcp')) fail(errors, 'Repo-wide mcp/ surface must not be shipped or maintained');
+  if (existsRel('_projects/repo-methodology/mcp-ready-registry')) {
+    fail(errors, 'Repo-wide MCP-ready registry source module must not be shipped or maintained');
+  }
+  for (const manifest of projectManifests()) {
+    if (['mcp', 'both'].includes(manifest.surface?.publish_as)) {
+      fail(errors, `${manifest.id} must not publish repo-wide MCP surfaces`);
+    }
+    for (const output of manifest.outputs || []) {
+      if (typeof output.output === 'string' && output.output.startsWith('mcp/')) {
+        fail(errors, `${manifest.id} must not declare repo-wide MCP output: ${output.output}`);
+      }
+    }
+    for (const allowed of manifest.writes?.allowed || []) {
+      if (typeof allowed === 'string' && allowed.startsWith('mcp/')) {
+        fail(errors, `${manifest.id} must not allow repo-wide MCP output writes: ${allowed}`);
+      }
     }
   }
 }
@@ -1647,7 +1597,6 @@ function runValidation() {
   validateForbiddenFiles(errors);
   validateTrackedLocalRuntimeFiles(errors);
   validateJsonRegistries(errors);
-  validateSourceRepoRegistry(errors);
   validatePacks(errors);
   validateSkills(errors);
   validateExecutables(errors);
@@ -1667,7 +1616,7 @@ function runValidation() {
   validateWorkflows(errors);
   validateMarkdownLinks(errors);
   validateSourceWatchTruthfulness(errors);
-  validateMcpDocs(errors);
+  validateNoRepoWideMcpSurface(errors);
   return errors;
 }
 

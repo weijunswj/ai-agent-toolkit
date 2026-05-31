@@ -14,8 +14,6 @@ The compact shared contract lives in [_projects/repo-methodology/context-preserv
 - CI/CD installer guides and templates.
 - Optional local-only tools.
 - Pack manifests.
-- MCP-ready registry metadata.
-- MCP design/spec docs.
 
 ## Product-Owned
 
@@ -31,9 +29,9 @@ Product repos own:
 
 Do not move product-owned assets into this toolkit.
 
-## Registries
+## Published Surfaces
 
-The JSON registries under `mcp/registry/` are the published MCP-ready registry discovery surface. Generated registries should be refreshed from project manifests with `node repo/scripts/sync-toolkit-projects.cjs --write`.
+The repo-wide generated surface is skills-first. Humans use `_projects/**` for source review and maintenance, and agents use generated `skills/**` folders after sync. Repo-wide MCP is intentionally not shipped or maintained as a generated surface for now.
 
 ## Documentation Links
 
@@ -55,7 +53,7 @@ The privileged workflow definition runs from the base/default branch, then write
 
 - Fork PRs are never written to.
 - `main` is never written to.
-- The workflow only republishes declared passive generated/synced outputs such as `README.md`, `skills/**`, `mcp/**`, and the source-side agent-rule templates generated from declared agent-rule partials.
+- The workflow only republishes declared passive generated/synced outputs such as `README.md`, `skills/**`, and the source-side agent-rule templates generated from declared agent-rule partials.
 - The workflow must not write active root AI instruction files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`. If source changes require those outputs to change, the PR author must commit them manually on the PR branch and rely on the normal read-only validation workflow.
 - It does not update other sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
 - Because the workflow is privileged, it does not run generated test suites, PR-controlled generated executable code, or full repo validation against raw PR heads; full validation remains covered by normal read-only CI.

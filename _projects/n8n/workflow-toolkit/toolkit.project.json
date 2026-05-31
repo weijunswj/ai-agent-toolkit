@@ -127,13 +127,6 @@
       "output": "skills/n8n-workflow-templates/templates/chatbot-with-RAG/rag-ingestion.workflow.template.json",
       "notes": "Reviewed generic inactive RAG knowledge-base ingestion workflow template generated from preserved source JSON.",
       "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/mcp/n8n-workflow-toolkit.md",
-      "output": "mcp/projects/n8n-workflow-toolkit.md",
-      "notes": "Published MCP doc generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
     }
   ],
   "writes": {
@@ -167,9 +160,7 @@
       "skills/n8n-workflow-templates/templates/README.md",
       "skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json",
       "skills/n8n-workflow-templates/templates/chatbot-with-RAG/customer-support-agent.workflow.template.json",
-      "skills/n8n-workflow-templates/templates/chatbot-with-RAG/rag-ingestion.workflow.template.json",
-      "mcp/projects/n8n-workflow-toolkit.md",
-      "mcp/registry/projects.registry.json"
+      "skills/n8n-workflow-templates/templates/chatbot-with-RAG/rag-ingestion.workflow.template.json"
     ],
     "denied": [
       ".env*",
@@ -197,16 +188,14 @@
     "summary": "Reusable n8n workflow helper scripts and public generic workflow templates with separate published skill boundaries that depend on n8n-agent-rules for the full n8n operating contract."
   },
   "surface": {
-    "publish_as": "both",
+    "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/n8n-workflow-helper-scripts",
       "summary": "Helps an agent review, copy, and use n8n helper-script templates safely while following n8n-agent-rules for workflow and live n8n work."
     },
     "mcp": {
-      "status": "published",
-      "path": "mcp/projects/n8n-workflow-toolkit.md",
-      "summary": "Spec-only MCP notes for future deterministic workflow toolkit validation and routing tools."
+      "status": "not_applicable"
     }
   }
 }

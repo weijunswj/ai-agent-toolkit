@@ -227,8 +227,7 @@
       "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-MANIFEST.template.md",
       "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json",
       "skills/context-preserving-ai-publisher/templates/ci/generated-surface-check.template.yml",
-      "skills/context-preserving-ai-publisher/templates/ci/safe-auto-sync.template.yml",
-      "mcp/registry/projects.registry.json"
+      "skills/context-preserving-ai-publisher/templates/ci/safe-auto-sync.template.yml"
     ],
     "denied": [
       ".env*",
