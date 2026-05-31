@@ -11,18 +11,18 @@ Beginner-facing source index for this toolkit module.
 
 Start with Local Setup for Docker Desktop on your own computer. Use Hostinger VPS for a public server.
 
-## Supporting References
-
-MCP setup pages are supporting references. They are not equal start paths for local setup.
+## Supporting Materials
 
 | Need | Open |
 | --- | --- |
-| Codex MCP setup | [Codex MCP Setup](./mcp%20setup%20-%20codex.md) |
-| Claude Code MCP setup | [Claude Code MCP Setup](./mcp%20setup%20-%20claude%20code.md) |
-| OpenCode MCP setup | [OpenCode MCP Setup](./mcp%20setup%20-%20opencode.md) |
-| Antigravity MCP setup | [Antigravity MCP Setup](./mcp%20setup%20-%20antigravity.md) |
 | Local stack templates | [templates/local-stack/](./templates/local-stack/) |
-| MCP config templates | [codex-mcp-config.md](./codex-mcp-config.md), [claude-mcp-config.md](./claude-mcp-config.md), [opencode-mcp-config.md](./opencode-mcp-config.md), [antigravity-mcp-config.md](./antigravity-mcp-config.md) |
+| Local helper scripts | [scripts/](./scripts/) |
+
+## Skills-First Routing
+
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync.
+
+MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
 
 ## Agent Rules And Adapters
 
@@ -36,5 +36,5 @@ MCP setup pages are supporting references. They are not equal start paths for lo
 ## Safety Notes
 
 - Do not run live n8n import/export, activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
-- Do not paste real API tokens, webhook secrets, passwords, encryption keys, or MCP tokens into repo files.
+- Do not paste real API tokens, webhook secrets, passwords, or encryption keys into repo files.
 - Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.

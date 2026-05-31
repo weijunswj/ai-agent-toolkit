@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "2.3.0",
+  "version": "3.0.0",
   "version_policy": "semver",
-  "version_notes": "Clean rebuild with two primary guides, final MCP setup/config sources, Hostinger VPS coverage, and the underscore-prefixed local launcher.",
+  "version_notes": "Skills-first n8n local setup pivot with MCP setup/config surfaces removed from supported routing.",
   "outputs": [
     {
       "kind": "curated",
@@ -21,13 +21,6 @@
       "source": "curated_output_for_ai/skills/n8n-local-setup/README.md",
       "output": "skills/n8n-local-setup/README.md",
       "notes": "Published skill README generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/mcp/n8n-local-setup.md",
-      "output": "mcp/projects/n8n-local-setup.md",
-      "notes": "Published MCP doc generated from project-owned curated AI output.",
       "fidelity": "reviewed_entrypoint"
     },
     {
@@ -62,22 +55,6 @@
           "to": "hostinger-vps.md"
         },
         {
-          "from": "./mcp%20setup%20-%20codex.md",
-          "to": "../ai-agent-platforms/codex.md"
-        },
-        {
-          "from": "./mcp%20setup%20-%20claude%20code.md",
-          "to": "../ai-agent-platforms/claude-code.md"
-        },
-        {
-          "from": "./mcp%20setup%20-%20opencode.md",
-          "to": "../ai-agent-platforms/opencode.md"
-        },
-        {
-          "from": "./mcp%20setup%20-%20antigravity.md",
-          "to": "../ai-agent-platforms/antigravity.md"
-        },
-        {
           "from": "../../../../skills/n8n-agent-rules/",
           "to": "../../../n8n-agent-rules/"
         }
@@ -97,72 +74,32 @@
       ]
     },
     {
-      "kind": "copy",
-      "source": "_main/mcp setup - codex.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/ai-agent-platforms/codex.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
-      "notes": "Final Codex MCP setup guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact",
-      "text_rewrites": [
-        {
-          "from": "./Page%201%20-%20Local%20Setup.md",
-          "to": "../n8n/local-setup.md"
-        },
-        {
-          "from": "./codex-mcp-config.md",
-          "to": "../../templates/mcp-configs/codex-mcp-config.md"
-        }
-      ]
+      "notes": "Skills-first AI-agent platform router generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/mcp setup - claude code.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/ai-agent-platforms/claude-code.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
-      "notes": "Final Claude Code MCP setup guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact",
-      "text_rewrites": [
-        {
-          "from": "./Page%201%20-%20Local%20Setup.md",
-          "to": "../n8n/local-setup.md"
-        },
-        {
-          "from": "./claude-mcp-config.md",
-          "to": "../../templates/mcp-configs/claude-mcp-config.md"
-        }
-      ]
+      "notes": "Skills-first AI-agent platform router generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/mcp setup - opencode.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/ai-agent-platforms/opencode.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",
-      "notes": "Final OpenCode MCP setup guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact",
-      "text_rewrites": [
-        {
-          "from": "./Page%201%20-%20Local%20Setup.md",
-          "to": "../n8n/local-setup.md"
-        },
-        {
-          "from": "./opencode-mcp-config.md",
-          "to": "../../templates/mcp-configs/opencode-mcp-config.md"
-        }
-      ]
+      "notes": "Skills-first AI-agent platform router generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/mcp setup - antigravity.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/ai-agent-platforms/antigravity.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md",
-      "notes": "Final Antigravity MCP setup guide copied from preserved source into the copyable skill folder.",
-      "fidelity": "exact",
-      "text_rewrites": [
-        {
-          "from": "./Page%201%20-%20Local%20Setup.md",
-          "to": "../n8n/local-setup.md"
-        },
-        {
-          "from": "./antigravity-mcp-config.md",
-          "to": "../../templates/mcp-configs/antigravity-mcp-config.md"
-        }
-      ]
+      "notes": "Skills-first AI-agent platform router generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
@@ -194,34 +131,6 @@
     },
     {
       "kind": "copy",
-      "source": "_main/antigravity-mcp-config.md",
-      "output": "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
-      "notes": "Final Antigravity MCP config copied from preserved source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "copy",
-      "source": "_main/claude-mcp-config.md",
-      "output": "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
-      "notes": "Final Claude MCP config copied from preserved source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "copy",
-      "source": "_main/codex-mcp-config.md",
-      "output": "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
-      "notes": "Final Codex MCP config copied from preserved source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "copy",
-      "source": "_main/opencode-mcp-config.md",
-      "output": "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md",
-      "notes": "Final OpenCode MCP config copied from preserved source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "copy",
       "source": "_main/templates/local-stack/docker-compose.yml",
       "output": "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
       "notes": "Copy-ready local Docker Compose stack for n8n, Postgres, and optional advanced Compose ngrok.",
@@ -247,13 +156,6 @@
       "output": "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
       "notes": "PowerShell menu for guided local stack start, update, logs, status, browser launch, and backup actions.",
       "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/templates/mcp-configs/README.md",
-      "output": "skills/n8n-local-setup/templates/mcp-configs/README.md",
-      "notes": "AI-facing index generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
@@ -288,7 +190,6 @@
     "allowed": [
       "skills/n8n-local-setup/SKILL.md",
       "skills/n8n-local-setup/README.md",
-      "mcp/projects/n8n-local-setup.md",
       "skills/n8n-local-setup/references/n8n/local-setup.md",
       "skills/n8n-local-setup/references/n8n/hostinger-vps.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
@@ -299,15 +200,10 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/README.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
-      "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
-      "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
-      "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
-      "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md",
       "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
       "skills/n8n-local-setup/templates/local-stack/.env.example",
       "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
-      "skills/n8n-local-setup/templates/mcp-configs/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
@@ -335,19 +231,17 @@
   "project": {
     "name": "Local n8n Setup",
     "category": "n8n",
-    "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, final MCP setup/config pages, Docker Compose local templates, and the underscore-prefixed guided launcher."
+    "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, Docker Compose local templates, skills-first agent routing, and the underscore-prefixed guided launcher."
   },
   "surface": {
-    "publish_as": "both",
+    "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/n8n-local-setup",
-      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, MCP config, Hostinger VPS reference, and platform setup pages while depending on n8n-agent-rules for workflow/live n8n rules."
+      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger VPS reference, local stack templates, and skills-first agent guidance while depending on n8n-agent-rules for workflow/live n8n rules."
     },
     "mcp": {
-      "status": "published",
-      "path": "mcp/projects/n8n-local-setup.md",
-      "summary": "Spec-only MCP notes for local n8n setup, Hostinger VPS references, and configuration surfaces; no runnable server is shipped."
+      "status": "not_applicable"
     }
   }
 }

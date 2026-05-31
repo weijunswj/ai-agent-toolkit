@@ -213,31 +213,28 @@
     "category": "n8n",
     "name": "local-setup",
     "title": "Local n8n Setup",
-    "version": "2.3.0",
+    "version": "3.0.0",
     "version_policy": "semver",
-    "version_notes": "Clean rebuild with two primary guides, final MCP setup/config sources, Hostinger VPS coverage, and the underscore-prefixed local launcher.",
+    "version_notes": "Skills-first n8n local setup pivot with MCP setup/config surfaces removed from supported routing.",
     "project": {
       "name": "Local n8n Setup",
       "category": "n8n",
-      "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, final MCP setup/config pages, Docker Compose local templates, and the underscore-prefixed guided launcher."
+      "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, Docker Compose local templates, skills-first agent routing, and the underscore-prefixed guided launcher."
     },
     "surface": {
-      "publish_as": "both",
+      "publish_as": "skill",
       "skill": {
         "status": "published",
         "path": "skills/n8n-local-setup",
-        "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, MCP config, Hostinger VPS reference, and platform setup pages while depending on n8n-agent-rules for workflow/live n8n rules."
+        "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger VPS reference, local stack templates, and skills-first agent guidance while depending on n8n-agent-rules for workflow/live n8n rules."
       },
       "mcp": {
-        "status": "published",
-        "path": "mcp/projects/n8n-local-setup.md",
-        "summary": "Spec-only MCP notes for local n8n setup, Hostinger VPS references, and configuration surfaces; no runnable server is shipped."
+        "status": "not_applicable"
       }
     },
     "module_path": "_projects/n8n/local-setup",
     "main_path": "_projects/n8n/local-setup/_main",
     "root_surfaces": [
-      "mcp/projects/n8n-local-setup.md",
       "skills/n8n-local-setup/README.md",
       "skills/n8n-local-setup/SKILL.md",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
@@ -257,12 +254,7 @@
       "skills/n8n-local-setup/templates/local-stack/.env.example",
       "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
-      "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
-      "skills/n8n-local-setup/templates/mcp-configs/README.md",
-      "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
-      "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
-      "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
-      "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md"
+      "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1"
     ]
   },
   {
@@ -375,9 +367,9 @@
     "category": "repo-methodology",
     "name": "mcp-ready-registry",
     "title": "MCP-Ready Registry",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "version_policy": "semver",
-    "version_notes": "Adds n8n-agent-rules registry metadata and replaces obsolete n8n add-on template metadata with adapter metadata.",
+    "version_notes": "Removes obsolete n8n MCP config template registry routing after the toolkit pivoted to skills-first n8n local setup.",
     "project": {
       "name": "MCP-Ready Registry",
       "category": "repo-methodology",

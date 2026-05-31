@@ -7,8 +7,7 @@
   "source_refs": [
     "_projects/n8n/local-setup/_main/Page 1 - Local Setup.md",
     "_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md",
-    "_projects/n8n/local-setup/_main/mcp setup - claude code.md",
-    "_projects/n8n/local-setup/_main/claude-mcp-config.md",
+    "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-code.md",
     "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
     "skills/n8n-local-setup/references/n8n/local-setup.md",
     "skills/n8n-local-setup/references/n8n/hostinger-vps.md",
@@ -21,8 +20,7 @@
     "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
     "skills/n8n-local-setup/templates/local-stack/.env.example",
     "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
-    "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
-    "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md"
+    "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1"
   ],
   "suitable_for": [
     "Claude Code",
@@ -43,8 +41,7 @@
     "skills/n8n-agent-rules/n8n-agent-rules.md",
     "skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md",
     "skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs",
-    "skills/n8n-local-setup/references/n8n-agent-rules.md",
-    "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md"
+    "skills/n8n-local-setup/references/n8n-agent-rules.md"
   ],
   "writes_allowed": [
     "user-approved Claude Code rules/config locations",
@@ -69,7 +66,7 @@
   "run_commands": false,
   "notes": [
     "Copy .env.example to .env locally and do not commit .env.",
-    "Use user-scoped MCP config unless a project explicitly needs project scope.",
+    "MCP setup/config is intentionally not shipped or maintained by this toolkit for now.",
     "Live n8n actions require separate explicit confirmation."
   ]
 }

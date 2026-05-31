@@ -12,7 +12,9 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Claude Code n8n Local Pack
 
-Collects [AI Coding Agent Rules](../../../ai-coding-agent-rules/), [n8n Agent Rules](../../../n8n-agent-rules/), the optional [Claude n8n adapter](../../../n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md), [local Docker Compose stack templates](../../templates/local-stack/), [Claude MCP config](../../templates/mcp-configs/claude-mcp-config.md), and local/Hostinger n8n setup guides.
+Collects [AI Coding Agent Rules](../../../ai-coding-agent-rules/), [n8n Agent Rules](../../../n8n-agent-rules/), the optional [Claude n8n adapter](../../../n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md), [local Docker Compose stack templates](../../templates/local-stack/), skills-first Claude Code routing, and local/Hostinger n8n setup guides.
+
+MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
 
 Review [pack.json](pack.json) before use.
 

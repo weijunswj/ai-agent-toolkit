@@ -1,80 +1,57 @@
 <!--
-Generated from toolkit project source. Do not edit directly.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/mcp setup - codex.md
-Update the project source and run sync.
+Source: _projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md
+Update the curated output and run sync.
 -->
-# Codex MCP Setup
+<!--
+Curated AI-facing source.
+Project: n8n.local-setup
+Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+-->
 
-The primary local setup guide is [Page 1 - Local Setup](../n8n/local-setup.md).
+# Codex Platform Router
 
-This page is a secondary Codex reference, not a required local setup path.
+Codex can consume this toolkit through skills and `AGENTS.md`. This is a skills-first router; use the linked full-fidelity files for runtime setup detail.
 
-## What This Adds
+## Boundary
 
-| Item | Use |
-| --- | --- |
-| `n8n_docs` | Node search and workflow validation using the community MCP. |
-| `n8n_live` | Read or mutate the real n8n instance only after explicit approval. |
-| Codex rules | Repo or user instructions for safer agent behavior. |
-| Codex MCP config | User-scoped MCP server setup. |
+This is a short platform overview and routing note. It is not the full runtime setup guide.
 
-## 1. Before You Start
+For full setup detail, use the local full-fidelity references and templates in this copied skill folder.
 
-1. Finish [Page 1 - Local Setup](../n8n/local-setup.md) first if you are using local n8n.
-2. You should already have:
-   1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed if you are running local n8n.
-   2. [Node.js](https://nodejs.org/en/download) installed.
-   3. [Codex](https://openai.com/index/introducing-the-codex-app/) installed.
-   4. n8n running locally, through a tunnel, or on a hosted domain.
-   5. Instance-level MCP enabled in n8n.
-   6. The live n8n MCP server URL copied from n8n.
-   7. A live n8n MCP token copied from n8n.
-
-## 2. Install Codex
-
-1. Install Codex using the official install method for your machine.
-2. Run this in a fresh PowerShell window:
-
-   ```powershell
-   node -v
-   npm -v
-   npx --version
-   ```
-
-## 3. Install Toolkit Skills For Codex
+## Skill Install
 
 Copy the whole `skills/<skill-name>/` folder.
-- **Choose any one supported Codex skill-folder location:**
 
-   | Scope | Skill folder location |
-   | --- | --- |
-   | Repo-local | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
-   | User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
-   | Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
+**Choose any one supported Codex skill-folder location:**
 
-- Do not copy only `SKILL.md`.
-- Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+| Scope | Skill folder location |
+| --- | --- |
+| Repo-level | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
+| User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
+| Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
 
-## 4. Agent Rules
+Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
-**If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
+Codex plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex should use direct whole-skill-folder installs.
 
-   | Need | Use |
-   | --- | --- |
-   | Generic Codex rules | [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) |
-   | Full n8n operating contract | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) |
-   | Optional n8n pointer | `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
+## Local Routes
 
-- If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+- Use [local setup](../n8n/local-setup.md) for the full local n8n and Codex setup guide.
+- Use [local stack templates](../../templates/local-stack/) for `n8n + postgres + ngrok`.
+- Use [skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for generic Codex agent rules. Copy or merge it into the target repo root as `AGENTS.md` only when the user explicitly wants Codex rules installed.
+- Use `skills/n8n-agent-rules` or [n8n-agent-rules.md](../n8n-agent-rules.md) before workflow, helper-script, or live n8n work.
+- Optionally merge `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` into `AGENTS.md`; it is a pointer, not the full ruleset.
+- Restart Codex after changing skills, agent rules, or user environment variables.
 
-## 5. Codex MCP Config
+## Toolkit Boundary
 
-Use the [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md).
-   - Add the configuration to your Codex setup.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
 
-## References
+## Smoke Tests
 
-- [Codex Docs](https://openai.com/index/introducing-the-codex-app/)
-- [Codex MCP config](https://developers.openai.com/codex/mcp)
-- [n8n MCP server docs](https://docs.n8n.io/advanced-ai/mcp/accessing-n8n-mcp-server/)
+- Rules-only: ask Codex to explain which local guide and skill references apply.
+- Local repo: ask Codex to inspect copied templates and report whether `.env.example` remains placeholder-only.
+
+Create live smoke-test workflows only after explicit confirmation.

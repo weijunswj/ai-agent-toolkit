@@ -1,12 +1,13 @@
 # Page 1 - Local Setup
 
-This is the beginner path for running n8n locally on Windows with Docker Desktop, Postgres, the guided `_n8n-local.cmd` menu, optional ngrok public access, and optional AI agent MCP setup.
+This is the beginner path for running n8n locally on Windows with Docker Desktop, Postgres, the guided `_n8n-local.cmd` menu, and optional ngrok public access.
 
 Use [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) instead when you want an always-on hosted server.
 
 * Start local n8n first.
 * Add ngrok only when something outside your computer must reach n8n.
-* Add MCP only when an AI agent needs n8n access.
+* Keep this toolkit skills-first: humans use `_projects/**`; agents use `skills/**`.
+* MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
 * Do not paste real tokens, credentials, `.env` values, backups, or live exports into repo files.
 
 ---
@@ -15,16 +16,15 @@ Use [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) instead when y
 
 | Step | What to do | Where | Result |
 | --- | --- | --- | --- |
-| 1. | Install Docker Desktop and Node.js LTS. | Your Windows computer. | Docker Compose and `npx` are available. |
+| 1. | Install Docker Desktop. | Your Windows computer. | Docker Compose is available. |
 | 2. | Create a local stack folder such as `C:\n8n-local`. | Windows Explorer. | Local runtime files stay outside this repo. |
 | 3. | Copy everything inside [templates/local-stack/](./templates/local-stack/) into your local stack folder. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, `_n8n-local.cmd`, and `scripts\`. |
 | 4. | Copy `.env.example` to `.env`. | `<LOCAL_STACK_FOLDER>`. | You have a private local settings file. |
 | 5. | Fill only local runtime values first. | `.env`. | Local n8n and Postgres can start. |
 | 6. | Double-click `_n8n-local.cmd`. | `<LOCAL_STACK_FOLDER>`. | The guided menu opens and stays open after actions. |
 | 7. | Choose `Start local n8n stack`. | Menu. | n8n starts locally without public exposure. |
-| 8. | Open `http://localhost:5678` and create the owner account. | Browser. | Local n8n works before public URL or MCP setup. |
-| 9. | Add ngrok only if something outside your computer must reach n8n. | Docker Desktop extension. | You get a public URL for webhooks, OAuth callbacks, or remote agent access. |
-| 10. | Enable MCP in n8n only if an AI agent needs it. | n8n settings plus the agent setup page. | Codex / Claude Code / OpenCode / Antigravity can use n8n MCP. |
+| 8. | Open `http://localhost:5678` and create the owner account. | Browser. | Local n8n works before any public URL setup. |
+| 9. | Add ngrok only if something outside your computer must reach n8n. | Docker Desktop extension. | You get a public URL for webhooks or OAuth callbacks. |
 
 Do not save `.env`, tokens, backups, `.n8n-local/`, `.tmp/`, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 
@@ -32,30 +32,24 @@ Do not save `.env`, tokens, backups, `.n8n-local/`, `.tmp/`, credentials, runtim
 
 ## 2. Before You Start
 
-Do not ask for ngrok, public URL, or MCP values before local n8n works. The order is:
+Do not ask for ngrok or public URL values before local n8n works. The order is:
 
 1. Start local n8n.
 2. Create the owner account at `http://localhost:5678`.
 3. Confirm local n8n works.
 4. Add a public ngrok URL only if needed.
-5. Enable MCP only if an AI agent needs to create, inspect, or manage n8n workflows through MCP.
 
 | Need | Install or open | Quick check |
 | --- | --- | --- |
 | Docker runtime | [Docker Desktop](https://www.docker.com/products/docker-desktop/) | Docker Desktop says the engine is running. |
-| Node.js for MCP helpers | [Node.js LTS](https://nodejs.org/en/download) | `node -v`, `npm -v`, and `npx --version` work in PowerShell. |
 | Local stack folder | A folder you control, such as `C:\n8n-local`. | It is outside this repo and outside Git tracking. |
 | ngrok account | [ngrok Docker Desktop setup](https://dashboard.ngrok.com/get-started/setup/docker-desktop) | Needed only when you need a public tunnel. |
-| AI agent app | Codex, Claude Code, OpenCode, or Antigravity. | Needed only for optional MCP setup. |
 
 Run these checks in PowerShell from any folder:
 
 ```powershell
 docker --version
 docker compose version
-node -v
-npm -v
-npx --version
 ```
 
 If Docker is installed but not running, open Docker Desktop and wait until the engine is ready.
@@ -172,19 +166,6 @@ Use these only after you create a public endpoint:
 | `NGROK_DOMAIN` | Your reserved ngrok domain. | `your-name.ngrok.app` | Needed only for the advanced Compose ngrok alternate. |
 
 The beginner path uses the ngrok Docker Desktop extension, so it does not require `NGROK_AUTHTOKEN` or `NGROK_DOMAIN` in `.env`.
-
-### MCP Values For AI Agents
-
-Do not add MCP values to the basic local stack `.env`.
-
-Put MCP URL and MCP token values into the AI agent setup/config, not basic local stack `.env`, unless a specific agent template explicitly tells you otherwise.
-
-| MCP value | Where it comes from | Where it goes |
-| --- | --- | --- |
-| MCP URL | n8n MCP settings after MCP is enabled. | Codex / Claude Code / OpenCode / Antigravity setup page. |
-| MCP token | n8n MCP settings after MCP is enabled. | User-scoped environment variable or supported secret storage. |
-
----
 
 ## 6. First-Time Local n8n Setup
 
@@ -326,43 +307,14 @@ Local update notes:
 
 ---
 
-## 11. AI Agents MCP Setup
+## 11. Skills-First Agent Guidance
 
-This step is optional.
+This toolkit is skills-first.
 
-Use it if you want Codex / Claude Code / OpenCode / Antigravity to create, inspect, or manage n8n workflows through MCP.
-
-Requirements before this step:
-
-1. n8n local setup must already be working.
-2. Public ngrok setup may be needed if the agent cannot reach local n8n directly.
-3. Enable MCP inside n8n.
-4. Copy the MCP URL.
-5. Copy the MCP token.
-6. Follow the detailed setup page for the relevant agent.
-
-Inside n8n:
-
-1. Open Settings.
-2. Open the instance-level MCP access page.
-3. Enable MCP.
-4. Copy the MCP URL shown by n8n.
-5. Copy the MCP token shown by n8n.
-
-For local n8n on the default port, the MCP URL usually has this shape:
-
-```text
-http://localhost:5678/mcp-server/http
-```
-
-| Platform | Detailed setup page | Use when |
-| --- | --- | --- |
-| Codex | [Codex MCP Setup](./mcp%20setup%20-%20codex.md) | You use Codex with n8n MCP. |
-| Claude Code | [Claude Code MCP Setup](./mcp%20setup%20-%20claude%20code.md) | You use Claude Code / Claude Desktop Code tab. |
-| OpenCode | [OpenCode MCP Setup](./mcp%20setup%20-%20opencode.md) | You use OpenCode. |
-| Antigravity | [Antigravity MCP Setup](./mcp%20setup%20-%20antigravity.md) | You use Antigravity. |
-
-Do not dump real MCP tokens into repo files.
+* Humans use `_projects/**` for source review and maintenance.
+* Agents use `skills/**` after generated outputs are synced.
+* MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+* Use [n8n Agent Rules](../../../../skills/n8n-agent-rules/) before workflow, helper-script, import/export, credential, execution, repo/live sync, or live-instance work.
 
 ---
 
@@ -387,15 +339,6 @@ Do not dump real MCP tokens into repo files.
 2. Confirm your public endpoint works.
 3. Set `WEBHOOK_URL`, `N8N_HOST`, `N8N_PROTOCOL`, and `N8N_PROXY_HOPS` intentionally.
 4. Recreate n8n from the menu with `Update selected services` or with a fallback command.
-
-### MCP Tools Do Not Appear
-
-1. Confirm MCP is enabled inside n8n.
-2. Confirm the MCP URL is the MCP endpoint, not just the n8n UI URL.
-3. Confirm the MCP token is stored in user-scoped environment variables or supported secret storage.
-4. Restart the agent app after config or environment changes.
-5. Use docs/search MCP tools before live n8n tools.
-6. Use live n8n tools only when the user clearly asks for real instance inspection or mutation.
 
 ### Port 5678 Is Already In Use
 
@@ -426,11 +369,11 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 ## 14. Safety Rules
 
 - Create the owner account locally before starting any public endpoint.
-- Treat an ngrok URL as public access to local n8n UI, API, webhooks, and MCP routes.
+- Treat an ngrok URL as public access to local n8n UI, API, and webhooks.
 - Do not treat ngrok as production hosting.
 - Do not expose the n8n container directly to the LAN or internet.
 - Do not run live n8n import/export, activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
-- Do not paste real API tokens, webhook secrets, passwords, encryption keys, or MCP tokens into repo files.
+- Do not paste real API tokens, webhook secrets, passwords, or encryption keys into repo files.
 - Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 - Do not remove `n8n_data` or `postgres_data` Docker volumes unless you intentionally want to delete local runtime data.
 - Use [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) for always-on hosted setup.
@@ -442,8 +385,5 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 | Reference | Use when |
 | --- | --- |
 | [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) | You need always-on public hosting on Hostinger. |
-| [Codex MCP Setup](./mcp%20setup%20-%20codex.md) | You need Codex-specific MCP setup. |
-| [Claude Code MCP Setup](./mcp%20setup%20-%20claude%20code.md) | You need Claude Code-specific MCP setup. |
-| [OpenCode MCP Setup](./mcp%20setup%20-%20opencode.md) | You need OpenCode-specific MCP setup. |
-| [Antigravity MCP Setup](./mcp%20setup%20-%20antigravity.md) | You need Antigravity-specific MCP setup. |
+| [Local stack templates](./templates/local-stack/) | You need the Docker Compose, environment template, launcher, and menu script. |
 | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) | You need the full n8n operating rules before workflow/live n8n work. |

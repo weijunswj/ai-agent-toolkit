@@ -6,7 +6,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Codex Platform Router
 
-Codex can consume this toolkit through skills, `AGENTS.md`, and MCP config templates. This is a router; use the linked full-fidelity files for runtime setup detail.
+Codex can consume this toolkit through skills and `AGENTS.md`. This is a skills-first router; use the linked full-fidelity files for runtime setup detail.
 
 ## Boundary
 
@@ -35,20 +35,17 @@ Codex plugin/package support exists, but this repo does not make it the primary 
 - Use [local setup](../n8n/local-setup.md) for the full local n8n and Codex setup guide.
 - Use [local stack templates](../../templates/local-stack/) for `n8n + postgres + ngrok`.
 - Use [skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for generic Codex agent rules. Copy or merge it into the target repo root as `AGENTS.md` only when the user explicitly wants Codex rules installed.
-- Use `skills/n8n-agent-rules` or [n8n-agent-rules.md](../n8n-agent-rules.md) before workflow, MCP, helper-script, or live n8n work.
+- Use `skills/n8n-agent-rules` or [n8n-agent-rules.md](../n8n-agent-rules.md) before workflow, helper-script, or live n8n work.
 - Optionally merge `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` into `AGENTS.md`; it is a pointer, not the full ruleset.
-- Use [Codex MCP config](../../templates/mcp-configs/codex-mcp-config.md) for the full Codex MCP config template.
-- Restart Codex after changing MCP config, agent rules, or user environment variables.
+- Restart Codex after changing skills, agent rules, or user environment variables.
 
-## n8n MCP Notes
+## Toolkit Boundary
 
-Use the docs server first for node discovery and validation. Use live n8n tools only when the user clearly asks for real instance inspection or mutation.
-
-Keep live MCP tokens in user environment variables. Do not paste token values into this repo or consumer repo files.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
 
 ## Smoke Tests
 
-- Docs-only: ask Codex to find a no-credentials Manual Trigger plus Set pattern.
-- Live read-only: ask Codex to list workflows and not modify anything.
+- Rules-only: ask Codex to explain which local guide and skill references apply.
+- Local repo: ask Codex to inspect copied templates and report whether `.env.example` remains placeholder-only.
 
 Create live smoke-test workflows only after explicit confirmation.

@@ -19,41 +19,25 @@ const guideOutputs = [
   {
     source: '_main/Page 2 - Hostinger VPS.md',
     output: 'skills/n8n-local-setup/references/n8n/hostinger-vps.md'
-  },
-  {
-    source: '_main/mcp setup - codex.md',
-    output: 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md'
-  },
-  {
-    source: '_main/mcp setup - claude code.md',
-    output: 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'
-  },
-  {
-    source: '_main/mcp setup - opencode.md',
-    output: 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md'
-  },
-  {
-    source: '_main/mcp setup - antigravity.md',
-    output: 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'
   }
 ];
 
-const mcpConfigOutputs = [
+const platformOutputs = [
   {
-    source: '_main/antigravity-mcp-config.md',
-    output: 'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md'
+    source: 'curated_output_for_ai/references/ai-agent-platforms/codex.md',
+    output: 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md'
   },
   {
-    source: '_main/claude-mcp-config.md',
-    output: 'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md'
+    source: 'curated_output_for_ai/references/ai-agent-platforms/claude-code.md',
+    output: 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'
   },
   {
-    source: '_main/codex-mcp-config.md',
-    output: 'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'
+    source: 'curated_output_for_ai/references/ai-agent-platforms/opencode.md',
+    output: 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md'
   },
   {
-    source: '_main/opencode-mcp-config.md',
-    output: 'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md'
+    source: 'curated_output_for_ai/references/ai-agent-platforms/antigravity.md',
+    output: 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'
   }
 ];
 
@@ -86,6 +70,17 @@ const obsoletePaths = [
   '_projects/n8n/local-setup/_main/5. extra - claude code integration.md',
   '_projects/n8n/local-setup/_main/6. extra - opencode integration.md',
   '_projects/n8n/local-setup/_main/7. extra - antigravity integration.md',
+  '_projects/n8n/local-setup/_main/mcp setup - codex.md',
+  '_projects/n8n/local-setup/_main/mcp setup - claude code.md',
+  '_projects/n8n/local-setup/_main/mcp setup - opencode.md',
+  '_projects/n8n/local-setup/_main/mcp setup - antigravity.md',
+  '_projects/n8n/local-setup/_main/codex-mcp-config.md',
+  '_projects/n8n/local-setup/_main/claude-mcp-config.md',
+  '_projects/n8n/local-setup/_main/opencode-mcp-config.md',
+  '_projects/n8n/local-setup/_main/antigravity-mcp-config.md',
+  '_projects/n8n/local-setup/curated_output_for_ai/mcp/n8n-local-setup.md',
+  '_projects/n8n/local-setup/curated_output_for_ai/templates/mcp-configs/README.md',
+  'mcp/projects/n8n-local-setup.md',
   '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local.cmd',
   '_projects/n8n/local-setup/_main/scripts/windows/start-n8n-ngrok.bat',
   'skills/n8n-local-setup/references/n8n/upgrading.md',
@@ -99,7 +94,12 @@ const obsoletePaths = [
   'skills/n8n-local-setup/references/n8n/4. vps hosting.md',
   'skills/n8n-local-setup/references/n8n/5. extra - claude code integration.md',
   'skills/n8n-local-setup/references/n8n/6. extra - opencode integration.md',
-  'skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md'
+  'skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md',
+  'skills/n8n-local-setup/templates/mcp-configs/README.md',
+  'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md',
+  'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md',
+  'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md',
+  'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md'
 ];
 
 const expectedMenuOptions = [
@@ -185,7 +185,7 @@ function menuOptions(menu) {
 
 test('n8n local setup final source and generated surfaces are declared', () => {
   const manifest = localSetupManifest();
-  for (const expected of [...guideOutputs, ...mcpConfigOutputs, ...localStackOutputs]) {
+  for (const expected of [...guideOutputs, ...localStackOutputs]) {
     const output = manifest.outputs.find((entry) => entry.output === expected.output);
     assert.ok(output, expected.output);
     assert.equal(output.kind, 'copy', expected.output);
@@ -194,12 +194,27 @@ test('n8n local setup final source and generated surfaces are declared', () => {
     assert.ok(manifest.writes.allowed.includes(expected.output), expected.output);
   }
 
+  for (const expected of platformOutputs) {
+    const output = manifest.outputs.find((entry) => entry.output === expected.output);
+    assert.ok(output, expected.output);
+    assert.equal(output.kind, 'curated', expected.output);
+    assert.equal(output.source, expected.source, expected.output);
+    assert.equal(output.fidelity, 'reviewed_entrypoint', expected.output);
+    assert.ok(manifest.writes.allowed.includes(expected.output), expected.output);
+  }
+
   for (const removed of [
+    'mcp/projects/n8n-local-setup.md',
     'skills/n8n-local-setup/references/n8n/upgrading.md',
     'skills/n8n-local-setup/references/n8n/tunnelling.md',
     'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md',
     'skills/n8n-local-setup/references/n8n/vps-hosting.md',
-    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd'
+    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
+    'skills/n8n-local-setup/templates/mcp-configs/README.md',
+    'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md',
+    'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md',
+    'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md',
+    'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md'
   ]) {
     assert.equal(manifest.outputs.some((entry) => entry.output === removed), false, removed);
     assert.equal(manifest.writes.allowed.includes(removed), false, removed);
@@ -208,11 +223,17 @@ test('n8n local setup final source and generated surfaces are declared', () => {
 
 test('n8n local setup generated files preserve source bodies', () => {
   const manifest = localSetupManifest();
-  for (const expected of [...guideOutputs, ...mcpConfigOutputs]) {
+  for (const expected of guideOutputs) {
     const source = readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`).trimEnd() + '\n';
     const recipe = manifest.outputs.find((entry) => entry.output === expected.output);
     const output = stripGeneratedNotices(readText(repoRoot, expected.output));
     assert.equal(output, applyTextRewrites(source, recipe), expected.output);
+  }
+
+  for (const expected of platformOutputs) {
+    const source = stripGeneratedNotices(readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`));
+    const output = stripGeneratedNotices(readText(repoRoot, expected.output));
+    assert.equal(output, source, expected.output);
   }
 
   for (const expected of localStackOutputs) {
@@ -236,6 +257,9 @@ test('obsolete n8n local setup pages and launchers are removed', () => {
   for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'templates/local-stack/n8n-local.cmd', 'start-n8n-ngrok.bat']) {
     assert.doesNotMatch(combined, new RegExp(escapeRegExp(stale)), stale);
   }
+  for (const removedMcp of ['mcp/projects/n8n-local-setup.md', 'templates/mcp-configs', 'mcp setup - codex.md', 'codex-mcp-config.md']) {
+    assert.doesNotMatch(combined, new RegExp(escapeRegExp(removedMcp)), removedMcp);
+  }
 });
 
 test('n8n local setup source README exposes two main beginner pages', () => {
@@ -244,12 +268,16 @@ test('n8n local setup source README exposes two main beginner pages', () => {
   assert.match(readme, /^## Start Here$/m);
   assert.match(readme, /\[Page 1 - Local Setup\]\(\.\/Page%201%20-%20Local%20Setup\.md\)/);
   assert.match(readme, /\[Page 2 - Hostinger VPS\]\(\.\/Page%202%20-%20Hostinger%20VPS\.md\)/);
-  assert.match(readme, /MCP setup pages are supporting references/);
+  assert.match(readme, /^## Supporting Materials$/m);
   assert.match(readme, /Local stack templates/);
-  assert.match(readme, /MCP config templates/);
+  assert.match(readme, /Local helper scripts/);
+  assert.match(readme, /^## Skills-First Routing$/m);
+  assert.match(readme, /Humans use `_projects\/\*\*`/);
+  assert.match(readme, /Agents use generated `skills\/\*\*` surfaces after sync/);
+  assert.match(readme, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./);
   assert.match(readme, /\*\*If the \[AI Coding Agent Rules\]\(\.\.\/\.\.\/\.\.\/\.\.\/skills\/ai-coding-agent-rules\/\) skill is installed, repo-local templates are automatically checked/);
 
-  for (const stale of ['Upgrading', 'Tunneling Guide', 'Docker Compose + ngrok', 'extra - claude', 'extra - opencode', 'extra - antigravity']) {
+  for (const stale of ['Upgrading', 'Tunneling Guide', 'Docker Compose + ngrok', 'MCP setup pages', 'MCP config templates', 'mcp setup -', 'mcp-configs', 'extra - claude', 'extra - opencode', 'extra - antigravity']) {
     assert.doesNotMatch(readme, new RegExp(stale, 'i'), stale);
   }
 });
@@ -271,14 +299,14 @@ test('Local Setup keeps the corrected beginner flow', () => {
     '## 8. Daily Use',
     '## 9. Backup',
     '## 10. Updating Local Instances',
-    '## 11. AI Agents MCP Setup',
+    '## 11. Skills-First Agent Guidance',
     '## 12. Troubleshooting',
     '## 13. Advanced Queue Mode',
     '## 14. Safety Rules',
     '## 15. Appendices And References'
   ]);
 
-  assert.match(localSetup, /Do not ask for ngrok, public URL, or MCP values before local n8n works/i);
+  assert.match(localSetup, /Do not ask for ngrok or public URL values before local n8n works/i);
   assert.match(localSetup, /Open `http:\/\/localhost:5678`/);
   assert.match(localSetup, /Create the owner account locally/);
   assert.match(localSetup, /https:\/\/dashboard\.ngrok\.com\/get-started\/setup\/docker-desktop/);
@@ -293,7 +321,7 @@ test('Local Setup keeps the corrected beginner flow', () => {
   assert.match(localSetup, /Do not launch n8n directly from Docker Desktop\. Launch it from `_n8n-local\.cmd` instead\./);
 });
 
-test('Local Setup separates .env, public URL, and MCP values', () => {
+test('Local Setup separates .env and public URL values without MCP setup values', () => {
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
 
@@ -302,8 +330,6 @@ test('Local Setup separates .env, public URL, and MCP values', () => {
   assert.match(localSetup, /Replace only the value after `=`/);
   assert.match(localSetup, /^### Local Stack Runtime Values$/m);
   assert.match(localSetup, /^### Public n8n URL And Webhook Values$/m);
-  assert.match(localSetup, /^### MCP Values For AI Agents$/m);
-  assert.match(localSetup, /Put MCP URL and MCP token values into the AI agent setup\/config/);
 
   for (const variable of ['POSTGRES_PASSWORD', 'N8N_ENCRYPTION_KEY', 'WEBHOOK_URL', 'N8N_HOST', 'N8N_PROTOCOL', 'N8N_PROXY_HOPS', 'NGROK_AUTHTOKEN', 'NGROK_DOMAIN']) {
     assert.match(localSetup, new RegExp(`\\| \`${variable}\` \\|`), variable);
@@ -312,31 +338,36 @@ test('Local Setup separates .env, public URL, and MCP values', () => {
   assert.doesNotMatch(envExample, /N8N_MCP_URL|N8N_MCP_TOKEN/);
   assert.doesNotMatch(localSetup, /\| `N8N_MCP_URL` \| Basic local stack/);
   assert.doesNotMatch(localSetup, /\| `N8N_MCP_TOKEN` \| Basic local stack/);
+  assert.doesNotMatch(localSetup, /MCP Values For AI Agents|MCP URL|MCP token|Enable MCP|N8N_MCP_URL|N8N_MCP_TOKEN|mcp%20setup|templates\/mcp-configs/);
 });
 
-test('Local Setup routes optional AI Agents MCP setup after public URL setup', () => {
+test('Local Setup keeps skills-first agent guidance and does not route MCP setup', () => {
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   const publicIndex = localSetup.indexOf('## 7. ngrok Public Tunnel Setup');
-  const mcpIndex = localSetup.indexOf('## 11. AI Agents MCP Setup');
+  const skillsIndex = localSetup.indexOf('## 11. Skills-First Agent Guidance');
 
   assert.ok(publicIndex > -1, 'public URL setup section exists');
-  assert.ok(mcpIndex > publicIndex, 'MCP section appears after public URL setup');
-  assert.match(localSetup, /This step is optional/);
-  assert.match(localSetup, /Codex \/ Claude Code \/ OpenCode \/ Antigravity/);
-  assert.match(localSetup, /create, inspect, or manage n8n workflows through MCP/);
-  assert.match(localSetup, /n8n local setup must already be working/);
-  assert.match(localSetup, /Public ngrok setup may be needed if the agent cannot reach local n8n directly/);
-  assert.match(localSetup, /Enable MCP inside n8n/);
-  assert.match(localSetup, /MCP URL/);
-  assert.match(localSetup, /MCP token/);
+  assert.ok(skillsIndex > publicIndex, 'skills-first guidance appears after public URL setup');
+  assert.match(localSetup, /This toolkit is skills-first\./);
+  assert.match(localSetup, /Humans use `_projects\/\*\*` for source review and maintenance\./);
+  assert.match(localSetup, /Agents use `skills\/\*\*` after generated outputs are synced\./);
+  assert.match(localSetup, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./);
+  assert.match(localSetup, /Use \[n8n Agent Rules\]/);
 
-  for (const setupPage of [
-    '[Codex MCP Setup](./mcp%20setup%20-%20codex.md)',
-    '[Claude Code MCP Setup](./mcp%20setup%20-%20claude%20code.md)',
-    '[OpenCode MCP Setup](./mcp%20setup%20-%20opencode.md)',
-    '[Antigravity MCP Setup](./mcp%20setup%20-%20antigravity.md)'
+  for (const forbidden of [
+    'Codex MCP Setup',
+    'Claude Code MCP Setup',
+    'OpenCode MCP Setup',
+    'Antigravity MCP Setup',
+    'mcp%20setup%20-%20codex.md',
+    'mcp%20setup%20-%20claude%20code.md',
+    'mcp%20setup%20-%20opencode.md',
+    'mcp%20setup%20-%20antigravity.md',
+    'templates/mcp-configs',
+    'Enable MCP',
+    'through MCP'
   ]) {
-    assert.match(localSetup, new RegExp(escapeRegExp(setupPage)), setupPage);
+    assert.doesNotMatch(localSetup, new RegExp(escapeRegExp(forbidden)), forbidden);
   }
 });
 
@@ -474,42 +505,31 @@ test('Hostinger VPS page restores Hostinger-specific production content only', (
   assert.doesNotMatch(vps, /unrelated hosting providers/i);
 });
 
-test('MCP setup and config pages remain available and linked to generated template paths', () => {
-  for (const source of [
-    '_projects/n8n/local-setup/_main/mcp setup - antigravity.md',
-    '_projects/n8n/local-setup/_main/mcp setup - claude code.md',
-    '_projects/n8n/local-setup/_main/mcp setup - codex.md',
-    '_projects/n8n/local-setup/_main/mcp setup - opencode.md',
-    '_projects/n8n/local-setup/_main/antigravity-mcp-config.md',
-    '_projects/n8n/local-setup/_main/claude-mcp-config.md',
-    '_projects/n8n/local-setup/_main/codex-mcp-config.md',
-    '_projects/n8n/local-setup/_main/opencode-mcp-config.md'
-  ]) {
-    assert.equal(fs.existsSync(path.join(repoRoot, source)), true, source);
+test('MCP setup and config surfaces are not shipped from n8n local setup', () => {
+  for (const relPath of obsoletePaths.filter((entry) => entry.includes('mcp') || entry.includes('MCP'))) {
+    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
   }
 
-  const generatedPages = [
-    ['skills/n8n-local-setup/references/ai-agent-platforms/codex.md', '../../templates/mcp-configs/codex-mcp-config.md'],
-    ['skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md', '../../templates/mcp-configs/claude-mcp-config.md'],
-    ['skills/n8n-local-setup/references/ai-agent-platforms/opencode.md', '../../templates/mcp-configs/opencode-mcp-config.md'],
-    ['skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md', '../../templates/mcp-configs/antigravity-mcp-config.md']
-  ];
-
-  for (const [page, templateLink] of generatedPages) {
+  for (const page of platformOutputs.map((entry) => entry.output)) {
     const text = readText(repoRoot, page);
+    assert.match(text, /skills-first/i, page);
     assert.match(text, /\]\(\.\.\/n8n\/local-setup\.md\)/, page);
-    assert.match(text, new RegExp(escapeRegExp(templateLink)), page);
-    assert.doesNotMatch(text, /_Page%201|\]\(\.\/templates\//, page);
+    assert.match(text, /\]\(\.\.\/\.\.\/templates\/local-stack\/\)/, page);
+    assert.match(text, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./, page);
+    assert.doesNotMatch(text, /mcp-configs|N8N_MCP|mcp-server|MCP URL|MCP token|Enable MCP|through MCP|_Page%201|\]\(\.\/templates\//, page);
   }
 });
 
-test('curated indexes, skill metadata, MCP spec, and packs point to current surfaces', () => {
+test('curated indexes, skill metadata, and packs point to current skills-first surfaces', () => {
   const paths = [
     '_projects/n8n/local-setup/curated_output_for_ai/references/n8n/README.md',
     '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/README.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-code.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/opencode.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/antigravity.md',
     '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/SKILL.md',
     '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/mcp/n8n-local-setup.md',
     '_projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/README.md',
     '_projects/n8n/local-setup/curated_output_for_ai/packs/claude-code-n8n-local/README.md',
     '_projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/pack.json',
@@ -519,10 +539,47 @@ test('curated indexes, skill metadata, MCP spec, and packs point to current surf
   const combined = paths.map((relPath) => readText(repoRoot, relPath)).join('\n');
   assert.match(combined, /hostinger-vps\.md/);
   assert.match(combined, /_n8n-local\.cmd/);
-  assert.match(combined, /mcp-configs\/codex-mcp-config\.md/);
+  assert.match(combined, /references\/ai-agent-platforms/);
+  assert.match(combined, /skills-first|Skills-First/);
+  assert.match(combined, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./);
 
-  for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd']) {
+  for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'mcp-configs/codex-mcp-config.md', 'mcp/projects/n8n-local-setup.md', 'N8N_MCP']) {
     assert.doesNotMatch(combined, new RegExp(escapeRegExp(stale)), stale);
+  }
+});
+
+test('repo README and usage docs route to n8n skills-first local setup surfaces', () => {
+  const readme = readText(repoRoot, 'README.md');
+  const howToUse = readText(repoRoot, 'repo/docs/HOW-TO-USE.md');
+  const combined = `${readme}\n${howToUse}`;
+
+  for (const expected of [
+    'skills/n8n-local-setup/references/n8n/local-setup.md',
+    'skills/n8n-local-setup/references/n8n/hostinger-vps.md',
+    'skills/n8n-local-setup/templates/local-stack/',
+    'skills/n8n-local-setup/references/ai-agent-platforms/',
+    'skills/n8n-agent-rules/'
+  ]) {
+    assert.match(combined, new RegExp(escapeRegExp(expected)), expected);
+  }
+
+  assert.match(combined, /Humans use `_projects\/\*\*`/);
+  assert.match(combined, /Agents use (generated )?`skills\/\*\*`/);
+  assert.match(combined, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./);
+
+  for (const forbidden of [
+    'skills/n8n-local-setup/templates/mcp-configs/',
+    'mcp setup - codex',
+    'mcp setup - claude code',
+    'mcp setup - opencode',
+    'mcp setup - antigravity',
+    'Codex MCP config',
+    'Claude Code MCP config',
+    'OpenCode MCP config',
+    'Antigravity MCP config',
+    'MCP config templates'
+  ]) {
+    assert.doesNotMatch(combined, new RegExp(escapeRegExp(forbidden), 'i'), forbidden);
   }
 });
 
@@ -547,15 +604,14 @@ test('n8n local setup packs install current files only', () => {
       assert.ok(pack.installs.includes(expected), `${pack.id}: ${expected}`);
     }
 
-    for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd']) {
+    for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'mcp-configs', 'mcp setup', 'N8N_MCP']) {
       assert.equal(pack.installs.some((entry) => entry.includes(stale)), false, `${pack.id}: ${stale}`);
+      assert.equal((pack.source_refs || []).some((entry) => entry.includes(stale)), false, `${pack.id}: ${stale} source_refs`);
     }
   }
 
   assert.ok(codex.installs.includes('skills/n8n-local-setup/references/ai-agent-platforms/codex.md'));
-  assert.ok(codex.installs.includes('skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'));
   assert.ok(claude.installs.includes('skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'));
-  assert.ok(claude.installs.includes('skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md'));
 });
 
 test('n8n local setup published surface audit findings are resolved', () => {
