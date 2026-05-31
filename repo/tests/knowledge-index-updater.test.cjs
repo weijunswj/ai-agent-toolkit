@@ -13,6 +13,13 @@ const generatedReadme = path.join(repoRoot, 'skills', 'knowledge-index-updater',
 const fakeDataSourceId = 'collection://replace-with-your-notion-data-source-id';
 const realDataSourceIdPattern = /collection:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
+const sourceFiles = [
+  { filePath: sourceSkill, label: 'source SKILL' },
+  { filePath: generatedSkill, label: 'generated SKILL' },
+  { filePath: sourceReadme, label: 'source README' },
+  { filePath: generatedReadme, label: 'generated README' },
+];
+
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
 }
@@ -22,6 +29,12 @@ function section(text, heading, nextHeadingLevel = '##') {
   assert.notEqual(start, -1, `missing heading ${heading}`);
   const next = text.indexOf(`\n${nextHeadingLevel} `, start + heading.length);
   return next === -1 ? text.slice(start) : text.slice(start, next);
+}
+
+function updateSectionFor(filePath, text) {
+  const heading = filePath.includes('README.md') ? '## Existing row update confirmation' : '### Existing row update confirmation';
+  const nextLevel = filePath.includes('README.md') ? '##' : '###';
+  return section(text, heading, nextLevel);
 }
 
 test('Knowledge Index clean default schema excludes Canonical Key', () => {
@@ -59,7 +72,7 @@ test('Knowledge Index scheduled prompt uses database placeholders instead of a r
   }
 });
 
-test('Knowledge Index tests use a clearly fake Notion data source ID sentinel', () => {
+test('Knowledge Index test fixture keeps fake Notion data source sentinel', () => {
   assert.equal(fakeDataSourceId, 'collection://replace-with-your-notion-data-source-id');
   assert.match(fakeDataSourceId, /^collection:\/\/[a-z-]+$/);
   assert.doesNotMatch(fakeDataSourceId, realDataSourceIdPattern);
@@ -78,58 +91,113 @@ test('Knowledge Index property-only Notion page updates include empty content up
   }
 });
 
-test('Knowledge Index requires confirmation before non-trivial existing row updates', () => {
+test('Knowledge Index proposes meaningful writes with explicit format and confirmation question', () => {
+  for (const { filePath } of sourceFiles) {
+    const text = read(filePath);
+    const updateSection = updateSectionFor(filePath, text);
+
+    assert.match(updateSection, /Default mode is \*\*audit\/propose first\*\*/i, filePath);
+    assert.match(updateSection, /No meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes\./i, filePath);
+    assert.match(updateSection, /\*\*Target:\*\* `.*`/, filePath);
+    assert.match(updateSection, /\*\*Write type:\*\* `.*`/, filePath);
+    assert.match(updateSection, /\*\*Current data:\*\* `<current value or compact current row summary>`/, filePath);
+    assert.match(updateSection, /\*\*Suggested data:\*\* `<suggested replacement>`/, filePath);
+    assert.match(updateSection, /\*\*Reason:\*\* `<why this update is suggested>`/, filePath);
+    assert.match(updateSection, /\*\*Do you want me to apply these proposed writes\?\*\*/, filePath);
+    assert.match(updateSection, /If the user approves only some items, apply only those approved items\./, filePath);
+  }
+});
+
+test('Knowledge Index explicitly requires confirmation for meaningful writes and row creation', () => {
   for (const filePath of [sourceSkill, generatedSkill]) {
     const text = read(filePath);
-    const matching = section(text, '### 4. Match before creating rows', '###');
-    const updateConfirmation = section(text, '### Existing row update confirmation', '###');
-    const scheduled = section(text, '### 7. Scheduled updater behaviour');
+    const updateSection = section(text, '### Existing row update confirmation', '###');
 
-    assert.match(matching, /propose merging into one row and setting `Source` to `Notion \+ GitHub`; apply only after confirmation when an existing row would be changed\./, filePath);
-    assert.doesNotMatch(matching, /merge into one row and set `Source` to `Notion \+ GitHub`/, filePath);
-    assert.match(updateConfirmation, /Existing rows are treated as user-confirmed unless the user explicitly asks for automatic updates\./, filePath);
-    assert.match(updateConfirmation, /When an existing Knowledge Index row already exists and a non-trivial update seems needed, do not write immediately\./, filePath);
-    assert.match(updateConfirmation, /1\. \*\*<NAME>:\*\*[\s\S]*- \*\*Current data:\*\* `<current value or compact current row summary>`[\s\S]*- \*\*Suggested data:\*\* `<suggested replacement>`[\s\S]*- \*\*Reason:\*\* `<why this update is suggested>`/, filePath);
-    assert.match(updateConfirmation, /2\. \*\*<NAME>:\*\*[\s\S]*- \*\*Current data:\*\* `<current value or compact current row summary>`[\s\S]*- \*\*Suggested data:\*\* `<suggested replacement>`[\s\S]*- \*\*Reason:\*\* `<why this update is suggested>`/, filePath);
-    assert.match(updateConfirmation, /\*\*Do you want me to apply these suggested updates\?\*\*/, filePath);
-    assert.match(updateConfirmation, /Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation\./, filePath);
-    assert.match(updateConfirmation, /Adding keys or source data to an existing row is a meaningful update\./, filePath);
-    assert.match(updateConfirmation, /Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation\./, filePath);
-    assert.match(updateConfirmation, /Safe refresh fields such as `Last checked` may be updated only if the user requested a check\/update run/, filePath);
-    assert.match(updateConfirmation, /If confirmation is unavailable, report the suggested changes instead of applying them\./, filePath);
-    assert.match(scheduled, /Treat existing rows as user-confirmed unless I explicitly ask for automatic updates\./, filePath);
-    assert.match(scheduled, /Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation\./, filePath);
-    assert.match(scheduled, /propose merging them into one row and setting `Source` to `Notion \+ GitHub`; apply only after confirmation when an existing row would be changed\./, filePath);
-    assert.match(scheduled, /Adding keys or source data to an existing row is a meaningful update\. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation\./, filePath);
-    assert.doesNotMatch(scheduled, /Update `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, and `Last checked`\./, filePath);
-    assert.doesNotMatch(scheduled, /For safe non-destructive creates and updates, proceed without asking me for extra confirmation\./, filePath);
-    assert.doesNotMatch(scheduled, /merge them into one row and set `Source` to `Notion \+ GitHub`/, filePath);
+    const requiredMeanings = [
+      'Creating a Notion page/row.',
+      'Updating `Name`.',
+      'Updating `Description`.',
+      'Updating `Status`.',
+      'Updating `Visibility`.',
+      'Updating `Source`.',
+      'Updating `Notion Key`.',
+      'Updating `GitHub Key`.',
+      'Updating `Canonical Key`.',
+      'Appending source identity data to an existing row.',
+      'Adding, changing, or merging `Source`.',
+      'Adding, changing, or merging `Notion Key`.',
+      'Adding, changing, or merging `GitHub Key`.',
+      'Adding, changing, or merging `Canonical Key`.',
+    ];
+
+    for (const phrase of requiredMeanings) {
+      assert.match(updateSection, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), filePath);
+    }
+    assert.match(updateSection, /Do not apply any meaningful write without confirmation\./, filePath);
+    assert.match(updateSection, /If approval is not available, report the proposed writes and reasons instead of applying them\./, filePath);
   }
 });
 
-test('Knowledge Index README documents existing row update confirmation', () => {
-  for (const filePath of [sourceReadme, generatedReadme]) {
+test('Knowledge Index does not treat safe wording as confirmation bypass', () => {
+  for (const { filePath } of sourceFiles) {
     const text = read(filePath);
-    const updateConfirmation = section(text, '## Existing row update confirmation');
-
-    assert.match(updateConfirmation, /Existing rows are treated as user-confirmed unless the user explicitly asks for automatic updates\./, filePath);
-    assert.match(updateConfirmation, /1\. \*\*<NAME>:\*\*[\s\S]*- \*\*Current data:\*\* `<current value or compact current row summary>`[\s\S]*- \*\*Suggested data:\*\* `<suggested replacement>`[\s\S]*- \*\*Reason:\*\* `<why this update is suggested>`/, filePath);
-    assert.match(updateConfirmation, /\*\*Do you want me to apply these suggested updates\?\*\*/, filePath);
-    assert.match(updateConfirmation, /Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation\./, filePath);
-    assert.match(updateConfirmation, /Adding keys or source data to an existing row is a meaningful update\./, filePath);
-    assert.match(updateConfirmation, /Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation\./, filePath);
+    assert.doesNotMatch(text, /safe non-destructive/i, filePath);
+    assert.doesNotMatch(text, /batch-style.*without confirmation/i, filePath);
+    assert.doesNotMatch(text, /go ahead and.*apply/i, filePath);
   }
 });
 
-test('Knowledge Index README documents only Notion and GitHub hard identity keys', () => {
+test('Knowledge Index explicitly documents batch write rules', () => {
+  for (const filePath of [sourceSkill, generatedSkill]) {
+    const text = read(filePath);
+    const updateSection = section(text, '### Existing row update confirmation', '###');
+
+    assert.match(updateSection, /Special rule for batch writes:/, filePath);
+    assert.match(updateSection, /Batch writes are allowed without confirmation only when every item in the batch is a pure `Last checked` refresh for a row with no meaningful changes\./, filePath);
+    assert.match(updateSection, /If a batch contains even one meaningful write, propose meaningful writes first and request confirmation before applying anything\./, filePath);
+  }
+});
+
+test('Knowledge Index allows only pure Last checked refreshes without confirmation', () => {
+  for (const filePath of [sourceSkill, generatedSkill]) {
+    const text = read(filePath);
+    const updateSection = section(text, '### Existing row update confirmation', '###');
+
+    assert.match(updateSection, /`Last checked` may be refreshed without confirmation only when all conditions are true:/, filePath);
+    assert.match(updateSection, /1\.\s*The user requested a check\/update\/sync\/review run\./, filePath);
+    assert.match(updateSection, /2\.\s*The row already exists\./, filePath);
+    assert.match(updateSection, /3\.\s*No meaningful field changes are needed for that row\./, filePath);
+    assert.match(updateSection, /4\.\s*The write changes only `Last checked`\./, filePath);
+    assert.match(updateSection, /5\.\s*No other property, identity key, source field, status, visibility, title, description, archive\/delete state, or content changes are included\./, filePath);
+    assert.match(updateSection, /If a row has any proposed meaningful change, do not refresh `Last checked` for that row until the user approves or rejects the proposed change\./, filePath);
+  }
+});
+
+test('Knowledge Index documents the required Last checked refresh reporting format', () => {
+  const text = read(sourceSkill);
+  const updateSection = section(text, '### Existing row update confirmation', '###');
+  assert.match(updateSection, /## Refreshed without confirmation/i, sourceSkill);
+  assert.match(updateSection, /- `<NAME>` — `Last checked` refreshed because no meaningful changes were found\./, sourceSkill);
+  assert.match(updateSection, /If approval is not available, report the proposed writes and reasons instead of applying them\./, sourceSkill);
+});
+
+test('Knowledge Index README documents same proposal-first rule', () => {
   for (const filePath of [sourceReadme, generatedReadme]) {
     const text = read(filePath);
-    const keyRule = section(text, '## Key rule');
-    const view = section(text, '## Default view');
+    const updateSection = section(text, '## Existing row update confirmation', '##');
+    assert.match(updateSection, /No meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes\./, filePath);
+    assert.match(updateSection, /If the user approves only some items, apply only those approved items\./, filePath);
+    assert.match(updateSection, /Batch refresh without confirmation is allowed only when every batch item is a pure `Last checked` refresh for a row with no meaningful changes\./, filePath);
+    assert.match(updateSection, /Refresh only `Last checked` when the row already exists, no meaningful change is needed for that row, and the user requested a check\/update run\./, filePath);
+    assert.match(updateSection, /## Existing row update confirmation/, filePath);
+  }
+});
 
-    assert.match(keyRule, /`Notion Key` and `GitHub Key` are the only hard identity fields\./, filePath);
-    assert.match(keyRule, /Do not use `Canonical Key` for matching, creating, merging, or deduplication\./, filePath);
-    assert.doesNotMatch(keyRule, /Canonical Key = stable-slug/, filePath);
-    assert.doesNotMatch(view, /^\s*\d+\.\s+Canonical Key$/m, filePath);
+test('Knowledge Index still permits read/search/proposal-only work without confirmation', () => {
+  for (const { filePath } of sourceFiles) {
+    const text = read(filePath);
+    const updateSection = updateSectionFor(filePath, text);
+    const allowedWork = /Allowed without confirmation:[\s\S]*Search\/read Notion[\s\S]*Search\/read GitHub[\s\S]*Compare current data against desired data[\s\S]*Produce a proposed change list[\s\S]*Explain what would be written if approved/i;
+    assert.match(updateSection, allowedWork, filePath);
   }
 });
