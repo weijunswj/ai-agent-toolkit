@@ -68,7 +68,7 @@ Codex and Claude Code plugin/package support exists, but this repo does not make
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional n8n AI-coding-agent MCP feature references are secondary and not the beginner local setup path.
 
 ### Codex
 
@@ -147,8 +147,9 @@ Templates are published material. Review them before copying into a consumer rep
 - [Generic agent rule templates](../../skills/ai-coding-agent-rules/) contain generated inert slim baseline templates only. They intentionally do not include the full n8n ruleset or full skill-routing table.
 - [n8n agent rules](../../skills/n8n-agent-rules/) contain the full n8n operating ruleset plus optional brief adapters under `adapters/`.
 - [n8n local setup](../../skills/n8n-local-setup/references/n8n/local-setup.md) and [Hostinger VPS](../../skills/n8n-local-setup/references/n8n/hostinger-vps.md) contain the full local and hosted setup guides.
-- [n8n skills-first agent routing](../../skills/n8n-local-setup/references/ai-agent-platforms/) contains platform-specific skills/rules pointers.
+- [n8n AI-agent platform references](../../skills/n8n-local-setup/references/ai-agent-platforms/) contain platform-specific skills/rules pointers and optional n8n MCP feature setup.
 - [n8n local stack templates](../../skills/n8n-local-setup/templates/local-stack/) contain the local Docker Compose, placeholder environment, launcher, and menu files.
+- [n8n optional MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) contain AI-coding-agent MCP config examples for users intentionally enabling n8n MCP.
 - [n8n import/export sync helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/) contain n8n import/export, validation, compare, prepare, and sync helper templates.
 - [n8n sanitizer helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/) contain sanitizer tooling.
 - [n8n workflow templates](../../skills/n8n-workflow-templates/templates/) contain public generic inactive workflow JSON templates.
@@ -183,7 +184,7 @@ Use:
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
 - [Local n8n setup source module](../../_projects/n8n/local-setup/)
 
-Keep live n8n tokens in user environment variables, not repo files. MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+Keep live n8n tokens in user environment variables, not repo files. Optional Codex MCP feature config is secondary and not part of the beginner local setup path.
 
 ## Claude Code Setup
 
@@ -197,7 +198,7 @@ Use:
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
 
-MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+Optional Claude Code MCP feature config is secondary and not part of the beginner local setup path.
 
 ## OpenCode Setup
 
@@ -210,7 +211,7 @@ Use:
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
 
-MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+Optional OpenCode MCP feature config is secondary and not part of the beginner local setup path.
 
 ## Antigravity Setup
 
@@ -225,7 +226,7 @@ Use:
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
 
-MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+Optional Antigravity MCP feature config is secondary and not part of the beginner local setup path.
 
 ## ChatGPT Web And Claude Web
 
@@ -239,7 +240,7 @@ The MCP surface is design/spec-only material in v1. Use [mcp/](../../mcp/) for s
 
 No runnable MCP server, package, CLI, or executable MCP tools are shipped from this repo today.
 
-MCP setup/config is intentionally not shipped or maintained by this toolkit for now. The supported path is skills-first: humans use `_projects/**`, and agents use `skills/**`.
+The supported path is skills-first: humans use `_projects/**`, and agents use `skills/**`. Optional n8n AI-coding-agent MCP feature references are packaged under `skills/n8n-local-setup/` as secondary setup material.
 
 ## Optional Design Tool
 

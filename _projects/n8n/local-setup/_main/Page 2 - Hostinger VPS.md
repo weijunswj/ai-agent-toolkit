@@ -72,19 +72,90 @@ Avoid a blank Ubuntu image unless you intentionally want to build and maintain t
 
 ## 4. First Login Checklist
 
-After provisioning:
+After Hostinger says the VPS is provisioned, do these in order.
 
-1. Open Hostinger hPanel.
-2. Open the VPS.
-3. Find the VPS IP address.
-4. Open Browser Terminal or connect by SSH.
-5. Open the default n8n URL from Hostinger.
-6. Create the first n8n owner/admin account.
-7. Store the account details in the password manager.
-8. Confirm the n8n editor loads.
-9. Do not add production credentials until backups and domain settings are understood.
+### 4.1 Open The VPS In hPanel
 
-Use a company-controlled email address for company deployments.
+1. Open a web browser.
+2. Go to Hostinger hPanel.
+3. Sign in to the Hostinger account that owns the VPS.
+4. Open the `VPS` area from the Hostinger dashboard.
+5. Click the VPS you just created.
+6. Click `Manage` if Hostinger shows a separate manage button.
+
+You should now be on the VPS dashboard for this one server.
+
+### 4.2 Find The VPS IP Address
+
+1. Stay on the VPS dashboard.
+2. Look for a card or field named one of these:
+   - `IP address`
+   - `Server IP`
+   - `IPv4`
+   - `Dedicated IP`
+3. Copy the IP address.
+4. Save it in the password manager or private setup notes.
+
+The IP address looks like this:
+
+```text
+123.123.123.123
+```
+
+Do not copy the Hostinger dashboard URL. You need the server IP address.
+
+### 4.3 Open A Terminal
+
+Use Hostinger Browser Terminal first. It avoids Windows SSH setup.
+
+1. Stay on the VPS dashboard.
+2. Look for `Browser Terminal`, `Terminal`, or `SSH`.
+3. Open Browser Terminal.
+4. Wait until you see a command prompt.
+
+If you prefer SSH from your computer:
+
+1. Open PowerShell.
+2. Run:
+
+   ```powershell
+   ssh root@<your-vps-ip>
+   ```
+
+3. Replace `<your-vps-ip>` with the IP address from hPanel.
+4. If Windows asks whether to trust the host, read the prompt and type `yes` only if the IP is your VPS.
+5. Enter the VPS password or use the SSH key configured in Hostinger.
+
+Terminal commands go in Browser Terminal or SSH. Website URLs go in your web browser.
+
+### 4.4 Open The Default n8n URL
+
+Hostinger's n8n template gives you a default n8n URL before you attach your own domain.
+
+1. In hPanel, look for the n8n access URL, default domain, hostname, or template instructions.
+2. Open a web browser.
+3. Paste the n8n URL into the browser address bar.
+
+Hostinger's n8n template guide describes the default URL shape as:
+
+```text
+https://n8n.<your-vps-hostname>
+```
+
+Do not type the n8n URL into Browser Terminal or SSH. It belongs in a web browser.
+
+### 4.5 Create The First n8n Owner Account
+
+The first time n8n opens, it should ask you to create the owner account.
+
+1. Use a company-controlled email address for company deployments.
+2. Create a strong password.
+3. Save the email, password, n8n URL, and VPS IP address in the password manager.
+4. Sign in.
+5. Confirm the n8n editor loads.
+6. Create a tiny manual test workflow only if you need to confirm the editor saves correctly.
+
+Do not add production credentials yet. First understand backups, domain setup, and who is responsible for restore.
 
 ---
 

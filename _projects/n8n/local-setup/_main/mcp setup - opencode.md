@@ -1,12 +1,6 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/mcp setup - opencode.md
-Update the project source and run sync.
--->
 # OpenCode MCP Setup
 
-The primary local setup guide is [Page 1 - Local Setup](../n8n/local-setup.md).
+The primary local setup guide is [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md).
 
 This page is an optional OpenCode AI-coding-agent MCP feature reference, not a required local setup path.
 
@@ -21,7 +15,7 @@ This page is an optional OpenCode AI-coding-agent MCP feature reference, not a r
 
 ## 1. Before You Start
 
-Finish [Page 1 - Local Setup](../n8n/local-setup.md) first if you are using local n8n.
+Finish [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md) first if you are using local n8n.
 
 You should already have:
 
@@ -78,7 +72,7 @@ Copy the whole `skills/<skill-name>/` folder.
 
 ## 5. OpenCode MCP Config
 
-Use the [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md).
+Use the [OpenCode MCP config](./opencode-mcp-config.md).
 - Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
 
 ## 6. Restart OpenCode

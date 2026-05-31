@@ -7,7 +7,7 @@ Use [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) instead when y
 * Start local n8n first.
 * Add ngrok only when something outside your computer must reach n8n.
 * Keep this toolkit skills-first: humans use `_projects/**`; agents use `skills/**`.
-* MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+* Optional AI-coding-agent MCP feature references are secondary. Do not start there.
 * Do not paste real tokens, credentials, `.env` values, backups, or live exports into repo files.
 
 ---
@@ -17,14 +17,15 @@ Use [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) instead when y
 | Step | What to do | Where | Result |
 | --- | --- | --- | --- |
 | 1. | Install Docker Desktop. | Your Windows computer. | Docker Compose is available. |
-| 2. | Create a local stack folder such as `C:\n8n-local`. | Windows Explorer. | Local runtime files stay outside this repo. |
+| 2. | Create the local stack folder at `%USERPROFILE%\.n8n-local`. | Windows Explorer. | Local runtime files stay outside this repo and outside OneDrive Desktop. |
 | 3. | Copy everything inside [templates/local-stack/](./templates/local-stack/) into your local stack folder. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, `_n8n-local.cmd`, and `scripts\`. |
 | 4. | Copy `.env.example` to `.env`. | `<LOCAL_STACK_FOLDER>`. | You have a private local settings file. |
 | 5. | Fill only local runtime values first. | `.env`. | Local n8n and Postgres can start. |
-| 6. | Double-click `_n8n-local.cmd`. | `<LOCAL_STACK_FOLDER>`. | The guided menu opens and stays open after actions. |
-| 7. | Choose `Start local n8n stack`. | Menu. | n8n starts locally without public exposure. |
-| 8. | Open `http://localhost:5678` and create the owner account. | Browser. | Local n8n works before any public URL setup. |
-| 9. | Add ngrok only if something outside your computer must reach n8n. | Docker Desktop extension. | You get a public URL for webhooks or OAuth callbacks. |
+| 6. | Optional: copy `n8n-local-desktop-shortcut.cmd` to your Desktop. | Desktop. | You get a convenient button without putting the runtime folder on the Desktop. |
+| 7. | Double-click `_n8n-local.cmd`, or double-click the Desktop shortcut if you copied it. | `<LOCAL_STACK_FOLDER>` or Desktop. | The guided menu opens and stays open after actions. |
+| 8. | Choose `Start n8n`, then `Localhost only`. | Menu. | n8n starts locally without public exposure. |
+| 9. | Open a web browser and go to `http://localhost:5678`, then create the owner account. | Browser. | Local n8n works before any public URL setup. |
+| 10. | Add ngrok only if something outside your computer must reach n8n. | Compose ngrok service. | You get a public URL for webhooks or OAuth callbacks. |
 
 Do not save `.env`, tokens, backups, `.n8n-local/`, `.tmp/`, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 
@@ -36,14 +37,14 @@ Do not ask for ngrok or public URL values before local n8n works. The order is:
 
 1. Start local n8n.
 2. Create the owner account at `http://localhost:5678`.
-3. Confirm local n8n works.
+3. Confirm local n8n works in a web browser.
 4. Add a public ngrok URL only if needed.
 
 | Need | Install or open | Quick check |
 | --- | --- | --- |
 | Docker runtime | [Docker Desktop](https://www.docker.com/products/docker-desktop/) | Docker Desktop says the engine is running. |
-| Local stack folder | A folder you control, such as `C:\n8n-local`. | It is outside this repo and outside Git tracking. |
-| ngrok account | [ngrok Docker Desktop setup](https://dashboard.ngrok.com/get-started/setup/docker-desktop) | Needed only when you need a public tunnel. |
+| Local stack folder | `%USERPROFILE%\.n8n-local`. | It is outside this repo, outside Git tracking, and not on OneDrive Desktop by default. |
+| ngrok account | [ngrok dashboard](https://dashboard.ngrok.com) | Needed only when you need a public tunnel. |
 
 Run these checks in PowerShell from any folder:
 
@@ -58,15 +59,38 @@ If Docker is installed but not running, open Docker Desktop and wait until the e
 
 ## 3. Create The Local Stack Folder
 
-Use a simple controlled path. Good choices:
+Use this default folder:
+
+```text
+%USERPROFILE%\.n8n-local
+```
+
+Example:
+
+```text
+C:\Users\xPass\.n8n-local
+```
+
+Why this folder:
+
+- It is inside your Windows user profile.
+- It is outside this toolkit repo.
+- It is normally outside OneDrive Desktop sync.
+- It keeps `.env` and local backups away from your visible Desktop.
+
+Do not put the real runtime folder on OneDrive Desktop unless you intentionally want `.env` and backups to sync to OneDrive.
+
+If you want a Desktop button, use the Desktop shortcut CMD later. Keep the real stack folder at `%USERPROFILE%\.n8n-local`.
+
+Other acceptable choices:
 
 | Location | Use when |
 | --- | --- |
-| `C:\n8n-local` | Best default for avoiding OneDrive Desktop redirection. |
-| `C:\Users\<you>\Documents\n8n-local` | Good if you prefer user-owned folders. |
-| Desktop | OK only if your Desktop is not OneDrive-redirected. |
+| `C:\n8n-local` | Good if you want a short machine-level path. |
+| `C:\Users\<you>\Documents\n8n-local` | OK if Documents is not synced to OneDrive. |
+| Desktop | Not recommended for the runtime folder. Use the Desktop shortcut instead. |
 
-OneDrive Desktop redirection can make local Docker/runtime files sync unexpectedly. If your Desktop path contains `OneDrive`, use `C:\n8n-local` or Documents instead.
+OneDrive Desktop redirection can make local `.env` files and backups sync unexpectedly. If your Desktop path contains `OneDrive`, keep the stack folder at `%USERPROFILE%\.n8n-local` and put only the shortcut CMD on the Desktop.
 
 This guide uses `<LOCAL_STACK_FOLDER>` as a placeholder. Replace it with your chosen folder path.
 
@@ -77,7 +101,7 @@ This guide uses `<LOCAL_STACK_FOLDER>` as a placeholder. Replace it with your ch
 PowerShell fallback:
 
 ```powershell
-New-Item -ItemType Directory -Force "C:\n8n-local"
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.n8n-local"
 ```
 
 ---
@@ -91,19 +115,22 @@ The local stack template folder is [templates/local-stack/](./templates/local-st
 | Docker Compose template | [docker-compose.yml](./templates/local-stack/docker-compose.yml) |
 | Environment template | [.env.example](./templates/local-stack/.env.example) |
 | Windows launcher | [_n8n-local.cmd](./templates/local-stack/_n8n-local.cmd) |
+| Desktop shortcut launcher | [n8n-local-desktop-shortcut.cmd](./templates/local-stack/n8n-local-desktop-shortcut.cmd) |
 | Menu script | [n8n-local-menu.ps1](./templates/local-stack/scripts/n8n-local-menu.ps1) |
 
 1. Open [templates/local-stack/](./templates/local-stack/).
 2. Select everything inside that folder.
 3. Copy the selected files and folders.
 4. Paste them into `<LOCAL_STACK_FOLDER>`.
-5. Keep `docker-compose.yml`, `.env.example`, `_n8n-local.cmd`, and `scripts\` together.
+5. Keep `docker-compose.yml`, `.env.example`, `_n8n-local.cmd`, `n8n-local-desktop-shortcut.cmd`, and `scripts\` together.
+6. Optional: copy `n8n-local-desktop-shortcut.cmd` to your Desktop after the real stack folder is ready.
 
 PowerShell fallback from the toolkit repo root:
 
 ```powershell
-New-Item -ItemType Directory -Force "C:\n8n-local"
-Copy-Item -LiteralPath "_projects\n8n\local-setup\_main\templates\local-stack\*" -Destination "C:\n8n-local" -Recurse -Force
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.n8n-local"
+Copy-Item -LiteralPath "_projects\n8n\local-setup\_main\templates\local-stack\*" -Destination "$env:USERPROFILE\.n8n-local" -Recurse -Force
+Copy-Item -LiteralPath "$env:USERPROFILE\.n8n-local\n8n-local-desktop-shortcut.cmd" -Destination "$env:USERPROFILE\Desktop\n8n-local-desktop-shortcut.cmd" -Force
 ```
 
 The copied folder should look like this:
@@ -113,6 +140,7 @@ The copied folder should look like this:
 |-- docker-compose.yml
 |-- .env.example
 |-- _n8n-local.cmd
+|-- n8n-local-desktop-shortcut.cmd
 `-- scripts\
     `-- n8n-local-menu.ps1
 ```
@@ -133,56 +161,86 @@ Copy `.env.example` to `.env`.
 PowerShell fallback:
 
 ```powershell
-cd "C:\n8n-local"
+cd "$env:USERPROFILE\.n8n-local"
 Copy-Item -LiteralPath ".env.example" -Destination ".env" -Force
 ```
 
 Replace only the value after `=`. Do not add quotes unless the value itself requires them.
 
-### Local Stack Runtime Values
+Some `.env` values are copied from somewhere else. Some are values you make up yourself.
 
-Fill these before the first local launch:
+Use this rule:
 
-| Variable | What to paste | Example / format | Notes |
-| --- | --- | --- | --- |
-| `POSTGRES_PASSWORD` | A local database password. | `replace-with-local-postgres-password` becomes a private password. | Store it in a password manager. |
-| `N8N_ENCRYPTION_KEY` | A long random value. | 32+ random characters. | n8n needs the same key after restarts to decrypt saved credentials. |
-| `TZ` | Your local timezone. | `Asia/Singapore` | Keep or change intentionally. |
-| `GENERIC_TIMEZONE` | Your local timezone. | `Asia/Singapore` | Keep aligned with `TZ`. |
+- If the guide says the value comes from a dashboard, domain, URL, or service, copy the real value from there.
+- If the guide says local password, random value, or random key, you are allowed to invent any strong random value yourself.
+- Do not use the example placeholder text as the final value.
+- Do not paste angle brackets like `<paste-token-here>` into `.env`.
 
-Leave the public URL and ngrok placeholder values alone until local n8n works.
+### STEP 1: Fill These Before First Launch
 
-### Public n8n URL And Webhook Values
-
-Use these only after you create a public endpoint:
+Fill these before starting n8n for the first time:
 
 | Variable | What to paste | Example / format | Notes |
 | --- | --- | --- | --- |
-| `WEBHOOK_URL` | The public n8n URL. | `https://your-name.ngrok.app/` | Include `https://` and the trailing slash. |
-| `N8N_HOST` | The public host name. | `your-name.ngrok.app` | No `https://`. |
-| `N8N_PROTOCOL` | The public protocol. | `https` | Use `http` for local-only defaults, `https` for ngrok. |
-| `N8N_PROXY_HOPS` | Proxy hop count. | `1` | Keep this as `1` for local ngrok. |
-| `NGROK_AUTHTOKEN` | Your ngrok authtoken. | Value from ngrok dashboard. | Needed only for the advanced Compose ngrok alternate. |
-| `NGROK_DOMAIN` | Your reserved ngrok domain. | `your-name.ngrok.app` | Needed only for the advanced Compose ngrok alternate. |
+| `POSTGRES_PASSWORD` | A local database password. | `replace-with-local-postgres-password` becomes a private password. | You make this up. Store it in a password manager. |
+| `N8N_ENCRYPTION_KEY` | A long random value. | 32+ random characters. | You make this up once, then keep it forever for this stack. n8n needs the same key after restarts to decrypt saved credentials. |
+| `TZ` | Your local timezone. | `Asia/Singapore` | This is a predefined timezone name. Keep or change intentionally. |
+| `GENERIC_TIMEZONE` | Your local timezone. | `Asia/Singapore` | This is a predefined timezone name. Keep aligned with `TZ`. |
 
-The beginner path uses the ngrok Docker Desktop extension, so it does not require `NGROK_AUTHTOKEN` or `NGROK_DOMAIN` in `.env`.
+For `POSTGRES_PASSWORD`, choose any strong random password. It does not come from Docker, n8n, ngrok, or Hostinger.
+
+For `N8N_ENCRYPTION_KEY`, choose any long random value. It does not come from n8n. After you use it, do not change it unless you understand the consequences.
+
+### STEP 2: Keep These Local Defaults For First Launch
+
+Leave these as-is until local n8n works in your browser:
+
+| Variable | First-launch value | Notes |
+| --- | --- | --- |
+| `N8N_HOST` | `localhost` | This is only the host name. It is not a URL. Do not put `http://` here. |
+| `N8N_PROTOCOL` | `http` | Local-only first launch uses `http`. |
+| `WEBHOOK_URL` | `http://localhost:5678/` | This is the full local webhook base URL. Keep the trailing slash. |
+| `N8N_PROXY_HOPS` | `1` | Keep this as `1` for the local setup. |
+| `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS` | `true` | Leave this alone. |
+| `N8N_RUNNERS_ENABLED` | `true` | Leave this alone. |
+
+`N8N_HOST` can stay `localhost` for this guide. When you add ngrok, the main value you change is `WEBHOOK_URL`.
+
+### STEP 3: Fill These Later Only After Local n8n Works
+
+Use these only when you are ready to expose local n8n through the Compose ngrok service:
+
+| Variable | What to paste | Example / format | Notes |
+| --- | --- | --- | --- |
+| `WEBHOOK_URL` | Your reserved ngrok URL. | `https://your-name.ngrok.app/` | Copy this from ngrok. Include `https://` and the trailing slash. |
+| `NGROK_AUTHTOKEN` | Your ngrok authtoken. | Value from ngrok dashboard. | Copy this from ngrok. Do not make this up. |
+| `NGROK_DOMAIN` | Your reserved ngrok domain. | `your-name.ngrok.app` | Copy this from ngrok. Do not include `https://`. |
+
+Keep `N8N_HOST=localhost` unless you intentionally know why you need to change it.
 
 ## 6. First-Time Local n8n Setup
 
 1. Open `<LOCAL_STACK_FOLDER>`.
 2. Double-click `_n8n-local.cmd`.
 3. Do not launch n8n directly from Docker Desktop. Launch it from `_n8n-local.cmd` instead.
-4. Choose `Start local n8n stack`.
-5. Open `http://localhost:5678`.
-6. Create the owner account locally.
-7. Confirm the editor loads and a workflow can be saved.
+4. Choose `Start n8n`, then `Localhost only`.
+5. Open a web browser.
+6. In the browser address bar, go to:
+
+   ```text
+   http://localhost:5678
+   ```
+
+7. Do not type this into PowerShell or CMD. It is a browser address.
+8. Create the owner account locally.
+9. Confirm the editor loads and a workflow can be saved.
 
 Docker Desktop direct launch bypasses guided checks, selected updates, backups, and clear status output.
 
 PowerShell fallback:
 
 ```powershell
-cd "C:\n8n-local"
+cd "$env:USERPROFILE\.n8n-local"
 docker compose up -d postgres n8n
 docker compose ps
 ```
@@ -199,133 +257,213 @@ Examples:
 - OAuth callbacks.
 - An AI agent running somewhere that cannot reach `http://localhost:5678`.
 
-### Beginner Default: ngrok Docker Desktop Extension
+### Compose ngrok Service
 
-1. Create or sign in to an ngrok account.
-2. Open [https://dashboard.ngrok.com/get-started/setup/docker-desktop](https://dashboard.ngrok.com/get-started/setup/docker-desktop).
-3. Install the ngrok Docker Desktop extension.
-4. Add your ngrok authtoken in the extension.
-5. Start an endpoint from Docker Desktop for the n8n container.
-6. Target n8n container port `5678`.
-7. Use the generated public URL for n8n webhooks and OAuth callback configuration.
-8. If you have a fixed/custom URL, choose it in the extension before using it in external services.
+This guide uses the `ngrok` service in `docker-compose.yml`. Do not install a separate ngrok extension for this guide.
 
-Free ngrok accounts get an assigned Dev Domain. Choosing or reserving custom domain names requires a paid plan. Bring-your-own-domain setup requires DNS/CNAME configuration in the domain's DNS provider.
+What happens:
 
-Stopping an endpoint is not the same as deleting or releasing a reserved domain.
+1. Docker starts the local n8n container.
+2. Docker starts the ngrok container.
+3. ngrok connects to `n8n:5678` inside the same Docker Compose network.
+4. ngrok gives the internet a public HTTPS URL.
+5. n8n still runs on your computer, but external services can reach it through the ngrok URL.
 
-Do not run both the Docker Desktop extension endpoint and the Compose ngrok tunnel for the same n8n container at the same time.
+Before you start:
 
-### Advanced Alternate: Compose ngrok Service
+1. Create or sign in to an ngrok account at [https://dashboard.ngrok.com](https://dashboard.ngrok.com).
+2. In ngrok, find your authtoken.
+3. Copy the authtoken into `NGROK_AUTHTOKEN` in `.env`.
+4. In ngrok, reserve or choose a domain.
+5. Copy only the hostname into `NGROK_DOMAIN`.
 
-The Compose file still includes an `ngrok` service for advanced/local alternate use. It is not the beginner default.
+Example:
 
-Only use this alternate if you intentionally want ngrok controlled by Docker Compose:
+```text
+NGROK_DOMAIN=your-name.ngrok.app
+```
+
+Do not include `https://` in `NGROK_DOMAIN`.
+
+Then set `WEBHOOK_URL` to the full public URL:
+
+```text
+WEBHOOK_URL=https://your-name.ngrok.app/
+```
+
+Include `https://` and the trailing slash in `WEBHOOK_URL`.
+
+Keep these local defaults unless you intentionally know why you are changing them:
+
+```text
+N8N_HOST=localhost
+N8N_PROTOCOL=http
+N8N_PROXY_HOPS=1
+```
+
+Start the tunnel from the menu:
+
+1. Double-click `_n8n-local.cmd`.
+2. Choose `Start n8n`.
+3. Choose `Start ngrok tunnel`.
+4. Choose `Show Compose status`.
+5. Confirm `ngrok` is running.
+6. Choose `View logs`, then type `ngrok`.
+7. Look for the public forwarding URL.
+
+PowerShell fallback:
 
 ```powershell
-cd "C:\n8n-local"
+cd "$env:USERPROFILE\.n8n-local"
 docker compose up -d ngrok
 docker compose logs -f ngrok
 ```
 
-If you use the Compose ngrok alternate, update `WEBHOOK_URL`, `N8N_HOST`, `N8N_PROTOCOL`, `NGROK_AUTHTOKEN`, and `NGROK_DOMAIN` in `.env`, then recreate the affected services:
+After changing `WEBHOOK_URL`, recreate n8n so it reads the new `.env` value:
 
 ```powershell
-cd "C:\n8n-local"
+cd "$env:USERPROFILE\.n8n-local"
 docker compose up -d --force-recreate n8n ngrok
 ```
 
----
+Free ngrok accounts get an assigned Dev Domain. Reserving custom domain names can require a paid plan. Bring-your-own-domain setup requires DNS/CNAME configuration in the domain's DNS provider.
 
-## 8. Daily Use
-
-Open `<LOCAL_STACK_FOLDER>`, double-click `_n8n-local.cmd`, then choose the action you need.
-
-| Need | Menu option | Step 1 | Step 2 | What it does | PowerShell fallback |
-| --- | --- | --- | --- | --- | --- |
-| Start local n8n | `Start local n8n stack` | Launch `_n8n-local.cmd`. | Choose `Start local n8n stack`. | Starts Postgres and n8n locally. | `docker compose up -d postgres n8n` |
-| Stop local n8n | `Stop local n8n stack` | Launch `_n8n-local.cmd`. | Choose `Stop local n8n stack`. | Stops containers without deleting Docker volumes. | `docker compose down` |
-| Restart local n8n | `Restart local n8n stack` | Launch `_n8n-local.cmd`. | Choose `Restart local n8n stack`. | Restarts Postgres and n8n. | `docker compose restart postgres n8n` |
-| Show status | `Show status` | Launch `_n8n-local.cmd`. | Choose `Show status`. | Shows Compose service status. | `docker compose ps` |
-| View all logs | `View all logs` | Launch `_n8n-local.cmd`. | Choose `View all logs`. | Follows all Compose logs. | `docker compose logs -f` |
-| View n8n logs | `View n8n logs` | Launch `_n8n-local.cmd`. | Choose `View n8n logs`. | Follows n8n logs. | `docker compose logs -f n8n` |
-| View Postgres logs | `View Postgres logs` | Launch `_n8n-local.cmd`. | Choose `View Postgres logs`. | Follows Postgres logs. | `docker compose logs -f postgres` |
-| View Compose ngrok logs | `View ngrok logs (advanced Compose tunnel)` | Launch `_n8n-local.cmd`. | Choose `View ngrok logs (advanced Compose tunnel)`. | Follows logs for the advanced Compose ngrok service. | `docker compose logs -f ngrok` |
-| Back up Postgres | `Backup Postgres database` | Launch `_n8n-local.cmd`. | Choose `Backup Postgres database`. | Writes a timestamped SQL dump under a local `backups` folder. Keep it local and private. | Use the menu option. |
-| Check image updates | `Check for updates` | Launch `_n8n-local.cmd`. | Choose `Check for updates`. | Pulls image metadata and compares image IDs without recreating running services. | `docker compose pull` |
-| Update selected services | `Update selected services` | Launch `_n8n-local.cmd`. | Choose `Update selected services`. | Pulls and recreates only selected services. | `docker compose pull <service>` then `docker compose up -d --force-recreate <service>` |
-| Update all services | `Update all services` | Launch `_n8n-local.cmd`. | Choose `Update all services`. | Pulls and recreates all declared services. Back up first. | `docker compose pull` then `docker compose up -d --force-recreate` |
-| Open local n8n | `Open local n8n URL` | Launch `_n8n-local.cmd`. | Choose `Open local n8n URL`. | Opens `http://localhost:5678`. | Open `http://localhost:5678` in a browser. |
-| Open ngrok extension guide | `Open ngrok Docker Desktop extension guide` | Launch `_n8n-local.cmd`. | Choose `Open ngrok Docker Desktop extension guide`. | Opens the ngrok Docker Desktop setup guide. | Open `https://dashboard.ngrok.com/get-started/setup/docker-desktop`. |
-| Open help | `Help / command reference` | Launch `_n8n-local.cmd`. | Choose `Help / command reference`. | Shows raw commands behind the menu. | Use the menu option. |
-
-Press `Ctrl+C` to stop following logs and return to the menu prompt.
+Stopping the `ngrok` Docker service stops the tunnel. It does not delete or release a reserved ngrok domain.
 
 ---
 
-## 9. Backup
+## 8. `_n8n-local.cmd` Guide
 
-Need:
-`Back up Postgres`
+Open `<LOCAL_STACK_FOLDER>`, double-click `_n8n-local.cmd`, then read the status at the top of the menu before choosing an action.
 
-Menu option:
-`Backup Postgres database`
+If you copied `n8n-local-desktop-shortcut.cmd` to your Desktop, you can double-click that instead. It opens the launcher from `%USERPROFILE%\.n8n-local`.
 
-Steps:
+The menu shows quick status for:
 
-1. Launch `_n8n-local.cmd`.
-2. Choose `Backup Postgres database`.
+```text
+postgres: running or stopped
+n8n: running or stopped
+ngrok: running or stopped
+```
 
-What it does:
+Read it like this:
 
-- Writes a timestamped SQL dump under a local `backups` folder.
-- Keeps the backup local and private.
-- Does not commit backup files.
+- `n8n: running` means the local editor should open in a web browser at `http://localhost:5678`.
+- `ngrok: running` means the public tunnel is on.
+- `ngrok: stopped` means the public tunnel is off.
 
-PowerShell fallback:
-Use the menu option.
+### 8.1 First Screen
 
----
-
-## 10. Updating Local Instances
-
-Launch `_n8n-local.cmd` once, then follow this update table.
-
-| Step | Menu option | What it does | PowerShell fallback |
+| Number | Command | Use when | Opens another menu? |
 | --- | --- | --- | --- |
-| 1 | `Check for updates` | Compares local image tag IDs before and after `docker compose pull`. It may pull newer images into the local Docker cache, but it does not restart or recreate running services. | `docker compose pull` |
-| 2 | `Update selected services` | Applies selected updates. Back up first if Postgres is selected. Postgres is pinned to major version 16 in `docker-compose.yml`. | `docker compose up -d --force-recreate <service>` |
-| 3 | `Update all services` | Applies all service updates. Back up first because n8n and Postgres containers may be recreated. | `docker compose up -d --force-recreate` |
+| 1 | `Start n8n` | You want to start local n8n, with or without ngrok. | Yes. |
+| 2 | `Restart n8n` | n8n is acting weird and you want to restart only the n8n app container. | No. |
+| 3 | `Stop n8n` | You want to stop ngrok only, or stop the full local stack. | Yes. |
+| 4 | `Update` | You want to check and apply Docker image updates. | Yes. |
+| 5 | `Show Compose status` | You want to see all available Compose services and their status. | No. |
+| 6 | `View logs` | You want to inspect all logs or one service's logs. | Yes. |
+| 7 | `Back up` | You want a local Postgres SQL backup. | No. |
+| 8 | `Help` | You want the command reference. | No. |
+| 9 | `Exit` | You want to close the launcher cleanly. | No. |
+
+### 8.2 `Start n8n` Menu
+
+Choose one:
+
+| Choice | Use when | What it does |
+| --- | --- | --- |
+| `Localhost only` | You only need n8n on your own computer. | Starts Postgres and n8n. If ngrok is running, it stops ngrok so the setup is localhost-only. |
+| `Start ngrok tunnel` | A webhook, OAuth callback, or remote agent needs a public URL. | Starts n8n if needed. If n8n is already running, it says so, then starts ngrok if ngrok is not running. |
+| `Update all, then start with ngrok tunnel` | You want to update first, then run with public access. | Opens the update flow first. After updates, it starts n8n and ngrok. |
+
+For localhost-only use, open a web browser and go to:
+
+```text
+http://localhost:5678
+```
+
+For ngrok use, fill `WEBHOOK_URL`, `NGROK_AUTHTOKEN`, and `NGROK_DOMAIN` in `.env` before starting the tunnel.
+
+### 8.3 `Stop n8n` Menu
+
+Choose one:
+
+| Choice | Use when | What it does |
+| --- | --- | --- |
+| `Stop ngrok tunnel` | You want n8n to stay local, but public access should turn off. | Stops only the `ngrok` service. |
+| `n8n + ngrok tunnel` | You are done working for now. | Runs `docker compose down`, which stops n8n, Postgres, and ngrok without deleting Docker volumes. |
+
+Stopping ngrok does not delete or release your reserved ngrok domain.
+
+### 8.4 `Update` Menu
+
+The update menu always checks for updates before it lets you choose what to update.
+
+What the check does:
+
+1. Pulls current Docker image metadata.
+2. Compares local image IDs before and after the pull.
+3. Reports which services appear to have updates.
+4. Does not recreate running containers until you choose an update option.
+
+After the check, choose one:
+
+| Choice | What it updates | Notes |
+| --- | --- | --- |
+| `All services` | `n8n`, `postgres`, and `ngrok`. | Back up first if you care about the current database state. |
+| `n8n only` | n8n app container. | Common update choice. |
+| `postgres only` | Postgres container. | The menu asks for confirmation first. Postgres is pinned to major version 16. |
+| `ngrok only` | ngrok tunnel container. | Safe when only tunnel image updates are available. |
+| `Cancel` | Nothing. | Returns to the menu. |
 
 Local update notes:
 
 - n8n updates come from `docker.n8n.io/n8nio/n8n:stable`.
 - Postgres is pinned to major version 16 in [docker-compose.yml](./templates/local-stack/docker-compose.yml).
-- The ngrok Docker Desktop extension updates through Docker Desktop Extensions.
-- The Compose ngrok alternate uses `ngrok/ngrok:latest`.
+- The Compose ngrok service uses `ngrok/ngrok:latest`.
 - Local stack template/script updates come from this toolkit repo. Re-copy templates only after reviewing what changed.
+
+### 8.5 `View logs` Menu
+
+Choose one:
+
+| Choice | Use when |
+| --- | --- |
+| `all` | You are not sure which service is failing. |
+| `n8n` | The editor, workflows, or webhooks are failing. |
+| `postgres` | n8n cannot connect to the database. |
+| `ngrok` | The public tunnel is not working. |
+| `cancel` | You do not want logs. |
+
+Logs follow live. Press `Ctrl+C` to stop following logs and return to the menu prompt.
+
+### 8.6 `Back up` And `Help`
+
+`Back up` writes a timestamped SQL dump under a local `backups` folder. Keep that folder local and private.
+
+`Help` shows the raw Docker commands behind the menu.
 
 ---
 
-## 11. Skills-First Agent Guidance
+## 9. Skills-First Agent Guidance
 
 This toolkit is skills-first.
 
 * Humans use `_projects/**` for source review and maintenance.
 * Agents use `skills/**` after generated outputs are synced.
-* MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+* Optional AI-coding-agent MCP feature references are available as secondary material, not as the beginner setup path.
 * Use [n8n Agent Rules](../../../../skills/n8n-agent-rules/) before workflow, helper-script, import/export, credential, execution, repo/live sync, or live-instance work.
 
 ---
 
-## 12. Troubleshooting
+## 10. Troubleshooting
 
 ### Docker Is Not Running
 
 1. Open Docker Desktop.
 2. Wait for the engine to finish starting.
 3. Relaunch `_n8n-local.cmd`.
-4. Choose `Show status`.
+4. Choose `Show Compose status`.
 
 ### `.env` Is Missing
 
@@ -337,8 +475,8 @@ This toolkit is skills-first.
 
 1. Confirm local n8n works first.
 2. Confirm your public endpoint works.
-3. Set `WEBHOOK_URL`, `N8N_HOST`, `N8N_PROTOCOL`, and `N8N_PROXY_HOPS` intentionally.
-4. Recreate n8n from the menu with `Update selected services` or with a fallback command.
+3. Set `WEBHOOK_URL`, `NGROK_AUTHTOKEN`, and `NGROK_DOMAIN` intentionally.
+4. Recreate n8n from the menu with `Update`, then `n8n only`, or with a fallback command.
 
 ### Port 5678 Is Already In Use
 
@@ -348,7 +486,7 @@ Do not delete Docker volumes unless you intentionally want to delete local n8n r
 
 ---
 
-## 13. Advanced Queue Mode
+## 11. Advanced Queue Mode
 
 The default local path is normal mode:
 
@@ -366,7 +504,7 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 
 ---
 
-## 14. Safety Rules
+## 12. Safety Rules
 
 - Create the owner account locally before starting any public endpoint.
 - Treat an ngrok URL as public access to local n8n UI, API, and webhooks.
@@ -380,7 +518,7 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 
 ---
 
-## 15. Appendices And References
+## 13. Appendices And References
 
 | Reference | Use when |
 | --- | --- |

@@ -12,7 +12,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup Skill
 
-Instruction-only skill for safe local n8n setup, Docker Compose plus Postgres, ngrok, Hostinger VPS, launcher/menu use, and skills-first agent guidance.
+Instruction-only skill for safe local n8n setup, Docker Compose plus Postgres, Compose ngrok, Hostinger VPS, launcher/menu use, skills-first agent guidance, and optional AI-coding-agent MCP feature references.
 
 ## Start Here
 
@@ -23,10 +23,11 @@ Instruction-only skill for safe local n8n setup, Docker Compose plus Postgres, n
 | n8n reference index | [references/n8n/](references/n8n/) |
 | Skills-first agent guidance | [references/ai-agent-platforms/](references/ai-agent-platforms/) |
 | Local stack templates | [templates/local-stack/](templates/local-stack/) |
+| Optional MCP config templates | [templates/mcp-configs/](templates/mcp-configs/) |
 
 Normal use of this skill does not require `_projects/`.
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional AI-coding-agent MCP feature references are secondary and not part of the beginner local setup path.
 
 ## Skill Install Note
 

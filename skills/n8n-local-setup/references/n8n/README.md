@@ -18,9 +18,9 @@ These references are local to the copyable skill folder. Use them for normal exe
 
 | Guide | Use when |
 | --- | --- |
-| [local-setup.md](local-setup.md) | Running the local Docker Desktop setup with n8n, Postgres, the `_n8n-local.cmd` menu, updates, ngrok Docker Desktop public access, troubleshooting, and daily commands. |
+| [local-setup.md](local-setup.md) | Running the local Docker Desktop setup with n8n, Postgres, the `_n8n-local.cmd` menu, updates, Compose ngrok public access, troubleshooting, and daily commands. |
 | [hostinger-vps.md](hostinger-vps.md) | Moving from local testing to always-on Hostinger VPS hosting with domain, backup, queue mode, update, and safety guidance. |
 
 ## Skills-First Note
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional AI-coding-agent MCP feature references are secondary and not part of the beginner local setup flow.

@@ -22,7 +22,18 @@ Start with Local Setup for Docker Desktop on your own computer. Use Hostinger VP
 
 Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync.
 
-MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+Start with [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md). Optional AI-coding-agent MCP feature references are secondary and only for users intentionally enabling n8n MCP for an AI coding agent.
+
+## Optional AI-Coding-Agent MCP Feature References
+
+Skip this section for beginner local setup.
+
+| Platform | Setup guide | Config template |
+| --- | --- | --- |
+| Codex | [mcp setup - codex.md](./mcp%20setup%20-%20codex.md) | [codex-mcp-config.md](./codex-mcp-config.md) |
+| Claude Code | [mcp setup - claude code.md](./mcp%20setup%20-%20claude%20code.md) | [claude-mcp-config.md](./claude-mcp-config.md) |
+| OpenCode | [mcp setup - opencode.md](./mcp%20setup%20-%20opencode.md) | [opencode-mcp-config.md](./opencode-mcp-config.md) |
+| Antigravity | [mcp setup - antigravity.md](./mcp%20setup%20-%20antigravity.md) | [antigravity-mcp-config.md](./antigravity-mcp-config.md) |
 
 ## Agent Rules And Adapters
 

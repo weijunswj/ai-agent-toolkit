@@ -215,18 +215,18 @@
     "title": "Local n8n Setup",
     "version": "3.0.0",
     "version_policy": "semver",
-    "version_notes": "Skills-first n8n local setup pivot with MCP setup/config surfaces removed from supported routing.",
+    "version_notes": "Intent-first n8n local setup launcher/menu, Compose ngrok tunnel flow, Hostinger first-login expansion, desktop shortcut launcher, and optional AI-coding-agent MCP feature references restored as secondary surfaces.",
     "project": {
       "name": "Local n8n Setup",
       "category": "n8n",
-      "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, Docker Compose local templates, skills-first agent routing, and the underscore-prefixed guided launcher."
+      "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, Docker Compose local templates, skills-first agent routing, optional AI-coding-agent MCP feature references, and the underscore-prefixed guided launcher."
     },
     "surface": {
       "publish_as": "skill",
       "skill": {
         "status": "published",
         "path": "skills/n8n-local-setup",
-        "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger VPS reference, local stack templates, and skills-first agent guidance while depending on n8n-agent-rules for workflow/live n8n rules."
+        "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger VPS reference, local stack templates, skills-first agent guidance, and optional AI-coding-agent MCP feature references while depending on n8n-agent-rules for workflow/live n8n rules."
       },
       "mcp": {
         "status": "not_applicable"
@@ -254,7 +254,13 @@
       "skills/n8n-local-setup/templates/local-stack/.env.example",
       "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
-      "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1"
+      "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
+      "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
+      "skills/n8n-local-setup/templates/mcp-configs/README.md",
+      "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
+      "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md"
     ]
   },
   {

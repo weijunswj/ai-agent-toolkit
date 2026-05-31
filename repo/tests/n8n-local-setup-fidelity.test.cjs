@@ -24,22 +24,46 @@ const guideOutputs = [
 
 const platformOutputs = [
   {
-    source: 'curated_output_for_ai/references/ai-agent-platforms/codex.md',
+    source: '_main/mcp setup - codex.md',
     output: 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md'
   },
   {
-    source: 'curated_output_for_ai/references/ai-agent-platforms/claude-code.md',
+    source: '_main/mcp setup - claude code.md',
     output: 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'
   },
   {
-    source: 'curated_output_for_ai/references/ai-agent-platforms/opencode.md',
+    source: '_main/mcp setup - opencode.md',
     output: 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md'
   },
   {
-    source: 'curated_output_for_ai/references/ai-agent-platforms/antigravity.md',
+    source: '_main/mcp setup - antigravity.md',
     output: 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'
   }
 ];
+
+const mcpConfigOutputs = [
+  {
+    source: '_main/antigravity-mcp-config.md',
+    output: 'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md'
+  },
+  {
+    source: '_main/claude-mcp-config.md',
+    output: 'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md'
+  },
+  {
+    source: '_main/codex-mcp-config.md',
+    output: 'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'
+  },
+  {
+    source: '_main/opencode-mcp-config.md',
+    output: 'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md'
+  }
+];
+
+const mcpConfigIndexOutput = {
+  source: 'curated_output_for_ai/templates/mcp-configs/README.md',
+  output: 'skills/n8n-local-setup/templates/mcp-configs/README.md'
+};
 
 const localStackOutputs = [
   {
@@ -53,6 +77,10 @@ const localStackOutputs = [
   {
     source: '_main/templates/local-stack/_n8n-local.cmd',
     output: 'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd'
+  },
+  {
+    source: '_main/templates/local-stack/n8n-local-desktop-shortcut.cmd',
+    output: 'skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd'
   },
   {
     source: '_main/templates/local-stack/scripts/n8n-local-menu.ps1',
@@ -70,16 +98,7 @@ const obsoletePaths = [
   '_projects/n8n/local-setup/_main/5. extra - claude code integration.md',
   '_projects/n8n/local-setup/_main/6. extra - opencode integration.md',
   '_projects/n8n/local-setup/_main/7. extra - antigravity integration.md',
-  '_projects/n8n/local-setup/_main/mcp setup - codex.md',
-  '_projects/n8n/local-setup/_main/mcp setup - claude code.md',
-  '_projects/n8n/local-setup/_main/mcp setup - opencode.md',
-  '_projects/n8n/local-setup/_main/mcp setup - antigravity.md',
-  '_projects/n8n/local-setup/_main/codex-mcp-config.md',
-  '_projects/n8n/local-setup/_main/claude-mcp-config.md',
-  '_projects/n8n/local-setup/_main/opencode-mcp-config.md',
-  '_projects/n8n/local-setup/_main/antigravity-mcp-config.md',
   '_projects/n8n/local-setup/curated_output_for_ai/mcp/n8n-local-setup.md',
-  '_projects/n8n/local-setup/curated_output_for_ai/templates/mcp-configs/README.md',
   'mcp/projects/n8n-local-setup.md',
   '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local.cmd',
   '_projects/n8n/local-setup/_main/scripts/windows/start-n8n-ngrok.bat',
@@ -94,31 +113,40 @@ const obsoletePaths = [
   'skills/n8n-local-setup/references/n8n/4. vps hosting.md',
   'skills/n8n-local-setup/references/n8n/5. extra - claude code integration.md',
   'skills/n8n-local-setup/references/n8n/6. extra - opencode integration.md',
-  'skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md',
-  'skills/n8n-local-setup/templates/mcp-configs/README.md',
-  'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md',
-  'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md',
-  'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md',
-  'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md'
+  'skills/n8n-local-setup/references/ai-agent-platforms/1. local setup.md'
 ];
 
-const expectedMenuOptions = [
-  'Start local n8n stack',
-  'Stop local n8n stack',
-  'Restart local n8n stack',
-  'Show status',
-  'View all logs',
-  'View n8n logs',
-  'View Postgres logs',
-  'View ngrok logs (advanced Compose tunnel)',
-  'Backup Postgres database',
-  'Check for updates',
-  'Update selected services',
-  'Update all services',
-  'Open local n8n URL',
-  'Open ngrok Docker Desktop extension guide',
-  'Help / command reference',
+const expectedMainMenuOptions = [
+  'Start n8n',
+  'Restart n8n',
+  'Stop n8n',
+  'Update',
+  'Show Compose status',
+  'View logs',
+  'Back up',
+  'Help',
   'Exit'
+];
+
+const expectedStartMenuOptions = [
+  'Localhost only',
+  'Start ngrok tunnel',
+  'Update all, then start with ngrok tunnel',
+  'Cancel'
+];
+
+const expectedStopMenuOptions = [
+  'Stop ngrok tunnel',
+  'n8n + ngrok tunnel',
+  'Cancel'
+];
+
+const expectedUpdateMenuOptions = [
+  'All services',
+  'n8n only',
+  'postgres only',
+  'ngrok only',
+  'Cancel'
 ];
 
 function tempCopy() {
@@ -179,13 +207,21 @@ function assertHeadingsInOrder(text, headings) {
   }
 }
 
-function menuOptions(menu) {
-  return [...menu.matchAll(/Write-Host ' \s*\d+\. ([^']+)'/g)].map((match) => match[1]);
+function functionBody(text, name) {
+  const start = text.indexOf(`function ${name}`);
+  assert.notEqual(start, -1, name);
+  const nextFunction = text.indexOf('\nfunction ', start + 1);
+  return nextFunction === -1 ? text.slice(start) : text.slice(start, nextFunction);
+}
+
+function menuOptions(menu, functionName) {
+  const body = functionBody(menu, functionName);
+  return [...body.matchAll(/Write-Host ' \s*\d+\. ([^']+)'/g)].map((match) => match[1]);
 }
 
 test('n8n local setup final source and generated surfaces are declared', () => {
   const manifest = localSetupManifest();
-  for (const expected of [...guideOutputs, ...localStackOutputs]) {
+  for (const expected of [...guideOutputs, ...localStackOutputs, ...platformOutputs, ...mcpConfigOutputs]) {
     const output = manifest.outputs.find((entry) => entry.output === expected.output);
     assert.ok(output, expected.output);
     assert.equal(output.kind, 'copy', expected.output);
@@ -194,14 +230,12 @@ test('n8n local setup final source and generated surfaces are declared', () => {
     assert.ok(manifest.writes.allowed.includes(expected.output), expected.output);
   }
 
-  for (const expected of platformOutputs) {
-    const output = manifest.outputs.find((entry) => entry.output === expected.output);
-    assert.ok(output, expected.output);
-    assert.equal(output.kind, 'curated', expected.output);
-    assert.equal(output.source, expected.source, expected.output);
-    assert.equal(output.fidelity, 'reviewed_entrypoint', expected.output);
-    assert.ok(manifest.writes.allowed.includes(expected.output), expected.output);
-  }
+  const mcpIndexOutput = manifest.outputs.find((entry) => entry.output === mcpConfigIndexOutput.output);
+  assert.ok(mcpIndexOutput, mcpConfigIndexOutput.output);
+  assert.equal(mcpIndexOutput.kind, 'curated', mcpConfigIndexOutput.output);
+  assert.equal(mcpIndexOutput.source, mcpConfigIndexOutput.source, mcpConfigIndexOutput.output);
+  assert.equal(mcpIndexOutput.fidelity, 'reviewed_entrypoint', mcpConfigIndexOutput.output);
+  assert.ok(manifest.writes.allowed.includes(mcpConfigIndexOutput.output), mcpConfigIndexOutput.output);
 
   for (const removed of [
     'mcp/projects/n8n-local-setup.md',
@@ -209,12 +243,7 @@ test('n8n local setup final source and generated surfaces are declared', () => {
     'skills/n8n-local-setup/references/n8n/tunnelling.md',
     'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md',
     'skills/n8n-local-setup/references/n8n/vps-hosting.md',
-    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
-    'skills/n8n-local-setup/templates/mcp-configs/README.md',
-    'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md',
-    'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md',
-    'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md',
-    'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md'
+    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd'
   ]) {
     assert.equal(manifest.outputs.some((entry) => entry.output === removed), false, removed);
     assert.equal(manifest.writes.allowed.includes(removed), false, removed);
@@ -231,9 +260,10 @@ test('n8n local setup generated files preserve source bodies', () => {
   }
 
   for (const expected of platformOutputs) {
-    const source = stripGeneratedNotices(readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`));
+    const source = readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`).trimEnd() + '\n';
+    const recipe = manifest.outputs.find((entry) => entry.output === expected.output);
     const output = stripGeneratedNotices(readText(repoRoot, expected.output));
-    assert.equal(output, source, expected.output);
+    assert.equal(output, applyTextRewrites(source, recipe), expected.output);
   }
 
   for (const expected of localStackOutputs) {
@@ -241,6 +271,16 @@ test('n8n local setup generated files preserve source bodies', () => {
     const output = readText(repoRoot, expected.output);
     assert.equal(output, source, expected.output);
   }
+
+  for (const expected of mcpConfigOutputs) {
+    const source = readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`).trimEnd() + '\n';
+    const output = stripGeneratedNotices(readText(repoRoot, expected.output));
+    assert.equal(output, source, expected.output);
+  }
+
+  const mcpIndexSource = stripGeneratedNotices(readText(repoRoot, `_projects/n8n/local-setup/${mcpConfigIndexOutput.source}`));
+  const mcpIndexGenerated = stripGeneratedNotices(readText(repoRoot, mcpConfigIndexOutput.output));
+  assert.equal(mcpIndexGenerated, mcpIndexSource, mcpConfigIndexOutput.output);
 });
 
 test('obsolete n8n local setup pages and launchers are removed', () => {
@@ -257,9 +297,9 @@ test('obsolete n8n local setup pages and launchers are removed', () => {
   for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'templates/local-stack/n8n-local.cmd', 'start-n8n-ngrok.bat']) {
     assert.doesNotMatch(combined, new RegExp(escapeRegExp(stale)), stale);
   }
-  for (const removedMcp of ['mcp/projects/n8n-local-setup.md', 'templates/mcp-configs', 'mcp setup - codex.md', 'codex-mcp-config.md']) {
-    assert.doesNotMatch(combined, new RegExp(escapeRegExp(removedMcp)), removedMcp);
-  }
+  assert.doesNotMatch(combined, /mcp\/projects\/n8n-local-setup\.md/);
+  assert.match(combined, /mcp setup - codex\.md/);
+  assert.match(combined, /codex-mcp-config\.md/);
 });
 
 test('n8n local setup source README exposes two main beginner pages', () => {
@@ -274,10 +314,13 @@ test('n8n local setup source README exposes two main beginner pages', () => {
   assert.match(readme, /^## Skills-First Routing$/m);
   assert.match(readme, /Humans use `_projects\/\*\*`/);
   assert.match(readme, /Agents use generated `skills\/\*\*` surfaces after sync/);
-  assert.match(readme, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./);
+  assert.match(readme, /Optional AI-coding-agent MCP feature references are secondary and only for users intentionally enabling n8n MCP for an AI coding agent\./);
+  assert.match(readme, /^## Optional AI-Coding-Agent MCP Feature References$/m);
+  assert.match(readme, /\[mcp setup - codex\.md\]\(\.\/mcp%20setup%20-%20codex\.md\)/);
+  assert.match(readme, /\[codex-mcp-config\.md\]\(\.\/codex-mcp-config\.md\)/);
   assert.match(readme, /\*\*If the \[AI Coding Agent Rules\]\(\.\.\/\.\.\/\.\.\/\.\.\/skills\/ai-coding-agent-rules\/\) skill is installed, repo-local templates are automatically checked/);
 
-  for (const stale of ['Upgrading', 'Tunneling Guide', 'Docker Compose + ngrok', 'MCP setup pages', 'MCP config templates', 'mcp setup -', 'mcp-configs', 'extra - claude', 'extra - opencode', 'extra - antigravity']) {
+  for (const stale of ['Upgrading', 'Tunneling Guide', 'Docker Compose + ngrok', 'MCP setup pages', 'MCP config templates', 'mcp-configs', 'extra - claude', 'extra - opencode', 'extra - antigravity']) {
     assert.doesNotMatch(readme, new RegExp(stale, 'i'), stale);
   }
 });
@@ -296,26 +339,29 @@ test('Local Setup keeps the corrected beginner flow', () => {
     '## 5. Create And Fill `.env`',
     '## 6. First-Time Local n8n Setup',
     '## 7. ngrok Public Tunnel Setup',
-    '## 8. Daily Use',
-    '## 9. Backup',
-    '## 10. Updating Local Instances',
-    '## 11. Skills-First Agent Guidance',
-    '## 12. Troubleshooting',
-    '## 13. Advanced Queue Mode',
-    '## 14. Safety Rules',
-    '## 15. Appendices And References'
+    '## 8. `_n8n-local.cmd` Guide',
+    '## 9. Skills-First Agent Guidance',
+    '## 10. Troubleshooting',
+    '## 11. Advanced Queue Mode',
+    '## 12. Safety Rules',
+    '## 13. Appendices And References'
   ]);
 
   assert.match(localSetup, /Do not ask for ngrok or public URL values before local n8n works/i);
-  assert.match(localSetup, /Open `http:\/\/localhost:5678`/);
+  assert.match(localSetup, /Open a web browser/);
+  assert.match(localSetup, /Open a web browser and go to `http:\/\/localhost:5678`/);
   assert.match(localSetup, /Create the owner account locally/);
-  assert.match(localSetup, /https:\/\/dashboard\.ngrok\.com\/get-started\/setup\/docker-desktop/);
-  assert.match(localSetup, /ngrok Docker Desktop extension/);
-  assert.match(localSetup, /Target n8n container port `5678`/);
-  assert.match(localSetup, /Do not run both the Docker Desktop extension endpoint and the Compose ngrok tunnel/);
+  assert.match(localSetup, /Do not install a separate ngrok extension for this guide/);
+  assert.doesNotMatch(localSetup, /dashboard\.ngrok\.com\/get-started\/setup\/docker-desktop/);
+  assert.doesNotMatch(localSetup, /ngrok Docker Desktop extension/);
+  assert.match(localSetup, /ngrok connects to `n8n:5678` inside the same Docker Compose network/);
+  assert.match(localSetup, /Choose `Start n8n`/);
+  assert.match(localSetup, /Choose `Start ngrok tunnel`/);
+  assert.match(localSetup, /Choose `Show Compose status`/);
   assert.match(localSetup, /Free ngrok accounts get an assigned Dev Domain/);
-  assert.match(localSetup, /Stopping an endpoint is not the same as deleting or releasing a reserved domain/);
+  assert.match(localSetup, /Stopping the `ngrok` Docker service stops the tunnel/);
   assert.match(localSetup, /OneDrive Desktop redirection/);
+  assert.match(localSetup, /`%USERPROFILE%\\\.n8n-local`/);
   assert.match(localSetup, /`C:\\n8n-local`/);
   assert.match(localSetup, /`<LOCAL_STACK_FOLDER>`/);
   assert.match(localSetup, /Do not launch n8n directly from Docker Desktop\. Launch it from `_n8n-local\.cmd` instead\./);
@@ -328,13 +374,24 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   assert.match(localSetup, /Copy `\.env\.example` to `\.env`/);
   assert.match(localSetup, /Do not edit `\.env\.example`/);
   assert.match(localSetup, /Replace only the value after `=`/);
-  assert.match(localSetup, /^### Local Stack Runtime Values$/m);
-  assert.match(localSetup, /^### Public n8n URL And Webhook Values$/m);
+  assert.match(localSetup, /^### STEP 1: Fill These Before First Launch$/m);
+  assert.match(localSetup, /^### STEP 2: Keep These Local Defaults For First Launch$/m);
+  assert.match(localSetup, /^### STEP 3: Fill These Later Only After Local n8n Works$/m);
+  assert.match(localSetup, /you are allowed to invent any strong random value yourself/);
+  assert.match(localSetup, /copy the real value from there/);
+  assert.match(localSetup, /`N8N_HOST` can stay `localhost` for this guide/);
 
   for (const variable of ['POSTGRES_PASSWORD', 'N8N_ENCRYPTION_KEY', 'WEBHOOK_URL', 'N8N_HOST', 'N8N_PROTOCOL', 'N8N_PROXY_HOPS', 'NGROK_AUTHTOKEN', 'NGROK_DOMAIN']) {
     assert.match(localSetup, new RegExp(`\\| \`${variable}\` \\|`), variable);
   }
 
+  for (const expected of [
+    '# [ STEP 1: Fill these before first launch ]',
+    '# [ STEP 2: Keep these local defaults for first launch ]',
+    '# [ STEP 3: Fill later only when you use the Compose ngrok tunnel ]'
+  ]) {
+    assert.match(envExample, new RegExp(escapeRegExp(expected)), expected);
+  }
   assert.doesNotMatch(envExample, /N8N_MCP_URL|N8N_MCP_TOKEN/);
   assert.doesNotMatch(localSetup, /\| `N8N_MCP_URL` \| Basic local stack/);
   assert.doesNotMatch(localSetup, /\| `N8N_MCP_TOKEN` \| Basic local stack/);
@@ -344,14 +401,14 @@ test('Local Setup separates .env and public URL values without MCP setup values'
 test('Local Setup keeps skills-first agent guidance and does not route MCP setup', () => {
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   const publicIndex = localSetup.indexOf('## 7. ngrok Public Tunnel Setup');
-  const skillsIndex = localSetup.indexOf('## 11. Skills-First Agent Guidance');
+  const skillsIndex = localSetup.indexOf('## 9. Skills-First Agent Guidance');
 
   assert.ok(publicIndex > -1, 'public URL setup section exists');
   assert.ok(skillsIndex > publicIndex, 'skills-first guidance appears after public URL setup');
   assert.match(localSetup, /This toolkit is skills-first\./);
   assert.match(localSetup, /Humans use `_projects\/\*\*` for source review and maintenance\./);
   assert.match(localSetup, /Agents use `skills\/\*\*` after generated outputs are synced\./);
-  assert.match(localSetup, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./);
+  assert.match(localSetup, /Optional AI-coding-agent MCP feature references are available as secondary material, not as the beginner setup path\./);
   assert.match(localSetup, /Use \[n8n Agent Rules\]/);
 
   for (const forbidden of [
@@ -365,7 +422,9 @@ test('Local Setup keeps skills-first agent guidance and does not route MCP setup
     'mcp%20setup%20-%20antigravity.md',
     'templates/mcp-configs',
     'Enable MCP',
-    'through MCP'
+    'through MCP',
+    'N8N_MCP_TOKEN',
+    'N8N_MCP_URL'
   ]) {
     assert.doesNotMatch(localSetup, new RegExp(escapeRegExp(forbidden)), forbidden);
   }
@@ -375,15 +434,27 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
 
-  assert.deepEqual(menuOptions(menu), expectedMenuOptions);
-  for (const option of expectedMenuOptions.filter((name) => name !== 'Exit')) {
+  assert.deepEqual(menuOptions(menu, 'Show-MainMenu'), expectedMainMenuOptions);
+  assert.deepEqual(menuOptions(menu, 'Show-StartMenu'), expectedStartMenuOptions);
+  assert.deepEqual(menuOptions(menu, 'Show-StopMenu'), expectedStopMenuOptions);
+  assert.deepEqual(menuOptions(menu, 'Show-UpdateMenu'), expectedUpdateMenuOptions);
+
+  for (const option of expectedMainMenuOptions.filter((name) => name !== 'Exit')) {
     assert.match(localSetup, new RegExp(`\\| \`${escapeRegExp(option)}\` \\|`), option);
   }
 
-  assert.match(localSetup, /\| Need \| Menu option \| Step 1 \| Step 2 \| What it does \| PowerShell fallback \|/);
-  assert.match(localSetup, /\| Step \| Menu option \| What it does \| PowerShell fallback \|/);
-  assert.match(localSetup, /\| 1 \| `Check for updates` \| Compares local image tag IDs before and after `docker compose pull`\. It may pull newer images into the local Docker cache, but it does not restart or recreate running services\. \|/);
-  assert.match(localSetup, /\| 2 \| `Update selected services` \| Applies selected updates\. Back up first if Postgres is selected\. Postgres is pinned to major version 16 in `docker-compose\.yml`\. \|/);
+  for (const option of [...expectedStartMenuOptions, ...expectedStopMenuOptions, ...expectedUpdateMenuOptions].filter((name) => name !== 'Cancel')) {
+    assert.match(localSetup, new RegExp(`\\| \`${escapeRegExp(option)}\` \\|`), option);
+  }
+
+  assert.match(localSetup, /^## 8\. `_n8n-local\.cmd` Guide$/m);
+  assert.match(localSetup, /^### 8\.1 First Screen$/m);
+  assert.match(localSetup, /^### 8\.2 `Start n8n` Menu$/m);
+  assert.match(localSetup, /^### 8\.3 `Stop n8n` Menu$/m);
+  assert.match(localSetup, /^### 8\.4 `Update` Menu$/m);
+  assert.match(localSetup, /^### 8\.5 `View logs` Menu$/m);
+  assert.match(localSetup, /The update menu always checks for updates before it lets you choose what to update\./);
+  assert.match(localSetup, /`Back up` writes a timestamped SQL dump under a local `backups` folder/);
 });
 
 test('local launcher and menu keep the console open until Exit', () => {
@@ -404,21 +475,33 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
   assert.match(menu, /while \(-not \$script:ExitRequested\)/);
   assert.match(menu, /Pause-Menu/);
-  assert.match(menu, /'16' \{ Clear-Host; Write-Success 'Bye\.'; \$script:ExitRequested = \$true \}/);
+  assert.match(menu, /'9' \{ Clear-Host; Write-Success 'Bye\.'; \$script:ExitRequested = \$true \}/);
   assert.match(menu, /exit 0/);
 
-  for (let option = 1; option <= 15; option += 1) {
+  for (let option = 1; option <= 8; option += 1) {
     assert.match(menu, new RegExp(`'${option}' \\{ Invoke-MenuAction \\{[^\\n]+\\} \\}`), `option ${option} returns through Invoke-MenuAction`);
   }
 
-  assert.match(menu, /Open-NgrokDockerDesktopGuide/);
-  assert.match(menu, /https:\/\/dashboard\.ngrok\.com\/get-started\/setup\/docker-desktop/);
+  assert.match(menu, /function Get-RunningServices/);
+  assert.match(menu, /function Write-ServiceStatus/);
+  assert.match(menu, /Write-ServiceStatus -Name 'postgres'/);
+  assert.match(menu, /Write-ServiceStatus -Name 'n8n'/);
+  assert.match(menu, /Write-ServiceStatus -Name 'ngrok'/);
+  assert.match(menu, /Write-Host '  2\. Start ngrok tunnel'/);
+  assert.match(menu, /Write-Host '  1\. Stop ngrok tunnel'/);
+  assert.match(menu, /function Show-UpdateMenu/);
+  assert.match(menu, /Checking for updates first\. Selection opens only after this check finishes\./);
+  assert.match(functionBody(menu, 'Show-UpdateMenu'), /Check-Updates -Services \$script:Services[\s\S]*Read-Host 'Enter a number'/);
+  assert.match(functionBody(menu, 'Start-N8nWithNgrok'), /n8n is already running\.[\s\S]*Starting ngrok tunnel now\./);
+  assert.doesNotMatch(menu, /Open-NgrokDockerDesktopGuide/);
+  assert.doesNotMatch(menu, /dashboard\.ngrok\.com\/get-started\/setup\/docker-desktop/);
   assert.match(menu, /Do not launch n8n directly from Docker Desktop\. Launch it from _n8n-local\.cmd instead\./);
 });
 
 test('local stack templates stay placeholder-only and local-first', () => {
   const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/docker-compose.yml');
   const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
+  const shortcut = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local-desktop-shortcut.cmd');
 
   assert.match(compose, /^\s{2}postgres:/m);
   assert.match(compose, /^\s{2}n8n:/m);
@@ -433,6 +516,9 @@ test('local stack templates stay placeholder-only and local-first', () => {
   assert.doesNotMatch(compose, /^\s{2}n8n-worker:/m);
 
   for (const expected of [
+    '# [ STEP 1: Fill these before first launch ]',
+    '# [ STEP 2: Keep these local defaults for first launch ]',
+    '# [ STEP 3: Fill later only when you use the Compose ngrok tunnel ]',
     'POSTGRES_PASSWORD=replace-with-local-postgres-password',
     'N8N_ENCRYPTION_KEY=replace-with-long-random-value',
     'N8N_HOST=localhost',
@@ -444,6 +530,9 @@ test('local stack templates stay placeholder-only and local-first', () => {
   }
   assert.doesNotMatch(envExample, /[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/);
   assert.doesNotMatch(envExample, /n8n_[A-Za-z0-9_-]{20,}/);
+  assert.match(shortcut, /%USERPROFILE%\\\.n8n-local/);
+  assert.match(shortcut, /_n8n-local\.cmd/);
+  assert.doesNotMatch(shortcut, /POSTGRES_PASSWORD|N8N_ENCRYPTION_KEY|NGROK_AUTHTOKEN/);
 });
 
 test('Hostinger VPS page restores Hostinger-specific production content only', () => {
@@ -482,6 +571,13 @@ test('Hostinger VPS page restores Hostinger-specific production content only', (
     '8 TB bandwidth',
     'Ubuntu 24.04 with n8n',
     'Ubuntu 24.04 with n8n (queue mode)',
+    'Browser Terminal',
+    'IP address',
+    'Server IP',
+    'IPv4',
+    'Dedicated IP',
+    'ssh root@<your-vps-ip>',
+    'https://n8n.<your-vps-hostname>',
     '/docker/n8n',
     '/root',
     'docker-compose.yml',
@@ -500,34 +596,40 @@ test('Hostinger VPS page restores Hostinger-specific production content only', (
   assert.match(vps, /KVM 4\+ is for heavier workflows/);
   assert.match(vps, /A record/);
   assert.match(vps, /DNS propagation/);
+  assert.match(vps, /Do not copy the Hostinger dashboard URL\. You need the server IP address\./);
+  assert.match(vps, /Terminal commands go in Browser Terminal or SSH\. Website URLs go in your web browser\./);
+  assert.match(vps, /Do not type the n8n URL into Browser Terminal or SSH\. It belongs in a web browser\./);
+  assert.match(vps, /Save the email, password, n8n URL, and VPS IP address in the password manager/);
   assert.doesNotMatch(vps, /Coolify/i);
   assert.doesNotMatch(vps, /generic company VM/i);
   assert.doesNotMatch(vps, /unrelated hosting providers/i);
 });
 
-test('MCP setup and config surfaces are not shipped from n8n local setup', () => {
-  for (const relPath of obsoletePaths.filter((entry) => entry.includes('mcp') || entry.includes('MCP'))) {
-    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
+test('optional MCP setup and config surfaces are shipped as secondary AI-coding-agent references', () => {
+  assert.equal(fs.existsSync(path.join(repoRoot, 'mcp/projects/n8n-local-setup.md')), false);
+
+  for (const expected of [...platformOutputs, ...mcpConfigOutputs, mcpConfigIndexOutput]) {
+    assert.equal(fs.existsSync(path.join(repoRoot, expected.output)), true, expected.output);
   }
 
   for (const page of platformOutputs.map((entry) => entry.output)) {
     const text = readText(repoRoot, page);
-    assert.match(text, /skills-first/i, page);
+    assert.match(text, /optional .*MCP feature reference/i, page);
+    assert.match(text, /not a required local setup path|not part of the beginner local setup path/i, page);
     assert.match(text, /\]\(\.\.\/n8n\/local-setup\.md\)/, page);
-    assert.match(text, /\]\(\.\.\/\.\.\/templates\/local-stack\/\)/, page);
-    assert.match(text, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./, page);
-    assert.doesNotMatch(text, /mcp-configs|N8N_MCP|mcp-server|MCP URL|MCP token|Enable MCP|through MCP|_Page%201|\]\(\.\/templates\//, page);
+    assert.match(text, /\]\(\.\.\/\.\.\/templates\/mcp-configs\//, page);
+    assert.doesNotMatch(text, /_Page%201|\]\(\.\/templates\//, page);
   }
+
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
+  assert.doesNotMatch(localSetup, /mcp%20setup|templates\/mcp-configs|N8N_MCP|mcp-server|MCP URL|MCP token|Enable MCP/);
 });
 
 test('curated indexes, skill metadata, and packs point to current skills-first surfaces', () => {
   const paths = [
     '_projects/n8n/local-setup/curated_output_for_ai/references/n8n/README.md',
     '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/README.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-code.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/opencode.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/antigravity.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/templates/mcp-configs/README.md',
     '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/SKILL.md',
     '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md',
     '_projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/README.md',
@@ -539,11 +641,13 @@ test('curated indexes, skill metadata, and packs point to current skills-first s
   const combined = paths.map((relPath) => readText(repoRoot, relPath)).join('\n');
   assert.match(combined, /hostinger-vps\.md/);
   assert.match(combined, /_n8n-local\.cmd/);
+  assert.match(combined, /n8n-local-desktop-shortcut\.cmd/);
   assert.match(combined, /references\/ai-agent-platforms/);
   assert.match(combined, /skills-first|Skills-First/);
-  assert.match(combined, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./);
+  assert.match(combined, /Optional AI-coding-agent MCP/i);
+  assert.match(combined, /templates\/mcp-configs\/codex-mcp-config\.md|codex-mcp-config\.md/);
 
-  for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'mcp-configs/codex-mcp-config.md', 'mcp/projects/n8n-local-setup.md', 'N8N_MCP']) {
+  for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'mcp/projects/n8n-local-setup.md']) {
     assert.doesNotMatch(combined, new RegExp(escapeRegExp(stale)), stale);
   }
 });
@@ -558,6 +662,7 @@ test('repo README and usage docs route to n8n skills-first local setup surfaces'
     'skills/n8n-local-setup/references/n8n/hostinger-vps.md',
     'skills/n8n-local-setup/templates/local-stack/',
     'skills/n8n-local-setup/references/ai-agent-platforms/',
+    'skills/n8n-local-setup/templates/mcp-configs/',
     'skills/n8n-agent-rules/'
   ]) {
     assert.match(combined, new RegExp(escapeRegExp(expected)), expected);
@@ -565,10 +670,10 @@ test('repo README and usage docs route to n8n skills-first local setup surfaces'
 
   assert.match(combined, /Humans use `_projects\/\*\*`/);
   assert.match(combined, /Agents use (generated )?`skills\/\*\*`/);
-  assert.match(combined, /MCP setup\/config is intentionally not shipped or maintained by this toolkit for now\./);
+  assert.match(combined, /No runnable MCP server, package, CLI, or executable MCP tools are shipped from this repo today\./);
+  assert.match(combined, /Optional n8n AI-coding-agent MCP feature references are secondary and not the beginner local setup path\./);
 
   for (const forbidden of [
-    'skills/n8n-local-setup/templates/mcp-configs/',
     'mcp setup - codex',
     'mcp setup - claude code',
     'mcp setup - opencode',
@@ -576,8 +681,7 @@ test('repo README and usage docs route to n8n skills-first local setup surfaces'
     'Codex MCP config',
     'Claude Code MCP config',
     'OpenCode MCP config',
-    'Antigravity MCP config',
-    'MCP config templates'
+    'Antigravity MCP config'
   ]) {
     assert.doesNotMatch(combined, new RegExp(escapeRegExp(forbidden), 'i'), forbidden);
   }
@@ -594,6 +698,7 @@ test('n8n local setup packs install current files only', () => {
       'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
       'skills/n8n-local-setup/templates/local-stack/.env.example',
       'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd',
+      'skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd',
       'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
       'skills/n8n-agent-rules/SKILL.md',
       'skills/n8n-agent-rules/README.md',
@@ -604,14 +709,20 @@ test('n8n local setup packs install current files only', () => {
       assert.ok(pack.installs.includes(expected), `${pack.id}: ${expected}`);
     }
 
-    for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'mcp-configs', 'mcp setup', 'N8N_MCP']) {
+    for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'N8N_MCP']) {
       assert.equal(pack.installs.some((entry) => entry.includes(stale)), false, `${pack.id}: ${stale}`);
       assert.equal((pack.source_refs || []).some((entry) => entry.includes(stale)), false, `${pack.id}: ${stale} source_refs`);
     }
   }
 
   assert.ok(codex.installs.includes('skills/n8n-local-setup/references/ai-agent-platforms/codex.md'));
+  assert.ok(codex.installs.includes('skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'));
+  assert.ok(codex.source_refs.includes('_projects/n8n/local-setup/_main/mcp setup - codex.md'));
+  assert.ok(codex.source_refs.includes('_projects/n8n/local-setup/_main/codex-mcp-config.md'));
   assert.ok(claude.installs.includes('skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'));
+  assert.ok(claude.installs.includes('skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md'));
+  assert.ok(claude.source_refs.includes('_projects/n8n/local-setup/_main/mcp setup - claude code.md'));
+  assert.ok(claude.source_refs.includes('_projects/n8n/local-setup/_main/claude-mcp-config.md'));
 });
 
 test('n8n local setup published surface audit findings are resolved', () => {

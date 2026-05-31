@@ -37,4 +37,4 @@ Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
 ## Toolkit Boundary
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. MCP setup/config is intentionally not shipped or maintained by this toolkit for now.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional AI-coding-agent MCP feature references are secondary and not part of the beginner local setup path.

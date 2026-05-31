@@ -8,7 +8,8 @@
     "_projects/n8n/local-setup/",
     "_projects/n8n/local-setup/_main/Page 1 - Local Setup.md",
     "_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md",
-    "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md",
+    "_projects/n8n/local-setup/_main/mcp setup - codex.md",
+    "_projects/n8n/local-setup/_main/codex-mcp-config.md",
     "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
     "skills/n8n-agent-rules/",
     "skills/n8n-agent-rules/n8n-agent-rules.md",
@@ -20,7 +21,9 @@
     "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
     "skills/n8n-local-setup/templates/local-stack/.env.example",
     "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
-    "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1"
+    "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
+    "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
+    "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md"
   ],
   "suitable_for": [
     "Codex",
@@ -33,6 +36,7 @@
     "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
     "skills/n8n-local-setup/templates/local-stack/.env.example",
     "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
+    "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
     "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
     "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
     "skills/n8n-agent-rules/SKILL.md",
@@ -40,7 +44,8 @@
     "skills/n8n-agent-rules/n8n-agent-rules.md",
     "skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md",
     "skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs",
-    "skills/n8n-local-setup/references/n8n-agent-rules.md"
+    "skills/n8n-local-setup/references/n8n-agent-rules.md",
+    "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md"
   ],
   "writes_allowed": [
     "declared generated toolkit outputs from _projects/n8n/local-setup/toolkit.project.json",
@@ -66,7 +71,7 @@
   "run_commands": false,
   "notes": [
     "Copy .env.example to .env locally and do not commit .env.",
-    "MCP setup/config is intentionally not shipped or maintained by this toolkit for now.",
+    "Optional AI-coding-agent MCP config is secondary and not part of the beginner local setup path.",
     "Live n8n actions require separate explicit confirmation."
   ]
 }

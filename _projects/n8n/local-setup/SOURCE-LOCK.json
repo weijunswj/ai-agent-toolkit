@@ -12,7 +12,7 @@
       "source_path": "1. local setup.md",
       "project_path": "_projects/n8n/local-setup/_main/Page 1 - Local Setup.md",
       "source_blob_sha": "a08f0b83ed5722b5b8ecbc560f1ccfe89baf4563",
-      "notes": "Clean-rebuilt as the single local Windows Docker Desktop guide. The default public tunnel path now uses the ngrok Docker Desktop extension, the advanced Compose ngrok service remains documented as optional, MCP setup/config is not shipped, and the supported launcher is _n8n-local.cmd."
+      "notes": "Clean-rebuilt as the single local Windows Docker Desktop guide. The public tunnel path now uses the Compose ngrok service, optional AI-coding-agent MCP feature references are secondary, and the supported launcher is _n8n-local.cmd."
     },
     {
       "mode": "adapted",
@@ -26,60 +26,68 @@
       "source_path": "README.md",
       "project_path": "_projects/n8n/local-setup/_main/README.md",
       "source_blob_sha": "19815dff51b90aaef1d5125dff4b2f188ee54436",
-      "notes": "Clean-rebuilt into a two-page source index: Local Setup and Hostinger VPS, with skills-first routing and no supported MCP setup/config path."
+      "notes": "Clean-rebuilt into a two-page source index: Local Setup and Hostinger VPS, with skills-first routing and optional secondary AI-coding-agent MCP feature references."
     },
     {
-      "mode": "excluded",
+      "mode": "adapted",
       "source_path": "5. extra - claude code integration.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - claude code.md",
       "source_blob_sha": "ad785430bd6c1fdbbf441e5c593d4be6e501aa36",
-      "notes": "Removed from supported n8n local setup routing after the toolkit pivoted to skills-first surfaces. MCP setup/config is intentionally not shipped or maintained by this toolkit for now."
+      "notes": "Clean-rebuilt as an optional Claude Code AI-coding-agent MCP feature reference, secondary to the beginner local setup flow."
     },
     {
-      "mode": "excluded",
+      "mode": "adapted",
       "source_path": "6. extra - opencode integration.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - opencode.md",
       "source_blob_sha": "8ff55220c401813eddf8cb882717bbc834ac8e75",
-      "notes": "Removed from supported n8n local setup routing after the toolkit pivoted to skills-first surfaces. MCP setup/config is intentionally not shipped or maintained by this toolkit for now."
+      "notes": "Clean-rebuilt as an optional OpenCode AI-coding-agent MCP feature reference, secondary to the beginner local setup flow."
     },
     {
-      "mode": "excluded",
+      "mode": "adapted",
       "source_path": "7. extra - antigravity integration.md",
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - antigravity.md",
       "source_blob_sha": "bd611a73f3b9ac035e35c752951f5a845240ad45",
-      "notes": "Removed from supported n8n local setup routing after the toolkit pivoted to skills-first surfaces. MCP setup/config is intentionally not shipped or maintained by this toolkit for now."
+      "notes": "Clean-rebuilt as an optional Antigravity AI-coding-agent MCP feature reference, secondary to the beginner local setup flow."
     },
     {
-      "mode": "excluded",
+      "mode": "adapted",
       "source_path": "user-supplied-final/mcp setup - codex.md",
-      "notes": "Removed from supported n8n local setup routing after the toolkit pivoted to skills-first surfaces. MCP setup/config is intentionally not shipped or maintained by this toolkit for now."
+      "project_path": "_projects/n8n/local-setup/_main/mcp setup - codex.md",
+      "notes": "User-supplied final Codex AI-coding-agent MCP feature reference restored as secondary to the beginner local setup flow."
     },
     {
-      "mode": "excluded",
+      "mode": "adapted",
       "source_path": "templates/antigravity-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/antigravity-mcp-config.md",
       "source_blob_sha": "e366f703f5f8de45f3715628cec0a4c195fee274",
-      "notes": "Removed from supported n8n local setup routing after the toolkit pivoted to skills-first surfaces. MCP setup/config is intentionally not shipped or maintained by this toolkit for now."
+      "notes": "Restored as an optional Antigravity AI-coding-agent MCP config template."
     },
     {
-      "mode": "excluded",
+      "mode": "adapted",
       "source_path": "templates/claude-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/claude-mcp-config.md",
       "source_blob_sha": "1d050c7f8430aad5a2b09c476ec955cbdb5b765d",
-      "notes": "Removed from supported n8n local setup routing after the toolkit pivoted to skills-first surfaces. MCP setup/config is intentionally not shipped or maintained by this toolkit for now."
+      "notes": "Restored as an optional Claude Code AI-coding-agent MCP config template."
     },
     {
-      "mode": "excluded",
+      "mode": "adapted",
       "source_path": "templates/codex-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/codex-mcp-config.md",
       "source_blob_sha": "66015cf2c0c9cdf01ad5fe5daa2b5656a2ba57c6",
-      "notes": "Removed from supported n8n local setup routing after the toolkit pivoted to skills-first surfaces. MCP setup/config is intentionally not shipped or maintained by this toolkit for now."
+      "notes": "Restored as an optional Codex AI-coding-agent MCP config template."
     },
     {
-      "mode": "excluded",
+      "mode": "adapted",
       "source_path": "templates/opencode-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/opencode-mcp-config.md",
       "source_blob_sha": "31502fdc926cc1c4c9343945afd4dd477d1f7278",
-      "notes": "Removed from supported n8n local setup routing after the toolkit pivoted to skills-first surfaces. MCP setup/config is intentionally not shipped or maintained by this toolkit for now."
+      "notes": "Restored as an optional OpenCode AI-coding-agent MCP config template."
     },
     {
       "mode": "adapted",
       "source_path": "templates/local-stack/docker-compose.yml",
       "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/docker-compose.yml",
-      "notes": "Local Compose stack remains source-owned here. It is local-first with Postgres and n8n; the ngrok service is retained for the advanced Compose tunnel path."
+      "notes": "Local Compose stack remains source-owned here. It is local-first with Postgres and n8n; the ngrok service is the supported Compose tunnel path."
     },
     {
       "mode": "adapted",
@@ -92,6 +100,12 @@
       "source_path": "templates/local-stack/n8n-local.cmd",
       "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/_n8n-local.cmd",
       "notes": "Renamed by adding an underscore prefix. _n8n-local.cmd is now the supported launcher entrypoint."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "templates/local-stack/n8n-local-desktop-shortcut.cmd",
+      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/n8n-local-desktop-shortcut.cmd",
+      "notes": "Desktop convenience launcher added. It delegates to %USERPROFILE%\\.n8n-local\\_n8n-local.cmd so runtime files stay out of OneDrive Desktop."
     },
     {
       "mode": "adapted",
@@ -123,7 +137,7 @@
       "mode": "excluded",
       "source_path": "3. tunneling guide.md",
       "source_blob_sha": "3c3b252811c024803123c44459ff9f6c23c4cc24",
-      "notes": "Collapsed into Local Setup. The supported beginner path now uses the ngrok Docker Desktop extension, with Compose ngrok kept as an advanced option."
+      "notes": "Collapsed into Local Setup. The supported public tunnel path now uses the Compose ngrok service."
     },
     {
       "mode": "excluded",
