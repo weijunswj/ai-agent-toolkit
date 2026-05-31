@@ -25,6 +25,8 @@ services:
       - "127.0.0.1:${N8N_LOCAL_PORT:-5678}:5678"
     env_file:
       - .env
+      - path: .env.active
+        required: false
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
