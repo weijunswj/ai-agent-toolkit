@@ -89,7 +89,7 @@
           "to": "../n8n/local-setup.md"
         },
         {
-          "from": "./codex-mcp-config.md",
+          "from": "./templates/mcp-configs/codex-mcp-config.md",
           "to": "../../templates/mcp-configs/codex-mcp-config.md"
         }
       ]
@@ -106,7 +106,7 @@
           "to": "../n8n/local-setup.md"
         },
         {
-          "from": "./claude-mcp-config.md",
+          "from": "./templates/mcp-configs/claude-mcp-config.md",
           "to": "../../templates/mcp-configs/claude-mcp-config.md"
         }
       ]
@@ -123,7 +123,7 @@
           "to": "../n8n/local-setup.md"
         },
         {
-          "from": "./opencode-mcp-config.md",
+          "from": "./templates/mcp-configs/opencode-mcp-config.md",
           "to": "../../templates/mcp-configs/opencode-mcp-config.md"
         }
       ]
@@ -140,7 +140,7 @@
           "to": "../n8n/local-setup.md"
         },
         {
-          "from": "./antigravity-mcp-config.md",
+          "from": "./templates/mcp-configs/antigravity-mcp-config.md",
           "to": "../../templates/mcp-configs/antigravity-mcp-config.md"
         }
       ]
@@ -210,28 +210,28 @@
     },
     {
       "kind": "copy",
-      "source": "_main/antigravity-mcp-config.md",
+      "source": "_main/templates/mcp-configs/antigravity-mcp-config.md",
       "output": "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "notes": "Optional Antigravity MCP config copied from preserved source.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/claude-mcp-config.md",
+      "source": "_main/templates/mcp-configs/claude-mcp-config.md",
       "output": "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
       "notes": "Optional Claude MCP config copied from preserved source.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/codex-mcp-config.md",
+      "source": "_main/templates/mcp-configs/codex-mcp-config.md",
       "output": "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
       "notes": "Optional Codex MCP config copied from preserved source.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/opencode-mcp-config.md",
+      "source": "_main/templates/mcp-configs/opencode-mcp-config.md",
       "output": "skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md",
       "notes": "Optional OpenCode MCP config copied from preserved source.",
       "fidelity": "exact"

@@ -58,28 +58,28 @@
     {
       "mode": "adapted",
       "source_path": "templates/antigravity-mcp-config.md",
-      "project_path": "_projects/n8n/local-setup/_main/antigravity-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/templates/mcp-configs/antigravity-mcp-config.md",
       "source_blob_sha": "e366f703f5f8de45f3715628cec0a4c195fee274",
       "notes": "Restored as an optional Antigravity AI-coding-agent MCP config template."
     },
     {
       "mode": "adapted",
       "source_path": "templates/claude-mcp-config.md",
-      "project_path": "_projects/n8n/local-setup/_main/claude-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/templates/mcp-configs/claude-mcp-config.md",
       "source_blob_sha": "1d050c7f8430aad5a2b09c476ec955cbdb5b765d",
       "notes": "Restored as an optional Claude Code AI-coding-agent MCP config template."
     },
     {
       "mode": "adapted",
       "source_path": "templates/codex-mcp-config.md",
-      "project_path": "_projects/n8n/local-setup/_main/codex-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/templates/mcp-configs/codex-mcp-config.md",
       "source_blob_sha": "66015cf2c0c9cdf01ad5fe5daa2b5656a2ba57c6",
       "notes": "Restored as an optional Codex AI-coding-agent MCP config template."
     },
     {
       "mode": "adapted",
       "source_path": "templates/opencode-mcp-config.md",
-      "project_path": "_projects/n8n/local-setup/_main/opencode-mcp-config.md",
+      "project_path": "_projects/n8n/local-setup/_main/templates/mcp-configs/opencode-mcp-config.md",
       "source_blob_sha": "31502fdc926cc1c4c9343945afd4dd477d1f7278",
       "notes": "Restored as an optional OpenCode AI-coding-agent MCP config template."
     },

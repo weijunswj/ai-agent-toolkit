@@ -80,7 +80,7 @@ Copy the whole `skills/<skill-name>/` folder.
 
 ## 5. Claude Code MCP Config
 
-Use the [Claude MCP config](./claude-mcp-config.md).
+Use the [Claude MCP config](./templates/mcp-configs/claude-mcp-config.md).
    - Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or Claude Code's supported secret storage, not repo files.
 
 ## 6. Restart Claude

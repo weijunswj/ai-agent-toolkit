@@ -1,7 +1,7 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/opencode-mcp-config.md
+Source: _projects/n8n/local-setup/_main/templates/mcp-configs/opencode-mcp-config.md
 Update the project source and run sync.
 -->
 # OpenCode MCP Config

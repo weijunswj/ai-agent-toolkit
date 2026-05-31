@@ -338,6 +338,8 @@ Open `<LOCAL_STACK_FOLDER>`, double-click `_n8n-local.cmd`, then read the status
 
 If you copied `n8n-local-desktop-shortcut.cmd` to your Desktop, you can double-click that instead. It opens the launcher from `%USERPROFILE%\.n8n-local`.
 
+When an action finishes, press `Enter` at the prompt. The launcher clears the completed command output, trims the console buffer when Windows allows it, and redraws the main menu. The CMD window should not grow forever during normal menu use.
+
 The menu shows quick status for:
 
 ```text

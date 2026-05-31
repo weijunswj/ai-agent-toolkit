@@ -72,7 +72,7 @@ Copy the whole `skills/<skill-name>/` folder.
 
 ## 5. OpenCode MCP Config
 
-Use the [OpenCode MCP config](./opencode-mcp-config.md).
+Use the [OpenCode MCP config](./templates/mcp-configs/opencode-mcp-config.md).
 - Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
 
 ## 6. Restart OpenCode

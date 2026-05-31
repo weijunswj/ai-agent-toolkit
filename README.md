@@ -72,8 +72,6 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [Windows Localhost Workflows](skills/windows-localhost-workflows/) | Start and verify Windows localhost dev services. |
 | [Knowledge Index Updater](skills/knowledge-index-updater/) | Maintain a Notion/GitHub knowledge index with stable source keys and no duplicate rows. |
 
-For n8n setup, use [local setup](skills/n8n-local-setup/references/n8n/local-setup.md), [Hostinger VPS](skills/n8n-local-setup/references/n8n/hostinger-vps.md), [local stack templates](skills/n8n-local-setup/templates/local-stack/), [AI-agent platform references](skills/n8n-local-setup/references/ai-agent-platforms/), optional [MCP config templates](skills/n8n-local-setup/templates/mcp-configs/), and [n8n Agent Rules](skills/n8n-agent-rules/).
-
 ## Install Skills By Platform
 
 For deeper setup notes, use [How To Use: Install Toolkit Skills](repo/docs/HOW-TO-USE.md#install-toolkit-skills).

@@ -43,19 +43,19 @@ const platformOutputs = [
 
 const mcpConfigOutputs = [
   {
-    source: '_main/antigravity-mcp-config.md',
+    source: '_main/templates/mcp-configs/antigravity-mcp-config.md',
     output: 'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md'
   },
   {
-    source: '_main/claude-mcp-config.md',
+    source: '_main/templates/mcp-configs/claude-mcp-config.md',
     output: 'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md'
   },
   {
-    source: '_main/codex-mcp-config.md',
+    source: '_main/templates/mcp-configs/codex-mcp-config.md',
     output: 'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'
   },
   {
-    source: '_main/opencode-mcp-config.md',
+    source: '_main/templates/mcp-configs/opencode-mcp-config.md',
     output: 'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md'
   }
 ];
@@ -98,6 +98,10 @@ const obsoletePaths = [
   '_projects/n8n/local-setup/_main/5. extra - claude code integration.md',
   '_projects/n8n/local-setup/_main/6. extra - opencode integration.md',
   '_projects/n8n/local-setup/_main/7. extra - antigravity integration.md',
+  '_projects/n8n/local-setup/_main/codex-mcp-config.md',
+  '_projects/n8n/local-setup/_main/claude-mcp-config.md',
+  '_projects/n8n/local-setup/_main/opencode-mcp-config.md',
+  '_projects/n8n/local-setup/_main/antigravity-mcp-config.md',
   '_projects/n8n/local-setup/curated_output_for_ai/mcp/n8n-local-setup.md',
   'mcp/projects/n8n-local-setup.md',
   '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local.cmd',
@@ -317,10 +321,10 @@ test('n8n local setup source README exposes two main beginner pages', () => {
   assert.match(readme, /Optional AI-coding-agent MCP feature references are secondary and only for users intentionally enabling n8n MCP for an AI coding agent\./);
   assert.match(readme, /^## Optional AI-Coding-Agent MCP Feature References$/m);
   assert.match(readme, /\[mcp setup - codex\.md\]\(\.\/mcp%20setup%20-%20codex\.md\)/);
-  assert.match(readme, /\[codex-mcp-config\.md\]\(\.\/codex-mcp-config\.md\)/);
+  assert.match(readme, /\[codex-mcp-config\.md\]\(\.\/templates\/mcp-configs\/codex-mcp-config\.md\)/);
   assert.match(readme, /\*\*If the \[AI Coding Agent Rules\]\(\.\.\/\.\.\/\.\.\/\.\.\/skills\/ai-coding-agent-rules\/\) skill is installed, repo-local templates are automatically checked/);
 
-  for (const stale of ['Upgrading', 'Tunneling Guide', 'Docker Compose + ngrok', 'MCP setup pages', 'MCP config templates', 'mcp-configs', 'extra - claude', 'extra - opencode', 'extra - antigravity']) {
+  for (const stale of ['Upgrading', 'Tunneling Guide', 'Docker Compose + ngrok', 'MCP setup pages', 'MCP config templates', 'extra - claude', 'extra - opencode', 'extra - antigravity']) {
     assert.doesNotMatch(readme, new RegExp(stale, 'i'), stale);
   }
 });
@@ -455,6 +459,7 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /^### 8\.5 `View logs` Menu$/m);
   assert.match(localSetup, /The update menu always checks for updates before it lets you choose what to update\./);
   assert.match(localSetup, /`Back up` writes a timestamped SQL dump under a local `backups` folder/);
+  assert.match(localSetup, /The launcher clears the completed command output, trims the console buffer when Windows allows it, and redraws the main menu\./);
 });
 
 test('local launcher and menu keep the console open until Exit', () => {
@@ -471,11 +476,16 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(cmd, /exit \/b 0/);
   assert.doesNotMatch(cmd, /NGROK_AUTHTOKEN|POSTGRES_PASSWORD|N8N_ENCRYPTION_KEY/);
   assert.match(menu, /\$script:ExitRequested = \$false/);
+  assert.match(menu, /function Clear-MenuScreen/);
+  assert.match(menu, /\[Console\]::Clear\(\)/);
+  assert.match(menu, /\[Console\]::SetBufferSize\(\[Console\]::BufferWidth, \[Console\]::WindowHeight\)/);
+  assert.match(menu, /Press Enter to clear completed output and return to the menu/);
+  assert.match(menu, /function Pause-Menu \{[\s\S]*Clear-MenuScreen[\s\S]*\}/);
   assert.match(menu, /function Invoke-MenuAction/);
   assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
   assert.match(menu, /while \(-not \$script:ExitRequested\)/);
   assert.match(menu, /Pause-Menu/);
-  assert.match(menu, /'9' \{ Clear-Host; Write-Success 'Bye\.'; \$script:ExitRequested = \$true \}/);
+  assert.match(menu, /'9' \{ Clear-MenuScreen; Write-Success 'Bye\.'; \$script:ExitRequested = \$true \}/);
   assert.match(menu, /exit 0/);
 
   for (let option = 1; option <= 8; option += 1) {
@@ -718,11 +728,11 @@ test('n8n local setup packs install current files only', () => {
   assert.ok(codex.installs.includes('skills/n8n-local-setup/references/ai-agent-platforms/codex.md'));
   assert.ok(codex.installs.includes('skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'));
   assert.ok(codex.source_refs.includes('_projects/n8n/local-setup/_main/mcp setup - codex.md'));
-  assert.ok(codex.source_refs.includes('_projects/n8n/local-setup/_main/codex-mcp-config.md'));
+  assert.ok(codex.source_refs.includes('_projects/n8n/local-setup/_main/templates/mcp-configs/codex-mcp-config.md'));
   assert.ok(claude.installs.includes('skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md'));
   assert.ok(claude.installs.includes('skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md'));
   assert.ok(claude.source_refs.includes('_projects/n8n/local-setup/_main/mcp setup - claude code.md'));
-  assert.ok(claude.source_refs.includes('_projects/n8n/local-setup/_main/claude-mcp-config.md'));
+  assert.ok(claude.source_refs.includes('_projects/n8n/local-setup/_main/templates/mcp-configs/claude-mcp-config.md'));
 });
 
 test('n8n local setup published surface audit findings are resolved', () => {

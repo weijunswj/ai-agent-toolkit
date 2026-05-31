@@ -64,7 +64,7 @@ Copy the whole `skills/<skill-name>/` folder.
 
 ## 5. Codex MCP Config
 
-Use the [Codex MCP config](./codex-mcp-config.md).
+Use the [Codex MCP config](./templates/mcp-configs/codex-mcp-config.md).
    - Add the configuration to your Codex setup.
 
 ## References

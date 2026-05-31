@@ -30,10 +30,10 @@ Skip this section for beginner local setup.
 
 | Platform | Setup guide | Config template |
 | --- | --- | --- |
-| Codex | [mcp setup - codex.md](./mcp%20setup%20-%20codex.md) | [codex-mcp-config.md](./codex-mcp-config.md) |
-| Claude Code | [mcp setup - claude code.md](./mcp%20setup%20-%20claude%20code.md) | [claude-mcp-config.md](./claude-mcp-config.md) |
-| OpenCode | [mcp setup - opencode.md](./mcp%20setup%20-%20opencode.md) | [opencode-mcp-config.md](./opencode-mcp-config.md) |
-| Antigravity | [mcp setup - antigravity.md](./mcp%20setup%20-%20antigravity.md) | [antigravity-mcp-config.md](./antigravity-mcp-config.md) |
+| Codex | [mcp setup - codex.md](./mcp%20setup%20-%20codex.md) | [codex-mcp-config.md](./templates/mcp-configs/codex-mcp-config.md) |
+| Claude Code | [mcp setup - claude code.md](./mcp%20setup%20-%20claude%20code.md) | [claude-mcp-config.md](./templates/mcp-configs/claude-mcp-config.md) |
+| OpenCode | [mcp setup - opencode.md](./mcp%20setup%20-%20opencode.md) | [opencode-mcp-config.md](./templates/mcp-configs/opencode-mcp-config.md) |
+| Antigravity | [mcp setup - antigravity.md](./mcp%20setup%20-%20antigravity.md) | [antigravity-mcp-config.md](./templates/mcp-configs/antigravity-mcp-config.md) |
 
 ## Agent Rules And Adapters
 

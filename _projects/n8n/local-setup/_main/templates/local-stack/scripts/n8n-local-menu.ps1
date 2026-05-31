@@ -39,10 +39,22 @@ function Write-ErrorMessage {
   Write-Host "[ERR]  $Message" -ForegroundColor Red
 }
 
+function Clear-MenuScreen {
+  try {
+    [Console]::Clear()
+    if ([Console]::WindowHeight -gt 0 -and [Console]::BufferHeight -gt [Console]::WindowHeight) {
+      [Console]::SetBufferSize([Console]::BufferWidth, [Console]::WindowHeight)
+    }
+  } catch {
+    Clear-Host
+  }
+}
+
 function Pause-Menu {
   Write-Host ''
-  Write-Host 'Press Enter to return to the menu...' -ForegroundColor DarkCyan
+  Write-Host 'Press Enter to clear completed output and return to the menu...' -ForegroundColor DarkCyan
   [void](Read-Host)
+  Clear-MenuScreen
 }
 
 function Invoke-MenuAction {
@@ -658,7 +670,7 @@ function Show-LaunchStatus {
 }
 
 function Show-MainMenu {
-  Clear-Host
+  Clear-MenuScreen
   Write-Header 'n8n Local Stack'
   Show-LaunchStatus
   Write-Host ''
@@ -688,7 +700,7 @@ while (-not $script:ExitRequested) {
     '6' { Invoke-MenuAction { View-LogsMenu } }
     '7' { Invoke-MenuAction { Backup-Postgres } }
     '8' { Invoke-MenuAction { Show-Help } }
-    '9' { Clear-Host; Write-Success 'Bye.'; $script:ExitRequested = $true }
+    '9' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
     default {
       Invoke-MenuAction { Write-Warning 'Choose a number from 1 to 9.' }
     }

@@ -84,7 +84,7 @@ This page is an optional Antigravity AI-coding-agent MCP feature reference, not 
 
 ## 5. Antigravity MCP Config
 
-1. Use the [Antigravity MCP config](./antigravity-mcp-config.md).
+1. Use the [Antigravity MCP config](./templates/mcp-configs/antigravity-mcp-config.md).
 2. Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
 
 ## 6. Restart Antigravity
