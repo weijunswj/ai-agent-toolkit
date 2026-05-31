@@ -682,7 +682,7 @@ test('local stack templates stay placeholder-only and local-first', () => {
     'POSTGRES_DB=n8n',
     'POSTGRES_USER=n8n',
     'POSTGRES_PASSWORD=replace-with-local-postgres-password',
-    'N8N_ENCRYPTION_KEY=replace-with-long-random-value',
+    'N8N_ENCRYPTION_KEY=replace-with-32-random-character',
     'LOCAL_TIMEZONE=Asia/Singapore',
     'N8N_LOCAL_PORT=5678',
     'NGROK_AUTHTOKEN=replace-with-ngrok-authtoken',
@@ -738,7 +738,7 @@ test('Hostinger VPS page restores Hostinger-specific production content only', (
     'Server IP',
     'IPv4',
     'Dedicated IP',
-    'ssh root@123.123.123.123',
+    'ssh root@203.0.113.123',
     'https://n8n.<your-vps-hostname>',
     '/docker/n8n',
     '/root',
@@ -758,7 +758,8 @@ test('Hostinger VPS page restores Hostinger-specific production content only', (
   assert.match(vps, /KVM 4\+ is for heavier workflows/);
   assert.match(vps, /A record/);
   assert.match(vps, /DNS propagation/);
-  assert.match(vps, /Replace `123\.123\.123\.123` with the IP address from hPanel/);
+  assert.match(vps, /Replace `203\.0\.113\.123` with the IP address from hPanel/);
+  assert.doesNotMatch(vps, /123\.123\.123\.123/);
   assert.doesNotMatch(vps, /ssh root@<your-vps-ip>/);
   assert.match(vps, /Do not copy the Hostinger dashboard URL\. You need the server IP address\./);
   assert.match(vps, /Terminal commands go in Browser Terminal or SSH\. Website URLs go in your web browser\./);
