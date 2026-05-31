@@ -22,7 +22,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:5678:5678"
+      - "127.0.0.1:${N8N_LOCAL_PORT:-5678}:5678"
     env_file:
       - .env
     environment:

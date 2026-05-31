@@ -69,13 +69,35 @@ function Invoke-MenuAction {
   Pause-Menu
 }
 
+function Invoke-NativeCommand {
+  param(
+    [scriptblock]$Command,
+    [switch]$Quiet
+  )
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $Command
+    $exitCode = $LASTEXITCODE
+  } catch {
+    if (-not $Quiet) {
+      Write-ErrorMessage $_.Exception.Message
+    }
+    $exitCode = 1
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
+  return $exitCode
+}
+
 function Invoke-Compose {
   param([string[]]$Arguments)
 
   $display = "docker compose $($Arguments -join ' ')"
   Write-Info $display
-  & docker compose @Arguments
-  $exitCode = $LASTEXITCODE
+  $exitCode = Invoke-NativeCommand -Command { & docker compose @Arguments }
   if ($exitCode -ne 0) {
     Write-ErrorMessage "Command failed with exit code $exitCode."
   }
@@ -86,6 +108,7 @@ function Test-StackFiles {
   $composeExists = Test-Path -LiteralPath (Join-Path $script:StackRoot 'docker-compose.yml')
   $envExists = Test-Path -LiteralPath (Join-Path $script:StackRoot '.env')
   $envExampleExists = Test-Path -LiteralPath (Join-Path $script:StackRoot '.env.example')
+  $configValid = $true
 
   if (-not $composeExists) {
     Write-ErrorMessage 'docker-compose.yml is missing from this folder.'
@@ -100,7 +123,11 @@ function Test-StackFiles {
     }
   }
 
-  return ($composeExists -and $envExists)
+  if ($envExists -and -not (Test-LocalPortConfig)) {
+    $configValid = $false
+  }
+
+  return ($composeExists -and $envExists -and $configValid)
 }
 
 function Test-DockerDesktopCli {
@@ -118,8 +145,7 @@ function Test-DockerReady {
     return $false
   }
 
-  & docker info *> $null
-  if ($LASTEXITCODE -eq 0) {
+  if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) {
     return $true
   }
 
@@ -129,8 +155,11 @@ function Test-DockerReady {
     $choice = Read-Host 'Try starting Docker Desktop now? (y/N)'
     if ($choice -match '^(y|yes)$') {
       Write-Info 'Starting Docker Desktop...'
-      & docker desktop start
-      Write-Warning 'Wait for Docker Desktop to finish starting, then run the menu action again.'
+      if ((Invoke-NativeCommand -Command { & docker desktop start }) -eq 0) {
+        Write-Warning 'Wait for Docker Desktop to finish starting, then run the menu action again.'
+      } else {
+        Write-Info 'If Docker Desktop did not open, start it manually, then run the menu action again.'
+      }
     }
   } else {
     Write-Info 'Start Docker Desktop manually, then run the menu action again.'
@@ -220,6 +249,32 @@ function Get-EnvValue {
   }
 
   return $Default
+}
+
+function Get-LocalN8nPort {
+  $port = Get-EnvValue -Name 'N8N_LOCAL_PORT' -Default '5678'
+  if ($port -notmatch '^\d+$') {
+    return '5678'
+  }
+  return $port
+}
+
+function Get-LocalN8nUrl {
+  return "http://localhost:$(Get-LocalN8nPort)"
+}
+
+function Get-ExpectedLocalWebhookUrl {
+  return "$(Get-LocalN8nUrl)/"
+}
+
+function Test-LocalPortConfig {
+  $port = Get-EnvValue -Name 'N8N_LOCAL_PORT' -Default '5678'
+  $portNumber = 0
+  if (-not [int]::TryParse($port, [ref]$portNumber) -or $portNumber -lt 1 -or $portNumber -gt 65535) {
+    Write-ErrorMessage 'N8N_LOCAL_PORT must be a number from 1 to 65535, like 5678 or 5679.'
+    return $false
+  }
+  return $true
 }
 
 function Get-ServiceImageIds {
@@ -321,10 +376,9 @@ function Apply-Update {
   if (-not (Test-DockerReady)) { return }
 
   if ($Services -contains 'postgres') {
-    Write-Warning 'Postgres is pinned to major version 16, but database updates should be backed up first.'
-    $confirm = Read-Host 'Continue with Postgres update? (y/N)'
-    if ($confirm -notmatch '^(y|yes)$') {
-      Write-Warning 'Update cancelled before touching Postgres.'
+    Write-Warning 'This update includes Postgres, so the menu will run a database backup first.'
+    if (-not (Backup-Postgres -Required)) {
+      Write-ErrorMessage 'Update cancelled because the automatic Postgres backup did not complete.'
       return
     }
   }
@@ -354,7 +408,7 @@ function Start-LocalStack {
     [void](Invoke-Compose -Arguments @('ps'))
     Write-Success 'Local n8n stack started.'
     Write-Host ''
-    Write-Host 'n8n: http://localhost:5678' -ForegroundColor Green
+    Write-Host "n8n: $(Get-LocalN8nUrl)" -ForegroundColor Green
     Write-Host 'Use Start ngrok tunnel only after .env has NGROK_AUTHTOKEN, NGROK_DOMAIN, and WEBHOOK_URL.' -ForegroundColor Cyan
   }
 }
@@ -366,6 +420,13 @@ function Start-LocalhostOnly {
   if ($runningServices -contains 'ngrok') {
     Write-Warning 'ngrok tunnel is running. Stopping it so n8n is localhost only.'
     [void](Invoke-Compose -Arguments @('stop', 'ngrok'))
+  }
+
+  $expectedWebhookUrl = Get-ExpectedLocalWebhookUrl
+  $webhookUrl = Get-EnvValue -Name 'WEBHOOK_URL'
+  if ($webhookUrl -and $webhookUrl -ne $expectedWebhookUrl) {
+    Write-Warning "WEBHOOK_URL is currently $webhookUrl"
+    Write-Warning "For localhost-only webhook URLs, set WEBHOOK_URL=$expectedWebhookUrl and choose Restart n8n."
   }
 }
 
@@ -400,19 +461,44 @@ function Start-NgrokTunnel {
   $authtoken = Get-EnvValue -Name 'NGROK_AUTHTOKEN'
   $domain = Get-EnvValue -Name 'NGROK_DOMAIN'
   $webhookUrl = Get-EnvValue -Name 'WEBHOOK_URL'
+  $n8nHost = Get-EnvValue -Name 'N8N_HOST'
+  $n8nProtocol = Get-EnvValue -Name 'N8N_PROTOCOL'
 
   if (-not $authtoken -or $authtoken -eq 'replace-with-ngrok-authtoken') {
     Write-ErrorMessage 'Set NGROK_AUTHTOKEN in .env before starting the tunnel.'
     return
   }
 
-  if (-not $domain -or $domain -eq 'your-reserved-domain.ngrok.app') {
+  if (-not $domain -or $domain -eq 'your-name.ngrok.app' -or $domain -eq 'your-reserved-domain.ngrok.app') {
     Write-ErrorMessage 'Set NGROK_DOMAIN in .env before starting the tunnel.'
     return
   }
 
-  if (-not $webhookUrl -or $webhookUrl -eq 'http://localhost:5678/') {
-    Write-Warning 'WEBHOOK_URL still looks local. Set it to https://<your-ngrok-domain>/, then recreate n8n.'
+  if ($domain -match '^https?://') {
+    Write-ErrorMessage 'NGROK_DOMAIN must be the hostname only, like your-name.ngrok.app. Do not include https://.'
+    return
+  }
+
+  if ($domain -match '/$') {
+    Write-ErrorMessage 'NGROK_DOMAIN must not end with a slash. Use your-name.ngrok.app, not your-name.ngrok.app/.'
+    return
+  }
+
+  if ($n8nHost -ne 'localhost') {
+    Write-ErrorMessage 'Set N8N_HOST back to localhost for this guide. Do not put the ngrok domain in N8N_HOST.'
+    return
+  }
+
+  if ($n8nProtocol -ne 'http') {
+    Write-ErrorMessage 'Set N8N_PROTOCOL back to http for this local Docker setup. ngrok provides the public HTTPS URL.'
+    return
+  }
+
+  $expectedWebhookUrl = "https://$domain/"
+  if ($webhookUrl -ne $expectedWebhookUrl) {
+    Write-ErrorMessage "Set WEBHOOK_URL in .env to $expectedWebhookUrl before starting the tunnel."
+    Write-Info 'Keep N8N_HOST=localhost. For ngrok in this guide, change WEBHOOK_URL only.'
+    return
   }
 
   if ((Invoke-Compose -Arguments @('up', '-d', 'ngrok')) -eq 0) {
@@ -448,7 +534,8 @@ function Restart-N8n {
 }
 
 function Show-Status {
-  Write-Header 'Stack Status'
+  Write-Header 'Compose Status Details'
+  Write-Info 'Shows service state, health, container names, and ports.'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
     [void](Invoke-Compose -Arguments @('ps'))
   }
@@ -457,11 +544,11 @@ function Show-Status {
 function Show-Logs {
   param([string]$Service = '')
 
-  Write-Header 'Live Logs'
-  Write-Warning 'This view follows logs live. Press Ctrl+C to return to the menu.'
+  Write-Header 'Recent Logs'
+  Write-Info 'Showing the last 200 lines. This command returns to the menu when complete.'
 
   if ((Test-StackFiles) -and (Test-DockerReady)) {
-    $args = @('logs', '-f')
+    $args = @('logs', '--tail', '200')
     if ($Service) {
       $args += $Service
     }
@@ -585,14 +672,16 @@ function Update-AllServices {
 
 function Open-N8n {
   Write-Header 'Open Local n8n URL'
-  Start-Process "http://localhost:5678"
+  Start-Process (Get-LocalN8nUrl)
   Write-Success 'Opened local n8n in your browser.'
 }
 
 function Backup-Postgres {
+  param([switch]$Required)
+
   Write-Header 'Backup Postgres Database'
-  if (-not (Test-StackFiles)) { return }
-  if (-not (Test-DockerReady)) { return }
+  if (-not (Test-StackFiles)) { return $false }
+  if (-not (Test-DockerReady)) { return $false }
 
   $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Default 'n8n'
   $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n'
@@ -603,43 +692,40 @@ function Backup-Postgres {
   New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 
   Write-Info 'Running pg_dump from the postgres service.'
-  & docker compose exec -T postgres pg_dump -U $postgresUser $postgresDb 1> $backupPath
-  if ($LASTEXITCODE -eq 0) {
+  $exitCode = Invoke-NativeCommand -Command { & docker compose exec -T postgres pg_dump -U $postgresUser $postgresDb 1> $backupPath }
+  if ($exitCode -eq 0) {
     Write-Success "Backup written to: $backupPath"
+    return $true
   } else {
     Write-ErrorMessage 'Backup failed. Check the Postgres logs for details.'
+    if ($Required) {
+      Write-ErrorMessage 'Required backup failed. No update was applied.'
+    }
+    return $false
   }
 }
 
-function Show-Help {
-  Write-Header 'Help / Command Reference'
+function Show-CommandList {
+  Write-Header 'Command List'
   Write-Host 'Recommended entrypoint:' -ForegroundColor Cyan
   Write-Host '  _n8n-local.cmd' -ForegroundColor White
   Write-Host ''
   Write-Host 'Do not launch n8n directly from Docker Desktop. Launch it from _n8n-local.cmd instead.' -ForegroundColor Yellow
-  Write-Host 'Docker Desktop direct launch bypasses guided checks, selected updates, backups, and clear status output.' -ForegroundColor Cyan
+  Write-Host 'Docker Desktop direct launch skips the guided menu, status, update choices, backups, and logs.' -ForegroundColor Cyan
   Write-Host ''
   Write-Host 'Compose ngrok setup values in .env:' -ForegroundColor Cyan
   Write-Host '  NGROK_AUTHTOKEN=<copy from ngrok dashboard>'
   Write-Host '  NGROK_DOMAIN=<copy host only, no https://>'
   Write-Host '  WEBHOOK_URL=https://<your-ngrok-domain>/'
   Write-Host ''
-  Write-Host 'Raw commands behind the menu:' -ForegroundColor Cyan
-  Write-Host '  Start n8n localhost only: docker compose up -d postgres n8n'
-  Write-Host '  Start ngrok tunnel:       docker compose up -d ngrok'
-  Write-Host '  Stop ngrok tunnel:        docker compose stop ngrok'
-  Write-Host '  Show Compose status:      docker compose ps'
-  Write-Host '  Check for updates:        docker compose pull'
-  Write-Host '  Update all services:      docker compose up -d --force-recreate'
-  Write-Host '  Update one service:       docker compose up -d --force-recreate <service>'
-  Write-Host '  Stop n8n + ngrok tunnel:  docker compose down'
-  Write-Host '  Restart n8n:              docker compose restart n8n'
-  Write-Host '  Status:                   docker compose ps'
-  Write-Host '  All logs:                 docker compose logs -f'
-  Write-Host '  n8n logs:                 docker compose logs -f n8n'
-  Write-Host '  Postgres logs:            docker compose logs -f postgres'
-  Write-Host '  ngrok logs:               docker compose logs -f ngrok'
-  Write-Host '  Postgres backup:          docker compose exec -T postgres pg_dump'
+  Write-Host 'Use the numbered menu options for normal work:' -ForegroundColor Cyan
+  Write-Host '  Start n8n: starts local n8n, or starts n8n with ngrok.'
+  Write-Host '  Restart n8n: restarts only the n8n app container.'
+  Write-Host '  Stop n8n: stops ngrok only, or stops the local stack.'
+  Write-Host '  Update: checks for image updates before letting you apply them.'
+  Write-Host '  Show Compose status: shows service state, health, container names, and ports.'
+  Write-Host '  View logs: shows recent logs for all services or one service.'
+  Write-Host '  Back up: writes a local Postgres SQL backup under .\backups.'
   Write-Host ''
   Write-Host 'Updates are user-approved. Pulling images does not recreate or restart containers until you choose an update action.' -ForegroundColor Yellow
 }
@@ -648,22 +734,25 @@ function Show-LaunchStatus {
   Write-Host 'Folder: ' -NoNewline -ForegroundColor DarkCyan
   Write-Host $script:StackRoot -ForegroundColor White
   $dockerReady = $false
+  $composeExists = Test-Path -LiteralPath (Join-Path $script:StackRoot 'docker-compose.yml')
+  $envExists = Test-Path -LiteralPath (Join-Path $script:StackRoot '.env')
+  $configValid = $true
 
-  if (Test-Path -LiteralPath (Join-Path $script:StackRoot 'docker-compose.yml')) {
+  if ($composeExists) {
     Write-Success 'docker-compose.yml found'
   } else {
     Write-ErrorMessage 'docker-compose.yml missing'
   }
 
-  if (Test-Path -LiteralPath (Join-Path $script:StackRoot '.env')) {
+  if ($envExists) {
     Write-Success '.env found'
+    $configValid = Test-LocalPortConfig
   } else {
     Write-Warning '.env missing. Copy .env.example to .env before starting or updating.'
   }
 
   if (Get-Command docker -ErrorAction SilentlyContinue) {
-    & docker info *> $null
-    if ($LASTEXITCODE -eq 0) {
+    if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) {
       Write-Success 'Docker appears available and running'
       $dockerReady = $true
     } else {
@@ -673,12 +762,12 @@ function Show-LaunchStatus {
     Write-ErrorMessage 'Docker CLI was not found'
   }
 
-  if ($dockerReady) {
+  if ($dockerReady -and $composeExists -and $envExists -and $configValid) {
     $runningServices = Get-RunningServices
     Write-Host ''
     Write-Host 'Quick service status:' -ForegroundColor Cyan
     Write-ServiceStatus -Name 'postgres' -RunningServices $runningServices
-    Write-ServiceStatus -Name 'n8n' -RunningServices $runningServices -WhenRunning 'local editor: http://localhost:5678'
+    Write-ServiceStatus -Name 'n8n' -RunningServices $runningServices -WhenRunning "local editor: $(Get-LocalN8nUrl)"
     Write-ServiceStatus -Name 'ngrok' -RunningServices $runningServices -WhenRunning 'public tunnel is ON' -WhenStopped 'public tunnel is OFF'
   }
 }
@@ -696,7 +785,7 @@ function Show-MainMenu {
   Write-Host '  5. Show Compose status'
   Write-Host '  6. View logs'
   Write-Host '  7. Back up'
-  Write-Host '  8. Help'
+  Write-Host '  8. Command list'
   Write-Host '  9. Exit'
   Write-Host ''
 }
@@ -712,8 +801,8 @@ while (-not $script:ExitRequested) {
     '4' { Invoke-MenuAction { Show-UpdateMenu } }
     '5' { Invoke-MenuAction { Show-Status } }
     '6' { Invoke-MenuAction { View-LogsMenu } }
-    '7' { Invoke-MenuAction { Backup-Postgres } }
-    '8' { Invoke-MenuAction { Show-Help } }
+    '7' { Invoke-MenuAction { [void](Backup-Postgres) } }
+    '8' { Invoke-MenuAction { Show-CommandList } }
     '9' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
     default {
       Invoke-MenuAction { Write-Warning 'Choose a number from 1 to 9.' }

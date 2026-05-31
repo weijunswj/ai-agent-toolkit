@@ -128,7 +128,7 @@ const expectedMainMenuOptions = [
   'Show Compose status',
   'View logs',
   'Back up',
-  'Help',
+  'Command list',
   'Exit'
 ];
 
@@ -381,7 +381,10 @@ test('Local Setup keeps the corrected beginner flow', () => {
   assert.match(localSetup, /ngrok connects to `n8n:5678` inside the same Docker Compose network/);
   assert.match(localSetup, /Choose `Start n8n`/);
   assert.match(localSetup, /Choose `Start ngrok tunnel`/);
-  assert.match(localSetup, /Choose `Show Compose status`/);
+  assert.match(localSetup, /Read the quick status at the top of the main menu and confirm `ngrok: running`/);
+  assert.match(localSetup, /choose `Show Compose status` to see service state, health, container names, and ports/);
+  assert.match(localSetup, /ngrok Docker setup page/);
+  assert.match(localSetup, /not Docker Desktop/);
   assert.match(localSetup, /Free ngrok accounts get an assigned Dev Domain/);
   assert.match(localSetup, /Stopping the `ngrok` Docker service stops the tunnel/);
   assert.match(localSetup, /OneDrive Desktop redirection/);
@@ -398,7 +401,7 @@ test('Local Setup keeps the corrected beginner flow', () => {
   assert.match(localSetup, /C:\\Users\\<you>\\OneDrive\\Desktop/);
   assert.doesNotMatch(localSetup, /\$env:USERPROFILE\\Desktop/);
   assert.match(localSetup, /`<LOCAL_STACK_FOLDER>`/);
-  assert.match(localSetup, /Do not launch n8n directly from Docker Desktop\. Launch it from `_n8n-local\.cmd` instead\./);
+  assert.match(localSetup, /Do not launch n8n directly from Docker Desktop\. Launch it from `_n8n-local\.cmd` instead because/);
 });
 
 test('Local Setup separates .env and public URL values without MCP setup values', () => {
@@ -413,9 +416,13 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   assert.match(localSetup, /^### STEP 3: Fill These Later Only After Local n8n Works$/m);
   assert.match(localSetup, /you are allowed to invent any strong random value yourself/);
   assert.match(localSetup, /copy the real value from there/);
-  assert.match(localSetup, /`N8N_HOST` can stay `localhost` for this guide/);
+  assert.match(localSetup, /For this guide, keep `N8N_HOST=localhost`/);
+  assert.match(localSetup, /For ngrok, the value you change is `WEBHOOK_URL`, not `N8N_HOST`/);
+  assert.match(localSetup, /If port `5678` is already used, change `N8N_LOCAL_PORT` to another unused port such as `5679`/);
+  assert.match(localSetup, /Open the ngrok Docker setup page/);
+  assert.match(localSetup, /bottom of section 1/);
 
-  for (const variable of ['POSTGRES_PASSWORD', 'N8N_ENCRYPTION_KEY', 'WEBHOOK_URL', 'N8N_HOST', 'N8N_PROTOCOL', 'N8N_PROXY_HOPS', 'NGROK_AUTHTOKEN', 'NGROK_DOMAIN']) {
+  for (const variable of ['POSTGRES_PASSWORD', 'N8N_ENCRYPTION_KEY', 'WEBHOOK_URL', 'N8N_HOST', 'N8N_LOCAL_PORT', 'N8N_PROTOCOL', 'N8N_PROXY_HOPS', 'NGROK_AUTHTOKEN', 'NGROK_DOMAIN']) {
     assert.match(localSetup, new RegExp(`\\| \`${variable}\` \\|`), variable);
   }
 
@@ -429,10 +436,10 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   assert.doesNotMatch(envExample, /N8N_MCP_URL|N8N_MCP_TOKEN/);
   assert.doesNotMatch(localSetup, /\| `N8N_MCP_URL` \| Basic local stack/);
   assert.doesNotMatch(localSetup, /\| `N8N_MCP_TOKEN` \| Basic local stack/);
-  assert.doesNotMatch(localSetup, /MCP Values For AI Agents|MCP URL|MCP token|Enable MCP|N8N_MCP_URL|N8N_MCP_TOKEN|mcp%20setup|templates\/mcp-configs/);
+  assert.doesNotMatch(localSetup, /MCP Values For AI Agents|MCP URL|MCP token|Enable MCP|N8N_MCP_URL|N8N_MCP_TOKEN/);
 });
 
-test('Local Setup keeps skills-first agent guidance and does not route MCP setup', () => {
+test('Local Setup keeps skills-first guidance and optional MCP setup table', () => {
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   const publicIndex = localSetup.indexOf('## 7. ngrok Public Tunnel Setup');
   const skillsIndex = localSetup.indexOf('## 9. Skills-First Agent Guidance');
@@ -444,17 +451,24 @@ test('Local Setup keeps skills-first agent guidance and does not route MCP setup
   assert.match(localSetup, /Agents use `skills\/\*\*` after generated outputs are synced\./);
   assert.match(localSetup, /Optional AI-coding-agent MCP feature references are available as secondary material, not as the beginner setup path\./);
   assert.match(localSetup, /Use \[n8n Agent Rules\]/);
+  assert.match(localSetup, /Use this table only when you want an AI coding agent to work with n8n workflows through the optional MCP feature setup/);
+
+  for (const expected of [
+    'mcp setup - codex.md',
+    'mcp setup - claude code.md',
+    'mcp setup - opencode.md',
+    'mcp setup - antigravity.md',
+    'codex-mcp-config.md',
+    'claude-mcp-config.md',
+    'opencode-mcp-config.md',
+    'antigravity-mcp-config.md',
+    '../../../../skills/n8n-local-setup/references/ai-agent-platforms/codex.md',
+    '../../../../skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'
+  ]) {
+    assert.match(localSetup, new RegExp(escapeRegExp(expected)), expected);
+  }
 
   for (const forbidden of [
-    'Codex MCP Setup',
-    'Claude Code MCP Setup',
-    'OpenCode MCP Setup',
-    'Antigravity MCP Setup',
-    'mcp%20setup%20-%20codex.md',
-    'mcp%20setup%20-%20claude%20code.md',
-    'mcp%20setup%20-%20opencode.md',
-    'mcp%20setup%20-%20antigravity.md',
-    'templates/mcp-configs',
     'Enable MCP',
     'through MCP',
     'N8N_MCP_TOKEN',
@@ -488,8 +502,13 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /^### 8\.4 `Update` Menu$/m);
   assert.match(localSetup, /^### 8\.5 `View logs` Menu$/m);
   assert.match(localSetup, /The update menu always checks for updates before it lets you choose what to update\./);
-  assert.match(localSetup, /`Back up` writes a timestamped SQL dump under a local `backups` folder/);
+  assert.match(localSetup, /`Back up` writes a timestamped SQL dump under:/);
+  assert.match(localSetup, /%USERPROFILE%\\\.n8n-local\\backups/);
   assert.match(localSetup, /The launcher clears the completed command output, trims the console buffer when Windows allows it, and redraws the main menu\./);
+  assert.match(localSetup, /For normal use, the quick status at the top of the main menu is enough/);
+  assert.match(localSetup, /Use `Show Compose status` only when you need the more detailed Docker Compose view/);
+  assert.match(localSetup, /`Command list` explains what the numbered menu options do/);
+  assert.match(localSetup, /If the update includes Postgres, the launcher runs `Back up` first/);
 });
 
 test('local launcher and menu keep the console open until Exit', () => {
@@ -512,6 +531,9 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /Press Enter to clear completed output and return to the menu/);
   assert.match(menu, /function Pause-Menu \{[\s\S]*Clear-MenuScreen[\s\S]*\}/);
   assert.match(menu, /function Invoke-MenuAction/);
+  assert.match(menu, /function Invoke-NativeCommand/);
+  assert.match(menu, /function Show-CommandList/);
+  assert.doesNotMatch(menu, /function Show-Help/);
   assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
   assert.match(menu, /while \(-not \$script:ExitRequested\)/);
   assert.match(menu, /Pause-Menu/);
@@ -533,10 +555,19 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /Write-ServiceStatus -Name 'ngrok'/);
   assert.match(menu, /Write-Host '  2\. Start ngrok tunnel'/);
   assert.match(menu, /Write-Host '  1\. Stop ngrok tunnel'/);
+  assert.match(menu, /Write-Host '  5\. Show Compose status'/);
+  assert.match(menu, /Write-Host '  8\. Command list'/);
+  assert.match(functionBody(menu, 'Show-Status'), /service state, health, container names, and ports/);
+  assert.match(functionBody(menu, 'Show-Status'), /Invoke-Compose -Arguments @\('ps'\)/);
+  assert.match(functionBody(menu, 'Apply-Update'), /This update includes Postgres[\s\S]*Backup-Postgres -Required[\s\S]*Update cancelled because the automatic Postgres backup did not complete/);
+  assert.match(functionBody(menu, 'Backup-Postgres'), /param\(\[switch\]\$Required\)[\s\S]*return \$true[\s\S]*return \$false/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Back up: writes a local Postgres SQL backup under \.\\backups/);
   assert.match(menu, /function Show-UpdateMenu/);
   assert.match(menu, /Checking for updates first\. Selection opens only after this check finishes\./);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Check-Updates -Services \$script:Services[\s\S]*Read-Host 'Enter a number'/);
   assert.match(functionBody(menu, 'Start-N8nWithNgrok'), /n8n is already running\.[\s\S]*Starting ngrok tunnel now\./);
+  assert.match(functionBody(menu, 'Start-NgrokTunnel'), /Set N8N_HOST back to localhost for this guide[\s\S]*Keep N8N_HOST=localhost/);
+  assert.match(functionBody(menu, 'Show-Logs'), /logs', '--tail', '200'/);
   assert.doesNotMatch(menu, /Open-NgrokDockerDesktopGuide/);
   assert.doesNotMatch(menu, /dashboard\.ngrok\.com\/get-started\/setup\/docker-desktop/);
   assert.match(menu, /Do not launch n8n directly from Docker Desktop\. Launch it from _n8n-local\.cmd instead\./);
@@ -584,7 +615,7 @@ test('local stack templates stay placeholder-only and local-first', () => {
   assert.match(compose, /docker\.n8n\.io\/n8nio\/n8n:stable/);
   assert.match(compose, /ngrok\/ngrok:latest/);
   assert.match(compose, /DB_TYPE: postgresdb/);
-  assert.match(compose, /"127\.0\.0\.1:5678:5678"/);
+  assert.match(compose, /"127\.0\.0\.1:\$\{N8N_LOCAL_PORT:-5678\}:5678"/);
   assert.match(compose, /"127\.0\.0\.1:4040:4040"/);
   assert.doesNotMatch(compose, /^\s{2}redis:/m);
   assert.doesNotMatch(compose, /^\s{2}n8n-worker:/m);
@@ -596,9 +627,10 @@ test('local stack templates stay placeholder-only and local-first', () => {
     'POSTGRES_PASSWORD=replace-with-local-postgres-password',
     'N8N_ENCRYPTION_KEY=replace-with-long-random-value',
     'N8N_HOST=localhost',
+    'N8N_LOCAL_PORT=5678',
     'WEBHOOK_URL=http://localhost:5678/',
     'NGROK_AUTHTOKEN=replace-with-ngrok-authtoken',
-    'NGROK_DOMAIN=your-reserved-domain.ngrok.app'
+    'NGROK_DOMAIN=your-name.ngrok.app'
   ]) {
     assert.match(envExample, new RegExp(escapeRegExp(expected)), expected);
   }
@@ -696,7 +728,9 @@ test('optional MCP setup and config surfaces are shipped as secondary AI-coding-
   }
 
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
-  assert.doesNotMatch(localSetup, /mcp%20setup|templates\/mcp-configs|N8N_MCP|mcp-server|MCP URL|MCP token|Enable MCP/);
+  assert.match(localSetup, /mcp setup - codex\.md/);
+  assert.match(localSetup, /templates\/mcp-configs\/codex-mcp-config\.md/);
+  assert.doesNotMatch(localSetup, /N8N_MCP|mcp-server|MCP URL|MCP token|Enable MCP/);
 });
 
 test('curated indexes, skill metadata, and packs point to current skills-first surfaces', () => {
