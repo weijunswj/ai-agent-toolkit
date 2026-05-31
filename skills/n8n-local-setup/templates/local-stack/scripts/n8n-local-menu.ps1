@@ -85,13 +85,19 @@ function Invoke-Compose {
 function Test-StackFiles {
   $composeExists = Test-Path -LiteralPath (Join-Path $script:StackRoot 'docker-compose.yml')
   $envExists = Test-Path -LiteralPath (Join-Path $script:StackRoot '.env')
+  $envExampleExists = Test-Path -LiteralPath (Join-Path $script:StackRoot '.env.example')
 
   if (-not $composeExists) {
     Write-ErrorMessage 'docker-compose.yml is missing from this folder.'
   }
 
   if (-not $envExists) {
-    Write-Warning '.env is missing. Copy .env.example to .env, then fill the placeholders.'
+    if ($envExampleExists) {
+      Write-Warning '.env is missing. If this is the template folder, copy the stack to %USERPROFILE%\.n8n-local first.'
+      Write-Warning 'Then copy .env.example to .env in that local stack folder and fill the placeholders.'
+    } else {
+      Write-Warning '.env is missing. Copy .env.example to .env, then fill the placeholders.'
+    }
   }
 
   return ($composeExists -and $envExists)
@@ -138,17 +144,25 @@ function Get-RunningServices {
     return @()
   }
 
+  if (-not (Test-Path -LiteralPath (Join-Path $script:StackRoot '.env'))) {
+    return @()
+  }
+
   if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     return @()
   }
 
-  & docker info *> $null
-  if ($LASTEXITCODE -ne 0) {
-    return @()
-  }
+  try {
+    & docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+      return @()
+    }
 
-  $services = @(& docker compose ps --services --filter 'status=running' 2>$null)
-  if ($LASTEXITCODE -ne 0) {
+    $services = @(& docker compose ps --services --filter 'status=running' 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+      return @()
+    }
+  } catch {
     return @()
   }
 

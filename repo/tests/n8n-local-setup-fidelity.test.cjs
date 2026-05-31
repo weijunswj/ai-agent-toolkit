@@ -524,6 +524,10 @@ test('local launcher and menu keep the console open until Exit', () => {
 
   assert.match(menu, /function Get-RunningServices/);
   assert.match(menu, /function Write-ServiceStatus/);
+  assert.match(menu, /If this is the template folder, copy the stack to %USERPROFILE%\\\.n8n-local first\./);
+  assert.match(menu, /Then copy \.env\.example to \.env in that local stack folder and fill the placeholders\./);
+  assert.match(functionBody(menu, 'Get-RunningServices'), /Join-Path \$script:StackRoot '\.env'[\s\S]*return @\(\)/);
+  assert.match(functionBody(menu, 'Get-RunningServices'), /try \{[\s\S]*docker compose ps --services --filter 'status=running' 2>\$null[\s\S]*\} catch \{[\s\S]*return @\(\)[\s\S]*\}/);
   assert.match(menu, /Write-ServiceStatus -Name 'postgres'/);
   assert.match(menu, /Write-ServiceStatus -Name 'n8n'/);
   assert.match(menu, /Write-ServiceStatus -Name 'ngrok'/);
