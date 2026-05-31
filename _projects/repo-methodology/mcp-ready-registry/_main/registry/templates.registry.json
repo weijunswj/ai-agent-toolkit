@@ -10,11 +10,6 @@
     "path": "skills/n8n-agent-rules/adapters/"
   },
   {
-    "id": "mcp-configs",
-    "title": "MCP Config Templates",
-    "path": "skills/n8n-local-setup/templates/mcp-configs/"
-  },
-  {
     "id": "n8n-local-stack",
     "title": "n8n Local Stack Launcher And Compose Templates",
     "path": "skills/n8n-local-setup/templates/local-stack/"

@@ -23,7 +23,7 @@ For full setup detail, use the local full-fidelity references and templates in t
 ## Local References
 
 - Use `skills/n8n-local-setup/references/n8n/local-setup.md` for the full local n8n setup guide.
-- Use `skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md` for the full Claude Code Desktop integration guide.
+- Use `skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md` for Claude Code skills-first routing.
 - Use `skills/n8n-local-setup/SKILL.md` as the skill router.
 
 ## Manual Use
@@ -35,6 +35,6 @@ For full setup detail, use the local full-fidelity references and templates in t
 
 ## Limitations
 
-Claude web may not have local shell, file, MCP, or connector access. If it cannot inspect or mutate local files, it should provide manual steps instead of claiming work was done.
+Claude web may not have local shell, file, or connector access. If it cannot inspect or mutate local files, it should provide manual steps instead of claiming work was done.
 
 Do not automate Claude web through cookies, browser sessions, or session hacks.

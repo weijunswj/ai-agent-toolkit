@@ -168,7 +168,6 @@ const expectedDirs = [
   'skills/n8n-workflow-templates/references',
   'mcp/references',
   'skills/n8n-local-setup/references/n8n',
-  'skills/n8n-local-setup/templates/mcp-configs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer',
   'skills/n8n-workflow-templates/templates/error-handling',

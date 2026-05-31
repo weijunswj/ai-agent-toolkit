@@ -18,9 +18,9 @@ Use local MCP setup when an AI agent needs structured access to local documentat
 
 ## n8n Pattern
 
-For n8n, use two separate concepts:
+For n8n workflow work, keep documentation/build help separate from live instance access:
 
 - `n8n_docs`: repo/docs/search/validation helper.
 - `n8n_live`: live instance access, approval-gated and used only on request.
 
-See [MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) for platform-specific examples.
+This toolkit intentionally does not ship or maintain n8n MCP setup/config templates for now. Use [n8n Local Setup](../../skills/n8n-local-setup/) and [n8n Agent Rules](../../skills/n8n-agent-rules/) for the supported skills-first path.

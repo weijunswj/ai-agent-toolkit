@@ -8,9 +8,11 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 These platform references route each AI platform to this toolkit. Generic rules live in [AI Coding Agent Rules](../../../ai-coding-agent-rules/); full n8n rules live in [n8n Agent Rules](../../../n8n-agent-rules/).
 
-For local setup, start with [local setup](../n8n/local-setup.md). The platform pages below are secondary references for platform-specific config details.
+For local setup, start with [local setup](../n8n/local-setup.md). The platform pages below are secondary AI-coding-agent references.
 
-Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional MCP feature setup/config references are available for users intentionally enabling n8n MCP for an AI coding agent, but they are not the beginner local setup path.
+
+Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`. Open the platform page for exact location details.
 
 | Platform | Preferred skill install model |
 | --- | --- |
@@ -19,26 +21,11 @@ Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`.
 | OpenCode | Short manual whole-skill-folder install note only. |
 | Antigravity | Plugin-scoped skill-folder install. |
 
-| Platform | Supported skill-folder locations |
-| --- | --- |
-| Codex | Choose any one supported Codex skill-folder location:<br>- `<repo>/.agents/skills/<skill-name>/`<br>- `$HOME/.agents/skills/<skill-name>/`<br>- `/etc/codex/skills/<skill-name>/` |
-| Claude Code | Choose any one supported Claude Code skill-folder location:<br>- `<repo>/.claude/skills/<skill-name>/`<br>- `$HOME/.claude/skills/<skill-name>/` |
-| OpenCode | Choose any one supported OpenCode skill-folder location:<br>- `<repo>/.opencode/skills/<skill-name>/`<br>- `$HOME/.config/opencode/skills/<skill-name>/`<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. |
-| Antigravity | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` |
-
-Antigravity repo-local bootstrap outputs still go into the target repo, not inside the plugin-scoped skill folder:
-
-1. `AGENTS.md`.
-2. `GEMINI.md`.
-3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
-
-Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
-
 | Reference | Use when |
 | --- | --- |
-| [codex.md](codex.md) | Codex rules, references, and n8n MCP templates. |
-| [claude-code.md](claude-code.md) | Claude Code skills, rules, and n8n MCP templates. |
+| [codex.md](codex.md) | Optional Codex MCP feature setup, skills, rules, and local n8n references. |
+| [claude-code.md](claude-code.md) | Optional Claude Code MCP feature setup, skills, rules, and local n8n references. |
 | [chatgpt-web.md](chatgpt-web.md) | Instruction-only skills in ChatGPT web. |
 | [claude-web.md](claude-web.md) | Instruction-only skills in Claude web. |
-| [opencode.md](opencode.md) | OpenCode rules and MCP config. |
-| [antigravity.md](antigravity.md) | Antigravity rules and MCP config. |
+| [opencode.md](opencode.md) | Optional OpenCode MCP feature setup, skills, rules, and local n8n references. |
+| [antigravity.md](antigravity.md) | Optional Antigravity MCP feature setup, skills, rules, and local n8n references. |

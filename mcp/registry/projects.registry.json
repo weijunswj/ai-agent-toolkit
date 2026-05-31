@@ -213,38 +213,34 @@
     "category": "n8n",
     "name": "local-setup",
     "title": "Local n8n Setup",
-    "version": "2.2.0",
+    "version": "3.0.0",
     "version_policy": "semver",
-    "version_notes": "Refactors the local setup docs for a beginner-first flow without noisy setup sections.",
+    "version_notes": "Intent-first n8n local setup launcher/menu, Compose ngrok tunnel flow, Hostinger first-login expansion, desktop shortcut launcher, and optional AI-coding-agent MCP feature references restored as secondary surfaces.",
     "project": {
       "name": "Local n8n Setup",
       "category": "n8n",
-      "summary": "Preserved local n8n setup guides plus Docker Compose, Postgres, ngrok-only tunneling, guided local stack launcher templates, MCP configuration templates, and references to the generated n8n-agent-rules skill."
+      "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, Docker Compose local templates, skills-first agent routing, optional AI-coding-agent MCP feature references, and the underscore-prefixed guided launcher."
     },
     "surface": {
-      "publish_as": "both",
+      "publish_as": "skill",
       "skill": {
         "status": "published",
         "path": "skills/n8n-local-setup",
-        "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, MCP config, ngrok tunnel, and platform references while depending on n8n-agent-rules for workflow/live n8n rules."
+        "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger VPS reference, local stack templates, skills-first agent guidance, and optional AI-coding-agent MCP feature references while depending on n8n-agent-rules for workflow/live n8n rules."
       },
       "mcp": {
-        "status": "published",
-        "path": "mcp/projects/n8n-local-setup.md",
-        "summary": "Spec-only MCP notes for local n8n setup and configuration surfaces; no runnable server is shipped."
+        "status": "not_applicable"
       }
     },
     "module_path": "_projects/n8n/local-setup",
     "main_path": "_projects/n8n/local-setup/_main",
     "root_surfaces": [
-      "mcp/projects/n8n-local-setup.md",
       "skills/n8n-local-setup/README.md",
       "skills/n8n-local-setup/SKILL.md",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
-      "skills/n8n-local-setup/references",
       "skills/n8n-local-setup/references/ai-agent-platforms/README.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
@@ -253,14 +249,12 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",
       "skills/n8n-local-setup/references/n8n/README.md",
-      "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md",
+      "skills/n8n-local-setup/references/n8n/hostinger-vps.md",
       "skills/n8n-local-setup/references/n8n/local-setup.md",
-      "skills/n8n-local-setup/references/n8n/tunnelling.md",
-      "skills/n8n-local-setup/references/n8n/upgrading.md",
-      "skills/n8n-local-setup/references/n8n/vps-hosting.md",
       "skills/n8n-local-setup/templates/local-stack/.env.example",
+      "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
-      "skills/n8n-local-setup/templates/local-stack/n8n-local.cmd",
+      "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
       "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
       "skills/n8n-local-setup/templates/mcp-configs/README.md",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
@@ -379,9 +373,9 @@
     "category": "repo-methodology",
     "name": "mcp-ready-registry",
     "title": "MCP-Ready Registry",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "version_policy": "semver",
-    "version_notes": "Adds n8n-agent-rules registry metadata and replaces obsolete n8n add-on template metadata with adapter metadata.",
+    "version_notes": "Removes obsolete n8n MCP config template registry routing after the toolkit pivoted to skills-first n8n local setup.",
     "project": {
       "name": "MCP-Ready Registry",
       "category": "repo-methodology",

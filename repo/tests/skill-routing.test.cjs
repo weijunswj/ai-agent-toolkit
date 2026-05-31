@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -47,25 +48,78 @@ function duplicates(values) {
   return [...repeated].sort();
 }
 
-function markdownFilesIn(relRoots) {
+function isInsideRoot(rootRealPath, realPath) {
+  const relative = path.relative(rootRealPath, realPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function markdownFilesIn(relRoots, root = repoRoot) {
   const files = [];
+  const visited = new Set();
+  const rootPath = path.resolve(root);
+  let rootRealPath;
+
+  try {
+    rootRealPath = fs.realpathSync(rootPath);
+  } catch {
+    return files;
+  }
 
   function walk(fullPath) {
-    const stat = fs.statSync(fullPath);
+    let stat;
+    try {
+      stat = fs.lstatSync(fullPath);
+    } catch {
+      return;
+    }
+
+    if (stat.isSymbolicLink()) return;
+
+    let realPath;
+    try {
+      realPath = fs.realpathSync(fullPath);
+    } catch {
+      return;
+    }
+
+    if (!isInsideRoot(rootRealPath, realPath)) return;
+    if (visited.has(realPath)) return;
+    visited.add(realPath);
+
     if (stat.isDirectory()) {
-      for (const entry of fs.readdirSync(fullPath)) {
+      let entries;
+      try {
+        entries = fs.readdirSync(fullPath);
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
         walk(path.join(fullPath, entry));
       }
       return;
     }
-    if (fullPath.endsWith('.md')) files.push(fullPath);
+    if (stat.isFile() && fullPath.endsWith('.md')) files.push(fullPath);
   }
 
   for (const relRoot of relRoots) {
-    walk(path.join(repoRoot, relRoot));
+    walk(path.resolve(rootPath, relRoot));
   }
 
   return files.sort();
+}
+
+function createSymlinkOrSkip(t, target, linkPath, type) {
+  try {
+    fs.rmSync(linkPath, { recursive: true, force: true });
+    fs.symlinkSync(target, linkPath, type);
+  } catch (error) {
+    if (['EPERM', 'EINVAL', 'ENOTSUP', 'EACCES'].includes(error.code)) {
+      t.skip(`symlink creation is not available in this environment: ${error.message}`);
+      return false;
+    }
+    throw error;
+  }
+  return true;
 }
 
 test('toolkit skill routing covers current skill folders or documents omissions', () => {
@@ -120,9 +174,31 @@ test('markdown docs use markdown numbered steps instead of HTML or compressed st
   for (const file of files) {
     const relPath = path.relative(repoRoot, file).replace(/\\/g, '/');
     const text = readText(file);
-    assert.doesNotMatch(text, /<\/?(?:ol|li)>/i, `${relPath} should use markdown numbered lists instead of HTML lists`);
-    assert.doesNotMatch(text, /;\s*choose any one/i, `${relPath} should split multi-step guidance instead of compressing it with semicolons`);
+    if (/<\/?(?:ol|li)>/i.test(text)) {
+      assert.fail(`${relPath} should use markdown numbered lists instead of HTML lists`);
+    }
+    if (/;\s*choose any one/i.test(text)) {
+      assert.fail(`${relPath} should split multi-step guidance instead of compressing it with semicolons`);
+    }
   }
+});
+
+test('markdown file walker skips symlinks and stays inside the selected root', (t) => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-md-walk-root-'));
+  const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-md-walk-external-'));
+
+  fs.writeFileSync(path.join(fixtureRoot, 'safe.md'), '# Safe\n', 'utf8');
+  fs.writeFileSync(path.join(externalRoot, 'secret.md'), '# External secret marker\n', 'utf8');
+
+  if (!createSymlinkOrSkip(t, externalRoot, path.join(fixtureRoot, 'external-link'), process.platform === 'win32' ? 'junction' : 'dir')) return;
+  if (!createSymlinkOrSkip(t, fixtureRoot, path.join(fixtureRoot, 'loop-link'), process.platform === 'win32' ? 'junction' : 'dir')) return;
+
+  const files = markdownFilesIn(['.'], fixtureRoot)
+    .map((file) => path.relative(fixtureRoot, file).replace(/\\/g, '/'));
+
+  assert.ok(files.includes('safe.md'), 'safe markdown file should be discovered');
+  assert.equal(files.includes('external-link/secret.md'), false, 'symlinked external markdown should be skipped');
+  assert.equal(files.includes('loop-link/safe.md'), false, 'symlink loop should be skipped');
 });
 
 test('context publisher documents published-surface readability rules', () => {
@@ -267,7 +343,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(claudeCodeRef, /\| Scope \| Skill folder location \|/);
   assert.match(claudeCodeRef, /`<repo>\/\.claude\/skills\/<skill-name>\/SKILL\.md`/);
   assert.match(claudeCodeRef, /`\$HOME\/\.claude\/skills\/<skill-name>\/SKILL\.md`/);
-  assert.match(opencodeRef, /OpenCode stays on a short manual whole-skill-folder install note/);
+  assert.match(opencodeRef, /Copy the whole `skills\/<skill-name>\/` folder/);
   assert.match(opencodeRef, /\*\*Choose any one supported OpenCode skill-folder location:\*\*/);
   assert.match(opencodeRef, /\| Scope \| Skill folder location \|/);
   assert.doesNotMatch(opencodeRef, /plugin\/package install first/i);
