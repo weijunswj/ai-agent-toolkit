@@ -572,6 +572,9 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /function Invoke-MenuAction/);
   assert.match(menu, /function Invoke-NativeCommand/);
   assert.match(menu, /function Show-CommandList/);
+  assert.match(menu, /function Write-CommandListItem/);
+  assert.match(menu, /function Write-ImageVersions/);
+  assert.match(menu, /function Write-BackupImageLog/);
   assert.doesNotMatch(menu, /function Show-Help/);
   assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
   assert.match(menu, /while \(-not \$script:ExitRequested\)/);
@@ -596,16 +599,20 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /public webhook and OAuth links need ngrok running/);
   assert.match(menu, /function Set-ActiveWebhookUrl/);
   assert.match(functionBody(menu, 'Set-ActiveWebhookUrl'), /\.env\.active[\s\S]*WEBHOOK_URL=\$activeUrl/);
-  assert.match(menu, /active WEBHOOK_URL:/);
+  assert.match(menu, /\$webhookLabel = "  \{0,-22\}: " -f 'active WEBHOOK_URL'/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ImageVersions[\s\S]*Write-Host ''[\s\S]*WEBHOOK_URL is public while ngrok is stopped/);
   assert.match(menu, /Write-Host '  2\. Start ngrok tunnel'/);
   assert.match(menu, /Write-Host '  1\. Stop ngrok tunnel'/);
   assert.match(menu, /Write-Host '  5\. Show Compose status'/);
   assert.match(menu, /Write-Host '  8\. Command list'/);
   assert.match(functionBody(menu, 'Show-Status'), /service state, health, container names, and ports/);
   assert.match(functionBody(menu, 'Show-Status'), /Invoke-Compose -Arguments @\('ps'\)/);
+  assert.match(functionBody(menu, 'Show-Status'), /Write-ImageVersions/);
   assert.match(functionBody(menu, 'Apply-Update'), /This update includes Postgres[\s\S]*Backup-Postgres -Required[\s\S]*Update cancelled because the automatic Postgres backup did not complete/);
-  assert.match(functionBody(menu, 'Backup-Postgres'), /param\(\[switch\]\$Required\)[\s\S]*return \$true[\s\S]*return \$false/);
-  assert.match(functionBody(menu, 'Show-CommandList'), /Back up: writes a local Postgres SQL backup under \.\\backups/);
+  assert.match(functionBody(menu, 'Backup-Postgres'), /n8n-postgres-\$timestamp[\s\S]*database\.sql[\s\S]*Write-BackupImageLog -BackupPath \$backupPath[\s\S]*return \$true[\s\S]*return \$false/);
+  assert.match(functionBody(menu, 'Write-BackupImageLog'), /image-versions\.txt[\s\S]*Service image tags and local image IDs at backup time/);
+  assert.match(functionBody(menu, 'Write-CommandListItem'), /\$itemLabelWidth = 19[\s\S]*\$itemPrefix = \("  \{0\}\. \{1,-\$itemLabelWidth\}: " -f \$Number, \$Name\)/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a timestamped backup folder under \.\\backups\.'/);
   assert.match(menu, /function Show-UpdateMenu/);
   assert.match(menu, /Checking for updates first\. Selection opens only after this check finishes\./);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Check-Updates -Services \$script:Services[\s\S]*Read-Host 'Enter a number'/);
@@ -615,7 +622,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Start-NgrokTunnel'), /Get-NgrokWebhookUrl -Domain \$domain[\s\S]*Set-ActiveWebhookUrl -Url \$publicWebhookUrl -Mode 'ngrok'/);
   assert.match(functionBody(menu, 'Start-LocalStack'), /Set-ActiveWebhookUrl -Url \(Get-LocalWebhookUrl\) -Mode 'localhost'/);
   assert.match(functionBody(menu, 'Start-NgrokTunnel'), /Invoke-Compose -Arguments @\('up', '-d', '--force-recreate', 'n8n', 'ngrok'\)/);
-  assert.match(functionBody(menu, 'Restart-N8n'), /current \.env values are applied[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--force-recreate', 'n8n'\)/);
+  assert.match(functionBody(menu, 'Stop-NgrokTunnel'), /Set-ActiveWebhookUrl -Url \(Get-LocalWebhookUrl\) -Mode 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local\.[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--force-recreate', 'n8n'\)/);
+  assert.match(functionBody(menu, 'Restart-N8n'), /Set-ActiveWebhookUrl -Url \(Get-LocalWebhookUrl\) -Mode 'localhost'[\s\S]*current \.env values are applied[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--force-recreate', 'n8n'\)/);
   assert.match(functionBody(menu, 'Show-Logs'), /logs', '--tail', '200'/);
   assert.doesNotMatch(menu, /Open-NgrokDockerDesktopGuide/);
   assert.doesNotMatch(menu, /dashboard\.ngrok\.com\/get-started\/setup\/docker-desktop/);
@@ -628,7 +636,7 @@ test('local menu PowerShell script stays parseable', (t) => {
   const sourceMenu = fs.readFileSync(sourceScript, 'utf8');
 
   assert.doesNotMatch(sourceMenu, /\$Name:/);
-  assert.match(sourceMenu, /\$\{Name\}: /);
+  assert.match(sourceMenu, /\$statusPrefix = \("  \{0,-\$statusLabelWidth\}: " -f \$Name\)/);
 
   const powerShell = findPowerShell();
   if (!powerShell) {

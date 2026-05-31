@@ -206,20 +206,25 @@ function Write-ServiceStatus {
     [string]$WhenStopped = ''
   )
 
+  $statusLabelWidth = 22
   $isRunning = $RunningServices -contains $Name
+  $statusPrefix = ("  {0,-$statusLabelWidth}: " -f $Name)
+
   if ($isRunning) {
-    Write-Host "  ${Name}: " -NoNewline -ForegroundColor DarkCyan
+    Write-Host $statusPrefix -NoNewline -ForegroundColor DarkCyan
     Write-Host 'running' -NoNewline -ForegroundColor Green
     if ($WhenRunning) {
-      Write-Host " - $WhenRunning" -ForegroundColor White
+      Write-Host (' ' * 1) -NoNewline
+      Write-Host "- $WhenRunning" -ForegroundColor White
     } else {
       Write-Host ''
     }
   } else {
-    Write-Host "  ${Name}: " -NoNewline -ForegroundColor DarkCyan
+    Write-Host $statusPrefix -NoNewline -ForegroundColor DarkCyan
     Write-Host 'stopped' -NoNewline -ForegroundColor Yellow
     if ($WhenStopped) {
-      Write-Host " - $WhenStopped" -ForegroundColor White
+      Write-Host (' ' * 1) -NoNewline
+      Write-Host "- $WhenStopped" -ForegroundColor White
     } else {
       Write-Host ''
     }
@@ -367,6 +372,63 @@ function Get-ServiceImageIds {
   return $ids
 }
 
+function Get-ShortImageId {
+  param([string]$ImageId)
+
+  $value = ([string]$ImageId).Trim() -replace '^sha256:', ''
+  if (-not $value) {
+    return 'not pulled'
+  }
+  if ($value.Length -gt 12) {
+    return $value.Substring(0, 12)
+  }
+  return $value
+}
+
+function Get-ImageVersionLines {
+  $lines = New-Object System.Collections.Generic.List[string]
+  $imageIds = Get-ServiceImageIds -Services $script:Services
+
+  foreach ($service in $script:Services) {
+    $image = $script:ServiceImages[$service]
+    $imageId = Get-ShortImageId -ImageId $imageIds[$service]
+    $label = "  {0,-8}: " -f $service
+    $lines.Add("$label$image ($imageId)")
+  }
+
+  return $lines.ToArray()
+}
+
+function Write-ImageVersions {
+  Write-Host ''
+  Write-Host 'Image versions:' -ForegroundColor Cyan
+  foreach ($line in Get-ImageVersionLines) {
+    Write-Host $line -ForegroundColor White
+  }
+}
+
+function Write-BackupImageLog {
+  param([string]$BackupPath)
+
+  $logPath = Join-Path (Split-Path -Parent $BackupPath) 'image-versions.txt'
+  $content = @(
+    '# n8n local backup image log',
+    "Backup file: $BackupPath",
+    "Created: $(Get-Date -Format o)",
+    '',
+    'Service image tags and local image IDs at backup time:',
+    ''
+  ) + (Get-ImageVersionLines)
+
+  try {
+    Set-Content -LiteralPath $logPath -Value $content -Encoding ascii
+    return $logPath
+  } catch {
+    Write-Warning "Backup image log could not be written: $($_.Exception.Message)"
+    return ''
+  }
+}
+
 function Check-Updates {
   param([string[]]$Services = $script:Services)
 
@@ -411,22 +473,27 @@ function Check-Updates {
 }
 
 function Read-ServiceSelection {
-  param(
-    [string]$Prompt,
-    [string]$CancelWord = 'cancel'
-  )
+  param([string]$Prompt)
 
   Write-Host ''
-  Write-Host 'Choices: all, n8n, postgres, ngrok, ' -NoNewline -ForegroundColor DarkCyan
-  Write-Host $CancelWord -ForegroundColor Yellow
-  $choice = (Read-Host $Prompt).Trim().ToLowerInvariant()
+  Write-Host 'Choices:' -ForegroundColor DarkCyan
+  Write-Host '  1. all'
+  Write-Host '  2. n8n'
+  Write-Host '  3. postgres'
+  Write-Host '  4. ngrok'
+  Write-Host '  5. cancel'
+  $choice = (Read-Host $Prompt).Trim()
 
   switch ($choice) {
-    'all' { return $script:Services }
-    'n8n' { return @('n8n') }
-    'postgres' { return @('postgres') }
-    'ngrok' { return @('ngrok') }
-    default { return @() }
+    '1' { return $script:Services }
+    '2' { return @('n8n') }
+    '3' { return @('postgres') }
+    '4' { return @('ngrok') }
+    '5' { return @() }
+    default {
+      Write-Warning 'Choose a number from 1 to 5.'
+      return @()
+    }
   }
 }
 
@@ -566,7 +633,19 @@ function Start-NgrokTunnel {
 function Stop-NgrokTunnel {
   Write-Header 'Stop ngrok Tunnel'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
+    $wasN8nRunning = (Get-RunningServices) -contains 'n8n'
+
     [void](Invoke-Compose -Arguments @('stop', 'ngrok'))
+
+    if (-not (Set-ActiveWebhookUrl -Url (Get-LocalWebhookUrl) -Mode 'localhost')) {
+      return
+    }
+
+    if ($wasN8nRunning) {
+      Write-Info 'Recreating n8n so WEBHOOK_URL is now local.'
+      [void](Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n'))
+    }
+
     Write-Success 'ngrok tunnel stopped. Your reserved ngrok domain was not deleted or released.'
   }
 }
@@ -582,9 +661,7 @@ function Stop-Stack {
 function Restart-N8n {
   Write-Header 'Restart n8n'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
-    if (-not (Get-ActiveWebhookUrl)) {
-      if (-not (Set-ActiveWebhookUrl -Url (Get-LocalWebhookUrl) -Mode 'localhost')) { return }
-    }
+    if (-not (Set-ActiveWebhookUrl -Url (Get-LocalWebhookUrl) -Mode 'localhost')) { return }
     Write-Info 'Recreating only the n8n app container so current .env values are applied.'
     Write-Info 'Postgres data and n8n files stay in Docker volumes.'
     [void](Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n'))
@@ -597,6 +674,7 @@ function Show-Status {
   Write-Info 'Shows service state, health, container names, and ports.'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
     [void](Invoke-Compose -Arguments @('ps'))
+    Write-ImageVersions
   }
 }
 
@@ -618,19 +696,20 @@ function Show-Logs {
 function View-LogsMenu {
   Write-Header 'View Logs'
   Write-Host 'Choose logs to view:' -ForegroundColor Cyan
-  Write-Host '  all'
-  Write-Host '  n8n'
-  Write-Host '  postgres'
-  Write-Host '  ngrok'
-  Write-Host '  cancel'
+  Write-Host '  1. all'
+  Write-Host '  2. n8n'
+  Write-Host '  3. postgres'
+  Write-Host '  4. ngrok'
+  Write-Host '  5. cancel'
 
-  $choice = (Read-Host 'Type one choice').Trim().ToLowerInvariant()
+  $choice = (Read-Host 'Enter a number').Trim()
   switch ($choice) {
-    'all' { Show-Logs }
-    'n8n' { Show-Logs -Service 'n8n' }
-    'postgres' { Show-Logs -Service 'postgres' }
-    'ngrok' { Show-Logs -Service 'ngrok' }
-    default { Write-Warning 'Log view cancelled.' }
+    '1' { Show-Logs }
+    '2' { Show-Logs -Service 'n8n' }
+    '3' { Show-Logs -Service 'postgres' }
+    '4' { Show-Logs -Service 'ngrok' }
+    '5' { Write-Warning 'Log view cancelled.' }
+    default { Write-Warning 'Choose a number from 1 to 5.' }
   }
 }
 
@@ -648,7 +727,8 @@ function Show-StartMenu {
     '1' { Start-LocalhostOnly }
     '2' { Start-N8nWithNgrok }
     '3' { Update-AllThenStartNgrok }
-    default { Write-Warning 'Start cancelled.' }
+    '4' { Write-Warning 'Start cancelled.' }
+    default { Write-Warning 'Choose a number from 1 to 4.' }
   }
 }
 
@@ -664,7 +744,8 @@ function Show-StopMenu {
   switch ($choice) {
     '1' { Stop-NgrokTunnel }
     '2' { Stop-Stack }
-    default { Write-Warning 'Stop cancelled.' }
+    '3' { Write-Warning 'Stop cancelled.' }
+    default { Write-Warning 'Choose a number from 1 to 3.' }
   }
 }
 
@@ -701,8 +782,9 @@ function Show-UpdateMenu {
     '2' { Apply-Update -Services @('n8n') }
     '3' { Apply-Update -Services @('postgres') }
     '4' { Apply-Update -Services @('ngrok') }
+    '5' { Write-Warning 'Update cancelled.' }
     default {
-      Write-Warning 'Update cancelled.'
+      Write-Warning 'Choose a number from 1 to 5.'
       return
     }
   }
@@ -744,9 +826,10 @@ function Backup-Postgres {
 
   $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Default 'n8n'
   $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n'
-  $backupDir = Join-Path $script:StackRoot 'backups'
   $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-  $backupPath = Join-Path $backupDir "n8n-postgres-$timestamp.sql"
+  $backupRoot = Join-Path $script:StackRoot 'backups'
+  $backupDir = Join-Path $backupRoot "n8n-postgres-$timestamp"
+  $backupPath = Join-Path $backupDir 'database.sql'
 
   New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 
@@ -754,6 +837,11 @@ function Backup-Postgres {
   $exitCode = Invoke-NativeCommand -Command { & docker compose exec -T postgres pg_dump -U $postgresUser $postgresDb 1> $backupPath }
   if ($exitCode -eq 0) {
     Write-Success "Backup written to: $backupPath"
+    $imageLogPath = Write-BackupImageLog -BackupPath $backupPath
+    if ($imageLogPath) {
+      Write-Success "Image versions written to: $imageLogPath"
+    }
+    Write-Success "Backup folder: $backupDir"
     return $true
   } else {
     Write-ErrorMessage 'Backup failed. Check the Postgres logs for details.'
@@ -762,6 +850,19 @@ function Backup-Postgres {
     }
     return $false
   }
+}
+
+function Write-CommandListItem {
+  param(
+    [string]$Number,
+    [string]$Name,
+    [string]$Description
+  )
+
+  $itemLabelWidth = 19
+  $itemPrefix = ("  {0}. {1,-$itemLabelWidth}: " -f $Number, $Name)
+  Write-Host $itemPrefix -NoNewline
+  Write-Host $Description
 }
 
 function Show-CommandList {
@@ -779,13 +880,13 @@ function Show-CommandList {
   Write-Host 'The launcher writes the active WEBHOOK_URL into .env.active automatically.' -ForegroundColor Cyan
   Write-Host ''
   Write-Host 'Use the numbered menu options for normal work:' -ForegroundColor Cyan
-  Write-Host '  Start n8n: starts local n8n, or starts n8n with ngrok.'
-  Write-Host '  Restart n8n: recreates only the n8n app container so .env changes are applied.'
-  Write-Host '  Stop n8n: stops ngrok only, or stops the local stack.'
-  Write-Host '  Update: checks for image updates before letting you apply them.'
-  Write-Host '  Show Compose status: shows service state, health, container names, and ports.'
-  Write-Host '  View logs: shows recent logs for all services or one service.'
-  Write-Host '  Back up: writes a local Postgres SQL backup under .\backups.'
+  Write-CommandListItem -Number '1' -Name 'Start n8n' -Description 'Starts local n8n, or starts n8n with ngrok.'
+  Write-CommandListItem -Number '2' -Name 'Restart n8n' -Description 'Recreates only the n8n app container so .env changes are applied.'
+  Write-CommandListItem -Number '3' -Name 'Stop n8n' -Description 'Stops ngrok only, or stops the local stack.'
+  Write-CommandListItem -Number '4' -Name 'Update' -Description 'Checks for image updates before applying them.'
+  Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state, health, container names, and ports.'
+  Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
+  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a timestamped backup folder under .\backups.'
   Write-Host ''
   Write-Host 'Updates are user-approved. Pulling images does not recreate or restart containers until you choose an update action.' -ForegroundColor Yellow
 }
@@ -833,11 +934,15 @@ function Show-LaunchStatus {
     $webhookUrl = Get-ActiveWebhookUrl
     $expectedWebhookUrl = Get-LocalWebhookUrl
     if ($webhookUrl) {
-      Write-Host '  active WEBHOOK_URL: ' -NoNewline -ForegroundColor DarkCyan
+      $webhookLabel = "  {0,-22}: " -f 'active WEBHOOK_URL'
+      Write-Host $webhookLabel -NoNewline -ForegroundColor DarkCyan
       Write-Host $webhookUrl -ForegroundColor White
     }
 
+    Write-ImageVersions
+
     if (($runningServices -notcontains 'ngrok') -and $webhookUrl -and $webhookUrl -ne $expectedWebhookUrl) {
+      Write-Host ''
       Write-Warning 'WEBHOOK_URL is public while ngrok is stopped.'
       Write-Warning 'The local editor still opens, but public webhook and OAuth links need ngrok running.'
     }
