@@ -165,7 +165,7 @@ function Write-ServiceStatus {
 
   $isRunning = $RunningServices -contains $Name
   if ($isRunning) {
-    Write-Host "  $Name: " -NoNewline -ForegroundColor DarkCyan
+    Write-Host "  ${Name}: " -NoNewline -ForegroundColor DarkCyan
     Write-Host 'running' -NoNewline -ForegroundColor Green
     if ($WhenRunning) {
       Write-Host " - $WhenRunning" -ForegroundColor White
@@ -173,7 +173,7 @@ function Write-ServiceStatus {
       Write-Host ''
     }
   } else {
-    Write-Host "  $Name: " -NoNewline -ForegroundColor DarkCyan
+    Write-Host "  ${Name}: " -NoNewline -ForegroundColor DarkCyan
     Write-Host 'stopped' -NoNewline -ForegroundColor Yellow
     if ($WhenStopped) {
       Write-Host " - $WhenStopped" -ForegroundColor White

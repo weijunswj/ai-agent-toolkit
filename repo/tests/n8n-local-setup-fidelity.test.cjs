@@ -223,6 +223,23 @@ function menuOptions(menu, functionName) {
   return [...body.matchAll(/Write-Host ' \s*\d+\. ([^']+)'/g)].map((match) => match[1]);
 }
 
+function findPowerShell() {
+  const candidates = process.platform === 'win32' ? ['powershell.exe', 'pwsh'] : ['pwsh', 'powershell'];
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate, ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], {
+      encoding: 'utf8'
+    });
+    if (!result.error && result.status === 0) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function powerShellSingleQuoted(value) {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
 test('n8n local setup final source and generated surfaces are declared', () => {
   const manifest = localSetupManifest();
   for (const expected of [...guideOutputs, ...localStackOutputs, ...platformOutputs, ...mcpConfigOutputs]) {
@@ -314,12 +331,15 @@ test('n8n local setup source README exposes two main beginner pages', () => {
   assert.match(readme, /\[Page 2 - Hostinger VPS\]\(\.\/Page%202%20-%20Hostinger%20VPS\.md\)/);
   assert.match(readme, /^## Supporting Materials$/m);
   assert.match(readme, /Local stack templates/);
-  assert.match(readme, /Local helper scripts/);
+  assert.doesNotMatch(readme, /Local helper scripts/);
+  assert.doesNotMatch(readme, /\[scripts\/\]\(\.\/scripts\/\)/);
   assert.match(readme, /^## Skills-First Routing$/m);
   assert.match(readme, /Humans use `_projects\/\*\*`/);
   assert.match(readme, /Agents use generated `skills\/\*\*` surfaces after sync/);
   assert.match(readme, /Optional AI-coding-agent MCP feature references are secondary and only for users intentionally enabling n8n MCP for an AI coding agent\./);
   assert.match(readme, /^## Optional AI-Coding-Agent MCP Feature References$/m);
+  assert.match(readme, /This section is for using AI coding agents to work on n8n workflows\./);
+  assert.doesNotMatch(readme, /Skip this section for beginner local setup/);
   assert.match(readme, /\[mcp setup - codex\.md\]\(\.\/mcp%20setup%20-%20codex\.md\)/);
   assert.match(readme, /\[codex-mcp-config\.md\]\(\.\/templates\/mcp-configs\/codex-mcp-config\.md\)/);
   assert.match(readme, /\*\*If the \[AI Coding Agent Rules\]\(\.\.\/\.\.\/\.\.\/\.\.\/skills\/ai-coding-agent-rules\/\) skill is installed, repo-local templates are automatically checked/);
@@ -506,6 +526,36 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.doesNotMatch(menu, /Open-NgrokDockerDesktopGuide/);
   assert.doesNotMatch(menu, /dashboard\.ngrok\.com\/get-started\/setup\/docker-desktop/);
   assert.match(menu, /Do not launch n8n directly from Docker Desktop\. Launch it from _n8n-local\.cmd instead\./);
+});
+
+test('local menu PowerShell script stays parseable', (t) => {
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const generatedScript = path.join(repoRoot, 'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const sourceMenu = fs.readFileSync(sourceScript, 'utf8');
+
+  assert.doesNotMatch(sourceMenu, /\$Name:/);
+  assert.match(sourceMenu, /\$\{Name\}: /);
+
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    t.skip('PowerShell is not available in this environment');
+    return;
+  }
+
+  for (const scriptPath of [sourceScript, generatedScript]) {
+    const command = [
+      '$tokens = $null',
+      '$errors = $null',
+      `[System.Management.Automation.Language.Parser]::ParseFile(${powerShellSingleQuoted(scriptPath)}, [ref]$tokens, [ref]$errors) | Out-Null`,
+      'if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
+    ].join('; ');
+    const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+
+    assert.equal(result.status, 0, `${scriptPath}\n${result.stdout}\n${result.stderr}`);
+  }
 });
 
 test('local stack templates stay placeholder-only and local-first', () => {

@@ -16,7 +16,6 @@ Start with Local Setup for Docker Desktop on your own computer. Use Hostinger VP
 | Need | Open |
 | --- | --- |
 | Local stack templates | [templates/local-stack/](./templates/local-stack/) |
-| Local helper scripts | [scripts/](./scripts/) |
 
 ## Skills-First Routing
 
@@ -26,7 +25,7 @@ Start with [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md). Optional A
 
 ## Optional AI-Coding-Agent MCP Feature References
 
-Skip this section for beginner local setup.
+This section is for using AI coding agents to work on n8n workflows.
 
 | Platform | Setup guide | Config template |
 | --- | --- | --- |
