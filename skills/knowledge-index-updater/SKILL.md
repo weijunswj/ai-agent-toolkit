@@ -351,7 +351,60 @@ When the user asks for a recurring updater, create a scheduled task that:
 
 Replace the placeholder database name and data source URL with the user's actual Notion Knowledge Index details before using this prompt in an external scheduler.
 
-Recommended prompt for an external AI scheduler or cron-style runner:
+#### Recommended Codex automation prompt
+
+```text
+Use the `knowledge-index-updater` skill.
+
+Before doing anything else:
+1. Locate and read the current `knowledge-index-updater/SKILL.md`.
+2. Prefer the installed Codex skill folder if available.
+3. If no installed skill is available, read `skills/knowledge-index-updater/SKILL.md` from the local `ai-agent-toolkit` repo.
+4. If generated skill output is unavailable, read `_projects/knowledge/knowledge-index-updater/_main/skill/SKILL.md` from the local `ai-agent-toolkit` repo.
+5. If no current skill file can be found, stop and report that the automation cannot safely run because it cannot load the current `knowledge-index-updater` rules.
+
+Do not fall back to older inline Knowledge Index rules from this automation config if they conflict with the current skill.
+
+Current database:
+- Name: <Knowledge Index database name>
+- Data source: <collection://your-notion-data-source-id>
+
+Task:
+Search my Notion and GitHub for new, changed, removed, or renamed guides, references, portfolio pages, tools, and repositories.
+
+Follow the current `knowledge-index-updater` skill exactly, especially:
+- `Scheduled updater behaviour`
+- `Existing row update confirmation`
+- `Property-only Notion page updates`
+- `Quality Checks`
+
+Important:
+- Use `Notion Key` and `GitHub Key` as the only hard identity fields.
+- Do not use `Canonical Key` for matching, creating, merging, or deduplication.
+- Do not create or apply meaningful writes without explicit current-turn approval.
+- Scheduled runs must propose meaningful writes instead of applying them automatically.
+- Only pure `Last checked` refreshes on existing rows with no meaningful changes may be written without confirmation.
+- Do not refresh `Last checked` for rows with pending proposed meaningful changes.
+- When using Notion MCP `notion_update_page` with `command: "update_properties"` for property-only writes, include `content_updates: []`.
+
+At the end, report:
+- rows created
+- rows updated
+- rows marked Needs review
+- rows marked Missing
+- rows refreshed without confirmation
+- anything skipped because identity was uncertain
+- proposed meaningful writes awaiting approval
+```
+
+#### Static fallback prompt for external schedulers that cannot load skills
+
+Use this static fallback only when the scheduler cannot load or read the current skill at runtime. Codex automation should use the self-loading prompt above instead.
+
+```text
+Search my Notion and GitHub for new, changed, removed, or renamed guides, references, portfolio pages, and repositories.
+
+Update the root-level Notion Knowledge Index using one row per real project, guide, reference, portfolio item, tool, or repo.
 
 ```text
 Search my Notion and GitHub for new, changed, removed, or renamed guides, references, portfolio pages, and repositories.

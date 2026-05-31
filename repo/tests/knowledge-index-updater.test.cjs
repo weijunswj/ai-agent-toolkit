@@ -72,6 +72,22 @@ test('Knowledge Index scheduled prompt uses database placeholders instead of a r
   }
 });
 
+test('Knowledge Index scheduled section includes Codex prompt and fallback guidance', () => {
+  for (const filePath of [sourceSkill, generatedSkill]) {
+    const text = read(filePath);
+    const scheduled = section(text, '### 7. Scheduled updater behaviour');
+    const codexPromptSection = section(scheduled, '#### Recommended Codex automation prompt', '####');
+    const staticPromptSection = section(scheduled, '#### Static fallback prompt for external schedulers that cannot load skills', '```');
+
+    assert.match(codexPromptSection, /Use the `knowledge-index-updater` skill\./, filePath);
+    assert.match(codexPromptSection, /Locate and read the current `knowledge-index-updater\/SKILL\.md`/, filePath);
+    assert.match(codexPromptSection, /Do not fall back to older inline Knowledge Index rules/, filePath);
+    assert.match(codexPromptSection, /stop and report that the automation cannot safely run/, filePath);
+    assert.match(staticPromptSection, /Static fallback prompt for external schedulers that cannot load skills/, filePath);
+    assert.match(staticPromptSection, /Use this static fallback only when the scheduler cannot load or read the current skill at runtime\. Codex automation should use the self-loading prompt above instead\./, filePath);
+  }
+});
+
 test('Knowledge Index test fixture keeps fake Notion data source sentinel', () => {
   assert.equal(fakeDataSourceId, 'collection://replace-with-your-notion-data-source-id');
   assert.match(fakeDataSourceId, /^collection:\/\/[a-z-]+$/);
