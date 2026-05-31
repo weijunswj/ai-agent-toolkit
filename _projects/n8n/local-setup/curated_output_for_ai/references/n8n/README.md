@@ -8,19 +8,13 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 These references are local to the copyable skill folder. Use them for normal execution instead of requiring access to `_projects/`.
 
-Start with [local-setup.md](local-setup.md). It is the primary beginner local guide for setup, menu use, updates, tunnels, URLs, MCP, platform setup, troubleshooting, and daily commands.
-
-## Primary Guide
+## Main Pages
 
 | Guide | Use when |
 | --- | --- |
-| [local-setup.md](local-setup.md) | Running the Docker Compose local setup with n8n, Postgres, ngrok, the `n8n-local.cmd` menu, updates, URLs, MCP, platform setup, troubleshooting, and daily commands. |
+| [local-setup.md](local-setup.md) | Running the local Docker Desktop setup with n8n, Postgres, the `_n8n-local.cmd` menu, updates, Compose ngrok public access, troubleshooting, and daily commands. |
+| [hostinger-vps.md](hostinger-vps.md) | Moving from local testing to always-on Hostinger VPS hosting with domain, backup, queue mode, update, and safety guidance. |
 
-## Appendices And References
+## Skills-First Note
 
-| Guide | Use when |
-| --- | --- |
-| [upgrading.md](upgrading.md) | Upgrading n8n, n8n MCP, and related local tooling safely. |
-| [tunnelling.md](tunnelling.md) | Moving from local/ngrok testing to a Hostinger public domain. |
-| [docker-compose-ngrok.md](docker-compose-ngrok.md) | Inspecting the Docker Compose stack, guided launcher, and local stack templates. |
-| [vps-hosting.md](vps-hosting.md) | Moving from local development to always-on VPS hosting. |
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional AI-coding-agent MCP feature references are secondary and not part of the beginner local setup flow.

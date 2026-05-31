@@ -65,24 +65,9 @@
     "path": "skills/n8n-local-setup/references/n8n/local-setup.md"
   },
   {
-    "id": "n8n-upgrading",
-    "title": "Upgrading n8n",
-    "path": "skills/n8n-local-setup/references/n8n/upgrading.md"
-  },
-  {
-    "id": "n8n-tunnelling",
-    "title": "ngrok Tunnelling",
-    "path": "skills/n8n-local-setup/references/n8n/tunnelling.md"
-  },
-  {
-    "id": "n8n-docker-compose-ngrok",
-    "title": "Docker Compose n8n Postgres ngrok",
-    "path": "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md"
-  },
-  {
-    "id": "n8n-vps-hosting",
-    "title": "VPS Hosting",
-    "path": "skills/n8n-local-setup/references/n8n/vps-hosting.md"
+    "id": "n8n-hostinger-vps",
+    "title": "Hostinger VPS",
+    "path": "skills/n8n-local-setup/references/n8n/hostinger-vps.md"
   },
   {
     "id": "n8n-workflow-helper-sync",

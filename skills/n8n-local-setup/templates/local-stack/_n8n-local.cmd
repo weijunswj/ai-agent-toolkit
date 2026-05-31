@@ -9,8 +9,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
+:run_menu
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%STACK_DIR%scripts\n8n-local-menu.ps1"
 set "EXIT_CODE=%ERRORLEVEL%"
+if "%EXIT_CODE%"=="0" goto done
 
+echo.
+echo The n8n local menu stopped unexpectedly with exit code %EXIT_CODE%.
+echo Press any key to reopen the menu, or close this window to stop.
+pause >nul
+goto run_menu
+
+:done
 popd >nul
-exit /b %EXIT_CODE%
+exit /b 0

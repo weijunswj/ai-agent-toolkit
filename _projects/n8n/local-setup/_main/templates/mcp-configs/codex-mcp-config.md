@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/templates/mcp-configs/codex-mcp-config.md
-Update the project source and run sync.
--->
 # Codex MCP Config
 
 Use this for the normal Codex + n8n MCP setup.
