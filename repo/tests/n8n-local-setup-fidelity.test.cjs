@@ -463,11 +463,11 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   for (const expected of [
     '# [ STEP 1: Fill These Before First Launch ]',
     '# Postgres',
-    '# Keep POSTGRES_DB and POSTGRES_USER visible so separate local stacks can use separate names.',
+    '# Keeping POSTGRES_DB and POSTGRES_USER visible so separate local stacks can use separate names.',
     '# n8n',
     '# Choose the browser port before first launch.',
-    '# https://dashboard.ngrok.com/get-started/setup/docker',
-    '# The free domain is near the bottom of section 1.',
+    '# - https://dashboard.ngrok.com/get-started/setup/docker',
+    '# - The free domain is near the bottom of section 1.',
     '# [ STEP 2: Fill These Later Only After Local n8n Works ]'
   ]) {
     assert.match(envExample, new RegExp(escapeRegExp(expected)), expected);
@@ -652,6 +652,31 @@ test('local menu PowerShell script stays parseable', (t) => {
   }
 });
 
+test('local menu native command helper returns only the process exit code', (t) => {
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    t.skip('PowerShell is not available in this environment');
+    return;
+  }
+
+  const command = [
+    `$menu = Get-Content -LiteralPath ${powerShellSingleQuoted(sourceScript)} -Raw`,
+    "$start = $menu.IndexOf('function Invoke-NativeCommand')",
+    "$end = $menu.IndexOf(\"`nfunction Invoke-Compose\", $start + 1)",
+    ". ([scriptblock]::Create($menu.Substring($start, $end - $start)))",
+    "$result = Invoke-NativeCommand -Command { Write-Output 'NAME IMAGE STATUS'; $global:LASTEXITCODE = 0 }",
+    "if ($result -is [array]) { Write-Error \"Invoke-NativeCommand leaked command output into its return value: $($result -join '|')\"; exit 1 }",
+    "if ($result -ne 0) { Write-Error \"Expected exit code 0, got $result\"; exit 1 }"
+  ].join('; ');
+  const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
 test('local stack templates stay placeholder-only and local-first', () => {
   const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/docker-compose.yml');
   const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
@@ -676,8 +701,8 @@ test('local stack templates stay placeholder-only and local-first', () => {
     '# Postgres',
     '# n8n',
     '# Choose the browser port before first launch.',
-    '# https://dashboard.ngrok.com/get-started/setup/docker',
-    '# The free domain is near the bottom of section 1.',
+    '# - https://dashboard.ngrok.com/get-started/setup/docker',
+    '# - The free domain is near the bottom of section 1.',
     '# [ STEP 2: Fill These Later Only After Local n8n Works ]',
     'POSTGRES_DB=n8n',
     'POSTGRES_USER=n8n',

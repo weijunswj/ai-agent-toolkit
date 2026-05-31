@@ -78,7 +78,7 @@ function Invoke-NativeCommand {
   $previousErrorActionPreference = $ErrorActionPreference
   try {
     $ErrorActionPreference = 'Continue'
-    & $Command
+    & $Command | Out-Host
     $exitCode = $LASTEXITCODE
   } catch {
     if (-not $Quiet) {
