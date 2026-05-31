@@ -281,20 +281,12 @@ function Normalize-WebhookUrl {
 }
 
 function Get-LocalWebhookUrl {
-  $configured = Get-EnvValue -Name 'N8N_LOCAL_WEBHOOK_URL'
-  if ($configured) {
-    return (Normalize-WebhookUrl -Url $configured)
-  }
   return (Get-ExpectedLocalWebhookUrl)
 }
 
 function Get-NgrokWebhookUrl {
   param([string]$Domain)
 
-  $configured = Get-EnvValue -Name 'N8N_NGROK_WEBHOOK_URL'
-  if ($configured -and $configured -ne 'https://your-name.ngrok.app/' -and $configured -ne 'https://your-reserved-domain.ngrok.app/') {
-    return (Normalize-WebhookUrl -Url $configured)
-  }
   return (Normalize-WebhookUrl -Url "https://$Domain")
 }
 
@@ -537,8 +529,6 @@ function Start-NgrokTunnel {
 
   $authtoken = Get-EnvValue -Name 'NGROK_AUTHTOKEN'
   $domain = Get-EnvValue -Name 'NGROK_DOMAIN'
-  $n8nHost = Get-EnvValue -Name 'N8N_HOST'
-  $n8nProtocol = Get-EnvValue -Name 'N8N_PROTOCOL'
 
   if (-not $authtoken -or $authtoken -eq 'replace-with-ngrok-authtoken') {
     Write-ErrorMessage 'Set NGROK_AUTHTOKEN in .env before starting the tunnel.'
@@ -560,27 +550,7 @@ function Start-NgrokTunnel {
     return
   }
 
-  if ($n8nHost -ne 'localhost') {
-    Write-ErrorMessage 'Set N8N_HOST back to localhost for this guide. Do not put the ngrok domain in N8N_HOST.'
-    return
-  }
-
-  if ($n8nProtocol -ne 'http') {
-    Write-ErrorMessage 'Set N8N_PROTOCOL back to http for this local Docker setup. ngrok provides the public HTTPS URL.'
-    return
-  }
-
   $publicWebhookUrl = Get-NgrokWebhookUrl -Domain $domain
-  if ($publicWebhookUrl -eq 'https://your-name.ngrok.app/' -or $publicWebhookUrl -eq 'https://your-reserved-domain.ngrok.app/') {
-    Write-ErrorMessage 'Set N8N_NGROK_WEBHOOK_URL in .env before starting the tunnel.'
-    return
-  }
-
-  if ($publicWebhookUrl -notmatch '^https://') {
-    Write-ErrorMessage 'N8N_NGROK_WEBHOOK_URL must start with https://.'
-    return
-  }
-
   if (-not (Set-ActiveWebhookUrl -Url $publicWebhookUrl -Mode 'ngrok')) {
     return
   }
@@ -805,7 +775,6 @@ function Show-CommandList {
   Write-Host 'Compose ngrok setup values in .env:' -ForegroundColor Cyan
   Write-Host '  NGROK_AUTHTOKEN=<copy from ngrok dashboard>'
   Write-Host '  NGROK_DOMAIN=<copy host only, no https://>'
-  Write-Host '  N8N_NGROK_WEBHOOK_URL=https://<your-ngrok-domain>/'
   Write-Host ''
   Write-Host 'The launcher writes the active WEBHOOK_URL into .env.active automatically.' -ForegroundColor Cyan
   Write-Host ''

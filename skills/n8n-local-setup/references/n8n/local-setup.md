@@ -191,39 +191,37 @@ Fill these before starting n8n for the first time:
 
 | Variable | What to paste | Example / format | Notes |
 | --- | --- | --- | --- |
+| `POSTGRES_DB` | Local database name. | `n8n` | Keep as `n8n` unless you intentionally run multiple local stacks. |
+| `POSTGRES_USER` | Local database user. | `n8n` | Keep aligned with this stack. You can change it for a separate stack. |
 | `POSTGRES_PASSWORD` | A local database password. | `replace-with-local-postgres-password` becomes a private password. | You make this up. Store it in a password manager. |
 | `N8N_ENCRYPTION_KEY` | A long random value. | 32+ random characters. | You make this up once, then keep it forever for this stack. n8n needs the same key after restarts to decrypt saved credentials. |
-| `TZ` | Your local timezone. | `Asia/Singapore` | This is a predefined timezone name. Keep or change intentionally. |
-| `GENERIC_TIMEZONE` | Your local timezone. | `Asia/Singapore` | This is a predefined timezone name. Keep aligned with `TZ`. |
+| `LOCAL_TIMEZONE` | Your local timezone. | `Asia/Singapore` | This is a predefined timezone name. Compose uses it for both n8n timezone values. |
 
 For `POSTGRES_PASSWORD`, choose any strong random password. It does not come from Docker, n8n, ngrok, or Hostinger.
 
 For `N8N_ENCRYPTION_KEY`, choose any long random value. It does not come from n8n. After you use it, do not change it unless you understand the consequences.
 
-### STEP 2: Keep These Local Defaults For First Launch
+`POSTGRES_DB` and `POSTGRES_USER` stay in `.env` on purpose. Most people can leave both as `n8n`, but they are useful when you intentionally run more than one local n8n stack and want each stack to have its own database name or user.
 
-Leave these as-is until local n8n works in your browser:
+### STEP 2: Local URL Choices
+
+These are the only local URL values most users need to see:
 
 | Variable | First-launch value | Notes |
 | --- | --- | --- |
-| `N8N_HOST` | `localhost` | Type exactly `localhost`. This is only the host name. Do not put `http://` here. Do not put your ngrok domain here. |
 | `N8N_LOCAL_PORT` | `5678` | This is the browser port on your computer. If `http://localhost:5678` is already used, change this to an unused port such as `5679`. |
-| `N8N_PROTOCOL` | `http` | Type exactly `http` for this local Docker setup. Do not change this to `https` for ngrok. |
-| `N8N_LOCAL_WEBHOOK_URL` | `http://localhost:5678/` | This is the localhost webhook URL choice. Keep the trailing slash. If you changed `N8N_LOCAL_PORT` to `5679`, set this to `http://localhost:5679/`. |
-| `N8N_PROXY_HOPS` | `1` | Keep this as `1` for the local setup. |
-| `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS` | `true` | Leave this alone. |
-| `N8N_RUNNERS_ENABLED` | `true` | Leave this alone. |
 
-For this guide, keep `N8N_HOST=localhost`.
+This local stack still sets `N8N_HOST=localhost`, `N8N_PROXY_HOPS=1`, `N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true`, and `N8N_RUNNERS_ENABLED=true` in `docker-compose.yml`. They are fixed for this guide, so they do not need to clutter `.env`.
+
+The launcher builds the localhost webhook URL from `N8N_LOCAL_PORT`. If `N8N_LOCAL_PORT=5678`, it uses `http://localhost:5678/`. If `N8N_LOCAL_PORT=5679`, it uses `http://localhost:5679/`.
 
 What that means:
 
 - For local-only use, open n8n in your browser at `http://localhost:5678`.
 - If port `5678` is already used, change `N8N_LOCAL_PORT` to another unused port such as `5679`, then open `http://localhost:5679`.
-- When you add ngrok, do not change `N8N_HOST`.
 - The launcher chooses the right active `WEBHOOK_URL` for n8n and writes it to `.env.active`.
-- When you choose `Localhost only`, the active `WEBHOOK_URL` becomes `N8N_LOCAL_WEBHOOK_URL`.
-- When you choose `Start ngrok tunnel`, the active `WEBHOOK_URL` becomes `N8N_NGROK_WEBHOOK_URL`.
+- When you choose `Localhost only`, the active `WEBHOOK_URL` is built from `localhost` plus `N8N_LOCAL_PORT`.
+- When you choose `Start ngrok tunnel`, the active `WEBHOOK_URL` is built from `NGROK_DOMAIN`.
 - Advanced reverse-proxy or custom-domain hosting may use different host settings, but that is outside this local setup guide.
 
 ### STEP 3: Fill These Later Only After Local n8n Works
@@ -234,11 +232,8 @@ You get these values from your ngrok account:
 
 1. Open the ngrok authtoken page: [https://dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken).
 2. Copy the authtoken into `NGROK_AUTHTOKEN`.
-3. Open the ngrok Docker setup page: [https://dashboard.ngrok.com/get-started/setup/docker](https://dashboard.ngrok.com/get-started/setup/docker).
-4. This is the ngrok dashboard page for Docker. It is not Docker Desktop.
-5. On the Docker setup page, look near the bottom of section 1 for the free ngrok domain.
-6. Copy only the hostname into `NGROK_DOMAIN`.
-7. Build `N8N_NGROK_WEBHOOK_URL` from that domain when an outside service needs to call n8n.
+3. On that same ngrok authtoken/get-started page, find the free domain shown by ngrok.
+4. Copy only the hostname into `NGROK_DOMAIN`.
 
 If ngrok shows this domain:
 
@@ -246,35 +241,27 @@ If ngrok shows this domain:
 your-name.ngrok.app
 ```
 
-Then use these `.env` values for ngrok:
+Then use this `.env` value for ngrok:
 
 ```text
 NGROK_DOMAIN=your-name.ngrok.app
-N8N_NGROK_WEBHOOK_URL=https://your-name.ngrok.app/
 ```
 
 Notice the difference:
 
 - `NGROK_DOMAIN` is only the hostname. No `https://`. No trailing slash.
-- `N8N_NGROK_WEBHOOK_URL` is the full URL. It includes `https://` and the trailing slash.
 - You still open the n8n editor in your browser at `http://localhost:5678` or your chosen `N8N_LOCAL_PORT`.
-- The launcher copies either `N8N_LOCAL_WEBHOOK_URL` or `N8N_NGROK_WEBHOOK_URL` into `.env.active` as the real `WEBHOOK_URL` used by n8n.
+- The launcher builds the full public webhook URL from `NGROK_DOMAIN`, then writes it into `.env.active` as the real `WEBHOOK_URL` used by n8n.
 - The ngrok webhook URL is for links that external services must call, such as production webhooks and OAuth callbacks.
 
 | Variable | What to paste | Example / format | Notes |
 | --- | --- | --- | --- |
 | `NGROK_AUTHTOKEN` | Your ngrok authtoken. | Value from the ngrok authtoken page. | Copy this from ngrok. Do not make this up. |
-| `NGROK_DOMAIN` | The free domain shown by ngrok. | `your-name.ngrok.app` | Copy this from the bottom of section 1 on the ngrok Docker setup page. Do not include `https://`. |
-| `N8N_NGROK_WEBHOOK_URL` | The full public URL made from your ngrok domain. | `https://your-name.ngrok.app/` | Use this only when outside services must call n8n. Include `https://` and the trailing slash. |
+| `NGROK_DOMAIN` | The free domain shown by ngrok. | `your-name.ngrok.app` | Copy this from the ngrok authtoken/get-started page. Do not include `https://`. |
 
-For ngrok in this guide, still keep:
+Do not add `N8N_HOST` to `.env` for this guide. The Compose file already sets it to `localhost`, and the ngrok domain belongs in `NGROK_DOMAIN`.
 
-```text
-N8N_HOST=localhost
-N8N_PROTOCOL=http
-```
-
-Do not put your ngrok domain into `N8N_HOST`. The launcher checks for this because putting the ngrok domain in the wrong field is an easy mistake.
+You also do not need `N8N_PROTOCOL` in this local `.env`. n8n defaults to `http`, and ngrok provides the public `https://` URL outside the container. You would only set n8n's protocol to `https` if n8n itself was serving HTTPS with its own SSL certificate and key, which is not this beginner local setup.
 
 ### If Port 5678 Is Already Used
 
@@ -289,21 +276,15 @@ Use this simple option:
    N8N_LOCAL_PORT=5679
    ```
 
-3. For local-only use, change `N8N_LOCAL_WEBHOOK_URL` to match:
-
-   ```text
-   N8N_LOCAL_WEBHOOK_URL=http://localhost:5679/
-   ```
-
-4. Start n8n from `_n8n-local.cmd`.
-5. Open a web browser.
-6. In the browser address bar, go to:
+3. Start n8n from `_n8n-local.cmd`.
+4. Open a web browser.
+5. In the browser address bar, go to:
 
    ```text
    http://localhost:5679
    ```
 
-Do not change `N8N_HOST`. Do not change Docker's internal `5678` port. The `N8N_LOCAL_PORT` value changes only the port on your computer.
+Do not change Docker's internal `5678` port. The `N8N_LOCAL_PORT` value changes only the port on your computer.
 
 You do not need to edit this line in `docker-compose.yml`:
 
@@ -369,10 +350,8 @@ Before you start:
 1. Create or sign in to an ngrok account.
 2. Open the ngrok authtoken page: [https://dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken).
 3. Copy the authtoken into `NGROK_AUTHTOKEN` in `.env`.
-4. Open the ngrok Docker setup page: [https://dashboard.ngrok.com/get-started/setup/docker](https://dashboard.ngrok.com/get-started/setup/docker).
-5. This is the ngrok dashboard page for Docker. It is not Docker Desktop.
-6. Near the bottom of section 1, find the free ngrok domain shown for the Docker command.
-7. Copy only the hostname into `NGROK_DOMAIN`.
+4. On that same ngrok authtoken/get-started page, find the free domain shown by ngrok.
+5. Copy only the hostname into `NGROK_DOMAIN`.
 
 Example:
 
@@ -382,28 +361,25 @@ NGROK_DOMAIN=your-name.ngrok.app
 
 Do not include `https://` in `NGROK_DOMAIN`.
 
-Then set `N8N_NGROK_WEBHOOK_URL` to the full public URL:
+The launcher will build the full public webhook URL from that domain:
 
 ```text
-N8N_NGROK_WEBHOOK_URL=https://your-name.ngrok.app/
+https://your-name.ngrok.app/
 ```
-
-Include `https://` and the trailing slash in `N8N_NGROK_WEBHOOK_URL`.
 
 This does not change where you open the editor. You still open n8n in your browser at `http://localhost:5678`, or at your chosen local port such as `http://localhost:5679`.
 
 The launcher writes the active n8n `WEBHOOK_URL` into `.env.active`:
 
-- Choose `Localhost only` and `.env.active` uses `N8N_LOCAL_WEBHOOK_URL`.
-- Choose `Start ngrok tunnel` and `.env.active` uses `N8N_NGROK_WEBHOOK_URL`.
+- Choose `Localhost only` and `.env.active` uses the localhost URL built from `N8N_LOCAL_PORT`.
+- Choose `Start ngrok tunnel` and `.env.active` uses the public URL built from `NGROK_DOMAIN`.
 
 `WEBHOOK_URL` controls the public webhook and callback links n8n shows or builds. If the active value is localhost, outside services will see localhost links and will not be able to call your machine from the internet.
 
-Keep these local defaults for ngrok in this guide:
+These fixed local defaults stay in `docker-compose.yml`:
 
 ```text
 N8N_HOST=localhost
-N8N_PROTOCOL=http
 N8N_PROXY_HOPS=1
 ```
 
@@ -430,7 +406,7 @@ docker compose up -d --force-recreate n8n ngrok
 docker compose logs --tail 200 ngrok
 ```
 
-Free ngrok accounts get an assigned Dev Domain. For this guide, use the free domain shown on the ngrok Docker setup page unless you already know you have a paid or custom ngrok domain.
+Free ngrok accounts get an assigned Dev Domain. For this guide, use the free domain shown on the ngrok authtoken/get-started page unless you already know you have a paid or custom ngrok domain.
 
 Stopping the `ngrok` Docker service stops the tunnel. It does not delete or release a reserved ngrok domain.
 
@@ -492,7 +468,7 @@ For localhost-only use, open a web browser and go to:
 http://localhost:5678
 ```
 
-For ngrok use, fill `NGROK_AUTHTOKEN`, `NGROK_DOMAIN`, and `N8N_NGROK_WEBHOOK_URL` in `.env` before starting the tunnel.
+For ngrok use, fill `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` in `.env` before starting the tunnel.
 
 You do not manually switch `WEBHOOK_URL`. The launcher chooses it for you and writes the active value to `.env.active`.
 
@@ -609,7 +585,7 @@ Use this table only when you want an AI coding agent to work with n8n workflows 
 
 1. Confirm local n8n works first.
 2. Confirm your public endpoint works.
-3. Set `NGROK_AUTHTOKEN`, `NGROK_DOMAIN`, and `N8N_NGROK_WEBHOOK_URL` intentionally.
+3. Set `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` intentionally.
 4. Choose `Start n8n`, then `Start ngrok tunnel`, so the launcher writes `.env.active` and recreates n8n.
 
 ### Webhook URLs Still Show ngrok In Localhost-Only Mode
@@ -622,10 +598,8 @@ Only the webhook and OAuth callback links are still public ngrok links.
 
 To switch those links back to localhost:
 
-1. Open `<LOCAL_STACK_FOLDER>\.env`.
-2. Confirm `N8N_LOCAL_WEBHOOK_URL` is the localhost URL, for example `N8N_LOCAL_WEBHOOK_URL=http://localhost:5678/`.
-3. Relaunch `_n8n-local.cmd`.
-4. Choose `Start n8n`, then `Localhost only`.
+1. Relaunch `_n8n-local.cmd`.
+2. Choose `Start n8n`, then `Localhost only`.
 
 ### Port 5678 Is Already In Use
 
@@ -635,13 +609,12 @@ Beginner-safe fix:
 
 1. Open `<LOCAL_STACK_FOLDER>\.env`.
 2. Change `N8N_LOCAL_PORT=5678` to another unused port, such as `5679`.
-3. Change `N8N_LOCAL_WEBHOOK_URL=http://localhost:5678/` to `N8N_LOCAL_WEBHOOK_URL=http://localhost:5679/`.
-4. Relaunch `_n8n-local.cmd`.
-5. Choose `Restart n8n`.
-6. Open a web browser.
-7. Go to `http://localhost:5679`.
+3. Relaunch `_n8n-local.cmd`.
+4. Choose `Restart n8n`.
+5. Open a web browser.
+6. Go to `http://localhost:5679`.
 
-Do not change `N8N_HOST`. Do not change the right-side Docker port `5678` in `docker-compose.yml`.
+Do not change the right-side Docker port `5678` in `docker-compose.yml`.
 
 If you already have an old disposable n8n container running, stop it only if you know it is not needed.
 

@@ -383,8 +383,7 @@ test('Local Setup keeps the corrected beginner flow', () => {
   assert.match(localSetup, /Choose `Start ngrok tunnel`/);
   assert.match(localSetup, /Read the quick status at the top of the main menu and confirm `ngrok: running`/);
   assert.match(localSetup, /choose `Show Compose status` to see service state, health, container names, and ports/);
-  assert.match(localSetup, /ngrok Docker setup page/);
-  assert.match(localSetup, /not Docker Desktop/);
+  assert.match(localSetup, /same ngrok authtoken\/get-started page/);
   assert.match(localSetup, /Free ngrok accounts get an assigned Dev Domain/);
   assert.match(localSetup, /Stopping the `ngrok` Docker service stops the tunnel/);
   assert.match(localSetup, /OneDrive Desktop redirection/);
@@ -412,14 +411,17 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   assert.match(localSetup, /Do not edit `\.env\.example`/);
   assert.match(localSetup, /Replace only the value after `=`/);
   assert.match(localSetup, /^### STEP 1: Fill These Before First Launch$/m);
-  assert.match(localSetup, /^### STEP 2: Keep These Local Defaults For First Launch$/m);
+  assert.match(localSetup, /^### STEP 2: Local URL Choices$/m);
   assert.match(localSetup, /^### STEP 3: Fill These Later Only After Local n8n Works$/m);
   assert.match(localSetup, /you are allowed to invent any strong random value yourself/);
   assert.match(localSetup, /copy the real value from there/);
-  assert.match(localSetup, /For this guide, keep `N8N_HOST=localhost`/);
+  assert.match(localSetup, /Compose uses it for both n8n timezone values/);
+  assert.match(localSetup, /Keep as `n8n` unless you intentionally run multiple local stacks/);
+  assert.match(localSetup, /`POSTGRES_DB` and `POSTGRES_USER` stay in `\.env` on purpose/);
   assert.match(localSetup, /The launcher chooses the right active `WEBHOOK_URL` for n8n and writes it to `\.env\.active`/);
-  assert.match(localSetup, /When you choose `Localhost only`, the active `WEBHOOK_URL` becomes `N8N_LOCAL_WEBHOOK_URL`/);
-  assert.match(localSetup, /When you choose `Start ngrok tunnel`, the active `WEBHOOK_URL` becomes `N8N_NGROK_WEBHOOK_URL`/);
+  assert.match(localSetup, /The launcher builds the localhost webhook URL from `N8N_LOCAL_PORT`/);
+  assert.match(localSetup, /When you choose `Localhost only`, the active `WEBHOOK_URL` is built from `localhost` plus `N8N_LOCAL_PORT`/);
+  assert.match(localSetup, /When you choose `Start ngrok tunnel`, the active `WEBHOOK_URL` is built from `NGROK_DOMAIN`/);
   assert.match(localSetup, /You still open the n8n editor in your browser at `http:\/\/localhost:5678`/);
   assert.match(localSetup, /`WEBHOOK_URL` controls the public webhook and callback links n8n shows or builds/);
   assert.match(localSetup, /If the active `WEBHOOK_URL` in `\.env\.active` is an ngrok URL while `ngrok` is stopped, the menu warns you/);
@@ -429,16 +431,26 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   assert.match(localSetup, /It reads `N8N_LOCAL_PORT` from `\.env` automatically/);
   assert.match(localSetup, /"127\.0\.0\.1:\$\{N8N_LOCAL_PORT:-5678\}:5678"/);
   assert.match(localSetup, /https:\/\/dashboard\.ngrok\.com\/get-started\/your-authtoken/);
-  assert.match(localSetup, /Open the ngrok Docker setup page/);
-  assert.match(localSetup, /bottom of section 1/);
+  assert.match(localSetup, /same ngrok authtoken\/get-started page/);
+  assert.match(localSetup, /do not need `N8N_PROTOCOL` in this local `\.env`/i);
+  assert.doesNotMatch(localSetup, /Open the ngrok Docker setup page/);
+  assert.doesNotMatch(localSetup, /bottom of section 1/);
+  assert.doesNotMatch(envExample, /N8N_PROTOCOL=/);
+  assert.doesNotMatch(envExample, /N8N_HOST=/);
+  assert.doesNotMatch(envExample, /N8N_PROXY_HOPS=/);
+  assert.doesNotMatch(envExample, /N8N_LOCAL_WEBHOOK_URL=/);
+  assert.doesNotMatch(envExample, /N8N_NGROK_WEBHOOK_URL=/);
+  assert.doesNotMatch(envExample, /^TZ=/m);
+  assert.doesNotMatch(envExample, /^GENERIC_TIMEZONE=/m);
 
-  for (const variable of ['POSTGRES_PASSWORD', 'N8N_ENCRYPTION_KEY', 'N8N_LOCAL_WEBHOOK_URL', 'N8N_HOST', 'N8N_LOCAL_PORT', 'N8N_PROTOCOL', 'N8N_PROXY_HOPS', 'NGROK_AUTHTOKEN', 'NGROK_DOMAIN', 'N8N_NGROK_WEBHOOK_URL']) {
+  for (const variable of ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'N8N_ENCRYPTION_KEY', 'LOCAL_TIMEZONE', 'N8N_LOCAL_PORT', 'NGROK_AUTHTOKEN', 'NGROK_DOMAIN']) {
     assert.match(localSetup, new RegExp(`\\| \`${variable}\` \\|`), variable);
   }
 
   for (const expected of [
     '# [ STEP 1: Fill These Before First Launch ]',
-    '# [ STEP 2: Keep These Local Defaults For First Launch ]',
+    '# Keep POSTGRES_DB and POSTGRES_USER visible so separate local stacks can use separate names.',
+    '# [ STEP 2: Local Browser Port ]',
     '# [ STEP 3: Fill These Later Only After Local n8n Works ]'
   ]) {
     assert.match(envExample, new RegExp(escapeRegExp(expected)), expected);
@@ -581,8 +593,9 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /Checking for updates first\. Selection opens only after this check finishes\./);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Check-Updates -Services \$script:Services[\s\S]*Read-Host 'Enter a number'/);
   assert.match(functionBody(menu, 'Start-N8nWithNgrok'), /n8n is already running\. It will be recreated so current \.env values are applied\.[\s\S]*Starting or refreshing ngrok tunnel now\./);
-  assert.match(functionBody(menu, 'Start-NgrokTunnel'), /Set N8N_HOST back to localhost for this guide/);
-  assert.match(functionBody(menu, 'Start-NgrokTunnel'), /N8N_NGROK_WEBHOOK_URL[\s\S]*Set-ActiveWebhookUrl -Url \$publicWebhookUrl -Mode 'ngrok'/);
+  assert.doesNotMatch(functionBody(menu, 'Start-NgrokTunnel'), /N8N_HOST/);
+  assert.doesNotMatch(functionBody(menu, 'Start-NgrokTunnel'), /N8N_PROTOCOL/);
+  assert.match(functionBody(menu, 'Start-NgrokTunnel'), /Get-NgrokWebhookUrl -Domain \$domain[\s\S]*Set-ActiveWebhookUrl -Url \$publicWebhookUrl -Mode 'ngrok'/);
   assert.match(functionBody(menu, 'Start-LocalStack'), /Set-ActiveWebhookUrl -Url \(Get-LocalWebhookUrl\) -Mode 'localhost'/);
   assert.match(functionBody(menu, 'Start-NgrokTunnel'), /Invoke-Compose -Arguments @\('up', '-d', '--force-recreate', 'n8n', 'ngrok'\)/);
   assert.match(functionBody(menu, 'Restart-N8n'), /current \.env values are applied[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--force-recreate', 'n8n'\)/);
@@ -643,16 +656,16 @@ test('local stack templates stay placeholder-only and local-first', () => {
 
   for (const expected of [
     '# [ STEP 1: Fill These Before First Launch ]',
-    '# [ STEP 2: Keep These Local Defaults For First Launch ]',
+    '# [ STEP 2: Local Browser Port ]',
     '# [ STEP 3: Fill These Later Only After Local n8n Works ]',
+    'POSTGRES_DB=n8n',
+    'POSTGRES_USER=n8n',
     'POSTGRES_PASSWORD=replace-with-local-postgres-password',
     'N8N_ENCRYPTION_KEY=replace-with-long-random-value',
-    'N8N_HOST=localhost',
+    'LOCAL_TIMEZONE=Asia/Singapore',
     'N8N_LOCAL_PORT=5678',
-    'N8N_LOCAL_WEBHOOK_URL=http://localhost:5678/',
     'NGROK_AUTHTOKEN=replace-with-ngrok-authtoken',
-    'NGROK_DOMAIN=your-name.ngrok.app',
-    'N8N_NGROK_WEBHOOK_URL=https://your-name.ngrok.app/'
+    'NGROK_DOMAIN=your-name.ngrok.app'
   ]) {
     assert.match(envExample, new RegExp(escapeRegExp(expected)), expected);
   }
