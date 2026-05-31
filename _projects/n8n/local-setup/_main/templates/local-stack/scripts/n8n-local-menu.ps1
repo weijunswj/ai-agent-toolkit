@@ -241,7 +241,7 @@ function Write-ServiceStatus {
     if ($WhenStopped) {
       Write-Host (' ' * 1) -NoNewline
       $statusLine = "- $WhenStopped"
-      $parts = $statusLine -split '(https?://\\S+)'
+      $parts = $statusLine -split '(https?://\S+)'
       foreach ($part in $parts) {
         if ([string]::IsNullOrWhiteSpace($part)) { continue }
         if ($part -match '^https?://\S+$') {
@@ -1035,7 +1035,7 @@ function Start-N8nWithNgrok {
 
   $runningServices = Get-RunningServices
   if ($runningServices -contains 'n8n') {
-    Write-Success 'n8n is already running. It will be recreated so current .env values are applied.'
+    Write-Success 'n8n is already running. It will be recreated so current non-image .env values are applied.'
   } else {
     Write-Info 'n8n is not running yet. It will be started with the tunnel after checks finish.'
   }
@@ -1093,7 +1093,7 @@ function Start-NgrokTunnel {
 
   if ((Invoke-Compose -Arguments $upArgs) -eq 0) {
     [void](Invoke-Compose -Arguments @('ps'))
-    Write-Success 'n8n and ngrok tunnel started. n8n was recreated so .env values are applied.'
+    Write-Success 'n8n and ngrok tunnel started. n8n was recreated so current non-image .env values are applied.'
     Write-Host ''
     Write-Host "Public URL should be: $publicWebhookUrl" -ForegroundColor DarkYellow
   }
@@ -1132,7 +1132,7 @@ function Restart-N8n {
   Write-Header 'Restart n8n'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
     if (-not (Set-ActiveWebhookUrl -Url (Get-LocalWebhookUrl) -Mode 'localhost')) { return }
-    Write-Info 'Recreating only the n8n app container so current .env values are applied.'
+    Write-Info 'Recreating only the n8n app container so current non-image .env values are applied.'
     Write-Info 'Postgres data and n8n files stay in Docker volumes.'
     if (-not (Test-ServiceImagesAvailable -Services @('n8n'))) { return }
     [void](Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'))
