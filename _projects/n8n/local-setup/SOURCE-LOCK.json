@@ -10,14 +10,14 @@
     {
       "mode": "adapted",
       "source_path": "1. local setup.md",
-      "project_path": "_projects/n8n/local-setup/_main/1. local setup.md",
+      "project_path": "_projects/n8n/local-setup/_main/Page 1 - Local Setup.md",
       "source_blob_sha": "a08f0b83ed5722b5b8ecbc560f1ccfe89baf4563",
       "notes": "Clean-rebuilt as the single local Windows Docker Desktop guide. The default public tunnel path now uses the ngrok Docker Desktop extension, the advanced Compose ngrok service remains documented as optional, MCP setup is routed after local/public URL setup, and the supported launcher is _n8n-local.cmd."
     },
     {
       "mode": "adapted",
       "source_path": "4. vps hosting.md",
-      "project_path": "_projects/n8n/local-setup/_main/2. hostinger vps.md",
+      "project_path": "_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md",
       "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2",
       "notes": "Clean-rebuilt into a Hostinger-only VPS page, with current Hostinger n8n plan/template/update/domain references verified on 2026-05-31."
     },

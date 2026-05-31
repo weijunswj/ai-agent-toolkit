@@ -3,8 +3,8 @@
 ## Preserved In `_main/`
 
 - `README.md`
-- `1. local setup.md`
-- `2. hostinger vps.md`
+- `Page 1 - Local Setup.md`
+- `Page 2 - Hostinger VPS.md`
 - `mcp setup - codex.md`
 - `mcp setup - claude code.md`
 - `mcp setup - opencode.md`

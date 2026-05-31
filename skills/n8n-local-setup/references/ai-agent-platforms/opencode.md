@@ -6,7 +6,7 @@ Update the project source and run sync.
 -->
 # OpenCode MCP Setup
 
-The primary local setup guide is [1. Local Setup](../n8n/local-setup.md).
+The primary local setup guide is [Page 1 - Local Setup](../n8n/local-setup.md).
 
 This page is a secondary OpenCode reference, not a required local setup path.
 
@@ -21,7 +21,7 @@ This page is a secondary OpenCode reference, not a required local setup path.
 
 ## 1. Before You Start
 
-Finish [1. Local Setup](../n8n/local-setup.md) first if you are using local n8n.
+Finish [Page 1 - Local Setup](../n8n/local-setup.md) first if you are using local n8n.
 
 You should already have:
 

@@ -6,8 +6,8 @@
   "risk_level": "medium",
   "source_refs": [
     "_projects/n8n/local-setup/",
-    "_projects/n8n/local-setup/_main/1. local setup.md",
-    "_projects/n8n/local-setup/_main/2. hostinger vps.md",
+    "_projects/n8n/local-setup/_main/Page 1 - Local Setup.md",
+    "_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md",
     "_projects/n8n/local-setup/_main/mcp setup - codex.md",
     "_projects/n8n/local-setup/_main/codex-mcp-config.md",
     "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",

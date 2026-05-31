@@ -32,7 +32,7 @@
     },
     {
       "kind": "copy",
-      "source": "_main/1. local setup.md",
+      "source": "_main/Page 1 - Local Setup.md",
       "output": "skills/n8n-local-setup/references/n8n/local-setup.md",
       "notes": "Full local setup guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
@@ -58,7 +58,7 @@
           "to": "](../../templates/local-stack/)"
         },
         {
-          "from": "./2.%20hostinger%20vps.md",
+          "from": "./Page%202%20-%20Hostinger%20VPS.md",
           "to": "hostinger-vps.md"
         },
         {
@@ -85,13 +85,13 @@
     },
     {
       "kind": "copy",
-      "source": "_main/2. hostinger vps.md",
+      "source": "_main/Page 2 - Hostinger VPS.md",
       "output": "skills/n8n-local-setup/references/n8n/hostinger-vps.md",
       "notes": "Hostinger VPS setup guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./1.%20local%20setup.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "local-setup.md"
         }
       ]
@@ -104,11 +104,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./_Page%201.%20Local%20Setup.md",
-          "to": "../n8n/local-setup.md"
-        },
-        {
-          "from": "./1.%20local%20setup.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
@@ -125,11 +121,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./_Page%201.%20Local%20Setup.md",
-          "to": "../n8n/local-setup.md"
-        },
-        {
-          "from": "./1.%20local%20setup.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
@@ -146,11 +138,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./_Page%201.%20Local%20Setup.md",
-          "to": "../n8n/local-setup.md"
-        },
-        {
-          "from": "./1.%20local%20setup.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "../n8n/local-setup.md"
         },
         {
@@ -167,11 +155,7 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./_Page%201.%20Local%20Setup.md",
-          "to": "../n8n/local-setup.md"
-        },
-        {
-          "from": "./1.%20local%20setup.md",
+          "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "../n8n/local-setup.md"
         },
         {

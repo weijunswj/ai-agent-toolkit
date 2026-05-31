@@ -6,8 +6,8 @@ Beginner-facing source index for this toolkit module.
 
 | Need | Open |
 | --- | --- |
-| Local Windows setup | [1. Local Setup](./1.%20local%20setup.md) |
-| Always-on hosted setup | [2. Hostinger VPS](./2.%20hostinger%20vps.md) |
+| Local Windows setup | [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md) |
+| Always-on hosted setup | [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) |
 
 Start with Local Setup for Docker Desktop on your own computer. Use Hostinger VPS for a public server.
 

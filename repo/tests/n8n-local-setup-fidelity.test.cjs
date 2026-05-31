@@ -13,11 +13,11 @@ const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surf
 
 const guideOutputs = [
   {
-    source: '_main/1. local setup.md',
+    source: '_main/Page 1 - Local Setup.md',
     output: 'skills/n8n-local-setup/references/n8n/local-setup.md'
   },
   {
-    source: '_main/2. hostinger vps.md',
+    source: '_main/Page 2 - Hostinger VPS.md',
     output: 'skills/n8n-local-setup/references/n8n/hostinger-vps.md'
   },
   {
@@ -77,6 +77,8 @@ const localStackOutputs = [
 ];
 
 const obsoletePaths = [
+  '_projects/n8n/local-setup/_main/1. local setup.md',
+  '_projects/n8n/local-setup/_main/2. hostinger vps.md',
   '_projects/n8n/local-setup/_main/2. upgrading.md',
   '_projects/n8n/local-setup/_main/3. tunneling guide.md',
   '_projects/n8n/local-setup/_main/3a. docker compose + ngrok.md',
@@ -240,8 +242,8 @@ test('n8n local setup source README exposes two main beginner pages', () => {
   const readme = readText(repoRoot, '_projects/n8n/local-setup/_main/README.md');
 
   assert.match(readme, /^## Start Here$/m);
-  assert.match(readme, /\[1\. Local Setup\]\(\.\/1\.%20local%20setup\.md\)/);
-  assert.match(readme, /\[2\. Hostinger VPS\]\(\.\/2\.%20hostinger%20vps\.md\)/);
+  assert.match(readme, /\[Page 1 - Local Setup\]\(\.\/Page%201%20-%20Local%20Setup\.md\)/);
+  assert.match(readme, /\[Page 2 - Hostinger VPS\]\(\.\/Page%202%20-%20Hostinger%20VPS\.md\)/);
   assert.match(readme, /MCP setup pages are supporting references/);
   assert.match(readme, /Local stack templates/);
   assert.match(readme, /MCP config templates/);
@@ -253,24 +255,27 @@ test('n8n local setup source README exposes two main beginner pages', () => {
 });
 
 test('Local Setup keeps the corrected beginner flow', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
 
+  assert.match(localSetup, /^# Page 1 - Local Setup$/m);
+  assert.match(localSetup, /\* Start local n8n first\./);
+  assert.match(localSetup, /\n---\n\n## 1\. Fast Path/);
   assertHeadingsInOrder(localSetup, [
-    '## Fast Path ( Full Guide Below )',
-    '## Before You Start',
-    '## Create The Local Stack Folder',
-    '## Copy The Local Stack Templates',
-    '## Create And Fill `.env`',
-    '## First-Time Local n8n Setup',
-    '## ngrok Public Tunnel Setup',
-    '## Daily Use',
-    '## Backup',
-    '## Updating Local Instances',
-    '## AI Agents MCP Setup',
-    '## Troubleshooting',
-    '## Advanced Queue Mode',
-    '## Safety Rules',
-    '## Appendices And References'
+    '## 1. Fast Path ( Full Guide Below )',
+    '## 2. Before You Start',
+    '## 3. Create The Local Stack Folder',
+    '## 4. Copy The Local Stack Templates',
+    '## 5. Create And Fill `.env`',
+    '## 6. First-Time Local n8n Setup',
+    '## 7. ngrok Public Tunnel Setup',
+    '## 8. Daily Use',
+    '## 9. Backup',
+    '## 10. Updating Local Instances',
+    '## 11. AI Agents MCP Setup',
+    '## 12. Troubleshooting',
+    '## 13. Advanced Queue Mode',
+    '## 14. Safety Rules',
+    '## 15. Appendices And References'
   ]);
 
   assert.match(localSetup, /Do not ask for ngrok, public URL, or MCP values before local n8n works/i);
@@ -289,7 +294,7 @@ test('Local Setup keeps the corrected beginner flow', () => {
 });
 
 test('Local Setup separates .env, public URL, and MCP values', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
 
   assert.match(localSetup, /Copy `\.env\.example` to `\.env`/);
@@ -310,9 +315,9 @@ test('Local Setup separates .env, public URL, and MCP values', () => {
 });
 
 test('Local Setup routes optional AI Agents MCP setup after public URL setup', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
-  const publicIndex = localSetup.indexOf('## ngrok Public Tunnel Setup');
-  const mcpIndex = localSetup.indexOf('## AI Agents MCP Setup');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
+  const publicIndex = localSetup.indexOf('## 7. ngrok Public Tunnel Setup');
+  const mcpIndex = localSetup.indexOf('## 11. AI Agents MCP Setup');
 
   assert.ok(publicIndex > -1, 'public URL setup section exists');
   assert.ok(mcpIndex > publicIndex, 'MCP section appears after public URL setup');
@@ -336,7 +341,7 @@ test('Local Setup routes optional AI Agents MCP setup after public URL setup', (
 });
 
 test('Local Setup menu tables match launcher option names exactly', () => {
-  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/1. local setup.md');
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
 
   assert.deepEqual(menuOptions(menu), expectedMenuOptions);
@@ -402,22 +407,24 @@ test('local stack templates stay placeholder-only and local-first', () => {
 });
 
 test('Hostinger VPS page restores Hostinger-specific production content only', () => {
-  const vps = readText(repoRoot, '_projects/n8n/local-setup/_main/2. hostinger vps.md');
+  const vps = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md');
 
-  assert.match(vps, /^# 2\. Hostinger VPS$/m);
+  assert.match(vps, /^# Page 2 - Hostinger VPS$/m);
+  assert.match(vps, /\* Verify current Hostinger plan\/template details before buying\./);
+  assert.match(vps, /\n---\n\n## 1\. When To Use Hostinger VPS/);
   assertHeadingsInOrder(vps, [
-    '## 2.1 When To Use Hostinger VPS',
-    '## 2.2 Choose A Hostinger Plan',
-    '## 2.3 Choose The n8n Template',
-    '## 2.4 First Login Checklist',
-    '## 2.5 Domain / Subdomain Setup',
-    '## 2.6 Verify Server Files',
-    '## 2.7 Verify Containers',
-    '## 2.8 Queue Mode And Workers',
-    '## 2.9 Backups',
-    '## 2.10 Updating Hostinger n8n',
-    '## 2.11 Safety Rules',
-    '## 2.12 References'
+    '## 1. When To Use Hostinger VPS',
+    '## 2. Choose A Hostinger Plan',
+    '## 3. Choose The n8n Template',
+    '## 4. First Login Checklist',
+    '## 5. Domain / Subdomain Setup',
+    '## 6. Verify Server Files',
+    '## 7. Verify Containers',
+    '## 8. Queue Mode And Workers',
+    '## 9. Backups',
+    '## 10. Updating Hostinger n8n',
+    '## 11. Safety Rules',
+    '## 12. References'
   ]);
 
   for (const expected of [
@@ -557,7 +564,7 @@ test('n8n local setup published surface audit findings are resolved', () => {
 
 test('changing a preserved n8n local setup source guide makes sync check fail stale', () => {
   const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', '2. hostinger vps.md'), '\nStale output regression fixture.\n', 'utf8');
+  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'Page 2 - Hostinger VPS.md'), '\nStale output regression fixture.\n', 'utf8');
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/references\/n8n\/hostinger-vps\.md/);

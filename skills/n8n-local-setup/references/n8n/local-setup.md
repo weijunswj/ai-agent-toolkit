@@ -1,16 +1,23 @@
 <!--
 Generated from toolkit project source. Do not edit directly.
 Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/1. local setup.md
+Source: _projects/n8n/local-setup/_main/Page 1 - Local Setup.md
 Update the project source and run sync.
 -->
-# 1. Local Setup
+# Page 1 - Local Setup
 
 This is the beginner path for running n8n locally on Windows with Docker Desktop, Postgres, the guided `_n8n-local.cmd` menu, optional ngrok public access, and optional AI agent MCP setup.
 
-Use [2. Hostinger VPS](hostinger-vps.md) instead when you want an always-on hosted server.
+Use [Page 2 - Hostinger VPS](hostinger-vps.md) instead when you want an always-on hosted server.
 
-## Fast Path ( Full Guide Below )
+* Start local n8n first.
+* Add ngrok only when something outside your computer must reach n8n.
+* Add MCP only when an AI agent needs n8n access.
+* Do not paste real tokens, credentials, `.env` values, backups, or live exports into repo files.
+
+---
+
+## 1. Fast Path ( Full Guide Below )
 
 | Step | What to do | Where | Result |
 | --- | --- | --- | --- |
@@ -27,7 +34,9 @@ Use [2. Hostinger VPS](hostinger-vps.md) instead when you want an always-on host
 
 Do not save `.env`, tokens, backups, `.n8n-local/`, `.tmp/`, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 
-## Before You Start
+---
+
+## 2. Before You Start
 
 Do not ask for ngrok, public URL, or MCP values before local n8n works. The order is:
 
@@ -57,7 +66,9 @@ npx --version
 
 If Docker is installed but not running, open Docker Desktop and wait until the engine is ready.
 
-## Create The Local Stack Folder
+---
+
+## 3. Create The Local Stack Folder
 
 Use a simple controlled path. Good choices:
 
@@ -81,7 +92,9 @@ PowerShell fallback:
 New-Item -ItemType Directory -Force "C:\n8n-local"
 ```
 
-## Copy The Local Stack Templates
+---
+
+## 4. Copy The Local Stack Templates
 
 The local stack template folder is [templates/local-stack/](../../templates/local-stack/).
 
@@ -116,7 +129,9 @@ The copied folder should look like this:
     `-- n8n-local-menu.ps1
 ```
 
-## Create And Fill `.env`
+---
+
+## 5. Create And Fill `.env`
 
 Copy `.env.example` to `.env`.
 
@@ -175,7 +190,9 @@ Put MCP URL and MCP token values into the AI agent setup/config, not basic local
 | MCP URL | n8n MCP settings after MCP is enabled. | Codex / Claude Code / OpenCode / Antigravity setup page. |
 | MCP token | n8n MCP settings after MCP is enabled. | User-scoped environment variable or supported secret storage. |
 
-## First-Time Local n8n Setup
+---
+
+## 6. First-Time Local n8n Setup
 
 1. Open `<LOCAL_STACK_FOLDER>`.
 2. Double-click `_n8n-local.cmd`.
@@ -195,7 +212,9 @@ docker compose up -d postgres n8n
 docker compose ps
 ```
 
-## ngrok Public Tunnel Setup
+---
+
+## 7. ngrok Public Tunnel Setup
 
 Use ngrok only when another online service or remote AI agent cannot reach local n8n directly.
 
@@ -241,7 +260,9 @@ cd "C:\n8n-local"
 docker compose up -d --force-recreate n8n ngrok
 ```
 
-## Daily Use
+---
+
+## 8. Daily Use
 
 Open `<LOCAL_STACK_FOLDER>`, double-click `_n8n-local.cmd`, then choose the action you need.
 
@@ -265,7 +286,9 @@ Open `<LOCAL_STACK_FOLDER>`, double-click `_n8n-local.cmd`, then choose the acti
 
 Press `Ctrl+C` to stop following logs and return to the menu prompt.
 
-## Backup
+---
+
+## 9. Backup
 
 Need:
 `Back up Postgres`
@@ -287,7 +310,9 @@ What it does:
 PowerShell fallback:
 Use the menu option.
 
-## Updating Local Instances
+---
+
+## 10. Updating Local Instances
 
 Launch `_n8n-local.cmd` once, then follow this update table.
 
@@ -305,7 +330,9 @@ Local update notes:
 - The Compose ngrok alternate uses `ngrok/ngrok:latest`.
 - Local stack template/script updates come from this toolkit repo. Re-copy templates only after reviewing what changed.
 
-## AI Agents MCP Setup
+---
+
+## 11. AI Agents MCP Setup
 
 This step is optional.
 
@@ -343,7 +370,9 @@ http://localhost:5678/mcp-server/http
 
 Do not dump real MCP tokens into repo files.
 
-## Troubleshooting
+---
+
+## 12. Troubleshooting
 
 ### Docker Is Not Running
 
@@ -380,7 +409,9 @@ Another local n8n process may already be running. Stop old disposable test conta
 
 Do not delete Docker volumes unless you intentionally want to delete local n8n runtime data.
 
-## Advanced Queue Mode
+---
+
+## 13. Advanced Queue Mode
 
 The default local path is normal mode:
 
@@ -396,7 +427,9 @@ Queue mode is a later production scaling path:
 
 Do not add Redis or workers to the default local setup. Use queue mode later when production workloads need worker-based scaling.
 
-## Safety Rules
+---
+
+## 14. Safety Rules
 
 - Create the owner account locally before starting any public endpoint.
 - Treat an ngrok URL as public access to local n8n UI, API, webhooks, and MCP routes.
@@ -406,13 +439,15 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 - Do not paste real API tokens, webhook secrets, passwords, encryption keys, or MCP tokens into repo files.
 - Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 - Do not remove `n8n_data` or `postgres_data` Docker volumes unless you intentionally want to delete local runtime data.
-- Use [2. Hostinger VPS](hostinger-vps.md) for always-on hosted setup.
+- Use [Page 2 - Hostinger VPS](hostinger-vps.md) for always-on hosted setup.
 
-## Appendices And References
+---
+
+## 15. Appendices And References
 
 | Reference | Use when |
 | --- | --- |
-| [2. Hostinger VPS](hostinger-vps.md) | You need always-on public hosting on Hostinger. |
+| [Page 2 - Hostinger VPS](hostinger-vps.md) | You need always-on public hosting on Hostinger. |
 | [Codex MCP Setup](../ai-agent-platforms/codex.md) | You need Codex-specific MCP setup. |
 | [Claude Code MCP Setup](../ai-agent-platforms/claude-code.md) | You need Claude Code-specific MCP setup. |
 | [OpenCode MCP Setup](../ai-agent-platforms/opencode.md) | You need OpenCode-specific MCP setup. |

@@ -12,8 +12,8 @@ Project identity: `n8n.local-setup`
 
 - Project module: [_projects/n8n/local-setup/](../../_projects/n8n/local-setup/)
 - Preserved source files: [_projects/n8n/local-setup/_main/](../../_projects/n8n/local-setup/_main/)
-- Primary local setup guide: [_projects/n8n/local-setup/_main/1. local setup.md](../../_projects/n8n/local-setup/_main/1.%20local%20setup.md)
-- Hostinger VPS guide: [_projects/n8n/local-setup/_main/2. hostinger vps.md](../../_projects/n8n/local-setup/_main/2.%20hostinger%20vps.md)
+- Primary local setup guide: [_projects/n8n/local-setup/_main/Page 1 - Local Setup.md](../../_projects/n8n/local-setup/_main/Page%201%20-%20Local%20Setup.md)
+- Hostinger VPS guide: [_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md](../../_projects/n8n/local-setup/_main/Page%202%20-%20Hostinger%20VPS.md)
 - Generic AI coding agent rules skill: [skills/ai-coding-agent-rules/](../../skills/ai-coding-agent-rules/)
 - Full n8n operating rules skill: [skills/n8n-agent-rules/](../../skills/n8n-agent-rules/)
 - n8n local setup portability reference: [skills/n8n-local-setup/references/n8n-agent-rules.md](../../skills/n8n-local-setup/references/n8n-agent-rules.md)

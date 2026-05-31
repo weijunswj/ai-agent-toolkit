@@ -1,10 +1,17 @@
-# 2. Hostinger VPS
+# Page 2 - Hostinger VPS
 
 Use this page when you want an always-on public n8n server on Hostinger instead of a local Docker Desktop setup.
 
-This is not the local ngrok path. If you are only testing on your own computer, start with [1. Local Setup](./1.%20local%20setup.md).
+This is not the local ngrok path. If you are only testing on your own computer, start with [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md).
 
-## 2.1 When To Use Hostinger VPS
+* Verify current Hostinger plan/template details before buying.
+* Use a company-owned account and domain for company automation.
+* Set up backups before adding production credentials.
+* Do not paste VPS passwords, production `.env` values, or `N8N_ENCRYPTION_KEY` into repo files.
+
+---
+
+## 1. When To Use Hostinger VPS
 
 Use Hostinger VPS when:
 
@@ -15,7 +22,9 @@ Use Hostinger VPS when:
 
 Do not use this page as approval to move private business data into a VPS. Confirm company policy, data handling, billing ownership, and recovery ownership first.
 
-## 2.2 Choose A Hostinger Plan
+---
+
+## 2. Choose A Hostinger Plan
 
 Plan snapshot verified against Hostinger sources on 2026-05-31. Pricing, regions, and availability can change, so verify the current Hostinger page before buying.
 
@@ -42,7 +51,9 @@ Before buying, prepare:
 | Password manager | Company vault | Store VPS, n8n admin, and encryption-key material privately. |
 | Backup owner | Named person/team | Someone must know how to restore. |
 
-## 2.3 Choose The n8n Template
+---
+
+## 3. Choose The n8n Template
 
 Hostinger documents n8n VPS templates including:
 
@@ -57,7 +68,9 @@ Hostinger's template runs n8n preinstalled in Docker. The queue-mode template ca
 
 Avoid a blank Ubuntu image unless you intentionally want to build and maintain the whole Compose stack yourself.
 
-## 2.4 First Login Checklist
+---
+
+## 4. First Login Checklist
 
 After provisioning:
 
@@ -73,7 +86,9 @@ After provisioning:
 
 Use a company-controlled email address for company deployments.
 
-## 2.5 Domain / Subdomain Setup
+---
+
+## 5. Domain / Subdomain Setup
 
 Use a subdomain:
 
@@ -130,7 +145,9 @@ WEBHOOK_URL=https://n8n.company.com/
 N8N_PROXY_HOPS=1
 ```
 
-## 2.6 Verify Server Files
+---
+
+## 6. Verify Server Files
 
 Use Browser Terminal or SSH.
 
@@ -167,7 +184,9 @@ Relevant files commonly include:
 
 Production `.env` files contain secrets. Do not copy them into GitHub, chat, screenshots, tickets, or public docs.
 
-## 2.7 Verify Containers
+---
+
+## 7. Verify Containers
 
 From the folder that contains `docker-compose.yml`:
 
@@ -195,7 +214,9 @@ Open the editor and confirm:
 3. A manual test execution works.
 4. A webhook test URL uses the intended domain after domain setup.
 
-## 2.8 Queue Mode And Workers
+---
+
+## 8. Queue Mode And Workers
 
 Queue mode generally needs:
 
@@ -241,7 +262,9 @@ docker compose up -d --scale n8n-worker=3
 
 More workers use more CPU and RAM. KVM 4+ is safer for heavier queue-mode workloads.
 
-## 2.9 Backups
+---
+
+## 9. Backups
 
 Before real workflows:
 
@@ -271,7 +294,9 @@ A VPS snapshot is useful, but also understand where n8n data lives:
 - `docker-compose.yml`.
 - `N8N_ENCRYPTION_KEY`.
 
-## 2.10 Updating Hostinger n8n
+---
+
+## 10. Updating Hostinger n8n
 
 Back up first.
 
@@ -318,7 +343,9 @@ docker compose logs -f --tail=100
 
 Exit logs with `Ctrl+C`.
 
-## 2.11 Safety Rules
+---
+
+## 11. Safety Rules
 
 - Keep Hostinger and n8n ownership under the right person or company.
 - Do not store production `.env` values in this repo.
@@ -329,7 +356,9 @@ Exit logs with `Ctrl+C`.
 - Do not expose raw database ports publicly.
 - Record who can restore backups before production workflows depend on this instance.
 
-## 2.12 References
+---
+
+## 12. References
 
 - [Hostinger VPS hosting/plans page](https://www.hostinger.com/pricing/n8n-hosting)
 - [Hostinger VPS plan parameters](https://support.hostinger.com/en/articles/6976044-parameters-and-limits-of-hosting-plans-in-hostinger)
