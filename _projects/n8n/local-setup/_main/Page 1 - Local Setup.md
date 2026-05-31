@@ -68,7 +68,7 @@ Use this default folder:
 Example:
 
 ```text
-C:\Users\xPass\.n8n-local
+C:\Users\<your-user>\.n8n-local
 ```
 
 Why this folder:
@@ -86,8 +86,8 @@ Other acceptable choices:
 
 | Location | Use when |
 | --- | --- |
-| `C:\n8n-local` | Good if you want a short machine-level path. |
-| `C:\Users\<you>\Documents\n8n-local` | OK if Documents is not synced to OneDrive. |
+| `C:\.n8n-local` | Good if you want a short machine-level path. |
+| `C:\Users\<you>\Documents\.n8n-local` | OK if Documents is not synced to OneDrive. |
 | Desktop | Not recommended for the runtime folder. Use the Desktop shortcut instead. |
 
 OneDrive Desktop redirection can make local `.env` files and backups sync unexpectedly. If your Desktop path contains `OneDrive`, keep the stack folder at `%USERPROFILE%\.n8n-local` and put only the shortcut CMD on the Desktop.
@@ -128,10 +128,13 @@ The local stack template folder is [templates/local-stack/](./templates/local-st
 PowerShell fallback from the toolkit repo root:
 
 ```powershell
+$DesktopPath = [Environment]::GetFolderPath('Desktop')
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.n8n-local"
 Copy-Item -LiteralPath "_projects\n8n\local-setup\_main\templates\local-stack\*" -Destination "$env:USERPROFILE\.n8n-local" -Recurse -Force
-Copy-Item -LiteralPath "$env:USERPROFILE\.n8n-local\n8n-local-desktop-shortcut.cmd" -Destination "$env:USERPROFILE\Desktop\n8n-local-desktop-shortcut.cmd" -Force
+Copy-Item -LiteralPath "$env:USERPROFILE\.n8n-local\n8n-local-desktop-shortcut.cmd" -Destination (Join-Path $DesktopPath 'n8n-local-desktop-shortcut.cmd') -Force
 ```
+
+`$DesktopPath` uses your real Windows Desktop folder. On many computers this is `C:\Users\<you>\OneDrive\Desktop`; on others it is `C:\Users\<you>\Desktop`.
 
 The copied folder should look like this:
 

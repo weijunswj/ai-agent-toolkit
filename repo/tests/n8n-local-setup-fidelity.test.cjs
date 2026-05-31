@@ -386,7 +386,17 @@ test('Local Setup keeps the corrected beginner flow', () => {
   assert.match(localSetup, /Stopping the `ngrok` Docker service stops the tunnel/);
   assert.match(localSetup, /OneDrive Desktop redirection/);
   assert.match(localSetup, /`%USERPROFILE%\\\.n8n-local`/);
-  assert.match(localSetup, /`C:\\n8n-local`/);
+  assert.match(localSetup, /C:\\Users\\<your-user>\\\.n8n-local/);
+  assert.doesNotMatch(localSetup, /C:\\Users\\xPass/);
+  assert.doesNotMatch(localSetup, /xPass/);
+  assert.match(localSetup, /`C:\\\.n8n-local`/);
+  assert.match(localSetup, /`C:\\Users\\<you>\\Documents\\\.n8n-local`/);
+  assert.doesNotMatch(localSetup, /`C:\\n8n-local`/);
+  assert.doesNotMatch(localSetup, /`C:\\Users\\<you>\\Documents\\n8n-local`/);
+  assert.match(localSetup, /\$DesktopPath = \[Environment\]::GetFolderPath\('Desktop'\)/);
+  assert.match(localSetup, /Join-Path \$DesktopPath 'n8n-local-desktop-shortcut\.cmd'/);
+  assert.match(localSetup, /C:\\Users\\<you>\\OneDrive\\Desktop/);
+  assert.doesNotMatch(localSetup, /\$env:USERPROFILE\\Desktop/);
   assert.match(localSetup, /`<LOCAL_STACK_FOLDER>`/);
   assert.match(localSetup, /Do not launch n8n directly from Docker Desktop\. Launch it from `_n8n-local\.cmd` instead\./);
 });
@@ -410,9 +420,9 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   }
 
   for (const expected of [
-    '# [ STEP 1: Fill these before first launch ]',
-    '# [ STEP 2: Keep these local defaults for first launch ]',
-    '# [ STEP 3: Fill later only when you use the Compose ngrok tunnel ]'
+    '# [ STEP 1: Fill These Before First Launch ]',
+    '# [ STEP 2: Keep These Local Defaults For First Launch ]',
+    '# [ STEP 3: Fill These Later Only After Local n8n Works ]'
   ]) {
     assert.match(envExample, new RegExp(escapeRegExp(expected)), expected);
   }
@@ -576,9 +586,9 @@ test('local stack templates stay placeholder-only and local-first', () => {
   assert.doesNotMatch(compose, /^\s{2}n8n-worker:/m);
 
   for (const expected of [
-    '# [ STEP 1: Fill these before first launch ]',
-    '# [ STEP 2: Keep these local defaults for first launch ]',
-    '# [ STEP 3: Fill later only when you use the Compose ngrok tunnel ]',
+    '# [ STEP 1: Fill These Before First Launch ]',
+    '# [ STEP 2: Keep These Local Defaults For First Launch ]',
+    '# [ STEP 3: Fill These Later Only After Local n8n Works ]',
     'POSTGRES_PASSWORD=replace-with-local-postgres-password',
     'N8N_ENCRYPTION_KEY=replace-with-long-random-value',
     'N8N_HOST=localhost',
