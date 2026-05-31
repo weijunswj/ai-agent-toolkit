@@ -49,7 +49,6 @@ For Claude-specific notes, see `agents/claude.md`.
    - Mark confirmed missing sources as `Missing` only after checking the source.
 5. Make links clickable.
    - Use scheme-less links if full URLs are blocked: `notion.so/<page-id>` and `github.com/<owner>/<repo>`.
-   - For guide, reference, tool, or portfolio rows that intentionally point at a specific GitHub file or folder, preserve the specific `github.com/<owner>/<repo>/...` path unless the user asks to normalize it.
 6. Keep descriptions short.
    - Use one sentence focused on what the item is and why it exists.
 
@@ -72,7 +71,7 @@ Create or migrate the Notion database to exactly this clean default schema unles
   - `Notion + GitHub` — blue.
   - `External` — brown.
 - `Notion Key` — URL, clickable Notion source and identity key using `notion.so/<page-id>`.
-- `GitHub Key` — URL, clickable GitHub source and identity key. Use `github.com/<owner>/<repo>` for repo rows; preserve intentional repo subpaths for guide, reference, tool, or portfolio rows that point at a specific file or folder.
+- `GitHub Key` — URL, clickable GitHub source and identity key using `github.com/<owner>/<repo>`.
 - `Visibility` — select options:
   - `Private` — red.
   - `Public-safe` — green.
@@ -147,8 +146,7 @@ For GitHub, list accessible repositories and capture:
 For every candidate, derive keys:
 
 - `Notion Key`: `notion.so/<page-id>` if a Notion page exists.
-- `GitHub Key`: `github.com/<owner>/<repo>` if the row represents a repository.
-- `GitHub Key`: preserve the specific `github.com/<owner>/<repo>/...` path if the row represents a guide, reference, tool, or portfolio item intentionally sourced from a repo subpath.
+- `GitHub Key`: `github.com/<owner>/<repo>` if a GitHub repo exists.
 
 Do not create or use `Canonical Key` for matching, creating, merging, or deduplication. If a legacy row still has `Canonical Key`, ignore that column unless the user explicitly asks for legacy cleanup.
 
@@ -170,11 +168,9 @@ If unsure whether two items are the same, do not merge silently. Mark or create 
 
 Default mode is **audit/propose first**.
 
-When no active user request or automation prompt grants write permission, no meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes.
+No meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes.
 
-If the active user request or automation prompt explicitly allows safe non-destructive creates and updates, apply those writes without asking again only when identity is certain and the write does not delete, archive, hide, or merge uncertain rows. Still batch all proposed writes into one compact approval request if the platform or connector requires explicit confirmation.
-
-Meaningful writes that require confirmation unless the active request explicitly authorizes safe non-destructive writes:
+Meaningful writes that always require confirmation:
 
 - Creating a Notion page/row.
 - Updating `Name`.
@@ -191,17 +187,11 @@ Meaningful writes that require confirmation unless the active request explicitly
 - Adding, changing, or merging `Notion Key`.
 - Adding, changing, or merging `GitHub Key`.
 - Adding, changing, or merging `Canonical Key`.
-- Any batch write containing anything other than pure `Last checked` refreshes for rows with no meaningful changes.
-- Any row creation or update that changes any property other than `Last checked`.
-
-Meaningful writes that always require explicit confirmation:
-
 - Archiving rows.
 - Deleting rows.
-- Hiding rows or changing archive/delete state.
-- Merging rows when identity is uncertain.
-- Normalizing an intentional GitHub repo subpath to a root repo key.
 - Any GitHub write, issue, branch, PR, file, label, metadata, or repository mutation if the skill routes such work.
+- Any batch write containing anything other than pure `Last checked` refreshes for rows with no meaningful changes.
+- Any row creation or update that changes any property other than `Last checked`.
 
 Allowed without confirmation:
 
@@ -211,6 +201,8 @@ Allowed without confirmation:
 - Produce a proposed change list.
 - Explain what would be written if approved.
 - Refresh only `Last checked` for rows where no meaningful field changes are needed.
+
+Only pure `Last checked` refreshes are approval-free.
 
 `Last checked` may be refreshed without confirmation only when all conditions are true:
 
@@ -227,7 +219,7 @@ If a row has any proposed meaningful change, do not refresh `Last checked` for t
 Special rule for batch writes:
 
 - Batch writes are allowed without confirmation only when every item in the batch is a pure `Last checked` refresh for a row with no meaningful changes.
-- If a batch contains even one meaningful write and the active request did not explicitly authorize safe non-destructive writes, propose meaningful writes first and request confirmation before applying anything.
+- If a batch contains even one meaningful write, propose meaningful writes first and request confirmation before applying anything.
 
 Use this exact proposal format:
 
@@ -249,7 +241,7 @@ Use this exact proposal format:
 **Do you want me to apply these proposed writes?**
 ```
 
-Do not apply any meaningful write without confirmation unless the active request explicitly authorizes safe non-destructive creates and updates.
+Do not apply any meaningful write without confirmation.
 
 If approval is not available, report the proposed writes and reasons instead of applying them.
 
@@ -276,7 +268,7 @@ For each canonical item:
 - `Description`: one sentence.
 - `Source`: `Notion + GitHub` when both keys exist; otherwise `Notion`, `GitHub`, or `External`.
 - `Notion Key`: clean clickable Notion URL when a Notion page exists.
-- `GitHub Key`: clean clickable GitHub URL when a GitHub repo exists; preserve intentional repo subpaths for guide, reference, tool, or portfolio entries.
+- `GitHub Key`: clean clickable GitHub URL when a GitHub repo exists.
 - `Visibility`: `Private` if any source is private unless the user explicitly marks it public-safe.
 - `Status`: `Active` for canonical live entries.
 - `Last checked`: today.
@@ -349,13 +341,15 @@ When the user asks for a recurring updater, create a scheduled task that:
 
 - Search Notion and GitHub for new, changed, removed, or renamed items.
 - Use `Notion Key` and `GitHub Key` as the only hard identity checks before writing.
-- Default to proposing meaningful updates to existing canonical rows and getting explicit approval before applying any meaningful write.
-- If the active automation prompt explicitly allows safe non-destructive creates and updates, apply those writes without asking again when identity is certain.
+- Scheduled runs must propose meaningful writes instead of applying them automatically.
+- Propose meaningful updates to existing canonical rows and get explicit approval before applying any meaningful write.
 - May refresh safe check-only fields such as `Last checked` when the user requested a check/update run.
-- Add new canonical rows only when no key or clear real-world match exists; require explicit current-turn confirmation unless the active automation prompt authorizes safe non-destructive creates.
-- Do not add or update rows, identity keys, source fields, archive/delete state, or merge operations without explicit current-turn confirmation unless the active automation prompt authorizes safe non-destructive updates.
-- Preserve intentional GitHub repo subpaths for guide, reference, tool, or portfolio rows; do not normalize them to root repo keys unless the user asks.
+- Add new canonical rows only when no key or clear real-world match exists, with explicit current-turn confirmation.
+- Do not add or update rows, identity keys, source fields, archive/delete state, or merge operations without explicit current-turn confirmation.
+- Do not apply meaningful writes to existing rows without current-turn confirmation.
+- Do not apply any meaningful write without confirmation in scheduled runs.
 - Do not apply pure `Last checked` refreshes to rows with pending meaningful proposed writes.
+- Only pure `Last checked` refreshes are approval-free.
 - Batch writes without confirmation are allowed only when every batch item is a pure `Last checked` refresh with no meaningful change.
 - Do not permanently delete anything.
 - Report what changed after each run.
@@ -392,9 +386,9 @@ Follow the current `knowledge-index-updater` skill exactly, especially:
 Important:
 - Use `Notion Key` and `GitHub Key` as the only hard identity fields.
 - Do not use `Canonical Key` for matching, creating, merging, or deduplication.
-- Safe non-destructive creates and updates may proceed without asking again when identity is certain.
-- Do not archive, delete, hide, or merge uncertain rows without explicit current-turn approval.
-- Preserve intentional GitHub repo subpath keys for guide, reference, tool, or portfolio rows unless I ask you to normalize them.
+- Meaningful writes require explicit current-turn approval.
+- Scheduled runs must propose meaningful writes instead of applying them automatically.
+- Add new canonical rows only when no key or clear real-world match exists, with explicit current-turn confirmation.
 - Only pure `Last checked` refreshes on existing rows with no meaningful changes may be written without confirmation.
 - Do not refresh `Last checked` for rows with pending proposed meaningful changes.
 - When using Notion MCP `notion_update_page` with `command: "update_properties"` for property-only writes, include `content_updates: []`.
@@ -418,11 +412,6 @@ Search my Notion and GitHub for new, changed, removed, or renamed guides, refere
 
 Update the root-level Notion Knowledge Index using one row per real project, guide, reference, portfolio item, tool, or repo.
 
-```text
-Search my Notion and GitHub for new, changed, removed, or renamed guides, references, portfolio pages, and repositories.
-
-Update the root-level Notion Knowledge Index using one row per real project, guide, reference, portfolio item, tool, or repo.
-
 Current database:
 - Name: <Knowledge Index database name>
 - Data source: <collection://your-notion-data-source-id>
@@ -431,23 +420,20 @@ Hard identity rules:
 
 - Treat `Notion Key` and `GitHub Key` as the only hard identity fields.
 - `Notion Key` must use `notion.so/<page-id>`.
-- `GitHub Key` must use `github.com/<owner>/<repo>` for repo rows.
-- For guide, reference, tool, or portfolio rows that intentionally point at a repo subpath, preserve the specific `github.com/<owner>/<repo>/...` path unless I ask you to normalize it.
+- `GitHub Key` must use `github.com/<owner>/<repo>`.
 - Before creating any row, first query existing rows for the same `Notion Key` or `GitHub Key`.
 - If either key already exists in another row, use that existing row instead of creating a duplicate.
 - Do not create duplicate repo-only rows for projects that already have a Notion + GitHub row.
-- If a Notion page and GitHub repo clearly describe the same real thing, merge them into one row and set `Source` to `Notion + GitHub` only when identity is certain and safe non-destructive writes are authorized; otherwise propose the merge first.
+- If a Notion page and GitHub repo clearly describe the same real thing, propose merging them into one row and setting `Source` to `Notion + GitHub`; apply only after confirmation when an existing row would be changed.
 - Do not use `Canonical Key` for matching, creating, merging, or deduplication.
 - If an existing row still has a `Canonical Key`, ignore it unless I explicitly ask for legacy cleanup.
 
 Update rules:
 
-- Apply safe non-destructive creates and updates without asking again when identity is certain and this prompt explicitly authorizes that mode.
-- Do not archive, delete, hide, or merge uncertain rows without confirmation.
-- Do not normalize intentional GitHub repo subpath keys to root repo keys unless I ask for that.
-- If the platform requires explicit confirmation for connector writes, batch all proposed writes into one compact approval request instead of asking repeatedly.
-- If this prompt does not explicitly authorize safe non-destructive writes, do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation.
-- Adding keys or source data to an existing row is a meaningful update. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation unless safe non-destructive writes are explicitly authorized.
+- Scheduled runs must propose meaningful writes instead of applying them automatically.
+- Do not apply meaningful writes to existing rows without current-turn confirmation.
+- Do not update existing `Name`, `Category`, `Description`, `Source`, `Notion Key`, `GitHub Key`, `Visibility`, `Status`, or other meaningful fields without confirmation.
+- Adding keys or source data to an existing row is a meaningful update. Changing `Source`, `Notion Key`, or `GitHub Key` on an existing row requires confirmation.
 - If an existing row needs a non-trivial update, first list proposed writes in this exact style:
   1. **<NAME>:**
      - **Target:** `<Notion page / GitHub item / canonical row>`
@@ -462,10 +448,10 @@ Update rules:
      - **Suggested data:** `<suggested replacement>`
      - **Reason:** `<why this update is suggested>`
 - Then ask: **Do you want me to apply these proposed writes?**
-- If confirmation is required but unavailable, report the proposed writes instead of applying them.
+- If confirmation is unavailable, report the proposed writes instead of applying them.
 - Safe refresh fields such as `Last checked` may be updated during this requested check/update run when no meaningful field changes are included.
 - Do not refresh `Last checked` for rows with pending proposed meaningful changes until the proposal is approved or rejected.
-- If the batch includes any meaningful write and safe non-destructive writes are not explicitly authorized, propose the meaningful writes first and request approval before applying anything.
+- If the batch includes any meaningful write, propose the meaningful writes first and request approval before applying anything.
 - Keep descriptions short: one sentence.
 - Preserve the current default table view behaviour where possible:
   - grouped by `Category`
@@ -477,8 +463,9 @@ Update rules:
 - Do not permanently delete anything.
 - Mark uncertain duplicates as `Needs review`.
 - Mark confirmed missing sources as `Missing`.
-- Any destructive, archival, hidden-state, or uncertain-identity write still requires explicit current-turn confirmation.
+- Any meaningful write still requires explicit current-turn confirmation, including row creation.
 - `Last checked` may be refreshed without confirmation only when no meaningful change is being written for that row and the user requested a check/update run.
+- Only pure `Last checked` refreshes are approval-free.
 - Do not refresh `Last checked` for rows that already have a proposed meaningful change until the proposal is approved or rejected.
 - If the platform requires explicit confirmation for connector writes, batch all proposed writes into one compact approval request instead of asking repeatedly.
 

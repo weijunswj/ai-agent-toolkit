@@ -19,6 +19,7 @@ const sourceFiles = [
   { filePath: sourceReadme, label: 'source README' },
   { filePath: generatedReadme, label: 'generated README' },
 ];
+const skillFiles = [sourceSkill, generatedSkill];
 
 function read(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
@@ -29,6 +30,17 @@ function section(text, heading, nextHeadingLevel = '##') {
   assert.notEqual(start, -1, `missing heading ${heading}`);
   const next = text.indexOf(`\n${nextHeadingLevel} `, start + heading.length);
   return next === -1 ? text.slice(start) : text.slice(start, next);
+}
+
+function subsection(text, heading) {
+  const start = text.indexOf(heading);
+  assert.notEqual(start, -1, `missing heading ${heading}`);
+  const next = text.indexOf('\n#### ', start + heading.length);
+  return next === -1 ? text.slice(start) : text.slice(start, next);
+}
+
+function countMatches(text, pattern) {
+  return [...text.matchAll(pattern)].length;
 }
 
 function updateSectionFor(filePath, text) {
@@ -73,11 +85,11 @@ test('Knowledge Index scheduled prompt uses database placeholders instead of a r
 });
 
 test('Knowledge Index scheduled section includes Codex prompt and fallback guidance', () => {
-  for (const filePath of [sourceSkill, generatedSkill]) {
+  for (const filePath of skillFiles) {
     const text = read(filePath);
     const scheduled = section(text, '### 7. Scheduled updater behaviour');
-    const codexPromptSection = section(scheduled, '#### Recommended Codex automation prompt', '####');
-    const staticPromptSection = section(scheduled, '#### Static fallback prompt for external schedulers that cannot load skills', '```');
+    const codexPromptSection = subsection(scheduled, '#### Recommended Codex automation prompt');
+    const staticPromptSection = subsection(scheduled, '#### Static fallback prompt for external schedulers that cannot load skills');
 
     assert.match(codexPromptSection, /Use the `knowledge-index-updater` skill\./, filePath);
     assert.match(codexPromptSection, /Locate and read the current `knowledge-index-updater\/SKILL\.md`/, filePath);
@@ -85,6 +97,11 @@ test('Knowledge Index scheduled section includes Codex prompt and fallback guida
     assert.match(codexPromptSection, /stop and report that the automation cannot safely run/, filePath);
     assert.match(staticPromptSection, /Static fallback prompt for external schedulers that cannot load skills/, filePath);
     assert.match(staticPromptSection, /Use this static fallback only when the scheduler cannot load or read the current skill at runtime\. Codex automation should use the self-loading prompt above instead\./, filePath);
+    assert.equal(countMatches(staticPromptSection, /\n```text\n/g), 1, filePath);
+    assert.equal(countMatches(staticPromptSection, /\n```\n/g), 1, filePath);
+    assert.equal(countMatches(staticPromptSection, /Search my Notion and GitHub/g), 1, filePath);
+    assert.equal(countMatches(staticPromptSection, /```text\nSearch my Notion and GitHub/g), 1, filePath);
+    assert.doesNotMatch(scheduled, /```text\nSearch my Notion and GitHub[\s\S]*?\n```text\nSearch my Notion and GitHub/, filePath);
   }
 });
 
@@ -113,7 +130,7 @@ test('Knowledge Index proposes meaningful writes with explicit format and confir
     const updateSection = updateSectionFor(filePath, text);
 
     assert.match(updateSection, /Default mode is \*\*audit\/propose first\*\*/i, filePath);
-    assert.match(updateSection, /When no active user request or automation prompt grants write permission, no meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes\./i, filePath);
+    assert.match(updateSection, /No meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes\./i, filePath);
     assert.match(updateSection, /\*\*Target:\*\* `.*`/, filePath);
     assert.match(updateSection, /\*\*Write type:\*\* `.*`/, filePath);
     assert.match(updateSection, /\*\*Current data:\*\* `<current value or compact current row summary>`/, filePath);
@@ -124,14 +141,16 @@ test('Knowledge Index proposes meaningful writes with explicit format and confir
   }
 });
 
-test('Knowledge Index scheduled updater prompt allows explicitly authorized non-destructive writes', () => {
-  for (const filePath of [sourceSkill, generatedSkill]) {
+test('Knowledge Index scheduled updater prompt requires explicit approval for meaningful writes', () => {
+  for (const filePath of skillFiles) {
     const text = read(filePath);
     const scheduled = section(text, '### 7. Scheduled updater behaviour');
 
-    assert.match(scheduled, /If the active automation prompt explicitly allows safe non-destructive creates and updates, apply those writes without asking again when identity is certain\./, filePath);
-    assert.match(scheduled, /Do not add or update rows, identity keys, source fields, archive\/delete state, or merge operations without explicit current-turn confirmation unless the active automation prompt authorizes safe non-destructive updates\./, filePath);
-    assert.match(scheduled, /Any destructive, archival, hidden-state, or uncertain-identity write still requires explicit current-turn confirmation\./, filePath);
+    assert.doesNotMatch(scheduled, /unless the user\s+explicitly requested automatic updates/i, filePath);
+    assert.match(scheduled, /Scheduled runs must propose meaningful writes instead of applying them automatically\./, filePath);
+    assert.match(scheduled, /Do not apply meaningful writes to existing rows without current-turn confirmation\./, filePath);
+    assert.match(scheduled, /Any meaningful write still requires explicit current-turn confirmation, including row creation\./, filePath);
+    assert.match(scheduled, /Do not add or update rows, identity keys, source fields, archive\/delete state, or merge operations without explicit current-turn confirmation\./, filePath);
     assert.match(scheduled, /Do not refresh `Last checked` for rows with pending proposed meaningful changes until the proposal is approved or rejected\./, filePath);
   }
 });
@@ -146,13 +165,13 @@ test('Knowledge Index scheduled updater proposal format includes required fields
     assert.match(scheduled, /- \*\*Current data:\*\* /, filePath);
     assert.match(scheduled, /- \*\*Suggested data:\*\* /, filePath);
     assert.match(scheduled, /- \*\*Reason:\*\* /, filePath);
-    assert.match(scheduled, /If confirmation is required but unavailable, report the proposed writes instead of applying them\./, filePath);
+    assert.match(scheduled, /If confirmation is unavailable, report the proposed writes instead of applying them\./, filePath);
     assert.match(scheduled, /\*\*Do you want me to apply these proposed writes\?\*\*/, filePath);
   }
 });
 
-test('Knowledge Index documents explicit authorization for safe non-destructive writes', () => {
-  for (const filePath of [sourceSkill, generatedSkill]) {
+test('Knowledge Index explicitly requires confirmation for meaningful writes and row creation', () => {
+  for (const filePath of skillFiles) {
     const text = read(filePath);
     const updateSection = section(text, '### Existing row update confirmation', '###');
 
@@ -179,35 +198,36 @@ test('Knowledge Index documents explicit authorization for safe non-destructive 
     for (const phrase of requiredMeanings) {
       assert.match(updateSection, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), filePath);
     }
-    assert.match(updateSection, /If the active user request or automation prompt explicitly allows safe non-destructive creates and updates, apply those writes without asking again only when identity is certain/, filePath);
-    assert.match(updateSection, /Do not apply any meaningful write without confirmation unless the active request explicitly authorizes safe non-destructive creates and updates\./, filePath);
+    assert.match(updateSection, /Do not apply any meaningful write without confirmation\./, filePath);
     assert.match(updateSection, /If approval is not available, report the proposed writes and reasons instead of applying them\./, filePath);
   }
 });
 
-test('Knowledge Index limits safe non-destructive write authorization', () => {
+test('Knowledge Index does not treat safe wording as confirmation bypass', () => {
   for (const { filePath } of sourceFiles) {
     const text = read(filePath);
-    assert.match(text, /safe non-destructive creates and updates/i, filePath);
-    assert.match(text, /identity is certain/i, filePath);
-    assert.match(text, /does not delete, archive, hide, or merge uncertain rows/i, filePath);
-    assert.match(text, /batch all proposed writes into one compact approval request/i, filePath);
+    assert.doesNotMatch(text, /safe non-destructive/i, filePath);
+    assert.doesNotMatch(text, /batch-style.*without confirmation/i, filePath);
+    assert.doesNotMatch(text, /go ahead and.*apply/i, filePath);
+    assert.doesNotMatch(text, /automation prompt .*authori[sz]es.*write/i, filePath);
+    assert.doesNotMatch(text, /repo subpath/i, filePath);
+    assert.doesNotMatch(text, /github\.com\/<owner>\/<repo>\/\.\.\./, filePath);
   }
 });
 
 test('Knowledge Index explicitly documents batch write rules', () => {
-  for (const filePath of [sourceSkill, generatedSkill]) {
+  for (const filePath of skillFiles) {
     const text = read(filePath);
     const updateSection = section(text, '### Existing row update confirmation', '###');
 
     assert.match(updateSection, /Special rule for batch writes:/, filePath);
     assert.match(updateSection, /Batch writes are allowed without confirmation only when every item in the batch is a pure `Last checked` refresh for a row with no meaningful changes\./, filePath);
-    assert.match(updateSection, /If a batch contains even one meaningful write and the active request did not explicitly authorize safe non-destructive writes, propose meaningful writes first and request confirmation before applying anything\./, filePath);
+    assert.match(updateSection, /If a batch contains even one meaningful write, propose meaningful writes first and request confirmation before applying anything\./, filePath);
   }
 });
 
 test('Knowledge Index allows only pure Last checked refreshes without confirmation', () => {
-  for (const filePath of [sourceSkill, generatedSkill]) {
+  for (const filePath of skillFiles) {
     const text = read(filePath);
     const updateSection = section(text, '### Existing row update confirmation', '###');
 
@@ -222,7 +242,7 @@ test('Knowledge Index allows only pure Last checked refreshes without confirmati
 });
 
 test('Knowledge Index documents the required Last checked refresh reporting format', () => {
-  for (const filePath of [sourceSkill, generatedSkill]) {
+  for (const filePath of skillFiles) {
     const text = read(filePath);
     const updateSection = section(text, '### Existing row update confirmation', '###');
 
@@ -236,8 +256,7 @@ test('Knowledge Index README documents same proposal-first rule', () => {
   for (const filePath of [sourceReadme, generatedReadme]) {
     const text = read(filePath);
     const updateSection = section(text, '## Existing row update confirmation', '##');
-    assert.match(updateSection, /When no active user request or automation prompt grants write permission, no meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes\./, filePath);
-    assert.match(updateSection, /If the active user request or automation prompt explicitly allows safe non-destructive creates and updates, apply those writes without asking again only when identity is certain/, filePath);
+    assert.match(updateSection, /No meaningful write may happen unless the user gives explicit current-turn approval for the exact write or exact batch of writes\./, filePath);
     assert.match(updateSection, /If the user approves only some items, apply only those approved items\./, filePath);
     assert.match(updateSection, /Batch refresh without confirmation is allowed only when every batch item is a pure `Last checked` refresh for a row with no meaningful changes\./, filePath);
     assert.match(updateSection, /Refresh only `Last checked` when the row already exists, no meaningful change is needed for that row, and the user requested a check\/update run\./, filePath);
@@ -245,11 +264,13 @@ test('Knowledge Index README documents same proposal-first rule', () => {
   }
 });
 
-test('Knowledge Index preserves intentional GitHub subpath keys for non-repo rows', () => {
-  for (const filePath of [sourceSkill, generatedSkill, sourceReadme, generatedReadme]) {
+test('Knowledge Index preserves strict scheduled safety rules', () => {
+  for (const filePath of skillFiles) {
     const text = read(filePath);
-    assert.match(text, /preserve intentional repo subpaths|intentionally point at a specific repo path/i, filePath);
-    assert.match(text, /github\.com\/<owner>\/<repo>\/\.\.\./, filePath);
+    assert.match(text, /Do not apply any meaningful write without confirmation\./, filePath);
+    assert.match(text, /Scheduled runs must propose meaningful writes instead of applying them automatically\./, filePath);
+    assert.match(text, /Add new canonical rows only when no key or clear real-world match exists, with explicit current-turn confirmation\./, filePath);
+    assert.match(text, /Only pure `Last checked` refreshes[\s\S]*approval-free/i, filePath);
   }
 });
 
