@@ -99,7 +99,7 @@ You should now be on the VPS dashboard for this one server.
 The IP address looks like this:
 
 ```text
-123.123.123.123
+203.0.113.123
 ```
 
 Do not copy the Hostinger dashboard URL. You need the server IP address.
@@ -119,10 +119,10 @@ If you prefer SSH from your computer:
 2. Run:
 
    ```powershell
-   ssh root@123.123.123.123
+   ssh root@203.0.113.123
    ```
 
-3. Replace `123.123.123.123` with the IP address from hPanel.
+3. Replace `203.0.113.123` with the IP address from hPanel.
 4. If Windows asks whether to trust the host, read the prompt and type `yes` only if the IP is your VPS.
 5. Enter the VPS password or use the SSH key configured in Hostinger.
 
