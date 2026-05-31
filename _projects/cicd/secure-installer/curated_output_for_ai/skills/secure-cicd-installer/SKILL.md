@@ -15,7 +15,7 @@ Use this skill as a safety-gated router for this toolkit's Secure CI/CD installe
 
 ## Canonical Procedure
 
-When this skill is invoked, read and follow `templates/cicd/secure-cicd-prompt.md` as the source-of-truth execution procedure.
+When this skill is invoked, read and follow [`templates/cicd/secure-cicd-prompt.md`](templates/cicd/secure-cicd-prompt.md) as the source-of-truth execution procedure.
 
 The prompt template is not optional background material. It defines the required phases, safety gates, status tracking, secret-handling rules, and commit/push/PR/deployment approval policy.
 
@@ -56,7 +56,7 @@ Do not commit, push, create a pull request, merge, or deploy without explicit us
 - Do not install packages, mutate deployment settings, rotate credentials, or write secrets unless the user explicitly approves the exact action and target.
 - Keep status tracking copy-ready and machine-readable when requested.
 - Treat `.env*`, private keys, deployment tokens, and credential files as denied writes.
-- Keep `templates/cicd/secure-cicd-prompt.md` loaded as the full guide; this SKILL.md is only the trigger surface, mandatory router, and high-priority safety summary.
+- Keep [`templates/cicd/secure-cicd-prompt.md`](templates/cicd/secure-cicd-prompt.md) loaded as the full guide; this SKILL.md is only the trigger surface, mandatory router, and high-priority safety summary.
 
 ## AI-Facing Surfaces
 

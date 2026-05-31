@@ -56,7 +56,16 @@ test('Secure CI/CD source and generated skills route to the canonical prompt pro
     const text = readText(relPath);
 
     assert.match(text, /^## Canonical Procedure$/m, relPath);
-    assert.match(text, /read and follow `templates\/cicd\/secure-cicd-prompt\.md`/i, relPath);
+    assert.match(
+      text,
+      /read and follow \[`templates\/cicd\/secure-cicd-prompt\.md`\]\(templates\/cicd\/secure-cicd-prompt\.md\)/i,
+      relPath
+    );
+    assert.match(
+      text,
+      /Keep \[`templates\/cicd\/secure-cicd-prompt\.md`\]\(templates\/cicd\/secure-cicd-prompt\.md\) loaded/i,
+      relPath
+    );
     assert.match(text, /not optional background material/i, relPath);
   }
 });
