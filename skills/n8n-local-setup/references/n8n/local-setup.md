@@ -209,6 +209,20 @@ Fill these before starting n8n for the first time:
 | `LOCAL_TIMEZONE` | Your local timezone. | `Asia/Singapore` | This is a predefined timezone name. Compose uses it for both n8n timezone values. |
 | `N8N_LOCAL_PORT` | Local browser port. | `5678` | Choose this before first launch. If `http://localhost:5678` is already used, change this to an unused port such as `5679`. |
 
+#### Optional Docker Image Pins
+
+Most users should leave these at the defaults. Change them only when you intentionally want a specific Docker image tag or digest.
+
+| Variable | What it controls | Default | Notes |
+| --- | --- | --- | --- |
+| `N8N_IMAGE` | n8n app image. | `docker.n8n.io/n8nio/n8n:stable` | Leave this for normal stable updates, or pin a release such as `docker.n8n.io/n8nio/n8n:2.22.5`. |
+| `POSTGRES_IMAGE` | Postgres image. | `postgres:16-alpine` | Keeps Postgres on major version 16 unless you intentionally change it. |
+| `NGROK_IMAGE` | ngrok tunnel image. | `ngrok/ngrok:latest` | Leave this unless you need a specific ngrok image tag. |
+
+You can also pin by digest, for example `N8N_IMAGE=docker.n8n.io/n8nio/n8n@sha256:<digest>`. A digest is the most reproducible option, but it will not move forward until you replace the digest yourself.
+
+After changing an image value in `.env`, use `Update` for the matching service from `_n8n-local.cmd`. The running container keeps the old image until Docker recreates it. `Restart n8n` can apply an image only if that image already exists locally; it does not intentionally pull missing images after the first setup.
+
 For `POSTGRES_PASSWORD`, choose any strong random password. It does not come from Docker, n8n, ngrok, or Hostinger.
 
 For `N8N_ENCRYPTION_KEY`, choose any long random value. It does not come from n8n. After you use it, do not change it unless you understand the consequences.
@@ -453,7 +467,7 @@ If the active `WEBHOOK_URL` in `.env.active` is an ngrok URL while `ngrok` is st
 | Number | Command | Use when | Opens another menu? |
 | --- | --- | --- | --- |
 | 1 | `Start n8n` | You want to start local n8n, with or without ngrok. | Yes. |
-| 2 | `Restart n8n` | n8n is acting weird, or you changed `.env` and want n8n to read the new values. | No. |
+| 2 | `Restart n8n` | n8n is acting weird, or you changed non-image `.env` values and want n8n to read them. | No. |
 | 3 | `Stop n8n` | You want to stop ngrok only, or stop the full local stack. | Yes. |
 | 4 | `Update` | You want to check and apply Docker image updates. | Yes. |
 | 5 | `Show Compose status` | You need deeper troubleshooting details: service state, health, container names, and ports. | No. |
@@ -463,6 +477,8 @@ If the active `WEBHOOK_URL` in `.env.active` is an ngrok URL while `ngrok` is st
 | 9 | `Exit` | You want to close the launcher cleanly. | No. |
 
 For normal use, the quick status at the top of the main menu is enough. Use `Show Compose status` only when you need the more detailed Docker Compose view.
+
+The first screen, `Show Compose status`, and backup metadata show the actual running container images for n8n, Postgres, and ngrok. If a service is not running, the launcher shows `stopped` for that service. If Compose reports a service is running but the image cannot be read, it shows `failed to detect`. These lines are runtime status only; `.env` image settings still control what the next start or update will use.
 
 ### 8.2 `Start n8n` Menu
 
@@ -497,16 +513,16 @@ Stopping ngrok does not delete or release your reserved ngrok domain.
 
 ### 8.4 `Update` Menu
 
-The update menu always checks for updates before it lets you choose what to update.
+The update menu asks what you want to update first. After you choose, it pulls the selected image(s) and recreates the selected container(s) automatically.
 
-What the check does:
+What the update does:
 
-1. Pulls current Docker image metadata.
-2. Compares local image IDs before and after the pull.
-3. Reports which services appear to have updates.
-4. Does not recreate running containers until you choose an update option.
+1. Runs a backup first when Postgres is included.
+2. Pulls the selected Docker image(s).
+3. Recreates the selected container(s) with the pulled image and current `.env` values.
+4. Shows `docker compose ps` when the update finishes.
 
-After the check, choose one:
+Choose one:
 
 | Choice | What it updates | Notes |
 | --- | --- | --- |
@@ -524,9 +540,11 @@ If the update includes Postgres, the launcher runs `Back up` first. The backup f
 
 Local update notes:
 
-- n8n updates come from `docker.n8n.io/n8nio/n8n:stable`.
-- Postgres is pinned to major version 16 in [docker-compose.yml](../../templates/local-stack/docker-compose.yml).
-- The Compose ngrok service uses `ngrok/ngrok:latest`.
+- By default, n8n updates come from `N8N_IMAGE=docker.n8n.io/n8nio/n8n:stable`.
+- By default, Postgres uses `POSTGRES_IMAGE=postgres:16-alpine`, which keeps it on major version 16.
+- By default, the Compose ngrok service uses `NGROK_IMAGE=ngrok/ngrok:latest`.
+- If you pin `N8N_IMAGE`, `POSTGRES_IMAGE`, or `NGROK_IMAGE` to an exact tag or digest, the update menu pulls and recreates from that pinned ref. It will not discover a newer release for that service until you change the image value in `.env`.
+- If stack volumes already exist but the configured image is missing locally, use `Update` for that service. Normal start and restart avoid silent pulls after first setup.
 - Local stack template/script updates come from this toolkit repo. Re-copy templates only after reviewing what changed.
 
 ### 8.5 `View logs` Menu
