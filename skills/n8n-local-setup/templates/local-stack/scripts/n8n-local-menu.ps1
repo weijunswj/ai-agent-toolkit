@@ -372,6 +372,63 @@ function Get-ServiceImageIds {
   return $ids
 }
 
+function Get-ShortImageId {
+  param([string]$ImageId)
+
+  $value = ([string]$ImageId).Trim() -replace '^sha256:', ''
+  if (-not $value) {
+    return 'not pulled'
+  }
+  if ($value.Length -gt 12) {
+    return $value.Substring(0, 12)
+  }
+  return $value
+}
+
+function Get-ImageVersionLines {
+  $lines = New-Object System.Collections.Generic.List[string]
+  $imageIds = Get-ServiceImageIds -Services $script:Services
+
+  foreach ($service in $script:Services) {
+    $image = $script:ServiceImages[$service]
+    $imageId = Get-ShortImageId -ImageId $imageIds[$service]
+    $label = "  {0,-8}: " -f $service
+    $lines.Add("$label$image ($imageId)")
+  }
+
+  return $lines.ToArray()
+}
+
+function Write-ImageVersions {
+  Write-Host ''
+  Write-Host 'Image versions:' -ForegroundColor Cyan
+  foreach ($line in Get-ImageVersionLines) {
+    Write-Host $line -ForegroundColor White
+  }
+}
+
+function Write-BackupImageLog {
+  param([string]$BackupPath)
+
+  $logPath = Join-Path (Split-Path -Parent $BackupPath) 'image-versions.txt'
+  $content = @(
+    '# n8n local backup image log',
+    "Backup file: $BackupPath",
+    "Created: $(Get-Date -Format o)",
+    '',
+    'Service image tags and local image IDs at backup time:',
+    ''
+  ) + (Get-ImageVersionLines)
+
+  try {
+    Set-Content -LiteralPath $logPath -Value $content -Encoding ascii
+    return $logPath
+  } catch {
+    Write-Warning "Backup image log could not be written: $($_.Exception.Message)"
+    return ''
+  }
+}
+
 function Check-Updates {
   param([string[]]$Services = $script:Services)
 
@@ -617,6 +674,7 @@ function Show-Status {
   Write-Info 'Shows service state, health, container names, and ports.'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
     [void](Invoke-Compose -Arguments @('ps'))
+    Write-ImageVersions
   }
 }
 
@@ -768,9 +826,10 @@ function Backup-Postgres {
 
   $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Default 'n8n'
   $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n'
-  $backupDir = Join-Path $script:StackRoot 'backups'
   $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-  $backupPath = Join-Path $backupDir "n8n-postgres-$timestamp.sql"
+  $backupRoot = Join-Path $script:StackRoot 'backups'
+  $backupDir = Join-Path $backupRoot "n8n-postgres-$timestamp"
+  $backupPath = Join-Path $backupDir 'database.sql'
 
   New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 
@@ -778,6 +837,11 @@ function Backup-Postgres {
   $exitCode = Invoke-NativeCommand -Command { & docker compose exec -T postgres pg_dump -U $postgresUser $postgresDb 1> $backupPath }
   if ($exitCode -eq 0) {
     Write-Success "Backup written to: $backupPath"
+    $imageLogPath = Write-BackupImageLog -BackupPath $backupPath
+    if ($imageLogPath) {
+      Write-Success "Image versions written to: $imageLogPath"
+    }
+    Write-Success "Backup folder: $backupDir"
     return $true
   } else {
     Write-ErrorMessage 'Backup failed. Check the Postgres logs for details.'
@@ -822,7 +886,7 @@ function Show-CommandList {
   Write-CommandListItem -Number '4' -Name 'Update' -Description 'Checks for image updates before applying them.'
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state, health, container names, and ports.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
-  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a local Postgres SQL backup under .\backups.'
+  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a timestamped backup folder under .\backups.'
   Write-Host ''
   Write-Host 'Updates are user-approved. Pulling images does not recreate or restart containers until you choose an update action.' -ForegroundColor Yellow
 }
@@ -875,7 +939,10 @@ function Show-LaunchStatus {
       Write-Host $webhookUrl -ForegroundColor White
     }
 
+    Write-ImageVersions
+
     if (($runningServices -notcontains 'ngrok') -and $webhookUrl -and $webhookUrl -ne $expectedWebhookUrl) {
+      Write-Host ''
       Write-Warning 'WEBHOOK_URL is public while ngrok is stopped.'
       Write-Warning 'The local editor still opens, but public webhook and OAuth links need ngrok running.'
     }
