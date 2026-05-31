@@ -213,25 +213,25 @@
     "category": "n8n",
     "name": "local-setup",
     "title": "Local n8n Setup",
-    "version": "2.2.0",
+    "version": "2.3.0",
     "version_policy": "semver",
-    "version_notes": "Refactors the local setup docs for a beginner-first flow without noisy setup sections.",
+    "version_notes": "Clean rebuild with two primary guides, final MCP setup/config sources, Hostinger VPS coverage, and the underscore-prefixed local launcher.",
     "project": {
       "name": "Local n8n Setup",
       "category": "n8n",
-      "summary": "Preserved local n8n setup guides plus Docker Compose, Postgres, ngrok-only tunneling, guided local stack launcher templates, MCP configuration templates, and references to the generated n8n-agent-rules skill."
+      "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, final MCP setup/config pages, Docker Compose local templates, and the underscore-prefixed guided launcher."
     },
     "surface": {
       "publish_as": "both",
       "skill": {
         "status": "published",
         "path": "skills/n8n-local-setup",
-        "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, MCP config, ngrok tunnel, and platform references while depending on n8n-agent-rules for workflow/live n8n rules."
+        "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, MCP config, Hostinger VPS reference, and platform setup pages while depending on n8n-agent-rules for workflow/live n8n rules."
       },
       "mcp": {
         "status": "published",
         "path": "mcp/projects/n8n-local-setup.md",
-        "summary": "Spec-only MCP notes for local n8n setup and configuration surfaces; no runnable server is shipped."
+        "summary": "Spec-only MCP notes for local n8n setup, Hostinger VPS references, and configuration surfaces; no runnable server is shipped."
       }
     },
     "module_path": "_projects/n8n/local-setup",
@@ -244,7 +244,6 @@
       "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
-      "skills/n8n-local-setup/references",
       "skills/n8n-local-setup/references/ai-agent-platforms/README.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
@@ -253,14 +252,11 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",
       "skills/n8n-local-setup/references/n8n/README.md",
-      "skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md",
+      "skills/n8n-local-setup/references/n8n/hostinger-vps.md",
       "skills/n8n-local-setup/references/n8n/local-setup.md",
-      "skills/n8n-local-setup/references/n8n/tunnelling.md",
-      "skills/n8n-local-setup/references/n8n/upgrading.md",
-      "skills/n8n-local-setup/references/n8n/vps-hosting.md",
       "skills/n8n-local-setup/templates/local-stack/.env.example",
+      "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
-      "skills/n8n-local-setup/templates/local-stack/n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
       "skills/n8n-local-setup/templates/mcp-configs/README.md",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",

@@ -1,14 +1,8 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/Page 1 - Local Setup.md
-Update the project source and run sync.
--->
 # Page 1 - Local Setup
 
 This is the beginner path for running n8n locally on Windows with Docker Desktop, Postgres, the guided `_n8n-local.cmd` menu, optional ngrok public access, and optional AI agent MCP setup.
 
-Use [Page 2 - Hostinger VPS](hostinger-vps.md) instead when you want an always-on hosted server.
+Use [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) instead when you want an always-on hosted server.
 
 * Start local n8n first.
 * Add ngrok only when something outside your computer must reach n8n.
@@ -23,7 +17,7 @@ Use [Page 2 - Hostinger VPS](hostinger-vps.md) instead when you want an always-o
 | --- | --- | --- | --- |
 | 1. | Install Docker Desktop and Node.js LTS. | Your Windows computer. | Docker Compose and `npx` are available. |
 | 2. | Create a local stack folder such as `C:\n8n-local`. | Windows Explorer. | Local runtime files stay outside this repo. |
-| 3. | Copy everything inside [templates/local-stack/](../../templates/local-stack/) into your local stack folder. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, `_n8n-local.cmd`, and `scripts\`. |
+| 3. | Copy everything inside [templates/local-stack/](./templates/local-stack/) into your local stack folder. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, `_n8n-local.cmd`, and `scripts\`. |
 | 4. | Copy `.env.example` to `.env`. | `<LOCAL_STACK_FOLDER>`. | You have a private local settings file. |
 | 5. | Fill only local runtime values first. | `.env`. | Local n8n and Postgres can start. |
 | 6. | Double-click `_n8n-local.cmd`. | `<LOCAL_STACK_FOLDER>`. | The guided menu opens and stays open after actions. |
@@ -96,16 +90,16 @@ New-Item -ItemType Directory -Force "C:\n8n-local"
 
 ## 4. Copy The Local Stack Templates
 
-The local stack template folder is [templates/local-stack/](../../templates/local-stack/).
+The local stack template folder is [templates/local-stack/](./templates/local-stack/).
 
 | File or folder | Link |
 | --- | --- |
-| Docker Compose template | [docker-compose.yml](../../templates/local-stack/docker-compose.yml) |
-| Environment template | [.env.example](../../templates/local-stack/.env.example) |
-| Windows launcher | [_n8n-local.cmd](../../templates/local-stack/_n8n-local.cmd) |
-| Menu script | [n8n-local-menu.ps1](../../templates/local-stack/scripts/n8n-local-menu.ps1) |
+| Docker Compose template | [docker-compose.yml](./templates/local-stack/docker-compose.yml) |
+| Environment template | [.env.example](./templates/local-stack/.env.example) |
+| Windows launcher | [_n8n-local.cmd](./templates/local-stack/_n8n-local.cmd) |
+| Menu script | [n8n-local-menu.ps1](./templates/local-stack/scripts/n8n-local-menu.ps1) |
 
-1. Open [templates/local-stack/](../../templates/local-stack/).
+1. Open [templates/local-stack/](./templates/local-stack/).
 2. Select everything inside that folder.
 3. Copy the selected files and folders.
 4. Paste them into `<LOCAL_STACK_FOLDER>`.
@@ -325,7 +319,7 @@ Launch `_n8n-local.cmd` once, then follow this update table.
 Local update notes:
 
 - n8n updates come from `docker.n8n.io/n8nio/n8n:stable`.
-- Postgres is pinned to major version 16 in [docker-compose.yml](../../templates/local-stack/docker-compose.yml).
+- Postgres is pinned to major version 16 in [docker-compose.yml](./templates/local-stack/docker-compose.yml).
 - The ngrok Docker Desktop extension updates through Docker Desktop Extensions.
 - The Compose ngrok alternate uses `ngrok/ngrok:latest`.
 - Local stack template/script updates come from this toolkit repo. Re-copy templates only after reviewing what changed.
@@ -363,10 +357,10 @@ http://localhost:5678/mcp-server/http
 
 | Platform | Detailed setup page | Use when |
 | --- | --- | --- |
-| Codex | [Codex MCP Setup](../ai-agent-platforms/codex.md) | You use Codex with n8n MCP. |
-| Claude Code | [Claude Code MCP Setup](../ai-agent-platforms/claude-code.md) | You use Claude Code / Claude Desktop Code tab. |
-| OpenCode | [OpenCode MCP Setup](../ai-agent-platforms/opencode.md) | You use OpenCode. |
-| Antigravity | [Antigravity MCP Setup](../ai-agent-platforms/antigravity.md) | You use Antigravity. |
+| Codex | [Codex MCP Setup](./mcp%20setup%20-%20codex.md) | You use Codex with n8n MCP. |
+| Claude Code | [Claude Code MCP Setup](./mcp%20setup%20-%20claude%20code.md) | You use Claude Code / Claude Desktop Code tab. |
+| OpenCode | [OpenCode MCP Setup](./mcp%20setup%20-%20opencode.md) | You use OpenCode. |
+| Antigravity | [Antigravity MCP Setup](./mcp%20setup%20-%20antigravity.md) | You use Antigravity. |
 
 Do not dump real MCP tokens into repo files.
 
@@ -439,7 +433,7 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 - Do not paste real API tokens, webhook secrets, passwords, encryption keys, or MCP tokens into repo files.
 - Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 - Do not remove `n8n_data` or `postgres_data` Docker volumes unless you intentionally want to delete local runtime data.
-- Use [Page 2 - Hostinger VPS](hostinger-vps.md) for always-on hosted setup.
+- Use [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) for always-on hosted setup.
 
 ---
 
@@ -447,9 +441,9 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 
 | Reference | Use when |
 | --- | --- |
-| [Page 2 - Hostinger VPS](hostinger-vps.md) | You need always-on public hosting on Hostinger. |
-| [Codex MCP Setup](../ai-agent-platforms/codex.md) | You need Codex-specific MCP setup. |
-| [Claude Code MCP Setup](../ai-agent-platforms/claude-code.md) | You need Claude Code-specific MCP setup. |
-| [OpenCode MCP Setup](../ai-agent-platforms/opencode.md) | You need OpenCode-specific MCP setup. |
-| [Antigravity MCP Setup](../ai-agent-platforms/antigravity.md) | You need Antigravity-specific MCP setup. |
-| [n8n Agent Rules](../../../n8n-agent-rules/) | You need the full n8n operating rules before workflow/live n8n work. |
+| [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) | You need always-on public hosting on Hostinger. |
+| [Codex MCP Setup](./mcp%20setup%20-%20codex.md) | You need Codex-specific MCP setup. |
+| [Claude Code MCP Setup](./mcp%20setup%20-%20claude%20code.md) | You need Claude Code-specific MCP setup. |
+| [OpenCode MCP Setup](./mcp%20setup%20-%20opencode.md) | You need OpenCode-specific MCP setup. |
+| [Antigravity MCP Setup](./mcp%20setup%20-%20antigravity.md) | You need Antigravity-specific MCP setup. |
+| [n8n Agent Rules](../../../../skills/n8n-agent-rules/) | You need the full n8n operating rules before workflow/live n8n work. |

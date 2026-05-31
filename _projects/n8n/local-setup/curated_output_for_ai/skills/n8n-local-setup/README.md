@@ -6,13 +6,14 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup Skill
 
-Instruction-only skill for safe local n8n setup, MCP config routing, Docker Compose plus Postgres, ngrok tunnel setup, and platform setup guidance.
+Instruction-only skill for safe local n8n setup, MCP config routing, Docker Compose plus Postgres, ngrok, and platform setup guidance.
 
 ## Start Here
 
 | Need | Open |
 | --- | --- |
 | Beginner local setup guide | [references/n8n/local-setup.md](references/n8n/local-setup.md) |
+| Hostinger VPS guide | [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md) |
 | n8n reference index | [references/n8n/](references/n8n/) |
 | AI-agent platform setup | [references/ai-agent-platforms/](references/ai-agent-platforms/) |
 | Local stack templates | [templates/local-stack/](templates/local-stack/) |
@@ -41,7 +42,7 @@ Codex and Claude Code plugin/package support exists, but this repo does not make
 
 Install or load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, MCP, import/export, credential, execution, repo/live sync, or live-instance work.
 
-A generated cross-skill copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for portability. It is generated from the canonical `development.ai-coding-agent-rules` source and must not be edited directly.
+A generated cross-skill copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for portability.
 
 ## Safety Notes
 

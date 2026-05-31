@@ -145,7 +145,6 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     'curated_adapter',
     'generated_cross_skill_reference',
     'curated_pack_readme',
-    'curated_shim',
     'curated_repo_local_agent_template',
     'curated_spec',
     'curated_template',
@@ -175,6 +174,23 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     report.issues.boundaryRecipeFindings.map((entry) => entry.path).sort(),
     [...expectedPackReadmeFindings].sort()
   );
+});
+
+test('audit-published-surfaces classifies reference-link shims when present', () => {
+  const cwd = tempCopy();
+  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
+    sourceRel: 'curated_output_for_ai/reference-link-shims/n8n/shim-fixture.md',
+    outputRel: 'skills/n8n-local-setup/references/n8n/shim-fixture.md',
+    sourceText: '# Shim Fixture\n\nCompatibility forwarding note.\n',
+    metadata: {
+      notes: 'Compatibility shim fixture.',
+      fidelity: 'reviewed_entrypoint'
+    }
+  });
+
+  const report = runAuditJson(cwd);
+  const entry = report.boundaryRecipes.find((item) => item.path === outputRel);
+  assert.equal(entry?.classification, 'curated_shim');
 });
 
 test('audit-published-surfaces does not baseline helper README import/export context', () => {

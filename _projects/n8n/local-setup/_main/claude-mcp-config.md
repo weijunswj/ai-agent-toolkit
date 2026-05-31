@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/claude-mcp-config.md
-Update the project source and run sync.
--->
 # Claude Code MCP Config
 
 Use this to connect Claude Code globally to the same n8n setup.
