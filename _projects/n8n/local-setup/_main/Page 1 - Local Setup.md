@@ -256,8 +256,8 @@ Notice the difference:
 
 | Variable | What to paste | Example / format | Notes |
 | --- | --- | --- | --- |
-| `NGROK_AUTHTOKEN` | Your ngrok authtoken. | Value from the ngrok authtoken page. | Copy this from ngrok. Do not make this up. |
-| `NGROK_DOMAIN` | The free domain shown by ngrok. | `your-name.ngrok.app` | Copy this from the ngrok Docker setup dashboard page, near the bottom of section 1. Do not include `https://`. |
+| `NGROK_AUTHTOKEN` | Your ngrok authtoken. | Value from the ngrok authtoken page. | Copy this from [ngrok authtoken dashboard](https://dashboard.ngrok.com/get-started/your-authtoken). |
+| `NGROK_DOMAIN` | The free domain shown by ngrok. | `your-name.ngrok.app` | Copy this from the [ngrok Docker setup dashboard page](https://dashboard.ngrok.com/get-started/setup/docker), near the bottom of section 1. Do not include `https://`. |
 
 Do not add `N8N_HOST` to `.env` for this guide. The Compose file already sets it to `localhost`, and the ngrok domain belongs in `NGROK_DOMAIN`.
 
