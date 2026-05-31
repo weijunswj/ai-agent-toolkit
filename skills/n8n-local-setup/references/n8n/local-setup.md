@@ -136,7 +136,7 @@ PowerShell fallback from the toolkit repo root:
 ```powershell
 $DesktopPath = [Environment]::GetFolderPath('Desktop')
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.n8n-local"
-Copy-Item -LiteralPath "_projects\n8n\local-setup\_main\templates\local-stack\*" -Destination "$env:USERPROFILE\.n8n-local" -Recurse -Force
+Copy-Item -Path "_projects\n8n\local-setup\_main\templates\local-stack\*" -Destination "$env:USERPROFILE\.n8n-local" -Recurse -Force
 Copy-Item -LiteralPath "$env:USERPROFILE\.n8n-local\n8n-local-desktop-shortcut.cmd" -Destination (Join-Path $DesktopPath 'n8n-local-desktop-shortcut.cmd') -Force
 ```
 
