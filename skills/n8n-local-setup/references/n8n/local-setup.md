@@ -226,7 +226,7 @@ What that means:
 - When you choose `Start ngrok tunnel`, the active `WEBHOOK_URL` is built from `NGROK_DOMAIN`.
 - Advanced reverse-proxy or custom-domain hosting may use different host settings, but that is outside this local setup guide.
 
-You will not see `.env.active` in a fresh copied stack folder. `_n8n-local.cmd` creates it automatically in `<LOCAL_STACK_FOLDER>` after you choose `Localhost only` or `Start ngrok tunnel`. Do not create or edit it by hand.
+You will not see `.env.active` in a fresh copied stack folder. `_n8n-local.cmd` creates it automatically in `<LOCAL_STACK_FOLDER>` after you choose `Localhost only` or `Start ngrok tunnel`. It stays there after the menu closes and gets overwritten the next time you choose a start mode. Do not create or edit it by hand.
 
 ### STEP 2: Fill These Later Only After Local n8n Works
 

@@ -430,6 +430,7 @@ test('Local Setup separates .env and public URL values without MCP setup values'
   assert.match(localSetup, /When you choose `Start ngrok tunnel`, the active `WEBHOOK_URL` is built from `NGROK_DOMAIN`/);
   assert.match(localSetup, /You will not see `\.env\.active` in a fresh copied stack folder/);
   assert.match(localSetup, /creates it automatically in `<LOCAL_STACK_FOLDER>`/);
+  assert.match(localSetup, /It stays there after the menu closes and gets overwritten the next time you choose a start mode/);
   assert.match(localSetup, /You still open the n8n editor in your browser at `http:\/\/localhost:5678`/);
   assert.match(localSetup, /`WEBHOOK_URL` controls the public webhook and callback links n8n shows or builds/);
   assert.match(localSetup, /If the active `WEBHOOK_URL` in `\.env\.active` is an ngrok URL while `ngrok` is stopped, the menu warns you/);
