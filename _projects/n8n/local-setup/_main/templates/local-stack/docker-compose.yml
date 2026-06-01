@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-n8n}
@@ -16,7 +16,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n:stable
+    image: ${N8N_IMAGE:-docker.n8n.io/n8nio/n8n:stable}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -44,7 +44,7 @@ services:
       - n8n_data:/home/node/.n8n
 
   ngrok:
-    image: ngrok/ngrok:latest
+    image: ${NGROK_IMAGE:-ngrok/ngrok:latest}
     restart: unless-stopped
     depends_on:
       - n8n

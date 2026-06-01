@@ -4,11 +4,17 @@ $script:StackRoot = (Get-Location).Path
 $script:CoreServices = @('postgres', 'n8n')
 $script:Services = @('n8n', 'postgres', 'ngrok')
 $script:ExitRequested = $false
-$script:ServiceImages = @{
+$script:ServiceImageDefaults = @{
   n8n = 'docker.n8n.io/n8nio/n8n:stable'
   postgres = 'postgres:16-alpine'
   ngrok = 'ngrok/ngrok:latest'
 }
+$script:ServiceImages = @{
+  n8n = $script:ServiceImageDefaults.n8n
+  postgres = $script:ServiceImageDefaults.postgres
+  ngrok = $script:ServiceImageDefaults.ngrok
+}
+$script:ServiceImageMetadata = @{}
 
 function Write-Header {
   param([string]$Title)
@@ -215,7 +221,17 @@ function Write-ServiceStatus {
     Write-Host 'running' -NoNewline -ForegroundColor Green
     if ($WhenRunning) {
       Write-Host (' ' * 1) -NoNewline
-      Write-Host "- $WhenRunning" -ForegroundColor White
+      $statusLine = "- $WhenRunning"
+      $parts = $statusLine -split '(https?://\S+)'
+      foreach ($part in $parts) {
+        if ([string]::IsNullOrWhiteSpace($part)) { continue }
+        if ($part -match '^https?://\S+$') {
+          Write-Host $part -NoNewline -ForegroundColor DarkYellow
+        } else {
+          Write-Host $part -NoNewline -ForegroundColor White
+        }
+      }
+      Write-Host ''
     } else {
       Write-Host ''
     }
@@ -224,7 +240,17 @@ function Write-ServiceStatus {
     Write-Host 'stopped' -NoNewline -ForegroundColor Yellow
     if ($WhenStopped) {
       Write-Host (' ' * 1) -NoNewline
-      Write-Host "- $WhenStopped" -ForegroundColor White
+      $statusLine = "- $WhenStopped"
+      $parts = $statusLine -split '(https?://\S+)'
+      foreach ($part in $parts) {
+        if ([string]::IsNullOrWhiteSpace($part)) { continue }
+        if ($part -match '^https?://\S+$') {
+          Write-Host $part -NoNewline -ForegroundColor DarkYellow
+        } else {
+          Write-Host $part -NoNewline -ForegroundColor White
+        }
+      }
+      Write-Host ''
     } else {
       Write-Host ''
     }
@@ -243,17 +269,226 @@ function Get-EnvValue {
   }
 
   $pattern = "^\s*$([regex]::Escape($Name))\s*=\s*(.*)\s*$"
+  $result = $Default
   foreach ($line in Get-Content -LiteralPath $envPath) {
     if ($line -match $pattern) {
       $value = $Matches[1].Trim()
       $value = $value.Trim('"').Trim("'")
       if ($value.Length -gt 0) {
-        return $value
+        $result = $value
       }
     }
   }
 
-  return $Default
+  return $result
+}
+
+function Get-ImageVersionFromImageRef {
+  param([string]$ImageRef)
+
+  $ref = ([string]$ImageRef).Trim()
+  if (-not $ref) {
+    return ''
+  }
+
+  $target = $ref
+  $slashIndex = $target.LastIndexOf('/')
+  if ($slashIndex -ge 0 -and $slashIndex -lt ($target.Length - 1)) {
+    $target = $target.Substring($slashIndex + 1)
+  }
+
+  if ($target -match '^(?<Name>[^:]+):(?<Tag>[^@]+)$') {
+    return $Matches.Tag
+  }
+
+  return ''
+}
+
+function Test-VersionLikeImageTag {
+  param([string]$Tag)
+
+  $value = ([string]$Tag).Trim()
+  return ($value -match '^v?\d+(\.\d+){1,3}([.-][0-9A-Za-z]+)?$')
+}
+
+function Get-ServiceRuntimeVersion {
+  param(
+    [string]$Service,
+    [string]$ContainerId
+  )
+
+  $container = ([string]$ContainerId).Trim()
+  if (-not $container) {
+    return ''
+  }
+
+  $output = ''
+  try {
+    switch ($Service) {
+      'n8n' {
+        $output = (& docker exec $container node -p "require('/usr/local/lib/node_modules/n8n/package.json').version" 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0 -or -not ([string]$output).Trim()) {
+          $output = (& docker exec $container n8n --version 2>$null | Select-Object -First 1)
+        }
+      }
+      'postgres' {
+        $output = (& docker exec $container postgres --version 2>$null | Select-Object -First 1)
+      }
+      'ngrok' {
+        $output = (& docker exec $container ngrok version 2>$null | Select-Object -First 1)
+      }
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+      return ''
+    }
+  } catch {
+    return ''
+  }
+
+  $value = ([string]$output).Trim()
+  if (-not $value) {
+    return ''
+  }
+
+  if ($value -match '(?<Version>\d+\.\d+(\.\d+){0,2}([.-][0-9A-Za-z]+)?)') {
+    return $Matches.Version
+  }
+
+  return $value
+}
+
+function Get-ImageLabelVersion {
+  param([string]$ImageRef)
+
+  $image = ([string]$ImageRef).Trim()
+  if (-not $image) {
+    return ''
+  }
+
+  $labels = @(
+    'org.opencontainers.image.version',
+    'org.label-schema.version'
+  )
+
+  foreach ($label in $labels) {
+    try {
+      $value = (& docker image inspect $image --format "{{index .Config.Labels `"$label`"}}" 2>$null | Select-Object -First 1)
+      if ($LASTEXITCODE -eq 0) {
+        $value = ([string]$value).Trim()
+        if ($value) {
+          return $value
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return ''
+}
+
+function Initialize-ServiceImages {
+  $script:ServiceImages = @{
+    n8n = Get-EnvValue -Name 'N8N_IMAGE' -Default $script:ServiceImageDefaults.n8n
+    postgres = Get-EnvValue -Name 'POSTGRES_IMAGE' -Default $script:ServiceImageDefaults.postgres
+    ngrok = Get-EnvValue -Name 'NGROK_IMAGE' -Default $script:ServiceImageDefaults.ngrok
+  }
+}
+
+function Get-ComposeProjectName {
+  try {
+    $configJson = (& docker compose config --format json 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $configJson) {
+      $config = (($configJson | Out-String).Trim() | ConvertFrom-Json)
+      $name = ([string]$config.name).Trim()
+      if ($name) {
+        return $name
+      }
+    }
+  } catch {
+  }
+
+  $folderName = (Split-Path -Leaf $script:StackRoot).TrimStart('.').ToLowerInvariant()
+  $folderName = $folderName -replace '[^a-z0-9_-]', ''
+  if ($folderName) {
+    return $folderName
+  }
+
+  return 'n8n-local'
+}
+
+function Test-ComposeVolumeExists {
+  param([string]$VolumeName)
+
+  $projectName = Get-ComposeProjectName
+  $fullName = "${projectName}_${VolumeName}"
+
+  try {
+    & docker volume inspect $fullName *> $null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  }
+}
+
+function Test-FirstLocalStart {
+  $requiredVolumes = @('n8n_data', 'postgres_data')
+  foreach ($volume in $requiredVolumes) {
+    if (-not (Test-ComposeVolumeExists -VolumeName $volume)) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
+function Test-LocalImageExists {
+  param([string]$Image)
+
+  $imageRef = ([string]$Image).Trim()
+  if (-not $imageRef) {
+    return $false
+  }
+
+  try {
+    & docker image inspect $imageRef *> $null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  }
+}
+
+function Test-ServiceImagesAvailable {
+  param(
+    [string[]]$Services,
+    [switch]$AllowPull
+  )
+
+  if ($AllowPull) {
+    return $true
+  }
+
+  Initialize-ServiceImages
+  $missing = New-Object System.Collections.Generic.List[string]
+
+  foreach ($service in $Services) {
+    $image = $script:ServiceImages[$service]
+    if (-not (Test-LocalImageExists -Image $image)) {
+      $missing.Add("$service -> $image")
+    }
+  }
+
+  if ($missing.Count -eq 0) {
+    return $true
+  }
+
+  Write-ErrorMessage 'Configured image is not available locally:'
+  foreach ($item in $missing) {
+    Write-ErrorMessage "  $item"
+  }
+  Write-ErrorMessage 'Run Update for that service to pull the image and restart it.'
+  return $false
 }
 
 function Get-LocalN8nPort {
@@ -351,58 +586,270 @@ function Test-LocalPortConfig {
 function Get-ServiceImageIds {
   param([string[]]$Services = $script:Services)
 
+  Initialize-ServiceImages
+  $script:ServiceImageMetadata = @{}
   $ids = @{}
   foreach ($service in $Services) {
+    $imageId = ''
+    $imageRef = ''
+    $imageDigest = ''
+    $imageVersion = ''
+    $imageVersionSource = ''
+
+    try {
+      $containerId = (& docker compose ps -q $service 2>$null | Select-Object -First 1)
+      $containerId = ([string]$containerId).Trim()
+      if ($LASTEXITCODE -eq 0 -and $containerId) {
+        $imageRef = (& docker inspect $containerId --format '{{.Config.Image}}' 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0) {
+          $imageRef = ''
+        }
+        $imageId = (& docker inspect $containerId --format '{{.Image}}' 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0) {
+          $imageId = ''
+        }
+        $imageDigest = (& docker inspect $containerId --format '{{index .RepoDigests 0}}' 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0) {
+          $imageDigest = ''
+        }
+        $imageVersion = (& docker inspect $containerId --format '{{index .Config.Labels "org.opencontainers.image.version"}}' 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0) {
+          $imageVersion = ''
+        } else {
+          $imageVersion = ([string]$imageVersion).Trim()
+          if ($imageVersion) {
+            $imageVersionSource = 'container-label'
+          }
+        }
+
+        $runtimeVersion = Get-ServiceRuntimeVersion -Service $service -ContainerId $containerId
+        if ($runtimeVersion) {
+          $imageVersion = $runtimeVersion
+          $imageVersionSource = 'runtime'
+        }
+      }
+    } catch {
+      $imageId = ''
+      $imageRef = ''
+      $imageDigest = ''
+      $imageVersion = ''
+      $imageVersionSource = ''
+    }
+
     $image = $script:ServiceImages[$service]
     if (-not $image) {
-      $ids[$service] = ''
+      $ids[$service] = Resolve-ServiceImageValue -ImageId $imageId -ImageRef $imageRef -ImageDigest $imageDigest
       continue
     }
 
-    try {
-      $imageId = (& docker image inspect $image --format '{{.Id}}' 2>$null | Select-Object -First 1)
-      if ($LASTEXITCODE -ne 0) {
+    if (-not $imageId) {
+      try {
+        $imageId = (& docker image inspect $image --format '{{.Id}}' 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0) {
+          $imageId = ''
+        }
+      } catch {
         $imageId = ''
       }
-      $ids[$service] = ([string]$imageId).Trim()
-    } catch {
-      $ids[$service] = ''
     }
+
+    if (-not $imageId -and -not $imageRef) {
+      $imageRef = $image
+    }
+
+    if ((-not $imageVersion) -and $imageId) {
+      $imageVersion = Get-ImageLabelVersion -ImageRef $imageId
+      if ($imageVersion) {
+        $imageVersionSource = 'running-image-label'
+      }
+    }
+
+    if ((-not $imageVersion) -and $image) {
+      $imageVersion = Get-ImageLabelVersion -ImageRef $image
+      if ($imageVersion) {
+        $imageVersionSource = 'configured-label'
+      }
+    }
+
+    if (-not $imageVersion) {
+      $imageVersion = Get-ImageVersionFromImageRef -ImageRef $image
+      if ($imageVersion) {
+        $imageVersionSource = 'configured-tag'
+      }
+    }
+
+    $script:ServiceImageMetadata[$service] = @{
+      Version = ([string]$imageVersion).Trim()
+      VersionSource = $imageVersionSource
+      Digest = ([string]$imageDigest).Trim()
+      RunningImageRef = ([string]$imageRef).Trim()
+    }
+
+    $ids[$service] = Resolve-ServiceImageValue -ImageId $imageId -ImageRef $imageRef -ImageDigest $imageDigest
   }
   return $ids
+}
+
+function Resolve-ServiceImageValue {
+  param(
+    [string]$ImageId,
+    [string]$ImageRef,
+    [string]$ImageDigest
+  )
+
+  $trimmedImageId = ([string]$ImageId).Trim()
+  if ($trimmedImageId) {
+    return $trimmedImageId
+  }
+  if ($ImageDigest) {
+    return ([string]$ImageDigest).Trim()
+  }
+  return ([string]$ImageRef).Trim()
 }
 
 function Get-ShortImageId {
   param([string]$ImageId)
 
-  $value = ([string]$ImageId).Trim() -replace '^sha256:', ''
+  $value = ([string]$ImageId).Trim()
   if (-not $value) {
-    return 'not pulled'
+    return 'not found'
   }
+
+  if ($value -match '^sha256:([0-9a-f]{64})$') {
+    $value = $Matches[1]
+  } elseif ($value -match '@sha256:([0-9a-f]{64})$') {
+    $value = $Matches[1]
+  }
+
+  if ($value -match '^.+://') {
+    return $value
+  }
+
+  if ($value.Length -gt 64 -and $value.Contains(':')) {
+    return $value
+  }
+
   if ($value.Length -gt 12) {
     return $value.Substring(0, 12)
   }
   return $value
 }
 
+function Get-ComposeServiceRows {
+  $rows = New-Object System.Collections.Generic.List[object]
+
+  try {
+    $formatted = @(& docker compose ps --format '{{.Service}}|{{.Image}}|{{.State}}' 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $formatted.Count -gt 0) {
+      foreach ($line in $formatted) {
+        $parts = ([string]$line).Split('|')
+        if ($parts.Count -ge 3) {
+          $rows.Add([pscustomobject]@{
+            Service = $parts[0].Trim()
+            Image = $parts[1].Trim()
+            State = $parts[2].Trim()
+            ContainerId = ''
+            Name = ''
+          })
+        }
+      }
+    }
+  } catch {
+  }
+
+  if ($rows.Count -gt 0) {
+    return $rows.ToArray()
+  }
+
+  try {
+    $jsonOutput = @(& docker compose ps --format json 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $jsonOutput.Count -eq 0) {
+      return @()
+    }
+
+    $json = ($jsonOutput -join "`n").Trim()
+    if (-not $json) {
+      return @()
+    }
+
+    $parsed = $json | ConvertFrom-Json
+    foreach ($item in @($parsed)) {
+      $rows.Add([pscustomobject]@{
+        Service = ([string]$item.Service).Trim()
+        Image = ([string]$item.Image).Trim()
+        State = ([string]$item.State).Trim()
+        ContainerId = ([string]$item.ID).Trim()
+        Name = ([string]$item.Name).Trim()
+      })
+    }
+  } catch {
+  }
+
+  return $rows.ToArray()
+}
+
+function Get-RunningServiceImage {
+  param(
+    [string]$Service,
+    [object[]]$Rows = @()
+  )
+
+  try {
+    $row = @($Rows | Where-Object { $_.Service -eq $Service } | Select-Object -First 1)
+    if ($row.Count -gt 0) {
+      $state = ([string]$row[0].State).Trim().ToLowerInvariant()
+      $image = ([string]$row[0].Image).Trim()
+      if ($state -eq 'running' -or $state -like 'running*') {
+        if ($image) {
+          return $image
+        }
+
+        $container = ([string]$row[0].ContainerId).Trim()
+        if (-not $container) {
+          $container = ([string]$row[0].Name).Trim()
+        }
+        if ($container) {
+          $inspectedImage = (& docker inspect $container --format '{{.Config.Image}}' 2>$null | Select-Object -First 1)
+          if ($LASTEXITCODE -eq 0) {
+            return ([string]$inspectedImage).Trim()
+          }
+        }
+      }
+      return ''
+    }
+  } catch {
+  }
+
+  return ''
+}
+
 function Get-ImageVersionLines {
+  param([string[]]$RunningServices = @())
+
   $lines = New-Object System.Collections.Generic.List[string]
-  $imageIds = Get-ServiceImageIds -Services $script:Services
+  $rows = Get-ComposeServiceRows
 
   foreach ($service in $script:Services) {
-    $image = $script:ServiceImages[$service]
-    $imageId = Get-ShortImageId -ImageId $imageIds[$service]
     $label = "  {0,-8}: " -f $service
-    $lines.Add("$label$image ($imageId)")
+    $runningImage = Get-RunningServiceImage -Service $service -Rows $rows
+    if ($runningImage) {
+      $lines.Add("$label$runningImage")
+    } elseif ($RunningServices -contains $service) {
+      $lines.Add("$($label)failed to detect")
+    } else {
+      $lines.Add("$($label)stopped")
+    }
   }
 
   return $lines.ToArray()
 }
 
 function Write-ImageVersions {
+  param([string[]]$RunningServices = @())
+
   Write-Host ''
-  Write-Host 'Image versions:' -ForegroundColor Cyan
-  foreach ($line in Get-ImageVersionLines) {
+  Write-Host 'Container images:' -ForegroundColor Cyan
+  foreach ($line in Get-ImageVersionLines -RunningServices $RunningServices) {
     Write-Host $line -ForegroundColor White
   }
 }
@@ -416,9 +863,9 @@ function Write-BackupImageLog {
     "Backup file: $BackupPath",
     "Created: $(Get-Date -Format o)",
     '',
-    'Service image tags and local image IDs at backup time:',
+    'Running container images at backup time:',
     ''
-  ) + (Get-ImageVersionLines)
+  ) + (Get-ImageVersionLines -RunningServices (Get-RunningServices))
 
   try {
     Set-Content -LiteralPath $logPath -Value $content -Encoding ascii
@@ -438,7 +885,7 @@ function Check-Updates {
   Write-Header 'Check For Updates'
   Write-Info 'This compares local image tag IDs before and after docker compose pull.'
   Write-Info 'This may pull newer images into the local Docker cache.'
-  Write-Info 'It does not restart or recreate running services.'
+  Write-Info 'Use the Update menu when you want pulled images applied automatically.'
 
   $before = Get-ServiceImageIds -Services $Services
   $pullArgs = @('pull')
@@ -465,8 +912,8 @@ function Check-Updates {
   if ($updated.Count -eq 0) {
     Write-Success 'Images are already current. No action needed.'
   } else {
-    Write-Warning "Updates were pulled but not applied: $($updated -join ', ')"
-    Write-Warning 'Use the Update menu to recreate containers when ready.'
+    Write-Warning "Updates were pulled: $($updated -join ', ')"
+    Write-Warning 'Use the Update menu to recreate selected containers automatically.'
   }
 
   return $updated.ToArray()
@@ -518,18 +965,19 @@ function Apply-Update {
 
   $isAll = ($Services.Count -eq $script:Services.Count)
   $pullArgs = @('pull')
-  $upArgs = @('up', '-d', '--force-recreate')
+  $upArgs = @('up', '-d', '--pull', 'never', '--force-recreate')
 
   if (-not $isAll) {
     $pullArgs += $Services
     $upArgs += $Services
   }
 
-  Write-Header 'Apply Updates'
+  Write-Header 'Update And Restart'
+  Write-Info 'Pulling selected image(s), then recreating selected container(s) automatically.'
   if ((Invoke-Compose -Arguments $pullArgs) -ne 0) { return }
   if ((Invoke-Compose -Arguments $upArgs) -ne 0) { return }
   [void](Invoke-Compose -Arguments @('ps'))
-  Write-Success 'Selected services were recreated.'
+  Write-Success 'Selected services were pulled and recreated.'
 }
 
 function Start-LocalStack {
@@ -539,11 +987,23 @@ function Start-LocalStack {
   if (-not (Test-StackFiles)) { return }
   if (-not (Test-DockerReady)) { return }
 
+  $isFirstStart = Test-FirstLocalStart
+  if (-not (Test-ServiceImagesAvailable -Services $script:CoreServices -AllowPull:$isFirstStart)) { return }
+
   if (-not (Set-ActiveWebhookUrl -Url (Get-LocalWebhookUrl) -Mode 'localhost')) { return }
 
-  if ((Invoke-Compose -Arguments @('up', '-d', 'postgres')) -ne 0) { return }
+  $postgresArgs = @('up', '-d')
+  if (-not $isFirstStart) {
+    $postgresArgs += @('--pull', 'never')
+  }
+  $postgresArgs += 'postgres'
+
+  if ((Invoke-Compose -Arguments $postgresArgs) -ne 0) { return }
 
   $n8nArgs = @('up', '-d')
+  if (-not $isFirstStart) {
+    $n8nArgs += @('--pull', 'never')
+  }
   if ($ForceRecreateN8n) {
     $n8nArgs += '--force-recreate'
   }
@@ -553,7 +1013,7 @@ function Start-LocalStack {
     [void](Invoke-Compose -Arguments @('ps'))
     Write-Success 'Local n8n stack started.'
     Write-Host ''
-    Write-Host "n8n: $(Get-LocalN8nUrl)" -ForegroundColor Green
+    Write-Host "n8n: $(Get-LocalN8nUrl)" -ForegroundColor DarkYellow
     Write-Host 'For public ngrok webhooks, fill the ngrok values in .env, then use Start ngrok tunnel.' -ForegroundColor Cyan
   }
 }
@@ -575,7 +1035,7 @@ function Start-N8nWithNgrok {
 
   $runningServices = Get-RunningServices
   if ($runningServices -contains 'n8n') {
-    Write-Success 'n8n is already running. It will be recreated so current .env values are applied.'
+    Write-Success 'n8n is already running. It will be recreated so current non-image .env values are applied.'
   } else {
     Write-Info 'n8n is not running yet. It will be started with the tunnel after checks finish.'
   }
@@ -617,16 +1077,25 @@ function Start-NgrokTunnel {
     return
   }
 
+  $isFirstStart = Test-FirstLocalStart
+  if (-not (Test-ServiceImagesAvailable -Services $script:Services -AllowPull:$isFirstStart)) { return }
+
   $publicWebhookUrl = Get-NgrokWebhookUrl -Domain $domain
   if (-not (Set-ActiveWebhookUrl -Url $publicWebhookUrl -Mode 'ngrok')) {
     return
   }
 
-  if ((Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n', 'ngrok')) -eq 0) {
+  $upArgs = @('up', '-d')
+  if (-not $isFirstStart) {
+    $upArgs += @('--pull', 'never')
+  }
+  $upArgs += @('--force-recreate', 'n8n', 'ngrok')
+
+  if ((Invoke-Compose -Arguments $upArgs) -eq 0) {
     [void](Invoke-Compose -Arguments @('ps'))
-    Write-Success 'n8n and ngrok tunnel started. n8n was recreated so .env values are applied.'
+    Write-Success 'n8n and ngrok tunnel started. n8n was recreated so current non-image .env values are applied.'
     Write-Host ''
-    Write-Host "Public URL should be: $publicWebhookUrl" -ForegroundColor Green
+    Write-Host "Public URL should be: $publicWebhookUrl" -ForegroundColor DarkYellow
   }
 }
 
@@ -643,7 +1112,8 @@ function Stop-NgrokTunnel {
 
     if ($wasN8nRunning) {
       Write-Info 'Recreating n8n so WEBHOOK_URL is now local.'
-      [void](Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n'))
+      if (-not (Test-ServiceImagesAvailable -Services @('n8n'))) { return }
+      [void](Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'))
     }
 
     Write-Success 'ngrok tunnel stopped. Your reserved ngrok domain was not deleted or released.'
@@ -662,9 +1132,10 @@ function Restart-N8n {
   Write-Header 'Restart n8n'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
     if (-not (Set-ActiveWebhookUrl -Url (Get-LocalWebhookUrl) -Mode 'localhost')) { return }
-    Write-Info 'Recreating only the n8n app container so current .env values are applied.'
+    Write-Info 'Recreating only the n8n app container so current non-image .env values are applied.'
     Write-Info 'Postgres data and n8n files stay in Docker volumes.'
-    [void](Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n'))
+    if (-not (Test-ServiceImagesAvailable -Services @('n8n'))) { return }
+    [void](Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'))
     [void](Invoke-Compose -Arguments @('ps'))
   }
 }
@@ -674,7 +1145,8 @@ function Show-Status {
   Write-Info 'Shows service state, health, container names, and ports.'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
     [void](Invoke-Compose -Arguments @('ps'))
-    Write-ImageVersions
+    $runningServices = Get-RunningServices
+    Write-ImageVersions -RunningServices $runningServices
   }
 }
 
@@ -753,21 +1225,7 @@ function Show-UpdateMenu {
   param([switch]$StartNgrokAfter)
 
   Write-Header 'Update'
-  Write-Info 'Checking for updates first. Selection opens only after this check finishes.'
-  $updated = Check-Updates -Services $script:Services
-
-  if (-not $updated -or $updated.Count -eq 0) {
-    Write-Success 'No service image updates were detected.'
-    if ($StartNgrokAfter) {
-      Write-Info 'Continuing to start n8n with ngrok tunnel.'
-      Start-N8nWithNgrok
-    }
-    return
-  }
-
-  Write-Host ''
-  Write-Host "Updates detected: $($updated -join ', ')" -ForegroundColor Yellow
-  Write-Host ''
+  Write-Info 'Choose what to update. The launcher pulls images, then recreates selected containers automatically.'
   Write-Host 'Choose what to update:' -ForegroundColor Cyan
   Write-Host '  1. All services'
   Write-Host '  2. n8n only'
@@ -777,17 +1235,23 @@ function Show-UpdateMenu {
   Write-Host ''
 
   $choice = Read-Host 'Enter a number'
+  $selection = @()
   switch ($choice) {
-    '1' { Apply-Update -Services $script:Services }
-    '2' { Apply-Update -Services @('n8n') }
-    '3' { Apply-Update -Services @('postgres') }
-    '4' { Apply-Update -Services @('ngrok') }
-    '5' { Write-Warning 'Update cancelled.' }
+    '1' { $selection = $script:Services }
+    '2' { $selection = @('n8n') }
+    '3' { $selection = @('postgres') }
+    '4' { $selection = @('ngrok') }
+    '5' {
+      Write-Warning 'Update cancelled.'
+      return
+    }
     default {
       Write-Warning 'Choose a number from 1 to 5.'
       return
     }
   }
+
+  Apply-Update -Services $selection
 
   if ($StartNgrokAfter) {
     Start-N8nWithNgrok
@@ -839,7 +1303,7 @@ function Backup-Postgres {
     Write-Success "Backup written to: $backupPath"
     $imageLogPath = Write-BackupImageLog -BackupPath $backupPath
     if ($imageLogPath) {
-      Write-Success "Image versions written to: $imageLogPath"
+      Write-Success "Container image log written to: $imageLogPath"
     }
     Write-Success "Backup folder: $backupDir"
     return $true
@@ -881,14 +1345,14 @@ function Show-CommandList {
   Write-Host ''
   Write-Host 'Use the numbered menu options for normal work:' -ForegroundColor Cyan
   Write-CommandListItem -Number '1' -Name 'Start n8n' -Description 'Starts local n8n, or starts n8n with ngrok.'
-  Write-CommandListItem -Number '2' -Name 'Restart n8n' -Description 'Recreates only the n8n app container so .env changes are applied.'
+  Write-CommandListItem -Number '2' -Name 'Restart n8n' -Description 'Recreates only the n8n app container for non-image .env changes.'
   Write-CommandListItem -Number '3' -Name 'Stop n8n' -Description 'Stops ngrok only, or stops the local stack.'
-  Write-CommandListItem -Number '4' -Name 'Update' -Description 'Checks for image updates before applying them.'
+  Write-CommandListItem -Number '4' -Name 'Update' -Description 'Pulls images and recreates selected containers automatically.'
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state, health, container names, and ports.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
   Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a timestamped backup folder under .\backups.'
   Write-Host ''
-  Write-Host 'Updates are user-approved. Pulling images does not recreate or restart containers until you choose an update action.' -ForegroundColor Yellow
+  Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
 }
 
 function Show-LaunchStatus {
@@ -936,15 +1400,15 @@ function Show-LaunchStatus {
     if ($webhookUrl) {
       $webhookLabel = "  {0,-22}: " -f 'active WEBHOOK_URL'
       Write-Host $webhookLabel -NoNewline -ForegroundColor DarkCyan
-      Write-Host $webhookUrl -ForegroundColor White
+      Write-Host $webhookUrl -ForegroundColor DarkYellow
     }
 
-    Write-ImageVersions
+    Write-ImageVersions -RunningServices $runningServices
 
     if (($runningServices -notcontains 'ngrok') -and $webhookUrl -and $webhookUrl -ne $expectedWebhookUrl) {
       Write-Host ''
-      Write-Warning 'WEBHOOK_URL is public while ngrok is stopped.'
-      Write-Warning 'The local editor still opens, but public webhook and OAuth links need ngrok running.'
+      Write-Warning 'WEBHOOK_URL is still using ngrok, but ngrok is stopped.'
+      Write-Warning 'Local n8n still works. Public webhooks and OAuth callbacks will not.'
     }
   }
 }
