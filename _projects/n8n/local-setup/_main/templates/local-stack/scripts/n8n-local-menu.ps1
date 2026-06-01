@@ -118,17 +118,12 @@ function Resolve-RestoreEnvFile {
   }
 
   $candidateEnvPaths = New-Object System.Collections.Generic.List[string]
-  $explicitComposeFile = Get-MenuArgumentValue -Name 'compose-file'
-  if ($explicitComposeFile) {
-    $composeFiles = @(Resolve-LocalPath -Path $explicitComposeFile)
-  } else {
-    $composeFiles = @(
-      (Join-Path $script:StackRoot 'docker-compose.yml'),
-      (Join-Path $script:StackRoot 'docker-compose.yaml'),
-      (Join-Path $script:StackRoot 'compose.yml'),
-      (Join-Path $script:StackRoot 'compose.yaml')
-    )
-  }
+  $composeFiles = @(
+    (Join-Path $script:StackRoot 'docker-compose.yml'),
+    (Join-Path $script:StackRoot 'docker-compose.yaml'),
+    (Join-Path $script:StackRoot 'compose.yml'),
+    (Join-Path $script:StackRoot 'compose.yaml')
+  )
 
   foreach ($composeFile in $composeFiles) {
     if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) { continue }
@@ -1052,11 +1047,10 @@ function Write-ImageVersions {
   }
 }
 
-function Write-BackupImageLog {
+function Get-BackupImageLogContent {
   param([string]$BackupPath)
 
-  $logPath = Join-Path (Split-Path -Parent $BackupPath) 'image-versions.txt'
-  $content = @(
+  return @(
     '# n8n local backup image log',
     "Backup file: $BackupPath",
     "Created: $(Get-Date -Format o)",
@@ -1064,14 +1058,6 @@ function Write-BackupImageLog {
     'Running container images at backup time:',
     ''
   ) + (Get-ImageVersionLines -RunningServices (Get-RunningServices))
-
-  try {
-    Set-Content -LiteralPath $logPath -Value $content -Encoding ascii
-    return $logPath
-  } catch {
-    Write-Warning "Backup image log could not be written: $($_.Exception.Message)"
-    return ''
-  }
 }
 
 function Check-Updates {
@@ -1524,22 +1510,27 @@ function Write-RestoreManifest {
 function Write-RestoreReadme {
   param(
     [string]$BackupDir,
-    [string]$BackupType
+    [string]$BackupType,
+    [string[]]$ImageLogContent = @()
   )
 
-  $readmePath = Join-Path $BackupDir 'README-RESTORE.txt'
+  $readmePath = Join-Path $BackupDir 'HOW TO USE THIS RESTORE FOLDER.txt'
   $content = @(
-    'n8n local restore package',
+    'How to use this restore folder',
     '',
     "Backup type: $BackupType",
     '',
-    'Use Advanced / Recovery: Restore local n8n from backup in _n8n-local.cmd.',
-    'This is database and environment recovery, not normal workflow JSON import.',
-    'The restore flow backs up current local Postgres data and .env first.',
-    'Restore replaces the current local n8n database state.',
-    'Use the N8N_ENCRYPTION_KEY in SECRET-DO-NOT-COMMIT.env for saved credentials.',
+    'Before restoring, make sure SECRET-DO-NOT-COMMIT.env is in this folder if saved credentials must decrypt.',
+    'Open _n8n-local.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to database.sql.',
+    'Type PROCEED when asked.',
+    'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.',
     'Do not commit this folder, backup files, or SECRET-DO-NOT-COMMIT.env.'
   )
+
+  if ($ImageLogContent.Count -gt 0) {
+    $content += @('', 'Image/version context:', '')
+    $content += $ImageLogContent
+  }
 
   Set-Content -LiteralPath $readmePath -Value $content -Encoding ascii
   return $readmePath
@@ -1573,19 +1564,16 @@ function Backup-Postgres {
   $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs 1> $backupPath }
   if ($exitCode -eq 0) {
     Write-Success "Backup written to: $backupPath"
-    $imageLogPath = Write-BackupImageLog -BackupPath $backupPath
-    if ($imageLogPath) {
-      Write-Success "Container image log written to: $imageLogPath"
-    }
+    $imageLogContent = Get-BackupImageLogContent -BackupPath $backupPath
     $secretPath = Write-BackupSecretFile -BackupDir $backupDir -EnvPath $EnvPath
-    $files = @('database.sql', 'image-versions.txt', 'README-RESTORE.txt', 'restore-manifest.json')
+    $files = @('database.sql', 'HOW TO USE THIS RESTORE FOLDER.txt', 'restore-manifest.json')
     if ($secretPath) {
       $files += 'SECRET-DO-NOT-COMMIT.env'
     }
     $manifestPath = Write-RestoreManifest -BackupDir $backupDir -BackupType 'postgres-sql' -Files $files
-    $readmePath = Write-RestoreReadme -BackupDir $backupDir -BackupType 'postgres-sql'
+    $readmePath = Write-RestoreReadme -BackupDir $backupDir -BackupType 'postgres-sql' -ImageLogContent $imageLogContent
     Write-Success "Restore manifest written to: $manifestPath"
-    Write-Success "Restore readme written to: $readmePath"
+    Write-Success "Restore instructions written to: $readmePath"
     Write-Success "Backup folder: $backupDir"
     return $true
   } else {
@@ -1651,16 +1639,6 @@ function Get-ZipEntryNames {
   }
 }
 
-function Copy-RestoreEntitiesZipToStaging {
-  param([string]$ZipPath)
-
-  $stagingDir = New-RestoreStagingDirectory
-  $targetPath = Join-Path $stagingDir 'entities.zip'
-  Copy-Item -LiteralPath $ZipPath -Destination $targetPath -Force
-  Write-Info "Backup zip staged under: $stagingDir"
-  return $stagingDir
-}
-
 function Expand-GzipFileToRestoreStaging {
   param([string]$SourcePath)
 
@@ -1677,6 +1655,99 @@ function Expand-GzipFileToRestoreStaging {
     $inputStream.Dispose()
   }
   return $targetPath
+}
+
+function Test-PathInsideDirectory {
+  param(
+    [string]$Path,
+    [string]$Directory
+  )
+
+  $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+  $resolvedDirectory = [System.IO.Path]::GetFullPath($Directory)
+  if (-not $resolvedDirectory.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+    $resolvedDirectory = $resolvedDirectory + [System.IO.Path]::DirectorySeparatorChar
+  }
+  return $resolvedPath.StartsWith($resolvedDirectory, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Find-RestoreEntityDirectory {
+  param([string]$Root)
+
+  $entityFiles = @(
+    Get-ChildItem -LiteralPath $Root -File -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { Test-RestoreEntityFileName -Name $_.Name }
+  )
+
+  if ($entityFiles.Count -eq 0) {
+    return ''
+  }
+
+  $bestMatch = @(
+    $entityFiles |
+      Group-Object -Property DirectoryName |
+      Sort-Object -Property Count -Descending |
+      Select-Object -First 1
+  )
+
+  if ($bestMatch.Count -eq 0) {
+    return ''
+  }
+
+  return $bestMatch[0].Name
+}
+
+function Expand-RestoreEntitiesZipToStaging {
+  param([string]$ZipPath)
+
+  $stagingDir = New-RestoreStagingDirectory
+  $stagingRoot = [System.IO.Path]::GetFullPath($stagingDir)
+
+  Enable-ZipSupport
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    foreach ($entry in $zip.Entries) {
+      if (-not $entry.FullName) { continue }
+      $entryName = ($entry.FullName -replace '\\', '/')
+      if ($entryName.StartsWith('/') -or $entryName -match '^[A-Za-z]:') {
+        return [pscustomobject]@{ Error = 'Zip restore package contains an unsafe absolute path entry.' }
+      }
+
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($stagingRoot, $entryName))
+      if (-not (Test-PathInsideDirectory -Path $targetPath -Directory $stagingRoot)) {
+        return [pscustomobject]@{ Error = 'Zip restore package contains an unsafe path traversal entry.' }
+      }
+    }
+
+    foreach ($entry in $zip.Entries) {
+      if (-not $entry.FullName) { continue }
+      $entryName = ($entry.FullName -replace '\\', '/')
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($stagingRoot, $entryName))
+      if ($entryName.EndsWith('/')) {
+        New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+        continue
+      }
+
+      $targetDir = Split-Path -Parent $targetPath
+      if ($targetDir) {
+        New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+      }
+      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $targetPath, $true)
+    }
+  } finally {
+    $zip.Dispose()
+  }
+
+  $entityDir = Find-RestoreEntityDirectory -Root $stagingDir
+  if (-not $entityDir) {
+    return [pscustomobject]@{ Error = 'Zip restore package did not contain n8n export:entities output files.' }
+  }
+
+  Write-Info "Backup zip extracted under: $stagingDir"
+  return [pscustomobject]@{
+    StagingPath = $stagingDir
+    EntityDir = $entityDir
+  }
 }
 
 function Get-RestoreBackupType {
@@ -1721,13 +1792,16 @@ function Prepare-RestoreBackupInput {
 
   $detected = Get-RestoreBackupType -Path $Path
   if ($detected.NeedsStaging) {
-    $stagingDir = Copy-RestoreEntitiesZipToStaging -ZipPath $detected.InputPath
+    $expanded = Expand-RestoreEntitiesZipToStaging -ZipPath $detected.InputPath
+    if ($expanded.Error) {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported zip'; Reason = $expanded.Error }
+    }
     $stagingDetected = [pscustomobject]@{
       Type = 'n8n-entities'
       Label = 'n8n entities backup'
-      InputDir = $stagingDir
+      InputDir = $expanded.EntityDir
     }
-    $stagingDetected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $stagingDir -Force
+    $stagingDetected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $expanded.StagingPath -Force
     $detected = $stagingDetected
   }
   return $detected
@@ -1923,6 +1997,11 @@ function Restore-LocalN8nFromBackupMenu {
     Write-ErrorMessage $detected.Reason
     return
   }
+  $detected = Prepare-RestoreBackupInput -Path $backupPath
+  if ($detected.Type -eq 'unsupported') {
+    Write-ErrorMessage $detected.Reason
+    return
+  }
 
   $envResolution = Resolve-RestoreEnvFile
   if ($envResolution.Error) {
@@ -1943,8 +2022,6 @@ function Restore-LocalN8nFromBackupMenu {
     }
     $runningServices = @()
   }
-
-  $detected = Prepare-RestoreBackupInput -Path $backupPath
 
   $backupEncryptionKey = Find-RestoreBackupSecret -Path $backupPath
   $secretSearchPath = $backupPath

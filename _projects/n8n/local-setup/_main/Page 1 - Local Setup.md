@@ -570,8 +570,7 @@ The backup package includes:
 
 - `database.sql`.
 - `restore-manifest.json`.
-- `README-RESTORE.txt`.
-- `image-versions.txt`.
+- `HOW TO USE THIS RESTORE FOLDER.txt`, including restore steps and captured image/version context.
 - `SECRET-DO-NOT-COMMIT.env` containing only the restore-critical `N8N_ENCRYPTION_KEY`, when the key is present in `.env`.
 
 Keep that folder local and private. Do not commit backup packages or `SECRET-DO-NOT-COMMIT.env`.
@@ -582,11 +581,11 @@ Supported backup types:
 
 - Allowed restore backup files:
   - `.sql` Postgres SQL dump.
-  - `.zip` n8n entities export package.
+  - `.zip` n8n entities export package containing `n8n export:entities` output files.
 
 - No folder input is accepted for restore. Use one of the two supported file types (`.sql` or `.zip`).
 
-For `.zip` restores, the launcher stages the selected file as `entities.zip` for `n8n import:entities`; it does not restore from an extracted folder of JSONL files.
+For `.zip` restores, the launcher safely extracts the selected package into local staging, verifies extracted paths stay under the staging folder, locates the extracted n8n entity output files, and then runs `n8n import:entities` against that extracted entity directory. A `.zip` that does not contain n8n `export:entities` output files is not supported.
 
 Restore replaces the current local n8n database state. Current local data and `.env` are backed up first. The current local Compose Postgres connection settings are used as the restore target, so Postgres passwords from the source backup are not normally needed.
 
