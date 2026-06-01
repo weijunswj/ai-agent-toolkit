@@ -5,9 +5,9 @@
   "title": "UI/UX Pro Max Design",
   "module_path": "_projects/design/ui-ux-pro-max",
   "main_path": "_projects/design/ui-ux-pro-max/_main",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "version_policy": "semver",
-  "version_notes": "Clarifies that the UI/UX skill is instruction-first and includes an optional local-only design-system generator with approval-gated execution and output writes.",
+  "version_notes": "Third-party-attributed toolkit adaptation. Upstream repo, ref, commit, file pins, attribution, and manual-review update policy are tracked in SOURCE-LOCK.json.",
   "outputs": [
     {
       "kind": "copy",
