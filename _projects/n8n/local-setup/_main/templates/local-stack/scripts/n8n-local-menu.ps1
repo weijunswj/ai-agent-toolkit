@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
+$script:MenuArguments = @($args)
 $script:StackRoot = (Get-Location).Path
 $script:CoreServices = @('postgres', 'n8n')
 $script:Services = @('n8n', 'postgres', 'ngrok')
@@ -43,6 +44,125 @@ function Write-Warning {
 function Write-ErrorMessage {
   param([string]$Message)
   Write-Host "[ERR]  $Message" -ForegroundColor Red
+}
+
+function Get-MenuArgumentValue {
+  param([string]$Name)
+
+  $longName = "--$Name"
+  $dashName = "-$Name"
+  for ($index = 0; $index -lt $script:MenuArguments.Count; $index += 1) {
+    $value = [string]$script:MenuArguments[$index]
+    if ($value -eq $longName -or $value -eq $dashName) {
+      if (($index + 1) -lt $script:MenuArguments.Count) {
+        return ([string]$script:MenuArguments[$index + 1]).Trim()
+      }
+      return ''
+    }
+
+    if ($value.StartsWith("$longName=", [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $value.Substring($longName.Length + 1).Trim()
+    }
+
+    if ($value.StartsWith("$dashName=", [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $value.Substring($dashName.Length + 1).Trim()
+    }
+  }
+
+  return ''
+}
+
+function Resolve-LocalPath {
+  param([string]$Path)
+
+  $value = ([string]$Path).Trim().Trim('"')
+  if (-not $value) {
+    return ''
+  }
+
+  return [System.IO.Path]::GetFullPath($value)
+}
+
+function Get-ComposeGlobalArguments {
+  $composeGlobalArgs = @()
+  $explicitEnvFile = Get-MenuArgumentValue -Name 'env-file'
+  if ($explicitEnvFile) {
+    $composeGlobalArgs += @('--env-file', (Resolve-LocalPath -Path $explicitEnvFile))
+  }
+  return $composeGlobalArgs
+}
+
+function Resolve-RestoreEnvFile {
+  $explicitEnvFile = Get-MenuArgumentValue -Name 'env-file'
+  if ($explicitEnvFile) {
+    $envPath = Resolve-LocalPath -Path $explicitEnvFile
+    if (Test-Path -LiteralPath $envPath -PathType Leaf) {
+      return [pscustomobject]@{ Path = $envPath; Source = 'explicit --env-file' }
+    }
+    return [pscustomobject]@{ Error = "No .env file found at --env-file path. Rerun with --env-file <path>." }
+  }
+
+  $explicitStackDir = Get-MenuArgumentValue -Name 'stack-dir'
+  if ($explicitStackDir) {
+    $stackDir = Resolve-LocalPath -Path $explicitStackDir
+    $envPath = Join-Path $stackDir '.env'
+    if (Test-Path -LiteralPath $envPath -PathType Leaf) {
+      return [pscustomobject]@{ Path = $envPath; Source = 'explicit --stack-dir' }
+    }
+    return [pscustomobject]@{ Error = "No .env file found under --stack-dir. Rerun with --env-file <path>." }
+  }
+
+  $knownEnvPath = Join-Path $script:StackRoot '.env'
+  if (Test-Path -LiteralPath $knownEnvPath -PathType Leaf) {
+    return [pscustomobject]@{ Path = ([System.IO.Path]::GetFullPath($knownEnvPath)); Source = 'launcher stack directory' }
+  }
+
+  $candidateEnvPaths = New-Object System.Collections.Generic.List[string]
+  $explicitComposeFile = Get-MenuArgumentValue -Name 'compose-file'
+  if ($explicitComposeFile) {
+    $composeFiles = @(Resolve-LocalPath -Path $explicitComposeFile)
+  } else {
+    $composeFiles = @(
+      (Join-Path $script:StackRoot 'docker-compose.yml'),
+      (Join-Path $script:StackRoot 'docker-compose.yaml'),
+      (Join-Path $script:StackRoot 'compose.yml'),
+      (Join-Path $script:StackRoot 'compose.yaml')
+    )
+  }
+
+  foreach ($composeFile in $composeFiles) {
+    if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) { continue }
+    $candidate = Join-Path (Split-Path -Parent $composeFile) '.env'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      $resolved = [System.IO.Path]::GetFullPath($candidate)
+      if (-not ($candidateEnvPaths -contains $resolved)) {
+        $candidateEnvPaths.Add($resolved)
+      }
+    }
+  }
+
+  if ($candidateEnvPaths.Count -eq 1) {
+    return [pscustomobject]@{ Path = $candidateEnvPaths[0]; Source = 'single .env beside selected local Docker Compose file' }
+  }
+
+  if ($candidateEnvPaths.Count -gt 1) {
+    return [pscustomobject]@{ Error = 'More than one plausible .env file was found. Rerun with --env-file <path>.' }
+  }
+
+  return [pscustomobject]@{ Error = 'No .env file was found. Rerun with --env-file <path>.' }
+}
+
+function Initialize-MenuRuntime {
+  $explicitStackDir = Get-MenuArgumentValue -Name 'stack-dir'
+  if (-not $explicitStackDir) {
+    return
+  }
+
+  $stackDir = Resolve-LocalPath -Path $explicitStackDir
+  if (Test-Path -LiteralPath $stackDir -PathType Container) {
+    $script:StackRoot = $stackDir
+    Set-Location -LiteralPath $script:StackRoot
+  }
 }
 
 function Clear-MenuScreen {
@@ -101,9 +221,10 @@ function Invoke-NativeCommand {
 function Invoke-Compose {
   param([string[]]$Arguments)
 
-  $display = "docker compose $($Arguments -join ' ')"
+  $allArguments = @((Get-ComposeGlobalArguments) + $Arguments)
+  $display = "docker compose $($allArguments -join ' ')"
   Write-Info $display
-  $exitCode = Invoke-NativeCommand -Command { & docker compose @Arguments }
+  $exitCode = Invoke-NativeCommand -Command { & docker compose @allArguments }
   if ($exitCode -ne 0) {
     Write-ErrorMessage "Command failed with exit code $exitCode."
   }
@@ -111,8 +232,14 @@ function Invoke-Compose {
 }
 
 function Test-StackFiles {
+  param([string]$EnvPath = '')
+
   $composeExists = Test-Path -LiteralPath (Join-Path $script:StackRoot 'docker-compose.yml')
-  $envExists = Test-Path -LiteralPath (Join-Path $script:StackRoot '.env')
+  $envPath = $EnvPath
+  if (-not $envPath) {
+    $envPath = Join-Path $script:StackRoot '.env'
+  }
+  $envExists = Test-Path -LiteralPath $envPath
   $envExampleExists = Test-Path -LiteralPath (Join-Path $script:StackRoot '.env.example')
   $configValid = $true
 
@@ -129,7 +256,7 @@ function Test-StackFiles {
     }
   }
 
-  if ($envExists -and -not (Test-LocalPortConfig)) {
+  if ($envExists -and -not (Test-LocalPortConfig -EnvPath $envPath)) {
     $configValid = $false
   }
 
@@ -175,11 +302,17 @@ function Test-DockerReady {
 }
 
 function Get-RunningServices {
+  param([string]$EnvPath = '')
+
   if (-not (Test-Path -LiteralPath (Join-Path $script:StackRoot 'docker-compose.yml'))) {
     return @()
   }
 
-  if (-not (Test-Path -LiteralPath (Join-Path $script:StackRoot '.env'))) {
+  $envPathToCheck = $EnvPath
+  if (-not $envPathToCheck) {
+    $envPathToCheck = Join-Path $script:StackRoot '.env'
+  }
+  if (-not (Test-Path -LiteralPath $envPathToCheck)) {
     return @()
   }
 
@@ -193,7 +326,8 @@ function Get-RunningServices {
       return @()
     }
 
-    $services = @(& docker compose ps --services --filter 'status=running' 2>$null)
+    $composeArgs = @((Get-ComposeGlobalArguments) + @('ps', '--services', '--filter', 'status=running'))
+    $services = @(& docker compose @composeArgs 2>$null)
     if ($LASTEXITCODE -ne 0) {
       return @()
     }
@@ -260,27 +394,89 @@ function Write-ServiceStatus {
 function Get-EnvValue {
   param(
     [string]$Name,
-    [string]$Default = ''
+    [string]$Default = '',
+    [string]$EnvPath = ''
   )
 
-  $envPath = Join-Path $script:StackRoot '.env'
+  $envPath = $EnvPath
+  if (-not $envPath) {
+    $envPath = Join-Path $script:StackRoot '.env'
+  }
   if (-not (Test-Path -LiteralPath $envPath)) {
     return $Default
   }
 
+  $value = Read-EnvFileValue -Path $envPath -Name $Name
+  if ($value) {
+    return $value
+  }
+
+  return $Default
+}
+
+function Read-EnvTextValue {
+  param(
+    [string]$Text,
+    [string]$Name
+  )
+
   $pattern = "^\s*$([regex]::Escape($Name))\s*=\s*(.*)\s*$"
-  $result = $Default
-  foreach ($line in Get-Content -LiteralPath $envPath) {
+  foreach ($line in (([string]$Text) -split "\r?\n")) {
     if ($line -match $pattern) {
       $value = $Matches[1].Trim()
       $value = $value.Trim('"').Trim("'")
       if ($value.Length -gt 0) {
-        $result = $value
+        return $value
       }
     }
   }
 
-  return $result
+  return ''
+}
+
+function Read-EnvFileValue {
+  param(
+    [string]$Path,
+    [string]$Name
+  )
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return ''
+  }
+
+  return (Read-EnvTextValue -Text (Get-Content -LiteralPath $Path -Raw) -Name $Name)
+}
+
+function Set-EnvFileValue {
+  param(
+    [string]$Path,
+    [string]$Name,
+    [string]$Value
+  )
+
+  $lines = New-Object System.Collections.Generic.List[string]
+  if (Test-Path -LiteralPath $Path) {
+    foreach ($line in Get-Content -LiteralPath $Path) {
+      $lines.Add($line)
+    }
+  }
+
+  $pattern = "^\s*$([regex]::Escape($Name))\s*="
+  $replacement = "$Name=$Value"
+  $updated = $false
+  for ($index = 0; $index -lt $lines.Count; $index += 1) {
+    if ($lines[$index] -match $pattern) {
+      $lines[$index] = $replacement
+      $updated = $true
+      break
+    }
+  }
+
+  if (-not $updated) {
+    $lines.Add($replacement)
+  }
+
+  Set-Content -LiteralPath $Path -Value $lines.ToArray() -Encoding ascii
 }
 
 function Get-ImageVersionFromImageRef {
@@ -574,7 +770,9 @@ function Set-ActiveWebhookUrl {
 }
 
 function Test-LocalPortConfig {
-  $port = Get-EnvValue -Name 'N8N_LOCAL_PORT' -Default '5678'
+  param([string]$EnvPath = '')
+
+  $port = Get-EnvValue -Name 'N8N_LOCAL_PORT' -Default '5678' -EnvPath $EnvPath
   $portNumber = 0
   if (-not [int]::TryParse($port, [ref]$portNumber) -or $portNumber -lt 1 -or $portNumber -gt 65535) {
     Write-ErrorMessage 'N8N_LOCAL_PORT must be a number from 1 to 65535, like 5678 or 5679.'
@@ -1281,15 +1479,84 @@ function Open-N8n {
   Write-Success 'Opened local n8n in your browser.'
 }
 
+function Write-BackupSecretFile {
+  param(
+    [string]$BackupDir,
+    [string]$EnvPath = ''
+  )
+
+  $encryptionKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -EnvPath $EnvPath
+  if (-not $encryptionKey -or $encryptionKey -eq 'replace-with-32-random-character') {
+    Write-Warning 'N8N_ENCRYPTION_KEY is missing or still uses the placeholder. Saved credentials may not decrypt after restore.'
+    return ''
+  }
+
+  $secretPath = Join-Path $BackupDir 'SECRET-DO-NOT-COMMIT.env'
+  Set-Content -LiteralPath $secretPath -Value @("N8N_ENCRYPTION_KEY=$encryptionKey") -Encoding ascii
+  Write-Success "Restore secret file written to: $secretPath"
+  return $secretPath
+}
+
+function Write-RestoreManifest {
+  param(
+    [string]$BackupDir,
+    [string]$BackupType,
+    [string[]]$Files
+  )
+
+  $manifestPath = Join-Path $BackupDir 'restore-manifest.json'
+  $manifest = [ordered]@{
+    backupType = $BackupType
+    createdAt = (Get-Date -Format o)
+    localOnly = $true
+    files = $Files
+    notes = @(
+      'Use the current local Compose Postgres connection settings as the restore target.',
+      'Use SECRET-DO-NOT-COMMIT.env for the backup N8N_ENCRYPTION_KEY.',
+      'Restore replaces the current local n8n database state.'
+    )
+  }
+
+  $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding ascii
+  return $manifestPath
+}
+
+function Write-RestoreReadme {
+  param(
+    [string]$BackupDir,
+    [string]$BackupType
+  )
+
+  $readmePath = Join-Path $BackupDir 'README-RESTORE.txt'
+  $content = @(
+    'n8n local restore package',
+    '',
+    "Backup type: $BackupType",
+    '',
+    'Use Advanced / Recovery: Restore local n8n from backup in _n8n-local.cmd.',
+    'This is database and environment recovery, not normal workflow JSON import.',
+    'The restore flow backs up current local Postgres data and .env first.',
+    'Restore replaces the current local n8n database state.',
+    'Use the N8N_ENCRYPTION_KEY in SECRET-DO-NOT-COMMIT.env for saved credentials.',
+    'Do not commit this folder, backup files, or SECRET-DO-NOT-COMMIT.env.'
+  )
+
+  Set-Content -LiteralPath $readmePath -Value $content -Encoding ascii
+  return $readmePath
+}
+
 function Backup-Postgres {
-  param([switch]$Required)
+  param(
+    [switch]$Required,
+    [string]$EnvPath = ''
+  )
 
   Write-Header 'Backup Postgres Database'
-  if (-not (Test-StackFiles)) { return $false }
+  if (-not (Test-StackFiles -EnvPath $EnvPath)) { return $false }
   if (-not (Test-DockerReady)) { return $false }
 
-  $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Default 'n8n'
-  $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n'
+  $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Default 'n8n' -EnvPath $EnvPath
+  $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n' -EnvPath $EnvPath
   $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
   $backupRoot = Join-Path $script:StackRoot 'backups'
   $backupDir = Join-Path $backupRoot "n8n-postgres-$timestamp"
@@ -1298,13 +1565,23 @@ function Backup-Postgres {
   New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 
   Write-Info 'Running pg_dump from the postgres service.'
-  $exitCode = Invoke-NativeCommand -Command { & docker compose exec -T postgres pg_dump -U $postgresUser $postgresDb 1> $backupPath }
+  $composeArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'pg_dump', '-U', $postgresUser, $postgresDb))
+  $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs 1> $backupPath }
   if ($exitCode -eq 0) {
     Write-Success "Backup written to: $backupPath"
     $imageLogPath = Write-BackupImageLog -BackupPath $backupPath
     if ($imageLogPath) {
       Write-Success "Container image log written to: $imageLogPath"
     }
+    $secretPath = Write-BackupSecretFile -BackupDir $backupDir -EnvPath $EnvPath
+    $files = @('database.sql', 'image-versions.txt', 'README-RESTORE.txt', 'restore-manifest.json')
+    if ($secretPath) {
+      $files += 'SECRET-DO-NOT-COMMIT.env'
+    }
+    $manifestPath = Write-RestoreManifest -BackupDir $backupDir -BackupType 'postgres-sql' -Files $files
+    $readmePath = Write-RestoreReadme -BackupDir $backupDir -BackupType 'postgres-sql'
+    Write-Success "Restore manifest written to: $manifestPath"
+    Write-Success "Restore readme written to: $readmePath"
     Write-Success "Backup folder: $backupDir"
     return $true
   } else {
@@ -1313,6 +1590,473 @@ function Backup-Postgres {
       Write-ErrorMessage 'Required backup failed. No update was applied.'
     }
     return $false
+  }
+}
+
+function Get-RestoreEntityFileNames {
+  return @(
+    'workflowentity.jsonl',
+    'credentialsentity.jsonl',
+    'settings.jsonl',
+    'project.jsonl',
+    'user.jsonl',
+    'tagentity.jsonl',
+    'workflowtagmapping.jsonl',
+    'sharedworkflow.jsonl',
+    'sharedcredentials.jsonl'
+  )
+}
+
+function Test-RestoreEntityFileName {
+  param([string]$Name)
+
+  $leaf = (Split-Path -Leaf ([string]$Name)).ToLowerInvariant()
+  return ((Get-RestoreEntityFileNames) -contains $leaf)
+}
+
+function New-RestoreStagingDirectory {
+  $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $importRoot = Join-Path $script:StackRoot 'import'
+  $stagingDir = Join-Path $importRoot "restore-$timestamp"
+  New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
+  return $stagingDir
+}
+
+function Enable-ZipSupport {
+  try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+  } catch {
+  }
+}
+
+function Get-ZipEntryNames {
+  param([string]$ZipPath)
+
+  Enable-ZipSupport
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in $zip.Entries) {
+      if ($entry.FullName) {
+        $names.Add(($entry.FullName -replace '\\', '/'))
+      }
+    }
+    return $names.ToArray()
+  } finally {
+    $zip.Dispose()
+  }
+}
+
+function Expand-RestoreZipToStaging {
+  param([string]$ZipPath)
+
+  Enable-ZipSupport
+  $stagingDir = New-RestoreStagingDirectory
+  $root = [System.IO.Path]::GetFullPath($stagingDir)
+  $rootWithSeparator = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    foreach ($entry in $zip.Entries) {
+      if (-not $entry.FullName) { continue }
+      $target = [System.IO.Path]::GetFullPath((Join-Path $stagingDir $entry.FullName))
+      if (-not ($target.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or $target.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase))) {
+        throw "Zip entry escapes restore staging folder: $($entry.FullName)"
+      }
+
+      if ($entry.FullName.EndsWith('/')) {
+        New-Item -ItemType Directory -Force -Path $target | Out-Null
+        continue
+      }
+
+      $parent = Split-Path -Parent $target
+      if ($parent) {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+      }
+
+      $inputStream = $entry.Open()
+      $outputStream = [System.IO.File]::Create($target)
+      try {
+        $inputStream.CopyTo($outputStream)
+      } finally {
+        $outputStream.Dispose()
+        $inputStream.Dispose()
+      }
+    }
+  } finally {
+    $zip.Dispose()
+  }
+
+  Write-Info "Backup zip staged under: $stagingDir"
+  return $stagingDir
+}
+
+function Expand-GzipFileToRestoreStaging {
+  param([string]$SourcePath)
+
+  $stagingDir = New-RestoreStagingDirectory
+  $targetPath = Join-Path $stagingDir ((Split-Path -Leaf $SourcePath) -replace '\.gz$', '')
+  $inputStream = [System.IO.File]::OpenRead($SourcePath)
+  $gzipStream = New-Object System.IO.Compression.GzipStream($inputStream, [System.IO.Compression.CompressionMode]::Decompress)
+  $outputStream = [System.IO.File]::Create($targetPath)
+  try {
+    $gzipStream.CopyTo($outputStream)
+  } finally {
+    $outputStream.Dispose()
+    $gzipStream.Dispose()
+    $inputStream.Dispose()
+  }
+  return $targetPath
+}
+
+function Get-RestoreBackupType {
+  param([string]$Path)
+
+  $inputPath = ([string]$Path).Trim().Trim('"')
+  if (-not $inputPath) {
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'missing input'; Reason = 'No backup path was provided.' }
+  }
+
+  if (-not (Test-Path -LiteralPath $inputPath)) {
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'missing input'; Reason = 'Backup path does not exist.' }
+  }
+
+  $item = Get-Item -LiteralPath $inputPath
+  if (-not $item.PSIsContainer) {
+    $name = $item.Name.ToLowerInvariant()
+    if ($name -match '\.sql$') {
+      return [pscustomobject]@{ Type = 'postgres-sql'; Label = 'Postgres SQL backup'; InputPath = $item.FullName }
+    }
+    if ($name -match '\.sql\.gz$') {
+      return [pscustomobject]@{ Type = 'postgres-sql-gzip'; Label = 'Postgres SQL gzip backup'; InputPath = $item.FullName }
+    }
+    if ($name -match '\.(dump|backup)$') {
+      return [pscustomobject]@{ Type = 'postgres-archive'; Label = 'Postgres archive backup'; InputPath = $item.FullName }
+    }
+    if ($name -match '\.tar$') {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported Postgres archive'; Reason = 'Postgres tar archives are not restored by this launcher. Use a .sql, .sql.gz, .dump, or .backup file.' }
+    }
+    if ($name -eq 'entities.zip' -or $name -match '\.zip$') {
+      $entries = @(Get-ZipEntryNames -ZipPath $item.FullName)
+      $hasEntities = @($entries | Where-Object { Test-RestoreEntityFileName -Name $_ }).Count -gt 0
+      $hasSql = @($entries | Where-Object { $_ -match '(?i)\.sql$|\.sql\.gz$|\.(dump|backup)$' }).Count -gt 0
+      if ($hasEntities -or $hasSql) {
+        return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package'; InputPath = $item.FullName; NeedsExtraction = $true }
+      }
+
+      Write-Warning 'Unknown zip backup. Filename-level detection found these entries:'
+      foreach ($entryName in $entries) {
+        Write-Warning "  $entryName"
+      }
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown zip'; Reason = 'Unknown zip backup package.' }
+    }
+    if ($name -match 'credential.*\.json$') {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'credential JSON-only input'; Reason = 'Credential JSON-only input is not a full restore package.' }
+    }
+    if ($name -match '\.json$') {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'workflow JSON-only input'; Reason = 'Workflow JSON is not a local environment/database backup. Use normal n8n workflow import guidance instead.' }
+    }
+
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown file'; Reason = 'Unknown backup file type.' }
+  }
+
+  $files = @(Get-ChildItem -LiteralPath $item.FullName -File -Recurse -ErrorAction SilentlyContinue)
+  $entityFiles = @($files | Where-Object { Test-RestoreEntityFileName -Name $_.Name })
+  if ($entityFiles.Count -gt 0) {
+    return [pscustomobject]@{ Type = 'n8n-entities'; Label = 'n8n entities backup'; InputDir = $item.FullName }
+  }
+
+  $entitiesZip = @($files | Where-Object { $_.Name.ToLowerInvariant() -eq 'entities.zip' } | Select-Object -First 1)
+  if ($entitiesZip.Count -gt 0) {
+    return [pscustomobject]@{ Type = 'zip-package'; Label = 'n8n entities zip backup'; InputPath = $entitiesZip[0].FullName; NeedsExtraction = $true }
+  }
+
+  $sqlFile = @($files | Where-Object { $_.Name -match '(?i)\.sql$' } | Select-Object -First 1)
+  if ($sqlFile.Count -gt 0) {
+    return [pscustomobject]@{ Type = 'postgres-sql'; Label = 'Postgres SQL backup'; InputPath = $sqlFile[0].FullName }
+  }
+
+  $sqlGzipFile = @($files | Where-Object { $_.Name -match '(?i)\.sql\.gz$' } | Select-Object -First 1)
+  if ($sqlGzipFile.Count -gt 0) {
+    return [pscustomobject]@{ Type = 'postgres-sql-gzip'; Label = 'Postgres SQL gzip backup'; InputPath = $sqlGzipFile[0].FullName }
+  }
+
+  $archiveFile = @($files | Where-Object { $_.Name -match '(?i)\.(dump|backup)$' } | Select-Object -First 1)
+  if ($archiveFile.Count -gt 0) {
+    return [pscustomobject]@{ Type = 'postgres-archive'; Label = 'Postgres archive backup'; InputPath = $archiveFile[0].FullName }
+  }
+
+  $jsonFiles = @($files | Where-Object { $_.Name -match '(?i)\.json$' })
+  if ($jsonFiles.Count -gt 0) {
+    $credentialJson = @($jsonFiles | Where-Object { $_.Name -match '(?i)credential' })
+    if ($credentialJson.Count -gt 0) {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'credential JSON-only input'; Reason = 'Credential JSON-only input is not a full restore package.' }
+    }
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'workflow JSON-only input'; Reason = 'Workflow JSON is not a local environment/database backup. Use normal n8n workflow import guidance instead.' }
+  }
+
+  return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown folder'; Reason = 'No supported Postgres backup or n8n entities files were found.' }
+}
+
+function Prepare-RestoreBackupInput {
+  param([string]$Path)
+
+  $detected = Get-RestoreBackupType -Path $Path
+  if ($detected.NeedsExtraction) {
+    $stagingDir = Expand-RestoreZipToStaging -ZipPath $detected.InputPath
+    $detected = Get-RestoreBackupType -Path $stagingDir
+    $detected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $stagingDir -Force
+  }
+  return $detected
+}
+
+function Find-RestoreBackupSecret {
+  param([string]$Path)
+
+  $inputPath = ([string]$Path).Trim().Trim('"')
+  if (-not $inputPath -or -not (Test-Path -LiteralPath $inputPath)) {
+    return ''
+  }
+
+  $item = Get-Item -LiteralPath $inputPath
+  if ($item.PSIsContainer) {
+    $secretFile = @(Get-ChildItem -LiteralPath $item.FullName -File -Recurse -Filter 'SECRET-DO-NOT-COMMIT.env' -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($secretFile.Count -gt 0) {
+      return (Read-EnvFileValue -Path $secretFile[0].FullName -Name 'N8N_ENCRYPTION_KEY')
+    }
+    return ''
+  }
+
+  if ($item.Name.ToLowerInvariant() -match '\.zip$') {
+    Enable-ZipSupport
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($item.FullName)
+    try {
+      foreach ($entry in $zip.Entries) {
+        if ((Split-Path -Leaf $entry.FullName) -eq 'SECRET-DO-NOT-COMMIT.env') {
+          $reader = New-Object System.IO.StreamReader($entry.Open())
+          try {
+            return (Read-EnvTextValue -Text $reader.ReadToEnd() -Name 'N8N_ENCRYPTION_KEY')
+          } finally {
+            $reader.Dispose()
+          }
+        }
+      }
+    } finally {
+      $zip.Dispose()
+    }
+  }
+
+  $siblingSecret = Join-Path (Split-Path -Parent $item.FullName) 'SECRET-DO-NOT-COMMIT.env'
+  if (Test-Path -LiteralPath $siblingSecret) {
+    return (Read-EnvFileValue -Path $siblingSecret -Name 'N8N_ENCRYPTION_KEY')
+  }
+
+  return ''
+}
+
+function Backup-CurrentEnvForRestore {
+  param([string]$EnvPath)
+
+  $envPath = $EnvPath
+  if (-not (Test-Path -LiteralPath $envPath)) {
+    Write-ErrorMessage 'Resolved .env is missing, so it cannot be backed up before restore.'
+    return ''
+  }
+
+  $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $backupDir = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-env-$timestamp"
+  New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+  $backupPath = Join-Path $backupDir ((Split-Path -Leaf $envPath) + '.before-restore')
+  Copy-Item -LiteralPath $envPath -Destination $backupPath -Force
+  return $backupPath
+}
+
+function Set-LocalEncryptionKeyForRestore {
+  param(
+    [string]$BackupEncryptionKey,
+    [string]$EnvPath
+  )
+
+  if (-not $BackupEncryptionKey) {
+    Write-Warning 'No backup N8N_ENCRYPTION_KEY was found. Saved credentials may not decrypt unless the current .env already matches the backup source key.'
+    return $true
+  }
+
+  Set-EnvFileValue -Path $EnvPath -Name 'N8N_ENCRYPTION_KEY' -Value $BackupEncryptionKey
+  Write-Success 'Resolved local Compose N8N_ENCRYPTION_KEY updated from the backup secret file.'
+  return $true
+}
+
+function Copy-RestoreFileToPostgres {
+  param(
+    [string]$SourcePath,
+    [string]$ContainerPath
+  )
+
+  $composeArgs = @((Get-ComposeGlobalArguments) + @('cp', $SourcePath, "postgres:$ContainerPath"))
+  return (Invoke-NativeCommand -Command { & docker compose @composeArgs })
+}
+
+function Clear-PostgresPublicSchema {
+  param(
+    [string]$PostgresUser,
+    [string]$PostgresDb
+  )
+
+  $replaceSql = 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+  $composeArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'psql', '-U', $PostgresUser, '-d', $PostgresDb, '-v', 'ON_ERROR_STOP=1', '-c', $replaceSql))
+  return (Invoke-NativeCommand -Command { & docker compose @composeArgs })
+}
+
+function Restore-PostgresSqlBackup {
+  param(
+    [object]$Backup,
+    [string]$EnvPath = ''
+  )
+
+  $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Default 'n8n' -EnvPath $EnvPath
+  $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n' -EnvPath $EnvPath
+
+  if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
+
+  $restorePath = $Backup.InputPath
+  if ($Backup.Type -eq 'postgres-sql-gzip') {
+    $restorePath = Expand-GzipFileToRestoreStaging -SourcePath $Backup.InputPath
+  }
+
+  $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+  $containerPath = "/tmp/n8n-restore-$timestamp"
+
+  if ($Backup.Type -eq 'postgres-archive') {
+    $containerPath = "$containerPath.backup"
+    if ((Copy-RestoreFileToPostgres -SourcePath $restorePath -ContainerPath $containerPath) -ne 0) { return $false }
+    if ((Clear-PostgresPublicSchema -PostgresUser $postgresUser -PostgresDb $postgresDb) -ne 0) { return $false }
+    $restoreArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'pg_restore', '-U', $postgresUser, '-d', $postgresDb, '--clean', '--if-exists', '--no-owner', '--no-privileges', $containerPath))
+    $restoreExit = Invoke-NativeCommand -Command { & docker compose @restoreArgs }
+    $cleanupArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'rm', '-f', $containerPath))
+    [void](Invoke-NativeCommand -Quiet -Command { & docker compose @cleanupArgs })
+    return ($restoreExit -eq 0)
+  }
+
+  $containerPath = "$containerPath.sql"
+  if ((Copy-RestoreFileToPostgres -SourcePath $restorePath -ContainerPath $containerPath) -ne 0) { return $false }
+  if ((Clear-PostgresPublicSchema -PostgresUser $postgresUser -PostgresDb $postgresDb) -ne 0) { return $false }
+  $restoreArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'psql', '-U', $postgresUser, '-d', $postgresDb, '-v', 'ON_ERROR_STOP=1', '-f', $containerPath))
+  $restoreExit = Invoke-NativeCommand -Command { & docker compose @restoreArgs }
+  $cleanupArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'rm', '-f', $containerPath))
+  [void](Invoke-NativeCommand -Quiet -Command { & docker compose @cleanupArgs })
+  return ($restoreExit -eq 0)
+}
+
+function Restore-N8nEntitiesBackup {
+  param([object]$Backup)
+
+  if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
+
+  $inputDir = $Backup.InputDir
+  $mountValue = "${inputDir}:/restore:ro"
+  $composeArgs = @((Get-ComposeGlobalArguments) + @('run', '--rm', '--no-deps', '-v', $mountValue, 'n8n', 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables'))
+  $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs }
+  return ($exitCode -eq 0)
+}
+
+function Restore-LocalN8nFromBackupMenu {
+  Write-Header 'Advanced / Recovery: Restore local n8n from backup'
+  Write-Warning 'Local recovery only. Do not use this for production or remote n8n restore.'
+  Write-Warning 'This is for database/environment restore, not normal workflow JSON import.'
+  Write-Host ''
+  $backupPath = (Read-Host 'Enter the local backup package, folder, or file path').Trim().Trim('"')
+  if (-not $backupPath) {
+    Write-Warning 'Restore cancelled.'
+    return
+  }
+
+  $envResolution = Resolve-RestoreEnvFile
+  if ($envResolution.Error) {
+    Write-ErrorMessage $envResolution.Error
+    return
+  }
+  $resolvedEnvPath = $envResolution.Path
+
+  if (-not (Test-StackFiles -EnvPath $resolvedEnvPath)) { return }
+  if (-not (Test-DockerReady)) { return }
+
+  $runningServices = Get-RunningServices -EnvPath $resolvedEnvPath
+  if ($runningServices -contains 'n8n') {
+    Write-ErrorMessage 'Stop n8n before restoring. Choose Stop n8n, then n8n + ngrok tunnel, and run this recovery option again.'
+    return
+  }
+
+  $detected = Prepare-RestoreBackupInput -Path $backupPath
+  if ($detected.Type -eq 'unsupported') {
+    Write-ErrorMessage $detected.Reason
+    return
+  }
+
+  $backupEncryptionKey = Find-RestoreBackupSecret -Path $backupPath
+  if (-not $backupEncryptionKey -and $detected.StagingPath) {
+    $backupEncryptionKey = Find-RestoreBackupSecret -Path $detected.StagingPath
+  }
+  if (-not $backupEncryptionKey) {
+    Write-Warning 'No backup N8N_ENCRYPTION_KEY was found. Saved credentials may not decrypt unless the current .env already matches the backup source key.'
+  }
+
+  if ($runningServices -notcontains 'postgres') {
+    Write-Info 'Starting Postgres so the current database can be backed up before restore.'
+    if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return }
+  }
+
+  if (-not (Backup-Postgres -Required -EnvPath $resolvedEnvPath)) {
+    Write-ErrorMessage 'Restore cancelled because the current local n8n database backup did not complete.'
+    return
+  }
+  Write-Success 'Current local n8n database backup created.'
+
+  $envBackupPath = Backup-CurrentEnvForRestore -EnvPath $resolvedEnvPath
+  if (-not $envBackupPath) {
+    Write-ErrorMessage 'Restore cancelled because the current .env backup did not complete.'
+    return
+  }
+  Write-Success 'Current .env backup created.'
+
+  Write-Host ''
+  Write-Host "Detected backup type: $($detected.Label)." -ForegroundColor Cyan
+  Write-Host "Resolved .env path: $resolvedEnvPath" -ForegroundColor Cyan
+  Write-Host "Resolved .env source: $($envResolution.Source)" -ForegroundColor Cyan
+  Write-Host 'Current local n8n database backup created.' -ForegroundColor Green
+  Write-Host 'Current .env backup created.' -ForegroundColor Green
+  Write-Host ''
+  Write-Warning 'This restore will replace the active local n8n database state with the backup state.'
+  if ($backupEncryptionKey) {
+    Write-Warning 'It will also update local Compose N8N_ENCRYPTION_KEY to the key bundled with the backup.'
+  } else {
+    Write-Warning 'No backup encryption key was found, so saved credentials are not guaranteed to decrypt.'
+  }
+  Write-Host ''
+  $approval = Read-Host 'Type RESTORE LOCAL N8N FROM BACKUP to continue'
+  if ($approval -ne 'RESTORE LOCAL N8N FROM BACKUP') {
+    Write-Warning 'Restore cancelled. The pre-restore backups were kept.'
+    return
+  }
+
+  if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
+
+  $ok = $false
+  switch ($detected.Type) {
+    'postgres-sql' { $ok = Restore-PostgresSqlBackup -Backup $detected -EnvPath $resolvedEnvPath }
+    'postgres-sql-gzip' { $ok = Restore-PostgresSqlBackup -Backup $detected -EnvPath $resolvedEnvPath }
+    'postgres-archive' { $ok = Restore-PostgresSqlBackup -Backup $detected -EnvPath $resolvedEnvPath }
+    'n8n-entities' { $ok = Restore-N8nEntitiesBackup -Backup $detected }
+    default {
+      Write-ErrorMessage 'Unsupported backup type after detection.'
+      return
+    }
+  }
+
+  if ($ok) {
+    Write-Success 'Local n8n restore completed.'
+    Write-Info 'Start n8n from the menu and verify workflows and saved credentials.'
+  } else {
+    Write-ErrorMessage 'Restore failed. Use the pre-restore database backup and .env backup as the rollback path.'
   }
 }
 
@@ -1351,6 +2095,7 @@ function Show-CommandList {
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state, health, container names, and ports.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
   Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a timestamped backup folder under .\backups.'
+  Write-CommandListItem -Number '8' -Name 'Advanced / Recovery: Restore local n8n from backup' -Description 'Restores a local database or entities backup after pre-restore backups and approval.'
   Write-Host ''
   Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
 }
@@ -1426,10 +2171,13 @@ function Show-MainMenu {
   Write-Host '  5. Show Compose status'
   Write-Host '  6. View logs'
   Write-Host '  7. Back up'
-  Write-Host '  8. Command list'
-  Write-Host '  9. Exit'
+  Write-Host '  8. Advanced / Recovery: Restore local n8n from backup'
+  Write-Host '  9. Command list'
+  Write-Host '  10. Exit'
   Write-Host ''
 }
+
+Initialize-MenuRuntime
 
 while (-not $script:ExitRequested) {
   Show-MainMenu
@@ -1443,10 +2191,11 @@ while (-not $script:ExitRequested) {
     '5' { Invoke-MenuAction { Show-Status } }
     '6' { Invoke-MenuAction { View-LogsMenu } }
     '7' { Invoke-MenuAction { [void](Backup-Postgres) } }
-    '8' { Invoke-MenuAction { Show-CommandList } }
-    '9' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
+    '8' { Invoke-MenuAction { Restore-LocalN8nFromBackupMenu } }
+    '9' { Invoke-MenuAction { Show-CommandList } }
+    '10' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
     default {
-      Invoke-MenuAction { Write-Warning 'Choose a number from 1 to 9.' }
+      Invoke-MenuAction { Write-Warning 'Choose a number from 1 to 10.' }
     }
   }
 }

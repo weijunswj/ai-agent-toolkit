@@ -221,6 +221,8 @@ For `POSTGRES_PASSWORD`, choose any strong random password. It does not come fro
 
 For `N8N_ENCRYPTION_KEY`, choose any long random value. It does not come from n8n. After you use it, do not change it unless you understand the consequences.
 
+Do not change `N8N_ENCRYPTION_KEY` after starting local n8n for the first time. This key is needed to decrypt saved n8n credentials in the database. If you restore from a backup, use the `N8N_ENCRYPTION_KEY` that came with that backup.
+
 `POSTGRES_DB` and `POSTGRES_USER` stay in `.env` on purpose. Most people can leave both as `n8n`, but they are useful when you intentionally run more than one local n8n stack and want each stack to have its own database name or user.
 
 Choose `N8N_LOCAL_PORT` before first launch. Docker uses this value when it creates the local n8n container. If you change it after n8n is already running, use `_n8n-local.cmd` to restart or recreate n8n so the new port is applied.
@@ -467,8 +469,9 @@ If the active `WEBHOOK_URL` in `.env.active` is an ngrok URL while `ngrok` is st
 | 5 | `Show Compose status` | You need deeper troubleshooting details: service state, health, container names, and ports. | No. |
 | 6 | `View logs` | You want to inspect all logs or one service's logs. | Yes. |
 | 7 | `Back up` | You want a local Postgres SQL backup. | No. |
-| 8 | `Command list` | You want a plain explanation of what each menu command does. | No. |
-| 9 | `Exit` | You want to close the launcher cleanly. | No. |
+| 8 | `Advanced / Recovery: Restore local n8n from backup` | You need to replace the current local database state from a backup package. | No. |
+| 9 | `Command list` | You want a plain explanation of what each menu command does. | No. |
+| 10 | `Exit` | You want to close the launcher cleanly. | No. |
 
 For normal use, the quick status at the top of the main menu is enough. Use `Show Compose status` only when you need the more detailed Docker Compose view.
 
@@ -555,7 +558,7 @@ Choose one:
 
 Logs show the last 200 lines and then return to the menu prompt. This keeps the CMD window from growing forever during normal use.
 
-### 8.6 `Back up` And `Command list`
+### 8.6 `Back up`, Restore, And `Command list`
 
 `Back up` writes a timestamped SQL dump under:
 
@@ -563,7 +566,50 @@ Logs show the last 200 lines and then return to the menu prompt. This keeps the 
 %USERPROFILE%\.n8n-local\backups
 ```
 
-Keep that folder local and private.
+The backup package includes:
+
+- `database.sql`.
+- `restore-manifest.json`.
+- `README-RESTORE.txt`.
+- `image-versions.txt`.
+- `SECRET-DO-NOT-COMMIT.env` containing only the restore-critical `N8N_ENCRYPTION_KEY`, when the key is present in `.env`.
+
+Keep that folder local and private. Do not commit backup packages or `SECRET-DO-NOT-COMMIT.env`.
+
+`Advanced / Recovery: Restore local n8n from backup` is for database and environment recovery, not normal workflow import.
+
+Supported backup types:
+
+- Postgres SQL or archive backup: `.sql`, `.sql.gz`, `.dump`, or `.backup`.
+- n8n entities backup zip or folder containing n8n entity `.jsonl` files, such as `workflowentity.jsonl`, `credentialsentity.jsonl`, `settings.jsonl`, `project.jsonl`, or `user.jsonl`.
+
+Restore replaces the current local n8n database state. Current local data and `.env` are backed up first. The current local Compose Postgres connection settings are used as the restore target, so Postgres passwords from the source backup are not normally needed.
+
+The backup's `N8N_ENCRYPTION_KEY` must be used after restore for saved credentials to work. If a backup package includes `SECRET-DO-NOT-COMMIT.env`, the restore flow updates the current local Compose `.env` to use that key after the explicit restore approval. If no backup key is present, saved credentials may not decrypt unless your current `.env` already matches the backup source key.
+
+Workflow JSON-only files are not supported by this recovery flow. Use normal n8n workflow import guidance for workflow JSON. Credential JSON-only files are not supported by this recovery flow because they are not a full restore package and are too sensitive for this recovery path.
+
+The restore flow resolves the target Compose `.env` file in this order:
+
+1. Explicit `--env-file <path>` argument.
+2. Explicit `--stack-dir <path>` argument, using `<stack-dir>\.env`.
+3. The known local stack directory used by `_n8n-local.cmd`.
+4. A single `.env` found beside the selected local Docker Compose file.
+
+If no `.env` is found, or more than one plausible `.env` is found, the restore stops and asks you to rerun with `--env-file`. Before changing the encryption key, the launcher shows the resolved `.env` path and backs up that exact file. It then updates only the `N8N_ENCRYPTION_KEY` line and keeps all other values unchanged.
+
+Optional advanced examples:
+
+```powershell
+.\_n8n-local.cmd --env-file "C:\Users\<you>\.n8n-local\.env"
+.\_n8n-local.cmd --stack-dir "C:\Users\<you>\.n8n-local"
+```
+
+Before replacing data, the launcher shows the detected backup type, confirms the current local database and `.env` backups were created, and requires this exact typed approval:
+
+```text
+RESTORE LOCAL N8N FROM BACKUP
+```
 
 `Command list` explains what the numbered menu options do. It is not asking you to type Docker commands for normal use.
 

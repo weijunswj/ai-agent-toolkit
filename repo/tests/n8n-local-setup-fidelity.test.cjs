@@ -128,6 +128,7 @@ const expectedMainMenuOptions = [
   'Show Compose status',
   'View logs',
   'Back up',
+  'Advanced / Recovery: Restore local n8n from backup',
   'Command list',
   'Exit'
 ];
@@ -543,6 +544,8 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /The update menu asks what you want to update first\. After you choose, it pulls the selected image\(s\) and recreates the selected container\(s\) automatically\./);
   assert.match(localSetup, /`Back up` writes a timestamped SQL dump under:/);
   assert.match(localSetup, /%USERPROFILE%\\\.n8n-local\\backups/);
+  assert.match(localSetup, /`Advanced \/ Recovery: Restore local n8n from backup` is for database and environment recovery, not normal workflow import/);
+  assert.match(localSetup, /Restore replaces the current local n8n database state/);
   assert.match(localSetup, /The launcher clears the completed command output, trims the console buffer when Windows allows it, and redraws the main menu\./);
   assert.match(localSetup, /For normal use, the quick status at the top of the main menu is enough/);
   assert.match(localSetup, /Use `Show Compose status` only when you need the more detailed Docker Compose view/);
@@ -556,6 +559,7 @@ test('local launcher and menu keep the console open until Exit', () => {
 
   assert.match(cmd, /n8n-local-menu\.ps1/);
   assert.match(cmd, /-ExecutionPolicy Bypass/);
+  assert.match(cmd, /n8n-local-menu\.ps1" %\*/);
   assert.match(cmd, /%~dp0/);
   assert.match(cmd, /:run_menu/);
   assert.match(cmd, /if "%EXIT_CODE%"=="0" goto done/);
@@ -583,10 +587,10 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
   assert.match(menu, /while \(-not \$script:ExitRequested\)/);
   assert.match(menu, /Pause-Menu/);
-  assert.match(menu, /'9' \{ Clear-MenuScreen; Write-Success 'Bye\.'; \$script:ExitRequested = \$true \}/);
+  assert.match(menu, /'10' \{ Clear-MenuScreen; Write-Success 'Bye\.'; \$script:ExitRequested = \$true \}/);
   assert.match(menu, /exit 0/);
 
-  for (let option = 1; option <= 8; option += 1) {
+  for (let option = 1; option <= 9; option += 1) {
     assert.match(menu, new RegExp(`'${option}' \\{ Invoke-MenuAction \\{[^\\n]+\\} \\}`), `option ${option} returns through Invoke-MenuAction`);
   }
 
@@ -595,7 +599,7 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /If this is the template folder, copy the stack to %USERPROFILE%\\\.n8n-local first\./);
   assert.match(menu, /Then copy \.env\.example to \.env in that local stack folder and fill the placeholders\./);
   assert.match(functionBody(menu, 'Get-RunningServices'), /Join-Path \$script:StackRoot '\.env'[\s\S]*return @\(\)/);
-  assert.match(functionBody(menu, 'Get-RunningServices'), /try \{[\s\S]*docker compose ps --services --filter 'status=running' 2>\$null[\s\S]*\} catch \{[\s\S]*return @\(\)[\s\S]*\}/);
+  assert.match(functionBody(menu, 'Get-RunningServices'), /try \{[\s\S]*Get-ComposeGlobalArguments[\s\S]*'ps', '--services', '--filter', 'status=running'[\s\S]*docker compose @composeArgs 2>\$null[\s\S]*\} catch \{[\s\S]*return @\(\)[\s\S]*\}/);
   assert.match(menu, /Write-ServiceStatus -Name 'postgres'/);
   assert.match(menu, /Write-ServiceStatus -Name 'n8n'/);
   assert.match(menu, /Write-ServiceStatus -Name 'ngrok'/);
@@ -608,7 +612,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /Write-Host '  2\. Start ngrok tunnel'/);
   assert.match(menu, /Write-Host '  1\. Stop ngrok tunnel'/);
   assert.match(menu, /Write-Host '  5\. Show Compose status'/);
-  assert.match(menu, /Write-Host '  8\. Command list'/);
+  assert.match(menu, /Write-Host '  8\. Advanced \/ Recovery: Restore local n8n from backup'/);
+  assert.match(menu, /Write-Host '  9\. Command list'/);
   assert.match(functionBody(menu, 'Show-Status'), /service state, health, container names, and ports/);
   assert.match(functionBody(menu, 'Show-Status'), /Invoke-Compose -Arguments @\('ps'\)/);
   assert.match(functionBody(menu, 'Show-Status'), /Write-ImageVersions/);
@@ -617,6 +622,7 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Write-BackupImageLog'), /image-versions\.txt[\s\S]*Running container images at backup time/);
   assert.match(functionBody(menu, 'Write-CommandListItem'), /\$itemLabelWidth = 19[\s\S]*\$itemPrefix = \("  \{0\}\. \{1,-\$itemLabelWidth\}: " -f \$Number, \$Name\)/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a timestamped backup folder under \.\\backups\.'/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '8' -Name 'Advanced \/ Recovery: Restore local n8n from backup' -Description 'Restores a local database or entities backup after pre-restore backups and approval\.'/);
   assert.match(menu, /function Show-UpdateMenu/);
   assert.match(menu, /Choose what to update\. The launcher pulls images, then recreates selected containers automatically\./);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Read-Host 'Enter a number'[\s\S]*Apply-Update -Services \$selection/);
@@ -633,6 +639,79 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.doesNotMatch(menu, /Open-NgrokDockerDesktopGuide/);
   assert.doesNotMatch(menu, /dashboard\.ngrok\.com\/get-started\/setup\/docker-desktop/);
   assert.match(menu, /Do not launch n8n directly from Docker Desktop\. Launch it from _n8n-local\.cmd instead\./);
+});
+
+test('local backup packages and restore flow protect n8n encryption keys', () => {
+  const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
+  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
+  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const gitignore = readText(repoRoot, '.gitignore');
+
+  assert.match(envExample, /DO NOT CHANGE THIS VALUE AFTER STARTING LOCAL n8n FOR THE FIRST TIME\./);
+  assert.match(envExample, /This key is needed to decrypt saved n8n credentials in the database\./);
+  assert.match(envExample, /If you restore from a backup, use the N8N_ENCRYPTION_KEY that came with that backup\./);
+
+  for (const ignored of ['.n8n-local/backups/', '.n8n-local/import/', '**/SECRET-DO-NOT-COMMIT.env']) {
+    assert.match(gitignore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
+  }
+
+  assert.match(localSetup, /Restore local n8n from backup/);
+  assert.match(localSetup, /Postgres SQL or archive backup/);
+  assert.match(localSetup, /n8n entities backup zip or folder/);
+  assert.match(localSetup, /Workflow JSON-only files are not supported by this recovery flow/);
+  assert.match(localSetup, /Credential JSON-only files are not supported by this recovery flow/);
+  assert.match(localSetup, /The backup's `N8N_ENCRYPTION_KEY` must be used after restore for saved credentials to work/);
+  assert.match(localSetup, /Current local data and `\.env` are backed up first/);
+  assert.match(localSetup, /current local Compose Postgres connection settings are used as the restore target/);
+  assert.match(localSetup, /Explicit `--env-file <path>` argument/);
+  assert.match(localSetup, /Explicit `--stack-dir <path>` argument, using `<stack-dir>\\\.env`/);
+  assert.match(localSetup, /The known local stack directory used by `_n8n-local\.cmd`/);
+  assert.match(localSetup, /A single `\.env` found beside the selected local Docker Compose file/);
+  assert.match(localSetup, /If no `\.env` is found, or more than one plausible `\.env` is found, the restore stops and asks you to rerun with `--env-file`/);
+  assert.match(localSetup, /Before changing the encryption key, the launcher shows the resolved `\.env` path and backs up that exact file/);
+  assert.match(localSetup, /updates only the `N8N_ENCRYPTION_KEY` line and keeps all other values unchanged/);
+
+  assert.match(menu, /function Write-BackupSecretFile/);
+  assert.match(menu, /SECRET-DO-NOT-COMMIT\.env/);
+  assert.match(functionBody(menu, 'Backup-Postgres'), /Write-BackupSecretFile[\s\S]*Write-RestoreManifest[\s\S]*Write-RestoreReadme/);
+  assert.match(functionBody(menu, 'Write-BackupSecretFile'), /N8N_ENCRYPTION_KEY[\s\S]*Set-Content[\s\S]*-Encoding ascii/);
+  assert.doesNotMatch(functionBody(menu, 'Write-BackupSecretFile'), /Write-Host \$encryptionKey|Write-Info \$encryptionKey|Write-Success \$encryptionKey/);
+
+  for (const functionName of [
+    'Find-RestoreBackupSecret',
+    'Get-RestoreBackupType',
+    'Resolve-RestoreEnvFile',
+    'Initialize-MenuRuntime',
+    'Backup-CurrentEnvForRestore',
+    'Set-LocalEncryptionKeyForRestore',
+    'Restore-PostgresSqlBackup',
+    'Restore-N8nEntitiesBackup',
+    'Restore-LocalN8nFromBackupMenu'
+  ]) {
+    assert.match(menu, new RegExp(`function ${escapeRegExp(functionName)}`), functionName);
+  }
+
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Type RESTORE LOCAL N8N FROM BACKUP to continue/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Resolved \.env path: \$resolvedEnvPath/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Backup-CurrentEnvForRestore -EnvPath \$resolvedEnvPath/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /replace the active local n8n database state with the backup state/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current local n8n database backup created/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current \.env backup created/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Stop n8n before restoring/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /RESTORE LOCAL N8N FROM BACKUP/);
+  assert.match(functionBody(menu, 'Clear-PostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;/);
+  assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /psql[\s\S]*ON_ERROR_STOP/);
+  assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /pg_restore[\s\S]*--clean[\s\S]*--if-exists/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /import:entities[\s\S]*--truncateTables/);
+  assert.match(functionBody(menu, 'Resolve-RestoreEnvFile'), /--env-file[\s\S]*--stack-dir[\s\S]*launcher stack directory[\s\S]*single \.env beside selected local Docker Compose file/);
+  assert.match(functionBody(menu, 'Resolve-RestoreEnvFile'), /More than one plausible \.env file was found\. Rerun with --env-file <path>\./);
+  assert.match(functionBody(menu, 'Initialize-MenuRuntime'), /Get-MenuArgumentValue -Name 'stack-dir'[\s\S]*Set-Location -LiteralPath \$script:StackRoot/);
+  assert.match(functionBody(menu, 'Get-ComposeGlobalArguments'), /Get-MenuArgumentValue -Name 'env-file'[\s\S]*--env-file/);
+  assert.match(functionBody(menu, 'Invoke-Compose'), /Get-ComposeGlobalArguments[\s\S]*\$allArguments/);
+  assert.match(functionBody(menu, 'Set-EnvFileValue'), /\$lines\[\$index\] = \$replacement[\s\S]*break[\s\S]*Set-Content/);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /workflow JSON is not a local environment\/database backup/i);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /credential JSON-only input is not a full restore package/i);
+  assert.doesNotMatch(menu, /POSTGRES_PASSWORD=.*SECRET-DO-NOT-COMMIT/);
 });
 
 test('local menu PowerShell script stays parseable', (t) => {
