@@ -201,10 +201,10 @@ Verify the following:
 7. You can inspect the current branch and git status.
 8. You can identify whether there are uncommitted changes.
 9. You can inspect existing GitHub Actions workflows, if any.
-10. You can prepare commits, but you must not commit until I approve.
-11. You must not push until I approve.
-12. You must not deploy until I approve.
-13. You must not delete files, rewrite history, rotate secrets, or perform destructive actions without explicit approval.
+10. You can prepare commits, but before committing you must pause, show the exact files, explain the risk, and ask for my approval.
+11. Before pushing, you must pause, name the branch and remote, explain what will happen, and ask for my approval.
+12. Before deploying, you must pause, name the environment and deployment target, explain the risk, and ask for my approval.
+13. Before deleting files, rewriting history, rotating secrets, or performing destructive actions, you must pause, name the exact target/action, explain the risk, and ask for explicit approval.
 14. You must not expose, print, or commit secrets.
 
 If you cannot verify any important access or repo requirement:
@@ -416,7 +416,7 @@ C. No, explain other options.
 Recommended reply:
 "Use your recommended safe setup."
 
-Do not implement deployment yet unless I explicitly approve deployment planning.
+Pause before deployment planning. Explain the deployment risk, name the proposed target/environment, and ask for my explicit approval before implementing any deployment changes.
 
 Phase 5: Implement CI first.
 
@@ -590,7 +590,7 @@ Do not paste the secret value into this chat.
 Phase 9: Commit, branch, pull request, and push policy.
 
 Default rule:
-Do not push directly to the default branch unless I explicitly approve direct push.
+Pause before any direct push to the default branch. Name the branch and remote, explain why a direct push is risky, and ask for explicit approval for that exact direct push.
 
 Preferred professional flow:
 1. Create a new setup branch for the CI/CD changes.
@@ -615,7 +615,7 @@ Before committing:
 Before pushing:
 1. Tell me which branch you will push to.
 2. Tell me whether this is the default branch or a setup branch.
-3. If it is the default branch, stop and ask for explicit approval before pushing.
+3. If it is the default branch, pause, explain why direct push is risky, and ask for explicit approval before pushing.
 4. Tell me what workflows will run after push.
 5. Ask me whether to push.
 
@@ -627,7 +627,7 @@ Pull request policy:
 5. Do not bypass failing checks.
 6. Do not force-merge.
 
-Do not commit, push, create a pull request, merge, or deploy without my approval.
+For commit, push, pull request creation, merge, or deploy actions, pause first, name the exact target/action, explain the risk, and ask for my approval.
 
 Phase 10: Final output.
 

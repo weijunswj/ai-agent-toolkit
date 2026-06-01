@@ -74,7 +74,7 @@ When local repo law conflicts with this generic skill, local law wins.
 - Do not summarise full runtime docs into thin published surfaces.
 - Do not edit generated files directly when a manifest declares their source.
 - Do not add root-level surface folders if the target repo has a different topology.
-- Do not add live-system, credential, deployment, or destructive automation without explicit local approval.
+- Before adding live-system, credential, deployment, or destructive automation, pause, explain the risk, name the exact target/action, and ask for explicit local approval.
 - Do not update an audit baseline until the movement is inspected and intentional.
 
 ## Published Surface Readability

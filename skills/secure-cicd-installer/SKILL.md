@@ -29,7 +29,7 @@ The prompt template is not optional background material. It defines the required
 
 When this skill applies, its approval gates override any repo-local default that would otherwise auto-commit, push, open a pull request, merge, or deploy.
 
-Do not commit, push, create a pull request, merge, or deploy without explicit user approval for that exact action.
+Before committing, pushing, creating a pull request, merging, or deploying, pause, explain the risk, name the exact target and action, and ask for explicit user approval for that exact action.
 
 ## Required Execution Shape
 
@@ -43,7 +43,7 @@ Do not commit, push, create a pull request, merge, or deploy without explicit us
 - Use GitHub Secrets for private values.
 - Never ask the user to paste secret values into chat.
 - Create or update `CURRENT_CICD_STATUS.md`.
-- Ask before commit, push, PR creation, merge, or deployment.
+- Ask a clear approval question before commit, push, PR creation, merge, or deployment.
 
 ## Manual Secret Handling
 
@@ -58,8 +58,8 @@ Do not commit, push, create a pull request, merge, or deploy without explicit us
 
 ## Core Rules
 
-- Do not run CI/CD commands by default.
-- Do not install packages, mutate deployment settings, rotate credentials, or write secrets unless the user explicitly approves the exact action and target.
+- Run CI/CD commands only when they are part of the approved plan or a safe local validation step.
+- Before installing packages, mutating deployment settings, or rotating credentials, pause, explain the risk, name the exact action and target, and ask for explicit current-turn approval. Never write secret values into repo files.
 - Keep status tracking copy-ready and machine-readable when requested.
 - Treat `.env*`, private keys, deployment tokens, and credential files as denied writes.
 - Keep [`templates/cicd/secure-cicd-prompt.md`](templates/cicd/secure-cicd-prompt.md) loaded as the full guide; this SKILL.md is only the trigger surface, mandatory router, and high-priority safety summary.
