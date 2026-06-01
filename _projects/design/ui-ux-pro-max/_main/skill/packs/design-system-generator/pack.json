@@ -39,7 +39,7 @@
   "run_commands": false,
   "notes": [
     "Local-only Python tooling for design creation and revision.",
-    "Read-only local generator execution may support normal design creation or revision.",
+    "Read-only local generator execution may support normal design creation or revision only from the trusted installed skill path.",
     "Installer must preview writes and must not execute the tool during installation."
   ]
 }

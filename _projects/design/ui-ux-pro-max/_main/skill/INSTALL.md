@@ -54,6 +54,8 @@ If using this toolkit topology, copy the folder to:
 skills/ui-ux-secure-frontend-design/
 ```
 
+This path is a source or packaging location, not a general instruction to execute generator code from an arbitrary active workspace. Runtime generator execution must resolve through the trusted installed skill directory loaded by the agent.
+
 This skill does not create or modify live n8n workflows. It only provides frontend design and review instructions, including safety gates for n8n-like workflow screens.
 
 ## Install verification

@@ -40,13 +40,31 @@ Use the generator whenever local CSV-backed recommendations would improve design
 
 The user does not need to know the generator exists or ask for it by name. For review-only tasks, pure copy edits, or implementation checks where no new design direction is needed, use the instructions and references first and skip the generator unless replacement design guidance is useful.
 
+## Trusted generator path rule
+
+Before running the generator, resolve the script path relative to the currently loaded trusted skill directory. Use the installed skill copy that provided this `SKILL.md`, such as `.agents/skills/ui-ux-secure-frontend-design/`, `.claude/skills/ui-ux-secure-frontend-design/`, or `~/.claude/skills/ui-ux-secure-frontend-design/` when that is the trusted runtime copy.
+
+Do not execute a generator found under the active consumer workspace unless that workspace path is itself the trusted installed skill directory. Do not search the active workspace for a same-named `skills/ui-ux-secure-frontend-design/` folder and run it.
+
+If the runtime cannot determine the trusted skill directory, do not run the generator proactively. Ask for explicit current-turn approval and show the exact script path that would be executed:
+
+```text
+I cannot verify that this generator path belongs to the trusted installed UI/UX skill:
+<resolved path>
+
+Running it may execute workspace code.
+
+Type RUN TRUSTED UI UX GENERATOR to approve this exact path:
+```
+
 ## Generator safety boundary
 
 - Read-only local execution is allowed for design creation and revision: it reads bundled CSV data from this skill folder and prints recommendations.
 - Do not use network downloads.
 - Do not install packages or dependencies.
-- Do not expand shell usage beyond the documented local Python command.
+- Do not expand shell usage beyond the documented local Python command resolved from the trusted installed skill directory.
 - Do not write outside the generator output folder documented by `tools/design-system-generator/README.md`.
+- If the trusted installed skill path cannot be proven, require explicit current-turn approval naming the exact script path before execution.
 - Ask for explicit current-turn approval before writing generated output or changing generator scripts, CSV data, tests, or dependencies.
 
 ## When to use
