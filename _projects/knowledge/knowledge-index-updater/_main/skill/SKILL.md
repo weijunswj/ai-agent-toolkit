@@ -360,7 +360,15 @@ Before doing anything else:
 2. Prefer the installed Codex skill folder if available.
 3. If no installed skill is available, read `skills/knowledge-index-updater/SKILL.md` from the local `ai-agent-toolkit` repo.
 4. If generated skill output is unavailable, read `_projects/knowledge/knowledge-index-updater/_main/skill/SKILL.md` from the local `ai-agent-toolkit` repo.
-5. If no current skill file can be found, stop and report that the automation cannot safely run because it cannot load the current `knowledge-index-updater` rules.
+5. Discover platform tooling before checking for missing sources:
+   - If `Notion` or `GitHub` tools are not visible, explicitly run the available tool/plugin discovery flow for this platform (for Codex, run `tool_search_tool` for "notion" and "github") before deciding they are unavailable.
+   - If a tool is still missing after discovery, report the exact missing tool name and list which knowledge-index work could not be completed because of that specific absence.
+6. If no current skill file can be found after discovery and fallback attempts, stop and report that the automation cannot safely run because it cannot load the current `knowledge-index-updater` rules.
+7. Local automation memory writes are best-effort only:
+   - The runtime may read `C:/Users/xPass/.codex/automations/daily-knowledge-index-update/memory.md`.
+   - If writing this file is blocked, do not fail the run or skip Notion/GitHub updates.
+   - Prefer durable Notion and GitHub state updates when those connectors are available.
+   - Continue the knowledge-index update work and include a concise "Local memory update summary" with the intended memory payload in the final response.
 
 Do not fall back to older inline Knowledge Index rules from this automation config if they conflict with the current skill.
 
@@ -403,6 +411,10 @@ Use this static fallback only when the scheduler cannot load or read the current
 
 ```text
 Search my Notion and GitHub for new, changed, removed, or renamed guides, references, portfolio pages, and repositories.
+
+If Notion or GitHub tools are not immediately visible, run the platform's available tool/plugin discovery flow first.
+- For Codex runs, discover "notion" and "github" tools explicitly before claiming they are unavailable.
+- If a required tool is still unavailable, report the exact missing tool and list only the work that cannot be completed without it.
 
 Update the root-level Notion Knowledge Index using one row per real project, guide, reference, portfolio item, tool, or repo.
 
