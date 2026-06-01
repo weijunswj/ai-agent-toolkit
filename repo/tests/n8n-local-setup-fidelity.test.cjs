@@ -656,8 +656,10 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   }
 
   assert.match(localSetup, /Restore local n8n from backup/);
-  assert.match(localSetup, /Postgres SQL or archive backup/);
-  assert.match(localSetup, /n8n entities backup zip or folder/);
+  assert.match(localSetup, /Allowed restore backup files/);
+  assert.match(localSetup, /`?\.sql/);
+  assert.match(localSetup, /`?\.zip/);
+  assert.match(localSetup, /No folder input is accepted for restore/);
   assert.match(localSetup, /Workflow JSON-only files are not supported by this recovery flow/);
   assert.match(localSetup, /Credential JSON-only files are not supported by this recovery flow/);
   assert.match(localSetup, /The backup's `N8N_ENCRYPTION_KEY` must be used after restore for saved credentials to work/);
@@ -680,6 +682,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   for (const functionName of [
     'Find-RestoreBackupSecret',
     'Get-RestoreBackupType',
+    'Copy-RestoreEntitiesZipToStaging',
     'Resolve-RestoreEnvFile',
     'Initialize-MenuRuntime',
     'Backup-CurrentEnvForRestore',
@@ -691,26 +694,31 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     assert.match(menu, new RegExp(`function ${escapeRegExp(functionName)}`), functionName);
   }
 
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Type RESTORE LOCAL N8N FROM BACKUP to continue/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Resolved \.env path: \$resolvedEnvPath/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Backup-CurrentEnvForRestore -EnvPath \$resolvedEnvPath/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /replace the active local n8n database state with the backup state/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current local n8n database backup created/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current \.env backup created/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Stop n8n before restoring/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /RESTORE LOCAL N8N FROM BACKUP/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Pre-restore backups created/);
+  assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current local n8n database backup created/);
+  assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current \.env backup created/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore requires the local stack to be stopped/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore cancelled because local services could not be stopped/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Type PROCEED to continue/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /PROCEED/);
   assert.match(functionBody(menu, 'Clear-PostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;/);
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /psql[\s\S]*ON_ERROR_STOP/);
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /pg_restore[\s\S]*--clean[\s\S]*--if-exists/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /import:entities[\s\S]*--truncateTables/);
+  assert.match(functionBody(menu, 'Copy-RestoreEntitiesZipToStaging'), /Join-Path \$stagingDir 'entities\.zip'[\s\S]*Copy-Item -LiteralPath \$ZipPath/);
+  assert.doesNotMatch(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Ignoring nested backup entities\.zip artifact/);
   assert.match(functionBody(menu, 'Resolve-RestoreEnvFile'), /--env-file[\s\S]*--stack-dir[\s\S]*launcher stack directory[\s\S]*single \.env beside selected local Docker Compose file/);
+  assert.match(functionBody(menu, 'Resolve-RestoreEnvFile'), /compose-file/);
   assert.match(functionBody(menu, 'Resolve-RestoreEnvFile'), /More than one plausible \.env file was found\. Rerun with --env-file <path>\./);
   assert.match(functionBody(menu, 'Initialize-MenuRuntime'), /Get-MenuArgumentValue -Name 'stack-dir'[\s\S]*Set-Location -LiteralPath \$script:StackRoot/);
   assert.match(functionBody(menu, 'Get-ComposeGlobalArguments'), /Get-MenuArgumentValue -Name 'env-file'[\s\S]*--env-file/);
   assert.match(functionBody(menu, 'Invoke-Compose'), /Get-ComposeGlobalArguments[\s\S]*\$allArguments/);
   assert.match(functionBody(menu, 'Set-EnvFileValue'), /\$lines\[\$index\] = \$replacement[\s\S]*break[\s\S]*Set-Content/);
-  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /workflow JSON is not a local environment\/database backup/i);
-  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /credential JSON-only input is not a full restore package/i);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must use one of these extensions: \.sql, \.zip/i);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must be a backup file/);
   assert.doesNotMatch(menu, /POSTGRES_PASSWORD=.*SECRET-DO-NOT-COMMIT/);
 });
 

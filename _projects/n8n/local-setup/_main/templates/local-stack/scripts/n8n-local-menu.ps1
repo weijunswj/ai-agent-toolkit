@@ -1548,7 +1548,8 @@ function Write-RestoreReadme {
 function Backup-Postgres {
   param(
     [switch]$Required,
-    [string]$EnvPath = ''
+    [string]$EnvPath = '',
+    [string]$BackupDir = ''
   )
 
   Write-Header 'Backup Postgres Database'
@@ -1559,7 +1560,10 @@ function Backup-Postgres {
   $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n' -EnvPath $EnvPath
   $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
   $backupRoot = Join-Path $script:StackRoot 'backups'
-  $backupDir = Join-Path $backupRoot "n8n-postgres-$timestamp"
+  if (-not $BackupDir) {
+    $BackupDir = Join-Path $backupRoot "n8n-postgres-$timestamp"
+  }
+  $backupDir = $BackupDir
   $backupPath = Join-Path $backupDir 'database.sql'
 
   New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
@@ -1647,45 +1651,12 @@ function Get-ZipEntryNames {
   }
 }
 
-function Expand-RestoreZipToStaging {
+function Copy-RestoreEntitiesZipToStaging {
   param([string]$ZipPath)
 
-  Enable-ZipSupport
   $stagingDir = New-RestoreStagingDirectory
-  $root = [System.IO.Path]::GetFullPath($stagingDir)
-  $rootWithSeparator = $root.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-  try {
-    foreach ($entry in $zip.Entries) {
-      if (-not $entry.FullName) { continue }
-      $target = [System.IO.Path]::GetFullPath((Join-Path $stagingDir $entry.FullName))
-      if (-not ($target.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or $target.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase))) {
-        throw "Zip entry escapes restore staging folder: $($entry.FullName)"
-      }
-
-      if ($entry.FullName.EndsWith('/')) {
-        New-Item -ItemType Directory -Force -Path $target | Out-Null
-        continue
-      }
-
-      $parent = Split-Path -Parent $target
-      if ($parent) {
-        New-Item -ItemType Directory -Force -Path $parent | Out-Null
-      }
-
-      $inputStream = $entry.Open()
-      $outputStream = [System.IO.File]::Create($target)
-      try {
-        $inputStream.CopyTo($outputStream)
-      } finally {
-        $outputStream.Dispose()
-        $inputStream.Dispose()
-      }
-    }
-  } finally {
-    $zip.Dispose()
-  }
-
+  $targetPath = Join-Path $stagingDir 'entities.zip'
+  Copy-Item -LiteralPath $ZipPath -Destination $targetPath -Force
   Write-Info "Backup zip staged under: $stagingDir"
   return $stagingDir
 }
@@ -1726,21 +1697,11 @@ function Get-RestoreBackupType {
     if ($name -match '\.sql$') {
       return [pscustomobject]@{ Type = 'postgres-sql'; Label = 'Postgres SQL backup'; InputPath = $item.FullName }
     }
-    if ($name -match '\.sql\.gz$') {
-      return [pscustomobject]@{ Type = 'postgres-sql-gzip'; Label = 'Postgres SQL gzip backup'; InputPath = $item.FullName }
-    }
-    if ($name -match '\.(dump|backup)$') {
-      return [pscustomobject]@{ Type = 'postgres-archive'; Label = 'Postgres archive backup'; InputPath = $item.FullName }
-    }
-    if ($name -match '\.tar$') {
-      return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported Postgres archive'; Reason = 'Postgres tar archives are not restored by this launcher. Use a .sql, .sql.gz, .dump, or .backup file.' }
-    }
-    if ($name -eq 'entities.zip' -or $name -match '\.zip$') {
+    if ($name -match '\.zip$') {
       $entries = @(Get-ZipEntryNames -ZipPath $item.FullName)
       $hasEntities = @($entries | Where-Object { Test-RestoreEntityFileName -Name $_ }).Count -gt 0
-      $hasSql = @($entries | Where-Object { $_ -match '(?i)\.sql$|\.sql\.gz$|\.(dump|backup)$' }).Count -gt 0
-      if ($hasEntities -or $hasSql) {
-        return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package'; InputPath = $item.FullName; NeedsExtraction = $true }
+      if ($hasEntities) {
+        return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package'; InputPath = $item.FullName; NeedsStaging = $true }
       }
 
       Write-Warning 'Unknown zip backup. Filename-level detection found these entries:'
@@ -1749,62 +1710,25 @@ function Get-RestoreBackupType {
       }
       return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown zip'; Reason = 'Unknown zip backup package.' }
     }
-    if ($name -match 'credential.*\.json$') {
-      return [pscustomobject]@{ Type = 'unsupported'; Label = 'credential JSON-only input'; Reason = 'Credential JSON-only input is not a full restore package.' }
-    }
-    if ($name -match '\.json$') {
-      return [pscustomobject]@{ Type = 'unsupported'; Label = 'workflow JSON-only input'; Reason = 'Workflow JSON is not a local environment/database backup. Use normal n8n workflow import guidance instead.' }
-    }
-
-    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown file'; Reason = 'Unknown backup file type.' }
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported file type'; Reason = 'Restore input must use one of these extensions: .sql, .zip.' }
   }
 
-  $files = @(Get-ChildItem -LiteralPath $item.FullName -File -Recurse -ErrorAction SilentlyContinue)
-  $entityFiles = @($files | Where-Object { Test-RestoreEntityFileName -Name $_.Name })
-  if ($entityFiles.Count -gt 0) {
-    return [pscustomobject]@{ Type = 'n8n-entities'; Label = 'n8n entities backup'; InputDir = $item.FullName }
-  }
-
-  $entitiesZip = @($files | Where-Object { $_.Name.ToLowerInvariant() -eq 'entities.zip' } | Select-Object -First 1)
-  if ($entitiesZip.Count -gt 0) {
-    return [pscustomobject]@{ Type = 'zip-package'; Label = 'n8n entities zip backup'; InputPath = $entitiesZip[0].FullName; NeedsExtraction = $true }
-  }
-
-  $sqlFile = @($files | Where-Object { $_.Name -match '(?i)\.sql$' } | Select-Object -First 1)
-  if ($sqlFile.Count -gt 0) {
-    return [pscustomobject]@{ Type = 'postgres-sql'; Label = 'Postgres SQL backup'; InputPath = $sqlFile[0].FullName }
-  }
-
-  $sqlGzipFile = @($files | Where-Object { $_.Name -match '(?i)\.sql\.gz$' } | Select-Object -First 1)
-  if ($sqlGzipFile.Count -gt 0) {
-    return [pscustomobject]@{ Type = 'postgres-sql-gzip'; Label = 'Postgres SQL gzip backup'; InputPath = $sqlGzipFile[0].FullName }
-  }
-
-  $archiveFile = @($files | Where-Object { $_.Name -match '(?i)\.(dump|backup)$' } | Select-Object -First 1)
-  if ($archiveFile.Count -gt 0) {
-    return [pscustomobject]@{ Type = 'postgres-archive'; Label = 'Postgres archive backup'; InputPath = $archiveFile[0].FullName }
-  }
-
-  $jsonFiles = @($files | Where-Object { $_.Name -match '(?i)\.json$' })
-  if ($jsonFiles.Count -gt 0) {
-    $credentialJson = @($jsonFiles | Where-Object { $_.Name -match '(?i)credential' })
-    if ($credentialJson.Count -gt 0) {
-      return [pscustomobject]@{ Type = 'unsupported'; Label = 'credential JSON-only input'; Reason = 'Credential JSON-only input is not a full restore package.' }
-    }
-    return [pscustomobject]@{ Type = 'unsupported'; Label = 'workflow JSON-only input'; Reason = 'Workflow JSON is not a local environment/database backup. Use normal n8n workflow import guidance instead.' }
-  }
-
-  return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown folder'; Reason = 'No supported Postgres backup or n8n entities files were found.' }
+  return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported restore path'; Reason = 'Restore input must be a backup file (.sql or .zip), not a folder.' }
 }
 
 function Prepare-RestoreBackupInput {
   param([string]$Path)
 
   $detected = Get-RestoreBackupType -Path $Path
-  if ($detected.NeedsExtraction) {
-    $stagingDir = Expand-RestoreZipToStaging -ZipPath $detected.InputPath
-    $detected = Get-RestoreBackupType -Path $stagingDir
-    $detected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $stagingDir -Force
+  if ($detected.NeedsStaging) {
+    $stagingDir = Copy-RestoreEntitiesZipToStaging -ZipPath $detected.InputPath
+    $stagingDetected = [pscustomobject]@{
+      Type = 'n8n-entities'
+      Label = 'n8n entities backup'
+      InputDir = $stagingDir
+    }
+    $stagingDetected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $stagingDir -Force
+    $detected = $stagingDetected
   }
   return $detected
 }
@@ -1853,8 +1777,22 @@ function Find-RestoreBackupSecret {
   return ''
 }
 
+function Write-MissingRestoreSecretWarning {
+  param([string]$SecretSearchPath)
+
+  $path = ([string]$SecretSearchPath).Trim().Trim('"')
+  if (-not $path) {
+    $path = 'the selected backup input'
+  }
+  Write-Warning "No SECRET-DO-NOT-COMMIT.env was found in $path."
+  Write-Warning 'Saved credentials may not decrypt unless the current .env already matches the backup source key.'
+}
+
 function Backup-CurrentEnvForRestore {
-  param([string]$EnvPath)
+  param(
+    [string]$EnvPath,
+    [string]$BackupDir = ''
+  )
 
   $envPath = $EnvPath
   if (-not (Test-Path -LiteralPath $envPath)) {
@@ -1862,10 +1800,12 @@ function Backup-CurrentEnvForRestore {
     return ''
   }
 
-  $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-  $backupDir = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-env-$timestamp"
-  New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-  $backupPath = Join-Path $backupDir ((Split-Path -Leaf $envPath) + '.before-restore')
+  if (-not $BackupDir) {
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $BackupDir = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-env-$timestamp"
+  }
+  New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
+  $backupPath = Join-Path $BackupDir ((Split-Path -Leaf $envPath) + '.before-restore')
   Copy-Item -LiteralPath $envPath -Destination $backupPath -Force
   return $backupPath
 }
@@ -1877,7 +1817,6 @@ function Set-LocalEncryptionKeyForRestore {
   )
 
   if (-not $BackupEncryptionKey) {
-    Write-Warning 'No backup N8N_ENCRYPTION_KEY was found. Saved credentials may not decrypt unless the current .env already matches the backup source key.'
     return $true
   }
 
@@ -1951,10 +1890,14 @@ function Restore-N8nEntitiesBackup {
   param([object]$Backup)
 
   if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
+  Write-Info 'Refreshing n8n image for restore.'
+  if ((Invoke-Compose -Arguments @('pull', 'n8n')) -ne 0) {
+    Write-Warning 'Could not refresh the n8n image; continuing with cached image.'
+  }
 
   $inputDir = $Backup.InputDir
   $mountValue = "${inputDir}:/restore:ro"
-  $composeArgs = @((Get-ComposeGlobalArguments) + @('run', '--rm', '--no-deps', '-v', $mountValue, 'n8n', 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables'))
+  $composeArgs = @((Get-ComposeGlobalArguments) + @('run', '--rm', '--no-deps', '-v', $mountValue, 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables'))
   $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs }
   return ($exitCode -eq 0)
 }
@@ -1964,9 +1907,20 @@ function Restore-LocalN8nFromBackupMenu {
   Write-Warning 'Local recovery only. Do not use this for production or remote n8n restore.'
   Write-Warning 'This is for database/environment restore, not normal workflow JSON import.'
   Write-Host ''
-  $backupPath = (Read-Host 'Enter the local backup package, folder, or file path').Trim().Trim('"')
+  $backupPath = (Read-Host 'Enter the local restore backup file path (.sql or .zip)').Trim().Trim('"')
+  Write-Host ''
   if (-not $backupPath) {
     Write-Warning 'Restore cancelled.'
+    return
+  }
+  if (-not (Test-Path -LiteralPath $backupPath)) {
+    Write-ErrorMessage 'Backup path does not exist.'
+    return
+  }
+
+  $detected = Get-RestoreBackupType -Path $backupPath
+  if ($detected.Type -eq 'unsupported') {
+    Write-ErrorMessage $detected.Reason
     return
   }
 
@@ -1981,23 +1935,44 @@ function Restore-LocalN8nFromBackupMenu {
   if (-not (Test-DockerReady)) { return }
 
   $runningServices = Get-RunningServices -EnvPath $resolvedEnvPath
-  if ($runningServices -contains 'n8n') {
-    Write-ErrorMessage 'Stop n8n before restoring. Choose Stop n8n, then n8n + ngrok tunnel, and run this recovery option again.'
-    return
+  if ($runningServices -contains 'n8n' -or $runningServices -contains 'ngrok') {
+    Write-Info 'Restore requires the local stack to be stopped. Stopping local n8n services now.'
+    if ((Invoke-Compose -Arguments @('down')) -ne 0) {
+      Write-ErrorMessage 'Restore cancelled because local services could not be stopped.'
+      return
+    }
+    $runningServices = @()
   }
 
   $detected = Prepare-RestoreBackupInput -Path $backupPath
-  if ($detected.Type -eq 'unsupported') {
-    Write-ErrorMessage $detected.Reason
-    return
-  }
 
   $backupEncryptionKey = Find-RestoreBackupSecret -Path $backupPath
+  $secretSearchPath = $backupPath
   if (-not $backupEncryptionKey -and $detected.StagingPath) {
     $backupEncryptionKey = Find-RestoreBackupSecret -Path $detected.StagingPath
+    $secretSearchPath = $detected.StagingPath
   }
   if (-not $backupEncryptionKey) {
-    Write-Warning 'No backup N8N_ENCRYPTION_KEY was found. Saved credentials may not decrypt unless the current .env already matches the backup source key.'
+    Write-MissingRestoreSecretWarning -SecretSearchPath $secretSearchPath
+  }
+
+  Write-Host ''
+  Write-Host "Detected backup type: $($detected.Label)." -ForegroundColor Cyan
+  Write-Host "Resolved .env path: $resolvedEnvPath" -ForegroundColor Cyan
+  Write-Host "Resolved .env source: $($envResolution.Source)" -ForegroundColor Cyan
+  Write-Host ''
+  Write-Warning 'This restore will replace the active local n8n database state with the backup state.'
+  if ($backupEncryptionKey) {
+    Write-Warning 'It will also update local Compose N8N_ENCRYPTION_KEY to the key bundled with the backup.'
+  } else {
+    Write-Warning 'No backup key was found, so saved credentials are not guaranteed to decrypt.'
+  }
+  Write-Host ''
+  $approval = Read-Host 'Type PROCEED to continue'
+  Write-Host ''
+  if ($approval -ne 'PROCEED') {
+    Write-Warning 'Restore cancelled. The pre-restore backups were kept.'
+    return
   }
 
   if ($runningServices -notcontains 'postgres') {
@@ -2005,46 +1980,23 @@ function Restore-LocalN8nFromBackupMenu {
     if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return }
   }
 
-  if (-not (Backup-Postgres -Required -EnvPath $resolvedEnvPath)) {
+  $preRestoreRoot = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+  if (-not (Backup-Postgres -Required -EnvPath $resolvedEnvPath -BackupDir $preRestoreRoot)) {
     Write-ErrorMessage 'Restore cancelled because the current local n8n database backup did not complete.'
     return
   }
-  Write-Success 'Current local n8n database backup created.'
-
-  $envBackupPath = Backup-CurrentEnvForRestore -EnvPath $resolvedEnvPath
+  $envBackupPath = Backup-CurrentEnvForRestore -EnvPath $resolvedEnvPath -BackupDir $preRestoreRoot
   if (-not $envBackupPath) {
     Write-ErrorMessage 'Restore cancelled because the current .env backup did not complete.'
     return
   }
-  Write-Success 'Current .env backup created.'
-
-  Write-Host ''
-  Write-Host "Detected backup type: $($detected.Label)." -ForegroundColor Cyan
-  Write-Host "Resolved .env path: $resolvedEnvPath" -ForegroundColor Cyan
-  Write-Host "Resolved .env source: $($envResolution.Source)" -ForegroundColor Cyan
-  Write-Host 'Current local n8n database backup created.' -ForegroundColor Green
-  Write-Host 'Current .env backup created.' -ForegroundColor Green
-  Write-Host ''
-  Write-Warning 'This restore will replace the active local n8n database state with the backup state.'
-  if ($backupEncryptionKey) {
-    Write-Warning 'It will also update local Compose N8N_ENCRYPTION_KEY to the key bundled with the backup.'
-  } else {
-    Write-Warning 'No backup encryption key was found, so saved credentials are not guaranteed to decrypt.'
-  }
-  Write-Host ''
-  $approval = Read-Host 'Type RESTORE LOCAL N8N FROM BACKUP to continue'
-  if ($approval -ne 'RESTORE LOCAL N8N FROM BACKUP') {
-    Write-Warning 'Restore cancelled. The pre-restore backups were kept.'
-    return
-  }
+  Write-Success 'Pre-restore backups created.'
 
   if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
 
   $ok = $false
   switch ($detected.Type) {
     'postgres-sql' { $ok = Restore-PostgresSqlBackup -Backup $detected -EnvPath $resolvedEnvPath }
-    'postgres-sql-gzip' { $ok = Restore-PostgresSqlBackup -Backup $detected -EnvPath $resolvedEnvPath }
-    'postgres-archive' { $ok = Restore-PostgresSqlBackup -Backup $detected -EnvPath $resolvedEnvPath }
     'n8n-entities' { $ok = Restore-N8nEntitiesBackup -Backup $detected }
     default {
       Write-ErrorMessage 'Unsupported backup type after detection.'

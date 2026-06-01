@@ -586,8 +586,13 @@ Keep that folder local and private. Do not commit backup packages or `SECRET-DO-
 
 Supported backup types:
 
-- Postgres SQL or archive backup: `.sql`, `.sql.gz`, `.dump`, or `.backup`.
-- n8n entities backup zip or folder containing n8n entity `.jsonl` files, such as `workflowentity.jsonl`, `credentialsentity.jsonl`, `settings.jsonl`, `project.jsonl`, or `user.jsonl`.
+- Allowed restore backup files:
+  - `.sql` Postgres SQL dump.
+  - `.zip` n8n entities export package.
+
+- No folder input is accepted for restore. Use one of the two supported file types (`.sql` or `.zip`).
+
+For `.zip` restores, the launcher stages the selected file as `entities.zip` for `n8n import:entities`; it does not restore from an extracted folder of JSONL files.
 
 Restore replaces the current local n8n database state. Current local data and `.env` are backed up first. The current local Compose Postgres connection settings are used as the restore target, so Postgres passwords from the source backup are not normally needed.
 
@@ -614,7 +619,7 @@ Optional advanced examples:
 Before replacing data, the launcher shows the detected backup type, confirms the current local database and `.env` backups were created, and requires this exact typed approval:
 
 ```text
-RESTORE LOCAL N8N FROM BACKUP
+PROCEED
 ```
 
 `Command list` explains what the numbered menu options do. It is not asking you to type Docker commands for normal use.
