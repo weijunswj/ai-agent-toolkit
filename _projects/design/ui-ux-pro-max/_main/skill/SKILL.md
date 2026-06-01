@@ -7,15 +7,36 @@ description: Security-first frontend UI/UX design skill for creating, reviewing,
 
 ## Overview
 
-Use this instruction-only skill to create or review frontend web interfaces with a design-system-first process and security-first guardrails. Aim for polished, accessible, responsive, maintainable UI that protects users and avoids manipulative UX.
+Use this instruction-first skill to create or review frontend web interfaces with a design-system-first process and security-first guardrails. Aim for polished, accessible, responsive, maintainable UI that protects users and avoids manipulative UX.
 
-Load reference files only when useful:
+This skill also includes an optional local-only design-system generator under `tools/design-system-generator/`. The generator is never required for normal design or review tasks, and it must not run by default.
+
+## Read First
+
+For design and review tasks, read the relevant references only when useful:
 
 - `references/design-system-workflow.md` for design system templates.
 - `references/component-patterns.md` for common UI patterns.
 - `references/frontend-quality-rubric.md` for scoring reviews.
 - `references/privacy-security-safety.md` for high-risk surface gates.
 - `references/stack-playbooks.md` for React, Next.js, Tailwind, shadcn/ui, charts, forms, and accessibility guidance.
+
+For generator tasks, read `tools/design-system-generator/README.md` before running anything.
+
+## When to use the generator
+
+Use the optional generator only when the user asks for design-system generation, stack or component pattern exploration, or local CSV-backed recommendations.
+
+For normal frontend design, redesign, planning, implementation, or review, use the instructions and references first.
+
+## Generator safety boundary
+
+- Local-only: it reads bundled CSV data from this skill folder.
+- Do not use network downloads.
+- Do not install packages or dependencies.
+- Do not expand shell usage beyond the documented local Python command.
+- Do not write outside the generator output folder documented by `tools/design-system-generator/README.md`.
+- Ask for explicit current-turn approval before running the generator or writing generated output.
 
 ## When to use
 
@@ -53,6 +74,7 @@ Use when the user asks to create, redesign, polish, review, or plan:
 - Prefer visible, reversible actions for destructive or automation-related controls.
 - Use clear consent, plain language, and honest product claims.
 - Do not add dependencies, network calls, trackers, or remote assets unless the user approves.
+- Do not run the optional generator unless the user explicitly asks for generator-backed output and approves the current run.
 
 ## Workflow
 
