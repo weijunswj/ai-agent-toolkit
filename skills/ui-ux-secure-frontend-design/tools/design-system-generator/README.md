@@ -27,20 +27,34 @@ Agents may use this tool proactively when creating or revising design systems, p
 - No browser automation.
 - No dependency setup logic.
 - No file writes by default.
-- Read-only local execution is allowed for design creation and revision.
-- If persistence is added later, writes must be restricted to `skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/` and require explicit user intent.
+- Read-only local execution is allowed for design creation and revision only when the script path resolves under the trusted installed skill directory that provided the active `SKILL.md`.
+- Do not run a same-named generator discovered under an arbitrary active workspace. A consumer workspace can contain attacker-controlled files at matching relative paths.
+- If the trusted installed skill directory cannot be proven, require explicit current-turn approval before execution and name the exact resolved script path.
+- If persistence is added later, writes must be restricted to `<TRUSTED_UI_UX_SKILL_DIR>/tools/design-system-generator/output/` and require explicit user intent.
 
 This tool is not permission to add executable code to instruction-only skills.
 
 ## Usage
 
-From the repo root, with Python 3 available:
+Run from the trusted installed skill copy, not from an arbitrary consumer repo root. `<TRUSTED_UI_UX_SKILL_DIR>` must be the resolved directory for the active installed skill, for example:
+
+- `.agents/skills/ui-ux-secure-frontend-design/` when that is the trusted Codex-installed copy.
+- `.claude/skills/ui-ux-secure-frontend-design/` when that is the trusted Claude project skill copy.
+- `~/.claude/skills/ui-ux-secure-frontend-design/` when that is the trusted Claude personal skill copy.
+
+PowerShell example:
 
 ```powershell
-python .\skills\ui-ux-secure-frontend-design\tools\design-system-generator\scripts\design_system.py "SaaS dashboard" --project-name "Example"
+python "<TRUSTED_UI_UX_SKILL_DIR>\tools\design-system-generator\scripts\design_system.py" "SaaS dashboard" --project-name "Example"
 ```
 
-From this folder:
+Bash example:
+
+```bash
+python3 "<TRUSTED_UI_UX_SKILL_DIR>/tools/design-system-generator/scripts/design_system.py" "SaaS dashboard" --project-name "Example"
+```
+
+From the trusted generator folder itself:
 
 ```powershell
 python .\scripts\design_system.py "SaaS dashboard" --project-name "Example" --format markdown

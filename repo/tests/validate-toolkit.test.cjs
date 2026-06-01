@@ -1213,6 +1213,20 @@ test('validator rejects network, shell, and package-install strings in design ge
   assert.match(result.stderr, /Design generator script contains forbidden local-only token/);
 });
 
+test('validator flags workspace-relative design generator commands in published docs', () => {
+  const errors = [];
+  validator.validateDesignGeneratorCommandDocs(
+    errors,
+    [
+      '```powershell',
+      'python .\\skills\\ui-ux-secure-frontend-design\\tools\\design-system-generator\\scripts\\design_system.py "SaaS dashboard"',
+      '```'
+    ].join('\n'),
+    'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md'
+  );
+  assert.match(errors.join('\n'), /workspace-relative design generator command/);
+});
+
 test('generated agent-rule templates keep manual global and repo-local lanes separate', () => {
   const executionPrompt = readTextFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md')).trimEnd();
   const n8nAdapter = readTextFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'n8n-agent-rules-adapter.md')).trimEnd();

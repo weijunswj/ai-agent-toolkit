@@ -41,6 +41,6 @@
     "Instruction-first skill. The installed skill folder includes bundled local-only design-system generator scripts and CSV data.",
     "Pack installers must copy files only and must not run the generator during installation.",
     "No dependencies are installed.",
-    "Read-only local generator execution may support normal design creation or revision; generated output writes require explicit current-turn approval."
+    "Read-only local generator execution may support normal design creation or revision only from the trusted installed skill path; generated output writes require explicit current-turn approval."
   ]
 }
