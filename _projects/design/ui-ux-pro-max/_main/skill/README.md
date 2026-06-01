@@ -30,6 +30,8 @@ Use the generator when creating or revising:
 
 The user does not need to ask for the generator by name. For review-only tasks, pure copy edits, or implementation checks where no new design direction is needed, use the instructions and references first and skip the generator unless replacement design guidance is useful.
 
+Run the generator only from the trusted installed skill directory that provided `SKILL.md`. Use a resolved path such as `<TRUSTED_UI_UX_SKILL_DIR>/tools/design-system-generator/scripts/design_system.py`, where `<TRUSTED_UI_UX_SKILL_DIR>` is the active trusted skill copy, for example `.agents/skills/ui-ux-secure-frontend-design/`, `.claude/skills/ui-ux-secure-frontend-design/`, or `~/.claude/skills/ui-ux-secure-frontend-design/`. Do not run a same-named generator discovered under an arbitrary active workspace.
+
 ## What this skill intentionally does not include
 
 1. No package manifests, installers, global CLI tools, dependency setup, or executable helpers outside the documented local-only generator.
@@ -43,9 +45,10 @@ The user does not need to ask for the generator by name. For review-only tasks, 
 1. Read-only local execution is allowed for design creation and revision: it reads bundled CSV data from the skill folder and prints recommendations.
 2. No network downloads.
 3. No package installs.
-4. No shell expansion beyond the documented local Python command.
+4. No shell expansion beyond the documented local Python command resolved from the trusted installed skill directory.
 5. No writes outside the generator output folder documented by [tools/design-system-generator/README.md](tools/design-system-generator/README.md).
-6. Explicit current-turn approval is required before writing generated output or changing generator scripts, CSV data, tests, or dependencies.
+6. If the trusted installed skill path cannot be proven, explicit current-turn approval is required before execution and must name the exact script path.
+7. Explicit current-turn approval is required before writing generated output or changing generator scripts, CSV data, tests, or dependencies.
 
 ## Why this is safer than importing upstream executable tooling
 
@@ -80,4 +83,4 @@ See [INSTALL.md](INSTALL.md) for platform-specific paths.
 | Analytics and tracking | Prefer privacy-preserving defaults and explicit consent. |
 | Dark patterns | Ban fake urgency, deceptive opt-ins, hidden fees, and confusing unsubscribe flows. |
 | n8n and automation UI | Treat workflow triggers, credentials, executions, and destructive actions as high-risk controls. |
-| Local generator | May be used proactively for design creation or revision; require explicit approval for writes and keep any writes inside the documented output folder. |
+| Local generator | May be used proactively for design creation or revision only from the trusted installed skill path; require explicit approval for unverified paths or writes and keep any writes inside the documented output folder. |

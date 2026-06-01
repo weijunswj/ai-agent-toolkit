@@ -657,6 +657,19 @@ function validateDesignGeneratorLocalOnly(errors) {
   if (!licenseNotes.includes('nextlevelbuilder/ui-ux-pro-max-skill') || !licenseNotes.includes('MIT')) {
     fail(errors, 'Design generator third-party licence notes must mention upstream project and MIT licence');
   }
+
+  for (const entry of listFiles().filter((item) => item.relPath.startsWith('skills/ui-ux-secure-frontend-design/') && item.relPath.endsWith('.md'))) {
+    validateDesignGeneratorCommandDocs(errors, fs.readFileSync(entry.fullPath, 'utf8'), entry.relPath);
+  }
+}
+
+function validateDesignGeneratorCommandDocs(errors, text, relPath) {
+  const normalized = text.replace(/\\/g, '/');
+  const workspaceRelativeGeneratorCommand =
+    /\b(?:python|python3|py)\b[^\n`]*?(?:\.\s*\/\s*)?skills\s*\/\s*ui-ux-secure-frontend-design\s*\/\s*tools\s*\/\s*design-system-generator\s*\/\s*scripts\s*\/\s*design_system\.py/i;
+  if (workspaceRelativeGeneratorCommand.test(normalized)) {
+    fail(errors, `Design generator docs contain workspace-relative design generator command: ${relPath}`);
+  }
 }
 
 function validateProjectModules(errors) {
@@ -1638,6 +1651,7 @@ module.exports = {
   skillDirs,
   validateForbiddenFiles,
   validateDesignGeneratorLocalOnly,
+  validateDesignGeneratorCommandDocs,
   validateMarkdownLinks,
   validateStaleReferences,
   validateSecretStrings
