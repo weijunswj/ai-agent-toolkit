@@ -10,7 +10,7 @@ if errorlevel 1 (
 )
 
 :run_menu
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%STACK_DIR%scripts\n8n-local-menu.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%STACK_DIR%scripts\n8n-local-menu.ps1" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 if "%EXIT_CODE%"=="0" goto done
 

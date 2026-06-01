@@ -5,9 +5,9 @@
   "title": "Knowledge Index Updater",
   "module_path": "_projects/knowledge/knowledge-index-updater",
   "main_path": "_projects/knowledge/knowledge-index-updater/_main",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "version_policy": "semver",
-  "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
+  "version_notes": "Clarifies best-effort local automation memory writes and explicit Notion/GitHub tool discovery guidance.",
   "outputs": [
     {
       "kind": "copy",

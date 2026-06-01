@@ -63,6 +63,7 @@
     "*.key",
     "*.p12",
     "*.pfx",
+    "**/SECRET-DO-NOT-COMMIT.env",
     "*credential*",
     "*.zip",
     "*.tgz"
@@ -71,6 +72,7 @@
   "run_commands": false,
   "notes": [
     "Copy .env.example to .env locally and do not commit .env.",
+    "Local backup packages may include SECRET-DO-NOT-COMMIT.env with the restore-critical N8N_ENCRYPTION_KEY. Keep it local and private.",
     "Optional AI-coding-agent MCP config is secondary and not part of the beginner local setup path.",
     "Live n8n actions require separate explicit confirmation."
   ]

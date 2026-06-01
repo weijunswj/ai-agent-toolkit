@@ -2,6 +2,8 @@
 .env.*
 !.env.example
 .n8n-local/
+.n8n-local/backups/
+.n8n-local/import/
 .tmp/
 /n8n-workflows/
 .to-sanitise/
@@ -21,6 +23,7 @@ __pycache__/
 *.credential*.json
 *n8n*credential*.json
 *n8n*binding*.json
+**/SECRET-DO-NOT-COMMIT.env
 !_projects/cicd/secure-installer/_main/docs/n8n/n8n-credential-migration-map.example.json
 *.pem
 *.key

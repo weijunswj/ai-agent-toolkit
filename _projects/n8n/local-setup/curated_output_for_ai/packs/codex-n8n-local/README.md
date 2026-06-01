@@ -27,4 +27,6 @@ If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge
 3. Fill placeholders locally in `.env`; do not edit `.env.example`.
 4. Start through [_n8n-local.cmd](../../templates/local-stack/_n8n-local.cmd).
 
+Launcher backup and recovery options are local/dev database restore only, not production restore or the regular workflow JSON flow.
+
 Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live imports/exports.

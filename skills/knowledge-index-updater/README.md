@@ -23,6 +23,12 @@ This skill should support these platforms by default:
 
 If a platform cannot access Notion, GitHub, or scheduled tasks, explain the limitation and still provide a manual update plan.
 
+## Tool discovery and local state
+
+Before claiming Notion or GitHub work is unavailable, explicitly run the platform's available tool or plugin discovery flow. For Codex, search for Notion and GitHub tools when they are not initially visible. If a required tool is still unavailable after discovery, report the exact missing tool and list the work that could not be completed because of that absence.
+
+Local automation memory files are optional convenience state only. Never require local filesystem write access for correctness, and never skip Notion or GitHub update work because a local memory file cannot be written. Prefer durable state in Notion and GitHub when available. If a local memory write is blocked, continue the run and include the would-be memory update as a concise run summary in the final response.
+
 ## What this skill is for
 
 Use this skill when the user wants to:
@@ -40,6 +46,8 @@ The agent should use:
 1. Notion connector.
 2. GitHub connector.
 3. Automation/scheduler tool when the user asks for recurring updates.
+
+If Notion or GitHub tools are not initially visible, discover available tools or plugins before deciding they are unavailable.
 
 ## Default Notion table
 
@@ -247,3 +255,5 @@ Updated the Knowledge Index.
 ### Caveats
 - <Any uncertainty or tool limitation>.
 ```
+
+If a local automation memory write was blocked, do not report the run as failed. Add a concise `Local memory update summary` with the would-be memory update instead.
