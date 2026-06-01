@@ -41,12 +41,6 @@
       "fidelity": "generated_metadata"
     },
     {
-      "kind": "linked",
-      "output": "mcp/projects/ui-ux-pro-max.md",
-      "notes": "MCP project note remains linked in this PR because the pass is limited to UI/UX skill-folder ownership findings, not MCP cleanup.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
       "kind": "copy",
       "source": "_main/skill/references/component-patterns.md",
       "output": "skills/ui-ux-secure-frontend-design/references/component-patterns.md",
@@ -162,7 +156,6 @@
       "skills/ui-ux-secure-frontend-design/INSTALL.md",
       "skills/ui-ux-secure-frontend-design/LICENSE-THIRD-PARTY-NOTES.md",
       "skills/ui-ux-secure-frontend-design/agents/openai.yaml",
-      "mcp/projects/ui-ux-pro-max.md",
       "skills/ui-ux-secure-frontend-design/references/component-patterns.md",
       "skills/ui-ux-secure-frontend-design/references/design-system-workflow.md",
       "skills/ui-ux-secure-frontend-design/references/frontend-quality-rubric.md",
@@ -180,7 +173,6 @@
       "skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json",
       "skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/README.md",
       "skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/pack.json",
-      "mcp/registry/projects.registry.json",
       "skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/**"
     ],
     "denied": [
@@ -208,16 +200,14 @@
     "summary": "Third-party-attributed UI/UX design knowledge preserved with a local-only design-system generator and a security-first frontend skill."
   },
   "surface": {
-    "publish_as": "both",
+    "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/ui-ux-secure-frontend-design",
       "summary": "Helps an agent create, review, and improve frontend UI/UX with accessibility, responsive, privacy, and security guardrails."
     },
     "mcp": {
-      "status": "published",
-      "path": "mcp/projects/ui-ux-pro-max.md",
-      "summary": "Spec-only MCP notes for future design-system generator and review surfaces; no runnable MCP server is shipped."
+      "status": "not_applicable"
     }
   }
 }

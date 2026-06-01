@@ -7,7 +7,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const baselineRelPath = 'repo/docs/published-surface-audit-baseline.json';
-const publishedRoots = ['skills', 'mcp'];
+const publishedRoots = ['skills'];
 const projectRoot = '_projects';
 const textExtensions = new Set(['.md', '.json', '.ps1', '.cmd', '.cjs', '.js', '.txt', '.yaml', '.yml']);
 const suspiciousPathWords = /\b(prompt|template|reference|guide|setup|policy|agent|rules|readme)\b/i;
@@ -188,17 +188,6 @@ function declaredOutputs(root, projects) {
     for (const output of project.outputs || []) {
       entries.push(...expandProjectOutput(root, project, output));
     }
-  }
-  if (fs.existsSync(resolveRel(root, 'mcp/registry/projects.registry.json'))) {
-    entries.push({
-      path: 'mcp/registry/projects.registry.json',
-      projectId: 'repo.project-registry',
-      projectPath: projectRoot,
-      kind: 'generated_registry',
-      source: '_projects/**/toolkit.project.json',
-      sources: projects.map((project) => `${project.module_path}/toolkit.project.json`),
-      recipeOutput: 'mcp/registry/projects.registry.json'
-    });
   }
   const byPath = new Map();
   for (const entry of entries) {
@@ -975,7 +964,7 @@ function countBy(items, field) {
 function buildAudit(root) {
   const projects = discoverProjectManifests(root);
   const tracked = trackedOrFilesystemFiles(root, publishedRoots);
-  const publishedFiles = tracked.files.filter((relPath) => relPath.startsWith('skills/') || relPath.startsWith('mcp/')).sort();
+  const publishedFiles = tracked.files.filter((relPath) => relPath.startsWith('skills/')).sort();
   const declared = declaredOutputs(root, projects);
   const packInstalled = packInstalledFiles(root, publishedFiles);
 

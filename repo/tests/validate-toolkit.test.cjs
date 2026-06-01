@@ -230,19 +230,9 @@ function contractBlock(text) {
   return text.slice(start + begin.length, finish).trim();
 }
 
-test('JSON registries parse in the current repo', () => {
-  for (const file of [
-    'skills.registry.json',
-    'playbooks.registry.json',
-    'templates.registry.json',
-    'packs.registry.json',
-    'projects.registry.json',
-    'tools.registry.json',
-    'source-repos.registry.json',
-    'consumers.registry.json'
-  ]) {
-    assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', file), 'utf8')));
-  }
+test('repo-wide MCP generated surface is absent', () => {
+  assert.equal(fs.existsSync(path.join(repoRoot, 'mcp')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'repo-methodology', 'mcp-ready-registry')), false);
 });
 
 test('advanced Codex and Claude plugin manifests stay out of the simple install PR', () => {
@@ -266,41 +256,16 @@ test('skill discovery includes migrated skills', () => {
   assert.ok(skills.includes('skills/n8n-local-setup'));
   assert.ok(skills.includes('skills/secure-cicd-installer'));
   assert.ok(skills.includes('skills/knowledge-index-updater'));
-
-  const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'skills.registry.json'), 'utf8'));
-  const registryPaths = registry.map((entry) => entry.path.replace(/\/$/, ''));
-  for (const skill of skills) {
-    assert.ok(registryPaths.includes(skill), `${skill} missing from skills registry`);
-  }
 });
 
-test('skill registry metadata describes the repo-local agent rules bootstrap skill', () => {
-  const expectedPurpose = 'Bootstrap, check, and repair repo-local AI coding agent instruction files and platform shims for Codex, Claude Code, Antigravity, and compatible agents.';
-  const expectedTriggers = [
-    'repo-local agent rules',
-    'bootstrap repo-local instructions',
-    'repair AGENTS.md',
-    'AI-AGENT-TOOLKIT managed markers'
-  ];
-
-  for (const relPath of [
-    '_projects/repo-methodology/mcp-ready-registry/_main/registry/skills.registry.json',
-    'mcp/registry/skills.registry.json'
-  ]) {
-    const registry = readJsonFile(path.join(repoRoot, relPath));
-    const skill = registry.find((entry) => entry.id === 'ai-coding-agent-rules');
-    assert.ok(skill, `${relPath}: ai-coding-agent-rules registry entry`);
-    assert.equal(skill.purpose, expectedPurpose, relPath);
-    assert.doesNotMatch(skill.purpose, /Slim generic execution-first/i, relPath);
-    for (const trigger of expectedTriggers) {
-      assert.ok(skill.auto_use_triggers.includes(trigger), `${relPath}: ${trigger}`);
-    }
-  }
+test('repo-local agent rules bootstrap skill metadata stays in the skill surface', () => {
+  const skill = readTextFile(path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'SKILL.md'));
+  assert.match(skill, /Bootstrap or repair repo-local AI coding agent instruction files/i);
+  assert.match(skill, /AI-AGENT-TOOLKIT managed[- ]marker/i);
 });
 
-test('project registry includes the project modules', () => {
-  const registry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'projects.registry.json'), 'utf8'));
-  const ids = registry.map((entry) => entry.id).sort();
+test('project manifests include the current project modules without repo-wide MCP publishing', () => {
+  const ids = validator.projectManifests().map((entry) => entry.id).sort();
   assert.deepEqual(ids, [
     'cicd.secure-installer',
     'design.ui-ux-pro-max',
@@ -309,16 +274,11 @@ test('project registry includes the project modules', () => {
     'knowledge.knowledge-index-updater',
     'n8n.local-setup',
     'n8n.workflow-toolkit',
-    'repo-methodology.context-preserving-ai-publisher',
-    'repo-methodology.mcp-ready-registry'
+    'repo-methodology.context-preserving-ai-publisher'
   ]);
-  for (const entry of registry) {
-    assert.ok(entry.project?.summary, entry.id);
-    assert.ok(['skill', 'mcp', 'both', 'source_only'].includes(entry.surface?.publish_as), entry.id);
-    assert.match(entry.version, /^\d+\.\d+\.\d+$/, entry.id);
-    assert.equal(entry.version_policy, 'semver', entry.id);
-    assert.ok(entry.version_notes, entry.id);
-    assert.doesNotMatch(JSON.stringify(entry.root_surfaces), /(^|[^A-Za-z0-9_])for_ai\//);
+  for (const entry of validator.projectManifests()) {
+    assert.ok(['skill', 'source_only'].includes(entry.surface?.publish_as), entry.id);
+    assert.equal(entry.surface?.mcp?.status, 'not_applicable', entry.id);
   }
 });
 
@@ -380,7 +340,7 @@ test('project manifest validation rejects empty version notes', () => {
 });
 
 test('project metadata supports all declared publish_as values', () => {
-  for (const publishAs of ['skill', 'mcp', 'both', 'source_only']) {
+  for (const publishAs of ['skill', 'source_only']) {
     const cwd = tempCopy();
     const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
     const manifest = readJsonFile(manifestPath);
@@ -395,16 +355,15 @@ test('project metadata supports all declared publish_as values', () => {
   }
 });
 
-test('sync output declarations target skills and mcp, not legacy surfaces', () => {
+test('sync output declarations target skills, not legacy or repo-wide MCP surfaces', () => {
   for (const manifest of validator.projectManifests()) {
     for (const output of manifest.outputs || []) {
-      assert.match(output.output, /^(skills|mcp)\//, `${manifest.id}: ${output.output}`);
+      assert.match(output.output, /^skills\//, `${manifest.id}: ${output.output}`);
       assert.doesNotMatch(output.output, /(^|[^A-Za-z0-9_])for_ai\//);
     }
     for (const allowed of manifest.writes.allowed || []) {
-      if (allowed === 'mcp/registry/projects.registry.json') continue;
       if (allowed.endsWith('/output/**')) continue;
-      assert.match(allowed, /^(skills|mcp)\//, `${manifest.id}: ${allowed}`);
+      assert.match(allowed, /^skills\//, `${manifest.id}: ${allowed}`);
     }
   }
 });
@@ -449,7 +408,7 @@ test('README is a user-facing map with the contract in the appendix', () => {
     '## Quick Start',
     '## Projects',
     '## Skills',
-    '## MCP',
+    '## MCP Status',
     '## Folder Map',
     '## For Maintainers',
     '## Validation',
@@ -464,11 +423,8 @@ test('README is a user-facing map with the contract in the appendix', () => {
   }
   assert.ok(text.indexOf(contractBegin) > text.indexOf('## Appendix: Source-of-Truth Contract'));
   assert.match(text, /`skills\/<skill-name>\/`/);
-  assert.match(text, /`mcp\/`/);
-  const skillRegistry = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mcp', 'registry', 'skills.registry.json'), 'utf8'));
-  for (const entry of skillRegistry) {
-    assert.ok(text.includes(`](${entry.path})`), `${entry.path} missing from README skills table`);
-  }
+  assert.doesNotMatch(text, /\[mcp\/\]\(/);
+  assert.match(text, /repo-wide MCP is intentionally not shipped/i);
   assert.doesNotMatch(text, /(^|[^A-Za-z0-9_])for_ai\//);
   for (const surface of ['packs', 'playbooks', 'templates', 'registries', 'registry', 'tools']) {
     assert.doesNotMatch(text, new RegExp(`\\|\\s+\`?${surface}/?\`?\\s+\\|`, 'i'));
@@ -851,7 +807,7 @@ test('validator rejects git push outside the auto-sync generated surfaces workfl
 });
 
 test('auto-sync generated surfaces workflow rejects forbidden events and missing guards', () => {
-  const generatedScopePrefix = 'README.md|skills/*|mcp/*|';
+  const generatedScopePrefix = 'README.md|skills/*|';
   const cases = [
     ['pull_request is forbidden', (text) => text.replace('pull_request_target:', 'pull_request:'), /must use pull_request_target/],
     ['push is forbidden', (text) => text.replace('pull_request_target:', 'push:\n  pull_request_target:'), /must not trigger on push/],
@@ -883,9 +839,9 @@ test('auto-sync generated surfaces workflow rejects forbidden commands and broad
     ['workflow_dispatch is forbidden', (text) => text.replace('pull_request_target:', 'workflow_dispatch:\n  pull_request_target:'), /must not trigger on workflow_dispatch/],
     ['source-watch script is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'node "$TRUSTED_ROOT/repo/scripts/watch-project-sources.cjs" --workspace "$PR_ROOT"'), new RegExp('must not run source-watch or source-update ' + 'scripts')],
     ['live n8n export is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'scr' + 'ipts/export-n8n-workflows-live.ps1'), /must not run live n8n import\/export/],
-    ['git add scope is fixed', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills mcp', '/usr/bin/git -C "$PR_ROOT" add README.md skills mcp repo'), /must commit only approved generated output paths/],
-    ['git add must not stage AGENTS.md', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills mcp', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
-    ['git add must not stage Claude shim', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills mcp', '/usr/bin/git -C "$PR_ROOT" add README.md CLAUDE.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
+    ['git add scope is fixed', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills', '/usr/bin/git -C "$PR_ROOT" add README.md skills repo'), /must commit only approved generated output paths/],
+    ['git add must not stage AGENTS.md', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
+    ['git add must not stage Claude shim', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills', '/usr/bin/git -C "$PR_ROOT" add README.md CLAUDE.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
     ['commit bypasses hooks', (text) => text.replace('commit --no-verify -m', 'commit -m'), /must use git commit --no-verify/],
     ['final push resets remote', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" remote set-url origin', 'echo remote'), /must set push remote with the GitHub token only in the final push step/]
   ];
@@ -1105,7 +1061,7 @@ test('auto-sync generated surfaces workflow snapshots and rechecks staged output
     ['final recheck is required after validation', (text) => text.replace('      - name: Final pre-commit workspace recheck', '      - name: Removed pre-commit workspace recheck'), /must recheck the workspace and staged index after validation and before commit/],
     ['post-sync staged index snapshot is required', (text) => text.replace('expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"', 'expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" rev-parse HEAD)"'), /must snapshot the staged index after the post-sync guard/],
     ['staged index tree comparison is required', (text) => text.replace('if [[ "$current_index_tree" != "${EXPECTED_INDEX_TREE}" ]]; then', 'if false; then'), /final recheck must compare the staged index tree snapshot/],
-    ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md skills mcp\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
+    ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md skills\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
     ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
     ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
     ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /final recheck must reject staged paths outside generated output scope/],
@@ -1159,7 +1115,6 @@ test('auto-sync generated output path scope is explicit', () => {
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
     '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    'mcp/registry/projects.registry.json',
     'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md'
   ]) {
     assert.equal(validator.isAutoSyncGeneratedOutputPath(rel), true, rel);
@@ -1177,6 +1132,7 @@ test('auto-sync generated output path scope is explicit', () => {
     'GEMINI.md',
     '.agents/rules/00-agent-toolkit-bootstrap.md',
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.with-toolkit-skills.template.md',
+    'mcp/registry/projects.registry.json',
     'repo/' + 'scr' + 'ipts/anything.cjs',
     '.github/workflows/anything.yml',
     'package.json',
@@ -1385,10 +1341,10 @@ test('validator rejects unexpected Antigravity rule files', () => {
 
 test('validator rejects broken relative links in non-_main Markdown files', () => {
   const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, 'mcp', 'projects', 'n8n-workflow-toolkit.md'), '\n[Missing local target](DOES-NOT-EXIST.md)\n');
+  fs.appendFileSync(path.join(cwd, 'skills', 'n8n-local-setup', 'README.md'), '\n[Missing local target](DOES-NOT-EXIST.md)\n');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /mcp\/projects\/n8n-workflow-toolkit\.md links to missing path: mcp\/projects\/DOES-NOT-EXIST\.md/);
+  assert.match(result.stderr, /skills\/n8n-local-setup\/README\.md links to missing path: skills\/n8n-local-setup\/DOES-NOT-EXIST\.md/);
 });
 
 test('Markdown link validation ignores _projects source files', () => {
@@ -1603,12 +1559,12 @@ test('sync rejects text_rewrites on JSON outputs before checking generated bytes
   manifest.outputs.push({
     kind: 'json',
     source: '_main/json-rewrite-regression.json',
-    output: 'mcp/projects/json-rewrite-regression.json',
+    output: 'skills/n8n-local-setup/references/json-rewrite-regression.json',
     notes: 'Regression fixture for JSON text rewrite hardening.',
     fidelity: 'generated_metadata',
     text_rewrites: [{ from: '"active": false', to: '"active": true' }]
   });
-  manifest.writes.allowed.push('mcp/projects/json-rewrite-regression.json');
+  manifest.writes.allowed.push('skills/n8n-local-setup/references/json-rewrite-regression.json');
   writeJsonFile(manifestPath, manifest);
 
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
@@ -1658,13 +1614,11 @@ test('internal AI-facing surfaces are generated from declared project output', (
     ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/README.md', 'curated_output_for_ai/skills/n8n-workflow-helper-scripts/README.md'],
     ['n8n.workflow-toolkit', 'skills/n8n-workflow-templates/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-templates/SKILL.md'],
     ['n8n.workflow-toolkit', 'skills/n8n-workflow-templates/README.md', 'curated_output_for_ai/skills/n8n-workflow-templates/README.md'],
-    ['n8n.workflow-toolkit', 'mcp/projects/n8n-workflow-toolkit.md', 'curated_output_for_ai/mcp/n8n-workflow-toolkit.md'],
     ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/references/workflow-sync.md', 'curated_output_for_ai/references/workflow-sync.md'],
     ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/README.md', 'curated_output_for_ai/templates/helper-scripts/sanitizer/README.md'],
     ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md', 'curated_output_for_ai/templates/helper-scripts/import-export-sync/README.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/SKILL.md', 'curated_output_for_ai/skills/secure-cicd-installer/SKILL.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/README.md', 'curated_output_for_ai/skills/secure-cicd-installer/README.md'],
-    ['cicd.secure-installer', 'mcp/projects/secure-cicd-installer.md', 'curated_output_for_ai/mcp/secure-cicd-installer.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/references/secure-cicd-installer.md', 'curated_output_for_ai/overviews/secure-cicd-installer.md'],
     ['cicd.secure-installer', 'skills/secure-cicd-installer/templates/cicd/README.md', 'curated_output_for_ai/templates/cicd/README.md'],
   ];
@@ -1776,14 +1730,10 @@ test('curated JSON pack outputs match deterministic source formatting', () => {
   }
 });
 
-test('third-party UI UX project owns skill surfaces and leaves MCP linked', () => {
+test('third-party UI UX project owns skill surfaces without repo-wide MCP linked output', () => {
   const manifests = manifestsById();
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'curated_output_for_ai')), false);
-  assert.equal(
-    manifestOutput(manifests.get('design.ui-ux-pro-max'), 'mcp/projects/ui-ux-pro-max.md')?.kind,
-    'linked',
-    'mcp/projects/ui-ux-pro-max.md'
-  );
+  assert.equal(manifestOutput(manifests.get('design.ui-ux-pro-max'), 'mcp/projects/ui-ux-pro-max.md'), undefined);
   for (const [outputPath, sourcePath] of [
     ['skills/ui-ux-secure-frontend-design/SKILL.md', '_main/skill/SKILL.md'],
     ['skills/ui-ux-secure-frontend-design/README.md', '_main/skill/README.md'],
@@ -1797,14 +1747,6 @@ test('third-party UI UX project owns skill surfaces and leaves MCP linked', () =
     const output = manifestOutput(manifests.get('design.ui-ux-pro-max'), outputPath);
     assert.equal(output?.kind, 'copy', outputPath);
     assert.equal(output?.source, sourcePath, outputPath);
-  }
-  for (const outputPath of [
-    'skills/ui-ux-secure-frontend-design/SKILL.md',
-    'skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md',
-    'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md',
-    'skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md'
-  ]) {
-    assert.match(fs.readFileSync(path.join(repoRoot, outputPath), 'utf8'), /Generated from toolkit project source/, outputPath);
   }
 });
 
@@ -1886,7 +1828,7 @@ test('source-lock audit requires local paths to stay in their topology namespace
   writeJsonFile(lockPath, lock);
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /root_surface_path must point under skills\/ or mcp\//);
+  assert.match(result.stderr, /root_surface_path must point under skills\//);
 
   cwd = tempCopy();
   lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
@@ -2098,54 +2040,37 @@ test('source watch rendered output is advisory and does not claim PR creation to
   assert.doesNotMatch(markdown, /Draft PR only|opens PRs today|creates PRs today|pushes commits/i);
 });
 
-test('public source repo registry excludes retired internal provenance sources', () => {
-  const registry = readJsonFile(path.join(repoRoot, 'mcp', 'registry', 'source-repos.registry.json'));
-  const sources = registry.map((entry) => entry.source);
+test('source-watch plan excludes retired internal provenance sources without MCP registry metadata', () => {
+  const plan = sourceWatcher.buildPlan(sourceWatcher.discoverLocks());
+  const sources = plan.active_update_candidates.map((entry) => entry.source_repo);
   assert.ok(sources.includes('nextlevelbuilder/ui-ux-pro-max-skill'));
   assert.equal(sources.includes('weijunswj/codex-n8n-local-setup'), false);
   assert.equal(sources.includes('weijunswj/ai-cicd-installer'), false);
   assert.equal(sources.includes('weijunswj/n8n-workflow-templates'), false);
 });
 
-test('validator rejects retired internal repos as active public source-watch targets', () => {
+test('validator rejects repo-wide MCP output declarations in project manifests', () => {
   const cwd = tempCopy();
-  const registryPath = path.join(cwd, 'mcp', 'registry', 'source-repos.registry.json');
-  const registry = readJsonFile(registryPath);
-  registry.push({
-    id: 'bad.retired',
-    source: 'weijunswj/codex-n8n-local-setup',
-    project_module: '_projects/n8n/local-setup'
-  });
-  writeJsonFile(registryPath, registry);
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.outputs.push({ kind: 'copy', source: '_main/README.md', output: 'mcp/projects/n8n-local-setup.md' });
+  manifest.writes.allowed.push('mcp/projects/n8n-local-setup.md');
+  writeJsonFile(manifestPath, manifest);
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /retired internal repo must not be listed as active source-watch target/);
+  assert.match(result.stderr, /must not declare repo-wide MCP output/);
 });
 
-test('retired internal repo guard does not trust mutable source-lock metadata', () => {
+test('validator rejects repo-wide MCP publish_as metadata in project manifests', () => {
   const cwd = tempCopy();
-  const lockPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'SOURCE-LOCK.json');
-  const lock = readJsonFile(lockPath);
-  lock.source_lifecycle = 'active';
-  lock.source_role = 'third_party_attribution_source';
-  lock.source_update_policy = 'manual_review_required';
-  lock.public_attribution_required = true;
-  lock.source_commit = '1111111111111111111111111111111111111111';
-  writeJsonFile(lockPath, lock);
-
-  const registryPath = path.join(cwd, 'mcp', 'registry', 'source-repos.registry.json');
-  const registry = readJsonFile(registryPath);
-  registry.push({
-    id: 'bad.retired.mutable',
-    source: 'weijunswj/codex-n8n-local-setup',
-    project_module: '_projects/n8n/local-setup'
-  });
-  writeJsonFile(registryPath, registry);
-
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.surface.publish_as = 'both';
+  manifest.surface.mcp = { status: 'published', path: 'mcp/projects/n8n-local-setup.md', summary: 'bad' };
+  writeJsonFile(manifestPath, manifest);
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /known retired internal source repo must stay retired_after_migration/);
-  assert.match(result.stderr, /retired internal repo must not be listed as active source-watch target/);
+  assert.match(result.stderr, /must not publish repo-wide MCP surfaces|surface.publish_as must be one of skill, source_only/);
 });
 
 test('source watch rejects inconsistent active no-update metadata', () => {

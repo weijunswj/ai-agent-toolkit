@@ -1,13 +1,13 @@
 # How To Use
 
-This repo is a reusable toolkit for AI-agent work. It gives humans and agents a stable place to find preserved project modules, copyable skills, MCP-ready registry/design/spec metadata, and maintenance scripts.
+This repo is a reusable toolkit for AI-agent work. It gives humans and agents a stable place to find preserved project modules, copyable skills, and maintenance scripts.
 
 ## Use Project Modules
 
 Use [_projects/](../../_projects/) when you need the preserved source context behind an AI-facing surface.
 
 - `_main/` keeps preserved project files, full docs, and provenance source.
-- `curated_output_for_ai/` keeps reviewed AI-facing source material that sync recipes publish into `skills/` and `mcp/`.
+- `curated_output_for_ai/` keeps reviewed AI-facing source material that sync recipes publish into `skills/`.
 - `_generated/` is preview-only and not source of truth.
 - `toolkit.project.json` owns the toolkit module version, routing contract, generated outputs, and write policy.
 - `SOURCE-LOCK.json` owns upstream/source provenance, source pins, blob pins, lifecycle, attribution requirements, and source-watch update policy.
@@ -234,13 +234,13 @@ ChatGPT web and Claude web can use instruction-only skills when custom skills ar
 
 Do not automate ChatGPT web or Claude web with cookies, sessions, browser automation, or session hacks.
 
-## MCP
+## MCP Status
 
-The MCP surface is design/spec-only material in v1. Use [mcp/](../../mcp/) for status, project specs, and read-only discovery metadata.
+Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now.
 
-No runnable MCP server, package, CLI, or executable MCP tools are shipped from this repo today.
+The supported path is skills-first: humans use `_projects/**`, and agents use `skills/**`.
 
-The supported path is skills-first: humans use `_projects/**`, and agents use `skills/**`. Optional n8n AI-coding-agent MCP feature references are packaged under `skills/n8n-local-setup/` as secondary setup material.
+Optional n8n AI-coding-agent MCP feature references are packaged under [skills/n8n-local-setup/](../../skills/n8n-local-setup/) as secondary setup material. They are not a repo-wide MCP surface.
 
 ## Optional Design Tool
 

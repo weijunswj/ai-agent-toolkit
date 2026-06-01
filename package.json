@@ -2,7 +2,7 @@
   "name": "ai-agent-toolkit",
   "version": "0.1.0",
   "private": true,
-  "description": "Reusable AI-agent skills, MCP specs/tools, and preserved project guides.",
+  "description": "Reusable AI-agent skills and preserved project guides.",
   "type": "commonjs",
   "scripts": {
     "validate": "node repo/scripts/validate-toolkit.cjs",

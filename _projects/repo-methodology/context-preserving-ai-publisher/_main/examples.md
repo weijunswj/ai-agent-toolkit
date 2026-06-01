@@ -9,7 +9,7 @@ These examples map the generic model to one reference implementation. They are n
 | Source layer | `_projects/**/_main/` |
 | Reviewed adapter layer | `_projects/**/curated_output_for_ai/` |
 | Manifest/routing contract | `_projects/**/toolkit.project.json` |
-| Portable generated surfaces | `skills/**` and `mcp/**` |
+| Portable generated surfaces | `skills/**` |
 | Local law/docs | `repo/docs/**` and `AGENTS.md` |
 | Deterministic publishing | `repo/scripts/sync-toolkit-projects.cjs` |
 | Source locks | `_projects/**/SOURCE-LOCK.json` |

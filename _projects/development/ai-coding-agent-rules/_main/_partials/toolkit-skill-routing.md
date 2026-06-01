@@ -27,7 +27,7 @@ None currently. If a skill should not be auto-routed, list it here as `skill-nam
 
 - When adding, removing, renaming, or materially changing a skill under `skills/**`, update this routing table.
 - When adding, removing, renaming, or materially changing a project module that publishes a skill, update this routing table if that skill should be invokable by supported agents.
-- When changing skill names, `SKILL.md` frontmatter, or skill descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, this routing partial, and generated `AGENTS`/`CLAUDE`/`GEMINI` equivalents.
+- When changing skill names, `SKILL.md` frontmatter, or skill descriptions, update README skill tables when applicable, this routing partial, and generated `AGENTS`/`CLAUDE`/`GEMINI` equivalents.
 - When a new skill should not be auto-routed, document why it is intentionally omitted.
 - Do not let this routing table become stale relative to current `skills/*/SKILL.md`.
 

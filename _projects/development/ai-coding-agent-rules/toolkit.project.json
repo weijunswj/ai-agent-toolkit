@@ -161,8 +161,7 @@
       "skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs",
       "skills/n8n-local-setup/references/n8n-agent-rules.md",
       "skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md",
-      "skills/n8n-workflow-templates/references/n8n-agent-rules.md",
-      "mcp/registry/projects.registry.json"
+      "skills/n8n-workflow-templates/references/n8n-agent-rules.md"
     ],
     "denied": [
       ".env*",
@@ -193,8 +192,7 @@
       "summary": "Provides repo-local automatic AGENTS, CLAUDE, GEMINI, and Antigravity bootstrap templates and also publishes the n8n-agent-rules skill from the same project-owned rules source."
     },
     "mcp": {
-      "status": "not_applicable",
-      "summary": "No MCP surface is published for this standalone rules project."
+      "status": "not_applicable"
     }
   }
 }

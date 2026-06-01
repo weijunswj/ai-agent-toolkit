@@ -43,8 +43,7 @@
       "skills/knowledge-index-updater/SKILL.md",
       "skills/knowledge-index-updater/README.md",
       "skills/knowledge-index-updater/agents/claude.md",
-      "skills/knowledge-index-updater/agents/openai.yaml",
-      "mcp/registry/projects.registry.json"
+      "skills/knowledge-index-updater/agents/openai.yaml"
     ],
     "denied": [
       ".env*",
@@ -75,8 +74,7 @@
       "summary": "Helps agents create, update, de-duplicate, and schedule checks for a Notion Knowledge Index using Notion and GitHub identity keys."
     },
     "mcp": {
-      "status": "not_applicable",
-      "summary": "No MCP surface is published for this standalone skill."
+      "status": "not_applicable"
     }
   }
 }

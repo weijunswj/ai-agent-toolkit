@@ -42,7 +42,6 @@ Run surface and audit checks after changing:
 - `_projects/**/toolkit.project.json`
 - `_projects/**/curated_output_for_ai/**`
 - `skills/**`
-- `mcp/**`
 - audit scripts
 - audit baselines
 - generated registries

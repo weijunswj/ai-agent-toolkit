@@ -10,8 +10,7 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 | Guide | Setup or workflow documentation under `_projects/**/_main/`, skill `references/`, or `repo/docs/`. |
 | Template | Copy-safe source material inside the relevant skill folder. |
 | Pack | Approval-gated bundle manifest inside the relevant skill folder under `packs/`. |
-| MCP registry data | JSON discovery metadata under `mcp/registry/`. |
-| MCP | MCP-ready registry, design/spec docs, and metadata under `mcp/`; no runnable server is shipped today. |
+| MCP | Repo-wide MCP is intentionally not shipped or maintained as a generated surface for now. Optional n8n MCP feature references remain inside `skills/n8n-local-setup/`. |
 | Toolkit project version | The `version` in `_projects/**/toolkit.project.json`; it versions the toolkit module/adaptation, not upstream source. |
 | Source lock | `_projects/**/SOURCE-LOCK.json`; it records source provenance, source pins, blob pins, lifecycle, attribution, and source-watch policy. |
 
@@ -42,7 +41,7 @@ Use installed skills only when they clearly match the task and improve correctne
 | `n8n-workflow-helper-scripts` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
 | `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
 | `secure-cicd-installer` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |
-| `context-preserving-ai-publisher` | Source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, manifests, source locks, audits, or anti-drift docs. |
+| `context-preserving-ai-publisher` | Source-traceable AI-facing repo surfaces, generated skills, templates, manifests, source locks, audits, or anti-drift docs. |
 | `windows-localhost-workflows` | Starting, relaunching, verifying, or debugging local Windows dev servers. |
 | `knowledge-index-updater` | Maintaining a Notion/GitHub knowledge index with stable source keys, de-duplication, categorisation, and stale/missing item checks. |
 | `ui-ux-secure-frontend-design` | Frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review. |
@@ -51,7 +50,7 @@ Use installed skills only when they clearly match the task and improve correctne
 
 - When adding, removing, renaming, or materially changing a skill under `skills/**`, update `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`.
 - When adding, removing, renaming, or materially changing a project module that publishes a skill, update the routing table if that skill should be invokable by supported agents.
-- When changing skill names, `SKILL.md` frontmatter, or descriptions, update the registry source that publishes `mcp/registry/skills.registry.json`, README skill tables when applicable, the routing partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
+- When changing skill names, `SKILL.md` frontmatter, or descriptions, update README skill tables when applicable, the routing partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
 - When a new skill should not be auto-routed, document why it is intentionally omitted from routing.
 - Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
 

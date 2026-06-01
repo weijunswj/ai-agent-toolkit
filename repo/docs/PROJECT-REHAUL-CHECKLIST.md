@@ -11,8 +11,8 @@ Use this checklist when reviewing the project-module architecture.
 
 ## AI-Facing Surfaces
 
-- [ ] [skills/](../../skills/) and [mcp/](../../mcp/) remain obvious as the only published AI-facing root surfaces.
-- [ ] Skills and MCP docs are generated from declared recipes where practical, with rare linked root surfaces justified in manifests.
+- [ ] [skills/](../../skills/) remains obvious as the published AI-facing root surface.
+- [ ] Skills are generated from declared recipes where practical, with rare linked root surfaces justified in manifests.
 - [ ] Generated Markdown outputs include a generated-source notice.
 - [ ] Root agent-rule templates are generated from declared `_main/` and linked partial sources, and unmanaged root partial duplicates do not exist.
 - [ ] `SOURCE-LOCK.json` files pass the source-lock audit.
