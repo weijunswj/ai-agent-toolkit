@@ -157,7 +157,7 @@ Templates are published material. Review them before copying into a consumer rep
 
 Generated template outputs are intentional. `node repo/scripts/sync-agent-instruction-shims.cjs --write` regenerates project-pure source-side baseline templates and root instruction shims from `_projects/development/ai-coding-agent-rules/_main/`; `node repo/scripts/sync-toolkit-projects.cjs --write` publishes inert skill copies and the generated `n8n-agent-rules` skill.
 
-For n8n work, install or load `skills/n8n-agent-rules`. The optional adapter installer can detect n8n repositories and preview patches to active instruction files, but it must be run with `--dry-run` first and must not be run with `--write` unless the user explicitly approves the current target file and operation. Do not copy the full n8n rules into global always-on instructions unless you intentionally accept the context cost.
+For n8n work, install or load `skills/n8n-agent-rules`. The optional adapter installer can detect n8n repositories and preview patches to active instruction files, but it must be run with `--dry-run` first. Before running it with `--write`, pause, name the current target file and operation, explain the write, and ask for explicit current-turn approval. Do not copy the full n8n rules into global always-on instructions unless you intentionally accept the context cost.
 
 n8n helper templates may write scoped local outputs after they are copied into a reviewed consumer repo: `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders. Keep those local folders ignored.
 
@@ -170,7 +170,8 @@ Until the installer MCP exists, use packs as review checklists:
 1. Open the pack README inside the skill folder.
 2. Inspect `pack.json`.
 3. Review every path in `installs`.
-4. Copy only the files you intentionally want.
+4. Before copying files, name the exact source and target paths and ask for explicit current-turn approval.
+5. Copy only the files the user intentionally approves.
 
 ## Codex Setup
 
@@ -250,9 +251,9 @@ Use [skills/ui-ux-secure-frontend-design/tools/design-system-generator/](../../s
 
 - Do not paste real secrets into repo files.
 - Do not copy live n8n exports into this toolkit.
-- Do not install pack files without reviewing the target writes.
+- Pause before installing pack files: review the target writes, name the exact files, and ask for explicit current-turn approval.
 - Do not copy the full n8n rules into global always-on instructions unless the extra context cost is intentional.
 - Do not run live import/export helpers from this toolkit repo.
 - Do not run live n8n import/export helpers in CI.
-- Do not auto-merge or auto-apply upstream updates.
+- Do not auto-merge or auto-apply upstream updates. Treat upstream changes as review prompts, then use a separate human-approved PR for any source update.
 - Do not edit generated AI-facing project outputs directly; update `_main/` or `curated_output_for_ai/` and run sync/check.

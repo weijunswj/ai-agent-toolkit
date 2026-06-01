@@ -76,7 +76,11 @@ test('Secure CI/CD source and generated skills enforce approval gate precedence'
 
     assert.match(text, /^## Approval Gate Precedence$/m, relPath);
     assert.match(text, /override any repo-local default.*auto-commit, push, open a pull request, merge, or deploy/is, relPath);
-    assert.match(text, /Do not commit, push, create a pull request, merge, or deploy without explicit user approval/i, relPath);
+    assert.match(
+      text,
+      /Before committing, pushing, creating a pull request, merging, or deploying, pause, explain the risk, name the exact target and action, and ask for explicit user approval/i,
+      relPath
+    );
   }
 });
 
@@ -92,7 +96,7 @@ test('Secure CI/CD source and generated skills summarize required safe execution
     /Use GitHub Secrets for private values/i,
     /Never ask the user to paste secret values into chat/i,
     /Create or update `CURRENT_CICD_STATUS\.md`/i,
-    /Ask before commit, push, PR creation, merge, or deployment/i,
+    /Ask a clear approval question before commit, push, PR creation, merge, or deployment/i,
     /beginner-friendly GitHub Secret setup instructions using secret names only/i,
     /Tell the user where to paste values directly in GitHub or the external platform/i
   ];
@@ -111,13 +115,13 @@ test('Secure CI/CD canonical prompt still carries the core setup safeguards', ()
 
   const requiredPromptSafeguards = [
     /verify access and repo state before changing anything/i,
-    /must not commit until I approve/i,
-    /must not push until I approve/i,
-    /must not deploy until I approve/i,
+    /before committing you must pause, show the exact files, explain the risk, and ask for my approval/i,
+    /Before pushing, you must pause, name the branch and remote, explain what will happen, and ask for my approval/i,
+    /Before deploying, you must pause, name the environment and deployment target, explain the risk, and ask for my approval/i,
     /Security preflight scan before setup/i,
     /If secrets or risky credentials are found during preflight:[\s\S]*?Stop setup immediately/i,
     /Create or update CURRENT_CICD_STATUS\.md/i,
-    /Do not enable deployment automatically/i,
+    /Pause before deployment planning/i,
     /After I approve the deployment plan/i,
     /Never ask me to paste real secret values into this chat/i
   ];

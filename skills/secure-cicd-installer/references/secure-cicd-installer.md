@@ -25,7 +25,7 @@ This is a short reviewed operating overview and safety wrapper. It is not the fu
 - Inspect the target repo before editing.
 - Scan for risky files and secrets before setup.
 - Do not print secret values.
-- Do not commit, push, create a PR, merge, or deploy without approval.
+- Before committing, pushing, creating a PR, merging, or deploying, pause, name the exact target and action, explain the risk, and ask for explicit approval.
 - Prefer CI first, deployment later.
 - Use GitHub Secrets for private values.
 - Keep `CURRENT_CICD_STATUS.md` updated in the consumer repo.

@@ -56,7 +56,7 @@ Use installed skills only when they clearly match the task and improve correctne
 
 ## Install Safety
 
-Do not install anything silently. Preview target writes, explain the source files, and preserve product repo ownership.
+For install or template writes, pause before mutating the target repo. Preview the target writes, explain the source files, name the exact target paths, preserve product repo ownership, and ask for explicit current-turn approval.
 
 Never commit or install:
 
@@ -77,7 +77,7 @@ Scoped writes are allowed only when the relevant template or helper is being run
 
 Treat n8n workflow JSON as high risk. Prefer policy docs, sanitizer scripts, and helper templates. If a workflow JSON file is ever added, it must be generic, inactive, credential-free, and validated.
 
-Do not run live n8n actions from this toolkit repo. In consumer repos, live n8n import/export requires explicit confirmation and must never run in CI.
+Do not run live n8n actions from this toolkit repo. In consumer repos, pause before live n8n import/export, name the target instance and workflow set, explain the risk, and ask for explicit current-turn confirmation. Live n8n import/export must never run in CI.
 
 ## Product-Code Exclusion
 

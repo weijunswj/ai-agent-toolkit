@@ -1598,7 +1598,10 @@ test('Secure CI/CD prompt preserves the full source prompt', () => {
   assert.equal(prompt, secureCicdPromptFromReadme());
   assert.match(prompt, /Manual step needed: \[Short title\]/);
   assert.match(prompt, /Phase 9: Commit, branch, pull request, and push policy\./);
-  assert.match(prompt, /Do not commit, push, create a pull request, merge, or deploy without my approval\./);
+  assert.match(
+    prompt,
+    /For commit, push, pull request creation, merge, or deploy actions, pause first, name the exact target\/action, explain the risk, and ask for my approval\./
+  );
 });
 
 test('Secure CI/CD prompt does not fetch n8n helpers from retired external main paths', () => {

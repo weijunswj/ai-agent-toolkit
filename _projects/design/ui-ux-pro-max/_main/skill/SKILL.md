@@ -79,7 +79,7 @@ Use when the user asks to create, redesign, polish, review, or plan:
 
 - Never ask the user to paste secrets or private credentials.
 - Never create UI that exposes tokens, internal IDs, private customer data, auth secrets, or unredacted PII.
-- Never add third-party scripts, analytics, trackers, pixels, remote fonts, embeds, or external network calls without explicit approval.
+- Before adding third-party scripts, analytics, trackers, pixels, remote fonts, embeds, or external network calls, pause, disclose the privacy/security risk, name the exact provider or URL, and ask for explicit current-turn approval.
 - Never weaken auth, input validation, CSP, CORS, CSRF, cookie security, or role-based access control for visual convenience.
 - Never recommend dark patterns, fake urgency, manipulative consent, hidden fees, deceptive opt-ins, or confusing unsubscribe flows.
 - Prefer privacy-preserving defaults.
@@ -96,7 +96,7 @@ Use when the user asks to create, redesign, polish, review, or plan:
 - Keep responsive behavior explicit for mobile, tablet, laptop, and wide desktop.
 - Prefer visible, reversible actions for destructive or automation-related controls.
 - Use clear consent, plain language, and honest product claims.
-- Do not add dependencies, network calls, trackers, or remote assets unless the user approves.
+- Before adding dependencies, network calls, trackers, or remote assets, name the exact package, provider, or URL, explain the risk, and ask for explicit current-turn approval.
 - For design creation or revision, consider the local generator as part of the normal design process when CSV-backed recommendations would improve the result; do not require the user to ask for it by name.
 
 ## Workflow
