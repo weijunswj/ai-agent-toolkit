@@ -642,7 +642,7 @@ Do not change the right-side Docker port `5678` in `docker-compose.yml`.
 
 If you already have an old disposable n8n container running, stop it only if you know it is not needed.
 
-Do not delete Docker volumes unless you intentionally want to delete local n8n runtime data.
+Before deleting Docker volumes, pause and confirm that you intentionally want to delete local n8n runtime data. Name the exact volumes first, usually `n8n_data` and `postgres_data`, and explain that workflows, credentials, executions, and database state may be lost.
 
 ---
 
@@ -673,7 +673,7 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 - Do not run live n8n import/export, activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
 - Do not paste real API tokens, webhook secrets, passwords, or encryption keys into repo files.
 - Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.
-- Do not remove `n8n_data` or `postgres_data` Docker volumes unless you intentionally want to delete local runtime data.
+- Before removing `n8n_data` or `postgres_data`, pause, explain that local runtime data may be deleted, name the exact volume, and ask for explicit current-turn approval.
 - Use [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) for always-on hosted setup.
 
 ---

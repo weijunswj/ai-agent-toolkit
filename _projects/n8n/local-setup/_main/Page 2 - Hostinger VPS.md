@@ -155,7 +155,7 @@ The first time n8n opens, it should ask you to create the owner account.
 5. Confirm the n8n editor loads.
 6. Create a tiny manual test workflow only if you need to confirm the editor saves correctly.
 
-Do not add production credentials yet. First understand backups, domain setup, and who is responsible for restore.
+Before adding production credentials, pause, confirm backups, domain setup, and restore responsibility, then ask for explicit approval for the named credential target.
 
 ---
 
@@ -422,7 +422,7 @@ Exit logs with `Ctrl+C`.
 - Do not store production `.env` values in this repo.
 - Do not share VPS passwords, n8n credentials, API keys, webhook secrets, or `N8N_ENCRYPTION_KEY`.
 - Do not assume the template uses PostgreSQL, Redis, workers, or queue mode without checking.
-- Do not update during business-critical hours without a backup.
+- Before updating during business-critical hours, pause, confirm there is a current backup, explain the downtime/rollback risk, and ask for explicit approval for the named VPS or service.
 - Do not activate workflows that touch live systems until they have been tested with safe data.
 - Do not expose raw database ports publicly.
 - Record who can restore backups before production workflows depend on this instance.
