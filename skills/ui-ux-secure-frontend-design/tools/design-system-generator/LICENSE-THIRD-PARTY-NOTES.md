@@ -6,7 +6,7 @@ Update the project source and run sync.
 -->
 # Third-Party Notes
 
-This optional local-only tool includes a safe subset adapted from:
+This local-only tool includes a safe subset adapted from:
 
 - Project: `nextlevelbuilder/ui-ux-pro-max-skill`
 - Source files: `src/ui-ux-pro-max/scripts/core.py`, `src/ui-ux-pro-max/scripts/design_system.py`, and required CSV data under `src/ui-ux-pro-max/data/`

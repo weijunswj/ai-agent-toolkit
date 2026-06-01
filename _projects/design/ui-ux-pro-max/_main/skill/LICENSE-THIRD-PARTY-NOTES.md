@@ -9,6 +9,6 @@ This repository does not vendor the upstream package wrapper, generated outputs,
 
 This is an independently written, instruction-first skill inspired by the high-level workflow idea. It captures the broad idea of moving from product brief to design system to page-level overrides to component planning to implementation review, with additional privacy, security, safety, accessibility, and maintainability guardrails.
 
-The skill includes an optional reviewed local-only design-system generator subset with bundled CSV data. That subset is documented under `tools/design-system-generator/` and is constrained to local data reads, no network downloads, no package installs, no shell expansion beyond the documented local Python command, and no writes outside the documented generator output folder.
+The skill includes a reviewed local-only design-system generator subset with bundled CSV data for design creation and revision. That subset is documented under `tools/design-system-generator/` and is constrained to local data reads, no network downloads, no package installs, no shell expansion beyond the documented local Python command, and no writes outside the documented generator output folder.
 
 The upstream repository should be audited separately before any additional executable pieces, generated assets, package dependencies, command-line tools, datasets, or templates are adopted.

@@ -1,7 +1,7 @@
 {
   "id": "frontend-design-skill",
   "title": "Frontend Design Skill",
-  "description": "Instruction-first secure UI/UX frontend design skill with an optional bundled local-only design-system generator.",
+  "description": "Instruction-first secure UI/UX frontend design skill with a bundled local-only design-system generator.",
   "status": "ready",
   "risk_level": "low",
   "source_refs": [
@@ -38,9 +38,9 @@
   "requires_approval": true,
   "run_commands": false,
   "notes": [
-    "Instruction-first skill. The installed skill folder includes optional bundled local-only design-system generator scripts and CSV data.",
+    "Instruction-first skill. The installed skill folder includes bundled local-only design-system generator scripts and CSV data.",
     "Pack installers must copy files only and must not run the generator during installation.",
     "No dependencies are installed.",
-    "Generator execution and output writes require explicit current-turn approval."
+    "Read-only local generator execution may support normal design creation or revision; generated output writes require explicit current-turn approval."
   ]
 }

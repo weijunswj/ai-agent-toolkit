@@ -1,7 +1,7 @@
 {
   "id": "design-system-generator",
   "title": "Design System Generator",
-  "description": "Optional local-only design-system search and recommendation tooling.",
+  "description": "Local-only design-system search and recommendation tooling for design creation and revision.",
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [
@@ -18,7 +18,7 @@
   ],
   "writes_allowed": [
     "declared generated toolkit outputs from _projects/design/ui-ux-pro-max/toolkit.project.json",
-    "skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/** only when explicitly requested"
+    "skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/** only with explicit current-turn approval"
   ],
   "writes_denied": [
     ".env*",
@@ -38,7 +38,8 @@
   "requires_approval": true,
   "run_commands": false,
   "notes": [
-    "Optional local-only Python tooling.",
+    "Local-only Python tooling for design creation and revision.",
+    "Read-only local generator execution may support normal design creation or revision.",
     "Installer must preview writes and must not execute the tool during installation."
   ]
 }
