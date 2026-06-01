@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "version_policy": "semver",
-  "version_notes": "Intent-first n8n local setup launcher/menu, Compose ngrok tunnel flow, Hostinger first-login expansion, desktop shortcut launcher, and optional AI-coding-agent MCP feature references restored as secondary surfaces.",
+  "version_notes": "Adds local-only n8n backup packages with restore-critical encryption key capture and a guarded restore flow for Postgres or n8n entities backups.",
   "outputs": [
     {
       "kind": "curated",

@@ -22,6 +22,12 @@ If a platform cannot access Notion, GitHub, or scheduled tasks, explain the limi
 
 For Claude-specific notes, see `agents/claude.md`.
 
+## Tool And Local State Availability
+
+Before claiming Notion or GitHub work is unavailable, explicitly run the platform's available tool or plugin discovery flow. For Codex, search for Notion and GitHub tools with `tool_search_tool` when those tools are not initially visible. If a required tool is still unavailable after discovery, report the exact missing tool name and the specific work that could not be completed because that tool was absent.
+
+Local automation memory files are optional convenience state only. Never require local filesystem write access for correctness, and never skip Notion or GitHub update work because a local memory file cannot be updated. Prefer durable state in Notion and GitHub when available. If a local memory write is blocked by environment policy, continue the run and include the would-be memory update as a concise run summary in the final response.
+
 ## Core Principles
 
 1. Keep one canonical row per thing.
@@ -345,6 +351,9 @@ When the user asks for a recurring updater, create a scheduled task that:
 - Do not apply pure `Last checked` refreshes to rows with pending meaningful proposed writes.
 - Only pure `Last checked` refreshes are approval-free.
 - Batch writes without confirmation are allowed only when every batch item is a pure `Last checked` refresh with no meaningful change.
+- Treat local automation memory file writes as best-effort only; local memory write failure must not fail the scheduled run.
+- Never skip Notion or GitHub search, comparison, proposal, or allowed update work because local memory cannot be written.
+- If local memory writeback is blocked, include a concise "Local memory update summary" in the final response instead of reporting the automation run as failed.
 - Do not permanently delete anything.
 - Report what changed after each run.
 
@@ -366,7 +375,8 @@ Before doing anything else:
 6. If no current skill file can be found after discovery and fallback attempts, stop and report that the automation cannot safely run because it cannot load the current `knowledge-index-updater` rules.
 7. Local automation memory writes are best-effort only:
    - The runtime may read `C:/Users/xPass/.codex/automations/daily-knowledge-index-update/memory.md`.
-   - If writing this file is blocked, do not fail the run or skip Notion/GitHub updates.
+   - Never require local filesystem write access for correctness.
+   - If writing this file is blocked by environment policy, do not fail the run or skip Notion/GitHub updates.
    - Prefer durable Notion and GitHub state updates when those connectors are available.
    - Continue the knowledge-index update work and include a concise "Local memory update summary" with the intended memory payload in the final response.
 
@@ -415,6 +425,12 @@ Search my Notion and GitHub for new, changed, removed, or renamed guides, refere
 If Notion or GitHub tools are not immediately visible, run the platform's available tool/plugin discovery flow first.
 - For Codex runs, discover "notion" and "github" tools explicitly before claiming they are unavailable.
 - If a required tool is still unavailable, report the exact missing tool and list only the work that cannot be completed without it.
+
+Local automation memory writes are best-effort only.
+- The scheduler may read `C:/Users/xPass/.codex/automations/daily-knowledge-index-update/memory.md` when available.
+- Never require local filesystem write access for correctness.
+- If a local memory write is blocked by environment policy, continue the Notion/GitHub work and include a concise "Local memory update summary" with the intended memory payload in the final response.
+- Prefer durable state in Notion and GitHub when those connectors are available.
 
 Update the root-level Notion Knowledge Index using one row per real project, guide, reference, portfolio item, tool, or repo.
 
