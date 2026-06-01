@@ -6,9 +6,11 @@ Third-party source: nextlevelbuilder/ui-ux-pro-max-skill
 -->
 # Design System Generator
 
-Optional local-only tooling for design-system search and recommendation generation.
+Local-only tooling for design-system search and recommendation generation.
 
 This tool searches bundled CSV data under [data/](data/) and returns design-system recommendations from local files only. It is packaged with the skill so the copied folder keeps its helper data and runtime context together.
+
+Agents may use this tool proactively when creating or revising design systems, page designs, component plans, or generator-backed recommendations. The user does not need to ask for the generator by name.
 
 ## Safety Model
 
@@ -19,6 +21,7 @@ This tool searches bundled CSV data under [data/](data/) and returns design-syst
 - No browser automation.
 - No dependency setup logic.
 - No file writes by default.
+- Read-only local execution is allowed for design creation and revision.
 - If persistence is added later, writes must be restricted to `skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/` and require explicit user intent.
 
 This tool is not permission to add executable code to instruction-only skills.

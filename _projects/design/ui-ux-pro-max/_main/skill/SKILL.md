@@ -7,15 +7,41 @@ description: Security-first frontend UI/UX design skill for creating, reviewing,
 
 ## Overview
 
-Use this instruction-only skill to create or review frontend web interfaces with a design-system-first process and security-first guardrails. Aim for polished, accessible, responsive, maintainable UI that protects users and avoids manipulative UX.
+Use this instruction-first skill to create or review frontend web interfaces with a design-system-first process and security-first guardrails. Aim for polished, accessible, responsive, maintainable UI that protects users and avoids manipulative UX.
 
-Load reference files only when useful:
+This skill also includes a local-only design-system generator under `tools/design-system-generator/`. Treat the generator as a normal available design aid when creating or revising design systems, page designs, component plans, or generator-backed recommendations. The user does not need to ask for it by name. Do not run it during installation or for pure review/copy-edit tasks that do not need new design direction.
+
+## Read First
+
+For design and review tasks, read the relevant references only when useful:
 
 - `references/design-system-workflow.md` for design system templates.
 - `references/component-patterns.md` for common UI patterns.
 - `references/frontend-quality-rubric.md` for scoring reviews.
 - `references/privacy-security-safety.md` for high-risk surface gates.
 - `references/stack-playbooks.md` for React, Next.js, Tailwind, shadcn/ui, charts, forms, and accessibility guidance.
+
+For design creation or revision tasks where CSV-backed recommendations would help, read `tools/design-system-generator/README.md` before running the generator.
+
+## When to use the generator
+
+Use the generator whenever local CSV-backed recommendations would improve design creation or revision, including:
+
+- Turning a product brief into a design system.
+- Creating or revising landing pages, dashboards, SaaS screens, forms, component plans, or page overrides.
+- Exploring stack, style, typography, color, chart, icon, or component patterns.
+- Producing generator-backed recommendations from bundled local CSV data.
+
+The user does not need to know the generator exists or ask for it by name. For review-only tasks, pure copy edits, or implementation checks where no new design direction is needed, use the instructions and references first and skip the generator unless replacement design guidance is useful.
+
+## Generator safety boundary
+
+- Read-only local execution is allowed for design creation and revision: it reads bundled CSV data from this skill folder and prints recommendations.
+- Do not use network downloads.
+- Do not install packages or dependencies.
+- Do not expand shell usage beyond the documented local Python command.
+- Do not write outside the generator output folder documented by `tools/design-system-generator/README.md`.
+- Ask for explicit current-turn approval before writing generated output or changing generator scripts, CSV data, tests, or dependencies.
 
 ## When to use
 
@@ -53,6 +79,7 @@ Use when the user asks to create, redesign, polish, review, or plan:
 - Prefer visible, reversible actions for destructive or automation-related controls.
 - Use clear consent, plain language, and honest product claims.
 - Do not add dependencies, network calls, trackers, or remote assets unless the user approves.
+- For design creation or revision, consider the local generator as part of the normal design process when CSV-backed recommendations would improve the result; do not require the user to ask for it by name.
 
 ## Workflow
 
@@ -60,6 +87,7 @@ Use when the user asks to create, redesign, polish, review, or plan:
 2. Inspect existing repo files before inventing new components.
 3. Identify stack and constraints.
 4. Create or infer a design system:
+   - Use the local generator when CSV-backed recommendations would improve the design direction.
    - Brand tone.
    - Colour roles.
    - Typography.
