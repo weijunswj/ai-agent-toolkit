@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "description": "Known published-surface audit findings allowed until follow-up PRs classify or generate them.",
+  "description": "Current skills-first published-surface audit baseline. Repo-wide MCP generated output is intentionally absent.",
   "summary": {
-    "projects": 9,
-    "publishedFiles": 201,
-    "declaredOutputFiles": 201,
-    "packInstalledFiles": 83,
+    "projects": 8,
+    "publishedFiles": 163,
+    "declaredOutputFiles": 163,
+    "packInstalledFiles": 74,
     "undeclaredPublishedFiles": 0,
     "packInstalledUndeclared": 0,
     "crossOwnedOutputs": 0,
@@ -13,7 +13,7 @@
     "sharedSurfaceMetadataFindings": 0,
     "suspiciousPublishedSurfaces": 0,
     "duplicateProjectContentGroups": 0,
-    "boundaryRecipeOutputs": 201,
+    "boundaryRecipeOutputs": 163,
     "boundaryRecipeFindings": 2,
     "curatedDirectoryFindings": 2
   },

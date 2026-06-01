@@ -144,7 +144,6 @@ test('audit-published-surfaces classifies curated boundary recipes', () => {
     'curated_pack_readme',
     'curated_repo_local_agent_template',
     'curated_template',
-    'curated_template_index',
     'curated_template_index'
   ]) {
     assert.ok(report.boundaryClassifications[classification] > 0, classification);
