@@ -35,6 +35,30 @@ Apply `n8n-agent-rules` first for the full n8n operating contract. A generated l
 - Do not include live workflow IDs, live webhook IDs, credential bindings, credential names that reveal private context, `.env` values, private URLs, customer data, or live import/export payloads.
 - Required manual configuration may be documented for non-secret literal placeholders.
 - Do not run live n8n actions from this toolkit repo.
+- Do not copy `.env`, private keys, `.tmp`, `.n8n-local`, generated package artifacts, live exports, live imports, credential files, or unrelated workflow files.
+- Do not weaken validators, tests, security gates, approval gates, or CI failure reporting to make a template pass.
+- Do not introduce arbitrary shell-execution MCP or tooling risks while selecting, validating, copying, or publishing templates.
+
+## Template Selection And Copy Procedure
+
+1. Read the template index at [templates/README.md](templates/README.md) before selecting a template.
+2. Select only the template or templates that directly match the user's request. Do not bulk-copy the template folder or unrelated workflow JSON.
+3. Inspect each selected JSON template before copying it. Check the full workflow object, including nodes, credentials, settings, pinned data, static data, trigger/webhook fields, HTTP headers, expressions, sticky notes, and example payloads.
+4. Verify each selected template is:
+   - Generic and safe for publication.
+   - Inactive and safe by default.
+   - Credential-free, with no credential bindings or sensitive credential names.
+   - Free of secret values, tokens, passwords, private keys, API keys, cookies, bearer headers, `.env` values, and private URLs.
+   - Free of live workflow IDs, live webhook IDs, live endpoint payloads, pinned production data, customer data, and product-specific runtime state.
+5. Validate the selected template before copy or publication. Prefer an available local validator, for example from this toolkit repo root:
+
+   ```sh
+   node skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs <template-directory-or-file>
+   ```
+
+   If the consumer repo has its own validator or schema check, run the smallest relevant local validation there too.
+6. Copy only the selected safe template files to the requested local target path after validation passes. Preserve clear template filenames and do not copy live import/export files.
+7. If the request would import, export, execute, activate, publish, mutate, or otherwise touch a live n8n workflow or external system, pause first. Explain the risk, name the exact target and action, and ask for explicit current-turn approval before proceeding.
 
 ## Templates
 
@@ -47,6 +71,8 @@ Apply `n8n-agent-rules` first for the full n8n operating contract. A generated l
 Report:
 
 - Template selected.
+- Copied path, if a template was copied.
 - Safety checks performed.
+- Validation command and result.
 - Required non-secret manual configuration.
 - Any reason the template should not be copied or published.
