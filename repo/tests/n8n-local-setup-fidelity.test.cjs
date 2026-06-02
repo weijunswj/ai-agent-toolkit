@@ -714,6 +714,17 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Type PROCEED to continue/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /PROCEED/);
   assert.match(functionBody(menu, 'Clear-PostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;/);
+  assert.match(functionBody(menu, 'Backup-Postgres'), /Test-PostgresSqlBackupFile -Path \$backupPath/);
+  const sqlRestoreBody = functionBody(menu, 'Restore-PostgresSqlBackup');
+  const sqlBranchIndex = sqlRestoreBody.indexOf('$containerPath = "$containerPath.sql"');
+  const sqlValidationIndex = sqlRestoreBody.indexOf('Test-PostgresSqlBackupFile', sqlBranchIndex);
+  const sqlClearIndex = sqlRestoreBody.indexOf('Clear-PostgresPublicSchema', sqlBranchIndex);
+  assert.notEqual(sqlBranchIndex, -1, 'Restore-PostgresSqlBackup has a SQL restore branch');
+  assert.notEqual(sqlValidationIndex, -1, 'Restore-PostgresSqlBackup validates SQL before restore');
+  assert.notEqual(sqlClearIndex, -1, 'Restore-PostgresSqlBackup clears schema during SQL restore');
+  assert.ok(sqlValidationIndex < sqlClearIndex, 'SQL backup validation must run before clearing the schema');
+  assert.match(functionBody(menu, 'Test-PostgresSqlBackupFile'), /docker compose help output instead of a Postgres dump/);
+  assert.match(functionBody(menu, 'Test-PostgresSqlBackupFile'), /PostgreSQL database dump/);
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /psql[\s\S]*ON_ERROR_STOP/);
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /pg_restore[\s\S]*--clean[\s\S]*--if-exists/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /import:entities[\s\S]*--truncateTables/);

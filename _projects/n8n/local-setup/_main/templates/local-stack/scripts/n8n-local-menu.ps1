@@ -1563,6 +1563,12 @@ function Backup-Postgres {
   $composeArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'pg_dump', '-U', $postgresUser, $postgresDb))
   $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs 1> $backupPath }
   if ($exitCode -eq 0) {
+    if (-not (Test-PostgresSqlBackupFile -Path $backupPath)) {
+      if ($Required) {
+        Write-ErrorMessage 'Required backup failed. No update was applied.'
+      }
+      return $false
+    }
     Write-Success "Backup written to: $backupPath"
     $imageLogContent = Get-BackupImageLogContent -BackupPath $backupPath
     $secretPath = Write-BackupSecretFile -BackupDir $backupDir -EnvPath $EnvPath
@@ -1583,6 +1589,45 @@ function Backup-Postgres {
     }
     return $false
   }
+}
+
+function Test-PostgresSqlBackupFile {
+  param([string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    Write-ErrorMessage "Postgres SQL backup file was not found: $Path"
+    return $false
+  }
+
+  $item = Get-Item -LiteralPath $Path
+  if ($item.Length -eq 0) {
+    Write-ErrorMessage "Postgres SQL backup file is empty: $Path"
+    return $false
+  }
+
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $bytesToRead = [Math]::Min($stream.Length, 65536)
+    $buffer = New-Object byte[] $bytesToRead
+    [void]$stream.Read($buffer, 0, $buffer.Length)
+  } finally {
+    $stream.Dispose()
+  }
+
+  $prefix = [System.Text.Encoding]::UTF8.GetString($buffer)
+  if ($prefix -match "(?m)^Usage:\s+docker compose \[OPTIONS\] COMMAND") {
+    Write-ErrorMessage 'Postgres SQL backup file contains docker compose help output instead of a Postgres dump.'
+    return $false
+  }
+
+  $looksLikePgDump = ($prefix -match 'PostgreSQL database dump')
+  $looksLikeSql = ($prefix -match "(?m)^\s*(SET|SELECT|CREATE|ALTER|COPY|INSERT)\b")
+  if (-not $looksLikePgDump -and -not $looksLikeSql) {
+    Write-ErrorMessage 'Postgres SQL backup file does not look like a PostgreSQL database dump or SQL restore file.'
+    return $false
+  }
+
+  return $true
 }
 
 function Get-RestoreEntityFileNames {
@@ -1951,6 +1996,9 @@ function Restore-PostgresSqlBackup {
   }
 
   $containerPath = "$containerPath.sql"
+  if (-not (Test-PostgresSqlBackupFile -Path $restorePath)) {
+    return $false
+  }
   if ((Copy-RestoreFileToPostgres -SourcePath $restorePath -ContainerPath $containerPath) -ne 0) { return $false }
   if ((Clear-PostgresPublicSchema -PostgresUser $postgresUser -PostgresDb $postgresDb) -ne 0) { return $false }
   $restoreArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'psql', '-U', $postgresUser, '-d', $postgresDb, '-v', 'ON_ERROR_STOP=1', '-f', $containerPath))
