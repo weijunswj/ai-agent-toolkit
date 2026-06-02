@@ -62,7 +62,14 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 - Before installing packages, mutating deployment settings, or rotating credentials, pause, explain the risk, name the exact action and target, and ask for explicit current-turn approval. Never write secret values into repo files.
 - Keep status tracking copy-ready and machine-readable when requested.
 - Treat `.env*`, private keys, deployment tokens, and credential files as denied writes.
+- Keep n8n helper-script and reusable workflow-template procedures routed to the dedicated n8n skills instead of duplicating their copy/install steps here.
 - Keep [`templates/cicd/secure-cicd-prompt.md`](templates/cicd/secure-cicd-prompt.md) loaded as the full guide; this SKILL.md is only the trigger surface, mandatory router, and high-priority safety summary.
+
+## Related Routing
+
+- Use `n8n-workflow-helper-scripts` for installing, copying, adapting, or validating n8n import/export/sync helper scripts.
+- Use `n8n-workflow-templates` for selecting, copying, publishing, or adapting reusable n8n workflow templates.
+- For mixed Secure CI/CD and n8n helper/template requests, keep this skill focused on CI/CD safety and validation, then use the dedicated n8n skill for the n8n-specific procedure.
 
 ## AI-Facing Surfaces
 
