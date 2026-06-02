@@ -618,8 +618,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Show-Status'), /Invoke-Compose -Arguments @\('ps'\)/);
   assert.match(functionBody(menu, 'Show-Status'), /Write-ImageVersions/);
   assert.match(functionBody(menu, 'Apply-Update'), /This update includes Postgres[\s\S]*Backup-Postgres -Required[\s\S]*Update cancelled because the automatic Postgres backup did not complete/);
-  assert.match(functionBody(menu, 'Backup-Postgres'), /n8n-postgres-\$timestamp[\s\S]*database\.sql[\s\S]*Get-BackupImageLogContent -BackupPath \$backupPath[\s\S]*return \$true[\s\S]*return \$false/);
-  assert.match(functionBody(menu, 'Get-BackupImageLogContent'), /Running container images at backup time/);
+  assert.match(functionBody(menu, 'Backup-Postgres'), /n8n-postgres-\$timestamp[\s\S]*database\.sql[\s\S]*Get-BackupImageLogContent -BackupPath \$backupPath -ImageVersionLines \$ImageVersionLines -ImageSectionHeading \$ImageSectionHeading[\s\S]*return \$true[\s\S]*return \$false/);
+  assert.match(functionBody(menu, 'Get-BackupImageLogContent'), /\[string\[\]\]\$ImageVersionLines[\s\S]*\[string\]\$ImageSectionHeading[\s\S]*Get-ImageVersionLines -RunningServices \(Get-RunningServices\)[\s\S]*\$ImageSectionHeading/);
   assert.match(functionBody(menu, 'Write-RestoreReadme'), /HOW TO USE THIS RESTORE FOLDER\.txt[\s\S]*Image\/version context/);
   assert.match(functionBody(menu, 'Write-CommandListItem'), /\$itemLabelWidth = 19[\s\S]*\$itemPrefix = \("  \{0\}\. \{1,-\$itemLabelWidth\}: " -f \$Number, \$Name\)/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a timestamped backup folder under \.\\backups\.'/);
@@ -671,21 +671,29 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.doesNotMatch(localSetup, /README-RESTORE\.txt/);
   assert.doesNotMatch(localSetup, /image-versions\.txt/);
   assert.doesNotMatch(localSetup, /does not restore from an extracted folder of JSONL files/);
-  assert.match(localSetup, /The backup's `N8N_ENCRYPTION_KEY` must be used after restore for saved credentials to work/);
+  assert.match(localSetup, /The selected backup's source `N8N_ENCRYPTION_KEY` must be used after restore for saved credentials from that backup to work/);
+  assert.match(localSetup, /The `Back up` option writes this restore-critical value to `SECRET-DO-NOT-COMMIT\.env`/);
+  assert.match(localSetup, /If the key still uses the placeholder, the launcher warns but still backs it up/);
+  assert.match(localSetup, /pre-restore rollback key protects the current local stack/);
+  assert.match(localSetup, /Pre-restore image-version logs are captured before local n8n or ngrok services are stopped/);
+  assert.match(localSetup, /already matches, it leaves the value unchanged/);
+  assert.match(localSetup, /encrypted credential entities and no source backup key is found/);
   assert.match(localSetup, /Current local data is backed up first/);
-  assert.match(localSetup, /current `N8N_ENCRYPTION_KEY` is saved in key-only `SECRET-DO-NOT-COMMIT\.env` when present/);
   assert.match(localSetup, /current local Compose Postgres connection settings are used as the restore target/);
   assert.match(localSetup, /Explicit `--env-file <path>` argument/);
   assert.match(localSetup, /Explicit `--stack-dir <path>` argument, using `<stack-dir>\\\.env`/);
   assert.match(localSetup, /The known local stack directory used by `_n8n-local\.cmd`/);
   assert.match(localSetup, /A single `\.env` found beside the selected local Docker Compose file/);
   assert.match(localSetup, /If no `\.env` is found, or more than one plausible `\.env` is found, the restore stops and asks you to rerun with `--env-file`/);
-  assert.match(localSetup, /Before changing the encryption key, the launcher shows the resolved `\.env` path and creates a pre-restore database backup plus key-only `SECRET-DO-NOT-COMMIT\.env` when the current key is present/);
+  assert.match(localSetup, /Before changing the encryption key, the launcher shows the resolved `\.env` path and creates a pre-restore database backup plus key-only rollback `SECRET-DO-NOT-COMMIT\.env` when the current key is present/);
   assert.match(localSetup, /updates only the `N8N_ENCRYPTION_KEY` line and keeps all other values unchanged/);
 
   assert.match(menu, /function Write-BackupSecretFile/);
   assert.match(menu, /SECRET-DO-NOT-COMMIT\.env/);
   assert.match(functionBody(menu, 'Backup-Postgres'), /Write-BackupSecretFile[\s\S]*Write-RestoreManifest[\s\S]*Write-RestoreReadme/);
+  assert.match(functionBody(menu, 'Write-BackupSecretFile'), /Test-PlaceholderEncryptionKey -Value \$encryptionKey/);
+  assert.doesNotMatch(functionBody(menu, 'Write-BackupSecretFile'), /Test-PlaceholderEncryptionKey -Value \$encryptionKey[\s\S]*return ''/);
+  assert.match(functionBody(menu, 'Write-BackupSecretFile'), /still uses the placeholder[\s\S]*backup will include it/);
   assert.match(functionBody(menu, 'Write-BackupSecretFile'), /N8N_ENCRYPTION_KEY[\s\S]*Set-Content[\s\S]*-Encoding ascii/);
   assert.doesNotMatch(functionBody(menu, 'Write-BackupSecretFile'), /Write-Host \$encryptionKey|Write-Info \$encryptionKey|Write-Success \$encryptionKey/);
 
@@ -697,6 +705,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Get-RestoreZipLimits',
     'Test-RestoreZipEntryLimits',
     'Expand-RestoreEntitiesZipToStaging',
+    'Test-PlaceholderEncryptionKey',
     'Resolve-RestoreEnvFile',
     'Initialize-MenuRuntime',
     'Set-LocalEncryptionKeyForRestore',
@@ -714,7 +723,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.doesNotMatch(menu, /\.before-restore/);
   assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Backup-CurrentEnvForRestore/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /replace the active local n8n database state with the backup state/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Pre-restore backups created/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Pre-restore database backup created; rollback key saved if present/);
   assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current local n8n database backup created/);
   assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current \.env backup created/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore requires the local stack to be stopped/);
@@ -757,6 +766,10 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /psql[\s\S]*ON_ERROR_STOP/);
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /pg_restore[\s\S]*--clean[\s\S]*--if-exists/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /import:entities[\s\S]*--truncateTables/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /bad decrypt[\s\S]*wrong N8N_ENCRYPTION_KEY/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Credential entities were imported, but no source backup N8N_ENCRYPTION_KEY was applied/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Re-run restore with SECRET-DO-NOT-COMMIT\.env next to the \.zip/);
+  assert.match(functionBody(menu, 'Set-LocalEncryptionKeyForRestore'), /already matches the backup secret file[\s\S]*return \$true[\s\S]*Set-EnvFileValue/);
   assert.match(functionBody(menu, 'Get-RestoreZipLimits'), /MaxFiles[\s\S]*MaxCompressedBytes[\s\S]*MaxEntryBytes[\s\S]*MaxTotalBytes[\s\S]*MaxCompressionRatio/);
   assert.match(functionBody(menu, 'Test-RestoreZipEntryLimits'), /MaxFiles[\s\S]*MaxEntryBytes[\s\S]*MaxTotalBytes[\s\S]*MaxCompressionRatio[\s\S]*MaxCompressedBytes/);
   assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*Find-RestoreEntityDirectory/);
@@ -775,6 +788,10 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must use one of these extensions: \.sql, \.zip/i);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must be a backup file/);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Get-ZipEntryNames[\s\S]*Test-RestoreEntityFileName[\s\S]*Filename-level detection/);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /credentialsentity\.jsonl[\s\S]*HasCredentialEntities/);
+  assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /HasCredentialEntities = \$detected\.HasCredentialEntities/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Get-RunningServices -EnvPath \$resolvedEnvPath[\s\S]*\$preRestoreImageVersionLines = @\(Get-ImageVersionLines -RunningServices \$runningServices\)[\s\S]*Backup-Postgres -Required -EnvPath \$resolvedEnvPath -BackupDir \$preRestoreRoot -ImageVersionLines \$preRestoreImageVersionLines -ImageSectionHeading 'Running container images before restore stopped services:'/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /encrypted credentials[\s\S]*no source backup key was found[\s\S]*current \.env key is missing or still uses the placeholder/);
   assert.doesNotMatch(functionBody(menu, 'Get-RestoreBackupType'), /ReadToEnd|StreamReader|Open\(\)/);
   assert.doesNotMatch(menu, /POSTGRES_PASSWORD=.*SECRET-DO-NOT-COMMIT/);
 });

@@ -1048,16 +1048,25 @@ function Write-ImageVersions {
 }
 
 function Get-BackupImageLogContent {
-  param([string]$BackupPath)
+  param(
+    [string]$BackupPath,
+    [string[]]$ImageVersionLines = @(),
+    [string]$ImageSectionHeading = 'Running container images at backup time:'
+  )
+
+  $imageLines = @($ImageVersionLines)
+  if ($imageLines.Count -eq 0) {
+    $imageLines = @(Get-ImageVersionLines -RunningServices (Get-RunningServices))
+  }
 
   return @(
     '# n8n local backup image log',
     "Backup file: $BackupPath",
     "Created: $(Get-Date -Format o)",
     '',
-    'Running container images at backup time:',
+    $ImageSectionHeading,
     ''
-  ) + (Get-ImageVersionLines -RunningServices (Get-RunningServices))
+  ) + $imageLines
 }
 
 function Check-Updates {
@@ -1465,6 +1474,13 @@ function Open-N8n {
   Write-Success 'Opened local n8n in your browser.'
 }
 
+function Test-PlaceholderEncryptionKey {
+  param([string]$Value)
+
+  $key = ([string]$Value).Trim()
+  return (-not $key -or $key -eq 'replace-with-32-random-character')
+}
+
 function Write-BackupSecretFile {
   param(
     [string]$BackupDir,
@@ -1472,14 +1488,17 @@ function Write-BackupSecretFile {
   )
 
   $encryptionKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -EnvPath $EnvPath
-  if (-not $encryptionKey -or $encryptionKey -eq 'replace-with-32-random-character') {
-    Write-Warning 'N8N_ENCRYPTION_KEY is missing or still uses the placeholder. Saved credentials may not decrypt after restore.'
+  if (-not ([string]$encryptionKey).Trim()) {
+    Write-Warning 'N8N_ENCRYPTION_KEY is missing. Saved credentials may not decrypt after restore.'
     return ''
+  }
+  if (Test-PlaceholderEncryptionKey -Value $encryptionKey) {
+    Write-Warning 'N8N_ENCRYPTION_KEY still uses the placeholder, but the backup will include it because existing saved credentials may depend on that exact value.'
   }
 
   $secretPath = Join-Path $BackupDir 'SECRET-DO-NOT-COMMIT.env'
   Set-Content -LiteralPath $secretPath -Value @("N8N_ENCRYPTION_KEY=$encryptionKey") -Encoding ascii
-  Write-Success "Restore secret file written to: $secretPath"
+  Write-Success "Restore credential key file written to: $secretPath"
   return $secretPath
 }
 
@@ -1540,7 +1559,9 @@ function Backup-Postgres {
   param(
     [switch]$Required,
     [string]$EnvPath = '',
-    [string]$BackupDir = ''
+    [string]$BackupDir = '',
+    [string[]]$ImageVersionLines = @(),
+    [string]$ImageSectionHeading = 'Running container images at backup time:'
   )
 
   Write-Header 'Backup Postgres Database'
@@ -1577,7 +1598,7 @@ function Backup-Postgres {
       return $false
     }
     Write-Success "Backup written to: $backupPath"
-    $imageLogContent = Get-BackupImageLogContent -BackupPath $backupPath
+    $imageLogContent = Get-BackupImageLogContent -BackupPath $backupPath -ImageVersionLines $ImageVersionLines -ImageSectionHeading $ImageSectionHeading
     $secretPath = Write-BackupSecretFile -BackupDir $backupDir -EnvPath $EnvPath
     $files = @('database.sql', 'HOW TO USE THIS RESTORE FOLDER.txt', 'restore-manifest.json')
     if ($secretPath) {
@@ -1883,8 +1904,9 @@ function Get-RestoreBackupType {
     if ($name -match '\.zip$') {
       $entries = @(Get-ZipEntryNames -ZipPath $item.FullName)
       $hasEntities = @($entries | Where-Object { Test-RestoreEntityFileName -Name $_ }).Count -gt 0
+      $hasCredentialEntities = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'credentialsentity.jsonl' }).Count -gt 0
       if ($hasEntities) {
-        return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package'; InputPath = $item.FullName; NeedsStaging = $true }
+        return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package'; InputPath = $item.FullName; NeedsStaging = $true; HasCredentialEntities = $hasCredentialEntities }
       }
 
       Write-Warning 'Unknown zip backup. Filename-level detection found these entries:'
@@ -1912,6 +1934,7 @@ function Prepare-RestoreBackupInput {
       Type = 'n8n-entities'
       Label = 'n8n entities backup'
       InputDir = $expanded.EntityDir
+      HasCredentialEntities = $detected.HasCredentialEntities
     }
     $stagingDetected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $expanded.StagingPath -Force
     $detected = $stagingDetected
@@ -1970,8 +1993,9 @@ function Write-MissingRestoreSecretWarning {
   if (-not $path) {
     $path = 'the selected backup input'
   }
-  Write-Warning "No SECRET-DO-NOT-COMMIT.env was found in $path."
+  Write-Warning "No source backup SECRET-DO-NOT-COMMIT.env was found in $path."
   Write-Warning 'Saved credentials may not decrypt unless the current .env already matches the backup source key.'
+  Write-Warning 'The pre-restore safety backup will still save your current local N8N_ENCRYPTION_KEY for rollback when it exists.'
 }
 
 function Set-LocalEncryptionKeyForRestore {
@@ -1981,6 +2005,12 @@ function Set-LocalEncryptionKeyForRestore {
   )
 
   if (-not $BackupEncryptionKey) {
+    return $true
+  }
+
+  $currentKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -EnvPath $EnvPath
+  if ($currentKey -eq $BackupEncryptionKey) {
+    Write-Success 'Resolved local Compose N8N_ENCRYPTION_KEY already matches the backup secret file.'
     return $true
   }
 
@@ -2106,7 +2136,10 @@ function Restore-PreRestoreEncryptionKeyBackup {
 }
 
 function Restore-N8nEntitiesBackup {
-  param([object]$Backup)
+  param(
+    [object]$Backup,
+    [string]$BackupEncryptionKey = ''
+  )
 
   if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
   Write-Info 'Refreshing n8n image for restore.'
@@ -2118,6 +2151,23 @@ function Restore-N8nEntitiesBackup {
   $mountValue = "${inputDir}:/restore:ro"
   $composeArgs = @((Get-ComposeGlobalArguments) + @('run', '--rm', '--no-deps', '-v', $mountValue, 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables'))
   $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs }
+
+  if ($Backup.HasCredentialEntities) {
+    if ($exitCode -eq 0 -and -not $BackupEncryptionKey) {
+      Write-Warning 'Credential entities were imported, but no source backup N8N_ENCRYPTION_KEY was applied.'
+      Write-Warning 'Saved credentials may not decrypt. Re-run restore with SECRET-DO-NOT-COMMIT.env next to the .zip containing the source n8n N8N_ENCRYPTION_KEY.'
+    }
+    if ($exitCode -ne 0) {
+      Write-ErrorMessage 'The entities import failed while encrypted credential data was present.'
+      Write-Info 'If the log includes "bad decrypt", the restore is using the wrong N8N_ENCRYPTION_KEY for this backup.'
+      if ($BackupEncryptionKey) {
+        Write-Info 'A backup key was found and applied, but it may not be the key that created this entities export.'
+      } else {
+        Write-Info 'No backup key was found, so the current .env N8N_ENCRYPTION_KEY must exactly match the source n8n instance key.'
+        Write-Info 'Re-run restore with SECRET-DO-NOT-COMMIT.env next to the .zip containing the source n8n N8N_ENCRYPTION_KEY.'
+      }
+    }
+  }
   return ($exitCode -eq 0)
 }
 
@@ -2154,6 +2204,7 @@ function Restore-LocalN8nFromBackupMenu {
   if (-not (Test-DockerReady)) { return }
 
   $runningServices = Get-RunningServices -EnvPath $resolvedEnvPath
+  $preRestoreImageVersionLines = @(Get-ImageVersionLines -RunningServices $runningServices)
   if ($runningServices -contains 'n8n' -or $runningServices -contains 'ngrok') {
     Write-Info 'Restore requires the local stack to be stopped. Stopping local n8n services now.'
     if ((Invoke-Compose -Arguments @('down')) -ne 0) {
@@ -2171,6 +2222,10 @@ function Restore-LocalN8nFromBackupMenu {
   }
   if (-not $backupEncryptionKey) {
     Write-MissingRestoreSecretWarning -SecretSearchPath $secretSearchPath
+    if ($detected.HasCredentialEntities -and (Test-PlaceholderEncryptionKey -Value (Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -EnvPath $resolvedEnvPath))) {
+      Write-Warning 'This entities zip appears to include encrypted credentials, but no source backup key was found and the current .env key is missing or still uses the placeholder.'
+      Write-Warning 'Saved credentials may not decrypt unless you provide SECRET-DO-NOT-COMMIT.env from the source n8n instance.'
+    }
   }
 
   Write-Host ''
@@ -2182,7 +2237,7 @@ function Restore-LocalN8nFromBackupMenu {
   if ($backupEncryptionKey) {
     Write-Warning 'It will also update local Compose N8N_ENCRYPTION_KEY to the key bundled with the backup.'
   } else {
-    Write-Warning 'No backup key was found, so saved credentials are not guaranteed to decrypt.'
+    Write-Warning 'No source backup key was found, so saved credentials are not guaranteed to decrypt.'
   }
   Write-Host ''
   $approval = Read-Host 'Type PROCEED to continue'
@@ -2207,19 +2262,19 @@ function Restore-LocalN8nFromBackupMenu {
   }
 
   $preRestoreRoot = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-  if (-not (Backup-Postgres -Required -EnvPath $resolvedEnvPath -BackupDir $preRestoreRoot)) {
+  if (-not (Backup-Postgres -Required -EnvPath $resolvedEnvPath -BackupDir $preRestoreRoot -ImageVersionLines $preRestoreImageVersionLines -ImageSectionHeading 'Running container images before restore stopped services:')) {
     Write-ErrorMessage 'Restore cancelled because the current local n8n database backup did not complete.'
     return
   }
   $preRestoreSecretPath = Join-Path $preRestoreRoot 'SECRET-DO-NOT-COMMIT.env'
-  Write-Success 'Pre-restore backups created.'
+  Write-Success 'Pre-restore database backup created; rollback key saved if present.'
 
   if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
 
   $ok = $false
   switch ($detected.Type) {
     'postgres-sql' { $ok = Restore-PostgresSqlBackup -Backup $detected -EnvPath $resolvedEnvPath }
-    'n8n-entities' { $ok = Restore-N8nEntitiesBackup -Backup $detected }
+    'n8n-entities' { $ok = Restore-N8nEntitiesBackup -Backup $detected -BackupEncryptionKey $backupEncryptionKey }
     default {
       Write-ErrorMessage 'Unsupported backup type after detection.'
       return
