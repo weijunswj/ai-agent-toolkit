@@ -408,7 +408,7 @@ function Write-N8nServiceStatus {
   param([string[]]$RunningServices)
 
   if ($RunningServices -contains 'n8n') {
-    if (Test-N8nHttpReady) {
+    if (Test-N8nHttpReady -Attempts 3 -DelaySeconds 1) {
       Write-ServiceStatus -Name 'n8n' -RunningServices $RunningServices -WhenRunning "local editor: $(Get-LocalN8nUrl)"
     } else {
       $statusLabelWidth = 22
@@ -731,15 +731,26 @@ function Get-LocalN8nUrl {
 }
 
 function Test-N8nHttpReady {
-  try {
-    $response = Invoke-WebRequest -Uri (Get-LocalN8nUrl) -UseBasicParsing -TimeoutSec 2
-    return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
-  } catch {
-    if ($_.Exception.Response) {
-      return $true
+  param(
+    [int]$Attempts = 1,
+    [int]$DelaySeconds = 0,
+    [int]$TimeoutSeconds = 3
+  )
+
+  for ($attempt = 1; $attempt -le $Attempts; $attempt += 1) {
+    try {
+      $response = Invoke-WebRequest -Uri (Get-LocalN8nUrl) -UseBasicParsing -TimeoutSec $TimeoutSeconds
+      return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+    } catch {
+      if ($_.Exception.Response) {
+        return $true
+      }
+      if ($attempt -lt $Attempts -and $DelaySeconds -gt 0) {
+        Start-Sleep -Seconds $DelaySeconds
+      }
     }
-    return $false
   }
+  return $false
 }
 
 function Get-N8nRecentLogLines {

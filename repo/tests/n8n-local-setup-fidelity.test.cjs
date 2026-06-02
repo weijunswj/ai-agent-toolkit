@@ -608,7 +608,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Get-RunningServices'), /try \{[\s\S]*Get-ComposeGlobalArguments[\s\S]*'ps', '--services', '--filter', 'status=running'[\s\S]*docker compose @composeArgs 2>\$null[\s\S]*\} catch \{[\s\S]*return @\(\)[\s\S]*\}/);
   assert.match(menu, /Write-ServiceStatus -Name 'postgres'/);
   assert.match(menu, /Write-N8nServiceStatus -RunningServices \$runningServices/);
-  assert.match(functionBody(menu, 'Write-N8nServiceStatus'), /Test-N8nHttpReady[\s\S]*not ready[\s\S]*choose View logs/);
+  assert.match(functionBody(menu, 'Write-N8nServiceStatus'), /Test-N8nHttpReady -Attempts 3 -DelaySeconds 1[\s\S]*not ready[\s\S]*choose View logs/);
+  assert.match(functionBody(menu, 'Test-N8nHttpReady'), /param\([\s\S]*\[int\]\$Attempts = 1[\s\S]*\[int\]\$DelaySeconds = 0[\s\S]*Invoke-WebRequest[\s\S]*Start-Sleep -Seconds \$DelaySeconds[\s\S]*return \$false/);
   assert.match(menu, /Write-ServiceStatus -Name 'ngrok'/);
   assert.match(menu, /WEBHOOK_URL is still using ngrok, but ngrok is stopped/);
   assert.match(menu, /Public webhooks and OAuth callbacks will not/);
