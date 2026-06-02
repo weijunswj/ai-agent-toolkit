@@ -1560,8 +1560,15 @@ function Backup-Postgres {
   New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 
   Write-Info 'Running pg_dump from the postgres service.'
-  $composeArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'pg_dump', '-U', $postgresUser, $postgresDb))
-  $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs 1> $backupPath }
+  $containerBackupPath = "/tmp/n8n-backup-$timestamp.sql"
+  $composeArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'pg_dump', '-U', $postgresUser, '-f', $containerBackupPath, $postgresDb))
+  $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs }
+  if ($exitCode -eq 0) {
+    $copyArgs = @((Get-ComposeGlobalArguments) + @('cp', "postgres:$containerBackupPath", $backupPath))
+    $exitCode = Invoke-NativeCommand -Command { & docker compose @copyArgs }
+  }
+  $cleanupArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'rm', '-f', $containerBackupPath))
+  [void](Invoke-NativeCommand -Quiet -Command { & docker compose @cleanupArgs })
   if ($exitCode -eq 0) {
     if (-not (Test-PostgresSqlBackupFile -Path $backupPath)) {
       if ($Required) {

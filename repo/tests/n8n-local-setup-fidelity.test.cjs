@@ -715,7 +715,9 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /PROCEED/);
   assert.match(functionBody(menu, 'Clear-PostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;/);
   const backupBody = functionBody(menu, 'Backup-Postgres');
-  assert.match(backupBody, /Invoke-NativeCommand -Command \{ & docker compose @composeArgs 1> \$backupPath \}/);
+  assert.match(backupBody, /pg_dump[\s\S]*'-f', \$containerBackupPath[\s\S]*Invoke-NativeCommand -Command \{ & docker compose @composeArgs \}/);
+  assert.match(backupBody, /'cp', "postgres:\$containerBackupPath", \$backupPath[\s\S]*Invoke-NativeCommand -Command \{ & docker compose @copyArgs \}/);
+  assert.doesNotMatch(backupBody, /1> \$backupPath/);
   assert.match(backupBody, /Test-PostgresSqlBackupFile -Path \$backupPath/);
   assert.doesNotMatch(menu, /function Invoke-DockerCommandToFile|Start-Process -FilePath 'docker' -ArgumentList \$Command/);
   const sqlRestoreBody = functionBody(menu, 'Restore-PostgresSqlBackup');
