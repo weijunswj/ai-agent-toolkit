@@ -762,16 +762,16 @@ function Repair-N8nConfigEncryptionKey {
   [void](Invoke-Compose -Arguments @('stop', 'n8n'))
 
   $nodeScript = @'
-const fs = require("fs");
-const path = "/home/node/.n8n/config";
+const fs = require(`fs`);
+const path = `/home/node/.n8n/config`;
 const key = process.env.N8N_ENCRYPTION_KEY;
-if (!key || key === "replace-with-32-random-character") {
-  console.error("N8N_ENCRYPTION_KEY is missing or still uses the placeholder.");
+if (!key || key === `replace-with-32-random-character`) {
+  console.error(`N8N_ENCRYPTION_KEY is missing or still uses the placeholder.`);
   process.exit(2);
 }
 let config = {};
 if (fs.existsSync(path)) {
-  config = JSON.parse(fs.readFileSync(path, "utf8"));
+  config = JSON.parse(fs.readFileSync(path, `utf8`));
 }
 if (config.encryptionKey === key) {
   process.exit(0);
