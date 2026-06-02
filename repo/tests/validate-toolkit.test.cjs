@@ -1608,7 +1608,9 @@ test('Secure CI/CD prompt does not fetch n8n helpers from retired external main 
   const prompt = readTextFile(path.join(repoRoot, 'skills', 'secure-cicd-installer', 'templates', 'cicd', 'secure-cicd-prompt.md'));
   assert.doesNotMatch(prompt, /ai-cicd-installer/i);
   assert.doesNotMatch(prompt, /raw\.githubusercontent\.com\/weijunswj\/ai-cicd-installer/i);
-  assert.match(prompt, /skills\/n8n-workflow-helper-scripts\/templates\/helper-scripts\/import-export-sync\//);
+  assert.match(prompt, /route that procedure to `n8n-workflow-helper-scripts`/);
+  assert.match(prompt, /route that procedure to `n8n-workflow-templates`/);
+  assert.doesNotMatch(prompt, /install only the reusable n8n runtime helper scripts/);
 });
 
 test('changing Secure CI/CD prompt source makes generated prompt stale', () => {
