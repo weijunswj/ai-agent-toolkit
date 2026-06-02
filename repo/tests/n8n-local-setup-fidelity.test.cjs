@@ -728,6 +728,8 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.ok(sqlValidationIndex < sqlClearIndex, 'SQL backup validation must run before clearing the schema');
   assert.match(functionBody(menu, 'Test-PostgresSqlBackupFile'), /docker compose help output instead of a Postgres dump/);
   assert.match(functionBody(menu, 'Test-PostgresSqlBackupFile'), /PostgreSQL database dump/);
+  assert.match(functionBody(menu, 'Test-PostgresSqlBackupFile'), /\[byte\[\]\]::new\(\$bytesToRead\)/);
+  assert.match(functionBody(menu, 'Test-PostgresSqlBackupFile'), /GetString\(\$buffer, 0, \$bytesRead\)/);
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /psql[\s\S]*ON_ERROR_STOP/);
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /pg_restore[\s\S]*--clean[\s\S]*--if-exists/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /import:entities[\s\S]*--truncateTables/);

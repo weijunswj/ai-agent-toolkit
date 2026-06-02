@@ -1607,14 +1607,14 @@ function Test-PostgresSqlBackupFile {
 
   $stream = [System.IO.File]::OpenRead($Path)
   try {
-    $bytesToRead = [Math]::Min($stream.Length, 65536)
-    $buffer = New-Object byte[] $bytesToRead
-    [void]$stream.Read($buffer, 0, $buffer.Length)
+    $bytesToRead = [int][Math]::Min($stream.Length, 65536)
+    $buffer = [byte[]]::new($bytesToRead)
+    $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
   } finally {
     $stream.Dispose()
   }
 
-  $prefix = [System.Text.Encoding]::UTF8.GetString($buffer)
+  $prefix = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $bytesRead)
   if ($prefix -match "(?m)^Usage:\s+docker compose \[OPTIONS\] COMMAND") {
     Write-ErrorMessage 'Postgres SQL backup file contains docker compose help output instead of a Postgres dump.'
     return $false
