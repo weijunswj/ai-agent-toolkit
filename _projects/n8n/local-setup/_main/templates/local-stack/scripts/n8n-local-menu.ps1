@@ -1487,18 +1487,26 @@ function Write-BackupSecretFile {
     [string]$EnvPath = ''
   )
 
-  $encryptionKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -EnvPath $EnvPath
-  if (-not ([string]$encryptionKey).Trim()) {
-    Write-Warning 'N8N_ENCRYPTION_KEY is missing. Saved credentials may not decrypt after restore.'
+  $sourceEnvPath = $EnvPath
+  if (-not $sourceEnvPath) {
+    $sourceEnvPath = Join-Path $script:StackRoot '.env'
+  }
+  if (-not (Test-Path -LiteralPath $sourceEnvPath -PathType Leaf)) {
+    Write-Warning 'No .env file was found to include in the backup. Saved credentials may not decrypt after restore.'
     return ''
   }
-  if (Test-PlaceholderEncryptionKey -Value $encryptionKey) {
+
+  $encryptionKey = Read-EnvFileValue -Path $sourceEnvPath -Name 'N8N_ENCRYPTION_KEY'
+  if (-not ([string]$encryptionKey).Trim()) {
+    Write-Warning 'N8N_ENCRYPTION_KEY is missing from .env. Saved credentials may not decrypt after restore.'
+  }
+  if (([string]$encryptionKey).Trim() -and (Test-PlaceholderEncryptionKey -Value $encryptionKey)) {
     Write-Warning 'N8N_ENCRYPTION_KEY still uses the placeholder, but the backup will include it because existing saved credentials may depend on that exact value.'
   }
 
   $secretPath = Join-Path $BackupDir 'SECRET-DO-NOT-COMMIT.env'
-  Set-Content -LiteralPath $secretPath -Value @("N8N_ENCRYPTION_KEY=$encryptionKey") -Encoding ascii
-  Write-Success "Restore credential key file written to: $secretPath"
+  Copy-Item -LiteralPath $sourceEnvPath -Destination $secretPath -Force
+  Write-Success "Private backup .env written to: $secretPath"
   return $secretPath
 }
 
@@ -1517,7 +1525,8 @@ function Write-RestoreManifest {
     files = $Files
     notes = @(
       'Use the current local Compose Postgres connection settings as the restore target.',
-      'Use SECRET-DO-NOT-COMMIT.env for the backup N8N_ENCRYPTION_KEY.',
+      'Keep SECRET-DO-NOT-COMMIT.env with this folder. It is the private backup .env.',
+      'Restore reads N8N_ENCRYPTION_KEY from that file and patches only that key automatically.',
       'Restore replaces the current local n8n database state.'
     )
   }
@@ -1539,7 +1548,7 @@ function Write-RestoreReadme {
     '',
     "Backup type: $BackupType",
     '',
-    'Before restoring, make sure SECRET-DO-NOT-COMMIT.env is in this folder if saved credentials must decrypt.',
+    'Keep SECRET-DO-NOT-COMMIT.env in this folder. It is the private backup .env.',
     'Open _n8n-local.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to database.sql.',
     'Type PROCEED when asked.',
     'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.',
@@ -1942,8 +1951,48 @@ function Prepare-RestoreBackupInput {
   return $detected
 }
 
+function Get-RestoreEnvBackupNames {
+  return @('SECRET-DO-NOT-COMMIT.env', '.env')
+}
+
+function Test-SameResolvedPath {
+  param(
+    [string]$Left,
+    [string]$Right
+  )
+
+  if (-not $Left -or -not $Right) {
+    return $false
+  }
+
+  try {
+    $trimChars = [char[]]@('\', '/')
+    $leftPath = [System.IO.Path]::GetFullPath($Left).TrimEnd($trimChars)
+    $rightPath = [System.IO.Path]::GetFullPath($Right).TrimEnd($trimChars)
+    return ($leftPath -ieq $rightPath)
+  } catch {
+    return $false
+  }
+}
+
+function Find-RestoreEnvBackupFileInDirectory {
+  param([string]$Directory)
+
+  foreach ($fileName in Get-RestoreEnvBackupNames) {
+    $matches = @(Get-ChildItem -LiteralPath $Directory -File -Recurse -Filter $fileName -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($matches.Count -gt 0) {
+      return $matches[0].FullName
+    }
+  }
+
+  return ''
+}
+
 function Find-RestoreBackupSecret {
-  param([string]$Path)
+  param(
+    [string]$Path,
+    [string]$TargetEnvPath = ''
+  )
 
   $inputPath = ([string]$Path).Trim().Trim('"')
   if (-not $inputPath -or -not (Test-Path -LiteralPath $inputPath)) {
@@ -1952,9 +2001,9 @@ function Find-RestoreBackupSecret {
 
   $item = Get-Item -LiteralPath $inputPath
   if ($item.PSIsContainer) {
-    $secretFile = @(Get-ChildItem -LiteralPath $item.FullName -File -Recurse -Filter 'SECRET-DO-NOT-COMMIT.env' -ErrorAction SilentlyContinue | Select-Object -First 1)
-    if ($secretFile.Count -gt 0) {
-      return (Read-EnvFileValue -Path $secretFile[0].FullName -Name 'N8N_ENCRYPTION_KEY')
+    $secretFile = Find-RestoreEnvBackupFileInDirectory -Directory $item.FullName
+    if ($secretFile) {
+      return (Read-EnvFileValue -Path $secretFile -Name 'N8N_ENCRYPTION_KEY')
     }
     return ''
   }
@@ -1963,13 +2012,15 @@ function Find-RestoreBackupSecret {
     Enable-ZipSupport
     $zip = [System.IO.Compression.ZipFile]::OpenRead($item.FullName)
     try {
-      foreach ($entry in $zip.Entries) {
-        if ((Split-Path -Leaf $entry.FullName) -eq 'SECRET-DO-NOT-COMMIT.env') {
-          $reader = New-Object System.IO.StreamReader($entry.Open())
-          try {
-            return (Read-EnvTextValue -Text $reader.ReadToEnd() -Name 'N8N_ENCRYPTION_KEY')
-          } finally {
-            $reader.Dispose()
+      foreach ($fileName in Get-RestoreEnvBackupNames) {
+        foreach ($entry in $zip.Entries) {
+          if ((Split-Path -Leaf $entry.FullName) -eq $fileName) {
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            try {
+              return (Read-EnvTextValue -Text $reader.ReadToEnd() -Name 'N8N_ENCRYPTION_KEY')
+            } finally {
+              $reader.Dispose()
+            }
           }
         }
       }
@@ -1978,24 +2029,32 @@ function Find-RestoreBackupSecret {
     }
   }
 
-  $siblingSecret = Join-Path (Split-Path -Parent $item.FullName) 'SECRET-DO-NOT-COMMIT.env'
-  if (Test-Path -LiteralPath $siblingSecret) {
-    return (Read-EnvFileValue -Path $siblingSecret -Name 'N8N_ENCRYPTION_KEY')
+  foreach ($fileName in Get-RestoreEnvBackupNames) {
+    $siblingSecret = Join-Path (Split-Path -Parent $item.FullName) $fileName
+    if ((Test-Path -LiteralPath $siblingSecret) -and -not (Test-SameResolvedPath -Left $siblingSecret -Right $TargetEnvPath)) {
+      return (Read-EnvFileValue -Path $siblingSecret -Name 'N8N_ENCRYPTION_KEY')
+    }
   }
 
   return ''
 }
 
-function Write-MissingRestoreSecretWarning {
+function Write-MissingRestoreEnvError {
   param([string]$SecretSearchPath)
 
   $path = ([string]$SecretSearchPath).Trim().Trim('"')
   if (-not $path) {
     $path = 'the selected backup input'
   }
-  Write-Warning "No source backup SECRET-DO-NOT-COMMIT.env was found in $path."
-  Write-Warning 'Saved credentials may not decrypt unless the current .env already matches the backup source key.'
-  Write-Warning 'The pre-restore safety backup will still save your current local N8N_ENCRYPTION_KEY for rollback when it exists.'
+  Write-ErrorMessage "No backup .env or SECRET-DO-NOT-COMMIT.env with N8N_ENCRYPTION_KEY was found in $path."
+  Write-Info 'Restore cancelled before stopping services or changing the database.'
+  Write-Info 'Keep SECRET-DO-NOT-COMMIT.env with database.sql, or include the backup .env / SECRET-DO-NOT-COMMIT.env in the entities zip.'
+}
+
+function Write-MissingCredentialRestoreKeyError {
+  Write-ErrorMessage 'Credential entities were found, but no source backup N8N_ENCRYPTION_KEY was found.'
+  Write-Info 'Include the backup .env or SECRET-DO-NOT-COMMIT.env with the .zip, then run restore again.'
+  Write-Info 'The file must contain the N8N_ENCRYPTION_KEY from the n8n instance that created the export.'
 }
 
 function Set-LocalEncryptionKeyForRestore {
@@ -2141,6 +2200,11 @@ function Restore-N8nEntitiesBackup {
     [string]$BackupEncryptionKey = ''
   )
 
+  if ($Backup.HasCredentialEntities -and -not $BackupEncryptionKey) {
+    Write-MissingCredentialRestoreKeyError
+    return $false
+  }
+
   if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
   Write-Info 'Refreshing n8n image for restore.'
   if ((Invoke-Compose -Arguments @('pull', 'n8n')) -ne 0) {
@@ -2153,18 +2217,11 @@ function Restore-N8nEntitiesBackup {
   $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs }
 
   if ($Backup.HasCredentialEntities) {
-    if ($exitCode -eq 0 -and -not $BackupEncryptionKey) {
-      Write-Warning 'Credential entities were imported, but no source backup N8N_ENCRYPTION_KEY was applied.'
-      Write-Warning 'Saved credentials may not decrypt. Re-run restore with SECRET-DO-NOT-COMMIT.env next to the .zip containing the source n8n N8N_ENCRYPTION_KEY.'
-    }
     if ($exitCode -ne 0) {
       Write-ErrorMessage 'The entities import failed while encrypted credential data was present.'
       Write-Info 'If the log includes "bad decrypt", the restore is using the wrong N8N_ENCRYPTION_KEY for this backup.'
       if ($BackupEncryptionKey) {
         Write-Info 'A backup key was found and applied, but it may not be the key that created this entities export.'
-      } else {
-        Write-Info 'No backup key was found, so the current .env N8N_ENCRYPTION_KEY must exactly match the source n8n instance key.'
-        Write-Info 'Re-run restore with SECRET-DO-NOT-COMMIT.env next to the .zip containing the source n8n N8N_ENCRYPTION_KEY.'
       }
     }
   }
@@ -2200,6 +2257,17 @@ function Restore-LocalN8nFromBackupMenu {
   }
   $resolvedEnvPath = $envResolution.Path
 
+  $backupEncryptionKey = Find-RestoreBackupSecret -Path $backupPath -TargetEnvPath $resolvedEnvPath
+  $secretSearchPath = $backupPath
+  if (-not $backupEncryptionKey -and $detected.StagingPath) {
+    $backupEncryptionKey = Find-RestoreBackupSecret -Path $detected.StagingPath -TargetEnvPath $resolvedEnvPath
+    $secretSearchPath = $detected.StagingPath
+  }
+  if (-not $backupEncryptionKey) {
+    Write-MissingRestoreEnvError -SecretSearchPath $secretSearchPath
+    return
+  }
+
   if (-not (Test-StackFiles -EnvPath $resolvedEnvPath)) { return }
   if (-not (Test-DockerReady)) { return }
 
@@ -2214,31 +2282,13 @@ function Restore-LocalN8nFromBackupMenu {
     $runningServices = @()
   }
 
-  $backupEncryptionKey = Find-RestoreBackupSecret -Path $backupPath
-  $secretSearchPath = $backupPath
-  if (-not $backupEncryptionKey -and $detected.StagingPath) {
-    $backupEncryptionKey = Find-RestoreBackupSecret -Path $detected.StagingPath
-    $secretSearchPath = $detected.StagingPath
-  }
-  if (-not $backupEncryptionKey) {
-    Write-MissingRestoreSecretWarning -SecretSearchPath $secretSearchPath
-    if ($detected.HasCredentialEntities -and (Test-PlaceholderEncryptionKey -Value (Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -EnvPath $resolvedEnvPath))) {
-      Write-Warning 'This entities zip appears to include encrypted credentials, but no source backup key was found and the current .env key is missing or still uses the placeholder.'
-      Write-Warning 'Saved credentials may not decrypt unless you provide SECRET-DO-NOT-COMMIT.env from the source n8n instance.'
-    }
-  }
-
   Write-Host ''
   Write-Host "Detected backup type: $($detected.Label)." -ForegroundColor Cyan
   Write-Host "Resolved .env path: $resolvedEnvPath" -ForegroundColor Cyan
   Write-Host "Resolved .env source: $($envResolution.Source)" -ForegroundColor Cyan
   Write-Host ''
   Write-Warning 'This restore will replace the active local n8n database state with the backup state.'
-  if ($backupEncryptionKey) {
-    Write-Warning 'It will also update local Compose N8N_ENCRYPTION_KEY to the key bundled with the backup.'
-  } else {
-    Write-Warning 'No source backup key was found, so saved credentials are not guaranteed to decrypt.'
-  }
+  Write-Warning 'It will also update local Compose N8N_ENCRYPTION_KEY to the key bundled with the backup.'
   Write-Host ''
   $approval = Read-Host 'Type PROCEED to continue'
   Write-Host ''
@@ -2253,7 +2303,11 @@ function Restore-LocalN8nFromBackupMenu {
     return
   }
   if (-not $backupEncryptionKey -and $detected.StagingPath) {
-    $backupEncryptionKey = Find-RestoreBackupSecret -Path $detected.StagingPath
+    $backupEncryptionKey = Find-RestoreBackupSecret -Path $detected.StagingPath -TargetEnvPath $resolvedEnvPath
+  }
+  if ($detected.HasCredentialEntities -and -not $backupEncryptionKey) {
+    Write-MissingCredentialRestoreKeyError
+    return
   }
 
   if ($runningServices -notcontains 'postgres') {
@@ -2267,7 +2321,7 @@ function Restore-LocalN8nFromBackupMenu {
     return
   }
   $preRestoreSecretPath = Join-Path $preRestoreRoot 'SECRET-DO-NOT-COMMIT.env'
-  Write-Success 'Pre-restore database backup created; rollback key saved if present.'
+  Write-Success 'Pre-restore database backup created; rollback .env saved if present.'
 
   if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
 

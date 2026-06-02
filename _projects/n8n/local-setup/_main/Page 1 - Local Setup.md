@@ -560,64 +560,56 @@ Logs show the last 200 lines and then return to the menu prompt. This keeps the 
 
 ### 8.6 `Back up`, Restore, And `Command list`
 
-`Back up` writes a timestamped SQL dump under:
+`Back up`:
 
-```text
-%USERPROFILE%\.n8n-local\backups
-```
+- Writes a timestamped folder under `%USERPROFILE%\.n8n-local\backups`.
+- Includes `database.sql`.
+- Includes `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`.
+- Also includes `restore-manifest.json` and `HOW TO USE THIS RESTORE FOLDER.txt`.
+- Keep the whole folder private.
+- Do not commit it.
 
-The backup package includes:
+Restore:
 
-- `database.sql`.
-- `restore-manifest.json`.
-- `HOW TO USE THIS RESTORE FOLDER.txt`, including restore steps and captured image/version context.
-- `SECRET-DO-NOT-COMMIT.env` containing only the restore-critical `N8N_ENCRYPTION_KEY`, when the key is present in `.env`.
+- Choose `Advanced / Recovery: Restore local n8n from backup`.
+- Paste only a `.sql` or `.zip` file path.
+- Type `PROCEED` when asked.
+- `.sql` must be `database.sql` from a backup folder.
+- `.zip` must contain n8n `export:entities` output files.
+- Folder paths are not accepted.
 
-Keep that folder local and private. Do not commit backup packages or `SECRET-DO-NOT-COMMIT.env`.
+Required backup env:
 
-`Advanced / Recovery: Restore local n8n from backup` is for database and environment recovery, not normal workflow import.
+- Restore requires `N8N_ENCRYPTION_KEY` from the backup `.env`.
+- Keep `SECRET-DO-NOT-COMMIT.env` beside `database.sql`.
+- For `.zip`, include `.env` or `SECRET-DO-NOT-COMMIT.env` in the zip, or keep `SECRET-DO-NOT-COMMIT.env` next to the zip.
+- If the backup env/key is missing, restore stops before stopping services or touching the database.
+- Restore updates only the active `.env` `N8N_ENCRYPTION_KEY` line.
 
-Supported backup types:
+Safety behaviour:
 
-- Allowed restore backup files:
-  - `.sql` Postgres SQL dump.
-  - `.zip` n8n entities export package containing `n8n export:entities` output files.
+- Restore creates a pre-restore backup of the current database and current `.env`.
+- If restore fails after changes begin, the launcher tries to roll back automatically.
+- If a `.zip` has credential entities but no backup key, import is refused before n8n can truncate tables.
 
-- No folder input is accepted for restore. Use one of the two supported file types (`.sql` or `.zip`).
+Not supported here:
 
-For `.zip` restores, the launcher checks filenames first and waits until you type `PROCEED` before extracting anything. After approval, it safely extracts the selected package into local staging, enforces file count, compressed size, decompressed size, per-entry size, and compression-ratio limits, verifies extracted paths stay under the staging folder, locates the extracted n8n entity output files, and then runs `n8n import:entities` against that extracted entity directory. A `.zip` that does not contain n8n `export:entities` output files is not supported.
+- Normal workflow JSON import.
+- Credential JSON-only import.
+- Folder input.
 
-Restore replaces the current local n8n database state. Current local data is backed up first using the same Postgres backup package shape as option 7 `Back up`, including `database.sql` and a key-only rollback `SECRET-DO-NOT-COMMIT.env` from the current local `.env` when a key exists. That pre-restore rollback key protects the current local stack; it is not a substitute for the selected backup's source key unless both stacks already use the same `N8N_ENCRYPTION_KEY`. The current local Compose Postgres connection settings are used as the restore target, so Postgres passwords from the source backup are not normally needed. Pre-restore image-version logs are captured before local n8n or ngrok services are stopped.
+Advanced target `.env`:
 
-The selected backup's source `N8N_ENCRYPTION_KEY` must be used after restore for saved credentials from that backup to work. The `Back up` option writes this restore-critical value to `SECRET-DO-NOT-COMMIT.env` when the current `.env` contains a key. If the key still uses the placeholder, the launcher warns but still backs it up because existing saved credentials may depend on that exact value. If a selected backup package includes `SECRET-DO-NOT-COMMIT.env`, the restore flow checks that source backup key after the explicit restore approval. If the current local Compose `.env` already matches, it leaves the value unchanged; if the backup key differs, it updates only `N8N_ENCRYPTION_KEY` so restored credentials can decrypt. If no source backup key is present, saved credentials may not decrypt unless your current `.env` already matches the backup source key.
-
-If a `.zip` restore contains encrypted credential entities and no source backup key is found, the launcher warns before restore continues. Saved credentials may not decrypt unless you provide `SECRET-DO-NOT-COMMIT.env` from the source n8n instance or restore on a stack whose `.env` already uses that source key.
-
-Workflow JSON-only files are not supported by this recovery flow. Use normal n8n workflow import guidance for workflow JSON. Credential JSON-only files are not supported by this recovery flow because they are not a full restore package and are too sensitive for this recovery path.
-
-The restore flow resolves the target Compose `.env` file in this order:
-
-1. Explicit `--env-file <path>` argument.
-2. Explicit `--stack-dir <path>` argument, using `<stack-dir>\.env`.
-3. The known local stack directory used by `_n8n-local.cmd`.
-4. A single `.env` found beside the selected local Docker Compose file.
-
-If no `.env` is found, or more than one plausible `.env` is found, the restore stops and asks you to rerun with `--env-file`. Before changing the encryption key, the launcher shows the resolved `.env` path and creates a pre-restore database backup plus key-only rollback `SECRET-DO-NOT-COMMIT.env` when the current key is present. It then updates only the `N8N_ENCRYPTION_KEY` line and keeps all other values unchanged.
-
-Optional advanced examples:
+- Usually you do not need flags.
+- If the launcher cannot find exactly one target `.env`, rerun with `--env-file`.
+- Examples:
 
 ```powershell
 .\_n8n-local.cmd --env-file "C:\Users\<you>\.n8n-local\.env"
 .\_n8n-local.cmd --stack-dir "C:\Users\<you>\.n8n-local"
 ```
 
-Before replacing data, the launcher shows the detected backup type, confirms the current local database and `.env` backups were created, and requires this exact typed approval:
-
-```text
-PROCEED
-```
-
-`Command list` explains what the numbered menu options do. It is not asking you to type Docker commands for normal use.
+`Command list` explains the numbered menu options. It is not asking you to type Docker commands for normal use.
 
 ---
 
