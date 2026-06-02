@@ -670,14 +670,15 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.doesNotMatch(localSetup, /image-versions\.txt/);
   assert.doesNotMatch(localSetup, /does not restore from an extracted folder of JSONL files/);
   assert.match(localSetup, /The backup's `N8N_ENCRYPTION_KEY` must be used after restore for saved credentials to work/);
-  assert.match(localSetup, /Current local data and `\.env` are backed up first/);
+  assert.match(localSetup, /Current local data is backed up first/);
+  assert.match(localSetup, /current `N8N_ENCRYPTION_KEY` is saved in key-only `SECRET-DO-NOT-COMMIT\.env` when present/);
   assert.match(localSetup, /current local Compose Postgres connection settings are used as the restore target/);
   assert.match(localSetup, /Explicit `--env-file <path>` argument/);
   assert.match(localSetup, /Explicit `--stack-dir <path>` argument, using `<stack-dir>\\\.env`/);
   assert.match(localSetup, /The known local stack directory used by `_n8n-local\.cmd`/);
   assert.match(localSetup, /A single `\.env` found beside the selected local Docker Compose file/);
   assert.match(localSetup, /If no `\.env` is found, or more than one plausible `\.env` is found, the restore stops and asks you to rerun with `--env-file`/);
-  assert.match(localSetup, /Before changing the encryption key, the launcher shows the resolved `\.env` path and backs up that exact file/);
+  assert.match(localSetup, /Before changing the encryption key, the launcher shows the resolved `\.env` path and creates a pre-restore database backup plus key-only `SECRET-DO-NOT-COMMIT\.env` when the current key is present/);
   assert.match(localSetup, /updates only the `N8N_ENCRYPTION_KEY` line and keeps all other values unchanged/);
 
   assert.match(menu, /function Write-BackupSecretFile/);
@@ -694,9 +695,10 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Expand-RestoreEntitiesZipToStaging',
     'Resolve-RestoreEnvFile',
     'Initialize-MenuRuntime',
-    'Backup-CurrentEnvForRestore',
     'Set-LocalEncryptionKeyForRestore',
     'Restore-PostgresSqlBackup',
+    'Restore-PreRestorePostgresBackup',
+    'Restore-PreRestoreEncryptionKeyBackup',
     'Restore-N8nEntitiesBackup',
     'Restore-LocalN8nFromBackupMenu'
   ]) {
@@ -704,7 +706,9 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   }
 
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Resolved \.env path: \$resolvedEnvPath/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Backup-CurrentEnvForRestore -EnvPath \$resolvedEnvPath/);
+  assert.doesNotMatch(menu, /function Backup-CurrentEnvForRestore/);
+  assert.doesNotMatch(menu, /\.before-restore/);
+  assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Backup-CurrentEnvForRestore/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /replace the active local n8n database state with the backup state/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Pre-restore backups created/);
   assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current local n8n database backup created/);
@@ -713,6 +717,10 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore cancelled because local services could not be stopped/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Type PROCEED to continue/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /PROCEED/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreRestorePostgresBackup -BackupDir \$preRestoreRoot -EnvPath \$resolvedEnvPath/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreRestoreEncryptionKeyBackup -SecretBackupPath \$preRestoreSecretPath -EnvPath \$resolvedEnvPath/);
+  assert.match(functionBody(menu, 'Restore-PreRestorePostgresBackup'), /database\.sql[\s\S]*Restore-PostgresSqlBackup[\s\S]*Pre-restore database rollback completed/);
+  assert.match(functionBody(menu, 'Restore-PreRestoreEncryptionKeyBackup'), /SECRET-DO-NOT-COMMIT\.env|N8N_ENCRYPTION_KEY/);
   assert.match(functionBody(menu, 'Clear-PostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;/);
   const backupBody = functionBody(menu, 'Backup-Postgres');
   assert.match(backupBody, /pg_dump[\s\S]*'-f', \$containerBackupPath[\s\S]*Invoke-NativeCommand -Command \{ & docker compose @composeArgs \}/);

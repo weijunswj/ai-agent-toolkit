@@ -593,7 +593,7 @@ Supported backup types:
 
 For `.zip` restores, the launcher safely extracts the selected package into local staging, verifies extracted paths stay under the staging folder, locates the extracted n8n entity output files, and then runs `n8n import:entities` against that extracted entity directory. A `.zip` that does not contain n8n `export:entities` output files is not supported.
 
-Restore replaces the current local n8n database state. Current local data and `.env` are backed up first. The current local Compose Postgres connection settings are used as the restore target, so Postgres passwords from the source backup are not normally needed.
+Restore replaces the current local n8n database state. Current local data is backed up first, and the current `N8N_ENCRYPTION_KEY` is saved in key-only `SECRET-DO-NOT-COMMIT.env` when present. The current local Compose Postgres connection settings are used as the restore target, so Postgres passwords from the source backup are not normally needed.
 
 The backup's `N8N_ENCRYPTION_KEY` must be used after restore for saved credentials to work. If a backup package includes `SECRET-DO-NOT-COMMIT.env`, the restore flow updates the current local Compose `.env` to use that key after the explicit restore approval. If no backup key is present, saved credentials may not decrypt unless your current `.env` already matches the backup source key.
 
@@ -606,7 +606,7 @@ The restore flow resolves the target Compose `.env` file in this order:
 3. The known local stack directory used by `_n8n-local.cmd`.
 4. A single `.env` found beside the selected local Docker Compose file.
 
-If no `.env` is found, or more than one plausible `.env` is found, the restore stops and asks you to rerun with `--env-file`. Before changing the encryption key, the launcher shows the resolved `.env` path and backs up that exact file. It then updates only the `N8N_ENCRYPTION_KEY` line and keeps all other values unchanged.
+If no `.env` is found, or more than one plausible `.env` is found, the restore stops and asks you to rerun with `--env-file`. Before changing the encryption key, the launcher shows the resolved `.env` path and creates a pre-restore database backup plus key-only `SECRET-DO-NOT-COMMIT.env` when the current key is present. It then updates only the `N8N_ENCRYPTION_KEY` line and keeps all other values unchanged.
 
 Optional advanced examples:
 

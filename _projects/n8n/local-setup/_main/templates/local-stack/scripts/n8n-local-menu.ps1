@@ -1914,28 +1914,6 @@ function Write-MissingRestoreSecretWarning {
   Write-Warning 'Saved credentials may not decrypt unless the current .env already matches the backup source key.'
 }
 
-function Backup-CurrentEnvForRestore {
-  param(
-    [string]$EnvPath,
-    [string]$BackupDir = ''
-  )
-
-  $envPath = $EnvPath
-  if (-not (Test-Path -LiteralPath $envPath)) {
-    Write-ErrorMessage 'Resolved .env is missing, so it cannot be backed up before restore.'
-    return ''
-  }
-
-  if (-not $BackupDir) {
-    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $BackupDir = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-env-$timestamp"
-  }
-  New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
-  $backupPath = Join-Path $BackupDir ((Split-Path -Leaf $envPath) + '.before-restore')
-  Copy-Item -LiteralPath $envPath -Destination $backupPath -Force
-  return $backupPath
-}
-
 function Set-LocalEncryptionKeyForRestore {
   param(
     [string]$BackupEncryptionKey,
@@ -2013,6 +1991,58 @@ function Restore-PostgresSqlBackup {
   $cleanupArgs = @((Get-ComposeGlobalArguments) + @('exec', '-T', 'postgres', 'rm', '-f', $containerPath))
   [void](Invoke-NativeCommand -Quiet -Command { & docker compose @cleanupArgs })
   return ($restoreExit -eq 0)
+}
+
+function Restore-PreRestorePostgresBackup {
+  param(
+    [string]$BackupDir,
+    [string]$EnvPath = ''
+  )
+
+  $backupPath = Join-Path $BackupDir 'database.sql'
+  if (-not (Test-PostgresSqlBackupFile -Path $backupPath)) {
+    Write-ErrorMessage "Pre-restore database backup is not usable: $backupPath"
+    return $false
+  }
+
+  Write-Warning 'Restore failed. Rolling back to the pre-restore database backup now.'
+  $backup = [pscustomobject]@{
+    Type = 'postgres-sql'
+    InputPath = $backupPath
+  }
+
+  if (Restore-PostgresSqlBackup -Backup $backup -EnvPath $EnvPath) {
+    Write-Success 'Pre-restore database rollback completed.'
+    return $true
+  }
+
+  Write-ErrorMessage "Pre-restore database rollback failed. Use this backup folder manually: $BackupDir"
+  return $false
+}
+
+function Restore-PreRestoreEncryptionKeyBackup {
+  param(
+    [string]$SecretBackupPath,
+    [string]$EnvPath
+  )
+
+  if (-not $SecretBackupPath -or -not (Test-Path -LiteralPath $SecretBackupPath -PathType Leaf)) {
+    return $true
+  }
+
+  $previousKey = Read-EnvFileValue -Path $SecretBackupPath -Name 'N8N_ENCRYPTION_KEY'
+  if (-not $previousKey) {
+    return $true
+  }
+
+  $currentKey = Read-EnvFileValue -Path $EnvPath -Name 'N8N_ENCRYPTION_KEY'
+  if ($currentKey -eq $previousKey) {
+    return $true
+  }
+
+  Set-EnvFileValue -Path $EnvPath -Name 'N8N_ENCRYPTION_KEY' -Value $previousKey
+  Write-Success 'Pre-restore N8N_ENCRYPTION_KEY restored from SECRET-DO-NOT-COMMIT.env.'
+  return $true
 }
 
 function Restore-N8nEntitiesBackup {
@@ -2117,11 +2147,7 @@ function Restore-LocalN8nFromBackupMenu {
     Write-ErrorMessage 'Restore cancelled because the current local n8n database backup did not complete.'
     return
   }
-  $envBackupPath = Backup-CurrentEnvForRestore -EnvPath $resolvedEnvPath -BackupDir $preRestoreRoot
-  if (-not $envBackupPath) {
-    Write-ErrorMessage 'Restore cancelled because the current .env backup did not complete.'
-    return
-  }
+  $preRestoreSecretPath = Join-Path $preRestoreRoot 'SECRET-DO-NOT-COMMIT.env'
   Write-Success 'Pre-restore backups created.'
 
   if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
@@ -2140,7 +2166,14 @@ function Restore-LocalN8nFromBackupMenu {
     Write-Success 'Local n8n restore completed.'
     Write-Info 'Start n8n from the menu and verify workflows and saved credentials.'
   } else {
-    Write-ErrorMessage 'Restore failed. Use the pre-restore database backup and .env backup as the rollback path.'
+    Write-ErrorMessage 'Restore failed.'
+    $rollbackOk = Restore-PreRestorePostgresBackup -BackupDir $preRestoreRoot -EnvPath $resolvedEnvPath
+    [void](Restore-PreRestoreEncryptionKeyBackup -SecretBackupPath $preRestoreSecretPath -EnvPath $resolvedEnvPath)
+    if ($rollbackOk) {
+      Write-Info 'Start n8n from the menu and verify the previous local database state.'
+    } else {
+      Write-ErrorMessage 'Automatic rollback did not complete. Use the pre-restore backup folder as the manual rollback path.'
+    }
   }
 }
 
