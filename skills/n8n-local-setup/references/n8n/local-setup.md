@@ -591,7 +591,7 @@ Supported backup types:
 
 - No folder input is accepted for restore. Use one of the two supported file types (`.sql` or `.zip`).
 
-For `.zip` restores, the launcher safely extracts the selected package into local staging, verifies extracted paths stay under the staging folder, locates the extracted n8n entity output files, and then runs `n8n import:entities` against that extracted entity directory. A `.zip` that does not contain n8n `export:entities` output files is not supported.
+For `.zip` restores, the launcher checks filenames first and waits until you type `PROCEED` before extracting anything. After approval, it safely extracts the selected package into local staging, enforces file count, compressed size, decompressed size, per-entry size, and compression-ratio limits, verifies extracted paths stay under the staging folder, locates the extracted n8n entity output files, and then runs `n8n import:entities` against that extracted entity directory. A `.zip` that does not contain n8n `export:entities` output files is not supported.
 
 Restore replaces the current local n8n database state. Current local data is backed up first, and the current `N8N_ENCRYPTION_KEY` is saved in key-only `SECRET-DO-NOT-COMMIT.env` when present. The current local Compose Postgres connection settings are used as the restore target, so Postgres passwords from the source backup are not normally needed.
 

@@ -661,7 +661,9 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(localSetup, /`?\.sql/);
   assert.match(localSetup, /`?\.zip/);
   assert.match(localSetup, /`n8n export:entities` output files/);
+  assert.match(localSetup, /waits until you type `PROCEED` before extracting anything/);
   assert.match(localSetup, /safely extracts the selected package into local staging/);
+  assert.match(localSetup, /file count, compressed size, decompressed size, per-entry size, and compression-ratio limits/);
   assert.match(localSetup, /No folder input is accepted for restore/);
   assert.match(localSetup, /Workflow JSON-only files are not supported by this recovery flow/);
   assert.match(localSetup, /Credential JSON-only files are not supported by this recovery flow/);
@@ -692,6 +694,8 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Get-RestoreBackupType',
     'Test-PathInsideDirectory',
     'Find-RestoreEntityDirectory',
+    'Get-RestoreZipLimits',
+    'Test-RestoreZipEntryLimits',
     'Expand-RestoreEntitiesZipToStaging',
     'Resolve-RestoreEnvFile',
     'Initialize-MenuRuntime',
@@ -717,6 +721,16 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore cancelled because local services could not be stopped/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Type PROCEED to continue/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /PROCEED/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore cancelled\. No restore changes were applied\./);
+  const restoreMenuBody = functionBody(menu, 'Restore-LocalN8nFromBackupMenu');
+  const approvalIndex = restoreMenuBody.indexOf("$approval = Read-Host 'Type PROCEED to continue'");
+  const prepareIndex = restoreMenuBody.indexOf('Prepare-RestoreBackupInput -Path $backupPath');
+  const backupIndex = restoreMenuBody.indexOf('Backup-Postgres -Required');
+  assert.notEqual(approvalIndex, -1, 'restore flow prompts for PROCEED');
+  assert.notEqual(prepareIndex, -1, 'restore flow prepares restore input');
+  assert.notEqual(backupIndex, -1, 'restore flow creates pre-restore backup');
+  assert.ok(approvalIndex < prepareIndex, 'zip staging must happen only after PROCEED');
+  assert.ok(prepareIndex < backupIndex, 'zip staging must complete before backup/restore mutation');
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreRestorePostgresBackup -BackupDir \$preRestoreRoot -EnvPath \$resolvedEnvPath/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreRestoreEncryptionKeyBackup -SecretBackupPath \$preRestoreSecretPath -EnvPath \$resolvedEnvPath/);
   assert.match(functionBody(menu, 'Restore-PreRestorePostgresBackup'), /database\.sql[\s\S]*Restore-PostgresSqlBackup[\s\S]*Pre-restore database rollback completed/);
@@ -743,7 +757,9 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /psql[\s\S]*ON_ERROR_STOP/);
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /pg_restore[\s\S]*--clean[\s\S]*--if-exists/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /import:entities[\s\S]*--truncateTables/);
-  assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*Find-RestoreEntityDirectory/);
+  assert.match(functionBody(menu, 'Get-RestoreZipLimits'), /MaxFiles[\s\S]*MaxCompressedBytes[\s\S]*MaxEntryBytes[\s\S]*MaxTotalBytes[\s\S]*MaxCompressionRatio/);
+  assert.match(functionBody(menu, 'Test-RestoreZipEntryLimits'), /MaxFiles[\s\S]*MaxEntryBytes[\s\S]*MaxTotalBytes[\s\S]*MaxCompressionRatio[\s\S]*MaxCompressedBytes/);
+  assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*Find-RestoreEntityDirectory/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /Expand-RestoreEntitiesZipToStaging[\s\S]*InputDir = \$expanded\.EntityDir/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /\$inputDir = \$Backup\.InputDir[\s\S]*\$mountValue = "\$\{inputDir\}:\/restore:ro"[\s\S]*--inputDir[\s\S]*\/restore/);
   assert.doesNotMatch(menu, /Copy-RestoreEntitiesZipToStaging/);

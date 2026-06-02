@@ -1691,6 +1691,61 @@ function Get-ZipEntryNames {
   }
 }
 
+function Get-RestoreZipLimits {
+  return [pscustomobject]@{
+    MaxFiles = 1000
+    MaxCompressedBytes = 268435456
+    MaxEntryBytes = 134217728
+    MaxTotalBytes = 536870912
+    MaxCompressionRatio = 100
+  }
+}
+
+function Test-RestoreZipEntryLimits {
+  param([object]$Zip)
+
+  $limits = Get-RestoreZipLimits
+  $fileCount = 0
+  $totalCompressedBytes = [int64]0
+  $totalBytes = [int64]0
+
+  foreach ($entry in $Zip.Entries) {
+    if (-not $entry.FullName) { continue }
+    $entryName = ($entry.FullName -replace '\\', '/')
+    if ($entryName.EndsWith('/')) { continue }
+
+    $fileCount += 1
+    if ($fileCount -gt $limits.MaxFiles) {
+      return [pscustomobject]@{ Error = "Zip restore package contains too many files. Limit: $($limits.MaxFiles)." }
+    }
+
+    if ($entry.Length -gt $limits.MaxEntryBytes) {
+      return [pscustomobject]@{ Error = "Zip restore package contains an entry larger than the allowed restore limit. Limit: $($limits.MaxEntryBytes) bytes." }
+    }
+
+    $totalBytes += [int64]$entry.Length
+    if ($totalBytes -gt $limits.MaxTotalBytes) {
+      return [pscustomobject]@{ Error = "Zip restore package expands beyond the allowed restore limit. Limit: $($limits.MaxTotalBytes) bytes." }
+    }
+
+    if ($entry.CompressedLength -gt 0) {
+      $totalCompressedBytes += [int64]$entry.CompressedLength
+      $ratio = ([double]$entry.Length / [double]$entry.CompressedLength)
+      if ($ratio -gt $limits.MaxCompressionRatio) {
+        return [pscustomobject]@{ Error = "Zip restore package contains an entry with an unsafe compression ratio. Limit: $($limits.MaxCompressionRatio):1." }
+      }
+    } elseif ($entry.Length -gt 0) {
+      return [pscustomobject]@{ Error = 'Zip restore package contains a compressed entry with no recorded compressed size.' }
+    }
+
+    if ($totalCompressedBytes -gt $limits.MaxCompressedBytes) {
+      return [pscustomobject]@{ Error = "Zip restore package compressed data is too large. Limit: $($limits.MaxCompressedBytes) bytes." }
+    }
+  }
+
+  return [pscustomobject]@{ Ok = $true }
+}
+
 function Expand-GzipFileToRestoreStaging {
   param([string]$SourcePath)
 
@@ -1758,6 +1813,11 @@ function Expand-RestoreEntitiesZipToStaging {
   Enable-ZipSupport
   $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
   try {
+    $limitCheck = Test-RestoreZipEntryLimits -Zip $zip
+    if ($limitCheck.Error) {
+      return [pscustomobject]@{ Error = $limitCheck.Error }
+    }
+
     foreach ($entry in $zip.Entries) {
       if (-not $entry.FullName) { continue }
       $entryName = ($entry.FullName -replace '\\', '/')
@@ -2082,11 +2142,6 @@ function Restore-LocalN8nFromBackupMenu {
     Write-ErrorMessage $detected.Reason
     return
   }
-  $detected = Prepare-RestoreBackupInput -Path $backupPath
-  if ($detected.Type -eq 'unsupported') {
-    Write-ErrorMessage $detected.Reason
-    return
-  }
 
   $envResolution = Resolve-RestoreEnvFile
   if ($envResolution.Error) {
@@ -2133,8 +2188,17 @@ function Restore-LocalN8nFromBackupMenu {
   $approval = Read-Host 'Type PROCEED to continue'
   Write-Host ''
   if ($approval -ne 'PROCEED') {
-    Write-Warning 'Restore cancelled. The pre-restore backups were kept.'
+    Write-Warning 'Restore cancelled. No restore changes were applied.'
     return
+  }
+
+  $detected = Prepare-RestoreBackupInput -Path $backupPath
+  if ($detected.Type -eq 'unsupported') {
+    Write-ErrorMessage $detected.Reason
+    return
+  }
+  if (-not $backupEncryptionKey -and $detected.StagingPath) {
+    $backupEncryptionKey = Find-RestoreBackupSecret -Path $detected.StagingPath
   }
 
   if ($runningServices -notcontains 'postgres') {
