@@ -141,8 +141,8 @@ const expectedStartMenuOptions = [
 ];
 
 const expectedStopMenuOptions = [
-  'Stop ngrok tunnel',
   'n8n + ngrok tunnel',
+  'Stop ngrok tunnel',
   'Cancel'
 ];
 
@@ -618,7 +618,7 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /\$webhookLabel = "  \{0,-22\}: " -f 'active WEBHOOK_URL'/);
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-N8nServiceStatus -RunningServices \$runningServices[\s\S]*Write-ImageVersions -RunningServices \$runningServices[\s\S]*Write-Host ''[\s\S]*WEBHOOK_URL is still using ngrok, but ngrok is stopped/);
   assert.match(menu, /Write-Host '  2\. Start ngrok tunnel'/);
-  assert.match(menu, /Write-Host '  1\. Stop ngrok tunnel'/);
+  assert.match(menu, /Write-Host '  1\. n8n \+ ngrok tunnel'/);
   assert.match(menu, /Write-Host '  5\. Show Compose status'/);
   assert.match(menu, /Write-Host '  8\. Advanced \/ Recovery: Restore local n8n from backup'/);
   assert.match(menu, /Write-Host '  9\. Command list'/);
@@ -645,7 +645,10 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Stop-NgrokTunnel'), /Set-ActiveWebhookUrl -Url \(Get-LocalWebhookUrl\) -Mode 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local\.[\s\S]*Test-ServiceImagesAvailable -Services @\('n8n'\)[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'\)[\s\S]*Wait-ForN8nReady -Context 'n8n restart after stopping ngrok' -AllowSelfHeal/);
   assert.match(functionBody(menu, 'Restart-N8n'), /Set-ActiveWebhookUrl -Url \(Get-LocalWebhookUrl\) -Mode 'localhost'[\s\S]*current non-image \.env values are applied[\s\S]*Test-ServiceImagesAvailable -Services @\('n8n'\)[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'\)[\s\S]*Wait-ForN8nReady -Context 'n8n restart' -AllowSelfHeal/);
   assert.match(functionBody(menu, 'Wait-ForN8nReady'), /Test-N8nHttpReady[\s\S]*Get-N8nRecentLogLines[\s\S]*Test-N8nEncryptionKeyMismatchLog[\s\S]*Repair-N8nConfigEncryptionKey[\s\S]*up', '-d', '--pull', 'never', '--force-recreate', 'n8n'/);
-  assert.match(functionBody(menu, 'Repair-N8nConfigEncryptionKey'), /const fs = require\(`fs`\);[\s\S]*const path = `\/home\/node\/\.n8n\/config`;[\s\S]*process\.env\.N8N_ENCRYPTION_KEY[\s\S]*key === `replace-with-32-random-character`[\s\S]*config\.encryptionKey = key[\s\S]*--entrypoint', 'node'/);
+  assert.match(functionBody(menu, 'Test-N8nDatabaseImageMismatchLog'), /McpRegistryServerEntity[\s\S]*Migration timestamp mismatch/);
+  assert.match(functionBody(menu, 'Wait-ForN8nReady'), /Test-N8nDatabaseImageMismatchLog[\s\S]*database schema \/ n8n image version mismatch[\s\S]*Set N8N_IMAGE back to the version that last started this database/);
+  assert.match(functionBody(menu, 'Repair-N8nConfigEncryptionKey'), /stop', '--timeout', '10', 'n8n'/);
+  assert.match(functionBody(menu, 'Repair-N8nConfigEncryptionKey'), /const fs = require\(`fs`\);[\s\S]*const path = require\(`path`\);[\s\S]*const configPath = `\/home\/node\/\.n8n\/config`;[\s\S]*process\.env\.N8N_ENCRYPTION_KEY[\s\S]*key === `replace-with-32-random-character`[\s\S]*config\.encryptionKey = key[\s\S]*'--pull', 'never'[\s\S]*'-T'[\s\S]*--entrypoint/, 'node');
   assert.doesNotMatch(functionBody(menu, 'Repair-N8nConfigEncryptionKey'), /Write-Host \$key|Write-Info \$key|Write-Success \$key|Write-Warning \$key/);
   assert.match(functionBody(menu, 'Show-Logs'), /logs', '--tail', '200'/);
   assert.doesNotMatch(menu, /Open-NgrokDockerDesktopGuide/);
@@ -687,8 +690,10 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(localSetup, /Restore creates a pre-restore backup of the current database and current `\.env`/);
   assert.match(localSetup, /Start and restart wait until the n8n editor answers at `localhost`/);
   assert.match(localSetup, /If the container runs but the editor is not reachable, the launcher reports an error instead of calling it healthy/);
-  assert.match(localSetup, /syncs `\/home\/node\/\.n8n\/config` to the active `\.env` key once/);
+  assert.match(localSetup, /syncs|attempts.*`\/home\/node\/\.n8n\/config` to the active `\.env` key/);
+  assert.match(localSetup, /database schema \/ image version mismatch[\s\S]*`N8N_IMAGE` back to the version that last started this database/);
   assert.match(localSetup, /Restore updates only the active `\.env` `N8N_ENCRYPTION_KEY` line/);
+  assert.match(localSetup, /Rollback does not rewrite `N8N_IMAGE`; image pins remain your explicit choice/);
   assert.match(localSetup, /If a `\.zip` has credential entities but no backup key, import is refused before n8n can truncate tables/);
   assert.match(localSetup, /^Advanced target `\.env`:$/m);
   assert.match(localSetup, /If the launcher cannot find exactly one target `\.env`, rerun with `--env-file`/);
@@ -711,7 +716,10 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Get-RestoreBackupType',
     'Test-PathInsideDirectory',
     'Test-SameResolvedPath',
+    'Test-N8nDatabaseImageMismatchLog',
     'Find-RestoreEntityDirectory',
+    'New-RestoreEntityImportDirectory',
+    'Wait-ForServiceImagesAvailable',
     'Get-RestoreZipLimits',
     'Test-RestoreZipEntryLimits',
     'Expand-RestoreEntitiesZipToStaging',
@@ -720,6 +728,8 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Write-MissingCredentialRestoreKeyError',
     'Resolve-RestoreEnvFile',
     'Initialize-MenuRuntime',
+    'Restore-PreviousStackServices',
+    'Update-N8nImageForRestore',
     'Set-LocalEncryptionKeyForRestore',
     'Restore-PostgresSqlBackup',
     'Restore-PreRestorePostgresBackup',
@@ -757,6 +767,8 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreRestoreEncryptionKeyBackup -SecretBackupPath \$preRestoreSecretPath -EnvPath \$resolvedEnvPath/);
   assert.match(functionBody(menu, 'Restore-PreRestorePostgresBackup'), /database\.sql[\s\S]*Restore-PostgresSqlBackup[\s\S]*Pre-restore database rollback completed/);
   assert.match(functionBody(menu, 'Restore-PreRestoreEncryptionKeyBackup'), /SECRET-DO-NOT-COMMIT\.env|N8N_ENCRYPTION_KEY/);
+  assert.doesNotMatch(menu, /function Restore-PreRestoreN8nImage/);
+  assert.doesNotMatch(menu, /Set-EnvFileValue -Path \$EnvPath -Name 'N8N_IMAGE'/);
   assert.match(functionBody(menu, 'Clear-PostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;/);
   const backupBody = functionBody(menu, 'Backup-Postgres');
   assert.match(backupBody, /pg_dump[\s\S]*'-f', \$containerBackupPath[\s\S]*Invoke-NativeCommand -Command \{ & docker compose @composeArgs \}/);
@@ -780,6 +792,13 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-PostgresSqlBackup'), /pg_restore[\s\S]*--clean[\s\S]*--if-exists/);
   const entitiesRestoreBody = functionBody(menu, 'Restore-N8nEntitiesBackup');
   assert.match(entitiesRestoreBody, /Write-MissingCredentialRestoreKeyError[\s\S]*return \$false[\s\S]*import:entities[\s\S]*--truncateTables/);
+  assert.match(functionBody(menu, 'Wait-ForServiceImagesAvailable'), /Test-LocalImageExists[\s\S]*Start-Sleep[\s\S]*still not available locally after waiting/);
+  assert.match(functionBody(menu, 'Update-N8nImageForRestore'), /pull', 'n8n'[\s\S]*Wait-ForServiceImagesAvailable -Services @\('n8n'\)[\s\S]*Configured n8n image is available locally/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /ImageAlreadyRefreshed[\s\S]*Update-N8nImageForRestore/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /'--pull', 'never'[\s\S]*'-T'[\s\S]*import:entities/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Invoke-ComposeCapture[\s\S]*\$outputText/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Migration timestamp mismatch\|different migration states[\s\S]*same N8N_IMAGE version[\s\S]*Postgres SQL backup/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Migrations file not found[\s\S]*migrations\.jsonl/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /bad decrypt[\s\S]*wrong N8N_ENCRYPTION_KEY/);
   assert.doesNotMatch(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Credential entities were imported, but no source backup N8N_ENCRYPTION_KEY was applied/);
   assert.match(functionBody(menu, 'Write-MissingCredentialRestoreKeyError'), /Credential entities were found, but no source backup N8N_ENCRYPTION_KEY was found/);
@@ -793,10 +812,11 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Get-RestoreZipLimits'), /MaxFiles[\s\S]*MaxCompressedBytes[\s\S]*MaxEntryBytes[\s\S]*MaxTotalBytes[\s\S]*MaxCompressionRatio/);
   assert.match(functionBody(menu, 'Test-RestoreZipEntryLimits'), /MaxFiles[\s\S]*MaxEntryBytes[\s\S]*MaxTotalBytes[\s\S]*MaxCompressionRatio[\s\S]*MaxCompressedBytes/);
   assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*Find-RestoreEntityDirectory/);
+  assert.match(functionBody(menu, 'New-RestoreEntityImportDirectory'), /EndsWith\('\.jsonl'\)[\s\S]*migrations\.jsonl[\s\S]*Copy-Item -LiteralPath \$file\.FullName[\s\S]*CreateFromDirectory\(\$zipSourceDir, \$zipPath\)[\s\S]*Rebuilt clean entities\.zip with/);
+  assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /New-RestoreEntityImportDirectory -EntityDir \$entityDir -StagingDir \$stagingDir[\s\S]*did not contain migrations\.jsonl[\s\S]*clean entities\.zip rebuilt from all extracted n8n entity JSONL files[\s\S]*EntityDir = \$importDir/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /Expand-RestoreEntitiesZipToStaging[\s\S]*InputDir = \$expanded\.EntityDir/);
-  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /\$inputDir = \$Backup\.InputDir[\s\S]*\$mountValue = "\$\{inputDir\}:\/restore:ro"[\s\S]*--inputDir[\s\S]*\/restore/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /\$inputDir = \$Backup\.InputDir[\s\S]*\$mountValue = "\$\{inputDir\}:\/restore"[\s\S]*--inputDir[\s\S]*\/restore/);
   assert.doesNotMatch(menu, /Copy-RestoreEntitiesZipToStaging/);
-  assert.doesNotMatch(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Ignoring nested backup entities\.zip artifact/);
   assert.match(functionBody(menu, 'Resolve-RestoreEnvFile'), /--env-file[\s\S]*--stack-dir[\s\S]*launcher stack directory[\s\S]*single \.env beside selected local Docker Compose file/);
   assert.doesNotMatch(functionBody(menu, 'Resolve-RestoreEnvFile'), /compose-file/);
   assert.doesNotMatch(menu, /Get-MenuArgumentValue -Name 'compose-file'/);
@@ -804,6 +824,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Initialize-MenuRuntime'), /Get-MenuArgumentValue -Name 'stack-dir'[\s\S]*Set-Location -LiteralPath \$script:StackRoot/);
   assert.match(functionBody(menu, 'Get-ComposeGlobalArguments'), /Get-MenuArgumentValue -Name 'env-file'[\s\S]*--env-file/);
   assert.match(functionBody(menu, 'Invoke-Compose'), /Get-ComposeGlobalArguments[\s\S]*\$allArguments/);
+  assert.match(functionBody(menu, 'Invoke-ComposeCapture'), /COMPOSE_PROGRESS[\s\S]*plain[\s\S]*COMPOSE_ANSI[\s\S]*never[\s\S]*finally/);
   assert.match(functionBody(menu, 'Set-EnvFileValue'), /\$lines\[\$index\] = \$replacement[\s\S]*break[\s\S]*Set-Content/);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must use one of these extensions: \.sql, \.zip/i);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must be a backup file/);
@@ -812,8 +833,12 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /HasCredentialEntities = \$detected\.HasCredentialEntities/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Get-RunningServices -EnvPath \$resolvedEnvPath[\s\S]*\$preRestoreImageVersionLines = @\(Get-ImageVersionLines -RunningServices \$runningServices\)[\s\S]*Backup-Postgres -Required -EnvPath \$resolvedEnvPath -BackupDir \$preRestoreRoot -ImageVersionLines \$preRestoreImageVersionLines -ImageSectionHeading 'Running container images before restore stopped services:'/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /detected\.HasCredentialEntities[\s\S]*Write-MissingCredentialRestoreKeyError[\s\S]*return/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /\$n8nImageRefreshed = Update-N8nImageForRestore[\s\S]*Repair-N8nConfigEncryptionKey[\s\S]*ImageAlreadyRefreshed:\$n8nImageRefreshed/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreviousStackServices -PreviousServices \$preRestoreServices/);
   assert.doesNotMatch(functionBody(menu, 'Get-RestoreBackupType'), /ReadToEnd|StreamReader|Open\(\)/);
   assert.doesNotMatch(menu, /Write-Host .*POSTGRES_PASSWORD|Write-Info .*POSTGRES_PASSWORD|Write-Success .*POSTGRES_PASSWORD|Write-Warning .*POSTGRES_PASSWORD/);
+  assert.match(functionBody(menu, 'Restore-PreviousStackServices'), /PreviousServices/);
+  assert.match(functionBody(menu, 'Restore-PreviousStackServices'), /Start-N8nWithNgrok|Start-LocalStack/);
 });
 
 test('local menu PowerShell script stays parseable', (t) => {

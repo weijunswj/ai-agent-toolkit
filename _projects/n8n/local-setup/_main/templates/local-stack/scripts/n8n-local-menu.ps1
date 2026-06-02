@@ -230,7 +230,11 @@ function Invoke-ComposeCapture {
   param([string[]]$Arguments)
 
   $allArguments = @((Get-ComposeGlobalArguments) + $Arguments)
+  $previousComposeProgress = $env:COMPOSE_PROGRESS
+  $previousComposeAnsi = $env:COMPOSE_ANSI
   try {
+    $env:COMPOSE_PROGRESS = 'plain'
+    $env:COMPOSE_ANSI = 'never'
     $output = @(& docker compose @allArguments 2>&1)
     return [pscustomobject]@{
       ExitCode = $LASTEXITCODE
@@ -240,6 +244,18 @@ function Invoke-ComposeCapture {
     return [pscustomobject]@{
       ExitCode = 1
       Output = @([string]$_.Exception.Message)
+    }
+  } finally {
+    if ($null -eq $previousComposeProgress) {
+      Remove-Item Env:\COMPOSE_PROGRESS -ErrorAction SilentlyContinue
+    } else {
+      $env:COMPOSE_PROGRESS = $previousComposeProgress
+    }
+
+    if ($null -eq $previousComposeAnsi) {
+      Remove-Item Env:\COMPOSE_ANSI -ErrorAction SilentlyContinue
+    } else {
+      $env:COMPOSE_ANSI = $previousComposeAnsi
     }
   }
 }
@@ -718,6 +734,41 @@ function Test-ServiceImagesAvailable {
   return $false
 }
 
+function Wait-ForServiceImagesAvailable {
+  param(
+    [string[]]$Services,
+    [int]$MaxAttempts = 30,
+    [int]$DelaySeconds = 2
+  )
+
+  Initialize-ServiceImages
+  $missing = New-Object System.Collections.Generic.List[string]
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    $missing.Clear()
+    foreach ($service in $Services) {
+      $image = $script:ServiceImages[$service]
+      if (-not (Test-LocalImageExists -Image $image)) {
+        $missing.Add("$service -> $image")
+      }
+    }
+
+    if ($missing.Count -eq 0) {
+      return $true
+    }
+
+    if ($attempt -lt $MaxAttempts) {
+      Start-Sleep -Seconds $DelaySeconds
+    }
+  }
+
+  Write-ErrorMessage 'Configured image is still not available locally after waiting:'
+  foreach ($item in $missing) {
+    Write-ErrorMessage "  $item"
+  }
+  return $false
+}
+
 function Get-LocalN8nPort {
   $port = Get-EnvValue -Name 'N8N_LOCAL_PORT' -Default '5678'
   if ($port -notmatch '^\d+$') {
@@ -767,37 +818,58 @@ function Test-N8nEncryptionKeyMismatchLog {
   return ($text -match 'Mismatching encryption keys' -or $text -match 'settings file .*/home/node/\.n8n/config.*N8N_ENCRYPTION_KEY')
 }
 
+function Test-N8nDatabaseImageMismatchLog {
+  param([string[]]$LogLines)
+
+  $text = (($LogLines | Select-Object -Last 80) -join "`n")
+  return ($text -match 'McpRegistryServerEntity\.id does not exist' -or $text -match 'different migration states' -or $text -match 'Migration timestamp mismatch')
+}
+
 function Repair-N8nConfigEncryptionKey {
   Write-Warning 'n8n config encryption key does not match the active .env key. Attempting local self-heal.'
   Write-Info 'Stopping n8n before updating /home/node/.n8n/config inside the local Docker volume.'
-  [void](Invoke-Compose -Arguments @('stop', 'n8n'))
+  Write-Info 'Repair scope: writes only /home/node/.n8n/config inside the container volume; your .env values are not changed.'
+  [void](Invoke-Compose -Arguments @('stop', '--timeout', '10', 'n8n'))
 
   $nodeScript = @'
 const fs = require(`fs`);
-const path = `/home/node/.n8n/config`;
+const path = require(`path`);
+const configPath = `/home/node/.n8n/config`;
 const key = process.env.N8N_ENCRYPTION_KEY;
 if (!key || key === `replace-with-32-random-character`) {
   console.error(`N8N_ENCRYPTION_KEY is missing or still uses the placeholder.`);
   process.exit(2);
 }
 let config = {};
-if (fs.existsSync(path)) {
-  config = JSON.parse(fs.readFileSync(path, `utf8`));
+const configDir = path.dirname(configPath);
+if (!fs.existsSync(configDir)) {
+  fs.mkdirSync(configDir, { recursive: true });
+}
+if (fs.existsSync(configPath)) {
+  try {
+    const fileText = fs.readFileSync(configPath, `utf8`);
+    if (fileText.trim()) {
+      config = JSON.parse(fileText);
+    }
+  } catch (error) {
+    console.warn(`Could not parse existing n8n config file. Recreating with current encryption key.`);
+  }
+}
+if (!config || typeof config !== `object` || Array.isArray(config)) {
+  config = {};
 }
 if (config.encryptionKey === key) {
   process.exit(0);
 }
 config.encryptionKey = key;
-fs.writeFileSync(path, JSON.stringify(config, null, 2));
+fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 '@
 
-  $result = Invoke-ComposeCapture -Arguments @('run', '--rm', '--no-deps', '--entrypoint', 'node', 'n8n', '-e', $nodeScript)
+  $result = Invoke-ComposeCapture -Arguments @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '--entrypoint', 'node', 'n8n', '-e', $nodeScript)
   if ($result.ExitCode -ne 0) {
     Write-ErrorMessage 'Could not update the local n8n config encryption key.'
     foreach ($line in $result.Output) {
-      if ($line -match 'N8N_ENCRYPTION_KEY|config|Error|error') {
-        Write-ErrorMessage $line
-      }
+      Write-ErrorMessage $line
     }
     return $false
   }
@@ -841,7 +913,11 @@ function Wait-ForN8nReady {
   Write-ErrorMessage "$Context did not produce a reachable n8n editor at $(Get-LocalN8nUrl)."
   if (Test-N8nEncryptionKeyMismatchLog -LogLines $logs) {
     Write-ErrorMessage 'Recent logs show mismatching encryption keys between /home/node/.n8n/config and N8N_ENCRYPTION_KEY.'
-    Write-Info 'Use View logs for details. Make sure the backup .env key is the key that belongs to this restored database.'
+    Write-Info 'Use View logs for details. If this continues, the restored data likely belongs to a different N8N_ENCRYPTION_KEY than the active .env.'
+  } elseif (Test-N8nDatabaseImageMismatchLog -LogLines $logs) {
+    Write-ErrorMessage 'Recent logs show a database schema / n8n image version mismatch.'
+    Write-Info 'This can happen after running an older N8N_IMAGE against a database that was already migrated by a newer n8n image.'
+    Write-Info 'Set N8N_IMAGE back to the version that last started this database, or restore a Postgres backup made for the configured image.'
   } else {
     Write-Info 'Use View logs to inspect the n8n startup error.'
   }
@@ -1471,11 +1547,70 @@ function Stop-NgrokTunnel {
   }
 }
 
+function Wait-ForServicesStopped {
+  param(
+    [string[]]$Services = $script:Services,
+    [int]$MaxAttempts = 12,
+    [int]$DelayMilliseconds = 500
+  )
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    $runningServices = Get-RunningServices
+    $remainingServices = @()
+    foreach ($service in $Services) {
+      if ($runningServices -contains $service) {
+        $remainingServices += $service
+      }
+    }
+
+    if ($remainingServices.Count -eq 0) {
+      return $true
+    }
+
+    if ($attempt -lt $MaxAttempts) {
+      Start-Sleep -Milliseconds $DelayMilliseconds
+    }
+  }
+
+  return $false
+}
+
+function Stop-LocalStackServices {
+  param([string]$Context = '')
+
+  if ((Invoke-Compose -Arguments @('down')) -ne 0) {
+    if ($Context) {
+      Write-ErrorMessage "${Context}: failed to run docker compose down."
+    }
+    return $false
+  }
+
+  if (Wait-ForServicesStopped -Services @('n8n', 'postgres', 'ngrok')) {
+    return $true
+  }
+
+  Write-Warning 'Compose down did not fully stop services. Trying direct compose stop.'
+  [void](Invoke-Compose -Arguments @('stop', 'n8n', 'postgres', 'ngrok'))
+
+  if (Wait-ForServicesStopped -Services @('n8n', 'postgres', 'ngrok')) {
+    return $true
+  }
+
+  Write-Warning 'Some local services are still running. Trying immediate compose kill.'
+  [void](Invoke-Compose -Arguments @('kill', 'n8n', 'postgres', 'ngrok'))
+
+  return (Wait-ForServicesStopped -Services @('n8n', 'postgres', 'ngrok'))
+}
+
 function Stop-Stack {
   Write-Header 'Stop Local n8n Stack'
   if ((Test-StackFiles) -and (Test-DockerReady)) {
-    [void](Invoke-Compose -Arguments @('down'))
-    Write-Success 'Stack stopped. Docker volumes were not removed.'
+    if (Stop-LocalStackServices) {
+      Write-Success 'Stack stopped. Docker volumes were not removed.'
+      return
+    }
+
+    Write-ErrorMessage 'Unable to stop all stack services automatically. Run `docker compose down --remove-orphans` from the stack folder.'
   }
 }
 
@@ -1559,15 +1694,15 @@ function Show-StartMenu {
 function Show-StopMenu {
   Write-Header 'Stop n8n'
   Write-Host 'Choose what to stop:' -ForegroundColor Cyan
-  Write-Host '  1. Stop ngrok tunnel'
-  Write-Host '  2. n8n + ngrok tunnel'
+  Write-Host '  1. n8n + ngrok tunnel'
+  Write-Host '  2. Stop ngrok tunnel'
   Write-Host '  3. Cancel'
   Write-Host ''
 
   $choice = Read-Host 'Enter a number'
   switch ($choice) {
-    '1' { Stop-NgrokTunnel }
-    '2' { Stop-Stack }
+    '1' { Stop-Stack }
+    '2' { Stop-NgrokTunnel }
     '3' { Write-Warning 'Stop cancelled.' }
     default { Write-Warning 'Choose a number from 1 to 3.' }
   }
@@ -1993,6 +2128,41 @@ function Find-RestoreEntityDirectory {
   return $bestMatch[0].Name
 }
 
+function New-RestoreEntityImportDirectory {
+  param(
+    [string]$EntityDir,
+    [string]$StagingDir
+  )
+
+  $importDir = Join-Path $StagingDir 'entities-import'
+  New-Item -ItemType Directory -Force -Path $importDir | Out-Null
+  $zipSourceDir = Join-Path $StagingDir 'entities-zip-source'
+  New-Item -ItemType Directory -Force -Path $zipSourceDir | Out-Null
+
+  $importFiles = @(
+    Get-ChildItem -LiteralPath $EntityDir -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name.ToLowerInvariant().EndsWith('.jsonl') }
+  )
+
+  $hasMigrationsFile = @($importFiles | Where-Object { $_.Name -ieq 'migrations.jsonl' }).Count -gt 0
+  if (-not $hasMigrationsFile) {
+    return ''
+  }
+
+  foreach ($file in $importFiles) {
+    Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $zipSourceDir $file.Name) -Force
+  }
+
+  $zipPath = Join-Path $importDir 'entities.zip'
+  if (Test-Path -LiteralPath $zipPath) {
+    Remove-Item -LiteralPath $zipPath -Force
+  }
+
+  [System.IO.Compression.ZipFile]::CreateFromDirectory($zipSourceDir, $zipPath)
+  Write-Info "Rebuilt clean entities.zip with $($importFiles.Count) JSONL file(s)."
+  return $importDir
+}
+
 function Expand-RestoreEntitiesZipToStaging {
   param([string]$ZipPath)
 
@@ -2044,10 +2214,15 @@ function Expand-RestoreEntitiesZipToStaging {
     return [pscustomobject]@{ Error = 'Zip restore package did not contain n8n export:entities output files.' }
   }
 
+  $importDir = New-RestoreEntityImportDirectory -EntityDir $entityDir -StagingDir $stagingDir
+  if (-not $importDir) {
+    return [pscustomobject]@{ Error = 'Zip restore package did not contain migrations.jsonl in the detected n8n entity export directory.' }
+  }
   Write-Info "Backup zip extracted under: $stagingDir"
+  Write-Info 'Using a clean entities.zip rebuilt from all extracted n8n entity JSONL files; nested zip artifacts are ignored.'
   return [pscustomobject]@{
     StagingPath = $stagingDir
-    EntityDir = $entityDir
+    EntityDir = $importDir
   }
 }
 
@@ -2353,10 +2528,61 @@ function Restore-PreRestoreEncryptionKeyBackup {
   return $true
 }
 
+function Restore-PreviousStackServices {
+  param([string[]]$PreviousServices)
+
+  $toRestore = @(
+    $PreviousServices | ForEach-Object { ([string]$_).Trim() } |
+      Where-Object { $_ -in @('n8n', 'ngrok') } |
+      Sort-Object -Unique
+  )
+
+  if ($toRestore.Count -eq 0) {
+    Write-Info 'No local n8n services were running before restore.'
+    return
+  }
+
+  Write-Info 'Restarting services that were running before restore.'
+  if (($toRestore -contains 'n8n') -and ($toRestore -contains 'ngrok')) {
+    Start-N8nWithNgrok
+    return
+  }
+
+  if ($toRestore -contains 'n8n') {
+    Start-LocalStack -ForceRecreateN8n
+    return
+  }
+
+  if ($toRestore -contains 'ngrok') {
+    Start-N8nWithNgrok
+    return
+  }
+}
+
+function Update-N8nImageForRestore {
+  Write-Info 'Refreshing n8n image for restore. This can take a while when N8N_IMAGE changed.'
+  $pullSucceeded = ((Invoke-Compose -Arguments @('pull', 'n8n')) -eq 0)
+  if (-not $pullSucceeded) {
+    Write-Warning 'Could not refresh the n8n image; continuing only if the configured image is already cached.'
+  }
+
+  Write-Info 'Verifying configured n8n image is available locally before continuing.'
+  if (Wait-ForServiceImagesAvailable -Services @('n8n')) {
+    Write-Success 'Configured n8n image is available locally.'
+    return $true
+  }
+
+  if ($pullSucceeded) {
+    Write-ErrorMessage 'docker compose pull finished, but the configured n8n image is not available locally.'
+  }
+  return $false
+}
+
 function Restore-N8nEntitiesBackup {
   param(
     [object]$Backup,
-    [string]$BackupEncryptionKey = ''
+    [string]$BackupEncryptionKey = '',
+    [switch]$ImageAlreadyRefreshed
   )
 
   if ($Backup.HasCredentialEntities -and -not $BackupEncryptionKey) {
@@ -2365,22 +2591,39 @@ function Restore-N8nEntitiesBackup {
   }
 
   if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
-  Write-Info 'Refreshing n8n image for restore.'
-  if ((Invoke-Compose -Arguments @('pull', 'n8n')) -ne 0) {
-    Write-Warning 'Could not refresh the n8n image; continuing with cached image.'
+  if (-not $ImageAlreadyRefreshed) {
+    if (-not (Update-N8nImageForRestore)) {
+      return $false
+    }
   }
 
   $inputDir = $Backup.InputDir
-  $mountValue = "${inputDir}:/restore:ro"
-  $composeArgs = @((Get-ComposeGlobalArguments) + @('run', '--rm', '--no-deps', '-v', $mountValue, 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables'))
-  $exitCode = Invoke-NativeCommand -Command { & docker compose @composeArgs }
+  $mountValue = "${inputDir}:/restore"
+  $importArgs = @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '-v', $mountValue, 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables')
+  $composeArgs = @((Get-ComposeGlobalArguments) + $importArgs)
+  Write-Info "docker compose $($composeArgs -join ' ')"
+  $result = Invoke-ComposeCapture -Arguments $importArgs
+  foreach ($line in $result.Output) {
+    Write-Host $line
+  }
+  $exitCode = $result.ExitCode
+  $outputText = ($result.Output -join "`n")
 
   if ($Backup.HasCredentialEntities) {
     if ($exitCode -ne 0) {
       Write-ErrorMessage 'The entities import failed while encrypted credential data was present.'
-      Write-Info 'If the log includes "bad decrypt", the restore is using the wrong N8N_ENCRYPTION_KEY for this backup.'
-      if ($BackupEncryptionKey) {
-        Write-Info 'A backup key was found and applied, but it may not be the key that created this entities export.'
+      if ($outputText -match 'Migration timestamp mismatch|different migration states') {
+        Write-ErrorMessage 'The entities export was created from a different n8n migration state than the target database/image.'
+        Write-Info 'Use the same N8N_IMAGE version that created the entities export, then retry restore.'
+        Write-Info 'If you do not know the source n8n version, restore from a Postgres SQL backup from the source instead.'
+      } elseif ($outputText -match 'Migrations file not found') {
+        Write-ErrorMessage 'The entities export package is missing n8n migration metadata.'
+        Write-Info 'Use an n8n export:entities package that includes migrations.jsonl, or restore from a Postgres SQL backup.'
+      } elseif ($outputText -match 'bad decrypt') {
+        Write-Info 'The restore is using the wrong N8N_ENCRYPTION_KEY for this backup.'
+        if ($BackupEncryptionKey) {
+          Write-Info 'A backup key was found and applied, but it may not be the key that created this entities export.'
+        }
       }
     }
   }
@@ -2431,10 +2674,15 @@ function Restore-LocalN8nFromBackupMenu {
   if (-not (Test-DockerReady)) { return }
 
   $runningServices = Get-RunningServices -EnvPath $resolvedEnvPath
+  $preRestoreServices = @(
+    $runningServices | ForEach-Object { ([string]$_).Trim() } |
+      Where-Object { $_ -in @('n8n', 'ngrok') } |
+      Sort-Object -Unique
+  )
   $preRestoreImageVersionLines = @(Get-ImageVersionLines -RunningServices $runningServices)
-  if ($runningServices -contains 'n8n' -or $runningServices -contains 'ngrok') {
+  if ($preRestoreServices.Count -gt 0) {
     Write-Info 'Restore requires the local stack to be stopped. Stopping local n8n services now.'
-    if ((Invoke-Compose -Arguments @('down')) -ne 0) {
+    if (-not (Stop-LocalStackServices -Context 'Restore')) {
       Write-ErrorMessage 'Restore cancelled because local services could not be stopped.'
       return
     }
@@ -2483,11 +2731,15 @@ function Restore-LocalN8nFromBackupMenu {
   Write-Success 'Pre-restore database backup created; rollback .env saved if present.'
 
   if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
+  $n8nImageRefreshed = Update-N8nImageForRestore
+  if (-not (Repair-N8nConfigEncryptionKey)) {
+    Write-Warning 'Could not sync local n8n config encryption key before restore completion. Startup will attempt one more repair pass.'
+  }
 
   $ok = $false
   switch ($detected.Type) {
     'postgres-sql' { $ok = Restore-PostgresSqlBackup -Backup $detected -EnvPath $resolvedEnvPath }
-    'n8n-entities' { $ok = Restore-N8nEntitiesBackup -Backup $detected -BackupEncryptionKey $backupEncryptionKey }
+    'n8n-entities' { $ok = Restore-N8nEntitiesBackup -Backup $detected -BackupEncryptionKey $backupEncryptionKey -ImageAlreadyRefreshed:$n8nImageRefreshed }
     default {
       Write-ErrorMessage 'Unsupported backup type after detection.'
       return
@@ -2496,13 +2748,15 @@ function Restore-LocalN8nFromBackupMenu {
 
   if ($ok) {
     Write-Success 'Local n8n restore completed.'
-    Write-Info 'Start n8n from the menu and verify workflows and saved credentials.'
+    Restore-PreviousStackServices -PreviousServices $preRestoreServices
+    Write-Info 'Verify workflows and saved credentials in n8n.'
   } else {
     Write-ErrorMessage 'Restore failed.'
     $rollbackOk = Restore-PreRestorePostgresBackup -BackupDir $preRestoreRoot -EnvPath $resolvedEnvPath
     [void](Restore-PreRestoreEncryptionKeyBackup -SecretBackupPath $preRestoreSecretPath -EnvPath $resolvedEnvPath)
     if ($rollbackOk) {
-      Write-Info 'Start n8n from the menu and verify the previous local database state.'
+      Restore-PreviousStackServices -PreviousServices $preRestoreServices
+      Write-Info 'Verify the rollback database state and saved credentials.'
     } else {
       Write-ErrorMessage 'Automatic rollback did not complete. Use the pre-restore backup folder as the manual rollback path.'
     }

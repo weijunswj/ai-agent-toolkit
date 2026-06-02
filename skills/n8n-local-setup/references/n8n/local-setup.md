@@ -509,8 +509,8 @@ Choose one:
 
 | Choice | Use when | What it does |
 | --- | --- | --- |
-| `Stop ngrok tunnel` | You want n8n to stay local, but public access should turn off. | Stops only the `ngrok` service. |
 | `n8n + ngrok tunnel` | You are done working for now. | Runs `docker compose down`, which stops n8n, Postgres, and ngrok without deleting Docker volumes. |
+| `Stop ngrok tunnel` | You want n8n to stay local, but public access should turn off. | Stops only the `ngrok` service. |
 
 Stopping ngrok does not delete or release your reserved ngrok domain.
 
@@ -582,6 +582,7 @@ Restore:
 - Type `PROCEED` when asked.
 - `.sql` must be `database.sql` from a backup folder.
 - `.zip` must contain n8n `export:entities` output files.
+- `.zip` entity restore requires the same n8n migration state as the source export. If n8n reports a migration timestamp mismatch, retry with the same `N8N_IMAGE` version that created the export, or use a Postgres SQL backup.
 - Folder paths are not accepted.
 
 Required backup env:
@@ -595,10 +596,13 @@ Required backup env:
 Safety behaviour:
 
 - Start and restart wait until the n8n editor answers at `localhost`.
+- If `n8n` and/or `ngrok` were running before restore, the launcher restarts only those services after restore or rollback.
 - If the container runs but the editor is not reachable, the launcher reports an error instead of calling it healthy.
-- If logs show a local n8n config encryption-key mismatch, the launcher syncs `/home/node/.n8n/config` to the active `.env` key once, recreates n8n, and checks again.
+- If logs show a local n8n config encryption-key mismatch, the launcher first attempts to sync `/home/node/.n8n/config` to the active `.env` key, then starts services with a second self-heal attempt.
+- If logs show a database schema / image version mismatch, switch `N8N_IMAGE` back to the version that last started this database, or restore a Postgres backup made for the configured image.
 - Restore creates a pre-restore backup of the current database and current `.env`.
 - If restore fails after changes begin, the launcher tries to roll back automatically.
+- Rollback does not rewrite `N8N_IMAGE`; image pins remain your explicit choice.
 - If a `.zip` has credential entities but no backup key, import is refused before n8n can truncate tables.
 
 Not supported here:
