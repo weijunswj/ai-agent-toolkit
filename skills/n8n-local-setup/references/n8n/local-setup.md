@@ -594,6 +594,9 @@ Required backup env:
 
 Safety behaviour:
 
+- Start and restart wait until the n8n editor answers at `localhost`.
+- If the container runs but the editor is not reachable, the launcher reports an error instead of calling it healthy.
+- If logs show a local n8n config encryption-key mismatch, the launcher syncs `/home/node/.n8n/config` to the active `.env` key once, recreates n8n, and checks again.
 - Restore creates a pre-restore backup of the current database and current `.env`.
 - If restore fails after changes begin, the launcher tries to roll back automatically.
 - If a `.zip` has credential entities but no backup key, import is refused before n8n can truncate tables.

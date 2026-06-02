@@ -226,6 +226,24 @@ function Invoke-Compose {
   return $exitCode
 }
 
+function Invoke-ComposeCapture {
+  param([string[]]$Arguments)
+
+  $allArguments = @((Get-ComposeGlobalArguments) + $Arguments)
+  try {
+    $output = @(& docker compose @allArguments 2>&1)
+    return [pscustomobject]@{
+      ExitCode = $LASTEXITCODE
+      Output = @($output | ForEach-Object { [string]$_ })
+    }
+  } catch {
+    return [pscustomobject]@{
+      ExitCode = 1
+      Output = @([string]$_.Exception.Message)
+    }
+  }
+}
+
 function Test-StackFiles {
   param([string]$EnvPath = '')
 
@@ -383,6 +401,24 @@ function Write-ServiceStatus {
     } else {
       Write-Host ''
     }
+  }
+}
+
+function Write-N8nServiceStatus {
+  param([string[]]$RunningServices)
+
+  if ($RunningServices -contains 'n8n') {
+    if (Test-N8nHttpReady) {
+      Write-ServiceStatus -Name 'n8n' -RunningServices $RunningServices -WhenRunning "local editor: $(Get-LocalN8nUrl)"
+    } else {
+      $statusLabelWidth = 22
+      $statusPrefix = ("  {0,-$statusLabelWidth}: " -f 'n8n')
+      Write-Host $statusPrefix -NoNewline -ForegroundColor DarkCyan
+      Write-Host 'not ready' -NoNewline -ForegroundColor Red
+      Write-Host " - container is running but editor is not reachable; choose View logs" -ForegroundColor White
+    }
+  } else {
+    Write-ServiceStatus -Name 'n8n' -RunningServices $RunningServices
   }
 }
 
@@ -692,6 +728,113 @@ function Get-LocalN8nPort {
 
 function Get-LocalN8nUrl {
   return "http://localhost:$(Get-LocalN8nPort)"
+}
+
+function Test-N8nHttpReady {
+  try {
+    $response = Invoke-WebRequest -Uri (Get-LocalN8nUrl) -UseBasicParsing -TimeoutSec 2
+    return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+  } catch {
+    if ($_.Exception.Response) {
+      return $true
+    }
+    return $false
+  }
+}
+
+function Get-N8nRecentLogLines {
+  param([int]$Tail = 80)
+
+  $result = Invoke-ComposeCapture -Arguments @('logs', '--tail', ([string]$Tail), 'n8n')
+  return @($result.Output)
+}
+
+function Test-N8nEncryptionKeyMismatchLog {
+  param([string[]]$LogLines)
+
+  $text = (($LogLines | Select-Object -Last 80) -join "`n")
+  return ($text -match 'Mismatching encryption keys' -or $text -match 'settings file .*/home/node/\.n8n/config.*N8N_ENCRYPTION_KEY')
+}
+
+function Repair-N8nConfigEncryptionKey {
+  Write-Warning 'n8n config encryption key does not match the active .env key. Attempting local self-heal.'
+  Write-Info 'Stopping n8n before updating /home/node/.n8n/config inside the local Docker volume.'
+  [void](Invoke-Compose -Arguments @('stop', 'n8n'))
+
+  $nodeScript = @'
+const fs = require("fs");
+const path = "/home/node/.n8n/config";
+const key = process.env.N8N_ENCRYPTION_KEY;
+if (!key || key === "replace-with-32-random-character") {
+  console.error("N8N_ENCRYPTION_KEY is missing or still uses the placeholder.");
+  process.exit(2);
+}
+let config = {};
+if (fs.existsSync(path)) {
+  config = JSON.parse(fs.readFileSync(path, "utf8"));
+}
+if (config.encryptionKey === key) {
+  process.exit(0);
+}
+config.encryptionKey = key;
+fs.writeFileSync(path, JSON.stringify(config, null, 2));
+'@
+
+  $result = Invoke-ComposeCapture -Arguments @('run', '--rm', '--no-deps', '--entrypoint', 'node', 'n8n', '-e', $nodeScript)
+  if ($result.ExitCode -ne 0) {
+    Write-ErrorMessage 'Could not update the local n8n config encryption key.'
+    foreach ($line in $result.Output) {
+      if ($line -match 'N8N_ENCRYPTION_KEY|config|Error|error') {
+        Write-ErrorMessage $line
+      }
+    }
+    return $false
+  }
+
+  Write-Success 'Local n8n config encryption key was synced to the active .env key.'
+  return $true
+}
+
+function Wait-ForN8nReady {
+  param(
+    [string]$Context = 'n8n startup',
+    [switch]$AllowSelfHeal
+  )
+
+  Write-Info "Waiting for n8n editor to respond at $(Get-LocalN8nUrl)."
+  for ($attempt = 1; $attempt -le 20; $attempt += 1) {
+    if (Test-N8nHttpReady) {
+      Write-Success 'n8n editor is responding.'
+      return $true
+    }
+    Start-Sleep -Seconds 2
+  }
+
+  $logs = @(Get-N8nRecentLogLines)
+  if ($AllowSelfHeal -and (Test-N8nEncryptionKeyMismatchLog -LogLines $logs)) {
+    if (Repair-N8nConfigEncryptionKey) {
+      Write-Info 'Recreating n8n after local config self-heal.'
+      if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n')) -ne 0) {
+        return $false
+      }
+      for ($attempt = 1; $attempt -le 20; $attempt += 1) {
+        if (Test-N8nHttpReady) {
+          Write-Success 'n8n editor is responding after self-heal.'
+          return $true
+        }
+        Start-Sleep -Seconds 2
+      }
+    }
+  }
+
+  Write-ErrorMessage "$Context did not produce a reachable n8n editor at $(Get-LocalN8nUrl)."
+  if (Test-N8nEncryptionKeyMismatchLog -LogLines $logs) {
+    Write-ErrorMessage 'Recent logs show mismatching encryption keys between /home/node/.n8n/config and N8N_ENCRYPTION_KEY.'
+    Write-Info 'Use View logs for details. Make sure the backup .env key is the key that belongs to this restored database.'
+  } else {
+    Write-Info 'Use View logs to inspect the n8n startup error.'
+  }
+  return $false
 }
 
 function Get-ExpectedLocalWebhookUrl {
@@ -1204,6 +1347,7 @@ function Start-LocalStack {
 
   if ((Invoke-Compose -Arguments $n8nArgs) -eq 0) {
     [void](Invoke-Compose -Arguments @('ps'))
+    if (-not (Wait-ForN8nReady -Context 'Local n8n start' -AllowSelfHeal)) { return }
     Write-Success 'Local n8n stack started.'
     Write-Host ''
     Write-Host "n8n: $(Get-LocalN8nUrl)" -ForegroundColor DarkYellow
@@ -1286,6 +1430,7 @@ function Start-NgrokTunnel {
 
   if ((Invoke-Compose -Arguments $upArgs) -eq 0) {
     [void](Invoke-Compose -Arguments @('ps'))
+    if (-not (Wait-ForN8nReady -Context 'n8n and ngrok start' -AllowSelfHeal)) { return }
     Write-Success 'n8n and ngrok tunnel started. n8n was recreated so current non-image .env values are applied.'
     Write-Host ''
     Write-Host "Public URL should be: $publicWebhookUrl" -ForegroundColor DarkYellow
@@ -1306,7 +1451,9 @@ function Stop-NgrokTunnel {
     if ($wasN8nRunning) {
       Write-Info 'Recreating n8n so WEBHOOK_URL is now local.'
       if (-not (Test-ServiceImagesAvailable -Services @('n8n'))) { return }
-      [void](Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'))
+      if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n')) -eq 0) {
+        [void](Wait-ForN8nReady -Context 'n8n restart after stopping ngrok' -AllowSelfHeal)
+      }
     }
 
     Write-Success 'ngrok tunnel stopped. Your reserved ngrok domain was not deleted or released.'
@@ -1330,6 +1477,7 @@ function Restart-N8n {
     if (-not (Test-ServiceImagesAvailable -Services @('n8n'))) { return }
     [void](Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'))
     [void](Invoke-Compose -Arguments @('ps'))
+    [void](Wait-ForN8nReady -Context 'n8n restart' -AllowSelfHeal)
   }
 }
 
@@ -2427,7 +2575,7 @@ function Show-LaunchStatus {
     Write-Host ''
     Write-Host 'Quick service status:' -ForegroundColor Cyan
     Write-ServiceStatus -Name 'postgres' -RunningServices $runningServices
-    Write-ServiceStatus -Name 'n8n' -RunningServices $runningServices -WhenRunning "local editor: $(Get-LocalN8nUrl)"
+    Write-N8nServiceStatus -RunningServices $runningServices
     Write-ServiceStatus -Name 'ngrok' -RunningServices $runningServices -WhenRunning 'public tunnel is ON' -WhenStopped 'public tunnel is OFF'
 
     $webhookUrl = Get-ActiveWebhookUrl
