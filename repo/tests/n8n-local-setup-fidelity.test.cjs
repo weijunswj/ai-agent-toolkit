@@ -695,6 +695,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(localSetup, /Restore updates the active `\.env` `N8N_ENCRYPTION_KEY`/);
   assert.match(localSetup, /Restore also applies backup `\.env` `N8N_IMAGE`/);
   assert.match(localSetup, /Backup `N8N_IMAGE` is accepted only when it points to the official n8n image path/);
+  assert.match(localSetup, /docker\.n8n\.io\/n8nio\/n8n:<tag>[\s\S]*docker\.n8n\.io\/n8nio\/n8n@sha256:<digest>/);
   assert.match(localSetup, /Other backup-provided image refs are refused before restore changes begin/);
   assert.match(localSetup, /set `N8N_IMAGE` manually in the active local `\.env`/);
   assert.match(localSetup, /database schema \/ image version mismatch[\s\S]*source n8n image and retry/);
