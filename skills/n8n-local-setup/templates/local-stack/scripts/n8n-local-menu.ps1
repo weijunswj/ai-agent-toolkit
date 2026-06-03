@@ -921,6 +921,14 @@ function Get-LocalN8nUrl {
   return "http://localhost:$(Get-LocalN8nPort)"
 }
 
+function Get-LocalN8nProbeUrls {
+  $port = Get-LocalN8nPort
+  return @(
+    "http://127.0.0.1:$port",
+    "http://localhost:$port"
+  )
+}
+
 function Test-N8nHttpReady {
   param(
     [int]$Attempts = 1,
@@ -929,16 +937,19 @@ function Test-N8nHttpReady {
   )
 
   for ($attempt = 1; $attempt -le $Attempts; $attempt += 1) {
-    try {
-      $response = Invoke-WebRequest -Uri (Get-LocalN8nUrl) -UseBasicParsing -TimeoutSec $TimeoutSeconds
-      return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
-    } catch {
-      if ($_.Exception.Response) {
-        return $true
+    foreach ($url in (Get-LocalN8nProbeUrls)) {
+      try {
+        $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $TimeoutSeconds
+        return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+      } catch {
+        if ($_.Exception.Response) {
+          return $true
+        }
       }
-      if ($attempt -lt $Attempts -and $DelaySeconds -gt 0) {
-        Start-Sleep -Seconds $DelaySeconds
-      }
+    }
+
+    if ($attempt -lt $Attempts -and $DelaySeconds -gt 0) {
+      Start-Sleep -Seconds $DelaySeconds
     }
   }
   return $false
@@ -1030,12 +1041,9 @@ config.encryptionKey = key;
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 '@
 
-  $result = Invoke-N8nOneOffCapture -Arguments @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '--entrypoint', 'node', 'n8n', '-e', $nodeScript) -Context 'n8n config encryption key repair'
-  if ($result.ExitCode -ne 0) {
+  $exitCode = Invoke-Compose -Arguments @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '--entrypoint', 'node', 'n8n', '-e', $nodeScript)
+  if ($exitCode -ne 0) {
     Write-ErrorMessage 'Could not update the local n8n config encryption key.'
-    foreach ($line in $result.Output) {
-      Write-ErrorMessage $line
-    }
     return $false
   }
 
@@ -2386,6 +2394,7 @@ function Expand-RestoreEntitiesZipToStaging {
   return [pscustomobject]@{
     StagingPath = $stagingDir
     EntityDir = $importDir
+    SourceEntityDir = $entityDir
   }
 }
 
@@ -2440,6 +2449,7 @@ function Prepare-RestoreBackupInput {
       Type = 'n8n-entities'
       Label = 'n8n entities backup'
       InputDir = $expanded.EntityDir
+      SourceEntityDir = $expanded.SourceEntityDir
       HasCredentialEntities = $detected.HasCredentialEntities
     }
     $stagingDetected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $expanded.StagingPath -Force
@@ -2718,7 +2728,12 @@ function Find-N8nImageForEntityMigration {
 function Resolve-N8nImageForEntityRestore {
   param([object]$Backup)
 
-  $migration = Get-RestoreEntityLatestMigration -EntityDir $Backup.InputDir
+  $entityDir = $Backup.SourceEntityDir
+  if (-not $entityDir) {
+    $entityDir = $Backup.InputDir
+  }
+
+  $migration = Get-RestoreEntityLatestMigration -EntityDir $entityDir
   if ($null -eq $migration) {
     Write-Warning 'Could not read migrations.jsonl to infer the source n8n image for this entities export.'
     return ''
@@ -2871,7 +2886,10 @@ function Restore-PreRestoreN8nImageBackup {
 }
 
 function Restore-PreviousStackServices {
-  param([string[]]$PreviousServices)
+  param(
+    [string[]]$PreviousServices,
+    [switch]$StartN8nWhenNone
+  )
 
   $toRestore = @(
     $PreviousServices | ForEach-Object { ([string]$_).Trim() } |
@@ -2880,6 +2898,11 @@ function Restore-PreviousStackServices {
   )
 
   if ($toRestore.Count -eq 0) {
+    if ($StartN8nWhenNone) {
+      Write-Info 'No local n8n services were detected before restore. Starting n8n so you can verify the restored data.'
+      Start-LocalStack -ForceRecreateN8n
+      return
+    }
     Write-Info 'No local n8n services were running before restore.'
     return
   }
@@ -2933,51 +2956,48 @@ function Restore-N8nEntitiesBackup {
     return $false
   }
 
-  if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
-  if (-not $ImageAlreadyRefreshed) {
-    if (-not (Update-N8nImageForRestore)) {
-      return $false
-    }
+  $previousN8nImageEnv = $env:N8N_IMAGE
+  $restoreN8nImage = ([string]$Backup.RestoreN8nImage).Trim()
+  if ($restoreN8nImage) {
+    $env:N8N_IMAGE = $restoreN8nImage
   }
 
-  $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Default 'n8n' -EnvPath $EnvPath
-  $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n' -EnvPath $EnvPath
-  Write-Warning 'Resetting the local n8n Postgres schema so entities import can run at the export migration state.'
-  if ((Clear-PostgresPublicSchema -PostgresUser $postgresUser -PostgresDb $postgresDb) -ne 0) {
-    return $false
-  }
-
-  $inputDir = $Backup.InputDir
-  $mountValue = "${inputDir}:/restore"
-  $importArgs = @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '-v', $mountValue, 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables')
-  $composeArgs = @((Get-ComposeGlobalArguments) + $importArgs)
-  Write-Info "docker compose $($composeArgs -join ' ')"
-  $result = Invoke-N8nOneOffCapture -Arguments $importArgs -Context 'n8n entities import'
-  foreach ($line in $result.Output) {
-    Write-Host $line
-  }
-  $exitCode = $result.ExitCode
-  $outputText = ($result.Output -join "`n")
-
-  if ($Backup.HasCredentialEntities) {
-    if ($exitCode -ne 0) {
-      Write-ErrorMessage 'The entities import failed while encrypted credential data was present.'
-      if ($outputText -match 'Migration timestamp mismatch|different migration states') {
-        Write-ErrorMessage 'The entities export was created from a different n8n migration state than the target database/image.'
-        Write-Info 'Use the same N8N_IMAGE version that created the entities export, then retry restore.'
-        Write-Info 'If you do not know the source n8n version, restore from a Postgres SQL backup from the source instead.'
-      } elseif ($outputText -match 'Migrations file not found') {
-        Write-ErrorMessage 'The entities export package is missing n8n migration metadata.'
-        Write-Info 'Use an n8n export:entities package that includes migrations.jsonl, or restore from a Postgres SQL backup.'
-      } elseif ($outputText -match 'bad decrypt') {
-        Write-Info 'The restore is using the wrong N8N_ENCRYPTION_KEY for this backup.'
-        if ($BackupEncryptionKey) {
-          Write-Info 'A backup key was found and applied, but it may not be the key that created this entities export.'
-        }
+  try {
+    if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
+    if (-not $ImageAlreadyRefreshed) {
+      if (-not (Update-N8nImageForRestore)) {
+        return $false
       }
     }
+
+    $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Default 'n8n' -EnvPath $EnvPath
+    $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n' -EnvPath $EnvPath
+    Write-Warning 'Resetting the local n8n Postgres schema so entities import can run at the export migration state.'
+    if ((Clear-PostgresPublicSchema -PostgresUser $postgresUser -PostgresDb $postgresDb) -ne 0) {
+      return $false
+    }
+
+    $inputDir = $Backup.InputDir
+    $mountValue = "${inputDir}:/restore"
+    $importArgs = @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '-v', $mountValue, 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables')
+    $composeArgs = @((Get-ComposeGlobalArguments) + $importArgs)
+    Write-Info "docker compose $($composeArgs -join ' ')"
+    $exitCode = Invoke-Compose -Arguments $importArgs
+
+    if ($Backup.HasCredentialEntities) {
+      if ($exitCode -ne 0) {
+        Write-ErrorMessage 'The entities import failed while encrypted credential data was present.'
+        Write-Info 'Review the n8n import output above. Common causes are wrong N8N_ENCRYPTION_KEY, missing migrations.jsonl, or an incompatible N8N_IMAGE.'
+      }
+    }
+    return ($exitCode -eq 0)
+  } finally {
+    if ($null -eq $previousN8nImageEnv) {
+      Remove-Item Env:\N8N_IMAGE -ErrorAction SilentlyContinue
+    } else {
+      $env:N8N_IMAGE = $previousN8nImageEnv
+    }
   }
-  return ($exitCode -eq 0)
 }
 
 function Restore-LocalN8nFromBackupMenu {
@@ -3080,6 +3100,9 @@ function Restore-LocalN8nFromBackupMenu {
     Write-MissingCredentialRestoreKeyError
     return
   }
+  if ($backupN8nImage) {
+    $detected | Add-Member -NotePropertyName RestoreN8nImage -NotePropertyValue $backupN8nImage -Force
+  }
 
   if ($runningServices -notcontains 'postgres') {
     Write-Info 'Starting Postgres so the current database can be backed up before restore.'
@@ -3119,7 +3142,7 @@ function Restore-LocalN8nFromBackupMenu {
     if ($detected.Type -eq 'n8n-entities') {
       [void](Restore-PreRestoreN8nImageBackup -SecretBackupPath $preRestoreSecretPath -EnvPath $resolvedEnvPath)
     }
-    Restore-PreviousStackServices -PreviousServices $preRestoreServices
+    Restore-PreviousStackServices -PreviousServices $preRestoreServices -StartN8nWhenNone
     Write-Info 'Verify workflows and saved credentials in n8n.'
   } else {
     Write-ErrorMessage 'Restore failed.'
