@@ -608,7 +608,7 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Get-RunningServices'), /try \{[\s\S]*Get-ComposeGlobalArguments[\s\S]*'ps', '--services', '--filter', 'status=running'[\s\S]*docker compose @composeArgs 2>\$null[\s\S]*\} catch \{[\s\S]*return @\(\)[\s\S]*\}/);
   assert.match(menu, /Write-ServiceStatus -Name 'postgres'/);
   assert.match(menu, /Write-N8nServiceStatus -RunningServices \$runningServices/);
-  assert.match(functionBody(menu, 'Write-N8nServiceStatus'), /Test-N8nHttpReady -Attempts 3 -DelaySeconds 1[\s\S]*not ready[\s\S]*choose View logs/);
+  assert.match(functionBody(menu, 'Write-N8nServiceStatus'), /Test-N8nStableReady -RequiredSuccesses 2 -DelaySeconds 1[\s\S]*Test-N8nDatabaseImageMismatchLog[\s\S]*database schema \/ image mismatch[\s\S]*Test-N8nEncryptionKeyMismatchLog[\s\S]*Restart n8n to self-heal[\s\S]*choose View logs/);
   assert.match(functionBody(menu, 'Test-N8nHttpReady'), /param\([\s\S]*\[int\]\$Attempts = 1[\s\S]*\[int\]\$DelaySeconds = 0[\s\S]*Invoke-WebRequest[\s\S]*Start-Sleep -Seconds \$DelaySeconds[\s\S]*return \$false/);
   assert.match(menu, /Write-ServiceStatus -Name 'ngrok'/);
   assert.match(menu, /WEBHOOK_URL is still using ngrok, but ngrok is stopped/);
@@ -644,7 +644,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Start-NgrokTunnel'), /Test-ServiceImagesAvailable -Services \$script:Services -AllowPull:\$isFirstStart[\s\S]*\$upArgs \+= @\('--pull', 'never'\)[\s\S]*\$upArgs \+= @\('--force-recreate', 'n8n', 'ngrok'\)[\s\S]*Wait-ForN8nReady -Context 'n8n and ngrok start' -AllowSelfHeal/);
   assert.match(functionBody(menu, 'Stop-NgrokTunnel'), /Set-ActiveWebhookUrl -Url \(Get-LocalWebhookUrl\) -Mode 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local\.[\s\S]*Test-ServiceImagesAvailable -Services @\('n8n'\)[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'\)[\s\S]*Wait-ForN8nReady -Context 'n8n restart after stopping ngrok' -AllowSelfHeal/);
   assert.match(functionBody(menu, 'Restart-N8n'), /Set-ActiveWebhookUrl -Url \(Get-LocalWebhookUrl\) -Mode 'localhost'[\s\S]*current non-image \.env values are applied[\s\S]*Test-ServiceImagesAvailable -Services @\('n8n'\)[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'\)[\s\S]*Wait-ForN8nReady -Context 'n8n restart' -AllowSelfHeal/);
-  assert.match(functionBody(menu, 'Wait-ForN8nReady'), /Test-N8nHttpReady[\s\S]*Get-N8nRecentLogLines[\s\S]*Test-N8nEncryptionKeyMismatchLog[\s\S]*Repair-N8nConfigEncryptionKey[\s\S]*up', '-d', '--pull', 'never', '--force-recreate', 'n8n'/);
+  assert.match(functionBody(menu, 'Test-N8nStableReady'), /RequiredSuccesses[\s\S]*Test-N8nHttpReady[\s\S]*Get-N8nRecentLogLines -Tail 60[\s\S]*Test-N8nDatabaseImageMismatchLog[\s\S]*Test-N8nEncryptionKeyMismatchLog/);
+  assert.match(functionBody(menu, 'Wait-ForN8nReady'), /\$readyStreak[\s\S]*readyStreak -ge 3[\s\S]*stayed reachable[\s\S]*Get-N8nRecentLogLines[\s\S]*Test-N8nEncryptionKeyMismatchLog[\s\S]*Repair-N8nConfigEncryptionKey[\s\S]*up', '-d', '--pull', 'never', '--force-recreate', 'n8n'/);
   assert.match(functionBody(menu, 'Test-N8nDatabaseImageMismatchLog'), /McpRegistryServerEntity[\s\S]*Migration timestamp mismatch/);
   assert.match(functionBody(menu, 'Wait-ForN8nReady'), /Test-N8nDatabaseImageMismatchLog[\s\S]*database schema \/ n8n image version mismatch[\s\S]*backup \.env includes it[\s\S]*source N8N_IMAGE/);
   assert.match(functionBody(menu, 'Repair-N8nConfigEncryptionKey'), /stop', '--timeout', '10', 'n8n'/);

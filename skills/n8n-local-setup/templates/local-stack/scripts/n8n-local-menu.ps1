@@ -557,14 +557,21 @@ function Write-N8nServiceStatus {
   param([string[]]$RunningServices)
 
   if ($RunningServices -contains 'n8n') {
-    if (Test-N8nHttpReady -Attempts 3 -DelaySeconds 1) {
+    if (Test-N8nStableReady -RequiredSuccesses 2 -DelaySeconds 1) {
       Write-ServiceStatus -Name 'n8n' -RunningServices $RunningServices -WhenRunning "local editor: $(Get-LocalN8nUrl)"
     } else {
       $statusLabelWidth = 22
       $statusPrefix = ("  {0,-$statusLabelWidth}: " -f 'n8n')
+      $logs = @(Get-N8nRecentLogLines -Tail 60)
       Write-Host $statusPrefix -NoNewline -ForegroundColor DarkCyan
       Write-Host 'not ready' -NoNewline -ForegroundColor Red
-      Write-Host " - container is running but editor is not reachable; choose View logs" -ForegroundColor White
+      if (Test-N8nDatabaseImageMismatchLog -LogLines $logs) {
+        Write-Host ' - logs show database schema / image mismatch; check backup N8N_IMAGE' -ForegroundColor White
+      } elseif (Test-N8nEncryptionKeyMismatchLog -LogLines $logs) {
+        Write-Host ' - logs show encryption-key mismatch; choose Restart n8n to self-heal' -ForegroundColor White
+      } else {
+        Write-Host " - container is running but editor is not reachable; choose View logs" -ForegroundColor White
+      }
     }
   } else {
     Write-ServiceStatus -Name 'n8n' -RunningServices $RunningServices
@@ -937,6 +944,31 @@ function Test-N8nHttpReady {
   return $false
 }
 
+function Test-N8nStableReady {
+  param(
+    [int]$RequiredSuccesses = 3,
+    [int]$DelaySeconds = 2
+  )
+
+  for ($attempt = 1; $attempt -le $RequiredSuccesses; $attempt += 1) {
+    if (-not (Test-N8nHttpReady -TimeoutSeconds 2)) {
+      return $false
+    }
+    if ($attempt -lt $RequiredSuccesses -and $DelaySeconds -gt 0) {
+      Start-Sleep -Seconds $DelaySeconds
+    }
+  }
+
+  $logs = @(Get-N8nRecentLogLines -Tail 60)
+  if (Test-N8nDatabaseImageMismatchLog -LogLines $logs) {
+    return $false
+  }
+  if (Test-N8nEncryptionKeyMismatchLog -LogLines $logs) {
+    return $false
+  }
+  return $true
+}
+
 function Get-N8nRecentLogLines {
   param([int]$Tail = 80)
 
@@ -1018,10 +1050,20 @@ function Wait-ForN8nReady {
   )
 
   Write-Info "Waiting for n8n editor to respond at $(Get-LocalN8nUrl)."
+  $readyStreak = 0
   for ($attempt = 1; $attempt -le 20; $attempt += 1) {
     if (Test-N8nHttpReady) {
-      Write-Success 'n8n editor is responding.'
-      return $true
+      $readyStreak += 1
+      if ($readyStreak -ge 3) {
+        $logs = @(Get-N8nRecentLogLines -Tail 60)
+        if (-not (Test-N8nDatabaseImageMismatchLog -LogLines $logs) -and -not (Test-N8nEncryptionKeyMismatchLog -LogLines $logs)) {
+          Write-Success 'n8n editor is responding and stayed reachable.'
+          return $true
+        }
+        break
+      }
+    } else {
+      $readyStreak = 0
     }
     Start-Sleep -Seconds 2
   }
@@ -1033,10 +1075,20 @@ function Wait-ForN8nReady {
       if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n')) -ne 0) {
         return $false
       }
+      $readyStreak = 0
       for ($attempt = 1; $attempt -le 20; $attempt += 1) {
         if (Test-N8nHttpReady) {
-          Write-Success 'n8n editor is responding after self-heal.'
-          return $true
+          $readyStreak += 1
+          if ($readyStreak -ge 3) {
+            $logs = @(Get-N8nRecentLogLines -Tail 60)
+            if (-not (Test-N8nDatabaseImageMismatchLog -LogLines $logs) -and -not (Test-N8nEncryptionKeyMismatchLog -LogLines $logs)) {
+              Write-Success 'n8n editor is responding after self-heal and stayed reachable.'
+              return $true
+            }
+            break
+          }
+        } else {
+          $readyStreak = 0
         }
         Start-Sleep -Seconds 2
       }
