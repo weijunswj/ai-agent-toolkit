@@ -2598,13 +2598,13 @@ function Set-LocalEncryptionKeyForRestore {
 function Test-TrustedRestoreN8nImageRef {
   param([string]$Image)
 
-  $imageRef = ([string]$Image).Trim()
-  if (-not $imageRef) {
-    return $true
-  }
+  $rawImage = [string]$Image
+  $imageRef = $rawImage.Trim()
+  if (-not $imageRef) { return $true }
+  if ($rawImage -ne $imageRef -or $imageRef -match '\s') { return $false }
 
-  $officialTagged = '^docker\.n8n\.io/n8nio/n8n:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$'
-  $officialDigest = '^docker\.n8n\.io/n8nio/n8n@sha256:[a-fA-F0-9]{64}$'
+  $officialTagged = '\Adocker\.n8n\.io/n8nio/n8n:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\z'
+  $officialDigest = '\Adocker\.n8n\.io/n8nio/n8n@sha256:[a-fA-F0-9]{64}\z'
   return ($imageRef -match $officialTagged -or $imageRef -match $officialDigest)
 }
 

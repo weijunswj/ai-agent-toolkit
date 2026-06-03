@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -737,12 +737,12 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Test-PlaceholderEncryptionKey',
     'Write-MissingRestoreEnvError',
     'Write-MissingCredentialRestoreKeyError',
+    'Test-TrustedRestoreN8nImageRef',
+    'Write-UntrustedRestoreN8nImageError',
     'Resolve-RestoreEnvFile',
     'Initialize-MenuRuntime',
     'Restore-PreviousStackServices',
     'Update-N8nImageForRestore',
-    'Test-TrustedRestoreN8nImageRef',
-    'Write-UntrustedRestoreN8nImageError',
     'Set-LocalN8nImageForRestore',
     'Set-LocalEncryptionKeyForRestore',
     'Get-RestoreEntityLatestMigration',
@@ -788,7 +788,8 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-PreRestorePostgresBackup'), /database\.sql[\s\S]*Restore-PostgresSqlBackup[\s\S]*Pre-restore database rollback completed/);
   assert.match(functionBody(menu, 'Restore-PreRestoreEncryptionKeyBackup'), /SECRET-DO-NOT-COMMIT\.env|N8N_ENCRYPTION_KEY/);
   assert.match(functionBody(menu, 'Restore-PreRestoreN8nImageBackup'), /Restore-PreRestoreEnvValueBackup[\s\S]*N8N_IMAGE/);
-  assert.match(functionBody(menu, 'Test-TrustedRestoreN8nImageRef'), /docker\\.n8n\\.io\/n8nio\/n8n:\[A-Za-z0-9\][\s\S]*docker\\.n8n\\.io\/n8nio\/n8n@sha256:\[a-fA-F0-9\]\{64\}/);
+  assert.match(functionBody(menu, 'Test-TrustedRestoreN8nImageRef'), /\$rawImage -ne \$imageRef[\s\S]*\$imageRef -match '\\s'/);
+  assert.match(functionBody(menu, 'Test-TrustedRestoreN8nImageRef'), /\\Adocker\\\.n8n\\\.io\/n8nio\/n8n:\[A-Za-z0-9\][\s\S]*\\z[\s\S]*\\Adocker\\\.n8n\\\.io\/n8nio\/n8n@sha256:\[a-fA-F0-9\]\{64\}\\z/);
   assert.match(functionBody(menu, 'Write-UntrustedRestoreN8nImageError'), /not an allowed official n8n image reference[\s\S]*docker\.n8n\.io\/n8nio\/n8n:<tag>[\s\S]*set N8N_IMAGE manually/);
   assert.match(functionBody(menu, 'Set-LocalN8nImageForRestore'), /Test-TrustedRestoreN8nImageRef -Image \$image[\s\S]*Write-UntrustedRestoreN8nImageError -Image \$image[\s\S]*return \$false[\s\S]*Read-EnvFileValue -Path \$EnvPath -Name 'N8N_IMAGE'[\s\S]*Set-EnvFileValue -Path \$EnvPath -Name 'N8N_IMAGE'[\s\S]*Initialize-ServiceImages/);
   assert.doesNotMatch(functionBody(menu, 'Restore-PreRestoreEncryptionKeyBackup'), /Name 'N8N_IMAGE'/);
@@ -865,8 +866,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Get-ZipEntryNames[\s\S]*Test-RestoreEntityFileName[\s\S]*Filename-level detection/);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /credentialsentity\.jsonl[\s\S]*HasCredentialEntities/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /HasCredentialEntities = \$detected\.HasCredentialEntities/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Find-RestoreBackupEnvValue -Path \$backupPath -Name 'N8N_IMAGE'[\s\S]*Resolve-N8nImageForEntityRestore -Backup \$detected[\s\S]*Could not determine the n8n image version required by this entities export[\s\S]*Set-LocalN8nImageForRestore -BackupN8nImage \$backupN8nImage -EnvPath \$resolvedEnvPath[\s\S]*Set-LocalEncryptionKeyForRestore/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Test-TrustedRestoreN8nImageRef -Image \$backupN8nImage[\s\S]*Write-UntrustedRestoreN8nImageError -Image \$backupN8nImage[\s\S]*return[\s\S]*detected\.HasCredentialEntities/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Find-RestoreBackupEnvValue -Path \$backupPath -Name 'N8N_IMAGE'[\s\S]*Resolve-N8nImageForEntityRestore -Backup \$detected[\s\S]*Could not determine the n8n image version required by this entities export[\s\S]*Test-TrustedRestoreN8nImageRef -Image \$backupN8nImage[\s\S]*Write-UntrustedRestoreN8nImageError -Image \$backupN8nImage[\s\S]*Set-LocalN8nImageForRestore -BackupN8nImage \$backupN8nImage -EnvPath \$resolvedEnvPath[\s\S]*Set-LocalEncryptionKeyForRestore/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Add-Member -NotePropertyName RestoreN8nImage -NotePropertyValue \$backupN8nImage/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Get-RunningServices -EnvPath \$resolvedEnvPath[\s\S]*Backup-Postgres -Required -EnvPath \$resolvedEnvPath -BackupDir \$preRestoreRoot/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /detected\.HasCredentialEntities[\s\S]*Write-MissingCredentialRestoreKeyError[\s\S]*return/);
