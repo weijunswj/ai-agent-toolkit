@@ -393,27 +393,6 @@ function Invoke-N8nOneOffCapture {
   return $retry
 }
 
-function Test-N8nOneOffContainerReady {
-  param([string]$MountPath = '')
-
-  $args = @('run', '--rm', '--pull', 'never', '--no-deps', '-T')
-  if ($MountPath) {
-    $args += @('-v', "${MountPath}:/restore")
-  }
-  $args += @('n8n', 'n8n', '--version')
-
-  $result = Invoke-N8nOneOffCapture -Arguments $args -Context 'n8n one-off container preflight'
-  if ($result.ExitCode -eq 0) {
-    return $true
-  }
-
-  Write-ErrorMessage 'n8n one-off container preflight failed.'
-  foreach ($line in $result.Output) {
-    Write-ErrorMessage $line
-  }
-  return $false
-}
-
 function Test-StackFiles {
   param([string]$EnvPath = '')
 
@@ -2892,10 +2871,6 @@ function Restore-LocalN8nFromBackupMenu {
     'n8n-entities' {
       $n8nImageRefreshed = Update-N8nImageForRestore
       if (-not $n8nImageRefreshed) { return }
-      if (-not (Test-N8nOneOffContainerReady -MountPath $detected.InputDir)) {
-        Write-ErrorMessage 'Restore cancelled because Docker could not start a one-off n8n container.'
-        return
-      }
       if (-not (Repair-N8nConfigEncryptionKey)) {
         Write-Warning 'Could not sync local n8n config encryption key before restore completion. Startup will attempt one more repair pass.'
       }

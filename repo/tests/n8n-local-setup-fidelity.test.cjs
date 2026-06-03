@@ -721,7 +721,6 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Get-ComposeProjectName',
     'Clear-StoppedN8nOneOffContainers',
     'Invoke-N8nOneOffCapture',
-    'Test-N8nOneOffContainerReady',
     'Find-RestoreEntityDirectory',
     'New-RestoreEntityImportDirectory',
     'Wait-ForServiceImagesAvailable',
@@ -803,7 +802,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Get-ComposeProjectName'), /COMPOSE_PROJECT_NAME[\s\S]*config', '--format', 'json'[\s\S]*Split-Path -Leaf \$script:StackRoot/);
   assert.match(functionBody(menu, 'Clear-StoppedN8nOneOffContainers'), /volumes are not removed[\s\S]*com\.docker\.compose\.project=\$projectName[\s\S]*com\.docker\.compose\.service=n8n[\s\S]*com\.docker\.compose\.oneoff=True[\s\S]*docker rm -f <stopped-or-created-n8n-one-off-containers>/);
   assert.match(functionBody(menu, 'Invoke-N8nOneOffCapture'), /Test-ComposeOneOffCreateOnlyFailure[\s\S]*retrying once[\s\S]*Clear-StoppedN8nOneOffContainers[\s\S]*Docker could not create or start the one-off n8n container/);
-  assert.match(functionBody(menu, 'Test-N8nOneOffContainerReady'), /'--pull', 'never'[\s\S]*'\-T'[\s\S]*'n8n', 'n8n', '--version'[\s\S]*Invoke-N8nOneOffCapture/);
+  assert.doesNotMatch(menu, /function Test-N8nOneOffContainerReady/);
   assert.match(functionBody(menu, 'Repair-N8nConfigEncryptionKey'), /Invoke-N8nOneOffCapture[\s\S]*n8n config encryption key repair/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /ImageAlreadyRefreshed[\s\S]*Update-N8nImageForRestore/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /'--pull', 'never'[\s\S]*'-T'[\s\S]*import:entities/);
@@ -845,9 +844,8 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Get-RunningServices -EnvPath \$resolvedEnvPath[\s\S]*\$preRestoreImageVersionLines = @\(Get-ImageVersionLines -RunningServices \$runningServices\)[\s\S]*Backup-Postgres -Required -EnvPath \$resolvedEnvPath -BackupDir \$preRestoreRoot -ImageVersionLines \$preRestoreImageVersionLines -ImageSectionHeading 'Running container images before restore stopped services:'/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /detected\.HasCredentialEntities[\s\S]*Write-MissingCredentialRestoreKeyError[\s\S]*return/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Set-LocalEncryptionKeyForRestore[\s\S]*'postgres-sql' \{ \$ok = Restore-PostgresSqlBackup -Backup \$detected -EnvPath \$resolvedEnvPath \}/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /'n8n-entities' \{[\s\S]*\$n8nImageRefreshed = Update-N8nImageForRestore[\s\S]*Test-N8nOneOffContainerReady -MountPath \$detected\.InputDir[\s\S]*Repair-N8nConfigEncryptionKey[\s\S]*ImageAlreadyRefreshed:\$n8nImageRefreshed[\s\S]*\}/);
-  assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Test-N8nOneOffContainerReady[\s\S]*'postgres-sql'/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore cancelled because Docker could not start a one-off n8n container/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /'n8n-entities' \{[\s\S]*\$n8nImageRefreshed = Update-N8nImageForRestore[\s\S]*Repair-N8nConfigEncryptionKey[\s\S]*Restore-N8nEntitiesBackup[\s\S]*ImageAlreadyRefreshed:\$n8nImageRefreshed[\s\S]*\}/);
+  assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Test-N8nOneOffContainerReady|Restore cancelled because Docker could not start a one-off n8n container/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreviousStackServices -PreviousServices \$preRestoreServices/);
   assert.doesNotMatch(functionBody(menu, 'Get-RestoreBackupType'), /ReadToEnd|StreamReader|Open\(\)/);
   assert.doesNotMatch(menu, /Write-Host .*POSTGRES_PASSWORD|Write-Info .*POSTGRES_PASSWORD|Write-Success .*POSTGRES_PASSWORD|Write-Warning .*POSTGRES_PASSWORD/);
