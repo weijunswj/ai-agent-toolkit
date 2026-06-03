@@ -279,17 +279,92 @@ function Test-ComposeOneOffCreateOnlyFailure {
   return ($hasCreateLine -and -not $hasN8nOutput -and -not $hasDockerError)
 }
 
-function Clear-StoppedN8nOneOffContainers {
-  Write-Info 'docker compose rm -f n8n (cleans stopped one-off n8n containers; volumes are not removed).'
-  $result = Invoke-ComposeCapture -Arguments @('rm', '-f', 'n8n')
-  if ($result.ExitCode -ne 0) {
-    Write-Warning 'Could not clean stopped one-off n8n containers before retry.'
-    foreach ($line in $result.Output) {
-      if ($line) {
-        Write-Warning $line
+function Get-ComposeProjectName {
+  if ($env:COMPOSE_PROJECT_NAME) {
+    return ([string]$env:COMPOSE_PROJECT_NAME).Trim()
+  }
+
+  $result = Invoke-ComposeCapture -Arguments @('config', '--format', 'json')
+  if ($result.ExitCode -eq 0) {
+    try {
+      $config = ($result.Output -join "`n") | ConvertFrom-Json
+      if ($config.name) {
+        return ([string]$config.name).Trim()
       }
+    } catch {
+      # Fall through to the local directory fallback below.
     }
   }
+
+  $fallback = ((Split-Path -Leaf $script:StackRoot).ToLowerInvariant() -replace '[^a-z0-9_-]', '')
+  return $fallback
+}
+
+function Clear-StoppedN8nOneOffContainers {
+  $projectName = Get-ComposeProjectName
+  if (-not $projectName) {
+    Write-Warning 'Could not resolve the Docker Compose project name; skipping one-off n8n container cleanup.'
+    return
+  }
+
+  Write-Info 'Looking for stopped or created one-off n8n containers to clean; volumes are not removed.'
+  $listArgs = @(
+    'ps', '-a',
+    '--filter', "label=com.docker.compose.project=$projectName",
+    '--filter', 'label=com.docker.compose.service=n8n',
+    '--filter', 'label=com.docker.compose.oneoff=True',
+    '--filter', 'status=created',
+    '--filter', 'status=exited',
+    '--filter', 'status=dead',
+    '--format', '{{.ID}}'
+  )
+
+  try {
+    $listOutput = @(& docker @listArgs 2>&1)
+    $listExitCode = $LASTEXITCODE
+  } catch {
+    $listOutput = @([string]$_.Exception.Message)
+    $listExitCode = 1
+  }
+
+  if ($listExitCode -ne 0) {
+    Write-Warning 'Could not list one-off n8n containers before retry.'
+    foreach ($line in $listOutput) {
+      if ($line) { Write-Warning ([string]$line) }
+    }
+    return
+  }
+
+  $containerIds = @(
+    $listOutput |
+      ForEach-Object { ([string]$_).Trim() } |
+      Where-Object { $_ -match '^[0-9a-fA-F]{12,64}$' }
+  )
+
+  if ($containerIds.Count -eq 0) {
+    Write-Info 'No stopped or created one-off n8n containers were found.'
+    return
+  }
+
+  Write-Info "Removing $($containerIds.Count) stopped or created one-off n8n container(s)."
+  $inspectArgs = @('inspect', '--format', '{{.Name}} {{.State.Status}} {{.State.Error}}') + $containerIds
+  $inspectOutput = @(& docker @inspectArgs 2>&1)
+  foreach ($line in $inspectOutput) {
+    if ($line) { Write-Warning ([string]$line) }
+  }
+
+  $removeArgs = @('rm', '-f') + $containerIds
+  Write-Info 'docker rm -f <stopped-or-created-n8n-one-off-containers>'
+  $removeOutput = @(& docker @removeArgs 2>&1)
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning 'Could not remove stopped or created one-off n8n containers before retry.'
+    foreach ($line in $removeOutput) {
+      if ($line) { Write-Warning ([string]$line) }
+    }
+    return
+  }
+
+  Write-Success 'Stopped or created one-off n8n containers were cleaned before retry.'
 }
 
 function Invoke-N8nOneOffCapture {
@@ -2810,26 +2885,23 @@ function Restore-LocalN8nFromBackupMenu {
   $preRestoreSecretPath = Join-Path $preRestoreRoot 'SECRET-DO-NOT-COMMIT.env'
   Write-Success 'Pre-restore database backup created; rollback .env saved if present.'
 
-  $n8nImageRefreshed = Update-N8nImageForRestore
-  if (-not $n8nImageRefreshed) { return }
-  $oneOffMountPath = ''
-  if ($detected.Type -eq 'n8n-entities') {
-    $oneOffMountPath = $detected.InputDir
-  }
-  if (-not (Test-N8nOneOffContainerReady -MountPath $oneOffMountPath)) {
-    Write-ErrorMessage 'Restore cancelled because Docker could not start a one-off n8n container.'
-    return
-  }
-
   if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
-  if (-not (Repair-N8nConfigEncryptionKey)) {
-    Write-Warning 'Could not sync local n8n config encryption key before restore completion. Startup will attempt one more repair pass.'
-  }
 
   $ok = $false
   switch ($detected.Type) {
     'postgres-sql' { $ok = Restore-PostgresSqlBackup -Backup $detected -EnvPath $resolvedEnvPath }
-    'n8n-entities' { $ok = Restore-N8nEntitiesBackup -Backup $detected -BackupEncryptionKey $backupEncryptionKey -ImageAlreadyRefreshed:$n8nImageRefreshed }
+    'n8n-entities' {
+      $n8nImageRefreshed = Update-N8nImageForRestore
+      if (-not $n8nImageRefreshed) { return }
+      if (-not (Test-N8nOneOffContainerReady -MountPath $detected.InputDir)) {
+        Write-ErrorMessage 'Restore cancelled because Docker could not start a one-off n8n container.'
+        return
+      }
+      if (-not (Repair-N8nConfigEncryptionKey)) {
+        Write-Warning 'Could not sync local n8n config encryption key before restore completion. Startup will attempt one more repair pass.'
+      }
+      $ok = Restore-N8nEntitiesBackup -Backup $detected -BackupEncryptionKey $backupEncryptionKey -ImageAlreadyRefreshed:$n8nImageRefreshed
+    }
     default {
       Write-ErrorMessage 'Unsupported backup type after detection.'
       return
