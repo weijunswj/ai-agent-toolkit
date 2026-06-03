@@ -1049,8 +1049,8 @@ function Wait-ForN8nReady {
     Write-Info 'Use View logs for details. If this continues, the restored data likely belongs to a different N8N_ENCRYPTION_KEY than the active .env.'
   } elseif (Test-N8nDatabaseImageMismatchLog -LogLines $logs) {
     Write-ErrorMessage 'Recent logs show a database schema / n8n image version mismatch.'
-    Write-Info 'This can happen after running an older N8N_IMAGE against a database that was already migrated by a newer n8n image.'
-    Write-Info 'Set N8N_IMAGE back to the version that last started this database, or restore a Postgres backup made for the configured image.'
+    Write-Info 'Restore can auto-apply N8N_IMAGE only when the backup .env includes it.'
+    Write-Info 'Use a backup folder or zip that includes SECRET-DO-NOT-COMMIT.env / .env with the source N8N_IMAGE, or set N8N_IMAGE manually to the source n8n image and retry.'
   } else {
     Write-Info 'Use View logs to inspect the n8n startup error.'
   }
@@ -1408,28 +1408,6 @@ function Write-ImageVersions {
   foreach ($line in Get-ImageVersionLines -RunningServices $RunningServices) {
     Write-Host $line -ForegroundColor White
   }
-}
-
-function Get-BackupImageLogContent {
-  param(
-    [string]$BackupPath,
-    [string[]]$ImageVersionLines = @(),
-    [string]$ImageSectionHeading = 'Running container images at backup time:'
-  )
-
-  $imageLines = @($ImageVersionLines)
-  if ($imageLines.Count -eq 0) {
-    $imageLines = @(Get-ImageVersionLines -RunningServices (Get-RunningServices))
-  }
-
-  return @(
-    '# n8n local backup image log',
-    "Backup file: $BackupPath",
-    "Created: $(Get-Date -Format o)",
-    '',
-    $ImageSectionHeading,
-    ''
-  ) + $imageLines
 }
 
 function Check-Updates {
@@ -1965,8 +1943,7 @@ function Write-RestoreManifest {
 function Write-RestoreReadme {
   param(
     [string]$BackupDir,
-    [string]$BackupType,
-    [string[]]$ImageLogContent = @()
+    [string]$BackupType
   )
 
   $readmePath = Join-Path $BackupDir 'HOW TO USE THIS RESTORE FOLDER.txt'
@@ -1979,13 +1956,9 @@ function Write-RestoreReadme {
     'Open _n8n-local.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to database.sql.',
     'Type PROCEED when asked.',
     'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.',
+    'Restore also reads N8N_IMAGE from SECRET-DO-NOT-COMMIT.env when present and applies that image pin for schema compatibility.',
     'Do not commit this folder, backup files, or SECRET-DO-NOT-COMMIT.env.'
   )
-
-  if ($ImageLogContent.Count -gt 0) {
-    $content += @('', 'Image/version context:', '')
-    $content += $ImageLogContent
-  }
 
   Set-Content -LiteralPath $readmePath -Value $content -Encoding ascii
   return $readmePath
@@ -1995,9 +1968,7 @@ function Backup-Postgres {
   param(
     [switch]$Required,
     [string]$EnvPath = '',
-    [string]$BackupDir = '',
-    [string[]]$ImageVersionLines = @(),
-    [string]$ImageSectionHeading = 'Running container images at backup time:'
+    [string]$BackupDir = ''
   )
 
   Write-Header 'Backup Postgres Database'
@@ -2034,14 +2005,13 @@ function Backup-Postgres {
       return $false
     }
     Write-Success "Backup written to: $backupPath"
-    $imageLogContent = Get-BackupImageLogContent -BackupPath $backupPath -ImageVersionLines $ImageVersionLines -ImageSectionHeading $ImageSectionHeading
     $secretPath = Write-BackupSecretFile -BackupDir $backupDir -EnvPath $EnvPath
     $files = @('database.sql', 'HOW TO USE THIS RESTORE FOLDER.txt', 'restore-manifest.json')
     if ($secretPath) {
       $files += 'SECRET-DO-NOT-COMMIT.env'
     }
     $manifestPath = Write-RestoreManifest -BackupDir $backupDir -BackupType 'postgres-sql' -Files $files
-    $readmePath = Write-RestoreReadme -BackupDir $backupDir -BackupType 'postgres-sql' -ImageLogContent $imageLogContent
+    $readmePath = Write-RestoreReadme -BackupDir $backupDir -BackupType 'postgres-sql'
     Write-Success "Restore manifest written to: $manifestPath"
     Write-Success "Restore instructions written to: $readmePath"
     Write-Success "Backup folder: $backupDir"
@@ -2455,9 +2425,10 @@ function Find-RestoreEnvBackupFileInDirectory {
   return ''
 }
 
-function Find-RestoreBackupSecret {
+function Find-RestoreBackupEnvValue {
   param(
     [string]$Path,
+    [string]$Name,
     [string]$TargetEnvPath = ''
   )
 
@@ -2470,7 +2441,7 @@ function Find-RestoreBackupSecret {
   if ($item.PSIsContainer) {
     $secretFile = Find-RestoreEnvBackupFileInDirectory -Directory $item.FullName
     if ($secretFile) {
-      return (Read-EnvFileValue -Path $secretFile -Name 'N8N_ENCRYPTION_KEY')
+      return (Read-EnvFileValue -Path $secretFile -Name $Name)
     }
     return ''
   }
@@ -2484,7 +2455,7 @@ function Find-RestoreBackupSecret {
           if ((Split-Path -Leaf $entry.FullName) -eq $fileName) {
             $reader = New-Object System.IO.StreamReader($entry.Open())
             try {
-              return (Read-EnvTextValue -Text $reader.ReadToEnd() -Name 'N8N_ENCRYPTION_KEY')
+              return (Read-EnvTextValue -Text $reader.ReadToEnd() -Name $Name)
             } finally {
               $reader.Dispose()
             }
@@ -2499,11 +2470,20 @@ function Find-RestoreBackupSecret {
   foreach ($fileName in Get-RestoreEnvBackupNames) {
     $siblingSecret = Join-Path (Split-Path -Parent $item.FullName) $fileName
     if ((Test-Path -LiteralPath $siblingSecret) -and -not (Test-SameResolvedPath -Left $siblingSecret -Right $TargetEnvPath)) {
-      return (Read-EnvFileValue -Path $siblingSecret -Name 'N8N_ENCRYPTION_KEY')
+      return (Read-EnvFileValue -Path $siblingSecret -Name $Name)
     }
   }
 
   return ''
+}
+
+function Find-RestoreBackupSecret {
+  param(
+    [string]$Path,
+    [string]$TargetEnvPath = ''
+  )
+
+  return (Find-RestoreBackupEnvValue -Path $Path -Name 'N8N_ENCRYPTION_KEY' -TargetEnvPath $TargetEnvPath)
 }
 
 function Write-MissingRestoreEnvError {
@@ -2542,6 +2522,31 @@ function Set-LocalEncryptionKeyForRestore {
 
   Set-EnvFileValue -Path $EnvPath -Name 'N8N_ENCRYPTION_KEY' -Value $BackupEncryptionKey
   Write-Success 'Resolved local Compose N8N_ENCRYPTION_KEY updated from the backup secret file.'
+  return $true
+}
+
+function Set-LocalN8nImageForRestore {
+  param(
+    [string]$BackupN8nImage,
+    [string]$EnvPath
+  )
+
+  $image = ([string]$BackupN8nImage).Trim()
+  if (-not $image) {
+    Write-Warning 'No backup N8N_IMAGE was found in the backup .env. If n8n later reports a database schema / image version mismatch, set N8N_IMAGE to the source backup image and retry.'
+    return $true
+  }
+
+  $currentImage = Read-EnvFileValue -Path $EnvPath -Name 'N8N_IMAGE'
+  if ($currentImage -eq $image) {
+    Write-Success 'Resolved local Compose N8N_IMAGE already matches the backup .env.'
+    return $true
+  }
+
+  Write-Info "Backup .env N8N_IMAGE detected: $image"
+  Write-Info 'Updating local Compose N8N_IMAGE to match the backup .env for restore schema compatibility.'
+  Set-EnvFileValue -Path $EnvPath -Name 'N8N_IMAGE' -Value $image
+  Initialize-ServiceImages
   return $true
 }
 
@@ -2793,10 +2798,14 @@ function Restore-LocalN8nFromBackupMenu {
   $resolvedEnvPath = $envResolution.Path
 
   $backupEncryptionKey = Find-RestoreBackupSecret -Path $backupPath -TargetEnvPath $resolvedEnvPath
+  $backupN8nImage = Find-RestoreBackupEnvValue -Path $backupPath -Name 'N8N_IMAGE' -TargetEnvPath $resolvedEnvPath
   $secretSearchPath = $backupPath
   if (-not $backupEncryptionKey -and $detected.StagingPath) {
     $backupEncryptionKey = Find-RestoreBackupSecret -Path $detected.StagingPath -TargetEnvPath $resolvedEnvPath
     $secretSearchPath = $detected.StagingPath
+  }
+  if (-not $backupN8nImage -and $detected.StagingPath) {
+    $backupN8nImage = Find-RestoreBackupEnvValue -Path $detected.StagingPath -Name 'N8N_IMAGE' -TargetEnvPath $resolvedEnvPath
   }
   if (-not $backupEncryptionKey) {
     Write-MissingRestoreEnvError -SecretSearchPath $secretSearchPath
@@ -2812,7 +2821,6 @@ function Restore-LocalN8nFromBackupMenu {
       Where-Object { $_ -in @('n8n', 'ngrok') } |
       Sort-Object -Unique
   )
-  $preRestoreImageVersionLines = @(Get-ImageVersionLines -RunningServices $runningServices)
   if ($preRestoreServices.Count -gt 0) {
     Write-Info 'Restore requires the local stack to be stopped. Stopping local n8n services now.'
     if (-not (Stop-LocalStackServices -Context 'Restore')) {
@@ -2828,7 +2836,7 @@ function Restore-LocalN8nFromBackupMenu {
   Write-Host "Resolved .env source: $($envResolution.Source)" -ForegroundColor Cyan
   Write-Host ''
   Write-Warning 'This restore will replace the active local n8n database state with the backup state.'
-  Write-Warning 'It will also update local Compose N8N_ENCRYPTION_KEY to the key bundled with the backup.'
+  Write-Warning 'It will also update local Compose N8N_ENCRYPTION_KEY and, when present, N8N_IMAGE from the backup .env.'
   Write-Host ''
   $approval = Read-Host 'Type PROCEED to continue'
   Write-Host ''
@@ -2845,6 +2853,9 @@ function Restore-LocalN8nFromBackupMenu {
   if (-not $backupEncryptionKey -and $detected.StagingPath) {
     $backupEncryptionKey = Find-RestoreBackupSecret -Path $detected.StagingPath -TargetEnvPath $resolvedEnvPath
   }
+  if (-not $backupN8nImage -and $detected.StagingPath) {
+    $backupN8nImage = Find-RestoreBackupEnvValue -Path $detected.StagingPath -Name 'N8N_IMAGE' -TargetEnvPath $resolvedEnvPath
+  }
   if ($detected.HasCredentialEntities -and -not $backupEncryptionKey) {
     Write-MissingCredentialRestoreKeyError
     return
@@ -2856,13 +2867,14 @@ function Restore-LocalN8nFromBackupMenu {
   }
 
   $preRestoreRoot = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-  if (-not (Backup-Postgres -Required -EnvPath $resolvedEnvPath -BackupDir $preRestoreRoot -ImageVersionLines $preRestoreImageVersionLines -ImageSectionHeading 'Running container images before restore stopped services:')) {
+  if (-not (Backup-Postgres -Required -EnvPath $resolvedEnvPath -BackupDir $preRestoreRoot)) {
     Write-ErrorMessage 'Restore cancelled because the current local n8n database backup did not complete.'
     return
   }
   $preRestoreSecretPath = Join-Path $preRestoreRoot 'SECRET-DO-NOT-COMMIT.env'
   Write-Success 'Pre-restore database backup created; rollback .env saved if present.'
 
+  if (-not (Set-LocalN8nImageForRestore -BackupN8nImage $backupN8nImage -EnvPath $resolvedEnvPath)) { return }
   if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
 
   $ok = $false

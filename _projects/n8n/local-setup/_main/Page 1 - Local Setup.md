@@ -581,11 +581,13 @@ Restore:
 
 Required backup env:
 
-- Restore requires `N8N_ENCRYPTION_KEY` from the backup `.env`.
+- Restore requires the backup `.env`.
 - Keep `SECRET-DO-NOT-COMMIT.env` beside `database.sql`.
 - For `.zip`, include `.env` or `SECRET-DO-NOT-COMMIT.env` in the zip, or keep `SECRET-DO-NOT-COMMIT.env` next to the zip.
 - If the backup env/key is missing, restore stops before stopping services or touching the database.
-- Restore updates only the active `.env` `N8N_ENCRYPTION_KEY` line.
+- Restore updates the active `.env` `N8N_ENCRYPTION_KEY`.
+- Restore also applies backup `.env` `N8N_IMAGE` when present so the database starts with the source n8n image.
+- If `N8N_IMAGE` cannot be detected and n8n logs show a database schema / image mismatch, set `N8N_IMAGE` manually to the source backup image and retry.
 
 Safety behaviour:
 
@@ -593,10 +595,10 @@ Safety behaviour:
 - If `n8n` and/or `ngrok` were running before restore, the launcher restarts only those services after restore or rollback.
 - If the container runs but the editor is not reachable, the launcher reports an error instead of calling it healthy.
 - If logs show a local n8n config encryption-key mismatch, the launcher first attempts to sync `/home/node/.n8n/config` to the active `.env` key, then starts services with a second self-heal attempt.
-- If logs show a database schema / image version mismatch, switch `N8N_IMAGE` back to the version that last started this database, or restore a Postgres backup made for the configured image.
+- If logs show a database schema / image version mismatch, use a backup folder or zip that includes the source backup `.env`, or set `N8N_IMAGE` manually to the source n8n image and retry.
 - Restore creates a pre-restore backup of the current database and current `.env`.
 - If restore fails after changes begin, the launcher tries to roll back automatically.
-- Rollback does not rewrite `N8N_IMAGE`; image pins remain your explicit choice.
+- Rollback restores the pre-restore database and pre-restore `.env` when possible.
 - If a `.zip` has credential entities but no backup key, import is refused before n8n can truncate tables.
 
 Not supported here:
