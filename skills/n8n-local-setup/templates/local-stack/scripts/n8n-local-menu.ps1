@@ -2304,8 +2304,16 @@ function New-RestoreEntityImportDirectory {
     return ''
   }
 
+  $hasWorkflowsTagsFile = @($importFiles | Where-Object { $_.Name -ieq 'workflows_tags.jsonl' }).Count -gt 0
+  $copiedCount = 0
   foreach ($file in $importFiles) {
+    if ($hasWorkflowsTagsFile -and $file.Name -ieq 'workflowtagmapping.jsonl') {
+      Write-Warning 'Skipping workflowtagmapping.jsonl because workflows_tags.jsonl is also present; both files import into the workflows_tags table.'
+      continue
+    }
+
     Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $zipSourceDir $file.Name) -Force
+    $copiedCount += 1
   }
 
   $zipPath = Join-Path $importDir 'entities.zip'
@@ -2314,7 +2322,7 @@ function New-RestoreEntityImportDirectory {
   }
 
   [System.IO.Compression.ZipFile]::CreateFromDirectory($zipSourceDir, $zipPath)
-  Write-Info "Rebuilt clean entities.zip with $($importFiles.Count) JSONL file(s)."
+  Write-Info "Rebuilt clean entities.zip with $copiedCount JSONL file(s)."
   return $importDir
 }
 
@@ -2602,6 +2610,157 @@ function Set-LocalN8nImageForRestore {
   return $true
 }
 
+function Get-RestoreEntityLatestMigration {
+  param([string]$EntityDir)
+
+  $migrationPath = Join-Path $EntityDir 'migrations.jsonl'
+  if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) {
+    return $null
+  }
+
+  $latest = $null
+  foreach ($line in Get-Content -LiteralPath $migrationPath) {
+    $text = ([string]$line).Trim()
+    if (-not $text) { continue }
+    try {
+      $entry = $text | ConvertFrom-Json
+      $timestamp = [int64]0
+      if ($entry.timestamp -and [int64]::TryParse(([string]$entry.timestamp), [ref]$timestamp)) {
+        if ($null -eq $latest -or $timestamp -gt $latest.Timestamp) {
+          $latest = [pscustomobject]@{
+            Id = ([string]$entry.id)
+            Name = ([string]$entry.name)
+            Timestamp = $timestamp
+          }
+        }
+      }
+    } catch {
+      # Ignore malformed lines here; n8n import performs the authoritative validation.
+    }
+  }
+
+  return $latest
+}
+
+function Get-N8nImageLatestMigration {
+  param([string]$Image)
+
+  $nodeScript = @'
+const fs = require(`fs`);
+const dir = `/usr/local/lib/node_modules/n8n/node_modules/@n8n/db/dist/migrations/common`;
+const files = fs.readdirSync(dir)
+  .filter((name) => name.endsWith(`.js`) && !name.endsWith(`.js.map`))
+  .sort();
+const latest = files[files.length - 1] || ``;
+const match = latest.match(/^(\d+)-(.+)\.js$/);
+if (!match) process.exit(2);
+console.log(`${match[1]}|${match[2]}`);
+'@
+
+  try {
+    $output = @(& docker run --rm --entrypoint node $Image -e $nodeScript 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $output.Count -eq 0) {
+      return $null
+    }
+    $parts = ([string]$output[0]).Trim() -split '\|', 2
+    if ($parts.Count -ne 2) {
+      return $null
+    }
+    return [pscustomobject]@{
+      Image = $Image
+      Timestamp = [int64]$parts[0]
+      Name = $parts[1]
+    }
+  } catch {
+    return $null
+  }
+}
+
+function Find-N8nImageForEntityMigration {
+  param([object]$Migration)
+
+  if ($null -eq $Migration) {
+    return ''
+  }
+
+  $images = @(
+    & docker image ls 'docker.n8n.io/n8nio/n8n' --format '{{.Repository}}:{{.Tag}}' 2>$null |
+      ForEach-Object { ([string]$_).Trim() } |
+      Where-Object { $_ -and $_ -notmatch ':<none>$' } |
+      Sort-Object -Unique
+  )
+
+  $matches = New-Object System.Collections.Generic.List[object]
+  foreach ($image in $images) {
+    $imageMigration = Get-N8nImageLatestMigration -Image $image
+    if ($null -ne $imageMigration -and $imageMigration.Timestamp -eq $Migration.Timestamp) {
+      $matches.Add($imageMigration)
+    }
+  }
+
+  if ($matches.Count -gt 0) {
+    $ranked = @(
+      $matches |
+        Sort-Object `
+          @{ Expression = { if ($_.Image -match ':(\d+\.\d+\.\d+)$') { [version]$Matches[1] } else { [version]'0.0.0' } }; Descending = $true },
+          @{ Expression = { if ($_.Image -match ':stable$|:latest$') { 1 } else { 0 } } }
+    )
+    return ([string]$ranked[0].Image)
+  }
+
+  if ($Migration.Timestamp -eq 1784000000006) {
+    return 'docker.n8n.io/n8nio/n8n:2.22.5'
+  }
+
+  return ''
+}
+
+function Resolve-N8nImageForEntityRestore {
+  param([object]$Backup)
+
+  $migration = Get-RestoreEntityLatestMigration -EntityDir $Backup.InputDir
+  if ($null -eq $migration) {
+    Write-Warning 'Could not read migrations.jsonl to infer the source n8n image for this entities export.'
+    return ''
+  }
+
+  Write-Info "Entities export latest migration: $($migration.Name)$($migration.Timestamp)."
+  $image = Find-N8nImageForEntityMigration -Migration $migration
+  if ($image) {
+    Write-Info "Matched entities export migration to N8N_IMAGE=$image."
+    return $image
+  }
+
+  Write-Warning 'No local or known n8n image mapping matched the entities export migration.'
+  return ''
+}
+
+function Restore-PreRestoreEnvValueBackup {
+  param(
+    [string]$SecretBackupPath,
+    [string]$EnvPath,
+    [string]$Name
+  )
+
+  if (-not $SecretBackupPath -or -not (Test-Path -LiteralPath $SecretBackupPath -PathType Leaf)) {
+    return $true
+  }
+
+  $previousValue = Read-EnvFileValue -Path $SecretBackupPath -Name $Name
+  if (-not $previousValue) {
+    return $true
+  }
+
+  $currentValue = Read-EnvFileValue -Path $EnvPath -Name $Name
+  if ($currentValue -eq $previousValue) {
+    return $true
+  }
+
+  Set-EnvFileValue -Path $EnvPath -Name $Name -Value $previousValue
+  Write-Success "Pre-restore $Name restored from SECRET-DO-NOT-COMMIT.env."
+  return $true
+}
+
 function Copy-RestoreFileToPostgres {
   param(
     [string]$SourcePath,
@@ -2699,23 +2858,16 @@ function Restore-PreRestoreEncryptionKeyBackup {
     [string]$EnvPath
   )
 
-  if (-not $SecretBackupPath -or -not (Test-Path -LiteralPath $SecretBackupPath -PathType Leaf)) {
-    return $true
-  }
+  return (Restore-PreRestoreEnvValueBackup -SecretBackupPath $SecretBackupPath -EnvPath $EnvPath -Name 'N8N_ENCRYPTION_KEY')
+}
 
-  $previousKey = Read-EnvFileValue -Path $SecretBackupPath -Name 'N8N_ENCRYPTION_KEY'
-  if (-not $previousKey) {
-    return $true
-  }
+function Restore-PreRestoreN8nImageBackup {
+  param(
+    [string]$SecretBackupPath,
+    [string]$EnvPath
+  )
 
-  $currentKey = Read-EnvFileValue -Path $EnvPath -Name 'N8N_ENCRYPTION_KEY'
-  if ($currentKey -eq $previousKey) {
-    return $true
-  }
-
-  Set-EnvFileValue -Path $EnvPath -Name 'N8N_ENCRYPTION_KEY' -Value $previousKey
-  Write-Success 'Pre-restore N8N_ENCRYPTION_KEY restored from SECRET-DO-NOT-COMMIT.env.'
-  return $true
+  return (Restore-PreRestoreEnvValueBackup -SecretBackupPath $SecretBackupPath -EnvPath $EnvPath -Name 'N8N_IMAGE')
 }
 
 function Restore-PreviousStackServices {
@@ -2772,6 +2924,7 @@ function Restore-N8nEntitiesBackup {
   param(
     [object]$Backup,
     [string]$BackupEncryptionKey = '',
+    [string]$EnvPath = '',
     [switch]$ImageAlreadyRefreshed
   )
 
@@ -2785,6 +2938,13 @@ function Restore-N8nEntitiesBackup {
     if (-not (Update-N8nImageForRestore)) {
       return $false
     }
+  }
+
+  $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Default 'n8n' -EnvPath $EnvPath
+  $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Default 'n8n' -EnvPath $EnvPath
+  Write-Warning 'Resetting the local n8n Postgres schema so entities import can run at the export migration state.'
+  if ((Clear-PostgresPublicSchema -PostgresUser $postgresUser -PostgresDb $postgresDb) -ne 0) {
+    return $false
   }
 
   $inputDir = $Backup.InputDir
@@ -2908,6 +3068,14 @@ function Restore-LocalN8nFromBackupMenu {
   if (-not $backupN8nImage -and $detected.StagingPath) {
     $backupN8nImage = Find-RestoreBackupEnvValue -Path $detected.StagingPath -Name 'N8N_IMAGE' -TargetEnvPath $resolvedEnvPath
   }
+  if (-not $backupN8nImage -and $detected.Type -eq 'n8n-entities') {
+    $backupN8nImage = Resolve-N8nImageForEntityRestore -Backup $detected
+  }
+  if ($detected.Type -eq 'n8n-entities' -and -not $backupN8nImage) {
+    Write-ErrorMessage 'Could not determine the n8n image version required by this entities export.'
+    Write-Info 'Include the backup .env / SECRET-DO-NOT-COMMIT.env with N8N_IMAGE, or use a Postgres SQL backup.'
+    return
+  }
   if ($detected.HasCredentialEntities -and -not $backupEncryptionKey) {
     Write-MissingCredentialRestoreKeyError
     return
@@ -2938,7 +3106,7 @@ function Restore-LocalN8nFromBackupMenu {
       if (-not (Repair-N8nConfigEncryptionKey)) {
         Write-Warning 'Could not sync local n8n config encryption key before restore completion. Startup will attempt one more repair pass.'
       }
-      $ok = Restore-N8nEntitiesBackup -Backup $detected -BackupEncryptionKey $backupEncryptionKey -ImageAlreadyRefreshed:$n8nImageRefreshed
+      $ok = Restore-N8nEntitiesBackup -Backup $detected -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath -ImageAlreadyRefreshed:$n8nImageRefreshed
     }
     default {
       Write-ErrorMessage 'Unsupported backup type after detection.'
@@ -2948,12 +3116,16 @@ function Restore-LocalN8nFromBackupMenu {
 
   if ($ok) {
     Write-Success 'Local n8n restore completed.'
+    if ($detected.Type -eq 'n8n-entities') {
+      [void](Restore-PreRestoreN8nImageBackup -SecretBackupPath $preRestoreSecretPath -EnvPath $resolvedEnvPath)
+    }
     Restore-PreviousStackServices -PreviousServices $preRestoreServices
     Write-Info 'Verify workflows and saved credentials in n8n.'
   } else {
     Write-ErrorMessage 'Restore failed.'
     $rollbackOk = Restore-PreRestorePostgresBackup -BackupDir $preRestoreRoot -EnvPath $resolvedEnvPath
     [void](Restore-PreRestoreEncryptionKeyBackup -SecretBackupPath $preRestoreSecretPath -EnvPath $resolvedEnvPath)
+    [void](Restore-PreRestoreN8nImageBackup -SecretBackupPath $preRestoreSecretPath -EnvPath $resolvedEnvPath)
     if ($rollbackOk) {
       Restore-PreviousStackServices -PreviousServices $preRestoreServices
       Write-Info 'Verify the rollback database state and saved credentials.'
