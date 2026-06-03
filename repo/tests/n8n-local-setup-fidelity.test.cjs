@@ -803,7 +803,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Get-ComposeProjectName'), /COMPOSE_PROJECT_NAME[\s\S]*config', '--format', 'json'[\s\S]*Split-Path -Leaf \$script:StackRoot/);
   assert.match(functionBody(menu, 'Clear-StoppedN8nOneOffContainers'), /volumes are not removed[\s\S]*com\.docker\.compose\.project=\$projectName[\s\S]*com\.docker\.compose\.service=n8n[\s\S]*com\.docker\.compose\.oneoff=True[\s\S]*docker rm -f <stopped-or-created-n8n-one-off-containers>/);
   assert.match(functionBody(menu, 'Invoke-N8nOneOffCapture'), /Test-ComposeOneOffCreateOnlyFailure[\s\S]*retrying once[\s\S]*Clear-StoppedN8nOneOffContainers[\s\S]*Docker could not create or start the one-off n8n container/);
-  assert.match(functionBody(menu, 'Test-N8nOneOffContainerReady'), /one-off ok[\s\S]*--entrypoint', 'node'[\s\S]*Invoke-N8nOneOffCapture/);
+  assert.match(functionBody(menu, 'Test-N8nOneOffContainerReady'), /'--pull', 'never'[\s\S]*'\-T'[\s\S]*'n8n', 'n8n', '--version'[\s\S]*Invoke-N8nOneOffCapture/);
   assert.match(functionBody(menu, 'Repair-N8nConfigEncryptionKey'), /Invoke-N8nOneOffCapture[\s\S]*n8n config encryption key repair/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /ImageAlreadyRefreshed[\s\S]*Update-N8nImageForRestore/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /'--pull', 'never'[\s\S]*'-T'[\s\S]*import:entities/);

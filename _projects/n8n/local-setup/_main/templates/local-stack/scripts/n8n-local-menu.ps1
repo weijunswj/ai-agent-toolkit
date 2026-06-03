@@ -396,12 +396,11 @@ function Invoke-N8nOneOffCapture {
 function Test-N8nOneOffContainerReady {
   param([string]$MountPath = '')
 
-  $nodeScript = 'console.log(`one-off ok`);'
-  $args = @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '--entrypoint', 'node')
+  $args = @('run', '--rm', '--pull', 'never', '--no-deps', '-T')
   if ($MountPath) {
     $args += @('-v', "${MountPath}:/restore")
   }
-  $args += @('n8n', '-e', $nodeScript)
+  $args += @('n8n', 'n8n', '--version')
 
   $result = Invoke-N8nOneOffCapture -Arguments $args -Context 'n8n one-off container preflight'
   if ($result.ExitCode -eq 0) {
