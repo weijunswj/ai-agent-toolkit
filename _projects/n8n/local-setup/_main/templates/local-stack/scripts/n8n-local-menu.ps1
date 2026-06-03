@@ -2595,6 +2595,28 @@ function Set-LocalEncryptionKeyForRestore {
   return $true
 }
 
+function Test-TrustedRestoreN8nImageRef {
+  param([string]$Image)
+
+  $rawImage = [string]$Image
+  $imageRef = $rawImage.Trim()
+  if (-not $imageRef) { return $true }
+  if ($rawImage -ne $imageRef -or $imageRef -match '\s') { return $false }
+
+  $officialTagged = '\Adocker\.n8n\.io/n8nio/n8n:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\z'
+  $officialDigest = '\Adocker\.n8n\.io/n8nio/n8n@sha256:[a-fA-F0-9]{64}\z'
+  return ($imageRef -match $officialTagged -or $imageRef -match $officialDigest)
+}
+
+function Write-UntrustedRestoreN8nImageError {
+  param([string]$Image)
+
+  $imageRef = ([string]$Image).Trim()
+  Write-ErrorMessage "Backup N8N_IMAGE is not an allowed official n8n image reference: $imageRef"
+  Write-Info 'Restore accepts only docker.n8n.io/n8nio/n8n:<tag> or docker.n8n.io/n8nio/n8n@sha256:<digest> from backup .env files.'
+  Write-Info 'If you intentionally need another image, set N8N_IMAGE manually in the active local .env after verifying the image yourself, then rerun restore without a backup-provided N8N_IMAGE.'
+}
+
 function Set-LocalN8nImageForRestore {
   param(
     [string]$BackupN8nImage,
@@ -2605,6 +2627,11 @@ function Set-LocalN8nImageForRestore {
   if (-not $image) {
     Write-Warning 'No backup N8N_IMAGE was found in the backup .env. If n8n later reports a database schema / image version mismatch, set N8N_IMAGE to the source backup image and retry.'
     return $true
+  }
+
+  if (-not (Test-TrustedRestoreN8nImageRef -Image $image)) {
+    Write-UntrustedRestoreN8nImageError -Image $image
+    return $false
   }
 
   $currentImage = Read-EnvFileValue -Path $EnvPath -Name 'N8N_IMAGE'
@@ -2959,6 +2986,10 @@ function Restore-N8nEntitiesBackup {
   $previousN8nImageEnv = $env:N8N_IMAGE
   $restoreN8nImage = ([string]$Backup.RestoreN8nImage).Trim()
   if ($restoreN8nImage) {
+    if (-not (Test-TrustedRestoreN8nImageRef -Image $restoreN8nImage)) {
+      Write-UntrustedRestoreN8nImageError -Image $restoreN8nImage
+      return $false
+    }
     $env:N8N_IMAGE = $restoreN8nImage
   }
 
@@ -3094,6 +3125,10 @@ function Restore-LocalN8nFromBackupMenu {
   if ($detected.Type -eq 'n8n-entities' -and -not $backupN8nImage) {
     Write-ErrorMessage 'Could not determine the n8n image version required by this entities export.'
     Write-Info 'Include the backup .env / SECRET-DO-NOT-COMMIT.env with N8N_IMAGE, or use a Postgres SQL backup.'
+    return
+  }
+  if ($backupN8nImage -and -not (Test-TrustedRestoreN8nImageRef -Image $backupN8nImage)) {
+    Write-UntrustedRestoreN8nImageError -Image $backupN8nImage
     return
   }
   if ($detected.HasCredentialEntities -and -not $backupEncryptionKey) {
