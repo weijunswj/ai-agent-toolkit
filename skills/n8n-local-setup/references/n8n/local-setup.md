@@ -593,6 +593,8 @@ Required backup env:
 - If the backup env/key is missing, restore stops before stopping services or touching the database.
 - Restore updates the active `.env` `N8N_ENCRYPTION_KEY`.
 - Restore also applies backup `.env` `N8N_IMAGE` when present so the database starts with the source n8n image.
+- Backup `N8N_IMAGE` is accepted only when it points to the official n8n image path: `docker.n8n.io/n8nio/n8n:<tag>` or `docker.n8n.io/n8nio/n8n@sha256:<digest>`.
+- Other backup-provided image refs are refused before restore changes begin. If you intentionally need a custom image, verify it yourself and set `N8N_IMAGE` manually in the active local `.env`.
 - If `N8N_IMAGE` cannot be detected and n8n logs show a database schema / image mismatch, set `N8N_IMAGE` manually to the source backup image and retry.
 
 Safety behaviour:
