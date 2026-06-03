@@ -717,6 +717,10 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Test-PathInsideDirectory',
     'Test-SameResolvedPath',
     'Test-N8nDatabaseImageMismatchLog',
+    'Test-ComposeOneOffCreateOnlyFailure',
+    'Clear-StoppedN8nOneOffContainers',
+    'Invoke-N8nOneOffCapture',
+    'Test-N8nOneOffContainerReady',
     'Find-RestoreEntityDirectory',
     'New-RestoreEntityImportDirectory',
     'Wait-ForServiceImagesAvailable',
@@ -794,9 +798,14 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(entitiesRestoreBody, /Write-MissingCredentialRestoreKeyError[\s\S]*return \$false[\s\S]*import:entities[\s\S]*--truncateTables/);
   assert.match(functionBody(menu, 'Wait-ForServiceImagesAvailable'), /Test-LocalImageExists[\s\S]*Start-Sleep[\s\S]*still not available locally after waiting/);
   assert.match(functionBody(menu, 'Update-N8nImageForRestore'), /pull', 'n8n'[\s\S]*Wait-ForServiceImagesAvailable -Services @\('n8n'\)[\s\S]*Configured n8n image is available locally/);
+  assert.match(functionBody(menu, 'Test-ComposeOneOffCreateOnlyFailure'), /ExitCode[\s\S]*Container .*Creating[\s\S]*Starting entity import/);
+  assert.match(functionBody(menu, 'Clear-StoppedN8nOneOffContainers'), /docker compose rm[\s\S]*stopped one-off n8n containers[\s\S]*volumes are not removed/);
+  assert.match(functionBody(menu, 'Invoke-N8nOneOffCapture'), /Test-ComposeOneOffCreateOnlyFailure[\s\S]*retrying once[\s\S]*Clear-StoppedN8nOneOffContainers[\s\S]*Docker could not create or start the one-off n8n container/);
+  assert.match(functionBody(menu, 'Test-N8nOneOffContainerReady'), /one-off ok[\s\S]*--entrypoint', 'node'[\s\S]*Invoke-N8nOneOffCapture/);
+  assert.match(functionBody(menu, 'Repair-N8nConfigEncryptionKey'), /Invoke-N8nOneOffCapture[\s\S]*n8n config encryption key repair/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /ImageAlreadyRefreshed[\s\S]*Update-N8nImageForRestore/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /'--pull', 'never'[\s\S]*'-T'[\s\S]*import:entities/);
-  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Invoke-ComposeCapture[\s\S]*\$outputText/);
+  assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Invoke-N8nOneOffCapture[\s\S]*n8n entities import[\s\S]*\$outputText/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Migration timestamp mismatch\|different migration states[\s\S]*same N8N_IMAGE version[\s\S]*Postgres SQL backup/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /Migrations file not found[\s\S]*migrations\.jsonl/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /bad decrypt[\s\S]*wrong N8N_ENCRYPTION_KEY/);
@@ -833,7 +842,8 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /HasCredentialEntities = \$detected\.HasCredentialEntities/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Get-RunningServices -EnvPath \$resolvedEnvPath[\s\S]*\$preRestoreImageVersionLines = @\(Get-ImageVersionLines -RunningServices \$runningServices\)[\s\S]*Backup-Postgres -Required -EnvPath \$resolvedEnvPath -BackupDir \$preRestoreRoot -ImageVersionLines \$preRestoreImageVersionLines -ImageSectionHeading 'Running container images before restore stopped services:'/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /detected\.HasCredentialEntities[\s\S]*Write-MissingCredentialRestoreKeyError[\s\S]*return/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /\$n8nImageRefreshed = Update-N8nImageForRestore[\s\S]*Repair-N8nConfigEncryptionKey[\s\S]*ImageAlreadyRefreshed:\$n8nImageRefreshed/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /\$n8nImageRefreshed = Update-N8nImageForRestore[\s\S]*Test-N8nOneOffContainerReady[\s\S]*Set-LocalEncryptionKeyForRestore[\s\S]*Repair-N8nConfigEncryptionKey[\s\S]*ImageAlreadyRefreshed:\$n8nImageRefreshed/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore cancelled because Docker could not start a one-off n8n container/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreviousStackServices -PreviousServices \$preRestoreServices/);
   assert.doesNotMatch(functionBody(menu, 'Get-RestoreBackupType'), /ReadToEnd|StreamReader|Open\(\)/);
   assert.doesNotMatch(menu, /Write-Host .*POSTGRES_PASSWORD|Write-Info .*POSTGRES_PASSWORD|Write-Success .*POSTGRES_PASSWORD|Write-Warning .*POSTGRES_PASSWORD/);

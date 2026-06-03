@@ -260,6 +260,86 @@ function Invoke-ComposeCapture {
   }
 }
 
+function Test-ComposeOneOffCreateOnlyFailure {
+  param([object]$Result)
+
+  if ($null -eq $Result -or $Result.ExitCode -eq 0) {
+    return $false
+  }
+
+  $text = (($Result.Output | ForEach-Object { [string]$_ }) -join "`n").Trim()
+  if (-not $text) {
+    return $false
+  }
+
+  $hasCreateLine = ($text -match 'Container .+ Creating')
+  $hasN8nOutput = ($text -match 'Starting entity import|Error details|Migration timestamp mismatch|Migrations file not found|bad decrypt|N8N_ENCRYPTION_KEY|one-off ok')
+  $hasDockerError = ($text -match 'Error response from daemon|Cannot connect to the Docker daemon|invalid mount|mount denied|no such image|pull access denied|is already in use|permission denied|failed to create|failed to solve')
+
+  return ($hasCreateLine -and -not $hasN8nOutput -and -not $hasDockerError)
+}
+
+function Clear-StoppedN8nOneOffContainers {
+  Write-Info 'docker compose rm -f n8n (cleans stopped one-off n8n containers; volumes are not removed).'
+  $result = Invoke-ComposeCapture -Arguments @('rm', '-f', 'n8n')
+  if ($result.ExitCode -ne 0) {
+    Write-Warning 'Could not clean stopped one-off n8n containers before retry.'
+    foreach ($line in $result.Output) {
+      if ($line) {
+        Write-Warning $line
+      }
+    }
+  }
+}
+
+function Invoke-N8nOneOffCapture {
+  param(
+    [string[]]$Arguments,
+    [string]$Context = 'n8n one-off command'
+  )
+
+  $result = Invoke-ComposeCapture -Arguments $Arguments
+  if ($result.ExitCode -eq 0) {
+    return $result
+  }
+
+  if (-not (Test-ComposeOneOffCreateOnlyFailure -Result $result)) {
+    return $result
+  }
+
+  Write-Warning "$Context failed while Docker was creating the one-off n8n container; cleaning stopped containers and retrying once."
+  Clear-StoppedN8nOneOffContainers
+  $retry = Invoke-ComposeCapture -Arguments $Arguments
+  if ($retry.ExitCode -ne 0 -and (Test-ComposeOneOffCreateOnlyFailure -Result $retry)) {
+    Write-ErrorMessage 'Docker could not create or start the one-off n8n container.'
+    Write-Info 'This failed before n8n import or key repair ran, so it is usually Docker/image/container state rather than backup version or encryption key.'
+    Write-Info 'Restart Docker Desktop or verify the configured N8N_IMAGE is available locally, then retry.'
+  }
+  return $retry
+}
+
+function Test-N8nOneOffContainerReady {
+  param([string]$MountPath = '')
+
+  $nodeScript = 'console.log(`one-off ok`);'
+  $args = @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '--entrypoint', 'node')
+  if ($MountPath) {
+    $args += @('-v', "${MountPath}:/restore")
+  }
+  $args += @('n8n', '-e', $nodeScript)
+
+  $result = Invoke-N8nOneOffCapture -Arguments $args -Context 'n8n one-off container preflight'
+  if ($result.ExitCode -eq 0) {
+    return $true
+  }
+
+  Write-ErrorMessage 'n8n one-off container preflight failed.'
+  foreach ($line in $result.Output) {
+    Write-ErrorMessage $line
+  }
+  return $false
+}
+
 function Test-StackFiles {
   param([string]$EnvPath = '')
 
@@ -865,7 +945,7 @@ config.encryptionKey = key;
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 '@
 
-  $result = Invoke-ComposeCapture -Arguments @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '--entrypoint', 'node', 'n8n', '-e', $nodeScript)
+  $result = Invoke-N8nOneOffCapture -Arguments @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '--entrypoint', 'node', 'n8n', '-e', $nodeScript) -Context 'n8n config encryption key repair'
   if ($result.ExitCode -ne 0) {
     Write-ErrorMessage 'Could not update the local n8n config encryption key.'
     foreach ($line in $result.Output) {
@@ -2602,7 +2682,7 @@ function Restore-N8nEntitiesBackup {
   $importArgs = @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '-v', $mountValue, 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables')
   $composeArgs = @((Get-ComposeGlobalArguments) + $importArgs)
   Write-Info "docker compose $($composeArgs -join ' ')"
-  $result = Invoke-ComposeCapture -Arguments $importArgs
+  $result = Invoke-N8nOneOffCapture -Arguments $importArgs -Context 'n8n entities import'
   foreach ($line in $result.Output) {
     Write-Host $line
   }
@@ -2730,8 +2810,18 @@ function Restore-LocalN8nFromBackupMenu {
   $preRestoreSecretPath = Join-Path $preRestoreRoot 'SECRET-DO-NOT-COMMIT.env'
   Write-Success 'Pre-restore database backup created; rollback .env saved if present.'
 
-  if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
   $n8nImageRefreshed = Update-N8nImageForRestore
+  if (-not $n8nImageRefreshed) { return }
+  $oneOffMountPath = ''
+  if ($detected.Type -eq 'n8n-entities') {
+    $oneOffMountPath = $detected.InputDir
+  }
+  if (-not (Test-N8nOneOffContainerReady -MountPath $oneOffMountPath)) {
+    Write-ErrorMessage 'Restore cancelled because Docker could not start a one-off n8n container.'
+    return
+  }
+
+  if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
   if (-not (Repair-N8nConfigEncryptionKey)) {
     Write-Warning 'Could not sync local n8n config encryption key before restore completion. Startup will attempt one more repair pass.'
   }
