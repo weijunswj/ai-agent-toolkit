@@ -1,0 +1,74 @@
+{
+  "id": "repo-methodology.agent-skill-supply-chain-audit",
+  "category": "repo-methodology",
+  "name": "agent-skill-supply-chain-audit",
+  "title": "Agent Skill Supply-Chain Audit",
+  "module_path": "_projects/repo-methodology/agent-skill-supply-chain-audit",
+  "main_path": "_projects/repo-methodology/agent-skill-supply-chain-audit/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial first-party toolkit project version.",
+  "outputs": [
+    {
+      "kind": "copy",
+      "source": "_main/skill/README.md",
+      "output": "skills/agent-skill-supply-chain-audit/README.md",
+      "notes": "Standalone skill README copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
+      "output": "skills/agent-skill-supply-chain-audit/SKILL.md",
+      "notes": "Standalone skill entrypoint copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
+      "output": "skills/agent-skill-supply-chain-audit/agents/openai.yaml",
+      "notes": "OpenAI platform metadata copied from first-party module source.",
+      "fidelity": "exact"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/agent-skill-supply-chain-audit/README.md",
+      "skills/agent-skill-supply-chain-audit/SKILL.md",
+      "skills/agent-skill-supply-chain-audit/agents/openai.yaml"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "Agent Skill Supply-Chain Audit",
+    "category": "repo-methodology",
+    "summary": "Reusable audit workflow for deciding whether third-party AI agent skills are safe, attributable, and useful enough to convert into toolkit source."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/agent-skill-supply-chain-audit",
+      "summary": "Audits third-party skill folders and repositories for provenance, license, safety, and source-to-surface conversion fit before import."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

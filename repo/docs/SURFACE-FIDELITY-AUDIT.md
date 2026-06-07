@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-01 (`codex/remove-repo-wide-mcp-surface` follow-up)
+Latest update: 2026-06-08 (`agent-skill-supply-chain-audit` addition)
 
 ## Current state
 
@@ -27,9 +27,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 8 |
-| publishedFiles | 163 |
-| declaredOutputFiles | 163 |
+| projects | 9 |
+| publishedFiles | 166 |
+| declaredOutputFiles | 166 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 163 |
+| boundaryRecipeOutputs | 166 |
 | boundaryRecipeFindings | 2 |
 | curatedDirectoryFindings | 2 |
 
@@ -46,14 +46,14 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 89 |
+| declared_generated | 92 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
 
 | Classification | Count |
 | --- | ---: |
-| main_full_fidelity | 114 |
+| main_full_fidelity | 117 |
 | generated_cross_skill_reference | 3 |
 | curated_adapter | 3 |
 | curated_index | 10 |
@@ -82,10 +82,12 @@ Known baseline findings:
 - `_projects/knowledge/knowledge-index-updater`
 - `_projects/n8n/local-setup`
 - `_projects/n8n/workflow-toolkit`
+- `_projects/repo-methodology/agent-skill-supply-chain-audit`
 - `_projects/repo-methodology/context-preserving-ai-publisher`
 
 ## Current skill folders
 
+- `skills/agent-skill-supply-chain-audit/`
 - `skills/ai-coding-agent-rules/`
 - `skills/context-preserving-ai-publisher/`
 - `skills/knowledge-index-updater/`

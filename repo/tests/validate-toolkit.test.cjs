@@ -274,6 +274,7 @@ test('project manifests include the current project modules without repo-wide MC
     'knowledge.knowledge-index-updater',
     'n8n.local-setup',
     'n8n.workflow-toolkit',
+    'repo-methodology.agent-skill-supply-chain-audit',
     'repo-methodology.context-preserving-ai-publisher'
   ]);
   for (const entry of validator.projectManifests()) {

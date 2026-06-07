@@ -51,6 +51,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Secure CI/CD Installer](_projects/cicd/secure-installer/) | CI/CD planning prompt, status templates, and safety policy source. | [_main/](_projects/cicd/secure-installer/_main/) |
 | [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Frontend design guidance, local generator source, and attribution notes. | [_main/](_projects/design/ui-ux-pro-max/_main/) |
 | [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Source-to-surface publishing method and starter templates. | [_main/](_projects/repo-methodology/context-preserving-ai-publisher/_main/) |
+| [Agent Skill Supply-Chain Audit](_projects/repo-methodology/agent-skill-supply-chain-audit/) | Third-party skill provenance, safety, license, and conversion audit source. | [_main/](_projects/repo-methodology/agent-skill-supply-chain-audit/_main/) |
 | [AI Coding Agent Rules](_projects/development/ai-coding-agent-rules/) | Generic agent-rule templates, skill routing source, and n8n rules source. | [_main/](_projects/development/ai-coding-agent-rules/_main/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
 | [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Notion/GitHub knowledge-index skill source. | [_main/](_projects/knowledge/knowledge-index-updater/_main/) |
@@ -68,6 +69,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
 | [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |
 | [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, templates, manifests, and audits. |
+| [Agent Skill Supply-Chain Audit](skills/agent-skill-supply-chain-audit/) | Audit third-party agent skills for provenance, license, safety, and toolkit conversion fit. |
 | [Secure UI/UX Frontend Design](skills/ui-ux-secure-frontend-design/) | Design or review frontend work with accessibility, responsive, privacy, and security guardrails. |
 | [Windows Localhost Workflows](skills/windows-localhost-workflows/) | Start and verify Windows localhost dev services. |
 | [Knowledge Index Updater](skills/knowledge-index-updater/) | Maintain a Notion/GitHub knowledge index with stable source keys and no duplicate rows. |

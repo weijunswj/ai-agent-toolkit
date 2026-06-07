@@ -1,0 +1,11 @@
+interface:
+  display_name: Agent Skill Supply-Chain Audit
+  short_description: Audit third-party skills before toolkit conversion.
+  primary_color: '#0F766E'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: true
