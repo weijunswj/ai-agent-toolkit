@@ -42,6 +42,7 @@ Use installed skills only when they clearly match the task and improve correctne
 | `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
 | `secure-cicd-installer` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |
 | `context-preserving-ai-publisher` | Source-traceable AI-facing repo surfaces, generated skills, templates, manifests, source locks, audits, or anti-drift docs. |
+| `agent-skill-supply-chain-audit` | Reviewing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, and toolkit conversion fit before import. |
 | `windows-localhost-workflows` | Starting, relaunching, verifying, or debugging local Windows dev servers. |
 | `knowledge-index-updater` | Maintaining a Notion/GitHub knowledge index with stable source keys, de-duplication, categorisation, and stale/missing item checks. |
 | `ui-ux-secure-frontend-design` | Frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review. |
