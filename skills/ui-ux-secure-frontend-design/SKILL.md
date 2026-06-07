@@ -133,6 +133,7 @@ Use when the user asks to create, redesign, polish, review, or plan:
    - Mobile behaviour.
    - Security/privacy notes.
 6. Implement or recommend changes.
+   - When a mockup or screenshot has been confirmed as the implementation target, use the mockup-driven implementation loop below.
 7. Run review checklist.
 8. Report what changed, what was not changed, and remaining risks.
 
@@ -177,6 +178,10 @@ Plan components before implementation:
 - Specify validation, error copy, and recovery paths for forms.
 - Specify confirmation, undo, audit, and permission handling for destructive actions.
 - Avoid components that require new dependencies unless approved.
+
+## Mockup-driven implementation
+
+Use this loop only after the user has confirmed a mockup or screenshot as the implementation target. Treat that confirmed reference as the visual acceptance target: render the current UI, capture a screenshot, compare it against the confirmed reference, patch the largest visible mismatches, then screenshot again. Repeat until layout, spacing, typography, colour, imagery, and responsive framing closely match the reference while preserving accessibility, security, and existing app constraints.
 
 ## Implementation review
 
@@ -246,6 +251,7 @@ Choose the smallest useful format:
 - Existing files and stack inspected.
 - Design system or page overrides produced when needed.
 - Components reuse existing patterns where practical.
+- If a mockup or screenshot was confirmed as the implementation target, screenshot comparison was repeated until the UI closely matched it.
 - Accessibility, responsive, performance, privacy, security, and safety gates reviewed.
 - No secrets, private data, third-party scripts, trackers, remote assets, or new dependencies added without approval.
 - Risky UI surfaces identified and safer alternatives proposed.
