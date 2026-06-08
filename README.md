@@ -18,6 +18,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 |---|---|
 | Full guide or source context | Open a project under [_projects/](_projects/), then its `_main/` folder. |
 | Install a skill | Copy the whole skill folder using [Install Skills By Platform](#install-skills-by-platform). |
+| Review skill safety | Use the [Skill Safety Matrix](repo/docs/SKILL-SAFETY-MATRIX.md) before creating, extending, or importing skills. |
 | Maintenance work | Start with [repo/docs/](repo/docs/) and the validation commands below. |
 
 ## Terms
