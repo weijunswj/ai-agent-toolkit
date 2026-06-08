@@ -1927,14 +1927,14 @@ test('validator accepts new skill-publishing modules with creation-center eviden
   const cwd = tempCopy();
   createNewSkillProjectFixture(cwd, {
     skill_creation_review: {
-      existing_skill_review: 'Reviewed current skills and confirmed no existing skill has this fixture trigger or validation role.',
+      existing_skill_review: 'Reviewed current skills before adding new-safe-skill and confirmed no existing skill has this fixture trigger or validation role.',
       decision: 'new_project_skill',
       decision_reason: 'This fixture represents a distinct project module and published skill surface for validation.',
       safety_boundary: 'Instruction-only, local-only, no credentials, no live systems, no installers, and no destructive commands.',
       source_provenance: 'first_party',
       third_party_audit: 'not_applicable_first_party',
       publisher_workflow: 'context-preserving-ai-publisher source-to-surface workflow',
-      routing: 'Would update toolkit skill routing if this fixture were a real user-facing skill.',
+      routing: 'new-safe-skill would be routed in toolkit skill routing if this fixture were a real user-facing skill.',
       validation: [
         'node repo/scripts/sync-toolkit-projects.cjs --check',
         'node repo/scripts/validate-toolkit.cjs'
@@ -1947,6 +1947,34 @@ test('validator accepts new skill-publishing modules with creation-center eviden
   const result = runValidate(cwd);
 
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('validator requires creation-center evidence to name the new skill and routing decision', () => {
+  const cwd = tempCopy();
+  createNewSkillProjectFixture(cwd, {
+    skill_creation_review: {
+      existing_skill_review: 'Reviewed current skills and confirmed no existing skill has this fixture trigger or validation role.',
+      decision: 'new_project_skill',
+      decision_reason: 'This fixture represents a distinct project module and published skill surface for validation.',
+      safety_boundary: 'Instruction-only, local-only, no credentials, no live systems, no installers, and no destructive commands.',
+      source_provenance: 'first_party',
+      third_party_audit: 'not_applicable_first_party',
+      publisher_workflow: 'context-preserving-ai-publisher source-to-surface workflow',
+      routing: 'This fixture will be documented in project review notes before publication.',
+      validation: [
+        'node repo/scripts/sync-toolkit-projects.cjs --check',
+        'node repo/scripts/validate-toolkit.cjs'
+      ]
+    }
+  });
+  addNewSafeSkillSafetyMatrixRow(cwd);
+  addSkillRoutingDecision(cwd);
+
+  const result = runValidate(cwd);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /development\.new-safe-skill skill_creation_review\.existing_skill_review must mention new skill new-safe-skill/);
+  assert.match(result.stderr, /development\.new-safe-skill skill_creation_review\.routing must document whether new-safe-skill is routed or intentionally omitted/);
 });
 
 test('sync rejects source_only manifests that publish skill entrypoints', () => {

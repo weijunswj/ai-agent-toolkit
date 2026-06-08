@@ -12,27 +12,20 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Codex n8n Local Pack
 
-Collects [AI Coding Agent Rules](../../../ai-coding-agent-rules/), [n8n Agent Rules](../../../n8n-agent-rules/), the optional [Codex n8n adapter](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md), [local Docker Compose stack templates](../../templates/local-stack/), optional Codex MCP feature config, and local/Hostinger n8n setup guides.
+Pack inventory for Codex agents working with local n8n material. It points to canonical rules, references, templates, and metadata without duplicating the full runtime guide.
 
-Optional AI-coding-agent MCP config is secondary and not part of the beginner local setup path.
+Review [pack.json](pack.json) before copying files.
 
-Review [pack.json](pack.json) before use.
+## Contains
 
-## Instruction files
+- [AI Coding Agent Rules](../../../ai-coding-agent-rules/) and the Codex repo-local `AGENTS.md` template.
+- [n8n Agent Rules](../../../n8n-agent-rules/) and the optional [Codex n8n adapter](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md).
+- [Local stack templates](../../templates/local-stack/), optional Codex MCP feature config, and the local/Hostinger n8n guides.
 
-1. Copy or merge [repo-local/AGENTS.managed.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) into the target repo root as `AGENTS.md`.
-2. Install or load [n8n Agent Rules](../../../n8n-agent-rules/).
-3. Optionally merge [AGENTS.n8n-brief.template.md](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md) into the same file.
+## Review Notes
 
-If the target repo already has `AGENTS.md`, do not overwrite it; produce a merge/diff plan first. Only merge/append the adapter rules after explicit current-turn approval.
-
-## Local runtime
-
-1. Copy everything inside [templates/local-stack/](../../templates/local-stack/) into `%USERPROFILE%\.n8n-local` or another local folder outside this repo.
-2. Copy [.env.example](../../templates/local-stack/.env.example) to a new file named `.env`.
-3. Fill placeholders locally in `.env`; do not edit `.env.example`.
-4. Start through [_n8n-local.cmd](../../templates/local-stack/_n8n-local.cmd).
-
-Launcher backup and recovery options are local/dev database restore only, not production restore or the regular workflow JSON flow.
-
-Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live imports/exports.
+- If the target repo already has `AGENTS.md`, produce a merge/diff plan first and do not overwrite it.
+- Use n8n Agent Rules before workflow, import/export, credential, execution, repo/live sync, or live-instance work.
+- Optional AI-coding-agent MCP config is secondary and not part of the beginner local path.
+- Local launcher backup and recovery options are local/dev database restore only, not production restore or the regular workflow JSON flow.
+- Never commit `.env`, credentials, runtime payloads, `.n8n-local/`, `.tmp/`, or live imports/exports.
