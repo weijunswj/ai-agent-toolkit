@@ -14,8 +14,8 @@
     "suspiciousPublishedSurfaces": 0,
     "duplicateProjectContentGroups": 0,
     "boundaryRecipeOutputs": 166,
-    "boundaryRecipeFindings": 2,
-    "curatedDirectoryFindings": 2
+    "boundaryRecipeFindings": 0,
+    "curatedDirectoryFindings": 0
   },
   "issueKeys": {
     "undeclaredPublishedFiles": [],
@@ -29,13 +29,7 @@
     "sharedSurfaceMetadataFindings": [],
     "suspiciousPublishedSurfaces": [],
     "duplicateProjectContentGroups": [],
-    "boundaryRecipeFindings": [
-      "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md <= _projects/n8n/local-setup/curated_output_for_ai/packs/claude-code-n8n-local/README.md: suspicious_curated_runtime: curated source has runtime markers: Install, Setup; curated source has numbered runtime setup steps: 2",
-      "skills/n8n-local-setup/packs/codex-n8n-local/README.md <= _projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/README.md: suspicious_curated_runtime: curated source has runtime markers: Install, Setup; curated source has numbered runtime setup steps: 2"
-    ],
-    "curatedDirectoryFindings": [
-      "_projects/n8n/local-setup/curated_output_for_ai/packs/claude-code-n8n-local/README.md: many numbered setup steps; runtime markers: Install, Setup; numbered runtime setup steps: 2",
-      "_projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/README.md: many numbered setup steps; runtime markers: Install, Setup; numbered runtime setup steps: 2"
-    ]
+    "boundaryRecipeFindings": [],
+    "curatedDirectoryFindings": []
   }
 }

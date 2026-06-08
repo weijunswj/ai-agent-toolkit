@@ -671,6 +671,16 @@ function markdownSection(text, heading) {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
+function parseSkillRouting(routing) {
+  const routedSection = markdownSection(routing, 'Current Toolkit Skill Routing');
+  const omittedSection = markdownSection(routing, 'Intentionally Omitted Skills');
+  const routed = [...routedSection.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((match) => match[1]).sort();
+  const omitted = [...omittedSection.matchAll(/^-\s*`([^`]+)`:\s*(.+)$/gm)]
+    .map((match) => ({ name: match[1], reason: match[2].trim() }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { routed, omitted };
+}
+
 function validateSkillRouting(errors) {
   const routingPath = '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md';
   if (!existsRel(routingPath)) {
@@ -679,12 +689,7 @@ function validateSkillRouting(errors) {
   }
 
   const routing = readText(routingPath);
-  const routedSection = markdownSection(routing, 'Current Toolkit Skill Routing');
-  const omittedSection = markdownSection(routing, 'Intentionally Omitted Skills');
-  const routed = [...routedSection.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((match) => match[1]).sort();
-  const omitted = [...omittedSection.matchAll(/^-\s*`([^`]+)`:\s*(.+)$/gm)]
-    .map((match) => ({ name: match[1], reason: match[2].trim() }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const { routed, omitted } = parseSkillRouting(routing);
   const omittedNames = omitted.map((entry) => entry.name);
   const currentNames = skillDirs().map((skillDir) => path.basename(skillDir)).sort();
   const currentSet = new Set(currentNames);
@@ -828,6 +833,15 @@ function publishesSkillSurface(manifest) {
   );
 }
 
+function textMentions(value, token) {
+  return String(value || '').toLowerCase().includes(String(token || '').toLowerCase());
+}
+
+function reviewDocumentsSkillRoutingDecision(value, skill) {
+  const text = String(value || '');
+  return textMentions(text, skill) && /\b(?:route|routed|routes|routing|omit|omits|omitted|omission)\b/i.test(text);
+}
+
 function validateSkillCreationCenter(errors) {
   const baselinePath = 'repo/docs/skill-creation-center-baseline.json';
   let baseline;
@@ -917,6 +931,14 @@ function validateSkillCreationCenter(errors) {
     }
     if (!Array.isArray(review.validation) || review.validation.length === 0 || review.validation.some((item) => typeof item !== 'string' || !item.trim())) {
       fail(errors, `${manifest.id} skill_creation_review.validation must list at least one validation command`);
+    }
+    for (const entry of newSkillEntries) {
+      if (!textMentions(review.existing_skill_review, entry.skill)) {
+        fail(errors, `${manifest.id} skill_creation_review.existing_skill_review must mention new skill ${entry.skill}`);
+      }
+      if (!reviewDocumentsSkillRoutingDecision(review.routing, entry.skill)) {
+        fail(errors, `${manifest.id} skill_creation_review.routing must document whether ${entry.skill} is routed or intentionally omitted`);
+      }
     }
   }
 }
@@ -1892,6 +1914,7 @@ if (require.main === module) {
 
 module.exports = {
   isAutoSyncGeneratedOutputPath,
+  parseSkillRouting,
   parseFrontMatter,
   projectManifests,
   runValidation,

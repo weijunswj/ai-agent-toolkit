@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const validator = require('../scripts/validate-toolkit.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const routingPartial = path.join(
@@ -27,15 +28,6 @@ function skillNames() {
     .map((entry) => entry.name)
     .filter((name) => fs.existsSync(path.join(repoRoot, 'skills', name, 'SKILL.md')))
     .sort();
-}
-
-function section(text, heading) {
-  const marker = `## ${heading}\n`;
-  const start = text.indexOf(marker);
-  assert.notEqual(start, -1, `missing section: ${heading}`);
-  const contentStart = start + marker.length;
-  const nextHeading = text.indexOf('\n## ', contentStart);
-  return nextHeading === -1 ? text.slice(contentStart) : text.slice(contentStart, nextHeading);
 }
 
 function duplicates(values) {
@@ -124,19 +116,19 @@ function createSymlinkOrSkip(t, target, linkPath, type) {
 
 test('toolkit skill routing covers current skill folders or documents omissions', () => {
   const routing = readText(routingPartial);
-  const routedSection = section(routing, 'Current Toolkit Skill Routing');
-  const omittedSection = section(routing, 'Intentionally Omitted Skills');
-
-  const routed = [...routedSection.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((match) => match[1]).sort();
-  const omitted = [...omittedSection.matchAll(/^-\s*`([^`]+)`:\s*(.+)$/gm)]
-    .map((match) => ({ name: match[1], reason: match[2].trim() }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const { routed, omitted } = validator.parseSkillRouting(routing);
   const omittedNames = omitted.map((entry) => entry.name);
   const current = skillNames();
   const currentSet = new Set(current);
+  const omittedSet = new Set(omittedNames);
 
   assert.deepEqual(duplicates(routed), [], 'routing table should not list a skill twice');
   assert.deepEqual(duplicates(omittedNames), [], 'omitted skills should not list a skill twice');
+  assert.deepEqual(
+    routed.filter((name) => omittedSet.has(name)),
+    [],
+    'a skill should not be both routed and intentionally omitted'
+  );
 
   for (const name of current) {
     assert.ok(

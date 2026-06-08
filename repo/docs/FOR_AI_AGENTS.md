@@ -65,6 +65,8 @@ Create a new project module plus published skill only when the work has a distin
 
 Use [Skill Safety Matrix](SKILL-SAFETY-MATRIX.md) as the maintained catalog of current skill triggers, risk classes, companion skills, provenance, and approval boundaries before creating, extending, or importing skills.
 
+Validation treats each concrete `skills/<skill-name>/SKILL.md` entrypoint as the Skill Creation Center review boundary. A new skill ID outside `repo/docs/skill-creation-center-baseline.json` `existing_skill_ids` must include `skill_creation_review` evidence in the owning `toolkit.project.json`, even when an existing baseline project module publishes it. That evidence must name the new skill and document whether the skill is routed or intentionally omitted.
+
 For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved conversions must go through `context-preserving-ai-publisher` and this repo's source-to-surface workflow.
 
 Prioritize repo safety, device safety, provenance, attribution, validation, and practical usefulness over adding more surface area.
