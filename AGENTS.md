@@ -289,6 +289,18 @@ Change managed sections from the source file or generator, then run sync/check.
 - Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, production, destructive, or privileged external actions without explicit current-turn approval naming the target and allowed operation.
 - Do not weaken validation, schemas, guardrails, attribution, generated-output ownership, or local-only safety constraints just to make a check pass.
 
+## Skill Creation Center
+
+This repo is the canonical skill creation and conversion center.
+
+Before adding a new skill, skill pack, adapter, template, or project module, inspect the existing `skills/**` surfaces, related `_projects/**` modules, README skill tables, and toolkit skill-routing source. Prefer extending an existing skill when the use case fits its trigger, safety boundary, source model, and validation path without making that skill bloated or ambiguous.
+
+Create a new project module plus published skill only when the work has a distinct trigger, domain, safety boundary, source/provenance requirement, references/templates/assets, or validation path.
+
+For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved conversions must go through `context-preserving-ai-publisher` and this repo's source-to-surface workflow.
+
+Prioritize repo safety, device safety, provenance, attribution, validation, and practical usefulness over adding more surface area.
+
 ## Validation And PR Updates
 
 - Run the smallest relevant local validation before pushing. Use targeted tests/checks for touched scripts, docs, generated surfaces, or managed instruction files.
