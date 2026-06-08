@@ -10,5 +10,18 @@
     "repo-methodology.agent-skill-supply-chain-audit",
     "repo-methodology.context-preserving-ai-publisher"
   ],
-  "notes": "Baseline of skill-publishing project modules that existed before the Skill Creation Center gate. New skill-publishing modules outside this list must include skill_creation_review evidence in toolkit.project.json."
+  "existing_skill_ids": [
+    "agent-skill-supply-chain-audit",
+    "ai-coding-agent-rules",
+    "context-preserving-ai-publisher",
+    "knowledge-index-updater",
+    "n8n-agent-rules",
+    "n8n-local-setup",
+    "n8n-workflow-helper-scripts",
+    "n8n-workflow-templates",
+    "secure-cicd-installer",
+    "ui-ux-secure-frontend-design",
+    "windows-localhost-workflows"
+  ],
+  "notes": "Baseline of skill-publishing project modules and concrete skill entrypoints that existed before the Skill Creation Center gate. New skills outside existing_skill_ids must include skill_creation_review evidence in toolkit.project.json, even when they are added by an existing project module."
 }
