@@ -661,6 +661,51 @@ function validateSkillSafetyMatrix(errors) {
   }
 }
 
+function markdownSection(text, heading) {
+  const pattern = new RegExp(`^## ${escapeRegExp(heading)}\\s*$`, 'm');
+  const match = pattern.exec(text);
+  if (!match) return '';
+  const start = match.index + match[0].length;
+  const rest = text.slice(start);
+  const next = rest.search(/^##\s+/m);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
+function validateSkillRouting(errors) {
+  const routingPath = '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md';
+  if (!existsRel(routingPath)) {
+    fail(errors, `${routingPath} is missing`);
+    return;
+  }
+
+  const routing = readText(routingPath);
+  const routedSection = markdownSection(routing, 'Current Toolkit Skill Routing');
+  const omittedSection = markdownSection(routing, 'Intentionally Omitted Skills');
+  const routed = [...routedSection.matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((match) => match[1]).sort();
+  const omitted = [...omittedSection.matchAll(/^-\s*`([^`]+)`:\s*(.+)$/gm)]
+    .map((match) => ({ name: match[1], reason: match[2].trim() }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const omittedNames = omitted.map((entry) => entry.name);
+  const currentNames = skillDirs().map((skillDir) => path.basename(skillDir)).sort();
+  const currentSet = new Set(currentNames);
+
+  for (const name of duplicates(routed)) fail(errors, `${routingPath} routes ${name} more than once`);
+  for (const name of duplicates(omittedNames)) fail(errors, `${routingPath} omits ${name} more than once`);
+
+  for (const name of currentNames) {
+    if (!routed.includes(name) && !omittedNames.includes(name)) {
+      fail(errors, `${routingPath} is missing routing or omission for skills/${name}/`);
+    }
+  }
+  for (const name of routed) {
+    if (!currentSet.has(name)) fail(errors, `${routingPath} routes unknown skill ${name}`);
+  }
+  for (const { name, reason } of omitted) {
+    if (!currentSet.has(name)) fail(errors, `${routingPath} omits unknown skill ${name}`);
+    if (reason.length < 12) fail(errors, `${routingPath} omission for ${name} needs a concrete reason`);
+  }
+}
+
 function validateExecutables(errors) {
   for (const entry of listFiles()) {
     const rel = entry.relPath;
@@ -757,11 +802,18 @@ function validateProjectModules(errors) {
   for (const error of result.errors) fail(errors, error);
 }
 
+function skillEntrypointOutputs(manifest) {
+  return (manifest.outputs || [])
+    .map((output) => {
+      const outputPath = String(output?.output || '').replace(/\\/g, '/');
+      const match = outputPath.match(/^skills\/([^/]+)\/SKILL\.md$/);
+      return match ? { output: outputPath, skill: match[1] } : null;
+    })
+    .filter(Boolean);
+}
+
 function hasSkillEntrypointOutput(manifest) {
-  return (manifest.outputs || []).some((output) => {
-    const outputPath = String(output?.output || '').replace(/\\/g, '/');
-    return /^skills\/[^/]+\/SKILL\.md$/.test(outputPath);
-  });
+  return skillEntrypointOutputs(manifest).length > 0;
 }
 
 function publishesSkillSurface(manifest) {
@@ -795,21 +847,38 @@ function validateSkillCreationCenter(errors) {
   if (new Set(baselineIds).size !== baselineIds.length) {
     fail(errors, `${baselinePath} existing_skill_project_ids must not contain duplicates`);
   }
+  const baselineSkillIds = baseline.existing_skill_ids;
+  if (!Array.isArray(baselineSkillIds) || baselineSkillIds.some((id) => typeof id !== 'string' || !id.trim())) {
+    fail(errors, `${baselinePath} existing_skill_ids must be an array of non-empty strings`);
+    return;
+  }
+  const sortedSkillIds = [...baselineSkillIds].sort((a, b) => a.localeCompare(b));
+  if (baselineSkillIds.join('\n') !== sortedSkillIds.join('\n')) {
+    fail(errors, `${baselinePath} existing_skill_ids must be sorted`);
+  }
+  if (new Set(baselineSkillIds).size !== baselineSkillIds.length) {
+    fail(errors, `${baselinePath} existing_skill_ids must not contain duplicates`);
+  }
 
-  const baselineSet = new Set(baselineIds);
+  const baselineSkillSet = new Set(baselineSkillIds);
   const manifests = projectManifests();
-  const currentSkillIds = new Set(
+  const currentSkillProjectIds = new Set(
     manifests
       .filter((manifest) => publishesSkillSurface(manifest))
       .map((manifest) => manifest.id)
   );
+  const currentSkillIds = new Set(manifests.flatMap((manifest) => skillEntrypointOutputs(manifest).map((entry) => entry.skill)));
 
   for (const id of baselineIds) {
-    if (!currentSkillIds.has(id)) fail(errors, `${baselinePath} references missing skill project: ${id}`);
+    if (!currentSkillProjectIds.has(id)) fail(errors, `${baselinePath} references missing skill project: ${id}`);
+  }
+  for (const id of baselineSkillIds) {
+    if (!currentSkillIds.has(id)) fail(errors, `${baselinePath} references missing skill id: ${id}`);
   }
 
   for (const manifest of manifests) {
-    if (!publishesSkillSurface(manifest) || baselineSet.has(manifest.id)) continue;
+    const newSkillEntries = skillEntrypointOutputs(manifest).filter((entry) => !baselineSkillSet.has(entry.skill));
+    if (!publishesSkillSurface(manifest) || newSkillEntries.length === 0) continue;
     const review = manifest.skill_creation_review;
     if (!review || typeof review !== 'object' || Array.isArray(review)) {
       fail(errors, `${manifest.id} must include skill_creation_review for new skill-publishing modules`);
@@ -1784,6 +1853,7 @@ function runValidation() {
   validatePacks(errors);
   validateSkills(errors);
   validateSkillSafetyMatrix(errors);
+  validateSkillRouting(errors);
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
   validateDocContract(errors);

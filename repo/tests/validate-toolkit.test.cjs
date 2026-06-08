@@ -354,11 +354,11 @@ function createNewSkillProjectFixture(cwd, options = {}) {
   writeJsonFile(path.join(projectDir, 'toolkit.project.json'), manifest);
 }
 
-function addNewSafeSkillSafetyMatrixRow(cwd) {
+function addNewSafeSkillSafetyMatrixRow(cwd, skillName = 'new-safe-skill') {
   const matrixPath = path.join(cwd, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md');
   const matrix = readTextFile(matrixPath);
   const row = [
-    '| [new-safe-skill](../../skills/new-safe-skill/)',
+    `| [${skillName}](../../skills/${skillName}/)`,
     'Fixture trigger for validation-only skill creation center tests.',
     'Low',
     'Fixture local files only.',
@@ -374,6 +374,82 @@ function addNewSafeSkillSafetyMatrixRow(cwd) {
     matrix.replace('\n\n## Description Review Notes\n', `\n${row}\n\n## Description Review Notes\n`),
     'utf8'
   );
+}
+
+function addSkillRoutingDecision(cwd, skillName = 'new-safe-skill') {
+  const routingPath = path.join(
+    cwd,
+    '_projects',
+    'development',
+    'ai-coding-agent-rules',
+    '_main',
+    '_partials',
+    'toolkit-skill-routing.md'
+  );
+  const routing = readTextFile(routingPath);
+  const row = `| \`${skillName}\` | Fixture trigger for validation-only skill routing checks. |`;
+  fs.writeFileSync(
+    routingPath,
+    routing.replace('\n\n## Intentionally Omitted Skills\n', `\n${row}\n\n## Intentionally Omitted Skills\n`),
+    'utf8'
+  );
+}
+
+function addSkillOutputToAiCodingAgentRules(cwd, skillName = 'existing-project-new-skill') {
+  const sourceDir = path.join(
+    cwd,
+    '_projects',
+    'development',
+    'ai-coding-agent-rules',
+    'curated_output_for_ai',
+    'skills',
+    skillName
+  );
+  const outputDir = path.join(cwd, 'skills', skillName);
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const readme = `# ${skillName}\n\nFixture skill from an existing baseline project.\n`;
+  const skill = [
+    '---',
+    `name: ${skillName}`,
+    'description: Use when testing per-skill creation center baselines.',
+    '---',
+    '',
+    `# ${skillName}`,
+    '',
+    'Fixture skill used to ensure baseline exemptions attach to skill entrypoints, not project IDs.',
+    '',
+    'Use this fixture when validating that an existing project module cannot add a new published skill entrypoint without fresh creation-center evidence. The fixture is intentionally local-only and instruction-only so it exercises repository validation without introducing package installation, network access, credentials, live systems, destructive actions, or third-party material. Agents should inspect the relevant files, make the smallest safe local edit, run targeted validation, and report the exact validation result.',
+    ''
+  ].join('\n');
+  fs.writeFileSync(path.join(sourceDir, 'README.md'), readme, 'utf8');
+  fs.writeFileSync(path.join(sourceDir, 'SKILL.md'), skill, 'utf8');
+  fs.writeFileSync(path.join(outputDir, 'README.md'), readme, 'utf8');
+  fs.writeFileSync(path.join(outputDir, 'SKILL.md'), skill, 'utf8');
+
+  const manifestPath = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.outputs.push(
+    {
+      kind: 'copy',
+      source: `curated_output_for_ai/skills/${skillName}/README.md`,
+      output: `skills/${skillName}/README.md`,
+      notes: 'Fixture README for per-skill baseline validation.',
+      fidelity: 'exact',
+      notice: false
+    },
+    {
+      kind: 'copy',
+      source: `curated_output_for_ai/skills/${skillName}/SKILL.md`,
+      output: `skills/${skillName}/SKILL.md`,
+      notes: 'Fixture skill entrypoint for per-skill baseline validation.',
+      fidelity: 'exact',
+      notice: false
+    }
+  );
+  manifest.writes.allowed.push(`skills/${skillName}/README.md`, `skills/${skillName}/SKILL.md`);
+  writeJsonFile(manifestPath, manifest);
 }
 
 function manifestsById() {
@@ -514,6 +590,8 @@ test('project metadata supports all declared publish_as values', () => {
     const manifest = readJsonFile(manifestPath);
     manifest.surface.publish_as = publishAs;
     if (publishAs === 'source_only') {
+      manifest.outputs = manifest.outputs.filter((output) => output.output !== 'skills/n8n-local-setup/SKILL.md');
+      manifest.writes.allowed = manifest.writes.allowed.filter((output) => output !== 'skills/n8n-local-setup/SKILL.md');
       manifest.surface.skill = { status: 'not_applicable' };
       manifest.surface.mcp = { status: 'not_applicable' };
     }
@@ -1780,6 +1858,7 @@ test('validator detects new skill-publishing modules from skill outputs', () => 
   const cwd = tempCopy();
   createNewSkillProjectFixture(cwd);
   addNewSafeSkillSafetyMatrixRow(cwd);
+  addSkillRoutingDecision(cwd);
   const manifestPath = path.join(cwd, '_projects', 'development', 'new-safe-skill', 'toolkit.project.json');
   const manifest = readJsonFile(manifestPath);
   manifest.surface.publish_as = 'source_only';
@@ -1789,6 +1868,30 @@ test('validator detects new skill-publishing modules from skill outputs', () => 
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /development\.new-safe-skill must include skill_creation_review/);
+});
+
+test('validator requires creation-center evidence for new skill outputs from baselined projects', () => {
+  const cwd = tempCopy();
+  addSkillOutputToAiCodingAgentRules(cwd);
+  addNewSafeSkillSafetyMatrixRow(cwd, 'existing-project-new-skill');
+  addSkillRoutingDecision(cwd, 'existing-project-new-skill');
+
+  const result = runValidate(cwd);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /development\.ai-coding-agent-rules must include skill_creation_review for new skill-publishing modules/);
+});
+
+test('validator reports review, safety matrix, and routing gaps for new skill outputs', () => {
+  const cwd = tempCopy();
+  createNewSkillProjectFixture(cwd);
+
+  const result = runValidate(cwd);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /development\.new-safe-skill must include skill_creation_review/);
+  assert.match(result.stderr, /repo\/docs\/SKILL-SAFETY-MATRIX\.md is missing skills\/new-safe-skill\//);
+  assert.match(result.stderr, /toolkit-skill-routing\.md is missing routing or omission for skills\/new-safe-skill\//);
 });
 
 test('validator accepts new skill-publishing modules with creation-center evidence', () => {
@@ -1810,10 +1913,39 @@ test('validator accepts new skill-publishing modules with creation-center eviden
     }
   });
   addNewSafeSkillSafetyMatrixRow(cwd);
+  addSkillRoutingDecision(cwd);
 
   const result = runValidate(cwd);
 
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('sync rejects source_only manifests that publish skill entrypoints', () => {
+  const cwd = tempCopy();
+  createNewSkillProjectFixture(cwd);
+  const manifestPath = path.join(cwd, '_projects', 'development', 'new-safe-skill', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.surface.publish_as = 'source_only';
+  manifest.surface.skill = { status: 'not_applicable' };
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /development\.new-safe-skill source_only projects must not publish skill entrypoints/);
+});
+
+test('sync rejects skill surface paths without matching skill entrypoint outputs', () => {
+  const cwd = tempCopy();
+  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.surface.skill.path = 'skills/does-not-match-entrypoint';
+  writeJsonFile(manifestPath, manifest);
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /n8n\.local-setup surface\.skill\.path must match a declared skill entrypoint output/);
 });
 
 test('validator requires skill safety matrix coverage for every current skill', () => {

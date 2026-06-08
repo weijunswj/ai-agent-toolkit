@@ -196,6 +196,43 @@ function isRootSurfacePath(relPath) {
   return rootSurfacePrefixes.some((prefix) => relPath.startsWith(prefix));
 }
 
+function skillEntrypointOutputs(project) {
+  return (project.outputs || [])
+    .map((output) => slash(String(output?.output || '').replace(/\\/g, '/')))
+    .filter((outputPath) => /^skills\/[^/]+\/SKILL\.md$/.test(outputPath))
+    .map((outputPath) => ({
+      output: outputPath,
+      skillPath: outputPath.replace(/\/SKILL\.md$/, '')
+    }));
+}
+
+function validateSkillSurfaceConsistency(errors, project) {
+  const entrypoints = skillEntrypointOutputs(project);
+  const hasEntrypoint = entrypoints.length > 0;
+  const publishAs = project.surface?.publish_as;
+  const skillSurface = project.surface?.skill;
+  const skillStatus = skillSurface?.status;
+
+  if (publishAs === 'source_only' && skillStatus && skillStatus !== 'not_applicable') {
+    fail(errors, `${project.id} source_only projects must mark surface.skill.status as not_applicable`);
+  }
+  if (publishAs === 'source_only' && hasEntrypoint) {
+    fail(errors, `${project.id} source_only projects must not publish skill entrypoints: ${entrypoints.map((entry) => entry.output).join(', ')}`);
+  }
+  if (publishAs === 'skill' && skillStatus === 'not_applicable') {
+    fail(errors, `${project.id} skill projects must publish surface.skill metadata`);
+  }
+  if (publishAs === 'skill' && !hasEntrypoint) {
+    fail(errors, `${project.id} skill projects must declare at least one skills/*/SKILL.md output`);
+  }
+  if (skillStatus && skillStatus !== 'not_applicable' && hasEntrypoint) {
+    const surfacePath = slash(path.posix.normalize(String(skillSurface.path || '').replace(/\\/g, '/'))).replace(/\/+$/, '');
+    if (!entrypoints.some((entry) => entry.skillPath === surfacePath)) {
+      fail(errors, `${project.id} surface.skill.path must match a declared skill entrypoint output`);
+    }
+  }
+}
+
 function validateForbiddenFiles(errors, project) {
   let mainPath;
   try {
@@ -350,6 +387,7 @@ function validateProjectShape(errors, relPath) {
       fail(errors, `${project.id} curated output source must start with curated_output_for_ai/: ${output.output}`);
     }
   }
+  validateSkillSurfaceConsistency(errors, project);
 
   return project;
 }
