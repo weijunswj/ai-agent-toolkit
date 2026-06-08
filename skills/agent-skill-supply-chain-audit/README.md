@@ -34,6 +34,7 @@ The audit should produce a concise verdict with:
 - License and attribution status.
 - Unsafe or rejected material.
 - Safe reusable material.
+- Usefulness and token-bloat decision.
 - Required conversion edits.
 - Conversion handoff for the source-preserving publisher workflow.
 - Proposed `_projects/**` source placement and generated `skills/**` outputs.

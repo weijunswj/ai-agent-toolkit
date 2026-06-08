@@ -1,0 +1,95 @@
+{
+  "id": "development.local-ai-stack-safety",
+  "category": "development",
+  "name": "local-ai-stack-safety",
+  "title": "Local AI Stack Safety",
+  "module_path": "_projects/development/local-ai-stack-safety",
+  "main_path": "_projects/development/local-ai-stack-safety/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial first-party lightweight safety-review skill version.",
+  "outputs": [
+    {
+      "kind": "copy",
+      "source": "_main/skill/README.md",
+      "output": "skills/local-ai-stack-safety/README.md",
+      "notes": "Standalone skill README copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
+      "output": "skills/local-ai-stack-safety/SKILL.md",
+      "notes": "Standalone skill entrypoint copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
+      "output": "skills/local-ai-stack-safety/agents/openai.yaml",
+      "notes": "OpenAI platform metadata copied from first-party module source.",
+      "fidelity": "exact"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/local-ai-stack-safety/README.md",
+      "skills/local-ai-stack-safety/SKILL.md",
+      "skills/local-ai-stack-safety/agents/openai.yaml"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "skill_creation_review": {
+    "existing_skill_review": "Reviewed current skills before adding local-ai-stack-safety: n8n-agent-rules, n8n-local-setup, windows-localhost-workflows, secure-cicd-installer, ai-coding-agent-rules, and context-preserving-ai-publisher. No existing skill covers this exact non-n8n safety-review trigger without either being too narrow or too broad.",
+    "trigger": "Use only when reviewing or planning local AI stack setup such as local LLM runners, model servers, Stable Diffusion or ComfyUI-style web UIs, vector databases, model downloads, GPU/runtime changes, or exposing local AI endpoints. Do not use for ordinary AI API coding, model prompting, or general application work.",
+    "decision": "new_project_skill",
+    "decision_reason": "Local AI Stack Safety has a distinct safety boundary and invocation trigger, so folding it into ai-coding-agent-rules would make the always-adjacent coding rules heavier while hiding the setup/exposure review boundary.",
+    "unique_value": "Forces a short risk review before high-impact local setup or service exposure work that agents might otherwise treat as ordinary setup commands.",
+    "runtime_footprint": "SKILL.md is intentionally short, review-only, and has no required long references or bundled tools; optional detail is not loaded by default.",
+    "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because the useful behavior is a compact safety review, not an installer or tutorial.",
+    "output_contract": "Return a compact Local AI Stack Safety Review with risk level, blocked actions, approval-gated actions, safer first-run plan, files/settings to inspect, and validation checks such as localhost-only health checks or port binding review.",
+    "anti_bloat_review": "The skill is rejected for ordinary coding and model-general advice; it triggers only on setup/exposure/credential/live-system risk and produces a compact review instead of a tutorial.",
+    "safety_boundary": "Review-only by default. Installation, model pulls, Docker, public tunnels, driver/runtime changes, shell profile edits, credentials, or non-local network exposure require explicit current-turn approval.",
+    "source_provenance": "first_party",
+    "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted.",
+    "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, routing updates, safety matrix updates, sync, and validation.",
+    "routing": "local-ai-stack-safety is routed only for local-ai-stack-safety review/planning tasks involving local AI runtimes, model servers, model downloads, GPU/runtime setup, local AI web UIs, or endpoint exposure.",
+    "validation": [
+      "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "node --test repo/tests/skill-routing.test.cjs",
+      "node repo/scripts/validate-toolkit.cjs"
+    ]
+  },
+  "project": {
+    "name": "Local AI Stack Safety",
+    "category": "development",
+    "summary": "Small safety-review skill for local AI runtimes, model servers, model downloads, GPU/runtime setup, local AI web UIs, and endpoint exposure."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/local-ai-stack-safety",
+      "summary": "Small safety-review skill for local AI runtimes, model servers, model downloads, GPU/runtime setup, local AI web UIs, and endpoint exposure."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

@@ -905,8 +905,14 @@ function validateSkillCreationCenter(errors) {
 
     const requiredStrings = [
       'existing_skill_review',
+      'trigger',
       'decision',
       'decision_reason',
+      'unique_value',
+      'runtime_footprint',
+      'local_assets',
+      'output_contract',
+      'anti_bloat_review',
       'safety_boundary',
       'third_party_audit',
       'publisher_workflow',

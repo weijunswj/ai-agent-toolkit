@@ -147,6 +147,12 @@ After editing:
 - After two failed repair attempts, stop and report the blocker.
 - Review the diff for unrelated changes before final reporting.
 
+## Command And Repo Hygiene
+
+Use safe, targeted shell commands. Prefer read-only inspection before writes, avoid broad destructive patterns, and do not run installers, package managers, `curl | sh`, network downloads, Docker, deploy commands, or service exposure unless the task and approval rules clearly allow them.
+
+When adding local outputs, generated files, logs, caches, backup folders, or secrets-adjacent templates, check whether the repo needs a narrow ignore-rule update. Prefer precise patterns for the actual local artifact, and avoid broad rules that hide source files. Use `git check-ignore` or `git status --ignored` when practical to verify the intended path is ignored.
+
 ## Generated Files
 
 When a file says it is generated:

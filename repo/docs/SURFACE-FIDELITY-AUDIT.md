@@ -27,9 +27,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 9 |
-| publishedFiles | 166 |
-| declaredOutputFiles | 166 |
+| projects | 11 |
+| publishedFiles | 172 |
+| declaredOutputFiles | 172 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 166 |
+| boundaryRecipeOutputs | 172 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 0 |
 
@@ -46,14 +46,14 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 92 |
+| declared_generated | 98 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
 
 | Classification | Count |
 | --- | ---: |
-| main_full_fidelity | 117 |
+| main_full_fidelity | 123 |
 | generated_cross_skill_reference | 3 |
 | curated_adapter | 3 |
 | curated_index | 10 |
@@ -76,6 +76,8 @@ Known baseline context:
 - `_projects/cicd/secure-installer`
 - `_projects/design/ui-ux-pro-max`
 - `_projects/development/ai-coding-agent-rules`
+- `_projects/development/local-ai-stack-safety`
+- `_projects/development/self-hosted-service-safety`
 - `_projects/development/windows-localhost-workflows`
 - `_projects/knowledge/knowledge-index-updater`
 - `_projects/n8n/local-setup`
@@ -89,10 +91,12 @@ Known baseline context:
 - `skills/ai-coding-agent-rules/`
 - `skills/context-preserving-ai-publisher/`
 - `skills/knowledge-index-updater/`
+- `skills/local-ai-stack-safety/`
 - `skills/n8n-agent-rules/`
 - `skills/n8n-local-setup/`
 - `skills/n8n-workflow-helper-scripts/`
 - `skills/n8n-workflow-templates/`
+- `skills/self-hosted-service-safety/`
 - `skills/secure-cicd-installer/`
 - `skills/ui-ux-secure-frontend-design/`
 - `skills/windows-localhost-workflows/`

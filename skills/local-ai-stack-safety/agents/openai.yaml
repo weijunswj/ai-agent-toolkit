@@ -1,0 +1,11 @@
+interface:
+  display_name: Local AI Stack Safety
+  short_description: Review local AI runtime setup for safety.
+  primary_color: '#7C3AED'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: true
