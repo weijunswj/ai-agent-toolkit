@@ -1,0 +1,14 @@
+{
+  "existing_skill_project_ids": [
+    "cicd.secure-installer",
+    "design.ui-ux-pro-max",
+    "development.ai-coding-agent-rules",
+    "development.windows-localhost-workflows",
+    "knowledge.knowledge-index-updater",
+    "n8n.local-setup",
+    "n8n.workflow-toolkit",
+    "repo-methodology.agent-skill-supply-chain-audit",
+    "repo-methodology.context-preserving-ai-publisher"
+  ],
+  "notes": "Baseline of skill-publishing project modules that existed before the Skill Creation Center gate. New skill-publishing modules outside this list must include skill_creation_review evidence in toolkit.project.json."
+}

@@ -123,12 +123,18 @@ function readJson(relPath) {
 
 function writeText(relPath, content) {
   const full = safeWorkspacePath(relPath, 'generated output', { allowMissing: true });
+  const next = content.replace(/\r\n/g, '\n');
+  if (fs.existsSync(full)) {
+    const current = fs.readFileSync(full, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+    if (current === next) return;
+  }
   fs.mkdirSync(path.dirname(full), { recursive: true });
-  fs.writeFileSync(full, content.replace(/\r\n/g, '\n'), 'utf8');
+  fs.writeFileSync(full, next, 'utf8');
 }
 
 function writeBuffer(relPath, content) {
   const full = safeWorkspacePath(relPath, 'generated output', { allowMissing: true });
+  if (fs.existsSync(full) && fs.readFileSync(full).equals(content)) return;
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, content);
 }

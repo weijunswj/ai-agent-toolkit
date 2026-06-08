@@ -50,6 +50,7 @@ const expectedFiles = [
   'repo/docs/PROJECT-MODULE-STANDARD.md',
   'repo/docs/WRITE-SAFETY-MODEL.md',
   'repo/docs/PROJECT-REHAUL-CHECKLIST.md',
+  'repo/docs/skill-creation-center-baseline.json',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py',
@@ -675,6 +676,82 @@ function validateDesignGeneratorCommandDocs(errors, text, relPath) {
 function validateProjectModules(errors) {
   const result = projectSync.validateAndSync();
   for (const error of result.errors) fail(errors, error);
+}
+
+function validateSkillCreationCenter(errors) {
+  const baselinePath = 'repo/docs/skill-creation-center-baseline.json';
+  let baseline;
+  try {
+    baseline = readJson(baselinePath);
+  } catch (error) {
+    fail(errors, `${baselinePath} is not valid JSON: ${error.message}`);
+    return;
+  }
+
+  const baselineIds = baseline.existing_skill_project_ids;
+  if (!Array.isArray(baselineIds) || baselineIds.some((id) => typeof id !== 'string' || !id.trim())) {
+    fail(errors, `${baselinePath} existing_skill_project_ids must be an array of non-empty strings`);
+    return;
+  }
+
+  const sortedIds = [...baselineIds].sort((a, b) => a.localeCompare(b));
+  if (baselineIds.join('\n') !== sortedIds.join('\n')) {
+    fail(errors, `${baselinePath} existing_skill_project_ids must be sorted`);
+  }
+  if (new Set(baselineIds).size !== baselineIds.length) {
+    fail(errors, `${baselinePath} existing_skill_project_ids must not contain duplicates`);
+  }
+
+  const baselineSet = new Set(baselineIds);
+  const manifests = projectManifests();
+  const currentSkillIds = new Set(
+    manifests
+      .filter((manifest) => manifest.surface?.publish_as === 'skill')
+      .map((manifest) => manifest.id)
+  );
+
+  for (const id of baselineIds) {
+    if (!currentSkillIds.has(id)) fail(errors, `${baselinePath} references missing skill project: ${id}`);
+  }
+
+  for (const manifest of manifests) {
+    if (manifest.surface?.publish_as !== 'skill' || baselineSet.has(manifest.id)) continue;
+    const review = manifest.skill_creation_review;
+    if (!review || typeof review !== 'object' || Array.isArray(review)) {
+      fail(errors, `${manifest.id} must include skill_creation_review for new skill-publishing modules`);
+      continue;
+    }
+
+    const requiredStrings = [
+      'existing_skill_review',
+      'decision',
+      'decision_reason',
+      'safety_boundary',
+      'third_party_audit',
+      'publisher_workflow',
+      'routing'
+    ];
+    for (const key of requiredStrings) {
+      if (typeof review[key] !== 'string' || review[key].trim().length < 12) {
+        fail(errors, `${manifest.id} skill_creation_review.${key} must be a non-empty evidence string`);
+      }
+    }
+    if (!['extend_existing_skill', 'new_project_skill'].includes(review.decision)) {
+      fail(errors, `${manifest.id} skill_creation_review.decision must be extend_existing_skill or new_project_skill`);
+    }
+    if (!['first_party', 'third_party_audited', 'adapted_external', 'inspiration_only'].includes(review.source_provenance)) {
+      fail(errors, `${manifest.id} skill_creation_review.source_provenance must be first_party, third_party_audited, adapted_external, or inspiration_only`);
+    }
+    if (!/context-preserving-ai-publisher/.test(review.publisher_workflow || '')) {
+      fail(errors, `${manifest.id} skill_creation_review.publisher_workflow must name context-preserving-ai-publisher`);
+    }
+    if (['third_party_audited', 'adapted_external'].includes(review.source_provenance) && !/agent-skill-supply-chain-audit/i.test(review.third_party_audit || '')) {
+      fail(errors, `${manifest.id} third-party skill_creation_review.third_party_audit must name agent-skill-supply-chain-audit`);
+    }
+    if (!Array.isArray(review.validation) || review.validation.length === 0 || review.validation.some((item) => typeof item !== 'string' || !item.trim())) {
+      fail(errors, `${manifest.id} skill_creation_review.validation must list at least one validation command`);
+    }
+  }
 }
 
 function validateDocContract(errors) {
@@ -1618,6 +1695,7 @@ function runValidation() {
   validateAgentInstructionShims(errors);
   validateReadmeSurface(errors);
   validateProjectModules(errors);
+  validateSkillCreationCenter(errors);
   validateProjectLandingCards(errors);
   validateSourceLocks(errors);
   validateSkillPortability(errors);
