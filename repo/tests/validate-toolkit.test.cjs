@@ -209,6 +209,151 @@ function insertWorkflowStepBefore(text, stepName, stepText) {
   return `${text.slice(0, stepStart)}${stepText}\n${text.slice(stepStart)}`;
 }
 
+function createNewSkillProjectFixture(cwd, options = {}) {
+  const projectDir = path.join(cwd, '_projects', 'development', 'new-safe-skill');
+  const sourceDir = path.join(projectDir, '_main', 'skill');
+  const outputDir = path.join(cwd, 'skills', 'new-safe-skill');
+  fs.mkdirSync(path.join(sourceDir, 'agents'), { recursive: true });
+  fs.mkdirSync(path.join(outputDir, 'agents'), { recursive: true });
+
+  const readme = '# New Safe Skill\n\nTiny fixture skill.\n';
+  const skill = [
+    '---',
+    'name: new-safe-skill',
+    'description: Use when testing the skill creation center validation fixture.',
+    '---',
+    '',
+    '# New Safe Skill',
+    '',
+    'Use this fixture when validating the skill creation center gate in tests.',
+    '',
+    'Keep the workflow local-only, instruction-only, and free of third-party material.',
+    '',
+    'Do not run installers, network commands, live systems, credential actions, or destructive commands from this fixture.',
+    '',
+    'Before making any change, inspect the relevant local project files, choose the smallest safe edit, and run a targeted validation command. Report exactly what changed, which files were inspected, which checks passed, and which risks remain. If a task would require external services, credentials, package installation, or deletion, stop and ask for explicit current-turn approval instead of continuing.',
+    ''
+  ].join('\n');
+  const openai = [
+    'interface:',
+    '  display_name: New Safe Skill',
+    '  short_description: Fixture skill for validation.',
+    'policy:',
+    '  allow_implicit_invocation: true',
+    ''
+  ].join('\n');
+
+  fs.writeFileSync(path.join(sourceDir, 'README.md'), readme, 'utf8');
+  fs.writeFileSync(path.join(sourceDir, 'SKILL.md'), skill, 'utf8');
+  fs.writeFileSync(path.join(sourceDir, 'agents', 'openai.yaml'), openai, 'utf8');
+  fs.writeFileSync(path.join(outputDir, 'README.md'), readme, 'utf8');
+  fs.writeFileSync(path.join(outputDir, 'SKILL.md'), skill, 'utf8');
+  fs.writeFileSync(path.join(outputDir, 'agents', 'openai.yaml'), openai, 'utf8');
+
+  fs.writeFileSync(
+    path.join(projectDir, 'README.md'),
+    '# New Safe Skill\n\nProject module for [New Safe Skill](../../../skills/new-safe-skill/).\n\nSee [`_main/`](_main/) for source.\n',
+    'utf8'
+  );
+  fs.writeFileSync(
+    path.join(projectDir, 'SOURCE-MANIFEST.md'),
+    '# Source Manifest: New Safe Skill\n\n## Preserved In `_main/`\n\n- `skill/README.md`\n- `skill/SKILL.md`\n- `skill/agents/openai.yaml`\n\n## Provenance\n\nFirst-party test fixture. No third-party material is copied.\n',
+    'utf8'
+  );
+  writeJsonFile(path.join(projectDir, 'SOURCE-LOCK.json'), {
+    source_repo: 'weijunswj/ai-agent-toolkit',
+    source_ref: 'first-party-authored',
+    source_commit: '0000000000000000000000000000000000000000',
+    source_lifecycle: 'retired_after_migration',
+    source_role: 'migration_provenance_only',
+    source_update_policy: 'none',
+    public_attribution_required: false,
+    notes: 'First-party validation fixture with no third-party source material.',
+    files: []
+  });
+
+  const manifest = {
+    id: 'development.new-safe-skill',
+    category: 'development',
+    name: 'new-safe-skill',
+    title: 'New Safe Skill',
+    module_path: '_projects/development/new-safe-skill',
+    main_path: '_projects/development/new-safe-skill/_main',
+    version: '1.0.0',
+    version_policy: 'semver',
+    version_notes: 'Initial first-party validation fixture version.',
+    outputs: [
+      {
+        kind: 'copy',
+        source: '_main/skill/README.md',
+        output: 'skills/new-safe-skill/README.md',
+        notes: 'Fixture skill README copied from first-party source.',
+        fidelity: 'exact',
+        notice: false
+      },
+      {
+        kind: 'copy',
+        source: '_main/skill/SKILL.md',
+        output: 'skills/new-safe-skill/SKILL.md',
+        notes: 'Fixture skill entrypoint copied from first-party source.',
+        fidelity: 'exact',
+        notice: false
+      },
+      {
+        kind: 'copy',
+        source: '_main/skill/agents/openai.yaml',
+        output: 'skills/new-safe-skill/agents/openai.yaml',
+        notes: 'Fixture OpenAI metadata copied from first-party source.',
+        fidelity: 'exact'
+      }
+    ],
+    writes: {
+      allowed: [
+        'skills/new-safe-skill/README.md',
+        'skills/new-safe-skill/SKILL.md',
+        'skills/new-safe-skill/agents/openai.yaml'
+      ],
+      denied: [
+        '.env*',
+        '.n8n-local/**',
+        '.tmp/**',
+        '**/*credential*',
+        '**/*.key',
+        '**/*.pem',
+        '**/*.live-export.json',
+        '**/*.live-import.json',
+        'node_modules/**',
+        'dist/**',
+        '_dist/**'
+      ]
+    },
+    requires_approval: true,
+    run_commands_by_default: false,
+    live_actions: 'explicit_confirmation_only',
+    ci_live_actions: false,
+    project: {
+      name: 'New Safe Skill',
+      category: 'development',
+      summary: 'Fixture skill used to validate skill creation center enforcement.'
+    },
+    surface: {
+      publish_as: 'skill',
+      skill: {
+        status: 'published',
+        path: 'skills/new-safe-skill',
+        summary: 'Fixture skill for validation.'
+      },
+      mcp: {
+        status: 'not_applicable'
+      }
+    }
+  };
+  if (options.skill_creation_review) {
+    manifest.skill_creation_review = options.skill_creation_review;
+  }
+  writeJsonFile(path.join(projectDir, 'toolkit.project.json'), manifest);
+}
+
 function manifestsById() {
   return new Map(validator.projectManifests().map((manifest) => [manifest.id, manifest]));
 }
@@ -1585,6 +1730,52 @@ test('sync rejects text_rewrites on JSON outputs before checking generated bytes
   const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /JSON outputs must not set text_rewrites/);
+});
+
+test('sync --write does not rewrite unchanged generated outputs', () => {
+  const cwd = tempCopy();
+  const outputPath = path.join(cwd, 'skills', 'agent-skill-supply-chain-audit', 'agents', 'openai.yaml');
+  const oldTime = new Date('2020-01-02T03:04:05.000Z');
+  fs.utimesSync(outputPath, oldTime, oldTime);
+
+  const result = spawnSync(process.execPath, [syncScript, '--write'], { cwd, encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.statSync(outputPath).mtimeMs, oldTime.getTime());
+});
+
+test('validator requires creation-center evidence for new skill-publishing modules', () => {
+  const cwd = tempCopy();
+  createNewSkillProjectFixture(cwd);
+
+  const result = runValidate(cwd);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /development\.new-safe-skill must include skill_creation_review/);
+});
+
+test('validator accepts new skill-publishing modules with creation-center evidence', () => {
+  const cwd = tempCopy();
+  createNewSkillProjectFixture(cwd, {
+    skill_creation_review: {
+      existing_skill_review: 'Reviewed current skills and confirmed no existing skill has this fixture trigger or validation role.',
+      decision: 'new_project_skill',
+      decision_reason: 'This fixture represents a distinct project module and published skill surface for validation.',
+      safety_boundary: 'Instruction-only, local-only, no credentials, no live systems, no installers, and no destructive commands.',
+      source_provenance: 'first_party',
+      third_party_audit: 'not_applicable_first_party',
+      publisher_workflow: 'context-preserving-ai-publisher source-to-surface workflow',
+      routing: 'Would update toolkit skill routing if this fixture were a real user-facing skill.',
+      validation: [
+        'node repo/scripts/sync-toolkit-projects.cjs --check',
+        'node repo/scripts/validate-toolkit.cjs'
+      ]
+    }
+  });
+
+  const result = runValidate(cwd);
+
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('Secure CI/CD prompt preserves the full source prompt', () => {

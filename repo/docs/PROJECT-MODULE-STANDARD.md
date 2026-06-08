@@ -98,6 +98,18 @@ When a project module creates or materially changes a skill, decide and document
 
 If a new skill should not be auto-routed, document the omission and reason in the toolkit skill-routing source partial. Do not let that routing table drift from current `skills/*/SKILL.md`.
 
+New skill-publishing project modules that are not listed in [skill-creation-center-baseline.json](skill-creation-center-baseline.json) must include `skill_creation_review` evidence in `toolkit.project.json`:
+
+- `existing_skill_review`: which existing `skills/**`, `_projects/**` modules, README skill tables, and routing sources were inspected.
+- `decision`: `extend_existing_skill` or `new_project_skill`.
+- `decision_reason`: why the chosen path is safer and more useful than the alternative.
+- `safety_boundary`: repo safety, device safety, live-action, credential, and destructive-action limits.
+- `source_provenance`: `first_party`, `third_party_audited`, `adapted_external`, or `inspiration_only`.
+- `third_party_audit`: `not_applicable_first_party` for first-party work, or the `agent-skill-supply-chain-audit` verdict/evidence for third-party or adapted external material.
+- `publisher_workflow`: the `context-preserving-ai-publisher` source-to-surface workflow used for approved conversions.
+- `routing`: routing-table and omission decision.
+- `validation`: the targeted local checks that prove source and generated outputs stayed aligned.
+
 ## Cross-Project And Cross-Skill Dependencies
 
 Projects link to projects. Skills link to skills.
