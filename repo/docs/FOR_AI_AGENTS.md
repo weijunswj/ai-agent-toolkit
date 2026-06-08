@@ -55,6 +55,18 @@ Use installed skills only when they clearly match the task and improve correctne
 - When a new skill should not be auto-routed, document why it is intentionally omitted from routing.
 - Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
 
+## Skill Creation Center
+
+This repo is the canonical skill creation and conversion center.
+
+Before adding a new skill, skill pack, adapter, template, or project module, inspect the existing `skills/**` surfaces, related `_projects/**` modules, README skill tables, and toolkit skill-routing source. Prefer extending an existing skill when the use case fits its trigger, safety boundary, source model, and validation path without making that skill bloated or ambiguous.
+
+Create a new project module plus published skill only when the work has a distinct trigger, domain, safety boundary, source/provenance requirement, references/templates/assets, or validation path.
+
+For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved conversions must go through `context-preserving-ai-publisher` and this repo's source-to-surface workflow.
+
+Prioritize repo safety, device safety, provenance, attribution, validation, and practical usefulness over adding more surface area.
+
 ## Install Safety
 
 For install or template writes, pause before mutating the target repo. Preview the target writes, explain the source files, name the exact target paths, preserve product repo ownership, and ask for explicit current-turn approval.
