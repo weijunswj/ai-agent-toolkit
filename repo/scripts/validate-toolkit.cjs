@@ -757,6 +757,21 @@ function validateProjectModules(errors) {
   for (const error of result.errors) fail(errors, error);
 }
 
+function hasSkillEntrypointOutput(manifest) {
+  return (manifest.outputs || []).some((output) => {
+    const outputPath = String(output?.output || '').replace(/\\/g, '/');
+    return /^skills\/[^/]+\/SKILL\.md$/.test(outputPath);
+  });
+}
+
+function publishesSkillSurface(manifest) {
+  return (
+    manifest.surface?.publish_as === 'skill' ||
+    ['published', 'candidate'].includes(manifest.surface?.skill?.status) ||
+    hasSkillEntrypointOutput(manifest)
+  );
+}
+
 function validateSkillCreationCenter(errors) {
   const baselinePath = 'repo/docs/skill-creation-center-baseline.json';
   let baseline;
@@ -785,7 +800,7 @@ function validateSkillCreationCenter(errors) {
   const manifests = projectManifests();
   const currentSkillIds = new Set(
     manifests
-      .filter((manifest) => manifest.surface?.publish_as === 'skill')
+      .filter((manifest) => publishesSkillSurface(manifest))
       .map((manifest) => manifest.id)
   );
 
@@ -794,7 +809,7 @@ function validateSkillCreationCenter(errors) {
   }
 
   for (const manifest of manifests) {
-    if (manifest.surface?.publish_as !== 'skill' || baselineSet.has(manifest.id)) continue;
+    if (!publishesSkillSurface(manifest) || baselineSet.has(manifest.id)) continue;
     const review = manifest.skill_creation_review;
     if (!review || typeof review !== 'object' || Array.isArray(review)) {
       fail(errors, `${manifest.id} must include skill_creation_review for new skill-publishing modules`);

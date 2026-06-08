@@ -1776,6 +1776,21 @@ test('validator requires creation-center evidence for new skill-publishing modul
   assert.match(result.stderr, /development\.new-safe-skill must include skill_creation_review/);
 });
 
+test('validator detects new skill-publishing modules from skill outputs', () => {
+  const cwd = tempCopy();
+  createNewSkillProjectFixture(cwd);
+  addNewSafeSkillSafetyMatrixRow(cwd);
+  const manifestPath = path.join(cwd, '_projects', 'development', 'new-safe-skill', 'toolkit.project.json');
+  const manifest = readJsonFile(manifestPath);
+  manifest.surface.publish_as = 'source_only';
+  writeJsonFile(manifestPath, manifest);
+
+  const result = runValidate(cwd);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /development\.new-safe-skill must include skill_creation_review/);
+});
+
 test('validator accepts new skill-publishing modules with creation-center evidence', () => {
   const cwd = tempCopy();
   createNewSkillProjectFixture(cwd, {
