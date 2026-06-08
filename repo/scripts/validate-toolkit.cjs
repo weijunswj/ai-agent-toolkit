@@ -688,9 +688,13 @@ function validateSkillRouting(errors) {
   const omittedNames = omitted.map((entry) => entry.name);
   const currentNames = skillDirs().map((skillDir) => path.basename(skillDir)).sort();
   const currentSet = new Set(currentNames);
+  const omittedSet = new Set(omittedNames);
 
   for (const name of duplicates(routed)) fail(errors, `${routingPath} routes ${name} more than once`);
   for (const name of duplicates(omittedNames)) fail(errors, `${routingPath} omits ${name} more than once`);
+  for (const name of routed) {
+    if (omittedSet.has(name)) fail(errors, `${routingPath} must not both route and omit ${name}`);
+  }
 
   for (const name of currentNames) {
     if (!routed.includes(name) && !omittedNames.includes(name)) {

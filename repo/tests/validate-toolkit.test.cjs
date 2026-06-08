@@ -395,6 +395,25 @@ function addSkillRoutingDecision(cwd, skillName = 'new-safe-skill') {
   );
 }
 
+function addOmittedSkillRoutingDecision(cwd, skillName) {
+  const routingPath = path.join(
+    cwd,
+    '_projects',
+    'development',
+    'ai-coding-agent-rules',
+    '_main',
+    '_partials',
+    'toolkit-skill-routing.md'
+  );
+  const routing = readTextFile(routingPath);
+  const omission = `- \`${skillName}\`: Fixture omission reason long enough to prove conflicting routing decisions are rejected.`;
+  fs.writeFileSync(
+    routingPath,
+    routing.replace('\n## Routing Maintenance\n', `\n${omission}\n\n## Routing Maintenance\n`),
+    'utf8'
+  );
+}
+
 function addSkillOutputToAiCodingAgentRules(cwd, skillName = 'existing-project-new-skill') {
   const sourceDir = path.join(
     cwd,
@@ -1892,6 +1911,16 @@ test('validator reports review, safety matrix, and routing gaps for new skill ou
   assert.match(result.stderr, /development\.new-safe-skill must include skill_creation_review/);
   assert.match(result.stderr, /repo\/docs\/SKILL-SAFETY-MATRIX\.md is missing skills\/new-safe-skill\//);
   assert.match(result.stderr, /toolkit-skill-routing\.md is missing routing or omission for skills\/new-safe-skill\//);
+});
+
+test('validator rejects skill routing entries that are also intentionally omitted', () => {
+  const cwd = tempCopy();
+  addOmittedSkillRoutingDecision(cwd, 'ai-coding-agent-rules');
+
+  const result = runValidate(cwd);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /toolkit-skill-routing\.md must not both route and omit ai-coding-agent-rules/);
 });
 
 test('validator accepts new skill-publishing modules with creation-center evidence', () => {
