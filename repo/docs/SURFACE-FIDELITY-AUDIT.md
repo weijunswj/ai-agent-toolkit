@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-08 (`agent-skill-supply-chain-audit` addition)
+Latest update: 2026-06-08 (published-surface audit snapshot refresh)
 
 ## Current state
 
@@ -39,8 +39,8 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
 | boundaryRecipeOutputs | 166 |
-| boundaryRecipeFindings | 2 |
-| curatedDirectoryFindings | 2 |
+| boundaryRecipeFindings | 0 |
+| curatedDirectoryFindings | 0 |
 
 Current published-file classifications:
 
@@ -58,19 +58,17 @@ Current boundary recipe classifications:
 | curated_adapter | 3 |
 | curated_index | 10 |
 | curated_metadata | 3 |
-| curated_pack_readme | 1 |
+| curated_pack_readme | 3 |
 | curated_reference | 7 |
 | curated_repo_local_agent_template | 4 |
 | curated_router | 7 |
 | curated_template | 2 |
 | curated_template_index | 7 |
-| suspicious_curated_runtime | 2 |
 
-Known baseline findings:
+Known baseline context:
 
-- `skills/n8n-local-setup/packs/claude-code-n8n-local/README.md` remains a known curated boundary finding because the short pack README contains setup-oriented markers.
-- `skills/n8n-local-setup/packs/codex-n8n-local/README.md` remains a known curated boundary finding because the short pack README contains setup-oriented markers.
-- The same two source files under `_projects/n8n/local-setup/curated_output_for_ai/packs/**` remain known curated-directory findings.
+- There are no current curated output boundary findings.
+- There are no current curated directory boundary findings.
 - The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills.
 
 ## Current project modules

@@ -1,0 +1,55 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const repoRoot = path.resolve(__dirname, '..', '..');
+
+function readText(relPath) {
+  return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+}
+
+test('agent onboarding path exposes repo purpose and major navigation roots', () => {
+  const readme = readText('README.md');
+  const agents = readText('AGENTS.md');
+
+  assert.match(readme, /A practical skills-first toolkit of reusable AI-agent skills and preserved source projects\./);
+  assert.match(readme, /\[_projects\/\]\(_projects\/\) preserves project source, provenance, and reviewed AI-facing source\./);
+  assert.match(readme, /\[skills\/\]\(skills\/\) contains copyable AI-agent skill folders\./);
+  assert.match(readme, /\[repo\/\]\(repo\/\) contains repo maintenance docs, scripts, tests, and validation policy\./);
+  assert.match(readme, /\| Full guide or source context \| Open a project under \[_projects\/\]\(_projects\/\), then its `_main\/` folder\. \|/);
+  assert.match(readme, /\| Install a skill \| Copy the whole skill folder using \[Install Skills By Platform\]/);
+  assert.match(readme, /\| Review skill safety \| Use the \[Skill Safety Matrix\]/);
+  assert.match(readme, /\| Maintenance work \| Start with \[repo\/docs\/\]/);
+
+  assert.match(agents, /This root `AGENTS\.md` is toolkit-repo-specific\./);
+  assert.match(agents, /Portable repo installs must use \[`skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
+});
+
+test('agent onboarding path keeps source-of-truth and validation anchors visible', () => {
+  const agents = readText('AGENTS.md');
+  const sourceOfTruth = readText('repo/docs/SOURCE-OF-TRUTH.md');
+  const validation = readText('repo/docs/VALIDATION-STRATEGY.md');
+
+  assert.match(agents, /`_projects\/\*\*\/_main\/` preserves full source material and original docs\./);
+  assert.match(agents, /`_projects\/\*\*\/curated_output_for_ai\/` stores reviewed AI-facing source material\./);
+  assert.match(agents, /`_projects\/\*\*\/toolkit\.project\.json` is the routing and toolkit project-version contract\./);
+  assert.match(agents, /`skills\/` contains copyable AI-agent skill folders\./);
+
+  assert.match(sourceOfTruth, /The repo-wide generated surface is skills-first\./);
+  assert.match(sourceOfTruth, /Humans use `_projects\/\*\*` for source review and maintenance, and agents use generated `skills\/\*\*` folders after sync\./);
+  assert.match(validation, /For this repo, the canonical full validation command is:/);
+  assert.match(validation, /npm run validate:all/);
+});
+
+test('agent onboarding path does not advertise repo-wide MCP as a current surface', () => {
+  const readme = readText('README.md');
+  const surfaceAudit = readText('repo/docs/SURFACE-FIDELITY-AUDIT.md');
+
+  assert.match(readme, /Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now\./);
+  assert.match(surfaceAudit, /`mcp\/\*\*` is not shipped\./);
+  assert.match(surfaceAudit, /Project manifests must not declare repo-wide `mcp\/\*\*` outputs or `publish_as: "mcp"` \/ `publish_as: "both"`\./);
+  assert.match(surfaceAudit, /No tracked root `mcp\/\*\*` file is part of the current generated\/published surface\./);
+});

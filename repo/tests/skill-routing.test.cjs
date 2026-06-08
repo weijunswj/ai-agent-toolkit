@@ -191,6 +191,25 @@ test('skill safety matrix covers current skill folders and safety boundaries', (
   }
 });
 
+test('README skill table covers current skill folders exactly once', () => {
+  const readme = readText(path.join(repoRoot, 'README.md'));
+  const skillsSection = readme.match(/^## Skills\s*$(?<body>[\s\S]*?)(?=^##\s+)/m)?.groups?.body || '';
+  assert.ok(skillsSection, 'README should include a Skills section');
+
+  const rows = [...skillsSection.matchAll(/^\|\s*\[([^\]]+)\]\(skills\/([^/)]+)\/\)\s*\|/gm)]
+    .map((match) => ({ label: match[1], skill: match[2] }))
+    .sort((a, b) => a.skill.localeCompare(b.skill));
+  const rowSkills = rows.map((row) => row.skill);
+  const current = skillNames();
+
+  assert.deepEqual(duplicates(rowSkills), [], 'README skill table should not list a skill twice');
+  assert.deepEqual(rowSkills, current, 'README skill table should cover every skills/*/SKILL.md folder exactly once');
+
+  for (const row of rows) {
+    assert.ok(row.label.trim().length >= 3, `${row.skill} README table label should be descriptive`);
+  }
+});
+
 test('toolkit skill routing stays routing-only', () => {
   const routing = readText(routingPartial);
 

@@ -33,6 +33,34 @@ function runAuditJson(cwd = repoRoot) {
   return JSON.parse(result.stdout);
 }
 
+function parseMarkdownTable(sectionText) {
+  const rows = [];
+  for (const line of sectionText.split('\n')) {
+    if (!line.startsWith('|')) continue;
+    const cells = line.split('|').slice(1, -1).map((cell) => cell.trim());
+    if (cells.length !== 2) continue;
+    if (cells[0] === '---' || cells[0] === 'Metric' || cells[0] === 'Classification') continue;
+    rows.push(cells);
+  }
+  return Object.fromEntries(rows.map(([key, value]) => [key, Number(value)]));
+}
+
+function markdownSection(text, heading, nextHeading = null) {
+  const startToken = `${heading}\n`;
+  const start = text.indexOf(startToken);
+  assert.notEqual(start, -1, `${heading} section is missing`);
+  const bodyStart = start + startToken.length;
+  const rest = text.slice(bodyStart);
+  if (!nextHeading) return rest;
+  const end = rest.indexOf(`${nextHeading}\n`);
+  assert.notEqual(end, -1, `${nextHeading} section is missing`);
+  return rest.slice(0, end);
+}
+
+function tableInSection(text, heading, nextHeading) {
+  return parseMarkdownTable(markdownSection(text, heading, nextHeading));
+}
+
 function addCrossOwnedOutputFixture(cwd, metadata = {}) {
   const projectDir = path.join(cwd, '_projects', 'cicd', 'secure-installer');
   const sourceRel = 'curated_output_for_ai/templates/n8n/sync-helpers/new-cross-owned-helper.md';
@@ -85,6 +113,31 @@ test('audit-published-surfaces runs successfully on the current repo', () => {
   const result = runAudit();
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Published surface audit/);
+});
+
+test('surface fidelity audit doc snapshot matches current audit report', () => {
+  const report = runAuditJson();
+  const doc = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'SURFACE-FIDELITY-AUDIT.md'), 'utf8');
+
+  assert.deepEqual(
+    tableInSection(doc, 'Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:', 'Current published-file classifications:'),
+    report.summary
+  );
+  assert.deepEqual(
+    tableInSection(doc, 'Current published-file classifications:', 'Current boundary recipe classifications:'),
+    report.classifications
+  );
+  assert.deepEqual(
+    tableInSection(doc, 'Current boundary recipe classifications:', 'Known baseline context:'),
+    report.boundaryClassifications
+  );
+
+  if (report.issues.boundaryRecipeFindings.length === 0) {
+    assert.match(doc, /There are no current curated output boundary findings\./);
+  }
+  if (report.issues.curatedDirectoryFindings.length === 0) {
+    assert.match(doc, /There are no current curated directory boundary findings\./);
+  }
 });
 
 test('audit-published-surfaces detects pack-installed undeclared files', () => {
