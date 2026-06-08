@@ -42,7 +42,9 @@ Use installed skills only when they clearly match the task and improve correctne
 | `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
 | `secure-cicd-installer` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |
 | `context-preserving-ai-publisher` | Source-traceable AI-facing repo surfaces, generated skills, templates, manifests, source locks, audits, or anti-drift docs. |
-| `agent-skill-supply-chain-audit` | Reviewing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, and toolkit conversion fit before import. |
+| `agent-skill-supply-chain-audit` | Reviewing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, toolkit conversion fit, and usefulness/token-bloat risk before import. |
+| `local-ai-stack-safety` | Reviewing local AI runtime, model download, GPU/runtime, local AI web UI, or local AI endpoint exposure risk before setup. |
+| `self-hosted-service-safety` | Reviewing non-n8n self-hosted service setup, Docker/VPS, public ports, tunnels, credentials, backups, or first-run hardening. |
 | `windows-localhost-workflows` | Starting, relaunching, verifying, or debugging local Windows dev servers. |
 | `knowledge-index-updater` | Maintaining a Notion/GitHub knowledge index with stable source keys, de-duplication, categorisation, and stale/missing item checks. |
 | `ui-ux-secure-frontend-design` | Frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review. |
@@ -65,7 +67,7 @@ Create a new project module plus published skill only when the work has a distin
 
 Use [Skill Safety Matrix](SKILL-SAFETY-MATRIX.md) as the maintained catalog of current skill triggers, risk classes, companion skills, provenance, and approval boundaries before creating, extending, or importing skills.
 
-Validation treats each concrete `skills/<skill-name>/SKILL.md` entrypoint as the Skill Creation Center review boundary. A new skill ID outside `repo/docs/skill-creation-center-baseline.json` `existing_skill_ids` must include `skill_creation_review` evidence in the owning `toolkit.project.json`, even when an existing baseline project module publishes it. That evidence must name the new skill and document whether the skill is routed or intentionally omitted.
+Validation treats each concrete `skills/<skill-name>/SKILL.md` entrypoint as the Skill Creation Center review boundary. A new skill ID outside `repo/docs/skill-creation-center-baseline.json` `existing_skill_ids` must include `skill_creation_review` evidence in the owning `toolkit.project.json`, even when an existing baseline project module publishes it. That evidence must name the new skill, document whether the skill is routed or intentionally omitted, and include the trigger, unique value, runtime footprint, local assets, output contract, and anti-bloat review.
 
 For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved conversions must go through `context-preserving-ai-publisher` and this repo's source-to-surface workflow.
 

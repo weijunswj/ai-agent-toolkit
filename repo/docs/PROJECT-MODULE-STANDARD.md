@@ -101,8 +101,14 @@ If a new skill should not be auto-routed, document the omission and reason in th
 The Skill Creation Center baseline tracks both existing skill-publishing project modules and existing concrete skill IDs. New `skills/<skill-name>/SKILL.md` entrypoints that are not listed in [skill-creation-center-baseline.json](skill-creation-center-baseline.json) `existing_skill_ids` must include `skill_creation_review` evidence in the owning `toolkit.project.json`, even when they are added by an existing baseline project module:
 
 - `existing_skill_review`: which existing `skills/**`, `_projects/**` modules, README skill tables, and routing sources were inspected; this must mention the new skill ID being reviewed.
+- `trigger`: the exact user task that should invoke the skill, including when not to invoke it.
 - `decision`: `extend_existing_skill` or `new_project_skill`.
 - `decision_reason`: why the chosen path is safer and more useful than the alternative.
+- `unique_value`: the safety gate, local asset, deterministic workflow, validation, or domain constraint that a strong agent would still often miss without this material.
+- `runtime_footprint`: why the `SKILL.md` stays concise and how optional detail is kept out of default context.
+- `local_assets`: required templates, references, examples, fixtures, tools, or `none` with a reason.
+- `output_contract`: the concrete output an agent produces when the skill is used.
+- `anti_bloat_review`: why the proposal is not generic advice, model-common knowledge, or a token-heavy duplicate of an existing skill.
 - `safety_boundary`: repo safety, device safety, live-action, credential, and destructive-action limits.
 - `source_provenance`: `first_party`, `third_party_audited`, `adapted_external`, or `inspiration_only`.
 - `third_party_audit`: `not_applicable_first_party` for first-party work, or the `agent-skill-supply-chain-audit` verdict/evidence for third-party or adapted external material.

@@ -1,0 +1,95 @@
+{
+  "id": "development.self-hosted-service-safety",
+  "category": "development",
+  "name": "self-hosted-service-safety",
+  "title": "Self-Hosted Service Safety",
+  "module_path": "_projects/development/self-hosted-service-safety",
+  "main_path": "_projects/development/self-hosted-service-safety/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial first-party lightweight safety-review skill version.",
+  "outputs": [
+    {
+      "kind": "copy",
+      "source": "_main/skill/README.md",
+      "output": "skills/self-hosted-service-safety/README.md",
+      "notes": "Standalone skill README copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
+      "output": "skills/self-hosted-service-safety/SKILL.md",
+      "notes": "Standalone skill entrypoint copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
+      "output": "skills/self-hosted-service-safety/agents/openai.yaml",
+      "notes": "OpenAI platform metadata copied from first-party module source.",
+      "fidelity": "exact"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/self-hosted-service-safety/README.md",
+      "skills/self-hosted-service-safety/SKILL.md",
+      "skills/self-hosted-service-safety/agents/openai.yaml"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "skill_creation_review": {
+    "existing_skill_review": "Reviewed current skills before adding self-hosted-service-safety: n8n-agent-rules, n8n-local-setup, windows-localhost-workflows, secure-cicd-installer, ai-coding-agent-rules, and context-preserving-ai-publisher. No existing skill covers this exact non-n8n safety-review trigger without either being too narrow or too broad.",
+    "trigger": "Use only when reviewing or planning non-n8n self-hosted service setup, Docker Compose services, VPS deployment notes, reverse proxies, public ports, DNS/TLS, tunnels, admin panels, backups, or first-run hardening. Do not use for ordinary app coding, local-only dev servers, or n8n work.",
+    "decision": "new_project_skill",
+    "decision_reason": "Self-Hosted Service Safety has a distinct safety boundary and invocation trigger, so folding it into ai-coding-agent-rules would make the always-adjacent coding rules heavier while hiding the setup/exposure review boundary.",
+    "unique_value": "Forces a short risk review before high-impact local setup or service exposure work that agents might otherwise treat as ordinary setup commands.",
+    "runtime_footprint": "SKILL.md is intentionally short, review-only, and has no required long references or bundled tools; optional detail is not loaded by default.",
+    "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because the useful behavior is a compact safety review, not an installer or tutorial.",
+    "output_contract": "Return a compact Self-Hosted Service Safety Review with risk level, blocked actions, approval-gated actions, safe first-run plan, required config changes, backup/restore notes, and verification checks before public exposure.",
+    "anti_bloat_review": "The skill is rejected for ordinary coding and model-general advice; it triggers only on setup/exposure/credential/live-system risk and produces a compact review instead of a tutorial.",
+    "safety_boundary": "Review-only by default. Docker, DNS/TLS, tunnels, firewall/public ports, VPS/cloud changes, credentials, production data, or deployment commands require explicit current-turn approval.",
+    "source_provenance": "first_party",
+    "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted.",
+    "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, routing updates, safety matrix updates, sync, and validation.",
+    "routing": "self-hosted-service-safety is routed only for self-hosted-service-safety review/planning tasks involving non-n8n self-hosted services, Docker/VPS setup, public exposure, reverse proxies, tunnels, credentials, or backups.",
+    "validation": [
+      "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "node --test repo/tests/skill-routing.test.cjs",
+      "node repo/scripts/validate-toolkit.cjs"
+    ]
+  },
+  "project": {
+    "name": "Self-Hosted Service Safety",
+    "category": "development",
+    "summary": "Small safety-review skill for non-n8n self-hosted service setup, Docker/VPS plans, reverse proxies, tunnels, public ports, credentials, backups, and first-run hardening."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/self-hosted-service-safety",
+      "summary": "Small safety-review skill for non-n8n self-hosted service setup, Docker/VPS plans, reverse proxies, tunnels, public ports, credentials, backups, and first-run hardening."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

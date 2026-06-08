@@ -518,6 +518,8 @@ test('skill discovery includes migrated skills', () => {
   assert.ok(skills.includes('skills/n8n-local-setup'));
   assert.ok(skills.includes('skills/secure-cicd-installer'));
   assert.ok(skills.includes('skills/knowledge-index-updater'));
+  assert.ok(skills.includes('skills/local-ai-stack-safety'));
+  assert.ok(skills.includes('skills/self-hosted-service-safety'));
 });
 
 test('repo-local agent rules bootstrap skill metadata stays in the skill surface', () => {
@@ -532,6 +534,8 @@ test('project manifests include the current project modules without repo-wide MC
     'cicd.secure-installer',
     'design.ui-ux-pro-max',
     'development.ai-coding-agent-rules',
+    'development.local-ai-stack-safety',
+    'development.self-hosted-service-safety',
     'development.windows-localhost-workflows',
     'knowledge.knowledge-index-updater',
     'n8n.local-setup',
@@ -1928,8 +1932,14 @@ test('validator accepts new skill-publishing modules with creation-center eviden
   createNewSkillProjectFixture(cwd, {
     skill_creation_review: {
       existing_skill_review: 'Reviewed current skills before adding new-safe-skill and confirmed no existing skill has this fixture trigger or validation role.',
+      trigger: 'Use new-safe-skill only for this validation fixture trigger and not for general coding work.',
       decision: 'new_project_skill',
       decision_reason: 'This fixture represents a distinct project module and published skill surface for validation.',
+      unique_value: 'Validates that new skill proposals document value beyond generic model-common advice.',
+      runtime_footprint: 'Tiny SKILL.md fixture with no optional references loaded by default.',
+      local_assets: 'No local assets beyond the fixture README, SKILL.md, and metadata.',
+      output_contract: 'Produces a deterministic validation fixture result for the creation-center gate.',
+      anti_bloat_review: 'This fixture exists only to exercise the anti-bloat validation gate and is not generic advice.',
       safety_boundary: 'Instruction-only, local-only, no credentials, no live systems, no installers, and no destructive commands.',
       source_provenance: 'first_party',
       third_party_audit: 'not_applicable_first_party',
@@ -1954,8 +1964,14 @@ test('validator requires creation-center evidence to name the new skill and rout
   createNewSkillProjectFixture(cwd, {
     skill_creation_review: {
       existing_skill_review: 'Reviewed current skills and confirmed no existing skill has this fixture trigger or validation role.',
+      trigger: 'Use new-safe-skill only for this validation fixture trigger and not for general coding work.',
       decision: 'new_project_skill',
       decision_reason: 'This fixture represents a distinct project module and published skill surface for validation.',
+      unique_value: 'Validates that new skill proposals document value beyond generic model-common advice.',
+      runtime_footprint: 'Tiny SKILL.md fixture with no optional references loaded by default.',
+      local_assets: 'No local assets beyond the fixture README, SKILL.md, and metadata.',
+      output_contract: 'Produces a deterministic validation fixture result for the creation-center gate.',
+      anti_bloat_review: 'This fixture exists only to exercise the anti-bloat validation gate and is not generic advice.',
       safety_boundary: 'Instruction-only, local-only, no credentials, no live systems, no installers, and no destructive commands.',
       source_provenance: 'first_party',
       third_party_audit: 'not_applicable_first_party',
