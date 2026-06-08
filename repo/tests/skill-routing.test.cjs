@@ -155,6 +155,50 @@ test('toolkit skill routing covers current skill folders or documents omissions'
   }
 });
 
+test('skill safety matrix covers current skill folders and safety boundaries', () => {
+  const matrix = readText(path.join(repoRoot, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md'));
+  const headerLine = matrix.split('\n').find((line) => line.startsWith('| Skill |'));
+  const requiredColumns = [
+    'Skill',
+    'Primary Trigger',
+    'Risk Class',
+    'Local Writes',
+    'Scripts Or Tools',
+    'External Or Live Risk',
+    'Approval Boundary',
+    'Companion Skills',
+    'Source/Provenance',
+    'Notes And Boundaries'
+  ];
+  const rows = [...matrix.matchAll(/^\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\|(.+)$/gm)]
+    .map((match) => ({
+      name: match[1],
+      link: match[2],
+      cells: match[0].split('|').slice(1, -1).map((cell) => cell.trim())
+    }))
+    .filter((row) => row.link.startsWith('../../skills/'));
+  const rowNames = rows.map((row) => row.name).sort();
+  const current = skillNames();
+
+  assert.ok(headerLine, 'skill safety matrix should have a Markdown table');
+  assert.deepEqual(
+    headerLine.split('|').slice(1, -1).map((cell) => cell.trim()),
+    requiredColumns,
+    'skill safety matrix should keep the approved safety columns'
+  );
+  assert.deepEqual(duplicates(rowNames), [], 'skill safety matrix should not list a skill twice');
+  assert.deepEqual(rowNames, current, 'skill safety matrix should cover every skills/*/SKILL.md folder exactly once');
+
+  for (const row of rows) {
+    assert.equal(row.link, `../../skills/${row.name}/`, `${row.name} should link to its skill folder`);
+    assert.equal(row.cells.length, requiredColumns.length, `${row.name} row should fill every safety column`);
+    for (const [index, cell] of row.cells.entries()) {
+      assert.ok(cell, `${row.name} ${requiredColumns[index]} cell should not be empty`);
+    }
+    assert.match(row.cells[2], /^(Low|Medium|High)$/);
+  }
+});
+
 test('toolkit skill routing stays routing-only', () => {
   const routing = readText(routingPartial);
 

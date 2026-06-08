@@ -51,6 +51,7 @@ const expectedFiles = [
   'repo/docs/WRITE-SAFETY-MODEL.md',
   'repo/docs/PROJECT-REHAUL-CHECKLIST.md',
   'repo/docs/skill-creation-center-baseline.json',
+  'repo/docs/SKILL-SAFETY-MATRIX.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py',
@@ -535,6 +536,29 @@ function skillDirs() {
   return result.sort();
 }
 
+const skillSafetyMatrixColumns = [
+  'Skill',
+  'Primary Trigger',
+  'Risk Class',
+  'Local Writes',
+  'Scripts Or Tools',
+  'External Or Live Risk',
+  'Approval Boundary',
+  'Companion Skills',
+  'Source/Provenance',
+  'Notes And Boundaries'
+];
+
+function duplicates(values) {
+  const seen = new Set();
+  const repeated = new Set();
+  for (const value of values) {
+    if (seen.has(value)) repeated.add(value);
+    seen.add(value);
+  }
+  return [...repeated].sort();
+}
+
 function validateSkills(errors) {
   for (const skillDir of skillDirs()) {
     const readme = `${skillDir}/README.md`;
@@ -579,6 +603,61 @@ function validateSkills(errors) {
   for (const entry of listFiles().filter((item) => item.relPath.startsWith('skills/ui-ux-secure-frontend-design/') && item.relPath.endsWith('.md'))) {
     const raw = fs.readFileSync(entry.fullPath, 'utf8');
     if (raw.includes('\r\n')) fail(errors, `Design skill Markdown is not LF-normalized: ${entry.relPath}`);
+  }
+}
+
+function validateSkillSafetyMatrix(errors) {
+  const matrixPath = 'repo/docs/SKILL-SAFETY-MATRIX.md';
+  if (!existsRel(matrixPath)) return;
+
+  const matrix = readText(matrixPath);
+  const headerLine = matrix.split('\n').find((line) => line.startsWith('| Skill |'));
+  if (!headerLine) {
+    fail(errors, `${matrixPath} must include a skill safety matrix table`);
+    return;
+  }
+
+  const headerCells = headerLine.split('|').slice(1, -1).map((cell) => cell.trim());
+  if (JSON.stringify(headerCells) !== JSON.stringify(skillSafetyMatrixColumns)) {
+    fail(errors, `${matrixPath} must keep the approved safety columns`);
+  }
+
+  const rows = [...matrix.matchAll(/^\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\|(.+)$/gm)]
+    .map((match) => ({
+      name: match[1],
+      link: match[2],
+      cells: match[0].split('|').slice(1, -1).map((cell) => cell.trim())
+    }))
+    .filter((row) => row.link.startsWith('../../skills/'));
+  const rowNames = rows.map((row) => row.name).sort();
+  const currentSkillNames = skillDirs().map((skillDir) => path.basename(skillDir)).sort();
+  const repeated = duplicates(rowNames);
+
+  for (const name of repeated) fail(errors, `${matrixPath} lists ${name} more than once`);
+
+  const rowNameSet = new Set(rowNames);
+  const currentNameSet = new Set(currentSkillNames);
+  for (const name of currentSkillNames) {
+    if (!rowNameSet.has(name)) fail(errors, `${matrixPath} is missing skills/${name}/`);
+  }
+  for (const name of rowNames) {
+    if (!currentNameSet.has(name)) fail(errors, `${matrixPath} lists unknown skill ${name}`);
+  }
+
+  for (const row of rows) {
+    if (row.link !== `../../skills/${row.name}/`) {
+      fail(errors, `${matrixPath} row for ${row.name} must link to ../../skills/${row.name}/`);
+    }
+    if (row.cells.length !== skillSafetyMatrixColumns.length) {
+      fail(errors, `${matrixPath} row for ${row.name} must fill every safety column`);
+      continue;
+    }
+    row.cells.forEach((cell, index) => {
+      if (!cell) fail(errors, `${matrixPath} row for ${row.name} has an empty ${skillSafetyMatrixColumns[index]} cell`);
+    });
+    if (!/^(Low|Medium|High)$/.test(row.cells[2])) {
+      fail(errors, `${matrixPath} row for ${row.name} has invalid risk class ${row.cells[2]}`);
+    }
   }
 }
 
@@ -1689,6 +1768,7 @@ function runValidation() {
   validateJsonRegistries(errors);
   validatePacks(errors);
   validateSkills(errors);
+  validateSkillSafetyMatrix(errors);
   validateExecutables(errors);
   validateDesignGeneratorLocalOnly(errors);
   validateDocContract(errors);

@@ -354,6 +354,28 @@ function createNewSkillProjectFixture(cwd, options = {}) {
   writeJsonFile(path.join(projectDir, 'toolkit.project.json'), manifest);
 }
 
+function addNewSafeSkillSafetyMatrixRow(cwd) {
+  const matrixPath = path.join(cwd, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md');
+  const matrix = readTextFile(matrixPath);
+  const row = [
+    '| [new-safe-skill](../../skills/new-safe-skill/)',
+    'Fixture trigger for validation-only skill creation center tests.',
+    'Low',
+    'Fixture local files only.',
+    'None bundled.',
+    'None.',
+    'Normal local fixture writes only.',
+    'None required.',
+    'First-party test fixture.',
+    'Used only to prove new skill-publishing modules update the safety catalog. |'
+  ].join(' | ');
+  fs.writeFileSync(
+    matrixPath,
+    matrix.replace('\n\n## Description Review Notes\n', `\n${row}\n\n## Description Review Notes\n`),
+    'utf8'
+  );
+}
+
 function manifestsById() {
   return new Map(validator.projectManifests().map((manifest) => [manifest.id, manifest]));
 }
@@ -1772,10 +1794,27 @@ test('validator accepts new skill-publishing modules with creation-center eviden
       ]
     }
   });
+  addNewSafeSkillSafetyMatrixRow(cwd);
 
   const result = runValidate(cwd);
 
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('validator requires skill safety matrix coverage for every current skill', () => {
+  const cwd = tempCopy();
+  const matrixPath = path.join(cwd, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md');
+  const matrix = readTextFile(matrixPath);
+  const withoutWindowsLocalhost = matrix.replace(
+    /^\| \[windows-localhost-workflows\]\([^)]+\)[^\n]*\n/m,
+    ''
+  );
+  fs.writeFileSync(matrixPath, withoutWindowsLocalhost, 'utf8');
+
+  const result = runValidate(cwd);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /repo\/docs\/SKILL-SAFETY-MATRIX\.md is missing skills\/windows-localhost-workflows\//);
 });
 
 test('Secure CI/CD prompt preserves the full source prompt', () => {
