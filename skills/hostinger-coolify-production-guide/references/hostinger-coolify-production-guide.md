@@ -205,10 +205,12 @@ services:
     build: .
     environment:
       NODE_ENV: production
-      PORT: ${PORT:?3000}
-      DATABASE_URL: ${DATABASE_URL:?}
-      CORS_ORIGIN: ${CORS_ORIGIN:?}
+      # Beginner-friendly default: use PORT from Coolify when set, otherwise 3000.
+      PORT: ${PORT:-3000}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
     expose:
+      # Keep this aligned with the default PORT above and the healthcheck URL below.
       - "3000"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
@@ -685,4 +687,18 @@ If any item is unknown, do not call the deployment complete. Mark it as pending 
 
 ## Documentation Source Notes
 
-This first-party guide uses public vendor documentation only as factual context. Coolify documentation currently describes Traefik as the default proxy, Caddy as an optional/experimental proxy, domains as automatically configured through the selected proxy, Docker Compose deployments as compose-file-driven, and environment variables as detectable from compose variable references. Hostinger documentation describes a Coolify VPS template and first-time access flow. Always check current vendor docs before making live production changes.
+This first-party guide uses public vendor documentation only as factual context. No third-party guide text or code is copied here. Always check current official vendor docs before making live production changes, especially because proxy, deployment, and platform behavior can change.
+
+Official docs to re-check before live work:
+
+| Vendor area | Official doc | Use before |
+| --- | --- | --- |
+| Hostinger Coolify VPS template | [How to use the Coolify VPS template](https://support.hostinger.com/en/articles/9615197-how-to-use-the-coolify-vps-template) | Selecting or opening the Hostinger Coolify VPS flow. |
+| Coolify supported proxies | [Supported Proxy](https://coolify.io/docs/knowledge-base/server/proxies) | Assuming default reverse proxy behavior or changing proxies. |
+| Coolify Traefik overview | [Traefik Proxy](https://coolify.io/docs/knowledge-base/proxy/traefik/overview) | Reviewing default proxy, routing, and SSL assumptions. |
+| Coolify domains and HTTPS | [Domains](https://coolify.io/docs/knowledge-base/domains) | Assigning domains or troubleshooting HTTPS/SSL. |
+| Coolify Docker Compose deployments | [Docker Compose](https://coolify.io/docs/knowledge-base/docker/compose) | Writing compose files, ports, labels, or compose env syntax. |
+| Coolify environment variables | [Environment Variables](https://coolify.io/docs/knowledge-base/environment-variables) | Entering real env vars or deciding build-time vs runtime variables. |
+| Coolify health checks | [Health checks](https://coolify.io/docs/knowledge-base/health-checks) | Configuring health checks, rolling updates, or proxy routing behavior. |
+
+At the time this guide was authored, Coolify documentation described Traefik as the default proxy, Caddy as optional/experimental, domains as proxy-configured, Docker Compose deployments as compose-file-driven, and compose variable references as visible in Coolify's UI. Treat those as review points, not permanent guarantees.

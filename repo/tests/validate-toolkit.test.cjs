@@ -519,6 +519,7 @@ test('skill discovery includes migrated skills', () => {
   assert.ok(skills.includes('skills/secure-cicd-installer'));
   assert.ok(skills.includes('skills/knowledge-index-updater'));
   assert.ok(skills.includes('skills/local-ai-stack-safety'));
+  assert.ok(skills.includes('skills/hostinger-coolify-production-guide'));
   assert.ok(skills.includes('skills/self-hosted-service-safety'));
 });
 
@@ -534,6 +535,7 @@ test('project manifests include the current project modules without repo-wide MC
     'cicd.secure-installer',
     'design.ui-ux-pro-max',
     'development.ai-coding-agent-rules',
+    'development.hostinger-coolify-production-guide',
     'development.local-ai-stack-safety',
     'development.self-hosted-service-safety',
     'development.windows-localhost-workflows',

@@ -1,7 +1,7 @@
 {
   "source_repo": "weijunswj/ai-agent-toolkit",
   "source_ref": "first-party-authored",
-  "source_commit": "first-party-new-module",
+  "source_commit": "a0dbe6b15ac7007c177ee562f64ee7413c40881c",
   "source_lifecycle": "retired_after_migration",
   "source_role": "migration_provenance_only",
   "source_update_policy": "none",

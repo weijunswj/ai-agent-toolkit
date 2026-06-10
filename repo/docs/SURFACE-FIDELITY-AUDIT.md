@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-08 (published-surface audit snapshot refresh)
+Latest update: 2026-06-10 (Hostinger Coolify production guide surface snapshot refresh)
 
 ## Current state
 
@@ -27,9 +27,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 11 |
-| publishedFiles | 172 |
-| declaredOutputFiles | 172 |
+| projects | 12 |
+| publishedFiles | 177 |
+| declaredOutputFiles | 177 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 172 |
+| boundaryRecipeOutputs | 177 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 0 |
 
@@ -46,20 +46,20 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 98 |
+| declared_generated | 103 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
 
 | Classification | Count |
 | --- | ---: |
-| main_full_fidelity | 123 |
+| main_full_fidelity | 127 |
 | generated_cross_skill_reference | 3 |
 | curated_adapter | 3 |
 | curated_index | 10 |
 | curated_metadata | 3 |
 | curated_pack_readme | 3 |
-| curated_reference | 7 |
+| curated_reference | 8 |
 | curated_repo_local_agent_template | 4 |
 | curated_router | 7 |
 | curated_template | 2 |
@@ -69,7 +69,7 @@ Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by adding one project and five generated Hostinger/Coolify skill outputs: skill README, skill entrypoint, OpenAI metadata, full guide reference, and reference index.
 
 ## Current project modules
 
