@@ -55,6 +55,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Agent Skill Supply-Chain Audit](_projects/repo-methodology/agent-skill-supply-chain-audit/) | Third-party skill provenance, safety, license, and conversion audit source. | [_main/](_projects/repo-methodology/agent-skill-supply-chain-audit/_main/) |
 | [AI Coding Agent Rules](_projects/development/ai-coding-agent-rules/) | Generic agent-rule templates, skill routing source, and n8n rules source. | [_main/](_projects/development/ai-coding-agent-rules/_main/) |
 | [Local AI Stack Safety](_projects/development/local-ai-stack-safety/) | Lightweight local AI runtime, model download, local AI web UI, and endpoint exposure safety-review skill source. | [_main/](_projects/development/local-ai-stack-safety/_main/) |
+| [Hostinger Coolify Production Guide](_projects/development/hostinger-coolify-production-guide/) | Hostinger VPS plus Coolify zero-to-production guide with agent-safe repository-preparation skill source. | [_main/](_projects/development/hostinger-coolify-production-guide/_main/) |
 | [Self-Hosted Service Safety](_projects/development/self-hosted-service-safety/) | Lightweight non-n8n Docker/VPS, public exposure, credential, backup, and first-run safety-review skill source. | [_main/](_projects/development/self-hosted-service-safety/_main/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
 | [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Notion/GitHub knowledge-index skill source. | [_main/](_projects/knowledge/knowledge-index-updater/_main/) |
@@ -74,6 +75,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, templates, manifests, and audits. |
 | [Agent Skill Supply-Chain Audit](skills/agent-skill-supply-chain-audit/) | Audit third-party agent skills for provenance, license, safety, conversion fit, and token-bloat risk. |
 | [Local AI Stack Safety](skills/local-ai-stack-safety/) | Review local AI runtimes, model downloads, local AI web UIs, and endpoint exposure before setup. |
+| [Hostinger Coolify Production Guide](skills/hostinger-coolify-production-guide/) | Prepare repositories for human-owned Hostinger VPS plus Coolify production deployments. |
 | [Self-Hosted Service Safety](skills/self-hosted-service-safety/) | Review non-n8n Docker/VPS, tunnel, public-port, credential, backup, and first-run safety. |
 | [Secure UI/UX Frontend Design](skills/ui-ux-secure-frontend-design/) | Design or review frontend work with accessibility, responsive, privacy, and security guardrails. |
 | [Windows Localhost Workflows](skills/windows-localhost-workflows/) | Start and verify Windows localhost dev services. |

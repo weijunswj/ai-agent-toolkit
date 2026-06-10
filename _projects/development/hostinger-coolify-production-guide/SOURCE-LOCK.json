@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "first-party-authored",
+  "source_commit": "a0dbe6b15ac7007c177ee562f64ee7413c40881c",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party toolkit-authored Hostinger VPS plus Coolify production guide and agent-safe repo-preparation skill. No third-party source files are copied or adapted. Vendor docs were consulted only as factual context.",
+  "files": []
+}

@@ -1,0 +1,113 @@
+{
+  "id": "development.hostinger-coolify-production-guide",
+  "category": "development",
+  "name": "hostinger-coolify-production-guide",
+  "title": "Hostinger Coolify Production Guide",
+  "module_path": "_projects/development/hostinger-coolify-production-guide",
+  "main_path": "_projects/development/hostinger-coolify-production-guide/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial first-party Hostinger VPS plus Coolify production guide with agent-safe repository-preparation skill.",
+  "outputs": [
+    {
+      "kind": "copy",
+      "source": "_main/skill/README.md",
+      "output": "skills/hostinger-coolify-production-guide/README.md",
+      "notes": "Standalone skill README copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
+      "output": "skills/hostinger-coolify-production-guide/SKILL.md",
+      "notes": "Standalone skill entrypoint copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
+      "output": "skills/hostinger-coolify-production-guide/agents/openai.yaml",
+      "notes": "OpenAI platform metadata copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/hostinger-coolify-production-guide.md",
+      "output": "skills/hostinger-coolify-production-guide/references/hostinger-coolify-production-guide.md",
+      "notes": "Full Hostinger VPS plus Coolify production guide copied from first-party source into the copyable skill folder.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/references/hostinger-coolify-production-guide/README.md",
+      "output": "skills/hostinger-coolify-production-guide/references/README.md",
+      "notes": "Skill-local reference index generated from reviewed curated output.",
+      "fidelity": "reviewed_entrypoint"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/hostinger-coolify-production-guide/README.md",
+      "skills/hostinger-coolify-production-guide/SKILL.md",
+      "skills/hostinger-coolify-production-guide/agents/openai.yaml",
+      "skills/hostinger-coolify-production-guide/references/hostinger-coolify-production-guide.md",
+      "skills/hostinger-coolify-production-guide/references/README.md"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "skill_creation_review": {
+    "existing_skill_review": "Reviewed current skills before adding hostinger-coolify-production-guide: n8n-local-setup for setup-guide structure and full-reference publishing, self-hosted-service-safety for non-n8n self-hosting safety boundaries, secure-cicd-installer for deployment-adjacent approval gates, ai-coding-agent-rules routing, README skill tables, and the skill safety matrix. The new hostinger-coolify-production-guide skill is distinct because it pairs a full human-owned Hostinger/Coolify production runbook with a narrow agent-safe repository-preparation workflow.",
+    "trigger": "Use hostinger-coolify-production-guide when a user asks to prepare a repository for Hostinger VPS plus Coolify production deployment, review Docker/Coolify readiness, or access the local human-owned zero-to-production guide. Do not invoke it for ordinary app coding with no deployment concern, n8n-specific deployments, generic self-hosted risk review without Coolify, or live production actions without explicit approval.",
+    "decision": "new_project_skill",
+    "decision_reason": "Extending self-hosted-service-safety would blur its compact review-only purpose, while extending n8n-local-setup would mix non-n8n production deployment guidance into an n8n-specific skill. A new module keeps the full guide source-fidelity surface and production safety boundary explicit.",
+    "unique_value": "Combines a complete Hostinger VPS plus Coolify zero-to-production guide with a strict agent-safe repo-preparation contract that prevents agents from owning billing, DNS, secrets, deployment, migrations, backups, cutover, or rollback.",
+    "runtime_footprint": "SKILL.md stays concise and routes to a local reference only when full runbook detail matters. The long runtime guide is published as a reference file, not duplicated in the default entrypoint.",
+    "local_assets": "Full local reference guide, concise skill README, SKILL.md, OpenAI metadata, and a skill-local reference index. No executable tools or templates are bundled because examples are copy-safe placeholders inside the guide.",
+    "output_contract": "Return a production-readiness report with app inventory, agent-safe repo changes, human-owned Hostinger/Coolify/DNS/secrets/deploy/migration/backup/cutover/rollback actions, validation, blockers, and confirmation that no real secrets or live production actions were added or performed.",
+    "anti_bloat_review": "The skill is not generic DevOps advice: it triggers only for Hostinger VPS plus Coolify production readiness and routes long instructions to a local reference. It is excluded from ordinary feature work and from live production operations without approval.",
+    "safety_boundary": "Agent-safe by default for local repository inspection and placeholder-only documentation/config examples. Hostinger, Coolify, GitHub connection, DNS/TLS, real secrets, production deployments, migrations, backups, restore tests, cutover, rollback, VPS changes, billing, customer data, and destructive actions are human-owned and approval-gated.",
+    "source_provenance": "first_party",
+    "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted. Vendor docs were consulted only as factual context.",
+    "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, curated reference index, routing updates, safety matrix updates, sync, and validation.",
+    "routing": "hostinger-coolify-production-guide is routed for Hostinger VPS plus Coolify production repository-preparation, Docker/Coolify readiness, and local runbook tasks. It is not routed for generic self-hosting risk review or live production mutation.",
+    "validation": [
+      "node repo/scripts/sync-toolkit-projects.cjs --write",
+      "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "node repo/scripts/audit-published-surfaces.cjs --check",
+      "node --test repo/tests/skill-routing.test.cjs",
+      "node repo/scripts/validate-toolkit.cjs"
+    ]
+  },
+  "project": {
+    "name": "Hostinger Coolify Production Guide",
+    "category": "development",
+    "summary": "First-party Hostinger VPS plus Coolify zero-to-production guide with a concise agent-safe repository-preparation skill."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/hostinger-coolify-production-guide",
+      "summary": "Prepare repositories for human-owned Hostinger VPS plus Coolify production deployments."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}
