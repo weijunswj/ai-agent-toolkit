@@ -3,11 +3,17 @@
 ## Preserved In `_main/`
 
 - `hostinger-coolify-production-guide.md`
-- `skill/README.md`
-- `skill/SKILL.md`
-- `skill/agents/openai.yaml`
 
-`_main/hostinger-coolify-production-guide.md` is the full runtime guide. `_main/skill/**` is the concise AI-facing skill source that routes agents to safe repository-preparation work and to the local full guide reference when the user needs human-owned runbook context.
+`_main/hostinger-coolify-production-guide.md` is the full runtime guide and preserved first-party source for the Hostinger VPS plus Coolify zero-to-production runbook.
+
+## Curated AI-Facing Source
+
+- `curated_output_for_ai/skills/hostinger-coolify-production-guide/SKILL.md`
+- `curated_output_for_ai/skills/hostinger-coolify-production-guide/README.md`
+- `curated_output_for_ai/skills/hostinger-coolify-production-guide/agents/openai.yaml`
+- `curated_output_for_ai/references/hostinger-coolify-production-guide/README.md`
+
+`curated_output_for_ai/skills/hostinger-coolify-production-guide/**` owns the AI-facing skill entrypoint, skill README, and skill-local agent metadata that route agents to safe repository-preparation work and to the local full guide reference when the user needs human-owned runbook context.
 
 ## Provenance
 
@@ -15,13 +21,13 @@ This module is first-party toolkit-authored source. No third-party text, scripts
 
 ## AI-Facing Surfaces
 
-- `skills/hostinger-coolify-production-guide/README.md` is generated from `_main/skill/README.md`.
-- `skills/hostinger-coolify-production-guide/SKILL.md` is generated from `_main/skill/SKILL.md`.
-- `skills/hostinger-coolify-production-guide/agents/openai.yaml` is generated from `_main/skill/agents/openai.yaml`.
+- `skills/hostinger-coolify-production-guide/README.md` is generated from `curated_output_for_ai/skills/hostinger-coolify-production-guide/README.md`.
+- `skills/hostinger-coolify-production-guide/SKILL.md` is generated from `curated_output_for_ai/skills/hostinger-coolify-production-guide/SKILL.md`.
+- `skills/hostinger-coolify-production-guide/agents/openai.yaml` is generated from `curated_output_for_ai/skills/hostinger-coolify-production-guide/agents/openai.yaml`.
 - `skills/hostinger-coolify-production-guide/references/hostinger-coolify-production-guide.md` is an exact generated copy of `_main/hostinger-coolify-production-guide.md`.
 - `skills/hostinger-coolify-production-guide/references/README.md` is generated from `curated_output_for_ai/references/hostinger-coolify-production-guide/README.md` as a short skill-local index.
 
-The full runtime guide is published from `_main/` with full fidelity. The curated output is limited to concise skill entrypoints and navigation.
+The full runtime guide is published with full fidelity from `_main/`. The curated output is limited to concise skill entrypoints, skill-local metadata, and navigation.
 
 ## Excluded
 

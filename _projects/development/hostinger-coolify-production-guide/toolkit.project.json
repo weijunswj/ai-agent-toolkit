@@ -10,25 +10,25 @@
   "version_notes": "Initial first-party Hostinger VPS plus Coolify production guide with agent-safe repository-preparation skill.",
   "outputs": [
     {
-      "kind": "copy",
-      "source": "_main/skill/README.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/hostinger-coolify-production-guide/README.md",
       "output": "skills/hostinger-coolify-production-guide/README.md",
-      "notes": "Standalone skill README copied from first-party module source.",
-      "fidelity": "exact"
+      "notes": "Published skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/skill/SKILL.md",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/hostinger-coolify-production-guide/SKILL.md",
       "output": "skills/hostinger-coolify-production-guide/SKILL.md",
-      "notes": "Standalone skill entrypoint copied from first-party module source.",
-      "fidelity": "exact"
+      "notes": "Published skill entrypoint generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
-      "kind": "copy",
-      "source": "_main/skill/agents/openai.yaml",
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/hostinger-coolify-production-guide/agents/openai.yaml",
       "output": "skills/hostinger-coolify-production-guide/agents/openai.yaml",
-      "notes": "OpenAI platform metadata copied from first-party module source.",
-      "fidelity": "exact"
+      "notes": "OpenAI platform metadata generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "copy",
