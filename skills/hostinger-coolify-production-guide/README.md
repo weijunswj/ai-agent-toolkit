@@ -1,8 +1,8 @@
 <!--
-Generated from toolkit project source. Do not edit directly.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: development.hostinger-coolify-production-guide
-Source: _projects/development/hostinger-coolify-production-guide/_main/skill/README.md
-Update the project source and run sync.
+Source: _projects/development/hostinger-coolify-production-guide/curated_output_for_ai/skills/hostinger-coolify-production-guide/README.md
+Update the curated output and run sync.
 -->
 # Hostinger Coolify Production Guide
 

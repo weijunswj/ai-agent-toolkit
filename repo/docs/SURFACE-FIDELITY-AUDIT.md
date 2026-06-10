@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-10 (Hostinger Coolify production guide surface snapshot refresh)
+Latest update: 2026-06-10 (Hostinger Coolify source-to-skill layout refactor)
 
 ## Current state
 
@@ -53,23 +53,24 @@ Current boundary recipe classifications:
 
 | Classification | Count |
 | --- | ---: |
-| main_full_fidelity | 127 |
-| generated_cross_skill_reference | 3 |
 | curated_adapter | 3 |
-| curated_index | 10 |
+| curated_agent_metadata | 1 |
+| curated_index | 11 |
 | curated_metadata | 3 |
 | curated_pack_readme | 3 |
 | curated_reference | 8 |
 | curated_repo_local_agent_template | 4 |
-| curated_router | 7 |
+| curated_router | 8 |
 | curated_template | 2 |
 | curated_template_index | 7 |
+| generated_cross_skill_reference | 3 |
+| main_full_fidelity | 124 |
 
 Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by adding one project and five generated Hostinger/Coolify skill outputs: skill README, skill entrypoint, OpenAI metadata, full guide reference, and reference index.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by reclassifying three Hostinger/Coolify wrapper outputs from `_main` full-fidelity recipes to curated AI-facing recipes: skill README, skill entrypoint, and OpenAI metadata. Published file totals did not change.
 
 ## Current project modules
 

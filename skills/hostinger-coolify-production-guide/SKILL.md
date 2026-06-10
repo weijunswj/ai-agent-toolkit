@@ -4,10 +4,10 @@ description: Prepare repositories for human-owned Hostinger VPS plus Coolify pro
 ---
 
 <!--
-Generated from toolkit project source. Do not edit directly.
+Generated from toolkit curated output for AI. Do not edit directly.
 Project: development.hostinger-coolify-production-guide
-Source: _projects/development/hostinger-coolify-production-guide/_main/skill/SKILL.md
-Update the project source and run sync.
+Source: _projects/development/hostinger-coolify-production-guide/curated_output_for_ai/skills/hostinger-coolify-production-guide/SKILL.md
+Update the curated output and run sync.
 -->
 # Hostinger Coolify Production Guide
 

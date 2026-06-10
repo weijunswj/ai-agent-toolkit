@@ -160,10 +160,37 @@ Expected result: the real values are entered manually in Coolify, while the repo
 
 ### Dockerfile Baseline
 
-Use the app framework's official production guidance when available. If the repository already has a good Dockerfile, improve it rather than replacing it. A generic Node example looks like this:
+Use the app framework's official production guidance when available. If the repository already has a good Dockerfile, improve it rather than replacing it. The example below is a safer generic Node baseline to adapt, not a universal Dockerfile.
+
+Production Dockerfiles require a restrictive `.dockerignore`, especially when the build context is the repository root. A `.dockerignore` reduces the chance of sending `.env` files, `.git`, private keys, backups, logs, or local runtime folders into the build context. Selective `COPY` statements are still preferred; do not rely on `.dockerignore` as the only protection.
+
+Baseline `.dockerignore` to adapt:
+
+```dockerignore
+.git
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+node_modules
+dist
+build
+.next
+coverage
+.tmp
+.n8n-local
+*.log
+backup*
+backups/
+```
+
+Safer generic Node Dockerfile baseline:
 
 ```dockerfile
 # Example only. Review for the actual framework before use.
+# Requires a restrictive .dockerignore.
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -172,7 +199,11 @@ RUN npm ci
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY package.json package-lock.json ./
+COPY src ./src
+# Copy only the actual framework config/public files this app needs.
+# Examples: COPY public ./public
+# Examples: COPY next.config.js ./
 RUN npm run build
 
 FROM node:22-alpine AS runtime
@@ -180,12 +211,20 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
-COPY --from=build /app ./
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+COPY --from=build --chown=node:node /app/dist ./dist
+# Adjust the build output path for the actual framework.
+# Examples: /app/.next, /app/build, /app/server, /app/public
+
+USER node
 EXPOSE 3000
 CMD ["npm", "run", "start"]
 ```
 
-Do not copy this blindly into every app. Adjust package manager, lockfile, build output, start command, and port to the actual repository.
+Do not copy this blindly into every app. Inspect the actual framework, package manager, lockfile, build output, runtime files, start command, and port. Copy only the source, config, public assets, and build artifacts the app actually needs. If the framework does not output `dist`, replace that placeholder with the real build/runtime output path.
 
 ### Optional Compose Example For Multi-Service Apps
 
