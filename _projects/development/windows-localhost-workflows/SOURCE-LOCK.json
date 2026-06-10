@@ -16,11 +16,11 @@
       "notes": "Former standalone skill README promoted exactly into _main/skill."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "skills/windows-localhost-workflows/SKILL.md",
       "project_path": "_projects/development/windows-localhost-workflows/_main/skill/SKILL.md",
       "source_blob_sha": "34bd16887f3d3aea62ec9dfd4bad48664959e0d2",
-      "notes": "Former standalone skill entrypoint promoted exactly into _main/skill."
+      "notes": "Toolkit-adapted after migration to cover Windows Start-Process duplicate Path/PATH failures, Codex sandbox background process persistence, single-string ArgumentList usage, logged launch, and HTTP health polling guidance."
     },
     {
       "mode": "exact",
