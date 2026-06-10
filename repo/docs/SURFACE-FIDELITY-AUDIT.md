@@ -77,6 +77,7 @@ Known baseline context:
 - `_projects/design/ui-ux-pro-max`
 - `_projects/development/ai-coding-agent-rules`
 - `_projects/development/local-ai-stack-safety`
+- `_projects/development/hostinger-coolify-production-guide`
 - `_projects/development/self-hosted-service-safety`
 - `_projects/development/windows-localhost-workflows`
 - `_projects/knowledge/knowledge-index-updater`
@@ -90,6 +91,7 @@ Known baseline context:
 - `skills/agent-skill-supply-chain-audit/`
 - `skills/ai-coding-agent-rules/`
 - `skills/context-preserving-ai-publisher/`
+- `skills/hostinger-coolify-production-guide/`
 - `skills/knowledge-index-updater/`
 - `skills/local-ai-stack-safety/`
 - `skills/n8n-agent-rules/`
