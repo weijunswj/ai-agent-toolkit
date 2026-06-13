@@ -60,21 +60,21 @@ Use only these statuses in checklists and reports:
    - `docker ps` if available
    - `ufw status verbose` if available
    - `systemctl status ssh --no-pager` if available
-4. Write a server evidence report before any mutation.
+4. Write a server evidence report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path before any mutation.
 5. Require owner approval before installing or changing anything.
 6. Install Coolify using the official Coolify installation path only after approval; record the official source URL.
 7. Pause immediately after installation and instruct the owner to create the first Coolify admin account before continuing.
 8. Configure firewall only after documenting the recovery path, allowing SSH first, keeping the current SSH session open, and testing a second SSH session.
 9. Verify Coolify health.
-10. Write the final bootstrap report.
+10. Write the final bootstrap report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path.
 
 ## Coolify Deploy Flow
 
-Confirm repository, branch, Dockerfile or buildpack path, app healthcheck endpoint, required env vars, persistent volumes, public/private exposure, custom domain, SSL, and no committed secrets. Deploy only after owner approval when the target is production. Run healthchecks, inspect logs without printing secrets, record rollback plan, and write a deployment evidence report.
+Confirm repository, branch, Dockerfile or buildpack path, app healthcheck endpoint, required env vars, persistent volumes, public/private exposure, custom domain, SSL, and no committed secrets. Deploy only after owner approval when the target is production. Run healthchecks, inspect logs without printing secrets, then record the rollback plan and deployment evidence report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path.
 
 ## Maintenance And Incident Standard
 
-Every setup, deploy, security check, maintenance action, and incident action must preserve an evidence report. Use evidence-based pass/fail maintenance language: PASS means the observed check met the documented expectation, WARN means follow-up or human verification is needed, and FAIL means the observed state is unsafe, unavailable, or outside the expected boundary. Daily security checks are read-only reports only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
+Every setup, deploy, security check, maintenance action, and incident action must preserve an evidence report. Store repo-side evidence reports, owner approval logs, rollback plans, implementation notes, and incident notes under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path, and update those docs as the server state or deployment plan changes. Daily server-generated security reports produced by the bundled script remain on the VPS under `/data/maintenance/reports` unless the owner explicitly chooses a different server path. Use evidence-based pass/fail maintenance language: PASS means the observed check met the documented expectation, WARN means follow-up or human verification is needed, and FAIL means the observed state is unsafe, unavailable, or outside the expected boundary. Daily security checks are read-only reports only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
 
 Daily security checks should include read-only intrusion signals: auth failures, recent successful logins, UID 0 account inventory, sudo/wheel membership, SSH authorized key file inventory without key material, cron persistence inventory, systemd timer inventory, listening ports, and Docker/Coolify state. Treat these as signals only; they do not prove the host has no intruder.
 

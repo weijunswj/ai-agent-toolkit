@@ -9,7 +9,7 @@ Boundary note: For Hostinger VPS plus Coolify deployment setup/maintenance, use 
 - `SKILL.md` - routing and safety contract.
 - `agents/openai.yaml` - UI metadata and implicit-invocation policy.
 - `checklists/` - bootstrap, deploy, daily security, maintenance, and incident response checklists.
-- `templates/` - evidence reports, rollback plans, and owner approval logs.
+- `templates/` - evidence reports, rollback plans, and owner approval logs; repo-side copies should live under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path.
 - `scripts/daily-security-check.sh` - read-only report generator for `/data/maintenance/reports`, with optional owner-configured Telegram/local-email notification.
 - `scripts/install-daily-security-check-systemd.sh` - installs a systemd service/timer and optional private env file without auto-remediation.
 - `references/` - full first-party workflow reference.

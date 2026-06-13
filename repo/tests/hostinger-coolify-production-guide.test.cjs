@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
@@ -10,6 +11,7 @@ const scripts = [
   '_projects/development/hostinger-coolify-production-guide/_main/skill/scripts/daily-security-check.sh',
   'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/daily-security-check.sh'
 ];
+const hostingerDocsPath = 'docs/hostinger-coolify/';
 
 function findBash() {
   const candidates = process.platform === 'win32'
@@ -145,5 +147,23 @@ test('daily security check accepts absolute backup directories after canonicaliz
 test('daily security check can send Telegram notification without leaking token', () => {
   for (const scriptRelPath of scripts) {
     runDailyCheckScenario(scriptRelPath, 'telegram');
+  }
+});
+
+test('Hostinger/Coolify repo-side evidence artifacts have a docs home', () => {
+  const requiredFiles = [
+    '_projects/development/hostinger-coolify-production-guide/_main/hostinger-coolify-production-guide.md',
+    '_projects/development/hostinger-coolify-production-guide/_main/skill/checklists/bootstrap-checklist.md',
+    '_projects/development/hostinger-coolify-production-guide/_main/skill/checklists/deploy-checklist.md',
+    '_projects/development/hostinger-coolify-production-guide/_main/skill/checklists/maintenance-checklist.md',
+    '_projects/development/hostinger-coolify-production-guide/curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/SKILL.md',
+    'skills/codex-ssh-hostinger-coolify-setup-maintainer/SKILL.md',
+    'skills/codex-ssh-hostinger-coolify-setup-maintainer/references/hostinger-coolify-production-guide.md',
+    'repo/docs/SKILL-SAFETY-MATRIX.md'
+  ];
+
+  for (const relPath of requiredFiles) {
+    const content = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
+    assert.match(content, new RegExp(hostingerDocsPath.replace(/\//g, '\\/')), relPath);
   }
 });
