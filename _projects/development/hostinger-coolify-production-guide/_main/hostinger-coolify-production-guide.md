@@ -1,6 +1,6 @@
 # Codex SSH Hostinger Coolify Setup And Maintainer Workflow
 
-This first-party workflow guides a non-DevOps owner and Codex through Hostinger VPS plus Coolify setup, deployment, evidence-based pass/fail maintenance, security checks, and incident response. Treat the VPS as production-sensitive infrastructure. Codex must inspect and report before changing anything. Codex must never claim setup or maintenance is perfect.
+This first-party workflow guides a non-DevOps owner and Codex through Hostinger VPS plus Coolify setup, deployment, evidence-based pass/fail maintenance, security checks, and incident response. Treat the VPS as production-sensitive infrastructure. Codex must inspect and report before changing anything. Codex must describe setup and maintenance only through recorded evidence-based PASS/WARN/FAIL results.
 
 For Hostinger VPS and Coolify setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`.
 
@@ -20,7 +20,7 @@ Use only these statuses in checklists and reports:
 - Do not ask the user to paste secrets into chat.
 - Do not print secrets, tokens, private keys, cookies, database URLs, or env files.
 - Do not disable SSH.
-- Do not enable UFW until SSH allow rules are confirmed and a recovery path is documented.
+- Do not enable UFW or apply restrictive firewall changes until the recovery path is documented, SSH allow rules are confirmed, the current SSH session is kept open, and a second SSH session has been tested.
 - Do not expose database/cache/admin ports publicly by default.
 - Do not delete Docker volumes, Coolify apps, databases, backups, or persistent data without explicit owner approval.
 - Do not reboot without explicit owner approval unless the owner has pre-approved a maintenance window.
@@ -63,7 +63,7 @@ Use only these statuses in checklists and reports:
 5. Require owner approval before installing or changing anything.
 6. Install Coolify using the official Coolify installation path only after approval; record the official source URL.
 7. Pause immediately after installation and instruct the owner to create the first Coolify admin account before continuing.
-8. Configure firewall only after confirming SSH allow rules and a recovery path.
+8. Configure firewall only after documenting the recovery path, allowing SSH first, keeping the current SSH session open, and testing a second SSH session.
 9. Verify Coolify health.
 10. Write the final bootstrap report.
 
@@ -73,6 +73,6 @@ Confirm repository, branch, Dockerfile or buildpack path, app healthcheck endpoi
 
 ## Maintenance And Incident Standard
 
-Every setup, deploy, security check, maintenance action, and incident action must preserve an evidence report. Use evidence-based pass/fail maintenance language: PASS means the observed check met the documented expectation, WARN means follow-up or human verification is needed, and FAIL means the observed state is unsafe, unavailable, or outside the expected boundary.
+Every setup, deploy, security check, maintenance action, and incident action must preserve an evidence report. Use evidence-based pass/fail maintenance language: PASS means the observed check met the documented expectation, WARN means follow-up or human verification is needed, and FAIL means the observed state is unsafe, unavailable, or outside the expected boundary. Daily security checks are read-only reports only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
 
 See the skill checklists and templates for copy-ready execution material.

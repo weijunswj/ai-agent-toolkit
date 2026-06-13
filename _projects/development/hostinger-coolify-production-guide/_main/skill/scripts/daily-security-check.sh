@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -u
 
+# Read-only evidence collection only. Do not change packages, restart services, mutate Docker, change firewall rules, or remediate.
+
 MAINTENANCE_ROOT="${MAINTENANCE_ROOT:-/data/maintenance}"
 REPORT_DIR="${REPORT_DIR:-$MAINTENANCE_ROOT/reports}"
 TODAY="$(date -u +%F)"
@@ -37,7 +39,7 @@ append_block() {
   printf 'Host: `%s`\n\n' "$(hostname 2>/dev/null || printf unknown)"
   printf 'Kernel: `%s`\n\n' "$(uname -sr 2>/dev/null || printf unknown)"
   printf 'Uptime: `%s`\n\n' "$(uptime -p 2>/dev/null || uptime 2>/dev/null || printf unknown)"
-  printf 'This is an evidence-based pass/fail maintenance report. It does not claim the system is perfect. No auto-remediation was performed.\n\n'
+  printf 'This is an evidence-based pass/fail maintenance report. It states only evidence-based PASS/WARN/FAIL results. No auto-remediation was performed.\n\n'
   printf '## Summary Checks\n\n'
   printf '| Area | Status | Evidence | Follow-up |\n| --- | --- | --- | --- |\n'
 } > "$TMP_REPORT"

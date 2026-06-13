@@ -13,7 +13,7 @@ Action type: `<bootstrap|deploy|security-check|maintenance|incident>`
 ## Summary
 
 - Overall status: `<PASS|WARN|FAIL>`
-- Statement: Evidence-based pass/fail maintenance result. This report does not claim the system is perfect.
+- Statement: Evidence-based pass/fail maintenance result. This report states only evidence-based PASS/WARN/FAIL results.
 
 ## Evidence
 

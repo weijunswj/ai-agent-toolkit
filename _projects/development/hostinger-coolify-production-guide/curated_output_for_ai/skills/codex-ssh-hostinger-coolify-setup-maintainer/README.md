@@ -15,4 +15,6 @@ Migration note: For Hostinger VPS and Coolify setup/maintenance, use `codex-ssh-
 
 ## Safety Summary
 
-Codex must inspect and report before changing anything, must not print secrets, must not disable SSH, must not enable UFW until SSH allow rules and recovery are documented, and must require explicit owner approval for production-sensitive actions.
+Codex must inspect and report before changing anything, must not print secrets, must not disable SSH, must not enable UFW or apply restrictive firewall changes until recovery is documented, SSH is allowed first, the current SSH session stays open, and a second SSH session is tested, and must require explicit owner approval for production-sensitive actions.
+
+Daily security checks are read-only reports. They must not change packages, restart services, mutate Docker, change firewall rules, or perform remediation.

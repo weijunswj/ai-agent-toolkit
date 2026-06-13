@@ -27,9 +27,10 @@ Do not use this skill for local n8n setup. Use `n8n-local-setup` for local n8n o
 - Inspect and report before changing anything.
 - Preserve an evidence report for setup, deploy, security check, maintenance action, and incident action.
 - Use evidence-based pass/fail maintenance wording.
-- Never claim setup or maintenance is perfect.
+- Do not describe setup or maintenance as complete, safe, or secure beyond the recorded evidence-based PASS/WARN/FAIL results.
 - Do not ask the user to paste secrets into chat.
 - Do not print secrets, tokens, private keys, cookies, database URLs, or env files.
+- Treat `daily-security-check.sh` as read-only reporting only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
 
 ## Checklist Statuses
 
@@ -45,7 +46,7 @@ Use these exact statuses:
 ## Hard Safety Gates
 
 - Do not disable SSH.
-- Do not enable UFW until SSH allow rules are confirmed and a recovery path is documented.
+- Do not enable UFW or apply restrictive firewall changes until the recovery path is documented, SSH allow rules are confirmed, the current SSH session is kept open, and a second SSH session has been tested.
 - Do not expose database/cache/admin ports publicly by default.
 - Do not delete Docker volumes, Coolify apps, databases, backups, or persistent data without explicit owner approval.
 - Do not reboot without explicit owner approval unless the owner has pre-approved a maintenance window.

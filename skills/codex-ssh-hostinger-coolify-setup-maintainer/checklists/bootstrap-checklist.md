@@ -13,5 +13,5 @@ Update the project source and run sync.
 - [!] Needs owner approval - Approve the named official Coolify install source URL before execution.
 - [ ] Pending - Install Coolify only through the approved official path.
 - [x?] Completed but needs human verification - Pause after installation for the owner to create the first Coolify admin account.
-- [!] Needs owner approval - Configure firewall only after SSH allow rules and recovery path are documented.
+- [!] Needs owner approval - Configure firewall only after the recovery path is documented, SSH is allowed first, the current SSH session remains open, and a second SSH session has been tested.
 - [ ] Pending - Verify Coolify health and write final bootstrap report.
