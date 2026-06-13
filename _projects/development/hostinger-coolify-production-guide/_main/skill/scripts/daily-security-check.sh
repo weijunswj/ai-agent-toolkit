@@ -30,6 +30,19 @@ redact_text() {
 secret_like_url() {
   printf '%s' "$1" | grep -Eiq '://[^/@]+@|[?&][^=]*(token|secret|password|passwd|api[_-]?key|key|auth|signature|sig|access[_-]?token|refresh[_-]?token)='
 }
+safe_backup_find_root() {
+  local path="$1" real_path
+  case "$path" in
+    /*) ;;
+    *) return 2 ;;
+  esac
+  [ -d "$path" ] || return 3
+  real_path="$(cd -- "$path" 2>/dev/null && pwd -P)" || return 3
+  case "$real_path" in
+    /*) printf '%s/.' "$real_path" ;;
+    *) return 2 ;;
+  esac
+}
 status_line() {
   local status="$1" area="$2" evidence="$3" followup="$4"
   case "$status" in
@@ -130,10 +143,15 @@ else status_line WARN 'Certificate expiry' 'HEALTHCHECK_HOSTS not configured or 
 
 if [ -n "${BACKUP_PATHS:-}" ]; then
   for path in $BACKUP_PATHS; do
-    if [ -d "$path" ]; then
-      newest="$(find "$path" -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-)"
+    case "$path" in
+      -*) status_line WARN "Backup freshness $path" 'Rejected unsafe backup path' 'Use absolute directory paths that do not begin with a dash.'; continue ;;
+      /*) ;;
+      *) status_line WARN "Backup freshness $path" 'Rejected non-absolute backup path' 'Use absolute directory paths only.'; continue ;;
+    esac
+    if backup_root="$(safe_backup_find_root "$path")"; then
+      newest="$(find "$backup_root" -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-)"
       [ -n "$newest" ] && status_line PASS "Backup freshness $path" "Newest file: $(basename "$newest")" 'Verify restore separately.' || status_line WARN "Backup freshness $path" 'No files found' 'Verify backup job.'
-    else status_line WARN "Backup freshness $path" 'Path not found' 'Verify backup configuration.'; fi
+    else status_line WARN "Backup freshness $path" 'Path not found or unsafe after canonicalization' 'Use an existing absolute backup directory.'; fi
   done
 else status_line WARN 'Backup freshness' 'BACKUP_PATHS not configured' 'Configure paths and verify restores manually.'; fi
 

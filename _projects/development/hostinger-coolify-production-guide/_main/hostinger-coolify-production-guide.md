@@ -76,4 +76,6 @@ Confirm repository, branch, Dockerfile or buildpack path, app healthcheck endpoi
 
 Every setup, deploy, security check, maintenance action, and incident action must preserve an evidence report. Use evidence-based pass/fail maintenance language: PASS means the observed check met the documented expectation, WARN means follow-up or human verification is needed, and FAIL means the observed state is unsafe, unavailable, or outside the expected boundary. Daily security checks are read-only reports only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
 
+When configuring backup freshness checks, set `BACKUP_PATHS` only to absolute backup directory paths. The daily report script must reject relative paths and leading-dash paths instead of passing them to filesystem tools.
+
 See the skill checklists and templates for copy-ready execution material.
