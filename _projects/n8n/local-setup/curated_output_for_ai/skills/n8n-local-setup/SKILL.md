@@ -1,6 +1,6 @@
 ---
 name: n8n-local-setup
-description: Guide AI agents through safe local n8n setup with Docker Compose, Postgres, Compose ngrok, launcher/menu use, skills-first routing, and optional AI-coding-agent MCP feature references. For any n8n workflow, helper-script, or live n8n task, first apply n8n-agent-rules.
+description: Guide AI agents through safe local n8n setup with Docker Compose, Postgres, Compose ngrok, hosted n8n Hostinger VPS notes, launcher/menu use, skills-first routing, and optional AI-coding-agent MCP feature references. For any n8n workflow, helper-script, or live n8n task, first apply n8n-agent-rules.
 ---
 
 <!--
@@ -11,7 +11,9 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup
 
-Use this skill when the user needs to set up or explain local n8n, the Docker Compose local stack, Compose ngrok tunneling, the guided launcher/menu, skills-first agent routing, or optional AI-coding-agent MCP feature references.
+Use this skill when the user needs to set up or explain local n8n, the Docker Compose local stack, Compose ngrok tunneling, hosted n8n Hostinger VPS notes, the guided launcher/menu, skills-first agent routing, or optional AI-coding-agent MCP feature references.
+
+For Hostinger VPS plus Coolify deployment setup or server maintenance that is not the hosted n8n reference guide, use `codex-ssh-hostinger-coolify-setup-maintainer`.
 
 For any n8n workflow, helper-script, `n8n_docs`, `n8n_live`, import/export, validation, credential, webhook ID, activation, execution, repo/live sync, or live n8n task, apply `n8n-agent-rules` first.
 
@@ -22,7 +24,7 @@ For any n8n workflow, helper-script, `n8n_docs`, `n8n_live`, import/export, vali
 
 ## Core Rules
 
-- Use the local full-fidelity references in [references/n8n/](references/n8n/) for local setup, updates, Compose ngrok tunneling, and Docker Compose plus Postgres details.
+- Use the local full-fidelity references in [references/n8n/](references/n8n/) for local setup, updates, Compose ngrok tunneling, Docker Compose plus Postgres, and hosted n8n Hostinger VPS details.
 - Treat the Compose ngrok service as the supported local tunnel path in this guide.
 - Use the local stack templates in [templates/local-stack/](templates/local-stack/) for local `n8n + postgres`.
 - Treat [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, Postgres backup packages, and local backup restore actions.
@@ -48,7 +50,7 @@ For any n8n workflow, helper-script, `n8n_docs`, `n8n_live`, import/export, vali
 - PowerShell local stack menu: [templates/local-stack/scripts/n8n-local-menu.ps1](templates/local-stack/scripts/n8n-local-menu.ps1), including local-only backup and restore recovery actions.
 - Optional MCP config templates: [templates/mcp-configs/](templates/mcp-configs/)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
-- Migration note: For Hostinger VPS and Coolify setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`.
+- Hostinger VPS reference: [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md)
 - Pack checklist: [packs/codex-n8n-local/pack.json](packs/codex-n8n-local/pack.json)
 
 ## Workflow

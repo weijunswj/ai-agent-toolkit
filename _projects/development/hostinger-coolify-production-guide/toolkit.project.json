@@ -24,6 +24,13 @@
       "fidelity": "reviewed_entrypoint"
     },
     {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/agents/openai.yaml",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/agents/openai.yaml",
+      "notes": "Published OpenAI UI metadata for the Codex SSH Hostinger Coolify setup maintainer skill.",
+      "fidelity": "generated_metadata"
+    },
+    {
       "kind": "copy",
       "source": "_main/skill/checklists/bootstrap-checklist.md",
       "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/bootstrap-checklist.md",
@@ -112,6 +119,7 @@
     "allowed": [
       "skills/codex-ssh-hostinger-coolify-setup-maintainer/README.md",
       "skills/codex-ssh-hostinger-coolify-setup-maintainer/SKILL.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/agents/openai.yaml",
       "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/bootstrap-checklist.md",
       "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/deploy-checklist.md",
       "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/daily-security-checklist.md",
@@ -144,20 +152,20 @@
   "live_actions": "explicit_confirmation_only",
   "ci_live_actions": false,
   "skill_creation_review": {
-    "existing_skill_review": "Reviewed current skills before adding hostinger-coolify-production-guide: n8n-local-setup for setup-guide structure and full-reference publishing, self-hosted-service-safety for non-n8n self-hosting safety boundaries, secure-cicd-installer for deployment-adjacent approval gates, ai-coding-agent-rules routing, README skill tables, and the skill safety matrix. The new codex-ssh-hostinger-coolify-setup-maintainer skill is distinct because it pairs a production-sensitive Hostinger/Coolify maintainer workflow with source-owned checklists, templates, scripts, and owner approval gates.",
-    "trigger": "Use codex-ssh-hostinger-coolify-setup-maintainer when a user asks Codex to inspect, bootstrap, deploy, secure, maintain, or respond to incidents on a Hostinger VPS running Coolify. Do not invoke it for local n8n setup or generic app coding with no Hostinger/Coolify work.",
+    "existing_skill_review": "Reviewed current skills before adding codex-ssh-hostinger-coolify-setup-maintainer: n8n-local-setup for local and hosted n8n guide ownership, self-hosted-service-safety for non-n8n self-hosting safety boundaries, secure-cicd-installer for deployment-adjacent approval gates, ai-coding-agent-rules routing, README skill tables, and the skill safety matrix. The new codex-ssh-hostinger-coolify-setup-maintainer skill is distinct because it pairs a production-sensitive Hostinger/Coolify maintainer workflow with source-owned checklists, templates, scripts, agent metadata, and owner approval gates while leaving n8n-local-setup's Hostinger VPS reference intact.",
+    "trigger": "Use codex-ssh-hostinger-coolify-setup-maintainer when a user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, inspect a Hostinger server over SSH, bootstrap or maintain Coolify, deploy apps through Coolify, run daily security checks, or respond to incidents on a Hostinger VPS running Coolify. Do not invoke it for generic local n8n setup, the n8n Hostinger VPS reference guide, or generic app coding with no Hostinger/Coolify work.",
     "decision": "new_project_skill",
     "decision_reason": "The previous Hostinger/Coolify material is now a dedicated production-sensitive maintainer workflow rather than secondary n8n-local setup guidance or a repo-preparation-only guide.",
     "unique_value": "Combines Codex SSH read-only preflight, owner approval gates, setup/deploy/maintenance/incident checklists, evidence templates, and a daily security report script for Hostinger VPS plus Coolify owners.",
     "runtime_footprint": "SKILL.md stays concise and routes to a local reference only when full runbook detail matters. The long runtime guide is published as a reference file, not duplicated in the default entrypoint.",
-    "local_assets": "Full local reference guide, concise skill README, SKILL.md, checklists, evidence templates, rollback/approval templates, read-only daily security report script, and systemd timer installer script. The scripts perform reporting/installation only and do not perform auto-remediation.",
+    "local_assets": "Full local reference guide, concise skill README, SKILL.md, agents/openai.yaml metadata, checklists, evidence templates, rollback/approval templates, read-only daily security report script, and systemd timer installer script. The scripts perform reporting/installation only and do not perform auto-remediation.",
     "output_contract": "Return an evidence-based PASS/WARN/FAIL setup, deploy, security check, maintenance, or incident report with owner approvals, blockers, manual follow-up, and confirmation that no secrets were printed and no unapproved live production actions were performed.",
     "anti_bloat_review": "The skill is not generic DevOps advice: it triggers only for Hostinger VPS plus Coolify setup, deployment, security checks, maintenance, and incident response. It routes longer instructions to local references/checklists and excludes unapproved live production operations.",
     "safety_boundary": "Agent-safe by default for read-only inspection, evidence reports, placeholder-only documentation, and the bundled read-only daily security report. Hostinger, Coolify, GitHub connection, DNS/TLS, real secrets, production deployments, migrations, backups, restore tests, cutover, rollback, VPS changes, billing, customer data, firewall restrictions, reboots, and destructive actions are human-owned and approval-gated.",
     "source_provenance": "first_party",
     "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted. Vendor docs were consulted only as factual context.",
     "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, curated reference index, routing updates, safety matrix updates, sync, and validation.",
-    "routing": "codex-ssh-hostinger-coolify-setup-maintainer is routed for Hostinger VPS plus Coolify setup, deployment, security checks, maintenance, and incident response. n8n-local-setup remains routed only for local n8n.",
+    "routing": "codex-ssh-hostinger-coolify-setup-maintainer is routed for Hostinger VPS plus Coolify setup, deployment, security checks, maintenance, incident response, and prompts such as helping set up Hostinger for deployment. n8n-local-setup keeps its local n8n and hosted n8n Hostinger VPS reference material. If the target app is n8n or the task touches live n8n operations, n8n-agent-rules remains the companion safety router.",
     "validation": [
       "node repo/scripts/sync-toolkit-projects.cjs --write",
       "node repo/scripts/sync-toolkit-projects.cjs --check",

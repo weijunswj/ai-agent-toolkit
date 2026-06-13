@@ -329,8 +329,7 @@ test('n8n local setup source README exposes two main beginner pages', () => {
 
   assert.match(readme, /^## Start Here$/m);
   assert.match(readme, /\[Page 1 - Local Setup\]\(\.\/Page%201%20-%20Local%20Setup\.md\)/);
-  assert.match(readme, /Hostinger\/Coolify migration note/);
-  assert.match(readme, /For Hostinger VPS and Coolify setup\/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`/);
+  assert.match(readme, /\[Page 2 - Hostinger VPS\]\(\.\/Page%202%20-%20Hostinger%20VPS\.md\)/);
   assert.match(readme, /^## Supporting Materials$/m);
   assert.match(readme, /Local stack templates/);
   assert.doesNotMatch(readme, /Local helper scripts/);
@@ -984,25 +983,79 @@ test('local stack templates stay placeholder-only and local-first', () => {
   assert.doesNotMatch(shortcut, /POSTGRES_PASSWORD|N8N_ENCRYPTION_KEY|NGROK_AUTHTOKEN/);
 });
 
-test('Hostinger VPS page is only a migration pointer to the dedicated Coolify skill', () => {
+test('Hostinger VPS page restores Hostinger-specific production content only', () => {
   const vps = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md');
 
-  assert.match(vps, /^# Page 2 - Hostinger VPS Migration Note$/m);
-  assert.match(vps, /For Hostinger VPS and Coolify setup\/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`\./);
-  assert.match(vps, /Keep `n8n-local-setup` focused on local n8n/);
-  assert.match(vps, /Do not use this local n8n reference as approval to buy, configure, deploy, reboot, firewall, restore, or maintain a production VPS\./);
+  assert.match(vps, /^# Page 2 - Hostinger VPS$/m);
+  assert.match(vps, /\* Verify current Hostinger plan\/template details before buying\./);
+  assert.match(vps, /\n---\n\n## 1\. When To Use Hostinger VPS/);
+  assertHeadingsInOrder(vps, [
+    '## 1. When To Use Hostinger VPS',
+    '## 2. Choose A Hostinger Plan',
+    '## 3. Choose The n8n Template',
+    '## 4. First Login Checklist',
+    '## 5. Domain / Subdomain Setup',
+    '## 6. Verify Server Files',
+    '## 7. Verify Containers',
+    '## 8. Queue Mode And Workers',
+    '## 9. Backups',
+    '## 10. Updating Hostinger n8n',
+    '## 11. Safety Rules',
+    '## 12. References'
+  ]);
 
-  for (const removed of [
-    'Choose A Hostinger Plan',
-    'Choose The n8n Template',
-    'KVM 2 is the comfortable default',
-    'Docker Compose Manager',
+  for (const expected of [
+    'KVM 1',
+    'KVM 2',
+    'KVM 4',
+    'KVM 8',
+    '1 vCPU',
+    '4 GB RAM',
+    '50 GB NVMe',
+    '4 TB bandwidth',
+    '2 vCPU',
+    '8 GB RAM',
+    '100 GB NVMe',
+    '8 TB bandwidth',
+    'Ubuntu 24.04 with n8n',
+    'Ubuntu 24.04 with n8n (queue mode)',
+    'Browser Terminal',
+    'IP address',
+    'Server IP',
+    'IPv4',
+    'Dedicated IP',
+    'ssh root@203.0.113.123',
+    'https://n8n.<your-vps-hostname>',
+    '/docker/n8n',
+    '/root',
+    'docker-compose.yml',
+    'docker compose pull',
     'docker compose down',
+    'docker compose up -d',
+    'Docker Compose Manager',
+    'VPS snapshot',
     'N8N_ENCRYPTION_KEY'
   ]) {
-    assert.doesNotMatch(vps, new RegExp(escapeRegExp(removed)), removed);
+    assert.match(vps, new RegExp(escapeRegExp(expected)), expected);
   }
+
+  assert.match(vps, /KVM 2 is the comfortable default/);
+  assert.match(vps, /KVM 1 is budget\/light-use only/);
+  assert.match(vps, /KVM 4\+ is for heavier workflows/);
+  assert.match(vps, /A record/);
+  assert.match(vps, /DNS propagation/);
+  assert.match(vps, /Replace `203\.0\.113\.123` with the IP address from hPanel/);
+  assert.doesNotMatch(vps, /123\.123\.123\.123/);
+  assert.doesNotMatch(vps, /ssh root@<your-vps-ip>/);
+  assert.match(vps, /Do not copy the Hostinger dashboard URL\. You need the server IP address\./);
+  assert.match(vps, /Terminal commands go in Browser Terminal or SSH\. Website URLs go in your web browser\./);
+  assert.match(vps, /Do not type the n8n URL into Browser Terminal or SSH\. It belongs in a web browser\./);
+  assert.match(vps, /Save the email, password, n8n URL, and VPS IP address in the password manager/);
+  assert.doesNotMatch(vps, /Coolify/i);
+  assert.doesNotMatch(vps, /generic company VM/i);
+  assert.doesNotMatch(vps, /unrelated hosting providers/i);
 });
+
 test('optional MCP setup and config surfaces are shipped as secondary AI-coding-agent references', () => {
   assert.equal(fs.existsSync(path.join(repoRoot, 'mcp/projects/n8n-local-setup.md')), false);
 
@@ -1059,8 +1112,8 @@ test('repo README and usage docs route to n8n skills-first local setup surfaces'
 
   for (const expected of [
     'skills/n8n-local-setup/references/n8n/local-setup.md',
-        'skills/n8n-local-setup/templates/local-stack/',
-    'codex-ssh-hostinger-coolify-setup-maintainer',
+    'skills/n8n-local-setup/references/n8n/hostinger-vps.md',
+    'skills/n8n-local-setup/templates/local-stack/',
     'skills/n8n-local-setup/references/ai-agent-platforms/',
     'skills/n8n-local-setup/templates/mcp-configs/',
     'skills/n8n-agent-rules/'
@@ -1094,7 +1147,8 @@ test('n8n local setup packs install current files only', () => {
   for (const pack of [codex, claude]) {
     for (const expected of [
       'skills/n8n-local-setup/references/n8n/local-setup.md',
-            'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
+      'skills/n8n-local-setup/references/n8n/hostinger-vps.md',
+      'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
       'skills/n8n-local-setup/templates/local-stack/.env.example',
       'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd',
       'skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd',

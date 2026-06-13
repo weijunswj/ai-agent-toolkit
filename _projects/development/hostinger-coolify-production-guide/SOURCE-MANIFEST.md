@@ -21,8 +21,9 @@ These files are first-party source for the Codex SSH Hostinger VPS plus Coolify 
 
 - `curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/SKILL.md`
 - `curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/README.md`
+- `curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/agents/openai.yaml`
 
-These files own the concise skill entrypoint and copy-folder README.
+These files own the concise skill entrypoint, copy-folder README, and OpenAI UI metadata.
 
 ## Generated outputs
 

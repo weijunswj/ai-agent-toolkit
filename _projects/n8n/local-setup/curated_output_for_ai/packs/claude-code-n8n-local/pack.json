@@ -1,7 +1,7 @@
 {
   "id": "claude-code-n8n-local",
   "title": "Claude Code n8n Local",
-  "description": "Generic Claude Code rules, n8n-agent-rules, optional n8n adapter, and n8n local setup materials plus Hostinger/Coolify migration note.",
+  "description": "Generic Claude Code rules, n8n-agent-rules, optional n8n adapter, and n8n local/Hostinger setup materials.",
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [

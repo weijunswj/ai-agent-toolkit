@@ -23,3 +23,4 @@ Overall status: `<PASS|WARN|FAIL>`
 | Healthchecks/certificates/backups | `<PASS|WARN|FAIL>` | `<summary>` | `<action>` |
 
 Do not include secrets, tokens, private keys, cookies, database URLs, or env file contents.
+Healthcheck URLs must be non-secret. Skip and replace any URL that contains userinfo or token-like query parameters.

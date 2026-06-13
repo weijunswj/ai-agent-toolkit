@@ -3,6 +3,8 @@ set -u
 
 # Read-only evidence collection only. Do not change packages, restart services, mutate Docker, change firewall rules, or remediate.
 
+umask 077
+
 MAINTENANCE_ROOT="${MAINTENANCE_ROOT:-/data/maintenance}"
 REPORT_DIR="${REPORT_DIR:-$MAINTENANCE_ROOT/reports}"
 TODAY="$(date -u +%F)"
@@ -12,23 +14,38 @@ WARN_COUNT=0
 FAIL_COUNT=0
 
 mkdir -p "$REPORT_DIR"
+chmod 700 "$MAINTENANCE_ROOT" "$REPORT_DIR" 2>/dev/null || true
 TMP_REPORT="$(mktemp "${REPORT_DIR}/.security-check.XXXXXX")"
 trap 'rm -f "$TMP_REPORT"' EXIT
 
 have() { command -v "$1" >/dev/null 2>&1; }
+redact_text() {
+  sed -E \
+    -e 's#(postgres(ql)?|mysql|redis)://[^[:space:]]+#<redacted-db-url>#Ig' \
+    -e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/@[:space:]]+@#\1<redacted-userinfo>@#g' \
+    -e 's#([?&][^=[:space:]&]*(token|secret|password|passwd|api[_-]?key|key|auth|signature|sig|access[_-]?token|refresh[_-]?token)[^=[:space:]&]*=)[^&#[:space:]]+#\1<redacted>#Ig' \
+    -e 's#(token|secret|password|passwd|api[_-]?key)=([^[:space:]]+)#\1=<redacted>#Ig' \
+    -e 's#(Authorization:[[:space:]]*(Bearer|Basic)[[:space:]]+)[A-Za-z0-9._~+/-]+=*#\1<redacted>#Ig'
+}
+secret_like_url() {
+  printf '%s' "$1" | grep -Eiq '://[^/@]+@|[?&][^=]*(token|secret|password|passwd|api[_-]?key|key|auth|signature|sig|access[_-]?token|refresh[_-]?token)='
+}
 status_line() {
   local status="$1" area="$2" evidence="$3" followup="$4"
   case "$status" in
     WARN) WARN_COUNT=$((WARN_COUNT + 1)) ;;
     FAIL) FAIL_COUNT=$((FAIL_COUNT + 1)) ;;
   esac
+  area="$(printf '%s' "$area" | redact_text)"
+  evidence="$(printf '%s' "$evidence" | redact_text)"
+  followup="$(printf '%s' "$followup" | redact_text)"
   printf '| %s | %s | %s | %s |\n' "$area" "$status" "$evidence" "$followup" >> "$TMP_REPORT"
 }
 append_block() {
   local title="$1" cmd="$2"
   {
     printf '\n### %s\n\n```text\n' "$title"
-    bash -c "$cmd" 2>&1 | sed -E 's#(postgres(ql)?|mysql|redis)://[^[:space:]]+#<redacted-db-url>#g; s#(token|secret|password|passwd|api[_-]?key)=([^[:space:]]+)#\1=<redacted>#Ig' | head -n 120
+    bash -c "$cmd" 2>&1 | redact_text | head -n 120
     printf '```\n'
   } >> "$TMP_REPORT"
 }
@@ -94,8 +111,13 @@ else status_line WARN 'System logs' 'journalctl unavailable' 'Check /var/log/aut
 
 if [ -n "${HEALTHCHECK_URLS:-}" ]; then
   for url in $HEALTHCHECK_URLS; do
+    label="$(printf '%s' "$url" | redact_text)"
+    if secret_like_url "$url"; then
+      status_line WARN "Healthcheck $label" 'Skipped secret-looking healthcheck URL' 'Use a non-secret health endpoint without userinfo or token-like query parameters.'
+      continue
+    fi
     code="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || true)"
-    [ "$code" = 200 ] && status_line PASS "Healthcheck $url" 'HTTP 200' 'None.' || status_line FAIL "Healthcheck $url" "HTTP ${code:-failed}" 'Investigate app/proxy before changes.'
+    [ "$code" = 200 ] && status_line PASS "Healthcheck $label" 'HTTP 200' 'None.' || status_line FAIL "Healthcheck $label" "HTTP ${code:-failed}" 'Investigate app/proxy before changes.'
   done
 else status_line WARN 'Healthcheck URLs' 'HEALTHCHECK_URLS not configured' 'Configure non-secret URLs if desired.'; fi
 

@@ -6,14 +6,14 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup Skill
 
-Instruction-only skill for safe local n8n setup, Docker Compose plus Postgres, Compose ngrok, Hostinger VPS migration note, launcher/menu use, local backup/restore recovery, skills-first agent guidance, and optional AI-coding-agent MCP feature references.
+Instruction-only skill for safe local n8n setup, Docker Compose plus Postgres, Compose ngrok, hosted n8n Hostinger VPS notes, launcher/menu use, local backup/restore recovery, skills-first agent guidance, and optional AI-coding-agent MCP feature references.
 
 ## Start Here
 
 | Need | Open |
 | --- | --- |
 | Beginner local setup guide | [references/n8n/local-setup.md](references/n8n/local-setup.md) |
-| Hostinger VPS migration note guide | [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md) |
+| Hostinger VPS guide | [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md) |
 | n8n reference index | [references/n8n/](references/n8n/) |
 | Skills-first agent guidance | [references/ai-agent-platforms/](references/ai-agent-platforms/) |
 | Local stack templates | [templates/local-stack/](templates/local-stack/) |

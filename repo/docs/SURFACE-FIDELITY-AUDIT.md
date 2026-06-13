@@ -28,8 +28,8 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 12 |
-| publishedFiles | 186 |
-| declaredOutputFiles | 186 |
+| publishedFiles | 187 |
+| declaredOutputFiles | 187 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 186 |
+| boundaryRecipeOutputs | 187 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 0 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 112 |
+| declared_generated | 113 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
@@ -54,6 +54,7 @@ Current boundary recipe classifications:
 | Classification | Count |
 | --- | ---: |
 | curated_adapter | 3 |
+| curated_agent_metadata | 1 |
 | curated_index | 11 |
 | curated_metadata | 3 |
 | curated_pack_readme | 3 |
@@ -69,7 +70,7 @@ Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by replacing the old Hostinger/Coolify repository-preparation skill with the Codex SSH Hostinger Coolify maintainer skill, moving runtime checklists, templates, scripts, and the full reference to `_main` full-fidelity recipes, and removing the old OpenAI metadata output.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by replacing the old Hostinger/Coolify repository-preparation skill with the Codex SSH Hostinger Coolify maintainer skill, moving runtime checklists, templates, scripts, and the full reference to `_main` full-fidelity recipes, restoring the n8n-local-setup Hostinger VPS reference as separate hosted n8n material, and publishing new OpenAI metadata for the new skill.
 
 ## Current project modules
 
