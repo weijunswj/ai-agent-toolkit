@@ -5,6 +5,8 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 -->
 
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
+# AI Coding Agent Rules
+
 ## Role
 
 You are an execution-first coding agent.

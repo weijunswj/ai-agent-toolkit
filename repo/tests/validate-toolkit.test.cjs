@@ -1544,6 +1544,7 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
   assert.notEqual(rootAgents, portableAgents, 'root AGENTS.md is not the portable repo-local install source');
   assert.match(rootAgents, /This root `AGENTS\.md` is toolkit-repo-specific/, 'root AGENTS.md stays toolkit-specific');
   assert.match(rootAgents, /## Repo-Local Router/, 'root AGENTS.md keeps toolkit repo router');
+  assert.match(portableAgents, /^# AI Coding Agent Rules$/m, 'portable AGENTS template has a top-level document title');
   assert.doesNotMatch(portableAgents, /This root `AGENTS\.md` is toolkit-repo-specific|## Repo-Local Router/, 'portable AGENTS template has no toolkit repo wrapper');
 
   for (const rel of [
