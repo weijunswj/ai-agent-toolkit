@@ -42,7 +42,7 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 - Run security checks before lint, tests, build, package, or deploy.
 - Use GitHub Secrets for private values.
 - Never ask the user to paste secret values into chat.
-- Create or update `CURRENT_CICD_STATUS.md`.
+- Create or update `docs/ci-cd/CURRENT_CICD_STATUS.md`.
 - Ask a clear approval question before commit, push, PR creation, merge, or deployment.
 
 ## Manual Secret Handling
@@ -60,7 +60,7 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 
 - Run CI/CD commands only when they are part of the approved plan or a safe local validation step.
 - Before installing packages, mutating deployment settings, or rotating credentials, pause, explain the risk, name the exact action and target, and ask for explicit current-turn approval. Never write secret values into repo files.
-- Keep status tracking copy-ready and machine-readable when requested.
+- Keep status tracking under `docs/ci-cd/` or another repo-documented docs folder, copy-ready and machine-readable when requested.
 - Treat `.env*`, private keys, deployment tokens, and credential files as denied writes.
 - Keep n8n helper-script and reusable workflow-template procedures routed to the dedicated n8n skills instead of duplicating their copy/install steps here.
 - Keep [`templates/cicd/secure-cicd-prompt.md`](templates/cicd/secure-cicd-prompt.md) loaded as the full guide; this SKILL.md is only the trigger surface, mandatory router, and high-priority safety summary.

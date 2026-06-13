@@ -137,6 +137,7 @@ Before editing:
 - Restate the task internally in one sentence.
 - Identify likely files and validation commands.
 - Inspect targeted files first.
+- If the task touches a documented workflow, setup, policy, implementation plan, status note, or operations area, read the relevant docs before editing and treat them as active context.
 - Avoid broad repo scans unless the first evidence is insufficient.
 
 During editing:
@@ -148,12 +149,15 @@ During editing:
 - Do not weaken tests, validation, schemas, guardrails, or error handling just to pass.
 - Do not introduce secrets, credentials, tokens, private keys, `.env`, or private values.
 - Do not create persistent task, todo, or lesson files unless the repo documents that pattern and the task needs it.
+- Put persistent status, report, implementation plan, handoff, or operations notes under an existing `docs/` path or another repo-documented folder; do not drop root-level files like `STATUS.md`, `REPORT.md`, or `PLAN.md` unless the repo explicitly requires that path.
+- Keep relevant docs and implementation plans current as the work changes; do not leave stale plans, status notes, or setup docs behind.
 
 After editing:
 
 - Run the smallest relevant validation first.
 - If validation fails, make one targeted repair and rerun.
 - After two failed repair attempts, stop and report the blocker.
+- Check whether the change affects existing setup, usage, operations, CI/CD, deployment, safety, troubleshooting, or implementation-plan docs, and update the relevant docs in the same change when needed.
 - Review the diff for unrelated changes before final reporting.
 
 ## Command And Repo Hygiene

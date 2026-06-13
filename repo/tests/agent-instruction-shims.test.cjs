@@ -310,6 +310,10 @@ test('managed toolkit block comes from the execution prompt partial', () => {
   assert.equal(rootToolkit, prompt);
   assert.equal(sourceToolkit, prompt);
   assertNoForbiddenDefaultPromptPhrases(rootToolkit, 'root toolkit block');
+  assert.match(rootToolkit, /read the relevant docs before editing and treat them as active context/i);
+  assert.match(rootToolkit, /Put persistent status, report, implementation plan, handoff, or operations notes under an existing `docs\/` path/i);
+  assert.match(rootToolkit, /Keep relevant docs and implementation plans current as the work changes/i);
+  assert.match(rootToolkit, /Check whether the change affects existing setup, usage, operations, CI\/CD, deployment, safety, troubleshooting, or implementation-plan docs/i);
 });
 
 test('n8n adapter is compact and fail-closed', () => {

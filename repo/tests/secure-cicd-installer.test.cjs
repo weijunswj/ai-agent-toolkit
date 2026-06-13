@@ -95,7 +95,7 @@ test('Secure CI/CD source and generated skills summarize required safe execution
     /Run security checks before lint, tests, build, package, or deploy/i,
     /Use GitHub Secrets for private values/i,
     /Never ask the user to paste secret values into chat/i,
-    /Create or update `CURRENT_CICD_STATUS\.md`/i,
+    /Create or update `docs\/ci-cd\/CURRENT_CICD_STATUS\.md`/i,
     /Ask a clear approval question before commit, push, PR creation, merge, or deployment/i,
     /beginner-friendly GitHub Secret setup instructions using secret names only/i,
     /Tell the user where to paste values directly in GitHub or the external platform/i
@@ -120,7 +120,8 @@ test('Secure CI/CD canonical prompt still carries the core setup safeguards', ()
     /Before deploying, you must pause, name the environment and deployment target, explain the risk, and ask for my approval/i,
     /Security preflight scan before setup/i,
     /If secrets or risky credentials are found during preflight:[\s\S]*?Stop setup immediately/i,
-    /Create or update CURRENT_CICD_STATUS\.md/i,
+    /Create or update `?docs\/ci-cd\/CURRENT_CICD_STATUS\.md`?/i,
+    /check whether the repo already has a CI\/CD, deployment, operations, or status document under `docs\/`/i,
     /Pause before deployment planning/i,
     /After I approve the deployment plan/i,
     /Never ask me to paste real secret values into this chat/i
