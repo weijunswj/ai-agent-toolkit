@@ -5,9 +5,9 @@
   "title": "Secure CI/CD Installer",
   "module_path": "_projects/cicd/secure-installer",
   "main_path": "_projects/cicd/secure-installer/_main",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "version_policy": "semver",
-  "version_notes": "Initial stable toolkit project version after migration from retired internal source material.",
+  "version_notes": "Updates CI/CD status tracking guidance to keep persistent status docs under docs/ci-cd or another documented project docs path.",
   "outputs": [
     {
       "kind": "curated",

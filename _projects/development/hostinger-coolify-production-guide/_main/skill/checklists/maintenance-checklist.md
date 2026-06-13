@@ -6,4 +6,4 @@
 - [ ] Pending - Execute only the approved change.
 - [ ] Pending - Run post-change smoke tests and log review.
 - [ ] Pending - Make rollback decision based on evidence.
-- [ ] Pending - Write maintenance evidence report.
+- [ ] Pending - Write maintenance evidence report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path.

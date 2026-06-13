@@ -20,6 +20,12 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 
 Human-facing navigational paths and URLs must be clickable Markdown links. Do not leave important links only inside code fences or inline code. Code blocks are for commands, payloads, literal examples, and copy/paste prompts.
 
+## Documentation Hygiene
+
+Persistent status, report, implementation plan, handoff, operations, setup, CI/CD, deployment, safety, and troubleshooting notes belong under an existing `docs/` path or another repo-documented folder. Do not create root-level files such as `STATUS.md`, `REPORT.md`, or `PLAN.md` unless the repo explicitly requires that path.
+
+Before adding a new persistent document, check for an existing relevant doc and update it instead of creating a duplicate. Before changing a documented workflow, setup, policy, implementation plan, status note, or operations area, read the relevant docs and treat them as active context. When implementation changes, keep the related docs and plans current in the same change.
+
 ## Project Categories
 
 - `cicd/`: CI/CD and GitHub Actions safety material.

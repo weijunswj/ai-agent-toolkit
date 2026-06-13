@@ -28,7 +28,7 @@ This is a short reviewed operating overview and safety wrapper. It is not the fu
 - Before committing, pushing, creating a PR, merging, or deploying, pause, name the exact target and action, explain the risk, and ask for explicit approval.
 - Prefer CI first, deployment later.
 - Use GitHub Secrets for private values.
-- Keep `CURRENT_CICD_STATUS.md` updated in the consumer repo.
+- Keep `docs/ci-cd/CURRENT_CICD_STATUS.md` updated in the consumer repo, unless the repo already documents another CI/CD status path.
 
 ## Pipeline Defaults
 

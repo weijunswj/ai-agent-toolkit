@@ -12,6 +12,10 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Current CI/CD Status
 
+Recommended repo path: `docs/ci-cd/CURRENT_CICD_STATUS.md`
+
+If the repo already has a documented CI/CD, deployment, operations, or status document under `docs/` or another project docs folder, update that file instead of creating a duplicate.
+
 ## Status
 
 - CI installed: no

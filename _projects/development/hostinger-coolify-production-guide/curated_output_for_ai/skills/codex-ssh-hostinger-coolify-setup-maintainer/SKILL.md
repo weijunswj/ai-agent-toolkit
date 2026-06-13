@@ -20,6 +20,7 @@ Do not replace the n8n Hostinger VPS guide with this skill. Use `n8n-local-setup
 - Treat the VPS as production-sensitive infrastructure.
 - Inspect and report before changing anything.
 - Preserve an evidence report for setup, deploy, security check, maintenance action, and incident action.
+- Store repo-side evidence reports, owner approval logs, rollback plans, implementation notes, and incident notes under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path, and update those docs as the server state or deployment plan changes.
 - Use evidence-based pass/fail maintenance wording.
 - Do not describe setup or maintenance as complete, safe, or secure beyond the recorded evidence-based PASS/WARN/FAIL results.
 - Do not ask the user to paste secrets into chat.
@@ -73,6 +74,6 @@ The owner must buy the VPS, secure the Hostinger account, create the first Cooli
 
 1. Confirm target host, OS, domain, intended apps, and owner recovery access.
 2. Run only read-only preflight commands until the owner approves a named change.
-3. Write or update the relevant evidence report.
+3. Write or update the relevant evidence report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path.
 4. Ask for explicit owner approval before installs, firewall changes, DNS changes, production deploys, env var changes, reboots, destructive actions, or official installer execution.
 5. After any approved change, run smoke tests and record PASS/WARN/FAIL evidence.

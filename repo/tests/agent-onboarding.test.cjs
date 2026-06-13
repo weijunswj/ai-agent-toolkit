@@ -40,6 +40,8 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
 
   assert.match(sourceOfTruth, /The repo-wide generated surface is skills-first\./);
   assert.match(sourceOfTruth, /Humans use `_projects\/\*\*` for source review and maintenance, and agents use generated `skills\/\*\*` folders after sync\./);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Persistent status, report, implementation plan, handoff, operations, setup, CI\/CD, deployment, safety, and troubleshooting notes belong under an existing `docs\/` path/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /read the relevant docs and treat them as active context/i);
   assert.match(validation, /For this repo, the canonical full validation command is:/);
   assert.match(validation, /npm run validate:all/);
 });

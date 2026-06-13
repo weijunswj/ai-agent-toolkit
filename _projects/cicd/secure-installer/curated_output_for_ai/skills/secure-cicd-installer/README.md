@@ -6,7 +6,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Secure CI/CD Installer Skill
 
-Instruction-only skill for secure CI/CD installer planning, approval-gated template review, and safe status tracking.
+Instruction-only skill for secure CI/CD installer planning, approval-gated template review, and safe docs-based status tracking.
 
 The `SKILL.md` file is an AI-facing published surface generated from [_projects/cicd/secure-installer/curated_output_for_ai/](../../_projects/cicd/secure-installer/curated_output_for_ai/). Update the curated source, then run:
 

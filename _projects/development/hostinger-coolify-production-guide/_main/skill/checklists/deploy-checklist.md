@@ -10,4 +10,4 @@
 - [ ] Pending - Confirm no secrets are committed.
 - [ ] Pending - Deploy after approval.
 - [ ] Pending - Run healthcheck and inspect logs without printing secrets.
-- [ ] Pending - Record rollback plan and deployment evidence report.
+- [ ] Pending - Record rollback plan and deployment evidence report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path.

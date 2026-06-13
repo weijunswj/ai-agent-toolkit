@@ -5,9 +5,9 @@
   "title": "Codex SSH Hostinger Coolify Setup Maintainer",
   "module_path": "_projects/development/hostinger-coolify-production-guide",
   "main_path": "_projects/development/hostinger-coolify-production-guide/_main",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "version_policy": "semver",
-  "version_notes": "Adds read-only intrusion-signal reporting and optional owner-configured Telegram/local-email daily maintenance notifications.",
+  "version_notes": "Clarifies docs-based homes for Hostinger/Coolify evidence reports, approval logs, rollback plans, implementation notes, and incident notes.",
   "outputs": [
     {
       "kind": "curated",

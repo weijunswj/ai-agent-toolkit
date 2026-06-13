@@ -111,7 +111,7 @@ Project detection rules:
 - If Dockerfile exists, support Docker build checks.
 - If docker-compose.yml or compose.yml exists, support Docker Compose validation.
 - If workflows/*.json, n8n workflow exports, or n8n-specific structure exists, treat it as a possible n8n workflow project.
-- If this is confirmed or strongly likely to be an n8n workflow project, use `n8n-workflows/` as the canonical workflow JSON folder for CI validation and local repository hygiene. Keep Secure CI/CD focused on project-specific CI, `.gitignore` additions, README safety notes, validation wiring, and `CURRENT_CICD_STATUS.md` updates based on the actual target repository structure. If the user asks to install, copy, adapt, or validate n8n import/export/sync helper scripts, route that procedure to `n8n-workflow-helper-scripts`. If the user asks to select, copy, publish, or adapt reusable n8n workflow templates, route that procedure to `n8n-workflow-templates`. If the request spans Secure CI/CD and n8n helpers or templates, state this boundary clearly and use the dedicated n8n skill for the n8n-specific copy or template-selection steps. Do not copy helper scripts or workflow templates blindly from Secure CI/CD guidance. Do not run live n8n import/export inside generic CI by default. Never commit .n8n-local/, .tmp/, *.live-export.json, *.live-import.json, credential binding files, or n8n credential exports.
+- If this is confirmed or strongly likely to be an n8n workflow project, use `n8n-workflows/` as the canonical workflow JSON folder for CI validation and local repository hygiene. Keep Secure CI/CD focused on project-specific CI, `.gitignore` additions, README safety notes, validation wiring, and `docs/ci-cd/CURRENT_CICD_STATUS.md` updates based on the actual target repository structure. If the user asks to install, copy, adapt, or validate n8n import/export/sync helper scripts, route that procedure to `n8n-workflow-helper-scripts`. If the user asks to select, copy, publish, or adapt reusable n8n workflow templates, route that procedure to `n8n-workflow-templates`. If the request spans Secure CI/CD and n8n helpers or templates, state this boundary clearly and use the dedicated n8n skill for the n8n-specific copy or template-selection steps. Do not copy helper scripts or workflow templates blindly from Secure CI/CD guidance. Do not run live n8n import/export inside generic CI by default. Never commit .n8n-local/, .tmp/, *.live-export.json, *.live-import.json, credential binding files, or n8n credential exports.
 - If index.html exists without a backend, treat it as a static site.
 - If the repo is a monorepo, detect each app/package and propose a matrix or workspace-aware CI plan.
 
@@ -240,7 +240,7 @@ After I approve the CI/security plan:
 3. If existing workflows conflict, explain the conflict and ask before replacing them.
 4. Add .gitignore entries for unsafe files if needed.
 5. Add or update .env.example with placeholder values only if environment variables are used.
-6. Create or update CURRENT_CICD_STATUS.md as the live source of truth for the CI/CD setup.
+6. Create or update `docs/ci-cd/CURRENT_CICD_STATUS.md` as the live source of truth for the CI/CD setup.
 7. Add comments in generated workflow files explaining each job.
 8. Make workflows clear, maintainable, and production-ready.
 9. Use pinned major versions for common GitHub Actions where suitable.
@@ -248,7 +248,7 @@ After I approve the CI/security plan:
 11. Run local validation where possible.
 12. Tell me exactly what changed.
 
-CURRENT_CICD_STATUS.md requirements:
+`docs/ci-cd/CURRENT_CICD_STATUS.md` requirements:
 - Explain the current CI/CD setup status.
 - List the workflow files that exist.
 - List the checks that currently run.
@@ -260,6 +260,7 @@ CURRENT_CICD_STATUS.md requirements:
 - Include the current setup branch and PR status, if applicable.
 - Include how to rerun or debug the workflow.
 - Keep this file updated whenever CI/CD setup changes.
+- Before creating it, check whether the repo already has a CI/CD, deployment, operations, or status document under `docs/` or another documented project folder; update the existing relevant document instead of creating a duplicate.
 
 CI workflow requirements:
 - Trigger on pull_request.
@@ -355,7 +356,7 @@ After I approve the deployment plan:
 5. Add staging before production where practical.
 6. Add smoke tests after deployment where practical.
 7. Add rollback instructions or rollback workflow where practical.
-8. Update CURRENT_CICD_STATUS.md with deployment status, required secrets, manual steps, and rollback notes.
+8. Update `docs/ci-cd/CURRENT_CICD_STATUS.md` with deployment status, required secrets, manual steps, and rollback notes.
 9. Never hardcode secrets.
 10. Never print secrets.
 11. Ask before pushing.
@@ -423,7 +424,7 @@ Before committing:
 2. Explain why each file was changed.
 3. Confirm no secrets are included.
 4. Confirm .env and other unsafe files are ignored.
-5. Confirm CURRENT_CICD_STATUS.md is created or updated.
+5. Confirm `docs/ci-cd/CURRENT_CICD_STATUS.md` is created or updated.
 6. Ask me whether to commit.
 
 Before pushing:
@@ -449,7 +450,7 @@ After setup is complete, give me:
 
 1. What was installed.
 2. Files created or changed.
-3. Where CURRENT_CICD_STATUS.md is and what it says is still pending.
+3. Where `docs/ci-cd/CURRENT_CICD_STATUS.md` is and what it says is still pending.
 4. What CI checks will run.
 5. What security checks will run.
 6. Whether deployment is enabled.
