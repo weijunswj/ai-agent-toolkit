@@ -46,11 +46,12 @@ function parseMarkdownTable(sectionText) {
 }
 
 function markdownSection(text, heading, nextHeading = null) {
+  const normalizedText = text.replace(/\r\n/g, '\n');
   const startToken = `${heading}\n`;
-  const start = text.indexOf(startToken);
+  const start = normalizedText.indexOf(startToken);
   assert.notEqual(start, -1, `${heading} section is missing`);
   const bodyStart = start + startToken.length;
-  const rest = text.slice(bodyStart);
+  const rest = normalizedText.slice(bodyStart);
   if (!nextHeading) return rest;
   const end = rest.indexOf(`${nextHeading}\n`);
   assert.notEqual(end, -1, `${nextHeading} section is missing`);
