@@ -20,7 +20,7 @@ Review [pack.json](pack.json) before copying files.
 
 - [AI Coding Agent Rules](../../../ai-coding-agent-rules/) and the Codex repo-local `AGENTS.md` template.
 - [n8n Agent Rules](../../../n8n-agent-rules/) and the optional [Codex n8n adapter](../../../n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md).
-- [Local stack templates](../../templates/local-stack/), optional Codex MCP feature config, and the local/Hostinger n8n guides.
+- [Local stack templates](../../templates/local-stack/), optional Codex MCP feature config, and the local n8n guides and the Hostinger/Coolify migration note.
 
 ## Review Notes
 

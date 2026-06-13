@@ -17,7 +17,7 @@ Use the skill name, description, and local files to decide whether a skill appli
 | `context-preserving-ai-publisher` | Creating or maintaining source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift docs. |
 | `agent-skill-supply-chain-audit` | Auditing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, toolkit conversion fit, and usefulness/token-bloat review before import. |
 | `local-ai-stack-safety` | Reviewing local AI stack setup risk for local model runners, model servers, model downloads, GPU/runtime changes, local AI web UIs, or local AI endpoint exposure. |
-| `hostinger-coolify-production-guide` | Preparing repositories for human-owned Hostinger VPS plus Coolify production deployment, Docker/Coolify readiness, placeholder-only env/deploy notes, health checks, migrations, CORS, logging, and local runbook reference. |
+| `codex-ssh-hostinger-coolify-setup-maintainer` | Codex SSH Hostinger VPS plus Coolify setup, deployment, daily security checks, evidence-based maintenance, and incident response with owner approval gates. |
 | `self-hosted-service-safety` | Reviewing non-n8n self-hosted service setup risk for Docker/VPS plans, reverse proxies, public ports, DNS/TLS, tunnels, credentials, backups, or first-run hardening. |
 | `windows-localhost-workflows` | Starting, relaunching, verifying, or troubleshooting localhost development workflows on Windows. |
 | `knowledge-index-updater` | Creating or updating a Notion/GitHub knowledge index, merging duplicates, categorising entries, maintaining stable source keys, or scheduling index checks. |

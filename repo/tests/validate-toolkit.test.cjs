@@ -519,7 +519,7 @@ test('skill discovery includes migrated skills', () => {
   assert.ok(skills.includes('skills/secure-cicd-installer'));
   assert.ok(skills.includes('skills/knowledge-index-updater'));
   assert.ok(skills.includes('skills/local-ai-stack-safety'));
-  assert.ok(skills.includes('skills/hostinger-coolify-production-guide'));
+  assert.ok(skills.includes('skills/codex-ssh-hostinger-coolify-setup-maintainer'));
   assert.ok(skills.includes('skills/self-hosted-service-safety'));
 });
 

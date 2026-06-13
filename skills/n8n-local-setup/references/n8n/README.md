@@ -19,7 +19,7 @@ These references are local to the copyable skill folder. Use them for normal exe
 | Guide | Use when |
 | --- | --- |
 | [local-setup.md](local-setup.md) | Running the local Docker Desktop setup with n8n, Postgres, the `_n8n-local.cmd` menu, updates, local backup/restore recovery, Compose ngrok public access, troubleshooting, and daily commands. |
-| [hostinger-vps.md](hostinger-vps.md) | Moving from local testing to always-on Hostinger VPS hosting with domain, backup, queue mode, update, and safety guidance. |
+| [hostinger-vps.md](hostinger-vps.md) | Migration note: For Hostinger VPS and Coolify setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`. |
 
 ## Skills-First Note
 

@@ -2,56 +2,128 @@
   "id": "development.hostinger-coolify-production-guide",
   "category": "development",
   "name": "hostinger-coolify-production-guide",
-  "title": "Hostinger Coolify Production Guide",
+  "title": "Codex SSH Hostinger Coolify Setup Maintainer",
   "module_path": "_projects/development/hostinger-coolify-production-guide",
   "main_path": "_projects/development/hostinger-coolify-production-guide/_main",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "version_policy": "semver",
-  "version_notes": "Initial first-party Hostinger VPS plus Coolify production guide with agent-safe repository-preparation skill.",
+  "version_notes": "Replaces the prior repository-preparation guide with a production-sensitive Codex SSH Hostinger Coolify setup and maintainer workflow.",
   "outputs": [
     {
       "kind": "curated",
-      "source": "curated_output_for_ai/skills/hostinger-coolify-production-guide/README.md",
-      "output": "skills/hostinger-coolify-production-guide/README.md",
-      "notes": "Published skill README generated from project-owned curated AI output.",
+      "source": "curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/README.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/README.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer skill material generated from project-owned curated AI output.",
       "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "curated",
-      "source": "curated_output_for_ai/skills/hostinger-coolify-production-guide/SKILL.md",
-      "output": "skills/hostinger-coolify-production-guide/SKILL.md",
-      "notes": "Published skill entrypoint generated from project-owned curated AI output.",
-      "fidelity": "reviewed_entrypoint"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/hostinger-coolify-production-guide/agents/openai.yaml",
-      "output": "skills/hostinger-coolify-production-guide/agents/openai.yaml",
-      "notes": "OpenAI platform metadata generated from project-owned curated AI output.",
+      "source": "curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/SKILL.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/SKILL.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer skill material generated from project-owned curated AI output.",
       "fidelity": "reviewed_entrypoint"
     },
     {
       "kind": "copy",
-      "source": "_main/hostinger-coolify-production-guide.md",
-      "output": "skills/hostinger-coolify-production-guide/references/hostinger-coolify-production-guide.md",
-      "notes": "Full Hostinger VPS plus Coolify production guide copied from first-party source into the copyable skill folder.",
+      "source": "_main/skill/checklists/bootstrap-checklist.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/bootstrap-checklist.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
       "fidelity": "exact"
     },
     {
-      "kind": "curated",
-      "source": "curated_output_for_ai/references/hostinger-coolify-production-guide/README.md",
-      "output": "skills/hostinger-coolify-production-guide/references/README.md",
-      "notes": "Skill-local reference index generated from reviewed curated output.",
-      "fidelity": "reviewed_entrypoint"
+      "kind": "copy",
+      "source": "_main/skill/checklists/deploy-checklist.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/deploy-checklist.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/checklists/daily-security-checklist.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/daily-security-checklist.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/checklists/maintenance-checklist.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/maintenance-checklist.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/checklists/incident-response-checklist.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/incident-response-checklist.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/templates/server-evidence-report.template.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/server-evidence-report.template.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/templates/daily-security-report.template.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/daily-security-report.template.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/templates/rollback-plan.template.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/rollback-plan.template.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/templates/owner-approval-log.template.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/owner-approval-log.template.md",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/scripts/daily-security-check.sh",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/daily-security-check.sh",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/scripts/install-daily-security-check-systemd.sh",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/install-daily-security-check-systemd.sh",
+      "notes": "Published Codex SSH Hostinger Coolify setup maintainer runtime material copied from first-party source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/hostinger-coolify-production-guide.md",
+      "output": "skills/codex-ssh-hostinger-coolify-setup-maintainer/references/hostinger-coolify-production-guide.md",
+      "notes": "Full first-party Codex SSH Hostinger Coolify setup and maintainer workflow copied into the skill folder.",
+      "fidelity": "exact"
     }
   ],
   "writes": {
     "allowed": [
-      "skills/hostinger-coolify-production-guide/README.md",
-      "skills/hostinger-coolify-production-guide/SKILL.md",
-      "skills/hostinger-coolify-production-guide/agents/openai.yaml",
-      "skills/hostinger-coolify-production-guide/references/hostinger-coolify-production-guide.md",
-      "skills/hostinger-coolify-production-guide/references/README.md"
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/README.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/SKILL.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/bootstrap-checklist.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/deploy-checklist.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/daily-security-checklist.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/maintenance-checklist.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/incident-response-checklist.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/server-evidence-report.template.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/daily-security-report.template.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/rollback-plan.template.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/owner-approval-log.template.md",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/daily-security-check.sh",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/install-daily-security-check-systemd.sh",
+      "skills/codex-ssh-hostinger-coolify-setup-maintainer/references/hostinger-coolify-production-guide.md"
     ],
     "denied": [
       ".env*",
@@ -72,11 +144,11 @@
   "live_actions": "explicit_confirmation_only",
   "ci_live_actions": false,
   "skill_creation_review": {
-    "existing_skill_review": "Reviewed current skills before adding hostinger-coolify-production-guide: n8n-local-setup for setup-guide structure and full-reference publishing, self-hosted-service-safety for non-n8n self-hosting safety boundaries, secure-cicd-installer for deployment-adjacent approval gates, ai-coding-agent-rules routing, README skill tables, and the skill safety matrix. The new hostinger-coolify-production-guide skill is distinct because it pairs a full human-owned Hostinger/Coolify production runbook with a narrow agent-safe repository-preparation workflow.",
-    "trigger": "Use hostinger-coolify-production-guide when a user asks to prepare a repository for Hostinger VPS plus Coolify production deployment, review Docker/Coolify readiness, or access the local human-owned zero-to-production guide. Do not invoke it for ordinary app coding with no deployment concern, n8n-specific deployments, generic self-hosted risk review without Coolify, or live production actions without explicit approval.",
+    "existing_skill_review": "Reviewed current skills before adding hostinger-coolify-production-guide: n8n-local-setup for setup-guide structure and full-reference publishing, self-hosted-service-safety for non-n8n self-hosting safety boundaries, secure-cicd-installer for deployment-adjacent approval gates, ai-coding-agent-rules routing, README skill tables, and the skill safety matrix. The new codex-ssh-hostinger-coolify-setup-maintainer skill is distinct because it pairs a full human-owned Hostinger/Coolify production runbook with a narrow agent-safe repository-preparation workflow.",
+    "trigger": "Use codex-ssh-hostinger-coolify-setup-maintainer when a user asks Codex to inspect, bootstrap, deploy, secure, maintain, or respond to incidents on a Hostinger VPS running Coolify. Do not invoke it for local n8n setup or generic app coding with no Hostinger/Coolify work.",
     "decision": "new_project_skill",
-    "decision_reason": "Extending self-hosted-service-safety would blur its compact review-only purpose, while extending n8n-local-setup would mix non-n8n production deployment guidance into an n8n-specific skill. A new module keeps the full guide source-fidelity surface and production safety boundary explicit.",
-    "unique_value": "Combines a complete Hostinger VPS plus Coolify zero-to-production guide with a strict agent-safe repo-preparation contract that prevents agents from owning billing, DNS, secrets, deployment, migrations, backups, cutover, or rollback.",
+    "decision_reason": "The previous Hostinger/Coolify material is now a dedicated production-sensitive maintainer workflow rather than secondary n8n-local setup guidance or a repo-preparation-only guide.",
+    "unique_value": "Combines Codex SSH read-only preflight, owner approval gates, setup/deploy/maintenance/incident checklists, evidence templates, and a daily security report script for Hostinger VPS plus Coolify owners.",
     "runtime_footprint": "SKILL.md stays concise and routes to a local reference only when full runbook detail matters. The long runtime guide is published as a reference file, not duplicated in the default entrypoint.",
     "local_assets": "Full local reference guide, concise skill README, SKILL.md, OpenAI metadata, and a skill-local reference index. No executable tools or templates are bundled because examples are copy-safe placeholders inside the guide.",
     "output_contract": "Return a production-readiness report with app inventory, agent-safe repo changes, human-owned Hostinger/Coolify/DNS/secrets/deploy/migration/backup/cutover/rollback actions, validation, blockers, and confirmation that no real secrets or live production actions were added or performed.",
@@ -85,7 +157,7 @@
     "source_provenance": "first_party",
     "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted. Vendor docs were consulted only as factual context.",
     "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, curated reference index, routing updates, safety matrix updates, sync, and validation.",
-    "routing": "hostinger-coolify-production-guide is routed for Hostinger VPS plus Coolify production repository-preparation, Docker/Coolify readiness, and local runbook tasks. It is not routed for generic self-hosting risk review or live production mutation.",
+    "routing": "codex-ssh-hostinger-coolify-setup-maintainer is routed for Hostinger VPS plus Coolify setup, deployment, security checks, maintenance, and incident response. n8n-local-setup remains routed only for local n8n.",
     "validation": [
       "node repo/scripts/sync-toolkit-projects.cjs --write",
       "node repo/scripts/sync-toolkit-projects.cjs --check",
@@ -95,16 +167,16 @@
     ]
   },
   "project": {
-    "name": "Hostinger Coolify Production Guide",
+    "name": "Codex SSH Hostinger Coolify Setup Maintainer",
     "category": "development",
-    "summary": "First-party Hostinger VPS plus Coolify zero-to-production guide with a concise agent-safe repository-preparation skill."
+    "summary": "First-party Codex SSH Hostinger VPS plus Coolify setup, deployment, security check, maintenance, and incident response workflow."
   },
   "surface": {
     "publish_as": "skill",
     "skill": {
       "status": "published",
-      "path": "skills/hostinger-coolify-production-guide",
-      "summary": "Prepare repositories for human-owned Hostinger VPS plus Coolify production deployments."
+      "path": "skills/codex-ssh-hostinger-coolify-setup-maintainer",
+      "summary": "Guide Codex through production-sensitive Hostinger VPS plus Coolify setup, deployment, daily security checks, evidence-based maintenance, and incident response with owner approval gates."
     },
     "mcp": {
       "status": "not_applicable"

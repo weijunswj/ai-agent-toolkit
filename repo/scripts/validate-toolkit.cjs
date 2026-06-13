@@ -242,7 +242,9 @@ const allowedExecutablePrefixes = [
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/',
   'skills/n8n-agent-rules/scripts/',
-  'skills/n8n-local-setup/templates/local-stack/'
+  'skills/n8n-local-setup/templates/local-stack/',
+  '_projects/development/hostinger-coolify-production-guide/curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/',
+  'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/'
 ];
 
 const executableExtensions = new Set([

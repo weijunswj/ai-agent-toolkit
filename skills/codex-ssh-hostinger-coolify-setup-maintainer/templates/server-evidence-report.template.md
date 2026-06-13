@@ -1,0 +1,26 @@
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: development.hostinger-coolify-production-guide
+Source: _projects/development/hostinger-coolify-production-guide/_main/skill/templates/server-evidence-report.template.md
+Update the project source and run sync.
+-->
+# Server Evidence Report
+
+Date/time UTC: `<YYYY-MM-DD HH:MM>`
+Target host: `<hostname or owner-provided label>`
+Action type: `<bootstrap|deploy|security-check|maintenance|incident>`
+
+## Summary
+
+- Overall status: `<PASS|WARN|FAIL>`
+- Statement: Evidence-based pass/fail maintenance result. This report does not claim the system is perfect.
+
+## Evidence
+
+| Check | Status | Evidence | Follow-up |
+| --- | --- | --- | --- |
+| SSH access preserved | `[ ] Pending` | `<redacted output or observation>` | `<none|owner action>` |
+
+## Owner Approvals
+
+Link or paste non-secret approval notes from `owner-approval-log.template.md`.

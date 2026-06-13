@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "version_policy": "semver",
-  "version_notes": "Adds local-only n8n backup packages with restore-critical encryption key capture and a guarded restore flow for Postgres or n8n entities backups.",
+  "version_notes": "De-scopes Hostinger/Coolify to a migration pointer and keeps Local n8n Setup focused on local n8n.",
   "outputs": [
     {
       "kind": "curated",
@@ -322,14 +322,14 @@
   "project": {
     "name": "Local n8n Setup",
     "category": "n8n",
-    "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, Docker Compose local templates, skills-first agent routing, optional AI-coding-agent MCP feature references, and the underscore-prefixed guided launcher."
+    "summary": "Preserved local n8n setup guides, Docker Compose local templates, skills-first agent routing, optional AI-coding-agent MCP feature references, the underscore-prefixed guided launcher, and a Hostinger/Coolify migration pointer."
   },
   "surface": {
     "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/n8n-local-setup",
-      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger VPS reference, local stack templates, skills-first agent guidance, and optional AI-coding-agent MCP feature references while depending on n8n-agent-rules for workflow/live n8n rules."
+      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, local stack templates, skills-first agent guidance, optional AI-coding-agent MCP feature references, and a Hostinger/Coolify migration pointer while depending on n8n-agent-rules for workflow/live n8n rules."
     },
     "mcp": {
       "status": "not_applicable"

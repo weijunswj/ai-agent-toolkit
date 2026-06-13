@@ -1,9 +1,7 @@
-# Hostinger Coolify Production Guide References
+# Codex SSH Hostinger Coolify Setup Maintainer References
 
-Open the full guide when exact setup detail matters:
+Curated AI-facing index for the generated skill reference.
 
-| Reference | Use |
+| Reference | Purpose |
 | --- | --- |
-| [hostinger-coolify-production-guide.md](hostinger-coolify-production-guide.md) | Full human-owned Hostinger VPS plus Coolify zero-to-production runbook with agent-safe repository preparation boundaries. |
-
-Keep live production actions human-owned. Use the skill entrypoint for concise agent-safe routing.
+| [hostinger-coolify-production-guide.md](hostinger-coolify-production-guide.md) | Full first-party Codex SSH Hostinger VPS plus Coolify setup and maintainer workflow. |
