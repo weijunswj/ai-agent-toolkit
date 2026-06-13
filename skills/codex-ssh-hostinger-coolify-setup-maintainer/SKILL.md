@@ -1,6 +1,6 @@
 ---
 name: codex-ssh-hostinger-coolify-setup-maintainer
-description: Guide Codex through production-sensitive Hostinger VPS plus Coolify setup, SSH preflight, deployment, maintenance, daily security checks, and incident response. Use when the user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, bootstrap or maintain Coolify, deploy apps through Coolify, inspect a Hostinger server over SSH, or produce evidence-based PASS/WARN/FAIL maintenance reports with owner approval gates.
+description: Guide Codex through production-sensitive Hostinger VPS plus Coolify setup, SSH preflight, deployment, maintenance, daily security checks, optional Telegram/email daily notifications, intrusion-signal review, and incident response. Use when the user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, bootstrap or maintain Coolify, deploy apps through Coolify, inspect a Hostinger server over SSH, configure daily maintenance alerts, review possible intruders/security signals, or produce evidence-based PASS/WARN/FAIL maintenance reports with owner approval gates.
 ---
 
 <!--
@@ -17,7 +17,7 @@ Review rule: Preserve production safety constraints. Do not weaken secret, SSH, 
 
 # Codex SSH Hostinger Coolify Setup Maintainer
 
-Use this skill when the user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, bootstrap or maintain Coolify, deploy apps through Coolify, inspect a Hostinger server over SSH, run daily security checks, perform maintenance, or respond to incidents. For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`.
+Use this skill when the user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, bootstrap or maintain Coolify, deploy apps through Coolify, inspect a Hostinger server over SSH, run daily security checks, configure daily maintenance alerts, review intrusion/security signals, perform maintenance, or respond to incidents. For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`.
 
 Do not replace the n8n Hostinger VPS guide with this skill. Use `n8n-local-setup` for local n8n and its hosted n8n Hostinger VPS reference. If the deployed app is n8n or the task touches live n8n workflows, credentials, import/export, activation, execution, or repo/live sync, also apply `n8n-agent-rules` before n8n-specific work.
 
@@ -31,7 +31,9 @@ Do not replace the n8n Hostinger VPS guide with this skill. Use `n8n-local-setup
 - Do not ask the user to paste secrets into chat.
 - Do not print secrets, tokens, private keys, cookies, database URLs, or env files.
 - Do not ask the user to paste SSH private keys or production passwords into chat; use owner-controlled SSH/session tooling and owner-entered secrets.
-- Treat `daily-security-check.sh` as read-only reporting only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
+- Treat `daily-security-check.sh` as read-only reporting and optional owner-configured notification delivery only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
+- Treat intrusion checks as signals, not proof that no intrusion occurred.
+- Store Telegram/email notification secrets only in owner-managed server config outside chat.
 
 ## Checklist Statuses
 

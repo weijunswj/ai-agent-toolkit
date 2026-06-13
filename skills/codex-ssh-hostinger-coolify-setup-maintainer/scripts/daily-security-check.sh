@@ -22,6 +22,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 redact_text() {
   sed -E \
     -e 's#(postgres(ql)?|mysql|redis)://[^[:space:]]+#<redacted-db-url>#Ig' \
+    -e 's#https://api\.telegram\.org/bot[^/[:space:]]+#https://api.telegram.org/bot<redacted>#Ig' \
     -e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/@[:space:]]+@#\1<redacted-userinfo>@#g' \
     -e 's#([?&][^=[:space:]&]*(token|secret|password|passwd|api[_-]?key|key|auth|signature|sig|access[_-]?token|refresh[_-]?token)[^=[:space:]&]*=)[^&#[:space:]]+#\1<redacted>#Ig' \
     -e 's#(token|secret|password|passwd|api[_-]?key)=([^[:space:]]+)#\1=<redacted>#Ig' \
@@ -61,6 +62,82 @@ append_block() {
     bash -c "$cmd" 2>&1 | redact_text | head -n 120
     printf '```\n'
   } >> "$TMP_REPORT"
+}
+notification_targets() {
+  local targets=''
+  if [ -n "${NOTIFY_TELEGRAM_BOT_TOKEN:-}" ] || [ -n "${NOTIFY_TELEGRAM_CHAT_ID:-}" ]; then
+    targets="${targets:+$targets, }telegram"
+  fi
+  if [ -n "${NOTIFY_EMAIL_TO:-}" ]; then
+    targets="${targets:+$targets, }local-email"
+  fi
+  printf '%s' "$targets"
+}
+report_notification_summary() {
+  {
+    printf 'Daily security check: %s\n' "$overall"
+    printf 'Host: %s\n' "$(hostname 2>/dev/null || printf unknown)"
+    printf 'Report: %s\n\n' "$REPORT"
+    awk '
+      /^## Summary Checks/ {in_summary=1; next}
+      /^### / {in_summary=0}
+      /^## Overall status:/ {in_summary=0}
+      in_summary && NF {print}
+      /^WARN count:/ || /^FAIL count:/ || /^## Overall status:/ {print}
+    ' "$REPORT" | head -n 45
+  } | redact_text | head -c 3500
+}
+send_telegram_notification() {
+  if [ -z "${NOTIFY_TELEGRAM_BOT_TOKEN:-}" ] && [ -z "${NOTIFY_TELEGRAM_CHAT_ID:-}" ]; then return 0; fi
+  if [ -z "${NOTIFY_TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${NOTIFY_TELEGRAM_CHAT_ID:-}" ]; then
+    printf 'Telegram notification skipped: NOTIFY_TELEGRAM_BOT_TOKEN and NOTIFY_TELEGRAM_CHAT_ID are both required.\n' >&2
+    return 1
+  fi
+  if ! have curl; then
+    printf 'Telegram notification skipped: curl unavailable.\n' >&2
+    return 1
+  fi
+
+  local curl_config text
+  curl_config="$(mktemp "${REPORT_DIR}/.telegram-curl.XXXXXX")" || return 1
+  chmod 600 "$curl_config" 2>/dev/null || true
+  printf 'url = "%s"\n' "https://api.telegram.org/bot${NOTIFY_TELEGRAM_BOT_TOKEN}/sendMessage" > "$curl_config"
+  text="$(report_notification_summary)"
+  if [ -n "${NOTIFY_TELEGRAM_THREAD_ID:-}" ]; then
+    curl -fsS --max-time 15 -K "$curl_config" \
+      --data-urlencode "chat_id=${NOTIFY_TELEGRAM_CHAT_ID}" \
+      --data-urlencode "message_thread_id=${NOTIFY_TELEGRAM_THREAD_ID}" \
+      --data-urlencode "text=$text" >/dev/null
+  else
+    curl -fsS --max-time 15 -K "$curl_config" \
+      --data-urlencode "chat_id=${NOTIFY_TELEGRAM_CHAT_ID}" \
+      --data-urlencode "text=$text" >/dev/null
+  fi
+  local result=$?
+  rm -f "$curl_config"
+  return "$result"
+}
+send_email_notification() {
+  if [ -z "${NOTIFY_EMAIL_TO:-}" ]; then return 0; fi
+  local subject
+  subject="${NOTIFY_EMAIL_SUBJECT_PREFIX:-[Hostinger Coolify]} Daily security check: $overall"
+  if have mail; then
+    mail -s "$subject" "$NOTIFY_EMAIL_TO" < "$REPORT"
+  elif [ -x /usr/sbin/sendmail ]; then
+    {
+      printf 'To: %s\n' "$NOTIFY_EMAIL_TO"
+      printf 'Subject: %s\n' "$subject"
+      printf 'Content-Type: text/plain; charset=UTF-8\n\n'
+      cat "$REPORT"
+    } | /usr/sbin/sendmail -t
+  else
+    printf 'Email notification skipped: mail and sendmail are unavailable.\n' >&2
+    return 1
+  fi
+}
+send_notifications() {
+  send_telegram_notification && printf 'Telegram notification sent or not configured.\n' || printf 'Telegram notification failed; check systemd journal.\n' >&2
+  send_email_notification && printf 'Email notification sent or not configured.\n' || printf 'Email notification failed; check systemd journal.\n' >&2
 }
 
 {
@@ -122,6 +199,23 @@ if have journalctl; then
   [ "${critical:-0}" -gt 0 ] && status_line WARN 'Critical system errors' "$critical recent critical log lines" 'Review journal details.' || status_line PASS 'Critical system errors' 'No recent critical journal lines' 'None.'
 else status_line WARN 'System logs' 'journalctl unavailable' 'Check /var/log/auth.log or provider logs manually.'; fi
 
+# Intrusion signals are read-only indicators, not proof that no intrusion occurred.
+if have getent; then
+  uid0_accounts="$(getent passwd | awk -F: '$3 == 0 {print $1}' | paste -sd ',' -)"
+  extra_uid0="$(printf '%s' "$uid0_accounts" | tr ',' '\n' | grep -vx root | paste -sd ',' - || true)"
+  [ -n "$extra_uid0" ] && status_line FAIL 'Intrusion signal: UID 0 accounts' "Extra UID 0 accounts: $extra_uid0" 'Investigate account ownership before changes.' || status_line PASS 'Intrusion signal: UID 0 accounts' "UID 0 accounts: ${uid0_accounts:-unknown}" 'Review if unexpected.'
+  sudo_users="$(getent group sudo wheel 2>/dev/null | awk -F: '$4 != "" {print $1 ":" $4}' | paste -sd ';' -)"
+  [ -n "$sudo_users" ] && status_line PASS 'Intrusion signal: sudo-capable users captured' 'sudo/wheel membership captured in details' 'Owner should review expected admins.' || status_line WARN 'Intrusion signal: sudo-capable users captured' 'No sudo/wheel membership found or group unavailable' 'Verify expected admin access.'
+else status_line WARN 'Intrusion signal: account inventory' 'getent unavailable' 'Review users and sudoers manually.'; fi
+
+if have find; then
+  auth_key_count="$(find /root /home -path '*/.ssh/authorized_keys' -type f 2>/dev/null | wc -l | tr -d ' ')"
+  writable_auth_keys="$(find /root /home -path '*/.ssh/authorized_keys' -type f -perm /022 2>/dev/null | wc -l | tr -d ' ')"
+  [ "${writable_auth_keys:-0}" -gt 0 ] && status_line WARN 'Intrusion signal: SSH key files' "$auth_key_count authorized_keys files; $writable_auth_keys group/world-writable" 'Review key files and permissions.' || status_line PASS 'Intrusion signal: SSH key files' "${auth_key_count:-0} authorized_keys files; none group/world-writable" 'Review key owners if unexpected.'
+  cron_count="$(find /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly /var/spool/cron /var/spool/cron/crontabs -type f 2>/dev/null | wc -l | tr -d ' ')"
+  status_line PASS 'Intrusion signal: cron inventory captured' "${cron_count:-0} cron files detected" 'Review details for unexpected persistence.'
+else status_line WARN 'Intrusion signal: filesystem inventory' 'find unavailable' 'Review SSH keys and cron manually.'; fi
+
 if [ -n "${HEALTHCHECK_URLS:-}" ]; then
   for url in $HEALTHCHECK_URLS; do
     label="$(printf '%s' "$url" | redact_text)"
@@ -155,6 +249,13 @@ if [ -n "${BACKUP_PATHS:-}" ]; then
   done
 else status_line WARN 'Backup freshness' 'BACKUP_PATHS not configured' 'Configure paths and verify restores manually.'; fi
 
+notify_targets="$(notification_targets)"
+if [ -n "$notify_targets" ]; then
+  status_line PASS 'Daily notification configured' "$notify_targets configured" 'Verify delivery after timer installation.'
+else
+  status_line WARN 'Daily notification configured' 'No Telegram or local email notifier configured' 'Configure owner-controlled notification env if daily alerts are desired.'
+fi
+
 append_block 'Disk Details' 'df -h'
 have free && append_block 'Memory Details' 'free -h'
 have ufw && append_block 'UFW Numbered Rules' 'ufw status numbered'
@@ -163,6 +264,11 @@ have docker && append_block 'Docker Containers' "docker ps --format 'table {{.Na
 have docker && append_block 'Coolify-like Containers' "docker ps --format '{{.Names}} {{.Image}} {{.Status}}' | grep -Ei 'coolify|coolify-' || true"
 have journalctl && append_block 'Recent Auth Failures Summary' "journalctl --since '24 hours ago' | grep -Ei 'Failed password|authentication failure|Invalid user' | tail -n 50 || true"
 have journalctl && append_block 'Recent Critical System Errors' "journalctl -p crit..alert --since '24 hours ago' | tail -n 80 || true"
+have last && append_block 'Recent Successful Logins' "last -n 20 -F || true"
+append_block 'Account Privilege Inventory' "getent passwd | awk -F: '\$3 == 0 {print \"uid0:\" \$1}' ; getent group sudo wheel 2>/dev/null | awk -F: '\$4 != \"\" {print \$1 \":\" \$4}'"
+have find && append_block 'SSH Authorized Keys Inventory' "find /root /home -path '*/.ssh/authorized_keys' -type f -printf '%m %u:%g %TY-%Tm-%Td %TH:%TM %p lines=' -exec sh -c 'wc -l < \"\$1\"' sh {} \\; 2>/dev/null | head -n 80"
+have find && append_block 'Cron Persistence Inventory' "find /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly /var/spool/cron /var/spool/cron/crontabs -type f -printf '%m %u:%g %TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | head -n 120"
+have systemctl && append_block 'Systemd Timer Inventory' "systemctl list-timers --all --no-pager 2>/dev/null | head -n 120"
 
 if [ "$FAIL_COUNT" -gt 0 ]; then overall=FAIL; elif [ "$WARN_COUNT" -gt 0 ]; then overall=WARN; else overall=PASS; fi
 sed -i "0,/Overall status:/s//Overall status: $overall/" "$TMP_REPORT" 2>/dev/null || true
@@ -175,3 +281,4 @@ mv "$TMP_REPORT" "$REPORT"
 cp "$REPORT" "$LATEST"
 printf 'Wrote %s and %s\n' "$REPORT" "$LATEST"
 printf 'Overall status: %s\n' "$overall"
+send_notifications

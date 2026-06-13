@@ -49,6 +49,19 @@ cleanup() {
   rm -rf "$tmp"
 }
 trap cleanup EXIT
+dump_debug() {
+  status=$?
+  printf '%s\n' '--- daily-security-check stdout ---'
+  [ -f "$tmp/stdout.txt" ] && cat "$tmp/stdout.txt" || true
+  printf '%s\n' '--- daily-security-check stderr ---' >&2
+  [ -f "$tmp/stderr.txt" ] && cat "$tmp/stderr.txt" >&2 || true
+  if [ -n "\${report:-}" ] && [ -f "$report" ]; then
+    printf '%s\n' '--- daily-security-check report ---'
+    cat "$report"
+  fi
+  exit "$status"
+}
+trap dump_debug ERR
 cd "$tmp"
 mkdir -- -delete
 printf keep > sentinel.txt
@@ -61,6 +74,8 @@ case "$scenario" in
     grep -q 'Backup freshness -delete' "$report"
     grep -q 'Rejected unsafe backup path' "$report"
     ! grep -q 'No files found' "$report"
+    grep -q 'Intrusion signal:' "$report"
+    grep -q 'Daily notification configured' "$report"
     ;;
   absolute)
     mkdir -p "$tmp/backups"
@@ -73,6 +88,28 @@ case "$scenario" in
     grep -q 'Newest file: backup.txt' "$report"
     ! grep -q 'Rejected unsafe backup path' "$report"
     ! grep -q 'Rejected non-absolute backup path' "$report"
+    ;;
+  telegram)
+    mkdir -p "$tmp/bin"
+    export CURL_ARGS_FILE="$tmp/curl-args.txt"
+    cat > "$tmp/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$CURL_ARGS_FILE"
+for arg in "$@"; do
+  case "$arg" in
+    *super-secret-token*) exit 9 ;;
+  esac
+done
+exit 0
+STUB
+    chmod +x "$tmp/bin/curl"
+    PATH="$tmp/bin:$PATH" MAINTENANCE_ROOT="$tmp/maintenance" NOTIFY_TELEGRAM_BOT_TOKEN="super-secret-token" NOTIFY_TELEGRAM_CHAT_ID="12345" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
+    test -f sentinel.txt
+    report="$tmp/maintenance/reports/latest-security-check.md"
+    grep -q 'Daily notification configured' "$report"
+    grep -q 'telegram configured' "$report"
+    grep -q 'Telegram notification sent or not configured' "$tmp/stdout.txt"
+    ! grep -R -q 'super-secret-token' "$report" "$tmp/stdout.txt" "$tmp/stderr.txt" "$tmp/curl-args.txt"
     ;;
   *)
     echo "unknown scenario: $scenario" >&2
@@ -102,5 +139,11 @@ test('daily security check rejects leading-dash BACKUP_PATHS entries without mut
 test('daily security check accepts absolute backup directories after canonicalization', () => {
   for (const scriptRelPath of scripts) {
     runDailyCheckScenario(scriptRelPath, 'absolute');
+  }
+});
+
+test('daily security check can send Telegram notification without leaking token', () => {
+  for (const scriptRelPath of scripts) {
+    runDailyCheckScenario(scriptRelPath, 'telegram');
   }
 });

@@ -82,6 +82,10 @@ Confirm repository, branch, Dockerfile or buildpack path, app healthcheck endpoi
 
 Every setup, deploy, security check, maintenance action, and incident action must preserve an evidence report. Use evidence-based pass/fail maintenance language: PASS means the observed check met the documented expectation, WARN means follow-up or human verification is needed, and FAIL means the observed state is unsafe, unavailable, or outside the expected boundary. Daily security checks are read-only reports only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
 
+Daily security checks should include read-only intrusion signals: auth failures, recent successful logins, UID 0 account inventory, sudo/wheel membership, SSH authorized key file inventory without key material, cron persistence inventory, systemd timer inventory, listening ports, and Docker/Coolify state. Treat these as signals only; they do not prove the host has no intruder.
+
+If the owner wants daily notifications, configure `/data/maintenance/daily-security-check.env` outside chat and keep it mode 600. The bundled script supports Telegram (`NOTIFY_TELEGRAM_BOT_TOKEN`, `NOTIFY_TELEGRAM_CHAT_ID`, optional `NOTIFY_TELEGRAM_THREAD_ID`) and local email (`NOTIFY_EMAIL_TO`, optional `NOTIFY_EMAIL_SUBJECT_PREFIX`). Codex must not ask the owner to paste notification tokens or email credentials into chat. Installing or changing notification delivery on the VPS still requires explicit owner approval.
+
 When configuring backup freshness checks, set `BACKUP_PATHS` only to absolute backup directory paths. The daily report script must reject relative paths and leading-dash paths instead of passing them to filesystem tools.
 
 See the skill checklists and templates for copy-ready execution material.

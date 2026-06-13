@@ -10,6 +10,7 @@
 - `_main/skill/checklists/incident-response-checklist.md`
 - `_main/skill/templates/server-evidence-report.template.md`
 - `_main/skill/templates/daily-security-report.template.md`
+- `_main/skill/templates/daily-security-check.env.example`
 - `_main/skill/templates/rollback-plan.template.md`
 - `_main/skill/templates/owner-approval-log.template.md`
 - `_main/skill/scripts/daily-security-check.sh`
