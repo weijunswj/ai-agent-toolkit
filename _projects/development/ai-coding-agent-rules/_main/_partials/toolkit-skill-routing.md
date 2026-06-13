@@ -10,14 +10,14 @@ Use the skill name, description, and local files to decide whether a skill appli
 |---|---|
 | `ai-coding-agent-rules` | Bootstrapping, checking, or repairing repo-local AI coding agent instruction files and platform shims for Codex, Claude Code, or Antigravity. |
 | `n8n-agent-rules` | Any n8n task, including workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
-| `n8n-local-setup` | Safe local n8n Docker Compose setup, Postgres/ngrok stack templates, MCP config selection, or platform-specific n8n agent-rule setup. |
+| `n8n-local-setup` | Safe local n8n Docker Compose setup, hosted n8n Hostinger VPS notes, Postgres/ngrok stack templates, MCP config selection, or platform-specific n8n agent-rule setup. |
 | `n8n-workflow-helper-scripts` | Safe n8n workflow helper scripts, sanitizer helpers, import/export sync helpers, validation, comparison, live-import preparation, or repo/live workflow hygiene. |
 | `n8n-workflow-templates` | Selecting, reviewing, or copying public reusable n8n workflow JSON templates that are generic, inactive, credential-free, and safe for publication. |
 | `secure-cicd-installer` | Reviewing, planning, or applying secure CI/CD installer materials with approval-gated writes, safe status tracking, and no default command execution. |
 | `context-preserving-ai-publisher` | Creating or maintaining source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift docs. |
 | `agent-skill-supply-chain-audit` | Auditing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, toolkit conversion fit, and usefulness/token-bloat review before import. |
 | `local-ai-stack-safety` | Reviewing local AI stack setup risk for local model runners, model servers, model downloads, GPU/runtime changes, local AI web UIs, or local AI endpoint exposure. |
-| `hostinger-coolify-production-guide` | Preparing repositories for human-owned Hostinger VPS plus Coolify production deployment, Docker/Coolify readiness, placeholder-only env/deploy notes, health checks, migrations, CORS, logging, and local runbook reference. |
+| `codex-ssh-hostinger-coolify-setup-maintainer` | Codex SSH Hostinger VPS plus Coolify deployment setup, SSH preflight, daily security checks, evidence-based maintenance, and incident response with owner approval gates. Use when the user asks Codex to help set up Hostinger for deployment. |
 | `self-hosted-service-safety` | Reviewing non-n8n self-hosted service setup risk for Docker/VPS plans, reverse proxies, public ports, DNS/TLS, tunnels, credentials, backups, or first-run hardening. |
 | `windows-localhost-workflows` | Starting, relaunching, verifying, or troubleshooting localhost development workflows on Windows. |
 | `knowledge-index-updater` | Creating or updating a Notion/GitHub knowledge index, merging duplicates, categorising entries, maintaining stable source keys, or scheduling index checks. |

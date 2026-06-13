@@ -9,7 +9,7 @@ Beginner-facing source index for this toolkit module.
 | Local Windows setup | [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md) |
 | Always-on hosted setup | [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) |
 
-Start with Local Setup for Docker Desktop on your own computer. Use Hostinger VPS for a public server.
+Start with Local Setup for Docker Desktop on your own computer. Use Hostinger VPS for hosted n8n on a public server. For Hostinger VPS plus Coolify deployment setup or server maintenance that is not the hosted n8n reference guide, use [`codex-ssh-hostinger-coolify-setup-maintainer`](../../development/hostinger-coolify-production-guide/).
 
 ## Supporting Materials
 

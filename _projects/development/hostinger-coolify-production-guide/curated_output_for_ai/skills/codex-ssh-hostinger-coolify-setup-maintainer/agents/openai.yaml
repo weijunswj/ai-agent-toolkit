@@ -1,0 +1,7 @@
+interface:
+  display_name: "Hostinger Coolify Maintainer"
+  short_description: "Safe Hostinger VPS and Coolify deployment"
+  default_prompt: "Use $codex-ssh-hostinger-coolify-setup-maintainer to inspect and prepare my Hostinger VPS and Coolify deployment plan safely."
+
+policy:
+  allow_implicit_invocation: true

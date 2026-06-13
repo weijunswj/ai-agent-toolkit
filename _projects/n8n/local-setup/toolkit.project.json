@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "version_policy": "semver",
-  "version_notes": "Adds local-only n8n backup packages with restore-critical encryption key capture and a guarded restore flow for Postgres or n8n entities backups.",
+  "version_notes": "Clarifies the hosted n8n Hostinger VPS guide remains in n8n-local-setup while Coolify deployment maintenance uses the separate Hostinger/Coolify maintainer skill.",
   "outputs": [
     {
       "kind": "curated",

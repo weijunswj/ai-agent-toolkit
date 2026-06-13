@@ -1,3 +1,9 @@
+<!--
+Generated from toolkit project source. Do not edit directly.
+Project: development.hostinger-coolify-production-guide
+Source: _projects/development/hostinger-coolify-production-guide/_main/hostinger-coolify-production-guide.md
+Update the project source and run sync.
+-->
 # Codex SSH Hostinger Coolify Setup And Maintainer Workflow
 
 This first-party workflow guides a non-DevOps owner and Codex through Hostinger VPS plus Coolify setup, deployment, evidence-based pass/fail maintenance, security checks, and incident response. Use it when Codex should help set up Hostinger for deployment or maintain a Coolify host. Treat the VPS as production-sensitive infrastructure. Codex must inspect and report before changing anything. Codex must describe setup and maintenance only through recorded evidence-based PASS/WARN/FAIL results.

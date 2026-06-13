@@ -146,7 +146,8 @@ Templates are published material. Review them before copying into a consumer rep
 
 - [Generic agent rule templates](../../skills/ai-coding-agent-rules/) contain generated inert slim baseline templates only. They intentionally do not include the full n8n ruleset or full skill-routing table.
 - [n8n agent rules](../../skills/n8n-agent-rules/) contain the full n8n operating ruleset plus optional brief adapters under `adapters/`.
-- [n8n local setup](../../skills/n8n-local-setup/references/n8n/local-setup.md) and [Hostinger VPS](../../skills/n8n-local-setup/references/n8n/hostinger-vps.md) contain the full local and hosted setup guides.
+- [n8n local setup](../../skills/n8n-local-setup/references/n8n/local-setup.md) and [Hostinger VPS](../../skills/n8n-local-setup/references/n8n/hostinger-vps.md) contain the full local and hosted n8n setup guides.
+- [Codex SSH Hostinger Coolify Setup Maintainer](../../skills/codex-ssh-hostinger-coolify-setup-maintainer/) is the separate skill for Hostinger VPS plus Coolify deployment setup, SSH preflight, maintenance, and incident response.
 - [n8n AI-agent platform references](../../skills/n8n-local-setup/references/ai-agent-platforms/) contain platform-specific skills/rules pointers and optional n8n MCP feature setup.
 - [n8n local stack templates](../../skills/n8n-local-setup/templates/local-stack/) contain the local Docker Compose, placeholder environment, launcher, and menu files.
 - [n8n optional MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) contain AI-coding-agent MCP config examples for users intentionally enabling n8n MCP.

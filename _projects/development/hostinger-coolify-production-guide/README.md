@@ -1,7 +1,19 @@
-# Hostinger Coolify Production Guide
+# Codex SSH Hostinger Coolify Setup Maintainer
 
-Canonical source docs live in [_main/](_main/).
+This module is first-party toolkit-authored material for a production-sensitive Codex SSH Hostinger VPS plus Coolify setup and maintainer workflow. It replaces the prior Hostinger/Coolify repository-preparation guide with setup, deployment, daily security check, maintenance, and incident response guidance that preserves owner approval gates.
 
-This module is first-party toolkit-authored material for a practical Hostinger VPS plus Coolify zero-to-production guide. It separates human-owned production operations from agent-safe repository preparation work.
+It is separate from `n8n-local-setup`: that project keeps the local n8n guide and the hosted n8n Hostinger VPS reference.
 
-Production deployment, DNS, billing, real secrets, backups, restore tests, migrations, cutover, rollback, and VPS administration are human-owned and require explicit current-turn approval before an agent performs any live mutation.
+Published skill identity: `codex-ssh-hostinger-coolify-setup-maintainer`.
+
+For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`.
+
+## Source layout
+
+- [_main/](_main/) - preserved first-party workflow source.
+- `_main/hostinger-coolify-production-guide.md` - full first-party workflow reference.
+- `_main/skill/checklists/` - source checklists published into the skill folder.
+- `_main/skill/templates/` - source evidence and approval templates published into the skill folder.
+- `_main/skill/scripts/` - source daily security check scripts published into the skill folder.
+- `curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/` - reviewed skill entrypoint and README.
+- `toolkit.project.json` - source-to-surface publishing contract.

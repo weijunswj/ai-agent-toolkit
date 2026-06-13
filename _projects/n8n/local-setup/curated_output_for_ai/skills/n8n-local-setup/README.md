@@ -6,7 +6,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup Skill
 
-Instruction-only skill for safe local n8n setup, Docker Compose plus Postgres, Compose ngrok, Hostinger VPS, launcher/menu use, local backup/restore recovery, skills-first agent guidance, and optional AI-coding-agent MCP feature references.
+Instruction-only skill for safe local n8n setup, Docker Compose plus Postgres, Compose ngrok, hosted n8n Hostinger VPS notes, launcher/menu use, local backup/restore recovery, skills-first agent guidance, and optional AI-coding-agent MCP feature references.
 
 ## Start Here
 

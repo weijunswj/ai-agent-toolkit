@@ -3,8 +3,8 @@
   "description": "Known published-surface audit findings allowed until follow-up PRs classify or generate them.",
   "summary": {
     "projects": 12,
-    "publishedFiles": 177,
-    "declaredOutputFiles": 177,
+    "publishedFiles": 187,
+    "declaredOutputFiles": 187,
     "packInstalledFiles": 74,
     "undeclaredPublishedFiles": 0,
     "packInstalledUndeclared": 0,
@@ -13,7 +13,7 @@
     "sharedSurfaceMetadataFindings": 0,
     "suspiciousPublishedSurfaces": 0,
     "duplicateProjectContentGroups": 0,
-    "boundaryRecipeOutputs": 177,
+    "boundaryRecipeOutputs": 187,
     "boundaryRecipeFindings": 0,
     "curatedDirectoryFindings": 0
   },

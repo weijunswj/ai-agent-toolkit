@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-10 (Hostinger Coolify source-to-skill layout refactor)
+Latest update: 2026-06-13 (Codex SSH Hostinger Coolify maintainer skill replacement)
 
 ## Current state
 
@@ -28,8 +28,8 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 12 |
-| publishedFiles | 177 |
-| declaredOutputFiles | 177 |
+| publishedFiles | 187 |
+| declaredOutputFiles | 187 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 177 |
+| boundaryRecipeOutputs | 187 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 0 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 103 |
+| declared_generated | 113 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
@@ -58,19 +58,19 @@ Current boundary recipe classifications:
 | curated_index | 11 |
 | curated_metadata | 3 |
 | curated_pack_readme | 3 |
-| curated_reference | 8 |
+| curated_reference | 7 |
 | curated_repo_local_agent_template | 4 |
 | curated_router | 8 |
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 124 |
+| main_full_fidelity | 135 |
 
 Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by reclassifying three Hostinger/Coolify wrapper outputs from `_main` full-fidelity recipes to curated AI-facing recipes: skill README, skill entrypoint, and OpenAI metadata. Published file totals did not change.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by replacing the old Hostinger/Coolify repository-preparation skill with the Codex SSH Hostinger Coolify maintainer skill, moving runtime checklists, templates, scripts, and the full reference to `_main` full-fidelity recipes, restoring the n8n-local-setup Hostinger VPS reference as separate hosted n8n material, and publishing new OpenAI metadata for the new skill.
 
 ## Current project modules
 
@@ -92,7 +92,7 @@ Known baseline context:
 - `skills/agent-skill-supply-chain-audit/`
 - `skills/ai-coding-agent-rules/`
 - `skills/context-preserving-ai-publisher/`
-- `skills/hostinger-coolify-production-guide/`
+- `skills/codex-ssh-hostinger-coolify-setup-maintainer/`
 - `skills/knowledge-index-updater/`
 - `skills/local-ai-stack-safety/`
 - `skills/n8n-agent-rules/`

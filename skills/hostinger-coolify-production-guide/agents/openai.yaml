@@ -1,7 +1,0 @@
-interface:
-  display_name: "Hostinger Coolify Production Guide"
-  short_description: "Prepare repos for human-owned Hostinger VPS and Coolify production deploys."
-  brand_color: "#2563EB"
-
-policy:
-  allow_implicit_invocation: true
