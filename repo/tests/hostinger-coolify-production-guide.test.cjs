@@ -55,7 +55,7 @@ printf keep > sentinel.txt
 
 case "$scenario" in
   unsafe)
-    MAINTENANCE_ROOT="$tmp/maintenance" BACKUP_PATHS="-delete" "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
+    MAINTENANCE_ROOT="$tmp/maintenance" BACKUP_PATHS="-delete" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
     test -f sentinel.txt
     report="$tmp/maintenance/reports/latest-security-check.md"
     grep -q 'Backup freshness -delete' "$report"
@@ -65,7 +65,7 @@ case "$scenario" in
   absolute)
     mkdir -p "$tmp/backups"
     printf backup > "$tmp/backups/backup.txt"
-    MAINTENANCE_ROOT="$tmp/maintenance" BACKUP_PATHS="$tmp/backups" "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
+    MAINTENANCE_ROOT="$tmp/maintenance" BACKUP_PATHS="$tmp/backups" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
     test -f sentinel.txt
     report="$tmp/maintenance/reports/latest-security-check.md"
     grep -q 'Backup freshness ' "$report"
