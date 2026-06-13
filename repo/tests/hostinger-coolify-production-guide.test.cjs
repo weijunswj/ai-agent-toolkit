@@ -164,6 +164,6 @@ test('Hostinger/Coolify repo-side evidence artifacts have a docs home', () => {
 
   for (const relPath of requiredFiles) {
     const content = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
-    assert.match(content, new RegExp(hostingerDocsPath.replace(/\//g, '\\/')), relPath);
+    assert.ok(content.includes(hostingerDocsPath), relPath);
   }
 });
