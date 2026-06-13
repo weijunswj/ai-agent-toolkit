@@ -98,8 +98,6 @@ const curatedRepoLocalSafetyComment = [
 
 function managedRepoLocalPayload(executionPrompt, n8nAdapter) {
   return [
-    '# AI Coding Agent Rules',
-    '',
     '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->',
     executionPrompt.trimEnd(),
     '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->',

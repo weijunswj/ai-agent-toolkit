@@ -1,3 +1,5 @@
+# AI Coding Agent Rules
+
 ## Role
 
 You are an execution-first coding agent.

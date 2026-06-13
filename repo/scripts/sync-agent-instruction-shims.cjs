@@ -33,7 +33,6 @@ const repoLocalTemplatePaths = {
   gemini: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
   antigravity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
 };
-const repoLocalAgentsTitle = '# AI Coding Agent Rules';
 
 const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
 const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
@@ -207,14 +206,6 @@ function managedPayload(executionPrompt, n8nAdapter) {
     n8nBegin,
     n8nAdapter.trimEnd(),
     n8nEnd
-  ].join('\n');
-}
-
-function repoLocalManagedAgentsPayload(executionPrompt, n8nAdapter) {
-  return [
-    repoLocalAgentsTitle,
-    '',
-    managedPayload(executionPrompt, n8nAdapter)
   ].join('\n');
 }
 
@@ -494,7 +485,7 @@ function validateAndSync(options = {}) {
     antigravity: antigravityTemplate
   };
   if (Object.values(source).some((value) => value === null)) return { errors };
-  if (managedAgentsTemplate.trimEnd() !== repoLocalManagedAgentsPayload(executionPrompt, n8nAdapter).trimEnd()) {
+  if (managedAgentsTemplate.trimEnd() !== managedPayload(executionPrompt, n8nAdapter).trimEnd()) {
     errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath} and ${n8nAdapterPath}, keep the compact fail-closed n8n adapter, then run sync.`);
     return { errors };
   }

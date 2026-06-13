@@ -48,6 +48,8 @@ notepad $HOME\.config\opencode\AGENTS.md
 ---
 
 ````````md
+# AI Coding Agent Rules
+
 ## Role
 
 You are an execution-first coding agent.

@@ -7,7 +7,7 @@
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
   "version": "2.1.5",
   "version_policy": "semver",
-  "version_notes": "Adds a top-level H1 to the copy-ready repo-local AGENTS.md template while keeping root repo AGENTS.md title handling unchanged.",
+  "version_notes": "Adds a top-level H1 to the canonical execution prompt partial so generated managed AGENTS.md toolkit blocks carry a document title.",
   "outputs": [
     {
       "kind": "curated",
