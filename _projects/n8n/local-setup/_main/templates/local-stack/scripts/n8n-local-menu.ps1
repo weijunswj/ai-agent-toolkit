@@ -72,6 +72,21 @@ function Get-MenuArgumentValue {
   return ''
 }
 
+function Test-MenuFlag {
+  param([string]$Name)
+
+  $longName = "--$Name"
+  $dashName = "-$Name"
+  foreach ($value in $script:MenuArguments) {
+    $text = [string]$value
+    if ($text -eq $longName -or $text -eq $dashName) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
 function Resolve-LocalPath {
   param([string]$Path)
 
@@ -434,9 +449,167 @@ function Test-DockerDesktopCli {
   }
 }
 
+function Test-WingetCli {
+  return [bool](Get-Command winget -ErrorAction SilentlyContinue)
+}
+
+function Test-DockerComposeCli {
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    return $false
+  }
+
+  try {
+    & docker compose version *> $null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  }
+}
+
+function Wait-ForDockerReady {
+  param(
+    [int]$MaxAttempts = 60,
+    [int]$DelaySeconds = 2
+  )
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) {
+      return $true
+    }
+
+    if ($attempt -lt $MaxAttempts) {
+      Start-Sleep -Seconds $DelaySeconds
+    }
+  }
+
+  return $false
+}
+
+function Invoke-DockerDesktopInstall {
+  param([string]$RequirementName = 'Docker Desktop')
+
+  if (-not (Test-WingetCli)) {
+    Write-ErrorMessage "$RequirementName is missing, and winget was not found."
+    Write-Info 'Install Docker Desktop manually from https://www.docker.com/products/docker-desktop/, then reopen this launcher.'
+    return $false
+  }
+
+  Write-Warning "$RequirementName is missing."
+  Write-Info 'The launcher can install Docker Desktop with winget.'
+  Write-Warning 'This downloads software, may show Windows approval prompts, and may require a restart.'
+  $choice = Read-Host 'Install Docker Desktop now with winget? (y/N)'
+  if ($choice -notmatch '^(y|yes)$') {
+    Write-Info 'Install skipped. Install Docker Desktop manually, then reopen this launcher.'
+    return $false
+  }
+
+  $installArgs = @(
+    'install',
+    '--id', 'Docker.DockerDesktop',
+    '--exact',
+    '--source', 'winget',
+    '--accept-package-agreements',
+    '--accept-source-agreements'
+  )
+
+  Write-Info 'Installing Docker Desktop with winget...'
+  $exitCode = Invoke-NativeCommand -Command { & winget @installArgs }
+  if ($exitCode -ne 0) {
+    Write-ErrorMessage "Docker Desktop install command failed with exit code $exitCode."
+    return $false
+  }
+
+  Write-Success 'Docker Desktop install command finished.'
+  Write-Info 'If Docker is still not found, close and reopen this launcher so Windows refreshes PATH.'
+  return $true
+}
+
+function Start-DockerDesktopAndWait {
+  param(
+    [int]$MaxAttempts = 60,
+    [int]$DelaySeconds = 2
+  )
+
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-ErrorMessage 'Docker CLI was not found.'
+    return $false
+  }
+
+  if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) {
+    return $true
+  }
+
+  if (-not (Test-DockerDesktopCli)) {
+    Write-Info 'Start Docker Desktop manually, then rerun this launcher.'
+    return $false
+  }
+
+  Write-Info 'Starting Docker Desktop...'
+  $startExit = Invoke-NativeCommand -Command { & docker desktop start }
+  if ($startExit -ne 0) {
+    Write-Warning "Docker Desktop start command exited with code $startExit; waiting anyway in case the app is opening."
+  }
+
+  Write-Info 'Waiting for the Docker engine to become ready...'
+  if (Wait-ForDockerReady -MaxAttempts $MaxAttempts -DelaySeconds $DelaySeconds) {
+    Write-Success 'Docker Desktop is running.'
+    return $true
+  }
+
+  Write-Warning 'Docker Desktop did not become ready before the wait timed out.'
+  Write-Info 'Leave Docker Desktop open until it finishes starting, then use the menu again.'
+  return $false
+}
+
+function Invoke-LaunchPreflight {
+  if (Test-MenuFlag -Name 'skip-launch-preflight') {
+    return
+  }
+
+  $showedPreflight = $false
+  $needsPause = $false
+
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Clear-MenuScreen
+    Write-Header 'Launch Preflight'
+    $showedPreflight = $true
+    [void](Invoke-DockerDesktopInstall -RequirementName 'Docker Desktop')
+    $needsPause = $true
+  } elseif (-not (Test-DockerComposeCli)) {
+    Clear-MenuScreen
+    Write-Header 'Launch Preflight'
+    $showedPreflight = $true
+    [void](Invoke-DockerDesktopInstall -RequirementName 'Docker Compose')
+    $needsPause = $true
+  }
+
+  if (Get-Command docker -ErrorAction SilentlyContinue) {
+    if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -ne 0) {
+      if (-not $showedPreflight) {
+        Clear-MenuScreen
+        Write-Header 'Launch Preflight'
+        $showedPreflight = $true
+      }
+
+      if (-not (Start-DockerDesktopAndWait)) {
+        $needsPause = $true
+      }
+    }
+  }
+
+  if ($needsPause) {
+    Pause-Menu
+  }
+}
+
 function Test-DockerReady {
   if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Write-ErrorMessage 'Docker CLI was not found. Install Docker Desktop, then reopen this menu.'
+    return $false
+  }
+
+  if (-not (Test-DockerComposeCli)) {
+    Write-ErrorMessage 'Docker Compose was not found. Install or repair Docker Desktop, then reopen this menu.'
     return $false
   }
 
@@ -445,19 +618,8 @@ function Test-DockerReady {
   }
 
   Write-Warning 'Docker is installed, but it does not appear to be running.'
-
-  if (Test-DockerDesktopCli) {
-    $choice = Read-Host 'Try starting Docker Desktop now? (y/N)'
-    if ($choice -match '^(y|yes)$') {
-      Write-Info 'Starting Docker Desktop...'
-      if ((Invoke-NativeCommand -Command { & docker desktop start }) -eq 0) {
-        Write-Warning 'Wait for Docker Desktop to finish starting, then run the menu action again.'
-      } else {
-        Write-Info 'If Docker Desktop did not open, start it manually, then run the menu action again.'
-      }
-    }
-  } else {
-    Write-Info 'Start Docker Desktop manually, then run the menu action again.'
+  if (Start-DockerDesktopAndWait) {
+    return $true
   }
 
   return $false
@@ -3311,6 +3473,7 @@ function Show-MainMenu {
 }
 
 Initialize-MenuRuntime
+Invoke-LaunchPreflight
 
 while (-not $script:ExitRequested) {
   Show-MainMenu

@@ -16,13 +16,13 @@ Use [Page 2 - Hostinger VPS](./Page%202%20-%20Hostinger%20VPS.md) instead when y
 
 | Step | What to do | Where | Result |
 | --- | --- | --- | --- |
-| 1. | Install Docker Desktop. | Your Windows computer. | Docker Compose is available. |
+| 1. | Install Docker Desktop, or let the launcher offer the winget install if Docker is missing. | Your Windows computer. | Docker Compose is available. |
 | 2. | Create the local stack folder at `%USERPROFILE%\.n8n-local`. | Windows Explorer. | Local runtime files stay outside this repo and outside OneDrive Desktop. |
 | 3. | Copy everything inside [templates/local-stack/](./templates/local-stack/) into your local stack folder. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, `_n8n-local.cmd`, and `scripts\`. |
 | 4. | Copy `.env.example` to `.env`. | `<LOCAL_STACK_FOLDER>`. | You have a private local settings file. |
 | 5. | Fill only local runtime values first. | `.env`. | Local n8n and Postgres can start. |
 | 6. | Optional: copy `n8n-local-desktop-shortcut.cmd` to your Desktop. | Desktop. | You get a convenient button without putting the runtime folder on the Desktop. |
-| 7. | Double-click `_n8n-local.cmd`, or double-click the Desktop shortcut if you copied it. | `<LOCAL_STACK_FOLDER>` or Desktop. | The guided menu opens and stays open after actions. |
+| 7. | Double-click `_n8n-local.cmd`, or double-click the Desktop shortcut if you copied it. | `<LOCAL_STACK_FOLDER>` or Desktop. | The launcher checks Docker requirements before the guided menu opens. |
 | 8. | Choose `Start n8n`, then `Localhost only`. | Menu. | n8n starts locally without public exposure. |
 | 9. | Open a web browser and go to `http://localhost:5678`, then create the owner account. | Browser. | Local n8n works before any public URL setup. |
 | 10. | Add ngrok only if something outside your computer must reach n8n. | Compose ngrok service. | You get a public URL for webhooks or OAuth callbacks. |
@@ -42,7 +42,7 @@ Do not ask for ngrok or public URL values before local n8n works. The order is:
 
 | Need | Install or open | Quick check |
 | --- | --- | --- |
-| Docker runtime | [Docker Desktop](https://www.docker.com/products/docker-desktop/) | Docker Desktop says the engine is running. |
+| Docker runtime | [Docker Desktop](https://www.docker.com/products/docker-desktop/) | `_n8n-local.cmd` can offer to install it with winget if it is missing, then starts Docker Desktop automatically when installed but stopped. |
 | Local stack folder | `%USERPROFILE%\.n8n-local`. | It is outside this repo, outside Git tracking, and not on OneDrive Desktop by default. |
 | ngrok account | [ngrok dashboard](https://dashboard.ngrok.com) | Needed only when you need a public tunnel. |
 
@@ -53,7 +53,7 @@ docker --version
 docker compose version
 ```
 
-If Docker is installed but not running, open Docker Desktop and wait until the engine is ready.
+If Docker is installed but not running, `_n8n-local.cmd` starts Docker Desktop and waits for the engine before it shows the main menu. If Docker or Docker Compose is missing, the launcher offers a winget-based Docker Desktop install. The install still asks first because it downloads software, may show Windows approval prompts, and may require a restart.
 
 ---
 
@@ -318,18 +318,20 @@ It reads `N8N_LOCAL_PORT` from `.env` automatically. If `.env` says `N8N_LOCAL_P
 
 1. Open `<LOCAL_STACK_FOLDER>`.
 2. Double-click `_n8n-local.cmd`.
-3. Do not launch n8n directly from Docker Desktop. Launch it from `_n8n-local.cmd` instead because the launcher shows status, checks for missing files, keeps update choices guided, and gives you backup/log/help options.
-4. Choose `Start n8n`, then `Localhost only`.
-5. Open a web browser.
-6. In the browser address bar, go to:
+3. Let the launch preflight finish. It checks Docker Desktop and Docker Compose before the main menu appears.
+4. If Docker Desktop is missing, approve the winget install only when you want this launcher to download and install Docker Desktop for you.
+5. Do not launch n8n directly from Docker Desktop. Launch it from `_n8n-local.cmd` instead because the launcher shows status, checks for missing files, keeps update choices guided, and gives you backup/log/help options.
+6. Choose `Start n8n`, then `Localhost only`.
+7. Open a web browser.
+8. In the browser address bar, go to:
 
    ```text
    http://localhost:5678
    ```
 
-7. Do not type this into PowerShell or CMD. It is a browser address.
-8. Create the owner account locally.
-9. Confirm the editor loads and a workflow can be saved.
+9. Do not type this into PowerShell or CMD. It is a browser address.
+10. Create the owner account locally.
+11. Confirm the editor loads and a workflow can be saved.
 
 Docker Desktop's direct start button skips the launcher menu. Use it only if you already understand the raw Docker Compose setup.
 
@@ -439,6 +441,18 @@ Stopping the `ngrok` Docker service stops the tunnel. It does not delete or rele
 Open `<LOCAL_STACK_FOLDER>`, double-click `_n8n-local.cmd`, then read the status at the top of the menu before choosing an action.
 
 If you copied `n8n-local-desktop-shortcut.cmd` to your Desktop, you can double-click that instead. It opens the launcher from `%USERPROFILE%\.n8n-local`.
+
+Before the main menu appears, the launcher runs a launch preflight:
+
+- If Docker Desktop or Docker Compose is missing and `winget` is available, it offers to install Docker Desktop.
+- If Docker Desktop is installed but stopped, it starts Docker Desktop and waits for the engine.
+- If Docker still cannot become ready, it returns to the menu with the current status so you can troubleshoot.
+
+Use `--skip-launch-preflight` only when you want to open the menu without the startup requirement checks:
+
+```powershell
+.\_n8n-local.cmd --skip-launch-preflight
+```
 
 When an action finishes, press `Enter` at the prompt. The launcher clears the completed command output, trims the console buffer when Windows allows it, and redraws the main menu. The CMD window should not grow forever during normal menu use.
 
@@ -648,11 +662,17 @@ Use this table only when you want an AI coding agent to work with n8n workflows 
 
 ### Docker Is Not Running
 
-1. Open Docker Desktop.
-2. Wait for the engine to finish starting.
-3. Relaunch `_n8n-local.cmd`.
-4. Read the quick status at the top of the main menu.
-5. If you need ports or health details, choose `Show Compose status`.
+1. Relaunch `_n8n-local.cmd`.
+2. Let the launch preflight start Docker Desktop and wait for the engine.
+3. Read the quick status at the top of the main menu.
+4. If Docker Desktop still does not become ready, open Docker Desktop manually and check its error message.
+5. If you need ports or health details after Docker is ready, choose `Show Compose status`.
+
+### Docker Desktop Or Compose Is Missing
+
+1. Relaunch `_n8n-local.cmd`.
+2. If the launch preflight offers a winget install, approve it only when you want this launcher to download and install Docker Desktop for you.
+3. If winget is unavailable or Windows needs a restart, install Docker Desktop manually from [Docker Desktop](https://www.docker.com/products/docker-desktop/), then reopen `_n8n-local.cmd`.
 
 ### `.env` Is Missing
 
