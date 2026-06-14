@@ -2,7 +2,7 @@
 
 This first-party workflow guides a non-DevOps owner and Codex through Hostinger VPS plus Coolify setup, deployment, evidence-based pass/fail maintenance, security checks, and incident response. Use it when Codex should help set up Hostinger for deployment or maintain a Coolify host. Treat the VPS as production-sensitive infrastructure. Codex must inspect and report before changing anything. Codex must describe setup and maintenance only through recorded evidence-based PASS/WARN/FAIL results.
 
-For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`. Keep the n8n Hostinger VPS guide in `n8n-local-setup` for hosted n8n reference material. If the deployed app is n8n or the task touches live n8n workflows, credentials, import/export, activation, execution, or repo/live sync, also apply `n8n-agent-rules`.
+For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`. Use `n8n-local-setup` for local n8n and for the n8n-specific Hostinger Coolify VPS deployment reference after Coolify exists. If the deployed app is n8n or the task touches live n8n workflows, credentials, import/export, activation, execution, or repo/live sync, also apply `n8n-agent-rules`.
 
 ## Required Checklist Statuses
 

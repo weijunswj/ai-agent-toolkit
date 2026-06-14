@@ -8,7 +8,7 @@ Update the project source and run sync.
 
 This is the beginner path for running n8n locally on Windows with Docker Desktop, Postgres, the guided `_n8n-local.cmd` menu, and optional ngrok public access.
 
-Use [Page 2 - Hostinger VPS](hostinger-vps.md) instead when you want an always-on hosted server.
+Use [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md) instead when you want an always-on hosted server.
 
 * Start local n8n first.
 * Add ngrok only when something outside your computer must reach n8n.
@@ -360,6 +360,8 @@ Examples:
 - Webhooks from services such as Stripe, GitHub, Telegram, or Shopify.
 - OAuth callbacks.
 - An AI agent running somewhere that cannot reach `http://localhost:5678`.
+
+Local Traefik, Caddy, or Nginx can provide local reverse-proxy behavior, but it is not a tunnel by itself. A local reverse proxy can route local hostnames to local services; it does not make your local PC reachable from the public internet by itself. For local external webhook tests, the Compose ngrok path remains the simpler option. For hosted production, use [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md) instead of adapting the local launcher.
 
 ### Compose ngrok Service
 
@@ -755,7 +757,7 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 - Do not paste real API tokens, webhook secrets, passwords, or encryption keys into repo files.
 - Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 - Before removing `n8n_data` or `postgres_data`, pause, explain that local runtime data may be deleted, name the exact volume, and ask for explicit current-turn approval.
-- Use [Page 2 - Hostinger VPS](hostinger-vps.md) for always-on hosted setup.
+- Use [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md) for always-on hosted setup.
 
 ---
 
@@ -763,6 +765,6 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 
 | Reference | Use when |
 | --- | --- |
-| [Page 2 - Hostinger VPS](hostinger-vps.md) | You need always-on public hosting on Hostinger. |
+| [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md) | You need always-on public n8n hosting on Hostinger with Coolify already set up. |
 | [Local stack templates](../../templates/local-stack/) | You need the Docker Compose, environment template, launcher, and menu script. |
 | [n8n Agent Rules](../../../n8n-agent-rules/) | You need the full n8n operating rules before workflow/live n8n work. |

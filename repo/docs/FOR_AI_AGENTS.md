@@ -43,7 +43,7 @@ Use installed skills only when they clearly match the task and improve correctne
 | --- | --- |
 | `ai-coding-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates. |
 | `n8n-agent-rules` | Any n8n task, including workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
-| `n8n-local-setup` | Safe local n8n Docker Compose setup, hosted n8n Hostinger VPS notes, Postgres/ngrok stack templates, MCP config selection, or platform-specific n8n agent-rule setup. |
+| `n8n-local-setup` | Safe local n8n Docker Compose setup, hosted n8n Hostinger Coolify VPS notes, Postgres/ngrok stack templates, MCP config selection, or platform-specific n8n agent-rule setup. |
 | `n8n-workflow-helper-scripts` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
 | `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
 | `secure-cicd-installer` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |

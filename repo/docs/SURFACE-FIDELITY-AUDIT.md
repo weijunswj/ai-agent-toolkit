@@ -70,7 +70,7 @@ Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by replacing the old Hostinger/Coolify repository-preparation skill with the Codex SSH Hostinger Coolify maintainer skill, moving runtime checklists, templates, scripts, and the full reference to `_main` full-fidelity recipes, restoring the n8n-local-setup Hostinger VPS reference as separate hosted n8n material, publishing new OpenAI metadata for the new skill, and adding the full-fidelity daily-security-check environment example template.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by replacing the old Hostinger/Coolify repository-preparation skill with the Codex SSH Hostinger Coolify maintainer skill, moving runtime checklists, templates, scripts, and the full reference to `_main` full-fidelity recipes, keeping the n8n-specific Hostinger Coolify VPS deployment reference in n8n-local-setup as separate hosted n8n material, publishing new OpenAI metadata for the new skill, and adding the full-fidelity daily-security-check environment example template.
 
 ## Current project modules
 
