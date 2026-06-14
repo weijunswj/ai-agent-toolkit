@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "version_policy": "semver",
-  "version_notes": "Clarifies the hosted n8n Hostinger VPS guide remains in n8n-local-setup while Coolify deployment maintenance uses the separate Hostinger/Coolify maintainer skill.",
+  "version_notes": "Adds a launch preflight to the local stack menu that can offer a Docker Desktop install when requirements are missing and auto-start Docker Desktop before showing the main menu.",
   "outputs": [
     {
       "kind": "curated",
