@@ -96,16 +96,16 @@ Create an `A` record from that subdomain to the Hostinger VPS IP. Then configure
 
 Temporary or no-domain option:
 
-- Use an IP-based DNS hostname such as `sslip.io` or `nip.io` style hostnames when you need a temporary public hostname before real DNS is ready.
+- Use an IP-based DNS hostname such as `sslip.io` or `nip.io` style hostnames only when you need a temporary public hostname before real DNS is ready.
 - Example shape only:
 
   ```text
   n8n.<vps-ip>.sslip.io
   ```
 
-- Replace `<vps-ip>` with the VPS IP only in your private deployment notes or Coolify UI.
+- Replace `<vps-ip>` only in your private deployment notes or Coolify UI. Do not commit the real VPS IP.
 
-Avoid direct public port `5678` except for disposable throwaway testing. Production n8n should be reached through Coolify HTTPS on `443`, with Coolify routing to the n8n container's internal port `5678`.
+Avoid direct `http://<vps-ip>:5678` access except for disposable throwaway testing. Production n8n should be reached through Coolify HTTPS on `443`, with Coolify routing to the n8n container's internal port `5678`.
 
 ---
 
@@ -118,18 +118,20 @@ Set these values in Coolify's environment/secrets UI, not in repo files.
 | `N8N_HOST` | Public hostname only. No protocol and no path. | `n8n.example.com` |
 | `N8N_PROTOCOL` | Public protocol users and webhooks use through Coolify. | `https` |
 | `N8N_EDITOR_BASE_URL` | Public editor URL. | `https://n8n.example.com/` |
-| `WEBHOOK_URL` | Public webhook base URL. Include trailing slash. | `https://n8n.example.com/` |
+| `WEBHOOK_URL` | Public webhook base URL. Must include trailing slash. | `https://n8n.example.com/` |
 | `N8N_PROXY_HOPS` | Number of trusted reverse-proxy hops in front of n8n. | `1` for a normal Coolify reverse proxy path |
-| `N8N_ENCRYPTION_KEY` | Long random key used to encrypt credentials. Create once and keep forever. | Generated secret, not a placeholder |
+| `N8N_ENCRYPTION_KEY` | Long random key used to encrypt credentials. Generate once, back up, and keep forever. | Generated secret, not a placeholder |
+| `GENERIC_TIMEZONE` / `TZ` | Runtime timezone used by n8n and the container. Set both to the same value. | `Etc/UTC` or your operating timezone |
 
 Rules:
 
 - `N8N_HOST` should match the public hostname.
 - `N8N_PROTOCOL` should be `https` when Coolify provides HTTPS.
 - `N8N_EDITOR_BASE_URL` should match the public editor URL.
-- `WEBHOOK_URL` should match the public webhook base URL and end with `/`.
+- `WEBHOOK_URL` should match the public webhook base URL and must end with `/`.
 - `N8N_PROXY_HOPS` should be set for the reverse proxy setup instead of ignored.
-- `N8N_ENCRYPTION_KEY` must be created once, stored safely, and not changed after credentials exist.
+- `N8N_ENCRYPTION_KEY` must be generated once, backed up outside the VPS and repo, and never changed after credentials exist. Changing it later can make existing n8n credentials unreadable.
+- `GENERIC_TIMEZONE` and `TZ` should use the same timezone value.
 - Do not paste real values into GitHub, chat, tickets, screenshots, or repo docs.
 
 If the public domain changes later, update the public URL values in Coolify and verify both the editor URL and a webhook URL after redeploy.
@@ -146,6 +148,8 @@ This example intentionally:
 - Does not expose Postgres publicly.
 - Does not map public host port `5678`.
 - Exposes n8n's internal `5678` for Coolify routing.
+- Lets Coolify manage the deployment/default network instead of declaring a custom Compose network.
+- Waits for Postgres to be healthy before starting n8n.
 - Uses placeholders that must be filled in Coolify environment/secrets, not committed.
 
 ```yaml
@@ -159,14 +163,19 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:stable
     restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
@@ -188,16 +197,10 @@ services:
       - n8n_data:/home/node/.n8n
     expose:
       - "5678"
-    networks:
-      - internal
 
 volumes:
   postgres_data:
   n8n_data:
-
-networks:
-  internal:
-    driver: bridge
 ```
 
 Example placeholder values for Coolify environment/secrets:
@@ -215,9 +218,13 @@ N8N_ENCRYPTION_KEY=<generate-once-and-store-safely>
 GENERIC_TIMEZONE=Etc/UTC
 ```
 
-The placeholders above are not secrets by themselves, but real values may be sensitive. Keep production values in Coolify and your password manager.
+The placeholders above are not secrets by themselves, but real values may be sensitive. Keep production values in Coolify environment/secrets and your password manager. Do not commit real env values.
 
-Postgres must stay private. Do not add `ports:` for Postgres. Do not expose `5432` through the VPS firewall, Coolify proxy, or Docker host mappings.
+Coolify should publish only the n8n service, not Postgres. Configure Coolify's public route/domain on n8n and target the n8n service's internal container port `5678`. Do not add a public host port mapping for n8n.
+
+Postgres must stay private. Do not add `ports:` for Postgres. Do not assign Postgres a public domain, public route, Coolify proxy route, VPS firewall opening, or Docker host port mapping for `5432`.
+
+This starter does not declare a custom Compose network because a normal Coolify Docker Compose resource can use the deployment/default network Coolify creates for the resource. Only add custom networking when you can explain why Coolify's default resource networking is insufficient and how the proxy, service discovery, TLS, and backups will behave.
 
 ---
 
@@ -231,14 +238,19 @@ Use Coolify's current UI, but keep this sequence:
 4. Paste or point Coolify to the reviewed Compose definition.
 5. Add environment variables and secrets in Coolify.
 6. Configure the public domain or temporary hostname for the n8n service.
-7. Route the public service to the n8n container's internal port `5678`.
-8. Confirm Postgres has no public route or public host port.
-9. Deploy.
-10. Open the public n8n URL in a browser.
-11. Create the first n8n owner account.
-12. Configure backups before adding production credentials or workflows.
+7. In Coolify routing/proxy settings, publish only the n8n service.
+8. Route the public n8n service to the n8n container's internal port `5678`.
+9. Do not create any public domain, public route, proxy route, or public host port for Postgres.
+10. Deploy.
+11. Confirm Postgres becomes healthy and n8n starts after it.
+12. Confirm Coolify/Traefik serves the n8n URL over HTTPS.
+13. Open the public n8n URL in a browser.
+14. Create the first n8n owner account.
+15. Configure backups before adding production credentials or workflows.
 
 Do not run the local Windows launcher on the VPS. The local launcher is for the Page 1 Windows/Docker Desktop setup only.
+
+Do not run a second public reverse proxy inside the n8n stack unless you know exactly why. Coolify/Traefik is already the public reverse proxy layer in this path.
 
 ---
 
@@ -251,9 +263,11 @@ Before first production use:
 - [ ] Domain/subdomain or temporary hostname is decided.
 - [ ] Coolify project/environment/resource is created.
 - [ ] Env vars and secrets are filled in Coolify or a secret store, not committed.
-- [ ] `N8N_ENCRYPTION_KEY` is generated once and stored safely.
-- [ ] n8n service is routed through Coolify to internal port `5678`.
-- [ ] Postgres has no public port or public route.
+- [ ] `WEBHOOK_URL` includes the trailing `/`.
+- [ ] `N8N_ENCRYPTION_KEY` is generated once, backed up, and stored safely before credentials exist.
+- [ ] n8n service is routed through Coolify/Traefik to internal port `5678`.
+- [ ] Postgres healthcheck is passing.
+- [ ] Postgres has no public port, public domain, public route, or proxy route.
 - [ ] n8n owner account is created.
 - [ ] Backups are configured before production credentials/workflows.
 - [ ] A small safe test workflow can be saved.

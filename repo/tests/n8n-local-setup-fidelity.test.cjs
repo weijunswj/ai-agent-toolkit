@@ -1022,7 +1022,11 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
     'N8N_EDITOR_BASE_URL',
     'WEBHOOK_URL',
     'N8N_PROXY_HOPS',
-    'N8N_ENCRYPTION_KEY'
+    'N8N_ENCRYPTION_KEY',
+    'GENERIC_TIMEZONE',
+    'pg_isready',
+    'service_healthy',
+    'deployment/default network'
   ]) {
     assert.match(vps, new RegExp(escapeRegExp(expected)), expected);
   }
@@ -1033,12 +1037,19 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
   assert.match(vps, /postgres:16-alpine/);
   assert.match(vps, /docker\.n8n\.io\/n8nio\/n8n:stable/);
   assert.match(vps, /DB_TYPE: postgresdb/);
+  assert.match(vps, /^\s{4}healthcheck:\n\s{6}test: \["CMD-SHELL", "pg_isready/m);
+  assert.match(vps, /^\s{4}depends_on:\n\s{6}postgres:\n\s{8}condition: service_healthy/m);
   assert.match(vps, /^\s{4}expose:\n\s{6}- "5678"/m);
   assert.match(vps, /Do not add `ports:` for Postgres/);
-  assert.match(vps, /Do not expose `5432`/);
-  assert.match(vps, /WEBHOOK_URL.*end with `\/`/);
+  assert.match(vps, /WEBHOOK_URL.*must end with `\/`/);
+  assert.match(vps, /Do not assign Postgres a public domain, public route, Coolify proxy route/);
+  assert.match(vps, /Docker host port mapping for `5432`/);
+  assert.doesNotMatch(vps, /^\s{4}ports:/m);
+  assert.doesNotMatch(vps, /^networks:/m);
+  assert.doesNotMatch(vps, /driver: bridge/);
   assert.doesNotMatch(vps, /203\.0\.113\.123/);
   assert.doesNotMatch(vps, /ssh root@/);
+  assert.match(vps, /Avoid direct `http:\/\/<vps-ip>:5678` access except for disposable throwaway testing/);
   assert.doesNotMatch(vps, /https:\/\/n8n\.<your-vps-hostname>/);
   assert.doesNotMatch(vps, /Ubuntu 24\.04 with n8n/);
   assert.doesNotMatch(vps, /KVM 2 is the comfortable default/);

@@ -19,7 +19,7 @@
       "source_path": "4. vps hosting.md",
       "project_path": "_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md",
       "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2",
-      "notes": "Clean-rebuilt into a Hostinger Coolify VPS n8n page. The old Hostinger one-click n8n template path is de-scoped from the recommended hosted flow; the page now treats Hostinger VPS plus Coolify setup as a prerequisite and covers n8n deployment inside Coolify."
+      "notes": "Clean-rebuilt into a Hostinger Coolify VPS n8n page. The old Hostinger one-click n8n template path is de-scoped from the recommended hosted flow; the page now treats Hostinger VPS plus Coolify setup as a prerequisite and covers n8n deployment inside Coolify with private Postgres, Coolify routing, and a healthchecked starter Compose."
     },
     {
       "mode": "adapted",

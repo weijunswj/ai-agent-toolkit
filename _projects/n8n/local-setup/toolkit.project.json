@@ -7,7 +7,7 @@
   "main_path": "_projects/n8n/local-setup/_main",
   "version": "3.3.0",
   "version_policy": "semver",
-  "version_notes": "Replaces the old Hostinger one-click n8n VPS template guide with a Hostinger Coolify VPS path that treats Coolify setup as a prerequisite and covers n8n deployment inside Coolify.",
+  "version_notes": "Replaces the old Hostinger one-click n8n VPS template guide with a Hostinger Coolify VPS path that treats Coolify setup as a prerequisite and covers n8n deployment inside Coolify, including private Postgres, Coolify routing, and a healthchecked starter Compose.",
   "outputs": [
     {
       "kind": "curated",
