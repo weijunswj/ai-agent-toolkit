@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-13 (Codex SSH Hostinger Coolify maintainer skill replacement)
+Latest update: 2026-06-14 (Strict PR Review skill)
 
 ## Current state
 
@@ -27,9 +27,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 12 |
-| publishedFiles | 188 |
-| declaredOutputFiles | 188 |
+| projects | 13 |
+| publishedFiles | 191 |
+| declaredOutputFiles | 191 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 188 |
+| boundaryRecipeOutputs | 191 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 0 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 114 |
+| declared_generated | 117 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
@@ -64,13 +64,13 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 136 |
+| main_full_fidelity | 139 |
 
 Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by replacing the old Hostinger/Coolify repository-preparation skill with the Codex SSH Hostinger Coolify maintainer skill, moving runtime checklists, templates, scripts, and the full reference to `_main` full-fidelity recipes, keeping the n8n-specific Hostinger Coolify VPS deployment reference in n8n-local-setup as separate hosted n8n material, publishing new OpenAI metadata for the new skill, and adding the full-fidelity daily-security-check environment example template.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by adding the first-party Strict PR Review project module and its three full-fidelity generated skill files.
 
 ## Current project modules
 
@@ -80,6 +80,7 @@ Known baseline context:
 - `_projects/development/local-ai-stack-safety`
 - `_projects/development/hostinger-coolify-production-guide`
 - `_projects/development/self-hosted-service-safety`
+- `_projects/development/strict-pr-review`
 - `_projects/development/windows-localhost-workflows`
 - `_projects/knowledge/knowledge-index-updater`
 - `_projects/n8n/local-setup`
@@ -101,6 +102,7 @@ Known baseline context:
 - `skills/n8n-workflow-templates/`
 - `skills/self-hosted-service-safety/`
 - `skills/secure-cicd-installer/`
+- `skills/strict-pr-review/`
 - `skills/ui-ux-secure-frontend-design/`
 - `skills/windows-localhost-workflows/`
 

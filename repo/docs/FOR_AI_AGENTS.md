@@ -52,6 +52,7 @@ Use installed skills only when they clearly match the task and improve correctne
 | `local-ai-stack-safety` | Reviewing local AI runtime, model download, GPU/runtime, local AI web UI, or local AI endpoint exposure risk before setup. |
 | `codex-ssh-hostinger-coolify-setup-maintainer` | Codex SSH Hostinger VPS plus Coolify deployment setup, SSH preflight, daily security checks, intrusion-signal review, optional Telegram/email maintenance alerts, evidence-based maintenance, and incident response with owner approval gates. Use when the user asks Codex to help set up Hostinger for deployment, configure daily maintenance alerts, or review Hostinger/Coolify security signals. |
 | `self-hosted-service-safety` | Reviewing non-n8n self-hosted service setup, Docker/VPS, public ports, tunnels, credentials, backups, or first-run hardening. |
+| `strict-pr-review` | Serious GitHub PR, branch, diff, proposed-merge, merge-readiness, or "check PR properly" reviews that need direct file/diff inspection, verification limits, and an explicit merge verdict. |
 | `windows-localhost-workflows` | Starting, relaunching, verifying, or debugging local Windows dev servers. |
 | `knowledge-index-updater` | Maintaining a Notion/GitHub knowledge index with stable source keys, de-duplication, categorisation, and stale/missing item checks. |
 | `ui-ux-secure-frontend-design` | Frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review. |

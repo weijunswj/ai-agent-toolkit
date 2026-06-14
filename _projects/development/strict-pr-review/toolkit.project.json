@@ -1,0 +1,96 @@
+{
+  "id": "development.strict-pr-review",
+  "category": "development",
+  "name": "strict-pr-review",
+  "title": "Strict PR Review",
+  "module_path": "_projects/development/strict-pr-review",
+  "main_path": "_projects/development/strict-pr-review/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial first-party strict GitHub PR review skill version.",
+  "outputs": [
+    {
+      "kind": "copy",
+      "source": "_main/skill/README.md",
+      "output": "skills/strict-pr-review/README.md",
+      "notes": "Standalone skill README copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
+      "output": "skills/strict-pr-review/SKILL.md",
+      "notes": "Standalone skill entrypoint copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
+      "output": "skills/strict-pr-review/agents/openai.yaml",
+      "notes": "OpenAI platform metadata copied from first-party module source.",
+      "fidelity": "exact"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/strict-pr-review/README.md",
+      "skills/strict-pr-review/SKILL.md",
+      "skills/strict-pr-review/agents/openai.yaml"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "skill_creation_review": {
+    "existing_skill_review": "Reviewed current skills before adding strict-pr-review: ai-coding-agent-rules, secure-cicd-installer, context-preserving-ai-publisher, agent-skill-supply-chain-audit, windows-localhost-workflows, self-hosted-service-safety, local-ai-stack-safety, n8n-agent-rules, and the README skill table. Existing skills either cover generic execution rules, source publishing, CI/CD setup, safety review, or n8n-specific work; none provides a reusable strict-pr-review workflow and merge verdict without bloating the generic AGENTS template.",
+    "trigger": "Use when a user asks to review a GitHub PR, branch, diff, proposed merge, merge readiness, or to check a PR properly. Do not use when the user asks to implement fixes or do ordinary coding without a review verdict.",
+    "decision": "new_project_skill",
+    "decision_reason": "A dedicated strict-pr-review skill is safer and clearer than extending ai-coding-agent-rules because serious PR review has a distinct output contract, evidence-gathering workflow, and review-only boundary, while the generic AGENTS template should remain execution-first and compact.",
+    "unique_value": "Forces reviewers to inspect PR metadata, full diff, changed files, CI/check status, comments, repo instructions, generated-output drift, deployment assumptions, and missing verification before giving an explicit merge verdict.",
+    "runtime_footprint": "SKILL.md is compact and instruction-only, with no long references, scripts, templates, or assets. It covers PR-review-specific workflow only and leaves generic coding execution rules in existing agent instructions.",
+    "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because the skill is a review workflow, not a tool bundle.",
+    "output_contract": "Return a direct evidence-based PR review with blocking findings, non-blocking findings, verification limitations, and exactly one merge verdict: MERGE, MERGE AFTER FIXES, DO NOT MERGE, or NEEDS MORE INFO.",
+    "anti_bloat_review": "The skill does not duplicate execution-first coding rules, persona, broad research rules, or generic review praise. It is scoped to serious GitHub PR, branch, diff, and proposed-merge review tasks.",
+    "safety_boundary": "Review-only by default. Do not edit files, push commits, update PRs, post reviews, merge, rerun workflows, deploy, or mutate external systems unless the user explicitly switches from review to fix or action mode and normal repo approval/auth rules allow the requested action.",
+    "source_provenance": "first_party",
+    "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted.",
+    "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, routing updates, safety matrix updates, README updates, sync, and validation.",
+    "routing": "strict-pr-review is routed for GitHub PR, branch, diff, proposed-merge, merge-readiness, and check-PR-properly review tasks. It is not intentionally omitted.",
+    "validation": [
+      "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "node --test repo/tests/skill-routing.test.cjs",
+      "node repo/scripts/validate-toolkit.cjs",
+      "node repo/scripts/audit-published-surfaces.cjs --check"
+    ]
+  },
+  "project": {
+    "name": "Strict PR Review",
+    "category": "development",
+    "summary": "Compact review-only skill for serious GitHub PR, branch, diff, proposed-merge, and merge-readiness reviews."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/strict-pr-review",
+      "summary": "Requires evidence-based PR review, direct changed-file inspection, risk classification, verification limits, and an explicit merge verdict."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}
