@@ -1,6 +1,6 @@
 ---
 name: windows-localhost-workflows
-description: start, relaunch, verify, and troubleshoot localhost development workflows on windows. use before starting localhost web apps, api servers, or development services on windows or in codex windows shells, and when debugging windows startup failures involving powershell scripts, execution policy, corepack, package managers, spawn eperm, duplicate path/path environment keys, port conflicts, detached background launch, non-persistent sandbox background processes, or empty log files. supports chatgpt, codex, claude, and claude code where shell access is available.
+description: start, relaunch, verify, and troubleshoot localhost development workflows on windows. use before starting localhost web apps, api servers, or development services on windows or in codex windows shells, and when debugging windows startup failures involving powershell scripts, execution policy, corepack, package managers, python runtime discovery, spawn eperm, duplicate path/path environment keys, port conflicts, detached background launch, non-persistent sandbox background processes, or empty log files. supports chatgpt, codex, claude, and claude code where shell access is available.
 ---
 
 <!--
@@ -65,18 +65,22 @@ if ($conn) { Get-Process -Id $conn.OwningProcess | Select-Object Id,ProcessName,
 
 If the port is already bound, decide whether to reuse the running service, stop it, or choose a different port based on project requirements.
 
-### 3. Resolve package-manager commands dynamically
+### 3. Resolve runtimes and package-manager commands dynamically
 
-Do not hardcode a user-specific path as the default. Find the package manager first:
+Do not hardcode a user-specific path as the default. Find the runtime or package manager first:
 
 ```powershell
 Get-Command pnpm.cmd -ErrorAction SilentlyContinue
 Get-Command npm.cmd -ErrorAction SilentlyContinue
 Get-Command yarn.cmd -ErrorAction SilentlyContinue
 Get-Command bun.exe -ErrorAction SilentlyContinue
+Get-Command python.exe -ErrorAction SilentlyContinue
+Get-Command py.exe -ErrorAction SilentlyContinue
 ```
 
-If a wrapper script fails, call the resolved executable directly:
+For Python apps, check `python.exe`, then `py.exe`, then any platform-provided or bundled Python runtime exposed by the current agent environment. Use the platform/bundled runtime only as a discovered fallback, not as a hardcoded default. Explain which runtime was selected.
+
+If a wrapper script fails, or PATH discovery does not find the expected command, call the resolved executable directly:
 
 ```powershell
 $pnpm = (Get-Command pnpm.cmd -ErrorAction Stop).Source
@@ -106,10 +110,12 @@ Use this when the service is long-running and the working command is known. A re
 
 1. Check the port.
 2. Normalize duplicate process environment keys before `Start-Process`.
-3. Start the server with stdout/stderr logs.
-4. Poll a documented health endpoint such as `/api/health`, or the root URL when no health endpoint exists.
-5. If a Codex sandbox launch does not persist after the shell command returns, retry with an escalated/unsandboxed launch when the environment supports it.
-6. Report the exact URL, command, process id, and log paths.
+3. Use a single quoted `Start-Process -ArgumentList` string when passing script paths, app roots, or commands that may contain spaces. Array arguments can be mis-passed by wrappers in some Windows launch paths and split paths like `C:\Users\xPass\GitHub Projects\...`.
+4. Start the server with stdout/stderr logs.
+5. Poll a documented health endpoint such as `/api/health`, or the root URL when no health endpoint exists.
+6. After the launch shell command returns, re-check the port or HTTP endpoint before claiming the server persists.
+7. If a Codex sandbox launch does not persist after the shell command returns, retry with an escalated/unsandboxed launch when the environment supports it, then repeat the post-return port or HTTP check.
+8. Report the exact URL, command, process id, and log paths.
 
 ```powershell
 $app = Resolve-Path .
@@ -156,7 +162,54 @@ do {
 }
 ```
 
-Replace `pnpm dev` with the project's actual working command. For Python or Node launches that pass arguments through `Start-Process -ArgumentList`, prefer a single quoted argument string once the command is known; array arguments can be mis-passed by wrappers in some Windows launch paths.
+Replace `pnpm dev` with the project's actual working command.
+
+Python localhost apps need the same quoting discipline, especially when the repo path contains spaces:
+
+```powershell
+$app = Resolve-Path .
+$server = Join-Path $app 'webapp/server.py'
+$python = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+if (-not $python) { $python = (Get-Command py.exe -ErrorAction SilentlyContinue).Source }
+# If PATH lookup fails, use the current agent/platform dependency locator to find a bundled Python,
+# then assign that discovered absolute python.exe path to $python.
+if (-not $python) { throw 'No Python runtime was found on PATH or through the current platform runtime discovery.' }
+
+$port = 8765
+$url = "http://localhost:$port"
+$log = Join-Path $app 'python-server.log'
+$err = Join-Path $app 'python-server.err.log'
+
+$argumentString = "`"$server`" --host 127.0.0.1 --port $port"
+$proc = Start-Process -FilePath $python `
+  -ArgumentList $argumentString `
+  -WorkingDirectory $app `
+  -RedirectStandardOutput $log `
+  -RedirectStandardError $err `
+  -WindowStyle Hidden `
+  -PassThru
+
+$deadline = (Get-Date).AddSeconds(60)
+do {
+  Start-Sleep -Seconds 2
+  try {
+    Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5 | Out-Null
+    $ready = $true
+  } catch {
+    $ready = $false
+  }
+} until ($ready -or (Get-Date) -gt $deadline)
+
+[pscustomobject]@{
+  Ready = $ready
+  Url = $url
+  ProcessId = $proc.Id
+  Stdout = $log
+  Stderr = $err
+}
+```
+
+If `python.exe` and `py.exe` are unavailable, substitute a discovered platform-provided Python executable for `$python` rather than hardcoding a user-specific path in reusable instructions.
 
 ### 6. Verify from logs and HTTP
 
@@ -212,7 +265,7 @@ If the dev server fails inside an agent sandbox with `spawn EPERM`, request elev
 
 In Codex sandboxed shells, background localhost servers may exit or be killed when the shell command returns. If the user needs the dev server to keep running after the command finishes, relaunch it with `sandbox_permissions: require_escalated` when available, then repeat the same log and HTTP health verification. Report that the escalation is for local process persistence, not for external network exposure.
 
-Do not claim the service is running persistently until a follow-up port or HTTP check succeeds after the launch command has returned.
+Even when a sandboxed background launch appears to work while the shell command is still running, do not claim the service is persistent until a follow-up port or HTTP check succeeds after that shell command has returned.
 
 ### Port conflict
 

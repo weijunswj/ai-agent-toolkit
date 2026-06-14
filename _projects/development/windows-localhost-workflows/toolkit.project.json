@@ -5,9 +5,9 @@
   "title": "Windows Localhost Workflows",
   "module_path": "_projects/development/windows-localhost-workflows",
   "main_path": "_projects/development/windows-localhost-workflows/_main",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "version_policy": "semver",
-  "version_notes": "Adds Windows Start-Process duplicate Path/PATH handling, persistent Codex sandbox launch guidance, and a robust logged health-polled localhost launch pattern.",
+  "version_notes": "Adds runtime discovery guidance for Python localhost apps, Start-Process quoting examples for paths with spaces, and stricter post-return persistence verification for sandboxed background launches.",
   "outputs": [
     {
       "kind": "copy",
