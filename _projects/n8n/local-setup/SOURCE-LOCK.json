@@ -19,14 +19,14 @@
       "source_path": "4. vps hosting.md",
       "project_path": "_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md",
       "source_blob_sha": "8f3b937c634a18c3df685adee79624f50a24b8e2",
-      "notes": "Clean-rebuilt into a Hostinger-only VPS page, with current Hostinger n8n plan/template/update/domain references verified on 2026-05-31."
+      "notes": "Clean-rebuilt into a Hostinger Coolify VPS n8n page. The old Hostinger one-click n8n template path is de-scoped from the recommended hosted flow; the page now treats Hostinger VPS plus Coolify setup as a prerequisite and covers n8n deployment inside Coolify."
     },
     {
       "mode": "adapted",
       "source_path": "README.md",
       "project_path": "_projects/n8n/local-setup/_main/README.md",
       "source_blob_sha": "19815dff51b90aaef1d5125dff4b2f188ee54436",
-      "notes": "Clean-rebuilt into a two-page source index: Local Setup and Hostinger VPS, with skills-first routing and optional secondary AI-coding-agent MCP feature references."
+      "notes": "Clean-rebuilt into a two-page source index: Local Setup and Hostinger Coolify VPS n8n, with skills-first routing and optional secondary AI-coding-agent MCP feature references."
     },
     {
       "mode": "adapted",

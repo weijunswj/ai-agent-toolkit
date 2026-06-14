@@ -2,7 +2,7 @@
 
 Production-minded skill for Hostinger VPS plus Coolify setup, deployment, daily security checks, optional Telegram/email daily notifications, intrusion-signal review, maintenance, and incident response. Use it when Codex should help set up Hostinger for deployment or maintain a Coolify host. Copy the whole skill folder, not just `SKILL.md`, so checklists, templates, scripts, and references stay available.
 
-Boundary note: For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`. Keep the n8n Hostinger VPS guide in `n8n-local-setup` for hosted n8n reference material. If the target app is n8n or the task touches live n8n operations, also apply `n8n-agent-rules`.
+Boundary note: For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`. Use `n8n-local-setup` for local n8n and for the n8n-specific Hostinger Coolify VPS deployment reference after Coolify exists. If the target app is n8n or the task touches live n8n operations, also apply `n8n-agent-rules`.
 
 ## Contents
 

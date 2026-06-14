@@ -2,7 +2,7 @@
 
 This module is first-party toolkit-authored material for a production-sensitive Codex SSH Hostinger VPS plus Coolify setup and maintainer workflow. It replaces the prior Hostinger/Coolify repository-preparation guide with setup, deployment, daily security check, maintenance, and incident response guidance that preserves owner approval gates.
 
-It is separate from `n8n-local-setup`: that project keeps the local n8n guide and the hosted n8n Hostinger VPS reference.
+It is separate from `n8n-local-setup`: that project keeps the local n8n guide and the n8n-specific Hostinger Coolify VPS deployment reference for use after Coolify exists.
 
 Published skill identity: `codex-ssh-hostinger-coolify-setup-maintainer`.
 

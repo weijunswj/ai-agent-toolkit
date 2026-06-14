@@ -13,7 +13,7 @@ Review rule: Preserve production safety constraints. Do not weaken secret, SSH, 
 
 Use this skill when the user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, bootstrap or maintain Coolify, deploy apps through Coolify, inspect a Hostinger server over SSH, run daily security checks, configure daily maintenance alerts, review intrusion/security signals, perform maintenance, or respond to incidents. For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`.
 
-Do not replace the n8n Hostinger VPS guide with this skill. Use `n8n-local-setup` for local n8n and its hosted n8n Hostinger VPS reference. If the deployed app is n8n or the task touches live n8n workflows, credentials, import/export, activation, execution, or repo/live sync, also apply `n8n-agent-rules` before n8n-specific work.
+Do not replace the n8n-specific Hostinger Coolify VPS deployment reference with this skill. Use this skill to prepare or maintain the Hostinger VPS plus Coolify host, then use `n8n-local-setup` for local n8n and for deploying n8n inside Coolify after Coolify exists. If the deployed app is n8n or the task touches live n8n workflows, credentials, import/export, activation, execution, or repo/live sync, also apply `n8n-agent-rules` before n8n-specific work.
 
 ## Operating Contract
 

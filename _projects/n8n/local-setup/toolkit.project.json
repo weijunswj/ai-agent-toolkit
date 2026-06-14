@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "version_policy": "semver",
-  "version_notes": "Adds a launch preflight to the local stack menu that can offer a Docker Desktop install when requirements are missing and auto-start Docker Desktop before showing the main menu.",
+  "version_notes": "Replaces the old Hostinger one-click n8n VPS template guide with a Hostinger Coolify VPS path that treats Coolify setup as a prerequisite and covers n8n deployment inside Coolify.",
   "outputs": [
     {
       "kind": "curated",
@@ -68,7 +68,7 @@
       "kind": "copy",
       "source": "_main/Page 2 - Hostinger VPS.md",
       "output": "skills/n8n-local-setup/references/n8n/hostinger-vps.md",
-      "notes": "Hostinger VPS setup guide copied from preserved source into the copyable skill folder.",
+      "notes": "Hostinger Coolify VPS n8n setup guide copied from preserved source into the copyable skill folder.",
       "fidelity": "exact",
       "text_rewrites": [
         {
@@ -322,14 +322,14 @@
   "project": {
     "name": "Local n8n Setup",
     "category": "n8n",
-    "summary": "Preserved local n8n setup guides, Hostinger VPS guidance, Docker Compose local templates, skills-first agent routing, optional AI-coding-agent MCP feature references, and the underscore-prefixed guided launcher."
+    "summary": "Preserved local n8n setup guides, Hostinger Coolify VPS n8n guidance, Docker Compose local templates, skills-first agent routing, optional AI-coding-agent MCP feature references, and the underscore-prefixed guided launcher."
   },
   "surface": {
     "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/n8n-local-setup",
-      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger VPS reference, local stack templates, skills-first agent guidance, and optional AI-coding-agent MCP feature references while depending on n8n-agent-rules for workflow/live n8n rules."
+      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger Coolify VPS n8n reference, local stack templates, skills-first agent guidance, and optional AI-coding-agent MCP feature references while depending on n8n-agent-rules for workflow/live n8n rules."
     },
     "mcp": {
       "status": "not_applicable"

@@ -329,7 +329,7 @@ test('n8n local setup source README exposes two main beginner pages', () => {
 
   assert.match(readme, /^## Start Here$/m);
   assert.match(readme, /\[Page 1 - Local Setup\]\(\.\/Page%201%20-%20Local%20Setup\.md\)/);
-  assert.match(readme, /\[Page 2 - Hostinger VPS\]\(\.\/Page%202%20-%20Hostinger%20VPS\.md\)/);
+  assert.match(readme, /\[Page 2 - Hostinger Coolify VPS n8n\]\(\.\/Page%202%20-%20Hostinger%20VPS\.md\)/);
   assert.match(readme, /^## Supporting Materials$/m);
   assert.match(readme, /Local stack templates/);
   assert.doesNotMatch(readme, /Local helper scripts/);
@@ -983,75 +983,66 @@ test('local stack templates stay placeholder-only and local-first', () => {
   assert.doesNotMatch(shortcut, /POSTGRES_PASSWORD|N8N_ENCRYPTION_KEY|NGROK_AUTHTOKEN/);
 });
 
-test('Hostinger VPS page restores Hostinger-specific production content only', () => {
+test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only', () => {
   const vps = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md');
 
-  assert.match(vps, /^# Page 2 - Hostinger VPS$/m);
-  assert.match(vps, /\* Verify current Hostinger plan\/template details before buying\./);
-  assert.match(vps, /\n---\n\n## 1\. When To Use Hostinger VPS/);
+  assert.match(vps, /^# Page 2 - Hostinger Coolify VPS n8n$/m);
+  assert.match(vps, /\* Set up the Hostinger VPS and Coolify first\./);
+  assert.match(vps, /\n---\n\n## 1\. Which n8n Path Should You Use\?/);
   assertHeadingsInOrder(vps, [
-    '## 1. When To Use Hostinger VPS',
-    '## 2. Choose A Hostinger Plan',
-    '## 3. Choose The n8n Template',
-    '## 4. First Login Checklist',
-    '## 5. Domain / Subdomain Setup',
-    '## 6. Verify Server Files',
-    '## 7. Verify Containers',
-    '## 8. Queue Mode And Workers',
-    '## 9. Backups',
-    '## 10. Updating Hostinger n8n',
-    '## 11. Safety Rules',
-    '## 12. References'
+    '## 1. Which n8n Path Should You Use?',
+    '## 2. What You Actually Manage',
+    '## 3. Prerequisites',
+    '## 4. Domain Or No-Domain Options',
+    '## 5. Required n8n Public URL Concepts',
+    '## 6. Safe Starter Compose For Coolify',
+    '## 7. Deploy n8n In Coolify',
+    '## 8. First-Launch Checklist',
+    '## 9. Backups And Restore Responsibility',
+    '## 10. Updating n8n In Coolify',
+    '## 11. Maintenance Checklist',
+    '## 12. Local Reverse Proxy Note',
+    '## 13. Safety Rules',
+    '## 14. References'
   ]);
 
   for (const expected of [
-    'KVM 1',
-    'KVM 2',
-    'KVM 4',
-    'KVM 8',
-    '1 vCPU',
-    '4 GB RAM',
-    '50 GB NVMe',
-    '4 TB bandwidth',
-    '2 vCPU',
-    '8 GB RAM',
-    '100 GB NVMe',
-    '8 TB bandwidth',
-    'Ubuntu 24.04 with n8n',
-    'Ubuntu 24.04 with n8n (queue mode)',
+    'Hostinger one-click n8n VPS template',
+    'Hostinger Coolify VPS with n8n inside Coolify',
+    'Codex SSH Hostinger Coolify Setup Maintainer',
+    'Coolify reverse proxy / Traefik',
+    'n8n container internal port 5678',
+    'private Postgres service',
     'Browser Terminal',
-    'IP address',
-    'Server IP',
-    'IPv4',
-    'Dedicated IP',
-    'ssh root@203.0.113.123',
-    'https://n8n.<your-vps-hostname>',
-    '/docker/n8n',
-    '/root',
-    'docker-compose.yml',
-    'docker compose pull',
-    'docker compose down',
-    'docker compose up -d',
-    'Docker Compose Manager',
-    'VPS snapshot',
+    'Coolify web dashboard',
+    'sslip.io',
+    'nip.io',
+    'N8N_HOST',
+    'N8N_PROTOCOL',
+    'N8N_EDITOR_BASE_URL',
+    'WEBHOOK_URL',
+    'N8N_PROXY_HOPS',
     'N8N_ENCRYPTION_KEY'
   ]) {
     assert.match(vps, new RegExp(escapeRegExp(expected)), expected);
   }
 
-  assert.match(vps, /KVM 2 is the comfortable default/);
-  assert.match(vps, /KVM 1 is budget\/light-use only/);
-  assert.match(vps, /KVM 4\+ is for heavier workflows/);
-  assert.match(vps, /A record/);
-  assert.match(vps, /DNS propagation/);
-  assert.match(vps, /Replace `203\.0\.113\.123` with the IP address from hPanel/);
-  assert.doesNotMatch(vps, /123\.123\.123\.123/);
-  assert.doesNotMatch(vps, /ssh root@<your-vps-ip>/);
-  assert.match(vps, /Do not copy the Hostinger dashboard URL\. You need the server IP address\./);
-  assert.match(vps, /Terminal commands go in Browser Terminal or SSH\. Website URLs go in your web browser\./);
-  assert.match(vps, /Do not type the n8n URL into Browser Terminal or SSH\. It belongs in a web browser\./);
-  assert.match(vps, /Save the email, password, n8n URL, and VPS IP address in the password manager/);
-  assert.doesNotMatch(vps, /Coolify/i);
+  assert.match(vps, /N8N_HOST=n8n\.example\.com/);
+  assert.match(vps, /WEBHOOK_URL=https:\/\/n8n\.example\.com\//);
+  assert.match(vps, /N8N_PROXY_HOPS=1/);
+  assert.match(vps, /postgres:16-alpine/);
+  assert.match(vps, /docker\.n8n\.io\/n8nio\/n8n:stable/);
+  assert.match(vps, /DB_TYPE: postgresdb/);
+  assert.match(vps, /^\s{4}expose:\n\s{6}- "5678"/m);
+  assert.match(vps, /Do not add `ports:` for Postgres/);
+  assert.match(vps, /Do not expose `5432`/);
+  assert.match(vps, /WEBHOOK_URL.*end with `\/`/);
+  assert.doesNotMatch(vps, /203\.0\.113\.123/);
+  assert.doesNotMatch(vps, /ssh root@/);
+  assert.doesNotMatch(vps, /https:\/\/n8n\.<your-vps-hostname>/);
+  assert.doesNotMatch(vps, /Ubuntu 24\.04 with n8n/);
+  assert.doesNotMatch(vps, /KVM 2 is the comfortable default/);
+  assert.doesNotMatch(vps, /Docker Compose Manager/);
   assert.doesNotMatch(vps, /generic company VM/i);
   assert.doesNotMatch(vps, /unrelated hosting providers/i);
 });
