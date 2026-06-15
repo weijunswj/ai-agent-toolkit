@@ -81,6 +81,7 @@ Use when the user asks to create, redesign, polish, review, or plan:
 - Never create UI that exposes tokens, internal IDs, private customer data, auth secrets, or unredacted PII.
 - Before adding third-party scripts, analytics, trackers, pixels, remote fonts, embeds, or external network calls, pause, disclose the privacy/security risk, name the exact provider or URL, and ask for explicit current-turn approval.
 - Never weaken auth, input validation, CSP, CORS, CSRF, cookie security, or role-based access control for visual convenience.
+- Treat server-side rate limits, email verification, CSRF protection for state-changing requests, and server-only secret handling as security requirements, not optional UX friction.
 - Never recommend dark patterns, fake urgency, manipulative consent, hidden fees, deceptive opt-ins, or confusing unsubscribe flows.
 - Prefer privacy-preserving defaults.
 - Treat forms, dashboards, admin pages, file upload UI, automation UI, AI-agent controls, and n8n workflow screens as high-risk surfaces.
@@ -191,10 +192,12 @@ Review implemented UI against:
 
 ## Privacy, security, and safety gates
 
-- Auth/session UI: preserve secure session behavior, avoid exposing tokens or internal IDs, and make sign-out/account changes clear.
-- Forms: keep validation, consent, rate limits, file limits, and safe error copy.
+- Auth/session UI: preserve secure session behavior, avoid exposing tokens or internal IDs, and make sign-out/account changes clear. Require server-side throttles on signup, login, and forgot-password/reset-email flows, and require email verification after account creation before meaningful account use or sensitive actions when accounts can affect data, billing, messaging, or automation.
+- CSRF/state changes: keep CSRF protection on every state-changing form, route, action, and mutation. Do not remove CSRF, SameSite, Secure, or HttpOnly cookie protections for visual convenience.
+- Forms: keep validation, consent, rate limits, file limits, and safe error copy. Public forms that send email, create accounts, create records, or call paid/provider APIs need server-side abuse limits by IP and account/email where appropriate; do not rely only on client-side cooldowns.
+- Client-exposed keys: do not put OpenAI or other private API keys, database credentials, service-role keys, Firebase service account JSON, or private provider tokens in browser-delivered code. Public/anon client keys are acceptable only when backed by server-side rules such as RLS, Firebase Security Rules, scoped endpoints, and provider-side quota controls.
 - Dashboards/admin: protect PII, use least-privilege display, add confirmation for destructive actions, and avoid leaking hidden operational data.
-- Analytics/tracking: require explicit approval for new trackers, pixels, scripts, or external calls.
+- Analytics/tracking: require explicit approval for new trackers, pixels, scripts, or external calls. Prefer first-party access logs or privacy-preserving security telemetry for abuse investigation, and avoid sending sensitive payloads, tokens, or PII to analytics tools.
 - AI-agent controls: make autonomy, permissions, data sources, and irreversible actions visible.
 - n8n workflow screens: treat triggers, credentials, executions, webhooks, and active workflow changes as high-risk controls.
 - Errors/logs/debug UI: do not expose stack traces, secrets, request headers, customer data, or private infrastructure details.

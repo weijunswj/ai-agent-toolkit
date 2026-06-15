@@ -5,9 +5,9 @@
   "title": "UI/UX Pro Max Design",
   "module_path": "_projects/design/ui-ux-pro-max",
   "main_path": "_projects/design/ui-ux-pro-max/_main",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "version_policy": "semver",
-  "version_notes": "Third-party-attributed toolkit adaptation. Upstream repo, ref, commit, file pins, attribution, and manual-review update policy are tracked in SOURCE-LOCK.json.",
+  "version_notes": "Adds explicit web app abuse hardening guidance for auth throttles, email verification, CSRF, public forms, client-exposed keys, and security telemetry.",
   "outputs": [
     {
       "kind": "copy",

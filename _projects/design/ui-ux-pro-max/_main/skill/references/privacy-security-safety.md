@@ -8,6 +8,9 @@ Use these gates before implementing or approving frontend changes on high-risk s
 - Keep sign-in, sign-out, account switching, password reset, and MFA states clear.
 - Preserve secure cookie, CSRF, CORS, CSP, and role-based access behavior.
 - Avoid UI shortcuts that bypass permission checks.
+- Rate-limit signup, login, and forgot-password/reset-email flows on the server. Use IP and account/email based controls where appropriate, and keep error copy generic enough to avoid account enumeration.
+- Require email verification after account creation before meaningful account use, posting, messaging, billing, automation, or access to sensitive data.
+- Add step-up checks such as CAPTCHA, proof-of-work, MFA, temporary lockout, or manual review only when the product risk justifies the friction.
 
 ## Forms
 
@@ -16,6 +19,22 @@ Use these gates before implementing or approving frontend changes on high-risk s
 - Mark required fields clearly.
 - Preserve consent and communication preferences.
 - Avoid prechecked marketing opt-ins unless explicitly required and legally reviewed.
+- Rate-limit public forms that send email, create records, call paid/provider APIs, or trigger automation. Use server-side IP and account/email limits where appropriate; do not rely only on disabled buttons or client-side cooldowns.
+- Contact forms should avoid confirming whether a target mailbox, user, or tenant exists.
+
+## CSRF and state-changing requests
+
+- Keep CSRF protection on every state-changing form, route, action, and mutation.
+- Preserve SameSite, Secure, HttpOnly, path, and domain cookie protections.
+- Do not describe read-only pages as needing CSRF unless they trigger a state change, but verify that hidden autosave, tracking opt-ins, logout, webhook, billing, or account actions are protected.
+- Do not weaken CSRF or cookie protections to work around a design, embed, cross-domain frame, or third-party script.
+
+## Client-exposed keys and service configuration
+
+- Never ship private API keys, database credentials, service-role keys, Firebase service account JSON, webhook secrets, or private provider tokens to browser code.
+- OpenAI or other paid provider calls that require private keys should go through a server route, server action, edge function, or backend service with rate limits and quota controls.
+- Supabase anon keys or Firebase public config are not secrets by themselves, but they must be backed by Row Level Security, Firebase Security Rules, scoped policies, auth checks, and provider-side quotas.
+- Environment variables with public prefixes such as `NEXT_PUBLIC_`, `PUBLIC_`, `VITE_`, or runtime public config are browser-visible. Do not place secrets in them.
 
 ## File uploads
 
@@ -45,6 +64,8 @@ Use these gates before implementing or approving frontend changes on high-risk s
 - Prefer privacy-preserving analytics and aggregated metrics.
 - Keep consent choices clear and reversible.
 - Do not hide tracking in vague UI copy.
+- For abuse investigation, prefer first-party access logs, proxy logs, WAF events, rate-limit counters, and minimal security telemetry over broad third-party tracking.
+- Do not log request bodies, tokens, cookies, passwords, reset links, payment data, or unnecessary PII into analytics or traffic-tracking tools.
 
 ## AI-agent controls
 

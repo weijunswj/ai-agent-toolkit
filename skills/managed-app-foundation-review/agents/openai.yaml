@@ -1,0 +1,12 @@
+interface:
+  display_name: Managed App Foundation Review
+  short_description: Compare managed app foundations before custom builds.
+  primary_color: '#0F766E'
+  default_prompt: Use $managed-app-foundation-review to compare managed auth, database, CRM, form, and email options before building from scratch.
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: true

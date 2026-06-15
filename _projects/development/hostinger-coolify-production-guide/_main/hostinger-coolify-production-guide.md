@@ -21,6 +21,7 @@ Use only these statuses in checklists and reports:
 - Do not print secrets, tokens, private keys, cookies, database URLs, or env files.
 - Do not ask the user to paste SSH private keys or production passwords into chat; use owner-controlled SSH/session tooling and owner-entered secrets.
 - Do not disable SSH.
+- Prefer SSH key-only access, such as Ed25519 or strong RSA keys. Do not disable SSH password authentication or change sshd configuration until key access is confirmed, owner recovery access is documented, the current SSH session is kept open, and a second SSH session has been tested.
 - Do not enable UFW or apply restrictive firewall changes until the recovery path is documented, SSH allow rules are confirmed, the current SSH session is kept open, and a second SSH session has been tested.
 - Do not expose database/cache/admin ports publicly by default.
 - Do not delete Docker volumes, Coolify apps, databases, backups, or persistent data without explicit owner approval.
@@ -60,13 +61,15 @@ Use only these statuses in checklists and reports:
    - `docker ps` if available
    - `ufw status verbose` if available
    - `systemctl status ssh --no-pager` if available
+   - `sshd -T` if available, only to inspect effective SSH settings without printing keys or secrets
 4. Write a server evidence report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path before any mutation.
 5. Require owner approval before installing or changing anything.
 6. Install Coolify using the official Coolify installation path only after approval; record the official source URL.
 7. Pause immediately after installation and instruct the owner to create the first Coolify admin account before continuing.
-8. Configure firewall only after documenting the recovery path, allowing SSH first, keeping the current SSH session open, and testing a second SSH session.
-9. Verify Coolify health.
-10. Write the final bootstrap report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path.
+8. Move toward SSH key-only access only after documenting recovery access, confirming key auth works, keeping the current SSH session open, and testing a second SSH session. Password-auth changes are owner-approved mutations.
+9. Configure firewall only after documenting the recovery path, allowing SSH first, keeping the current SSH session open, and testing a second SSH session.
+10. Verify Coolify health.
+11. Write the final bootstrap report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path.
 
 ## Coolify Deploy Flow
 
@@ -76,7 +79,7 @@ Confirm repository, branch, Dockerfile or buildpack path, app healthcheck endpoi
 
 Every setup, deploy, security check, maintenance action, and incident action must preserve an evidence report. Store repo-side evidence reports, owner approval logs, rollback plans, implementation notes, and incident notes under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path, and update those docs as the server state or deployment plan changes. Daily server-generated security reports produced by the bundled script remain on the VPS under `/data/maintenance/reports` unless the owner explicitly chooses a different server path. Use evidence-based pass/fail maintenance language: PASS means the observed check met the documented expectation, WARN means follow-up or human verification is needed, and FAIL means the observed state is unsafe, unavailable, or outside the expected boundary. Daily security checks are read-only reports only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
 
-Daily security checks should include read-only intrusion signals: auth failures, recent successful logins, UID 0 account inventory, sudo/wheel membership, SSH authorized key file inventory without key material, cron persistence inventory, systemd timer inventory, listening ports, and Docker/Coolify state. Treat these as signals only; they do not prove the host has no intruder.
+Daily security checks should include read-only intrusion signals: auth failures, recent successful logins, UID 0 account inventory, sudo/wheel membership, SSH authorized key file inventory without key material, SSH password-auth status when inspectable, cron persistence inventory, systemd timer inventory, listening ports, and Docker/Coolify state. Treat these as signals only; they do not prove the host has no intruder.
 
 If the owner wants daily notifications, configure `/data/maintenance/daily-security-check.env` outside chat and keep it mode 600. The bundled script supports Telegram (`NOTIFY_TELEGRAM_BOT_TOKEN`, `NOTIFY_TELEGRAM_CHAT_ID`, optional `NOTIFY_TELEGRAM_THREAD_ID`) and local email (`NOTIFY_EMAIL_TO`, optional `NOTIFY_EMAIL_SUBJECT_PREFIX`). Codex must not ask the owner to paste notification tokens or email credentials into chat. Installing or changing notification delivery on the VPS still requires explicit owner approval.
 

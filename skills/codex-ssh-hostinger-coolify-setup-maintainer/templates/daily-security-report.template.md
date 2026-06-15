@@ -21,6 +21,7 @@ Overall status: `<PASS|WARN|FAIL>`
 | Docker and Coolify | `<PASS|WARN|FAIL>` | `<summary>` | `<action>` |
 | Auth/system errors | `<PASS|WARN|FAIL>` | `<summary>` | `<action>` |
 | Intrusion signals | `<PASS|WARN|FAIL>` | `<summary>` | `<action>` |
+| SSH access posture | `<PASS|WARN|FAIL>` | `<summary of key access/password-auth status when inspectable; no key material>` | `<action>` |
 | Healthchecks/certificates/backups | `<PASS|WARN|FAIL>` | `<summary>` | `<action>` |
 | Daily notification | `<PASS|WARN|FAIL>` | `<summary>` | `<action>` |
 

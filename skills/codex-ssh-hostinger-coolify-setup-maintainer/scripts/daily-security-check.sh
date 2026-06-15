@@ -185,6 +185,21 @@ else status_line WARN 'Unattended upgrades' 'Service not detected' 'Owner should
 if have ufw; then status_line PASS 'UFW status captured' 'See details section for numbered rules' 'Review public exposure.'; else status_line WARN 'UFW status captured' 'ufw unavailable' 'Verify firewall through provider or host firewall.'; fi
 if have ss; then status_line PASS 'Listening ports captured' 'See details section' 'Confirm only intended public ports are exposed.'; else status_line WARN 'Listening ports captured' 'ss unavailable' 'Install iproute2 if unexpected.'; fi
 
+SSHD_BIN="$(command -v sshd 2>/dev/null || true)"
+[ -n "$SSHD_BIN" ] || SSHD_BIN="/usr/sbin/sshd"
+if [ -x "$SSHD_BIN" ]; then
+  sshd_effective="$("$SSHD_BIN" -T 2>/dev/null || true)"
+  password_auth="$(printf '%s\n' "$sshd_effective" | awk 'tolower($1) == "passwordauthentication" {print tolower($2); exit}')"
+  pubkey_auth="$(printf '%s\n' "$sshd_effective" | awk 'tolower($1) == "pubkeyauthentication" {print tolower($2); exit}')"
+  if [ "$password_auth" = "yes" ]; then
+    status_line WARN 'SSH access posture' "passwordauthentication=$password_auth; pubkeyauthentication=${pubkey_auth:-unknown}" 'Prefer key-only SSH after recovery access and a second session are verified.'
+  elif [ -n "$password_auth" ]; then
+    status_line PASS 'SSH access posture' "passwordauthentication=$password_auth; pubkeyauthentication=${pubkey_auth:-unknown}" 'None.'
+  else
+    status_line WARN 'SSH access posture' 'Could not read passwordauthentication from sshd -T' 'Inspect sshd configuration manually.'
+  fi
+else status_line WARN 'SSH access posture' 'sshd unavailable' 'Inspect SSH configuration manually.'; fi
+
 if have docker; then
   unhealthy="$(docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | grep -Eic 'unhealthy|Restarting' || true)"
   coolify="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -Eic 'coolify|coolify-' || true)"
@@ -265,6 +280,7 @@ have docker && append_block 'Coolify-like Containers' "docker ps --format '{{.Na
 have journalctl && append_block 'Recent Auth Failures Summary' "journalctl --since '24 hours ago' | grep -Ei 'Failed password|authentication failure|Invalid user' | tail -n 50 || true"
 have journalctl && append_block 'Recent Critical System Errors' "journalctl -p crit..alert --since '24 hours ago' | tail -n 80 || true"
 have last && append_block 'Recent Successful Logins' "last -n 20 -F || true"
+if [ -x "$SSHD_BIN" ]; then append_block 'SSH Effective Security Settings' "\"$SSHD_BIN\" -T 2>/dev/null | grep -Ei '^(passwordauthentication|pubkeyauthentication|permitrootlogin|authenticationmethods|maxauthtries) ' || true"; fi
 append_block 'Account Privilege Inventory' "getent passwd | awk -F: '\$3 == 0 {print \"uid0:\" \$1}' ; getent group sudo wheel 2>/dev/null | awk -F: '\$4 != \"\" {print \$1 \":\" \$4}'"
 have find && append_block 'SSH Authorized Keys Inventory' "find /root /home -path '*/.ssh/authorized_keys' -type f -printf '%m %u:%g %TY-%Tm-%Td %TH:%TM %p lines=' -exec sh -c 'wc -l < \"\$1\"' sh {} \\; 2>/dev/null | head -n 80"
 have find && append_block 'Cron Persistence Inventory' "find /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly /var/spool/cron /var/spool/cron/crontabs -type f -printf '%m %u:%g %TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | head -n 120"

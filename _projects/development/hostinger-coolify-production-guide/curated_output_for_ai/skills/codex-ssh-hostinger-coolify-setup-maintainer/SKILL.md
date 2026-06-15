@@ -26,6 +26,7 @@ Do not replace the n8n-specific Hostinger Coolify VPS deployment reference with 
 - Do not ask the user to paste secrets into chat.
 - Do not print secrets, tokens, private keys, cookies, database URLs, or env files.
 - Do not ask the user to paste SSH private keys or production passwords into chat; use owner-controlled SSH/session tooling and owner-entered secrets.
+- Prefer SSH key-only access, such as Ed25519 or strong RSA keys, but do not disable password authentication or change sshd configuration until key access, owner recovery access, the current session, and a second SSH session are verified.
 - Treat `daily-security-check.sh` as read-only reporting and optional owner-configured notification delivery only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
 - Treat intrusion checks as signals, not proof that no intrusion occurred.
 - Store Telegram/email notification secrets only in owner-managed server config outside chat.
@@ -44,6 +45,7 @@ Use these exact statuses:
 ## Hard Safety Gates
 
 - Do not disable SSH.
+- Do not disable SSH password authentication or change sshd configuration until recovery access is documented, SSH key access is confirmed, the current SSH session is kept open, and a second SSH session has been tested.
 - Do not enable UFW or apply restrictive firewall changes until the recovery path is documented, SSH allow rules are confirmed, the current SSH session is kept open, and a second SSH session has been tested.
 - Do not expose database/cache/admin ports publicly by default.
 - Do not delete Docker volumes, Coolify apps, databases, backups, or persistent data without explicit owner approval.

@@ -5,9 +5,9 @@
   "title": "Codex SSH Hostinger Coolify Setup Maintainer",
   "module_path": "_projects/development/hostinger-coolify-production-guide",
   "main_path": "_projects/development/hostinger-coolify-production-guide/_main",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "version_policy": "semver",
-  "version_notes": "Clarifies the boundary between Hostinger/Coolify platform setup and the n8n-specific Hostinger Coolify VPS deployment reference.",
+  "version_notes": "Adds explicit SSH key-only hardening guardrails and password-auth lockout prevention checks.",
   "outputs": [
     {
       "kind": "curated",

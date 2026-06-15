@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "first-party-authored",
+  "source_commit": "09a41d79df97cd92a7d2fab058598b95eacb816a",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party toolkit-authored source for managed-app-foundation-review. No third-party source files, provider docs, pricing tables, or vendor limits are copied or adapted, so file-level upstream pins are intentionally absent. Local provenance is documented in SOURCE-MANIFEST.md.",
+  "files": []
+}
