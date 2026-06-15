@@ -189,11 +189,12 @@ test('source structure keeps reusable prompt and adapter partials with no tiny s
     '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local',
     '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md'
   ]) {
     assert.equal(exists(relPath), false, relPath);
   }
+  assert.equal(exists('_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/INDEX.md'), true);
+  assert.equal(exists('_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md'), false);
 });
 
 test('manual global source templates exist and are generated from execution prompt partial', () => {
@@ -222,8 +223,11 @@ test('execution prompt requires full-bold user-action questions and generated su
   const portableContextRules = [
     /## Local Documentation/,
     /Treat repo-local documentation as active task context, not optional background\./,
+    /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/,
+    /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./,
     /## Managed Memory/,
     /Treat `MEMORY\.md` as managed, non-authoritative project memory\./,
+    /Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task/,
     /Instruction sources used/,
     /MEMORY\.md changed: Yes\/No/
   ];
@@ -326,7 +330,7 @@ test('root AGENTS is directly maintained while repo-local block comes from execu
   assert.equal(rootN8n, n8nAdapter);
   assert.doesNotMatch(rootAgents, /toolkit-root-agent-rules\.md/);
   assert.match(rootAgents, /Toolkit-specific root rules are maintained directly in this file after the managed execution blocks/);
-  assert.match(rootAgents, /repo\/docs\/agent-playbooks\/INDEX\.md/i);
+  assert.match(rootAgents, /\[Toolkit playbook index\]\(repo\/docs\/agent-playbooks\/INDEX\.md\) \(`repo\/docs\/agent-playbooks\/INDEX\.md`\)/i);
   assert.match(rootAgents, /MEMORY\.md changed: Yes\/No/i);
   assert.match(rootAgents, /Source-watch is PR-notification-only/i);
   assert.equal(sourceToolkit, prompt);
@@ -489,6 +493,8 @@ test('skill README documents required file sets and shim dependency', () => {
     const text = readText(relPath);
     assert.match(text, /Do not install a shim alone/i, relPath);
     assert.match(text, /Shims require root `AGENTS\.md`/i, relPath);
+    assert.match(text, /repo-local\/docs\/agent-playbooks\/INDEX\.md/, relPath);
+    assert.match(text, /target repo `docs\/agent-playbooks\/`/, relPath);
     assert.match(text, /`AGENTS\.managed\.template\.md` is canonical for the managed toolkit block/i, relPath);
     assert.match(text, /Preserve unmarked user-authored content\./i, relPath);
     assert.match(text, /toolkit-managed block is broken or edited during an explicit install\/check\/repair\/refresh\/bootstrap request/i, relPath);
@@ -529,6 +535,8 @@ test('skill instructions add only target platform shims by default', () => {
     const text = readText(relPath);
     assert.match(text, /Check only the required files for the selected platform/i, relPath);
     assert.match(text, /Do not create shims for platforms that are not in scope/i, relPath);
+    assert.match(text, /repo-local\/docs\/agent-playbooks\/` -> target repo `docs\/agent-playbooks\/`/, relPath);
+    assert.match(text, /also install or refresh the portable playbook docs under `docs\/agent-playbooks\/` when missing or stale/i, relPath);
     assert.match(text, /install, check, repair, refresh, or bootstrap repo-local agent rules/i, relPath);
     assert.match(text, /user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions/i, relPath);
     assert.match(text, /For ordinary follow-up coding tasks, stop after the cheap structural managed-marker check/i, relPath);

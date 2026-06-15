@@ -735,7 +735,7 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/);
   assert.doesNotMatch(text, /toolkit-root-agent-rules\.md/);
   assert.match(text, /Toolkit-specific root rules are maintained directly in this file after the managed execution blocks/);
-  assert.match(text, /Before planning or editing, read `repo\/docs\/agent-playbooks\/INDEX\.md`/);
+  assert.match(text, /Before planning or editing, read \[Toolkit playbook index\]\(repo\/docs\/agent-playbooks\/INDEX\.md\) \(`repo\/docs\/agent-playbooks\/INDEX\.md`\)/);
   assert.match(text, /If root `MEMORY\.md` exists, read it as non-authoritative project context/);
   assert.match(text, /Final reports must include `Instruction sources used` and `MEMORY\.md changed: Yes\/No`/);
   assert.match(text, /## Hard Safety Gates/);
@@ -829,6 +829,8 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
     assert.match(text, /You are an execution-first coding agent\./, `${relPath} keeps reusable execution prompt`);
     assert.match(text, /## Local Documentation/, `${relPath} keeps portable local-doc discovery`);
     assert.match(text, /Treat repo-local documentation as active task context, not optional background\./, `${relPath} treats docs as task context`);
+    assert.match(text, /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/, `${relPath} links the portable playbook index`);
+    assert.match(text, /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./, `${relPath} keeps missing-index fallback`);
     assert.match(text, /## Managed Memory/, `${relPath} keeps portable managed memory guidance`);
     assert.match(text, /Treat `MEMORY\.md` as managed, non-authoritative project memory\./, `${relPath} keeps non-authoritative memory contract`);
     assert.match(text, /Instruction sources used/, `${relPath} requires instruction-source reporting`);
@@ -1605,10 +1607,18 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
   assert.match(rootAgents, /## Repo-Local Router/, 'root AGENTS.md keeps toolkit repo router');
   assert.match(portableAgents, /^# AI Coding Agent Rules$/m, 'portable AGENTS template has a top-level document title');
   assert.match(portableAgents, /## Local Documentation/, 'portable AGENTS template carries local-doc discovery');
+  assert.match(portableAgents, /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/, 'portable AGENTS template links portable docs');
   assert.match(portableAgents, /## Managed Memory/, 'portable AGENTS template carries optional managed memory guidance');
   assert.match(portableAgents, /Instruction sources used/, 'portable AGENTS template requires instruction-source reporting');
   assert.match(portableAgents, /MEMORY\.md changed: Yes\/No/, 'portable AGENTS template requires memory change reporting');
   assert.doesNotMatch(portableAgents, /This root `AGENTS\.md` is toolkit-repo-specific|## Repo-Local Router/, 'portable AGENTS template has no toolkit repo wrapper');
+
+  const portableIndex = readTextFile(path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'docs', 'agent-playbooks', 'INDEX.md'));
+  assert.match(portableIndex, /\[Generated files\]\(generated-files\.md\) \(`docs\/agent-playbooks\/generated-files\.md`\)/);
+  assert.match(portableIndex, /\[Safety gates\]\(safety-gates\.md\) \(`docs\/agent-playbooks\/safety-gates\.md`\)/);
+  const portableDocsOutput = manifest.outputs.find((entry) => entry.output === 'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks');
+  assert.equal(portableDocsOutput?.kind, 'copy');
+  assert.equal(manifest.writes.allowed.includes('skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks'), true);
 
   for (const rel of [
     'skills/ai-coding-agent-rules/AGENTS.template.md',
@@ -1665,7 +1675,8 @@ test('generic agent-rule partials live in project _partials folders, not skill f
     true
   );
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'partials')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'repo-local')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'repo-local', 'docs', 'agent-playbooks', 'INDEX.md')), true);
+  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'repo-local', 'AGENTS.managed.template.md')), false);
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials')), false);
 });
 
