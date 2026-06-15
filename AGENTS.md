@@ -197,34 +197,9 @@ Final reports must include `Instruction sources used` and `MEMORY.md changed: Ye
 
 ## Source Of Truth
 
-This repo has a source layer and a published layer. The full source-of-truth contract appears below in this file and is maintained from `_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md`.
+The full source-of-truth contract appears below in this file and is maintained from `_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md`. Treat that managed block as the detailed active contract for `_projects/**`, generated `skills/**`, source locks, source-watch, and guarded generated-output writeback.
 
-Keep these rules active:
-
-- `_projects/**/_main/` preserves source material.
-- `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source.
-- `skills/**` is generated or published output unless declared `linked`.
-- `toolkit.project.json` owns project routing and module version contracts.
-- `SOURCE-LOCK.json` owns source provenance and source-watch tracking.
-- Update source or curated material first, then run sync.
-- Publish declared outputs with `node repo/scripts/sync-toolkit-projects.cjs --write`.
-- Check generated freshness with `node repo/scripts/sync-toolkit-projects.cjs --check`.
-- Source-watch is PR-notification-only and must not copy upstream files, update pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat a notification PR as approval to change source.
-
-## Toolkit Validation And PR Updates
-
-Run the smallest relevant local validation before pushing. Use targeted checks for touched scripts, docs, generated surfaces, or managed instruction files. Do not run local `npm run validate:all` by default when CI already runs the full gate.
-
-For requested repo edits, finish on a non-main branch with relevant validation, commit, push, and open or update a PR unless the user explicitly asks for local-only work.
-
-Before creating or updating PRs or issues, use local `gh` from the shell and verify the active account with:
-
-```powershell
-gh auth status
-gh api user --jq .login
-```
-
-If validation, generated freshness, CI, or PR checks are failing, pending, or inaccessible, report that honestly.
+For day-to-day work, update source or curated material first, do not edit generated `skills/**` directly unless declared `linked`, run the matching sync/check command, and preserve this boundary: Source-watch is PR-notification-only.
 
 <!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract
@@ -312,4 +287,11 @@ Prioritize repo safety, device safety, provenance, attribution, validation, and 
 - Run the smallest relevant local validation before pushing. Use targeted tests/checks for touched scripts, docs, generated surfaces, or managed instruction files.
 - Do not run local `npm run validate:all` by default when CI runs the full gate. Use local full validation for broad, risky, workflow, sync, generator, package, or security-sensitive changes, or to reproduce CI failures.
 - If a generated-output or contract check fails on unrelated stale files, report the blocker and do not broaden the PR without user direction.
+- Before creating or updating PRs or issues, use local `gh` from the shell and verify the active account with:
+
+```powershell
+gh auth status
+gh api user --jq .login
+```
+
 - Before final reporting after a push, update the existing PR body when the cumulative diff, safety notes, validation, generated-output status, or user-facing behaviour changed.

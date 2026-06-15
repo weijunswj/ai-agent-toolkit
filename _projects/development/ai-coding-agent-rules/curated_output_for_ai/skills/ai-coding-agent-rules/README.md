@@ -14,7 +14,7 @@ The copied skill folder includes bare repo-local bootstrap payload templates. Th
 - [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) is copied to target repo `CLAUDE.md` only when Claude Code support is requested or the target platform is Claude Code.
 - [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) is copied to target repo `GEMINI.md` for Antigravity.
 - [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) is copied to target repo `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
-- [repo-local/docs/agent-playbooks/INDEX.md](repo-local/docs/agent-playbooks/INDEX.md) is copied with the playbook folder to target repo `docs/agent-playbooks/` so the portable `AGENTS.md` links are live.
+- [repo-local/docs/agent-playbooks/](repo-local/docs/agent-playbooks/) is copied as a complete folder to target repo `docs/agent-playbooks/` so the portable `AGENTS.md` links are live. Copy every Markdown file: `INDEX.md`, `baseline-workflow.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `managed-memory.md`, and `safety-gates.md`.
 
 Install only the current target platform shim unless the user explicitly requests all platform shims. Repo-local installs require a selected/open target repo or an explicit target path; standalone/no-workspace chats cannot safely infer where to install repo-local files.
 
@@ -29,6 +29,8 @@ The skill is intended to run a cheap local check before coding work in GitHub, G
 Model expectation: Fresh-folder bootstrap and structurally-current cheap checks are designed to work broadly, but complex broken-marker or edited-managed-block auto-repair is best-effort below Codex GPT-5.5 High. For perfect runtime behaviour, use Codex GPT-5.5 High or an equivalent high-reasoning model.
 
 Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Preserve unmarked user-authored content. If a toolkit-managed block is broken or edited during an explicit install/check/repair/refresh/bootstrap request, back up the existing file under `.agent-toolkit-backups/` before replacing the toolkit-owned managed block from the current template.
+
+After installing or refreshing portable playbook docs, inspect target `docs/agent-playbooks/INDEX.md` and verify every linked `*.md` file exists beside it before reporting completion.
 
 Manual global setup templates live in `_projects/development/ai-coding-agent-rules/_main/`. The published skill folder is copyable and self-contained for repo-local bootstrap use.
 
