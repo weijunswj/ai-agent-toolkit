@@ -20,7 +20,6 @@ const mode = process.argv.includes('--write') ? 'write' : 'check';
 
 const projectId = 'development.ai-coding-agent-rules';
 const fixCommand = 'node repo/scripts/sync-agent-instruction-shims.cjs --write';
-const rootPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md';
 const executionPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md';
 const n8nAdapterPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md';
 const manualTemplatePaths = {
@@ -35,14 +34,11 @@ const repoLocalTemplatePaths = {
   antigravity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
 };
 
-const rootBegin = `<!-- AI-AGENT-TOOLKIT:${rootPromptPath}:BEGIN TOOLKIT-ROOT-AGENTS.MD-TEMPLATE v1 -->`;
-const rootEnd = `<!-- AI-AGENT-TOOLKIT:${rootPromptPath}:END TOOLKIT-ROOT-AGENTS.MD-TEMPLATE -->`;
 const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
 const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
 const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
 const n8nEnd = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:END N8N-AGENT-RULES-ADAPTER -->`;
 const toolkitMarkerPairs = [
-  { begin: rootBegin, end: rootEnd },
   { begin: toolkitBegin, end: toolkitEnd },
   {
     begin: `<!-- ai-agent-toolkit:${projectId}:BEGIN ai-coding-agent-execution v1 -->`,
@@ -210,14 +206,6 @@ function managedPayload(executionPrompt, n8nAdapter) {
     n8nBegin,
     n8nAdapter.trimEnd(),
     n8nEnd
-  ].join('\n');
-}
-
-function rootManagedPayload(rootPrompt) {
-  return [
-    rootBegin,
-    rootPrompt.trimEnd(),
-    rootEnd
   ].join('\n');
 }
 
@@ -414,13 +402,6 @@ function normalizeRepoIntroHeading(text) {
   );
 }
 
-function shimBody(sourceText, options) {
-  let body = sourceText;
-  if (options.importLine) body = removeExactLine(body, options.importLine);
-  if (options.heading) body = removeLeadingHeading(body, options.heading);
-  return body.trim();
-}
-
 function rootAgentsExpected(current, source, errors) {
   let body = stripManagedBlockAny('AGENTS.md', current, toolkitMarkerPairs, errors);
   if (body === null) return null;
@@ -442,6 +423,13 @@ function rootAgentsExpected(current, source, errors) {
   return normalizedBody
     ? `${source.root}\n\n${normalizedBody.trimEnd()}\n`
     : `${source.root}\n`;
+}
+
+function shimBody(sourceText, options) {
+  let body = sourceText;
+  if (options.importLine) body = removeExactLine(body, options.importLine);
+  if (options.heading) body = removeLeadingHeading(body, options.heading);
+  return body.trim();
 }
 
 function shimExpected(relPath, current, sourceText, options, errors) {
@@ -474,10 +462,9 @@ function writeOrCheck(relPath, expected, errors, runMode, label = 'managed agent
 function validateAndSync(options = {}) {
   const runMode = options.mode || mode;
   const errors = [];
-  const rootPrompt = readRequired(rootPromptPath, errors);
   const executionPrompt = readRequired(executionPromptPath, errors);
   const n8nAdapter = readRequired(n8nAdapterPath, errors);
-  if (rootPrompt === null || executionPrompt === null || n8nAdapter === null) return { errors };
+  if (executionPrompt === null || n8nAdapter === null) return { errors };
 
   const sourceTemplates = expectedSourceTemplates(executionPrompt);
   for (const [relPath, expected] of Object.entries(sourceTemplates)) {
@@ -491,7 +478,7 @@ function validateAndSync(options = {}) {
   if ([managedAgentsTemplate, claudeTemplate, geminiTemplate, antigravityTemplate].some((value) => value === null)) return { errors };
 
   const source = {
-    root: rootManagedPayload(rootPrompt),
+    root: managedPayload(executionPrompt, n8nAdapter),
     toolkit: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, toolkitBegin, toolkitEnd, errors),
     n8n: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, n8nBegin, n8nEnd, errors),
     claude: claudeTemplate,

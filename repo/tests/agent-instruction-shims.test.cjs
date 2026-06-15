@@ -6,11 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const rootPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md';
 const executionPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md';
 const n8nAdapterPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md';
-const rootBegin = `<!-- AI-AGENT-TOOLKIT:${rootPromptPath}:BEGIN TOOLKIT-ROOT-AGENTS.MD-TEMPLATE v1 -->`;
-const rootEnd = `<!-- AI-AGENT-TOOLKIT:${rootPromptPath}:END TOOLKIT-ROOT-AGENTS.MD-TEMPLATE -->`;
 const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
 const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
 const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
@@ -180,7 +177,6 @@ function isStructurallyCurrentManagedText(text) {
 test('source structure keeps reusable prompt and adapter partials with no tiny shim partials', () => {
   const kept = [
     executionPromptPath,
-    rootPromptPath,
     n8nAdapterPath,
     '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md'
@@ -193,7 +189,8 @@ test('source structure keeps reusable prompt and adapter partials with no tiny s
     '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local'
+    '_projects/development/ai-coding-agent-rules/_main/repo-local',
+    '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md'
   ]) {
     assert.equal(exists(relPath), false, relPath);
   }
@@ -296,12 +293,17 @@ test('repo-local shim marker structural check rejects invalid marker states', ()
   assert.equal(isStructurallyCurrentManagedText(`${template.end}${body}${template.begin}`), false, 'out-of-order marker pair is not structurally current');
 });
 
-test('root managed block comes from toolkit-root partial and repo-local block comes from execution prompt partial', () => {
-  const rootPrompt = readText(rootPromptPath).trimEnd();
+test('root AGENTS is directly maintained while repo-local block comes from execution prompt partial', () => {
+  const rootAgents = readText('AGENTS.md');
   const prompt = readText(executionPromptPath).trimEnd();
-  const rootToolkit = block(readText('AGENTS.md'), rootBegin, rootEnd, 'root toolkit block')
-    .replace(rootBegin, '')
-    .replace(rootEnd, '')
+  const n8nAdapter = readText(n8nAdapterPath).trimEnd();
+  const rootToolkit = block(rootAgents, toolkitBegin, toolkitEnd, 'root managed toolkit block')
+    .replace(toolkitBegin, '')
+    .replace(toolkitEnd, '')
+    .trim();
+  const rootN8n = block(rootAgents, n8nBegin, n8nEnd, 'root managed n8n block')
+    .replace(n8nBegin, '')
+    .replace(n8nEnd, '')
     .trim();
   const managedPayload = repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template');
   const sourceToolkit = block(managedPayload, toolkitBegin, toolkitEnd, 'repo-local managed toolkit block')
@@ -309,12 +311,14 @@ test('root managed block comes from toolkit-root partial and repo-local block co
     .replace(toolkitEnd, '')
     .trim();
 
-  assert.equal(rootToolkit, rootPrompt);
+  assert.equal(rootToolkit, prompt);
+  assert.equal(rootN8n, n8nAdapter);
+  assert.doesNotMatch(rootAgents, /toolkit-root-agent-rules\.md/);
+  assert.match(rootAgents, /Toolkit-specific root rules are maintained directly in this file after the managed execution blocks/);
+  assert.match(rootAgents, /repo\/docs\/agent-playbooks\/INDEX\.md/i);
+  assert.match(rootAgents, /MEMORY\.md changed: Yes\/No/i);
+  assert.match(rootAgents, /Source-watch is PR-notification-only/i);
   assert.equal(sourceToolkit, prompt);
-  assertNoForbiddenDefaultPromptPhrases(rootToolkit, 'root toolkit block');
-  assert.match(rootToolkit, /repo\/docs\/agent-playbooks\/INDEX\.md/i);
-  assert.match(rootToolkit, /MEMORY\.md changed: Yes\/No/i);
-  assert.match(rootToolkit, /Source-watch is PR-notification-only/i);
 });
 
 test('n8n adapter is compact and fail-closed', () => {

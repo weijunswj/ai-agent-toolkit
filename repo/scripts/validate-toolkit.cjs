@@ -112,7 +112,6 @@ const expectedFiles = [
   'skills/n8n-local-setup/references/n8n-agent-rules.md',
   'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
   'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
-  '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md',
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
   '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
   '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
@@ -1118,10 +1117,19 @@ function validateAgentPlaybookArchitecture(errors) {
   if (!rootAgents.includes(agentPlaybookIndexPath)) {
     fail(errors, `AGENTS.md must reference ${agentPlaybookIndexPath}`);
   }
+  if (!rootAgents.includes('AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1')) {
+    fail(errors, 'AGENTS.md must keep the managed ai-coding-agent execution block');
+  }
+  if (!rootAgents.includes('AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1')) {
+    fail(errors, 'AGENTS.md must keep the managed n8n adapter block');
+  }
+  if (/toolkit-root-agent-rules\.md/.test(rootAgents)) {
+    fail(errors, 'AGENTS.md must not source toolkit-specific root rules from the ai-coding-agent-rules project');
+  }
   if (!rootAgents.includes(currentContractBegin)) {
     fail(errors, 'AGENTS.md must preserve the managed source-of-truth contract block');
   }
-  if (lineCount(rootAgents) > 220 || rootAgents.length > 18000) {
+  if (lineCount(rootAgents) > 360 || rootAgents.length > 28000) {
     fail(errors, 'AGENTS.md must stay compact enough for always-loaded root instructions');
   }
 

@@ -14,7 +14,7 @@ Use this checklist when reviewing the project-module architecture.
 - [ ] [skills/](../../skills/) remains obvious as the published AI-facing root surface.
 - [ ] Skills are generated from declared recipes where practical, with rare linked root surfaces justified in manifests.
 - [ ] Generated Markdown outputs include a generated-source notice.
-- [ ] Root agent-rule templates are generated from declared `_main/` and linked partial sources, and unmanaged root partial duplicates do not exist.
+- [ ] Portable agent-rule templates and root managed execution blocks are generated from declared `_main` and curated sources; toolkit-specific root rules are appended directly in root `AGENTS.md`.
 - [ ] `SOURCE-LOCK.json` files pass the source-lock audit.
 
 ## Safety

@@ -731,9 +731,10 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /toolkit\.project\.json/);
   assert.match(text, /Do not edit generated `skills\/` or `mcp\/` outputs directly/);
   assert.match(text, /Do not generate curated files automatically from `_main`/);
-  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/toolkit-root-agent-rules\.md:BEGIN TOOLKIT-ROOT-AGENTS\.MD-TEMPLATE v1/);
-  assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v1/);
-  assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/);
+  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v1/);
+  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/);
+  assert.doesNotMatch(text, /toolkit-root-agent-rules\.md/);
+  assert.match(text, /Toolkit-specific root rules are maintained directly in this file after the managed execution blocks/);
   assert.match(text, /Before planning or editing, read `repo\/docs\/agent-playbooks\/INDEX\.md`/);
   assert.match(text, /If root `MEMORY\.md` exists, read it as non-authoritative project context/);
   assert.match(text, /Final reports must include `Instruction sources used` and `MEMORY\.md changed: Yes\/No`/);

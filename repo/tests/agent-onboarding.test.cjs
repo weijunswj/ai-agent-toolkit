@@ -25,6 +25,7 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   assert.match(readme, /\| Maintenance work \| Start with \[repo\/docs\/\]/);
 
   assert.match(agents, /This root `AGENTS\.md` is toolkit-repo-specific\./);
+  assert.match(agents, /Toolkit-specific root rules are maintained directly in this file after the managed execution blocks\./);
   assert.match(agents, /Portable repo installs must use \[`skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
 });
 

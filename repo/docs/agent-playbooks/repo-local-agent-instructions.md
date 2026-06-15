@@ -5,8 +5,9 @@ Use this for `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed mar
 ## Source Model
 
 - Root toolkit instructions are repo-specific.
+- Root `AGENTS.md` keeps managed execution and n8n blocks from `ai-coding-agent-rules`, then appends toolkit-specific root rules directly in root `AGENTS.md`.
 - Portable repo-local templates under `skills/ai-coding-agent-rules/repo-local/` must stay self-contained.
-- Source-owned instruction content lives under `_projects/development/ai-coding-agent-rules/`.
+- Portable and managed execution-block source-owned instruction content lives under `_projects/development/ai-coding-agent-rules/`.
 - Published `skills/**` instruction templates are generated outputs unless declared linked.
 
 Update the source partial, curated template, or generator first. Then run sync.
