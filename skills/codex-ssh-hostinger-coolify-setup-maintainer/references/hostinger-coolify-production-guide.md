@@ -6,7 +6,7 @@ Update the project source and run sync.
 -->
 # Codex SSH Hostinger Coolify Setup And Maintainer Workflow
 
-This first-party workflow guides a non-DevOps owner and Codex through Hostinger VPS plus Coolify setup, deployment, evidence-based pass/fail maintenance, security checks, and incident response. Use it when Codex should help set up Hostinger for deployment or maintain a Coolify host. Treat the VPS as production-sensitive infrastructure. Codex must inspect and report before changing anything. Codex must describe setup and maintenance only through recorded evidence-based PASS/WARN/FAIL results.
+This first-party workflow guides a non-DevOps owner and Codex through Hostinger VPS plus Coolify setup, deployment, evidence-based pass/fail maintenance, security checks, upgrade advisory, and incident response. Use it when Codex should help set up Hostinger for deployment or maintain a Coolify host. Treat the VPS as production-sensitive infrastructure. Codex must inspect and report before changing anything. Codex must describe setup and maintenance only through recorded evidence-based PASS/WARN/FAIL results.
 
 For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`. Use `n8n-local-setup` for local n8n and for the n8n-specific Hostinger Coolify VPS deployment reference after Coolify exists. If the deployed app is n8n or the task touches live n8n workflows, credentials, import/export, activation, execution, or repo/live sync, also apply `n8n-agent-rules`.
 
@@ -36,6 +36,7 @@ Use only these statuses in checklists and reports:
 - Do not run destructive cleanup commands automatically.
 - Do not modify DNS without explicit owner approval.
 - Do not change production env vars without explicit owner approval.
+- Do not resize the VPS, upgrade paid plans, add paid provider capacity, or change billing without explicit owner approval naming the provider and operation.
 - Do not install random third-party scripts except official documented installers that are explicitly part of the checklist.
 - For official install scripts, record the source URL and require owner approval before execution.
 
@@ -45,7 +46,7 @@ Use only these statuses in checklists and reports:
 - Keep Hostinger account secure.
 - Create first Coolify admin account.
 - Add secrets manually in Coolify or the relevant provider UI.
-- Approve firewall, reboot, destructive, DNS, production env var, backup, restore, deploy, rollback, and incident-containment actions.
+- Approve firewall, reboot, destructive, DNS, production env var, backup, restore, deploy, rollback, billing, plan upgrade, server resize, and incident-containment actions.
 - Verify backups and restores.
 - Approve production DNS.
 
@@ -83,9 +84,11 @@ Confirm repository, branch, Dockerfile or buildpack path, app healthcheck endpoi
 
 ## Maintenance And Incident Standard
 
-Every setup, deploy, security check, maintenance action, and incident action must preserve an evidence report. Store repo-side evidence reports, owner approval logs, rollback plans, implementation notes, and incident notes under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path, and update those docs as the server state or deployment plan changes. Daily server-generated security reports produced by the bundled script remain on the VPS under `/data/maintenance/reports` unless the owner explicitly chooses a different server path. Use evidence-based pass/fail maintenance language: PASS means the observed check met the documented expectation, WARN means follow-up or human verification is needed, and FAIL means the observed state is unsafe, unavailable, or outside the expected boundary. Daily security checks are read-only reports only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
+Every setup, deploy, security check, maintenance action, and incident action must preserve an evidence report. Store repo-side evidence reports, owner approval logs, rollback plans, implementation notes, and incident notes under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path, and update those docs as the server state or deployment plan changes. Daily server-generated security reports produced by the bundled script remain on the VPS under `/data/maintenance/reports` unless the owner explicitly chooses a different server path. Use evidence-based pass/fail maintenance language: PASS means the observed check met the documented expectation, WARN means follow-up or human verification is needed, and FAIL means the observed state is unsafe, unavailable, or outside the expected boundary. Daily security checks are read-only reports only: no package changes, service restarts, Docker mutations, firewall changes, plan upgrades, billing changes, or remediation actions.
 
 Daily security checks should include read-only intrusion signals: auth failures, recent successful logins, UID 0 account inventory, sudo/wheel membership, SSH authorized key file inventory without key material, SSH password-auth status when inspectable, cron persistence inventory, systemd timer inventory, listening ports, and Docker/Coolify state. Treat these as signals only; they do not prove the host has no intruder.
+
+Daily security checks should also include an upgrade advisory based on read-only usage signals. Codex may suggest cleanup, optimization, workload split, backup archival, storage resize, VPS resize, or managed-provider upgrade when disk, memory, container health, healthcheck failures, database/storage stats, provider quotas, or billing alerts show sustained pressure. This is advisory only: paid upgrades, server resizing, billing changes, and provider capacity changes require explicit owner approval.
 
 If the owner wants daily notifications, configure `/data/maintenance/daily-security-check.env` outside chat and keep it mode 600. The bundled script supports Telegram (`NOTIFY_TELEGRAM_BOT_TOKEN`, `NOTIFY_TELEGRAM_CHAT_ID`, optional `NOTIFY_TELEGRAM_THREAD_ID`) and local email (`NOTIFY_EMAIL_TO`, optional `NOTIFY_EMAIL_SUBJECT_PREFIX`). Codex must not ask the owner to paste notification tokens or email credentials into chat. Installing or changing notification delivery on the VPS still requires explicit owner approval.
 

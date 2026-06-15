@@ -8,6 +8,7 @@ Update the project source and run sync.
 
 - [ ] Pending - Run pre-maintenance health check and capture evidence.
 - [ ] Pending - Confirm backup or snapshot status and restore path.
+- [ ] Pending - Review upgrade advisory signals from daily reports, provider dashboards, billing alerts, or owner-supplied usage exports before recommending cleanup, optimization, resize, or paid upgrade.
 - [!] Needs owner approval - Record owner approval for the named change, target, expected risk, and rollback path.
 - [ ] Pending - Execute only the approved change.
 - [ ] Pending - Run post-change smoke tests and log review.

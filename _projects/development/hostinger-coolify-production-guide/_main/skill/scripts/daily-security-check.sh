@@ -167,6 +167,14 @@ if have free; then
   else status_line PASS 'Memory usage' "Memory ${mem_pct:-unknown}% used" 'None.'; fi
 else status_line WARN 'Memory usage' 'free unavailable' 'Install procps if unexpected.'; fi
 
+if [ "${use_pct:-0}" -ge 90 ] 2>/dev/null || [ "${mem_pct:-0}" -ge 95 ] 2>/dev/null; then
+  status_line WARN 'Upgrade advisory' "High local resource pressure: disk ${use_pct:-unknown}% used; memory ${mem_pct:-unknown}% used" 'Investigate cleanup and optimization first; consider owner-approved storage or VPS resize if sustained.'
+elif [ "${use_pct:-0}" -ge 80 ] 2>/dev/null || [ "${mem_pct:-0}" -ge 85 ] 2>/dev/null; then
+  status_line WARN 'Upgrade advisory' "Approaching local resource limits: disk ${use_pct:-unknown}% used; memory ${mem_pct:-unknown}% used" 'Monitor trend and plan cleanup, optimization, archival, or owner-approved capacity review.'
+else
+  status_line PASS 'Upgrade advisory' "Local disk ${use_pct:-unknown}% used; memory ${mem_pct:-unknown}% used" 'No local capacity upgrade signal from disk or memory thresholds.'
+fi
+
 [ -f /var/run/reboot-required ] && status_line WARN 'Reboot marker' 'Reboot required marker exists' 'Schedule owner-approved maintenance window.' || status_line PASS 'Reboot marker' 'No reboot-required marker found' 'None.'
 
 if have apt-get; then

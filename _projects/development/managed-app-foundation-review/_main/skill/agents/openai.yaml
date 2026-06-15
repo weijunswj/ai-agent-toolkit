@@ -1,8 +1,8 @@
 interface:
   display_name: Managed App Foundation Review
-  short_description: Compare managed app foundations before custom builds.
+  short_description: Compare managed foundations and upgrade triggers.
   primary_color: '#0F766E'
-  default_prompt: Use $managed-app-foundation-review to compare managed auth, database, CRM, form, and email options before building from scratch.
+  default_prompt: Use $managed-app-foundation-review to compare managed or owner-hosted auth, backend, database, workflow automation, CRM, form, and email options before building from scratch, including usage-limit and upgrade-watch triggers.
 policy:
   products:
     - chatgpt
