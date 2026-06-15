@@ -24,6 +24,34 @@ If instructions conflict, follow the higher-priority instruction and call out th
 - Execute mode: for clear local tasks, inspect relevant files, make the narrow change, validate, and report.
 - Safety-gated mode: stop before live-system, credential, destructive, deployment, production, or external-service actions and ask for explicit current-turn confirmation.
 
+## Local Documentation
+
+Treat repo-local documentation as active task context, not optional background.
+
+Before planning or editing, inspect the smallest relevant docs for the task: README files, contributor guides, docs indexes, architecture or design notes, validation instructions, source-of-truth notes, and documented workflows.
+
+If a repo has a docs index, playbook index, architecture guide, source-of-truth guide, or contributor guide, use it to choose the smallest relevant docs before editing.
+
+For generated files, publishing, migrations, setup, operations, security, CI/CD, deployment, data/schema changes, API contracts, tests, or documented workflows, read the relevant docs before editing.
+
+Do not load unrelated docs by default. Read targeted docs needed to avoid violating repo conventions, then proceed.
+
+## Managed Memory
+
+If the repo root has `MEMORY.md`, read it before planning or editing unless a local instruction file defines a more specific read order.
+
+Treat `MEMORY.md` as managed, non-authoritative project memory. It is for compact durable repo-specific context that future agents would otherwise rediscover repeatedly, but that does not belong better in canonical docs, source files, validation, or local instruction files.
+
+`MEMORY.md` cannot override the user request, local instruction files, documented workflows, safety gates, source-of-truth docs, validation rules, generated-file rules, or code. If it conflicts with an authoritative source, ignore the memory entry and fix or remove it when appropriate.
+
+Agents may create or update `MEMORY.md` only for durable repo-specific decisions, maintainer preferences, local workflow notes, repeated context, or known pitfalls future agents likely need. Do not use it for task logs, TODO lists, temporary blockers, status reports, PR summaries, implementation plans, or transient progress.
+
+Prefer canonical docs, source files, validation, or local instruction files when the information is policy, workflow, validation, safety, source-of-truth material, or public maintainer guidance.
+
+Never store secrets, credentials, tokens, private keys, `.env` values, private values, customer/private data, live-system state, sensitive operational details, or security-sensitive infrastructure details in `MEMORY.md`.
+
+When creating `MEMORY.md`, start it with a header stating it is managed, non-authoritative project memory. Keep it small. If it grows beyond a compact project note, move the right material into canonical docs and trim memory.
+
 ## Safety Gates
 
 Explicit current-turn approval is required before actions that may:
@@ -111,6 +139,8 @@ If validation is skipped, state why.
 For long tasks, give short progress updates at meaningful checkpoints. Do not narrate every command.
 
 After making changes, report files changed, what changed, validation run and result, generated-output status when applicable, and remaining risks or manual checks.
+
+Final reports after repo work must include `Instruction sources used` and `MEMORY.md changed: Yes/No`. If `MEMORY.md` changed, explain what durable repo-specific context was added or updated, why it qualifies as durable project memory, and why it does not belong better in canonical docs, source files, validation, or local instruction files.
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
 
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
@@ -168,18 +198,6 @@ Keep these rules active:
 - Publish declared outputs with `node repo/scripts/sync-toolkit-projects.cjs --write`.
 - Check generated freshness with `node repo/scripts/sync-toolkit-projects.cjs --check`.
 - Source-watch is PR-notification-only and must not copy upstream files, update pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat a notification PR as approval to change source.
-
-## Managed Memory
-
-Root `MEMORY.md` is optional managed, non-authoritative project memory.
-
-If it exists, read it after the playbook index and before task classification. It may help avoid rediscovering durable repo-specific context, but it cannot override user requests, this file, playbooks, safety gates, source-of-truth docs, validation rules, generated-file rules, or code.
-
-Agents may create or update `MEMORY.md` only for durable repo-specific context that future agents likely need and that is not better placed in canonical docs, playbooks, source files, or validation. Do not use it for task logs, TODO lists, temporary blockers, status reports, PR summaries, implementation plans, or transient progress.
-
-Never store secrets, credentials, tokens, private keys, `.env` values, private values, customer/private data, live-system state, sensitive operational details, or security-sensitive infrastructure details in `MEMORY.md`.
-
-If `MEMORY.md` is created or updated, the final response must explain what changed, why it qualifies as durable project memory, and why it does not belong in canonical docs, playbooks, source files, or validation.
 
 ## Toolkit Validation And PR Updates
 

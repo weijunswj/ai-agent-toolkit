@@ -219,6 +219,14 @@ test('manual global source templates exist and are generated from execution prom
 
 test('execution prompt requires full-bold user-action questions and generated surfaces stay synced', () => {
   const requiredRule = /When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold\./;
+  const portableContextRules = [
+    /## Local Documentation/,
+    /Treat repo-local documentation as active task context, not optional background\./,
+    /## Managed Memory/,
+    /Treat `MEMORY\.md` as managed, non-authoritative project memory\./,
+    /Instruction sources used/,
+    /MEMORY\.md changed: Yes\/No/
+  ];
 
   assert.match(readText(executionPromptPath), /## User Action Questions/);
   for (const relPath of [
@@ -231,6 +239,9 @@ test('execution prompt requires full-bold user-action questions and generated su
   ]) {
     const text = readText(relPath);
     assert.match(text, requiredRule, relPath);
+    for (const rule of portableContextRules) {
+      assert.match(text, rule, relPath);
+    }
   }
 });
 

@@ -1107,6 +1107,14 @@ const toolkitOnlyPortablePathTokens = [
   'toolkit.project.json',
   'SOURCE-LOCK.json'
 ];
+const portableAgentsTemplateRequiredSnippets = [
+  { label: 'portable local documentation discovery', text: '## Local Documentation' },
+  { label: 'portable docs-as-context rule', text: 'Treat repo-local documentation as active task context, not optional background.' },
+  { label: 'portable managed memory section', text: '## Managed Memory' },
+  { label: 'portable non-authoritative memory contract', text: 'Treat `MEMORY.md` as managed, non-authoritative project memory.' },
+  { label: 'portable final instruction-source report', text: 'Instruction sources used' },
+  { label: 'portable memory change report', text: 'MEMORY.md changed: Yes/No' }
+];
 
 function lineCount(text) {
   return text.replace(/\r\n/g, '\n').split('\n').length;
@@ -1155,10 +1163,17 @@ function validatePortableRepoLocalTemplates(errors) {
     const text = readText(relPath);
     const lines = lineCount(text);
     const isShim = !/AGENTS\.managed\.template\.md$/.test(relPath);
-    const maxLines = isShim ? 35 : 155;
-    const maxChars = isShim ? 2500 : 11000;
+    const maxLines = isShim ? 35 : 190;
+    const maxChars = isShim ? 2500 : 14000;
     if (lines > maxLines || text.length > maxChars) {
       fail(errors, `${relPath} must stay compact for portable repo-local installation`);
+    }
+    if (!isShim) {
+      for (const requirement of portableAgentsTemplateRequiredSnippets) {
+        if (!text.includes(requirement.text)) {
+          fail(errors, `${relPath} missing ${requirement.label}`);
+        }
+      }
     }
     for (const line of text.split('\n')) {
       for (const token of toolkitOnlyPortablePathTokens) {

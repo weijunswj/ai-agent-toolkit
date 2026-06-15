@@ -12,9 +12,9 @@
 - `GEMINI.template.md`
 - `README.md`
 
-`_partials/ai-coding-agent-execution.md` is the canonical reusable execution-first portable prompt source. It is used to generate the manual global templates and to validate the portable repo-local managed `AGENTS.md` template. It intentionally stays self-contained and must not depend on toolkit-repo-only paths such as `repo/docs/agent-playbooks/`, `_projects/`, `repo/scripts/`, `toolkit.project.json`, or `SOURCE-LOCK.json`.
+`_partials/ai-coding-agent-execution.md` is the canonical reusable execution-first portable prompt source. It owns portable repo-local documentation discovery, optional managed `MEMORY.md` behavior, validation/reporting expectations, and the general Git completion contract. It is used to generate the manual global templates and to validate the portable repo-local managed `AGENTS.md` template. It intentionally stays self-contained and must not depend on toolkit-repo-only paths such as `repo/docs/agent-playbooks/`, `_projects/`, `repo/scripts/`, `toolkit.project.json`, or `SOURCE-LOCK.json`.
 
-`_partials/n8n-agent-rules-adapter.md` is the compact fail-closed n8n adapter source appended beside the portable managed toolkit prompt in repo-local managed `AGENTS.md` templates and the toolkit root `AGENTS.md`. Toolkit-specific root routing, playbook, and managed-memory rules live directly in root `AGENTS.md` after the managed execution blocks; they are not sourced from this project module.
+`_partials/n8n-agent-rules-adapter.md` is the compact fail-closed n8n adapter source appended beside the portable managed toolkit prompt in repo-local managed `AGENTS.md` templates and the toolkit root `AGENTS.md`. Toolkit-specific root routing and playbook rules live directly in root `AGENTS.md` after the managed execution blocks; they are not sourced from this project module.
 
 `_partials/toolkit-skill-routing.md` was moved exactly from the former n8n skill-routing partial surface and renamed to make the generic ownership clear.
 
@@ -29,7 +29,7 @@ The manual global templates `_main/AGENTS.template.md`, `_main/CLAUDE.template.m
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md`
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md`
 
-The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap payloads. They intentionally contain only the exact curated-source safety comment plus destination-file content so agents can copy them wholesale into target repos. Every required repo-local template includes complete `AI-AGENT-TOOLKIT` managed marker pairs so later sessions can verify structural currency without reading or comparing template bodies. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md`, including its top-level document title, plus `_partials/n8n-agent-rules-adapter.md`; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
+The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap payloads. They intentionally contain only the exact curated-source safety comment plus destination-file content so agents can copy them wholesale into target repos. Every required repo-local template includes complete `AI-AGENT-TOOLKIT` managed marker pairs so later sessions can verify structural currency without reading or comparing template bodies. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md`, including its top-level document title, portable local-doc discovery, optional managed memory behavior, and final-report requirements, plus `_partials/n8n-agent-rules-adapter.md`; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
 
 ## AI-Facing Surfaces
 

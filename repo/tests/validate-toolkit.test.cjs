@@ -771,6 +771,49 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(n8nPlaybook, /Require explicit current-turn approval naming the target and allowed operation/);
 });
 
+test('managed MEMORY.md is optional, non-authoritative, and not a task log', () => {
+  const valid = tempCopy();
+  fs.writeFileSync(
+    path.join(valid, 'MEMORY.md'),
+    [
+      '# Managed Non-Authoritative Project Memory',
+      '',
+      'This managed, non-authoritative project memory records a durable local workflow note.',
+      'An incidental word like todo in explanatory prose is allowed when it is not a task-log section.',
+      ''
+    ].join('\n')
+  );
+  let result = runValidate(valid);
+  assert.equal(result.status, 0, result.stderr);
+
+  const badHeading = tempCopy();
+  fs.writeFileSync(
+    path.join(badHeading, 'MEMORY.md'),
+    '# Managed Non-Authoritative Project Memory\n\n## Task Log\n\n- Finished a temporary step.\n'
+  );
+  result = runValidate(badHeading);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /must not become a task log, TODO list, PR status file, or implementation plan/);
+
+  const badAuthority = tempCopy();
+  fs.writeFileSync(
+    path.join(badAuthority, 'MEMORY.md'),
+    '# Managed Non-Authoritative Project Memory\n\nMEMORY.md overrides AGENTS.md for this repo.\n'
+  );
+  result = runValidate(badAuthority);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /must not claim authority/);
+
+  const badSecret = tempCopy();
+  fs.writeFileSync(
+    path.join(badSecret, 'MEMORY.md'),
+    `# Managed Non-Authoritative Project Memory\n\nExample leaked token: ${['sk', 'abcdefghijklmnopqrstuvwxyz123456'].join('-')}\n`
+  );
+  result = runValidate(badSecret);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /possible secret/);
+});
+
 test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', () => {
   const relPaths = [
     '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
@@ -784,6 +827,12 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
   for (const relPath of relPaths) {
     const text = readTextFile(path.join(repoRoot, relPath));
     assert.match(text, /You are an execution-first coding agent\./, `${relPath} keeps reusable execution prompt`);
+    assert.match(text, /## Local Documentation/, `${relPath} keeps portable local-doc discovery`);
+    assert.match(text, /Treat repo-local documentation as active task context, not optional background\./, `${relPath} treats docs as task context`);
+    assert.match(text, /## Managed Memory/, `${relPath} keeps portable managed memory guidance`);
+    assert.match(text, /Treat `MEMORY\.md` as managed, non-authoritative project memory\./, `${relPath} keeps non-authoritative memory contract`);
+    assert.match(text, /Instruction sources used/, `${relPath} requires instruction-source reporting`);
+    assert.match(text, /MEMORY\.md changed: Yes\/No/, `${relPath} requires memory change reporting`);
     assert.match(text, /## Scope Control/, `${relPath} keeps generic execution guidance`);
     assert.match(text, /run the smallest relevant local validation/i, `${relPath} keeps targeted local validation guidance`);
     assert.match(text, /Do not run local `npm run validate:all` by default when CI already runs the full gate/, `${relPath} avoids default local full validation`);
@@ -1555,6 +1604,10 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
   assert.match(rootAgents, /This root `AGENTS\.md` is toolkit-repo-specific/, 'root AGENTS.md stays toolkit-specific');
   assert.match(rootAgents, /## Repo-Local Router/, 'root AGENTS.md keeps toolkit repo router');
   assert.match(portableAgents, /^# AI Coding Agent Rules$/m, 'portable AGENTS template has a top-level document title');
+  assert.match(portableAgents, /## Local Documentation/, 'portable AGENTS template carries local-doc discovery');
+  assert.match(portableAgents, /## Managed Memory/, 'portable AGENTS template carries optional managed memory guidance');
+  assert.match(portableAgents, /Instruction sources used/, 'portable AGENTS template requires instruction-source reporting');
+  assert.match(portableAgents, /MEMORY\.md changed: Yes\/No/, 'portable AGENTS template requires memory change reporting');
   assert.doesNotMatch(portableAgents, /This root `AGENTS\.md` is toolkit-repo-specific|## Repo-Local Router/, 'portable AGENTS template has no toolkit repo wrapper');
 
   for (const rel of [

@@ -7,7 +7,7 @@
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
   "version": "2.2.0",
   "version_policy": "semver",
-  "version_notes": "Keeps the existing managed root AGENTS.md execution-block structure while moving toolkit-specific heavy context into root-routed playbooks, keeps portable managed templates self-contained, and adds validation for playbook routing, size budgets, and dangling toolkit-only portable paths.",
+  "version_notes": "Adds portable repo-local docs discovery, optional managed MEMORY.md behavior, and final-report requirements while preserving self-contained templates and the existing managed root AGENTS.md execution-block structure; moves toolkit-specific heavy context into root-routed playbooks and validates playbook routing, size budgets, memory hygiene, and dangling toolkit-only portable paths.",
   "outputs": [
     {
       "kind": "curated",
