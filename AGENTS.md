@@ -199,7 +199,7 @@ Final reports must include `Instruction sources used` and `MEMORY.md changed: Ye
 
 The full source-of-truth contract appears below in this file and is maintained from `_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md`. Treat that managed block as the detailed active contract for `_projects/**`, generated `skills/**`, source locks, source-watch, and guarded generated-output writeback.
 
-For day-to-day work, update source or curated material first, do not edit generated `skills/**` directly unless declared `linked`, run the matching sync/check command, and preserve the source-watch PR-notification-only boundary.
+For day-to-day work, update source or curated material first, do not edit generated `skills/**` directly unless declared `linked`, run the matching sync/check command, and preserve this boundary: Source-watch is PR-notification-only.
 
 <!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract
