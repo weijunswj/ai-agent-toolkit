@@ -52,6 +52,14 @@ const expectedFiles = [
   'repo/docs/PROJECT-REHAUL-CHECKLIST.md',
   'repo/docs/skill-creation-center-baseline.json',
   'repo/docs/SKILL-SAFETY-MATRIX.md',
+  'repo/docs/agent-playbooks/INDEX.md',
+  'repo/docs/agent-playbooks/baseline-workflow.md',
+  'repo/docs/agent-playbooks/safety-gates.md',
+  'repo/docs/agent-playbooks/generated-output-and-publishing.md',
+  'repo/docs/agent-playbooks/repo-local-agent-instructions.md',
+  'repo/docs/agent-playbooks/n8n-safety-and-workflows.md',
+  'repo/docs/agent-playbooks/hostinger-coolify-vps.md',
+  'repo/docs/agent-playbooks/pr-review-and-ci.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py',
@@ -104,6 +112,7 @@ const expectedFiles = [
   'skills/n8n-local-setup/references/n8n-agent-rules.md',
   'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
   'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
+  '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md',
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
   '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
   '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
@@ -174,6 +183,7 @@ const expectedDirs = [
   'skills/n8n-local-setup/packs/codex-n8n-local',
   'skills/n8n-local-setup/packs/claude-code-n8n-local',
   'skills/secure-cicd-installer/packs/secure-cicd',
+  'repo/docs/agent-playbooks',
   '.agents',
   '.agents/rules',
   '.github/workflows'
@@ -199,6 +209,7 @@ const allowedRootEntries = new Set([
   'AGENTS.md',
   'CLAUDE.md',
   'GEMINI.md',
+  'MEMORY.md',
   'README.md',
   '_projects',
   'package.json',
@@ -1079,6 +1090,111 @@ function validateNoActiveAgentInstructionFilesInSkills(errors) {
   }
 }
 
+const agentPlaybookIndexPath = 'repo/docs/agent-playbooks/INDEX.md';
+const portableRepoLocalTemplatePaths = [
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+  'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+  'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+  'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+  'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
+];
+const toolkitOnlyPortablePathTokens = [
+  'repo/docs/agent-playbooks/',
+  '_projects/',
+  'repo/scripts/',
+  'toolkit.project.json',
+  'SOURCE-LOCK.json'
+];
+
+function lineCount(text) {
+  return text.replace(/\r\n/g, '\n').split('\n').length;
+}
+
+function validateAgentPlaybookArchitecture(errors) {
+  const rootAgents = readText('AGENTS.md');
+  if (!rootAgents.includes(agentPlaybookIndexPath)) {
+    fail(errors, `AGENTS.md must reference ${agentPlaybookIndexPath}`);
+  }
+  if (!rootAgents.includes(currentContractBegin)) {
+    fail(errors, 'AGENTS.md must preserve the managed source-of-truth contract block');
+  }
+  if (lineCount(rootAgents) > 220 || rootAgents.length > 18000) {
+    fail(errors, 'AGENTS.md must stay compact enough for always-loaded root instructions');
+  }
+
+  const indexText = readText(agentPlaybookIndexPath);
+  const referenced = new Set(indexText.match(/repo\/docs\/agent-playbooks\/[A-Za-z0-9._-]+\.md/g) || []);
+  if (referenced.size === 0) fail(errors, `${agentPlaybookIndexPath} must reference at least one playbook`);
+  for (const relPath of referenced) {
+    if (!existsRel(relPath)) fail(errors, `${agentPlaybookIndexPath} references missing playbook: ${relPath}`);
+  }
+}
+
+function portableTemplateLineIsAllowed(line) {
+  // Managed marker comments must retain source identities so repair/check logic can map
+  // copied portable files back to toolkit-owned source without making the payload depend
+  // on those toolkit-only paths at runtime.
+  if (/^<!-- AI-AGENT-TOOLKIT:_projects\//.test(line.trim())) return true;
+  return false;
+}
+
+function validatePortableRepoLocalTemplates(errors) {
+  for (const relPath of portableRepoLocalTemplatePaths) {
+    if (!existsRel(relPath)) continue;
+    const text = readText(relPath);
+    const lines = lineCount(text);
+    const isShim = !/AGENTS\.managed\.template\.md$/.test(relPath);
+    const maxLines = isShim ? 35 : 155;
+    const maxChars = isShim ? 2500 : 11000;
+    if (lines > maxLines || text.length > maxChars) {
+      fail(errors, `${relPath} must stay compact for portable repo-local installation`);
+    }
+    for (const line of text.split('\n')) {
+      for (const token of toolkitOnlyPortablePathTokens) {
+        if (line.includes(token) && !portableTemplateLineIsAllowed(line)) {
+          fail(errors, `${relPath} contains non-portable toolkit-only path token "${token}"`);
+        }
+      }
+    }
+  }
+}
+
+function memoryAuthorityClaimIsNegated(line, matchIndex) {
+  const prefix = line.slice(0, matchIndex).toLowerCase();
+  return /\b(cannot|can't|must not|does not|do not|never|non-authoritative|not authoritative)\b/.test(prefix);
+}
+
+function validateManagedMemory(errors) {
+  const relPath = 'MEMORY.md';
+  if (!existsRel(relPath)) return;
+  const text = readText(relPath);
+  const headerWindow = text.split('\n').slice(0, 8).join('\n');
+  if (!/managed/i.test(headerWindow) || !/non-authoritative project memory/i.test(headerWindow)) {
+    fail(errors, 'MEMORY.md must start with a header stating it is managed, non-authoritative project memory');
+  }
+  if (lineCount(text) > 120 || text.length > 8000) {
+    fail(errors, 'MEMORY.md must stay compact');
+  }
+  for (const pattern of secretPatterns) {
+    if (pattern.regex.test(text)) fail(errors, `MEMORY.md contains possible secret: ${pattern.label}`);
+  }
+  const forbiddenSectionPattern = /^#{1,3}\s*(todo(?:s)?|task log|tasks?|status(?: report)?|pr summary|pull request summary|implementation plan|progress log)\b/im;
+  if (forbiddenSectionPattern.test(text)) {
+    fail(errors, 'MEMORY.md must not become a task log, TODO list, PR status file, or implementation plan');
+  }
+  const authorityPattern = /\b(MEMORY\.md|memory)\b[^\n.]{0,120}\b(overrides?|supersedes?|replaces?|source of truth|authoritative)\b/i;
+  for (const line of text.split('\n')) {
+    const match = authorityPattern.exec(line);
+    if (match && !memoryAuthorityClaimIsNegated(line, match.index)) {
+      fail(errors, 'MEMORY.md must not claim authority over AGENTS.md, playbooks, safety gates, source-of-truth docs, validation, generated-file rules, or code');
+      break;
+    }
+  }
+}
+
 function validateStaleReferences(errors) {
   const roots = new Set(staleReferenceRoots);
   for (const entry of listFiles()) {
@@ -1899,6 +2015,9 @@ function runValidation() {
   validateSkillPortability(errors);
   validateAgentRuleSources(errors);
   validateNoActiveAgentInstructionFilesInSkills(errors);
+  validateAgentPlaybookArchitecture(errors);
+  validatePortableRepoLocalTemplates(errors);
+  validateManagedMemory(errors);
   validateNoOldForAiReferences(errors);
   validateStaleReferences(errors);
   validateSecretStrings(errors);

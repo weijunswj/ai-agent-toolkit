@@ -6,8 +6,11 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+const rootPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md';
 const executionPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md';
 const n8nAdapterPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md';
+const rootBegin = `<!-- AI-AGENT-TOOLKIT:${rootPromptPath}:BEGIN TOOLKIT-ROOT-AGENTS.MD-TEMPLATE v1 -->`;
+const rootEnd = `<!-- AI-AGENT-TOOLKIT:${rootPromptPath}:END TOOLKIT-ROOT-AGENTS.MD-TEMPLATE -->`;
 const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
 const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
 const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
@@ -177,6 +180,7 @@ function isStructurallyCurrentManagedText(text) {
 test('source structure keeps reusable prompt and adapter partials with no tiny shim partials', () => {
   const kept = [
     executionPromptPath,
+    rootPromptPath,
     n8nAdapterPath,
     '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md'
@@ -199,10 +203,10 @@ test('manual global source templates exist and are generated from execution prom
   const prompt = readText(executionPromptPath).trimEnd();
   assert.match(prompt, /## Git Completion/);
   assert.match(prompt, /check PR CI\/status before reporting completion/i);
-  assert.match(prompt, /Never:\n\n- Push to `main`/);
-  assert.match(prompt, /- Claim CI passed unless checked/);
+  assert.match(prompt, /- Push to `main`, secrets, credentials, live\/runtime files, failed targeted validation, or safety-blocked changes\./);
+  assert.match(prompt, /claim CI passed unless checked/i);
   assert.doesNotMatch(prompt, /## Pull Request Description/);
-  assert.match(prompt, /keep the PR body aligned with the full base-to-head diff/i);
+  assert.match(prompt, /opening or updating a pull request/i);
   for (const relPath of [
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
@@ -218,12 +222,10 @@ test('manual global source templates exist and are generated from execution prom
 
 test('execution prompt requires full-bold user-action questions and generated surfaces stay synced', () => {
   const requiredRule = /When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold\./;
-  const requiredClarifier = /The entire user-action question must be bolded\./;
 
   assert.match(readText(executionPromptPath), /## User Action Questions/);
   for (const relPath of [
     executionPromptPath,
-    'AGENTS.md',
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
     '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
@@ -232,7 +234,6 @@ test('execution prompt requires full-bold user-action questions and generated su
   ]) {
     const text = readText(relPath);
     assert.match(text, requiredRule, relPath);
-    assert.match(text, requiredClarifier, relPath);
   }
 });
 
@@ -295,11 +296,12 @@ test('repo-local shim marker structural check rejects invalid marker states', ()
   assert.equal(isStructurallyCurrentManagedText(`${template.end}${body}${template.begin}`), false, 'out-of-order marker pair is not structurally current');
 });
 
-test('managed toolkit block comes from the execution prompt partial', () => {
+test('root managed block comes from toolkit-root partial and repo-local block comes from execution prompt partial', () => {
+  const rootPrompt = readText(rootPromptPath).trimEnd();
   const prompt = readText(executionPromptPath).trimEnd();
-  const rootToolkit = block(readText('AGENTS.md'), toolkitBegin, toolkitEnd, 'root toolkit block')
-    .replace(toolkitBegin, '')
-    .replace(toolkitEnd, '')
+  const rootToolkit = block(readText('AGENTS.md'), rootBegin, rootEnd, 'root toolkit block')
+    .replace(rootBegin, '')
+    .replace(rootEnd, '')
     .trim();
   const managedPayload = repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template');
   const sourceToolkit = block(managedPayload, toolkitBegin, toolkitEnd, 'repo-local managed toolkit block')
@@ -307,18 +309,16 @@ test('managed toolkit block comes from the execution prompt partial', () => {
     .replace(toolkitEnd, '')
     .trim();
 
-  assert.equal(rootToolkit, prompt);
+  assert.equal(rootToolkit, rootPrompt);
   assert.equal(sourceToolkit, prompt);
   assertNoForbiddenDefaultPromptPhrases(rootToolkit, 'root toolkit block');
-  assert.match(rootToolkit, /read the relevant docs before editing and treat them as active context/i);
-  assert.match(rootToolkit, /Put persistent status, report, implementation plan, handoff, or operations notes under an existing `docs\/` path/i);
-  assert.match(rootToolkit, /Keep relevant docs and implementation plans current as the work changes/i);
-  assert.match(rootToolkit, /Check whether the change affects existing setup, usage, operations, CI\/CD, deployment, safety, troubleshooting, or implementation-plan docs/i);
+  assert.match(rootToolkit, /repo\/docs\/agent-playbooks\/INDEX\.md/i);
+  assert.match(rootToolkit, /MEMORY\.md changed: Yes\/No/i);
+  assert.match(rootToolkit, /Source-watch is PR-notification-only/i);
 });
 
 test('n8n adapter is compact and fail-closed', () => {
   for (const [label, text] of [
-    ['root AGENTS.md', readText('AGENTS.md')],
     ['repo-local AGENTS managed template', repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template')],
     ['published repo-local AGENTS managed template', repoLocalPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'published repo-local AGENTS managed template')]
   ]) {

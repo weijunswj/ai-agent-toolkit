@@ -731,16 +731,18 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /toolkit\.project\.json/);
   assert.match(text, /Do not edit generated `skills\/` or `mcp\/` outputs directly/);
   assert.match(text, /Do not generate curated files automatically from `_main`/);
-  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v1/);
-  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/);
+  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/toolkit-root-agent-rules\.md:BEGIN TOOLKIT-ROOT-AGENTS\.MD-TEMPLATE v1/);
+  assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v1/);
+  assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/);
+  assert.match(text, /Before planning or editing, read `repo\/docs\/agent-playbooks\/INDEX\.md`/);
+  assert.match(text, /If root `MEMORY\.md` exists, read it as non-authoritative project context/);
+  assert.match(text, /Final reports must include `Instruction sources used` and `MEMORY\.md changed: Yes\/No`/);
+  assert.match(text, /## Hard Safety Gates/);
+  assert.match(text, /## Source Of Truth/);
+  assert.match(text, /Source-watch is PR-notification-only/);
   assert.match(text, /## Managed Marker Rules/);
   assert.match(text, /AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1/);
-  assert.match(text, /## Role/);
-  assert.match(text, /You are an execution-first coding agent\./);
-  assert.match(text, /## Scope Control/);
-  assert.match(text, /stop and load `skills\/n8n-agent-rules` before planning or editing/);
-  assert.match(text, /skill or its full rules are unavailable, stop and report the limitation instead of continuing/);
-  assert.match(text, /Do not run live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation/);
+  assert.match(text, /Do not run live-system, Docker, n8n runtime, import\/export, sync, activation, credential, deployment, production, destructive, or external-service actions without explicit current-turn approval naming the target and allowed operation/);
   assert.doesNotMatch(text, /GitHub PR Completion Rules/);
   assert.doesNotMatch(text, /GITHUB APPROVAL NEEDED/);
   assert.doesNotMatch(text, /VERSION CONTROL APPROVAL NEEDED/);
@@ -758,11 +760,18 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
     text,
     /For new or changed project modules, `repo\/docs\/PROJECT-MODULE-STANDARD\.md` is the detailed rulebook\./
   );
+
+  const index = readTextFile(path.join(repoRoot, 'repo', 'docs', 'agent-playbooks', 'INDEX.md'));
+  assert.match(index, /repo\/docs\/agent-playbooks\/n8n-safety-and-workflows\.md/);
+  assert.match(index, /repo\/docs\/agent-playbooks\/generated-output-and-publishing\.md/);
+  assert.match(index, /repo\/docs\/agent-playbooks\/pr-review-and-ci\.md/);
+  const n8nPlaybook = readTextFile(path.join(repoRoot, 'repo', 'docs', 'agent-playbooks', 'n8n-safety-and-workflows.md'));
+  assert.match(n8nPlaybook, /Stop before live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, credential, deployment, production, destructive, or privileged external actions/);
+  assert.match(n8nPlaybook, /Require explicit current-turn approval naming the target and allowed operation/);
 });
 
 test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', () => {
   const relPaths = [
-    'AGENTS.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',

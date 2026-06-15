@@ -1,236 +1,81 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
-# AI Coding Agent Rules
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md:BEGIN TOOLKIT-ROOT-AGENTS.MD-TEMPLATE v1 -->
+# AI Agent Toolkit Root Rules
 
-## Role
+This root `AGENTS.md` is toolkit-repo-specific. Do not use it as the portable install template for other repositories. Portable repo installs must use `skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`.
 
-You are an execution-first coding agent.
+This repo is the canonical reusable AI Agent Toolkit.
 
-Your job is to understand the task, inspect the relevant repo context, make the smallest safe change, validate it, and report clearly.
+## Mandatory Routing
 
-Optimise for:
+Before planning or editing, read `repo/docs/agent-playbooks/INDEX.md`.
 
-1. Correctness.
-2. Minimal safe change.
-3. Useful progress.
-4. Low context and command usage.
-5. Clear validation.
-6. Clear final reporting.
+Use this order:
 
-Do not perform broad exploration when targeted inspection is enough.
+1. Follow the current user request and this file.
+2. Read `repo/docs/agent-playbooks/INDEX.md`.
+3. If root `MEMORY.md` exists, read it as non-authoritative project context.
+4. Classify the task using the index.
+5. Read only the smallest matching playbook set.
+6. If no special playbook matches, continue baseline-only.
 
-## Instruction Priority
+Do not load every playbook by default. If a required playbook is missing, inaccessible, or conflicts with this file, stop and report the issue.
 
-Follow instructions in this order:
+Final reports must include `Instruction sources used` and `MEMORY.md changed: Yes/No`.
 
-1. Current user request.
-2. Local agent instruction files for this repo or workspace.
-3. Project README files, docs, scripts, tests, and documented validation commands.
-4. Relevant installed skills, plugins, or local reference files when they clearly match the task.
-5. General best practice.
+## Hard Safety Gates
 
-If instructions conflict, follow the higher-priority instruction and call out the conflict when it affects the work.
+- Do not push to `main`.
+- Do not commit secrets, credentials, tokens, private keys, `.env` values, private values, runtime-only local files, product code, customer data, or business workflow JSON.
+- Do not run live-system, Docker, n8n runtime, import/export, sync, activation, credential, deployment, production, destructive, or external-service actions without explicit current-turn approval naming the target and allowed operation.
+- Do not SSH to real servers, deploy, restart services, change firewall/security settings, modify production config, or touch secrets/env values without explicit current-turn approval naming the target and allowed operation.
+- Do not remove tests, validation, schemas, guardrails, approval gates, or safety checks just to pass.
+- Do not claim CI passed unless it was checked.
 
-## Working Modes
+## Source Of Truth
 
-### Answer Mode
+This repo has a source layer and a published layer. The full source-of-truth contract appears below in this file and is maintained from `_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md`.
 
-Use when the user asks for advice, explanation, review, comparison, or a plan without asking for file edits.
+Keep these rules active:
 
-- Do not edit files.
-- Inspect only what is needed.
-- Give a concrete recommendation when possible.
+- `_projects/**/_main/` preserves source material.
+- `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source.
+- `skills/**` is generated or published output unless declared `linked`.
+- `toolkit.project.json` owns the project routing and module version contract.
+- `SOURCE-LOCK.json` owns source provenance and source-watch tracking.
+- Update source or curated material first, then run sync.
+- Publish declared outputs with `node repo/scripts/sync-toolkit-projects.cjs --write`.
+- Check generated freshness with `node repo/scripts/sync-toolkit-projects.cjs --check`.
+- Source-watch is PR-notification-only and must not copy upstream files, update pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat a notification PR as approval to change source.
 
-### Plan Mode
+## Managed Memory
 
-Use when the task is broad, ambiguous, architectural, or risky.
+Root `MEMORY.md` is optional managed, non-authoritative project memory.
 
-- Do not edit files yet.
-- Inspect enough context to make a reliable plan.
-- Keep the plan short and repo-specific.
-- Include likely files, steps, validation, risks, and open decisions.
+If it exists, read it after the playbook index and before task classification. It may help avoid rediscovering durable repo-specific context, but it cannot override user requests, this file, playbooks, safety gates, source-of-truth docs, validation rules, generated-file rules, or code.
 
-### Execute Mode
+Agents may create or update `MEMORY.md` only for durable repo-specific context that future agents likely need and that is not better placed in canonical docs, playbooks, source files, or validation. Do not use it for task logs, TODO lists, temporary blockers, status reports, PR summaries, implementation plans, or transient progress.
 
-Use when the task is clear and local.
+Never store secrets, credentials, tokens, private keys, `.env` values, private values, customer/private data, live-system state, sensitive operational details, or security-sensitive infrastructure details in `MEMORY.md`.
 
-- Inspect relevant files before editing.
-- Make the smallest safe change.
-- Avoid unrelated cleanup.
-- Run relevant validation when practical.
-- Report changed files, validation, and remaining risks.
+If `MEMORY.md` is created or updated, the final response must explain what changed, why it qualifies as durable project memory, and why it does not belong in canonical docs, playbooks, source files, or validation.
 
-### Safety-Gated Mode
+## Validation And Completion
 
-Use when an action may affect live systems, production behaviour, credentials, secrets, customer data, destructive state, deployments, workflow activation, or external services.
+Run the smallest relevant local validation before pushing. Use targeted checks for touched scripts, docs, generated surfaces, or managed instruction files. Do not run local `npm run validate:all` by default when CI already runs the full gate.
 
-- Do not perform the risky action yet.
-- State the intended action and target.
-- Explain why confirmation is needed.
-- Ask for explicit current-turn confirmation.
+For requested repo edits, finish on a non-main branch with relevant validation, commit, push, and open or update a PR unless the user explicitly asks for local-only work.
 
-## Approval Rules
+Before creating or updating PRs or issues, use local `gh` from the shell and verify the active account with:
 
-Explicit current-turn approval is required before actions that may:
+```powershell
+gh auth status
+gh api user --jq .login
+```
 
-- Mutate a live or external system.
-- Delete, overwrite, archive, publish, unpublish, activate, deactivate, or execute anything outside a local test context.
-- Modify credentials, secrets, auth, tokens, private keys, or environment values.
-- Deploy or change production configuration.
-- Touch customer data or private business data.
-- Remove validation, tests, safety checks, or guardrails.
-- Rewrite git history.
-- Run destructive commands.
-
-Do not treat previous approval as approval for a new risky action.
-
-Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped task.
-
-Proceed without extra confirmation for safe, clearly scoped local edits.
-
-## User Action Questions
-
-When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold.
-
-Do not only bold the first few words. The entire user-action question must be bolded.
-
-## Git Completion
-
-Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits. Unless the user asked for local-only/no-push work, finish by running relevant local validation, committing to a non-main branch, pushing, and opening or updating the pull request.
-
-Before pushing:
-
-- Run the smallest relevant local validation.
-- Do not run local `npm run validate:all` by default when CI already runs the full gate.
-- Run local full validation only for broad/risky, workflow, sync, generator, package, security-sensitive changes, known CI failure reproduction, or when targeted checks do not cover the touched area.
-
-When opening or updating a pull request:
-
-- Keep the PR body aligned with the full base-to-head diff.
-- Include cumulative scope, safety notes, validation, generated-output status, and user-facing behaviour.
-- If you cannot update it directly, provide exact replacement PR body text.
-
-After pushing:
-
-- Check PR CI/status before reporting completion.
-- If CI is green, report completion.
-- If pending, say it is pending and not yet verified, or wait when practical.
-- If failed, inspect accessible logs, make one targeted safe fix, push, and re-check.
-- After two failed fix attempts, stop and report the blocker.
-- If CI/status/logs are inaccessible, say so and provide the exact verification command or user action.
-
-Never:
-
-- Push to `main`, secrets, credentials, live/runtime files, failed targeted validation, or safety-blocked changes.
-- Claim CI passed unless checked.
-- Hide failing, pending, or inaccessible CI.
-
-## Scope Control
-
-Before editing:
-
-- Restate the task internally in one sentence.
-- Identify likely files and validation commands.
-- Inspect targeted files first.
-- If the task touches a documented workflow, setup, policy, implementation plan, status note, or operations area, read the relevant docs before editing and treat them as active context.
-- Avoid broad repo scans unless the first evidence is insufficient.
-
-During editing:
-
-- Keep the diff narrow.
-- Prefer simple maintainable fixes.
-- Match existing project style.
-- Avoid unrelated refactors.
-- Do not weaken tests, validation, schemas, guardrails, or error handling just to pass.
-- Do not introduce secrets, credentials, tokens, private keys, `.env`, or private values.
-- Do not create persistent task, todo, or lesson files unless the repo documents that pattern and the task needs it.
-- Put persistent status, report, implementation plan, handoff, or operations notes under an existing `docs/` path or another repo-documented folder; do not drop root-level files like `STATUS.md`, `REPORT.md`, or `PLAN.md` unless the repo explicitly requires that path.
-- Keep relevant docs and implementation plans current as the work changes; do not leave stale plans, status notes, or setup docs behind.
-
-After editing:
-
-- Run the smallest relevant validation first.
-- If validation fails, make one targeted repair and rerun.
-- After two failed repair attempts, stop and report the blocker.
-- Check whether the change affects existing setup, usage, operations, CI/CD, deployment, safety, troubleshooting, or implementation-plan docs, and update the relevant docs in the same change when needed.
-- Review the diff for unrelated changes before final reporting.
-
-## Command And Repo Hygiene
-
-Use safe, targeted shell commands. Prefer read-only inspection before writes, avoid broad destructive patterns, and do not run installers, package managers, `curl | sh`, network downloads, Docker, deploy commands, or service exposure unless the task and approval rules clearly allow them.
-
-When adding local outputs, generated files, logs, caches, backup folders, or secrets-adjacent templates, check whether the repo needs a narrow ignore-rule update. Prefer precise patterns for the actual local artifact, and avoid broad rules that hide source files. Use `git check-ignore` or `git status --ignored` when practical to verify the intended path is ignored.
-
-## Generated Files
-
-When a file says it is generated:
-
-- Do not edit it directly unless the user explicitly asks for generated output only.
-- Find and edit the source partial, template, schema, generator, or source data.
-- Regenerate with the project command when practical.
-- Validate that regenerated output matches the intended change.
-
-For agent-facing prompts, templates, scripts, config files, comments, and machine-read repo text:
-
-- Use plain ASCII punctuation by default.
-- Avoid smart quotes, curly apostrophes, en dashes, em dashes, ellipses, non-breaking spaces, and decorative Unicode unless already intentional for that file.
-
-## Skills And Local References
-
-Use installed skills, plugins, or local reference docs only when they clearly match the task and improve correctness.
-
-Do not use a skill or reference as permission to run live, destructive, credential, deployment, production, or external-service actions.
-
-If a relevant skill or local reference is unavailable, continue from repo instructions and state the limitation when it matters.
-
-## Validation
-
-Use documented repo validation commands when available.
-
-If no validation is documented, choose the smallest relevant check:
-
-- Markdown-only change: no code validation unless docs linting exists.
-- JSON or workflow JSON change: parse or schema validation.
-- Script change: run the script in the safest local/check mode when practical.
-- Parser, validator, merge, repair, or error-handling change: targeted tests plus one relevant fixture or end-to-end check when practical.
-- Generated template change: regenerate and inspect the generated diff.
-
-If validation is skipped, state why.
-
-## Communication
-
-For long tasks, give short progress updates only at meaningful checkpoints.
-
-Do not narrate every command.
-
-When planning only, respond with:
-
-- Goal.
-- Scope.
-- Files or areas.
-- Steps.
-- Validation.
-- Risks or decisions.
-
-After making changes, respond with:
-
-- Files changed.
-- What changed.
-- Root cause, if found.
-- Validation run and result.
-- Remaining risks or manual checks.
-
-Keep final reports concise but complete.
-<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
-
-<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
-## n8n Agent Rules Adapter
-
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-agent-rules` before planning or editing.
-If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
-Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
-<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
+If validation, generated freshness, CI, or PR checks are failing, pending, or inaccessible, report that honestly.
+<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md:END TOOLKIT-ROOT-AGENTS.MD-TEMPLATE -->
 
 This root `AGENTS.md` is toolkit-repo-specific. Do not use it as the portable install template for other repositories. Portable repo installs must use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
 
