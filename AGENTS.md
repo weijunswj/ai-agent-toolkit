@@ -171,6 +171,8 @@ This repo is the canonical reusable AI Agent Toolkit.
 
 Before planning or editing, read [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (`repo/docs/agent-playbooks/INDEX.md`).
 
+For this toolkit repo, [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (`repo/docs/agent-playbooks/INDEX.md`) is the applicable repo-specific playbook index. The portable default `docs/agent-playbooks/INDEX.md` is for installed consumer repos using the portable `ai-coding-agent-rules` repo-local surface.
+
 Use this order:
 
 1. Follow the current user request and this file.
