@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "version_policy": "semver",
-  "version_notes": "Adds portable repo-local docs/playbook routing, published portable playbook docs, optional managed MEMORY.md behavior, and final-report requirements while preserving self-contained templates and the existing managed root AGENTS.md execution-block structure; moves toolkit-specific heavy context into root-routed playbooks and validates playbook routing, size budgets, memory hygiene, and dangling toolkit-only portable paths.",
+  "version_notes": "Clarifies portable playbook docs as a complete folder-level install unit for repo-local repair/refresh so consumer repos receive every index-linked Markdown file, while preserving the split portable/root instruction architecture.",
   "outputs": [
     {
       "kind": "curated",

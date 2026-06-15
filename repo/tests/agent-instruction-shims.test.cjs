@@ -73,6 +73,15 @@ const forbiddenDefaultPromptPhrases = [
   'create a pull request',
   'update a pull request'
 ];
+const requiredPortablePlaybookFiles = [
+  'INDEX.md',
+  'baseline-workflow.md',
+  'generated-files.md',
+  'git-completion.md',
+  'local-docs.md',
+  'managed-memory.md',
+  'safety-gates.md'
+];
 
 function readText(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -132,6 +141,14 @@ function assertNoForbiddenDefaultPromptPhrases(text, label) {
   for (const phrase of forbiddenDefaultPromptPhrases) {
     assert.doesNotMatch(text, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${label}: ${phrase}`);
   }
+}
+
+function assertMentionsCompletePortablePlaybookSet(text, label) {
+  for (const fileName of requiredPortablePlaybookFiles) {
+    assert.match(text, new RegExp(`\`${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``), `${label}: ${fileName}`);
+  }
+  assert.match(text, /copy(?: or refresh)? every Markdown file/i, `${label}: copy every Markdown file`);
+  assert.match(text, /verify every linked `\*\.md` file exists beside it/i, `${label}: verify linked playbooks`);
 }
 
 function assertImportCount(text, importLine, label) {
@@ -493,8 +510,9 @@ test('skill README documents required file sets and shim dependency', () => {
     const text = readText(relPath);
     assert.match(text, /Do not install a shim alone/i, relPath);
     assert.match(text, /Shims require root `AGENTS\.md`/i, relPath);
-    assert.match(text, /repo-local\/docs\/agent-playbooks\/INDEX\.md/, relPath);
+    assert.match(text, /repo-local\/docs\/agent-playbooks\//, relPath);
     assert.match(text, /target repo `docs\/agent-playbooks\/`/, relPath);
+    assertMentionsCompletePortablePlaybookSet(text, relPath);
     assert.match(text, /`AGENTS\.managed\.template\.md` is canonical for the managed toolkit block/i, relPath);
     assert.match(text, /Preserve unmarked user-authored content\./i, relPath);
     assert.match(text, /toolkit-managed block is broken or edited during an explicit install\/check\/repair\/refresh\/bootstrap request/i, relPath);
@@ -536,7 +554,9 @@ test('skill instructions add only target platform shims by default', () => {
     assert.match(text, /Check only the required files for the selected platform/i, relPath);
     assert.match(text, /Do not create shims for platforms that are not in scope/i, relPath);
     assert.match(text, /repo-local\/docs\/agent-playbooks\/` -> target repo `docs\/agent-playbooks\/`/, relPath);
-    assert.match(text, /also install or refresh the portable playbook docs under `docs\/agent-playbooks\/` when missing or stale/i, relPath);
+    assert.match(text, /Treat `repo-local\/docs\/agent-playbooks\/` as a folder-level install unit/i, relPath);
+    assert.match(text, /also install or refresh the complete portable playbook doc set under `docs\/agent-playbooks\/` when missing, incomplete, or stale/i, relPath);
+    assertMentionsCompletePortablePlaybookSet(text, relPath);
     assert.match(text, /install, check, repair, refresh, or bootstrap repo-local agent rules/i, relPath);
     assert.match(text, /user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions/i, relPath);
     assert.match(text, /For ordinary follow-up coding tasks, stop after the cheap structural managed-marker check/i, relPath);
