@@ -28,7 +28,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 12 |
-| publishedFiles | 188 |
+| publishedFiles | 195 |
 | declaredOutputFiles | 195 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 114 |
+| declared_generated | 121 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
