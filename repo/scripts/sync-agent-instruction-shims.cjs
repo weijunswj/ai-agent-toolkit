@@ -402,13 +402,6 @@ function normalizeRepoIntroHeading(text) {
   );
 }
 
-function shimBody(sourceText, options) {
-  let body = sourceText;
-  if (options.importLine) body = removeExactLine(body, options.importLine);
-  if (options.heading) body = removeLeadingHeading(body, options.heading);
-  return body.trim();
-}
-
 function rootAgentsExpected(current, source, errors) {
   let body = stripManagedBlockAny('AGENTS.md', current, toolkitMarkerPairs, errors);
   if (body === null) return null;
@@ -423,13 +416,20 @@ function rootAgentsExpected(current, source, errors) {
   if (normalizedBody.startsWith(`${heading}\n`)) {
     const rest = normalizedBody.slice(heading.length).replace(/^\n+/, '').trimEnd();
     return rest
-      ? `${heading}\n\n${source.toolkit}\n\n${source.n8n}\n\n${rest}\n`
-      : `${heading}\n\n${source.toolkit}\n\n${source.n8n}\n`;
+      ? `${heading}\n\n${source.root}\n\n${rest}\n`
+      : `${heading}\n\n${source.root}\n`;
   }
 
   return normalizedBody
-    ? `${source.toolkit}\n\n${source.n8n}\n\n${normalizedBody.trimEnd()}\n`
-    : `${source.toolkit}\n\n${source.n8n}\n`;
+    ? `${source.root}\n\n${normalizedBody.trimEnd()}\n`
+    : `${source.root}\n`;
+}
+
+function shimBody(sourceText, options) {
+  let body = sourceText;
+  if (options.importLine) body = removeExactLine(body, options.importLine);
+  if (options.heading) body = removeLeadingHeading(body, options.heading);
+  return body.trim();
 }
 
 function shimExpected(relPath, current, sourceText, options, errors) {
@@ -478,6 +478,7 @@ function validateAndSync(options = {}) {
   if ([managedAgentsTemplate, claudeTemplate, geminiTemplate, antigravityTemplate].some((value) => value === null)) return { errors };
 
   const source = {
+    root: managedPayload(executionPrompt, n8nAdapter),
     toolkit: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, toolkitBegin, toolkitEnd, errors),
     n8n: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, n8nBegin, n8nEnd, errors),
     claude: claudeTemplate,

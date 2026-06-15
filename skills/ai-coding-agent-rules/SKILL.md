@@ -63,10 +63,13 @@ Use repo-local templates only when install or repair is needed:
 - `repo-local/CLAUDE.shim.template.md` -> target repo `CLAUDE.md` only for Claude Code.
 - `repo-local/GEMINI.shim.template.md` -> target repo `GEMINI.md` only for Antigravity.
 - `repo-local/antigravity-bootstrap.template.md` -> target repo `.agents/rules/00-agent-toolkit-bootstrap.md` only for Antigravity.
+- `repo-local/docs/agent-playbooks/` -> target repo `docs/agent-playbooks/` for the portable playbook docs referenced by `AGENTS.md`.
 
 Before modifying repo-local instruction files, record enough state to preserve user work: target path, whether git metadata exists, branch/HEAD and dirty state when available, existing required files, and whether affected instruction files were already dirty or manually edited. For plain folders without git metadata, treat existing instruction files as user-authored unless complete managed markers identify toolkit-owned content.
 
 The installed template content for every required repo-local instruction file must include complete `AI-AGENT-TOOLKIT` managed marker pairs so future sessions can verify structural currency without reading templates.
+
+For explicit install, check, repair, refresh, or bootstrap requests, also install or refresh the portable playbook docs under `docs/agent-playbooks/` when missing or stale. Preserve unrelated user-authored docs outside that folder.
 
 ### Missing Or Unmanaged Files
 

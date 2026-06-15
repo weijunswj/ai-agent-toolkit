@@ -52,6 +52,14 @@ const expectedFiles = [
   'repo/docs/PROJECT-REHAUL-CHECKLIST.md',
   'repo/docs/skill-creation-center-baseline.json',
   'repo/docs/SKILL-SAFETY-MATRIX.md',
+  'repo/docs/agent-playbooks/INDEX.md',
+  'repo/docs/agent-playbooks/baseline-workflow.md',
+  'repo/docs/agent-playbooks/safety-gates.md',
+  'repo/docs/agent-playbooks/generated-output-and-publishing.md',
+  'repo/docs/agent-playbooks/repo-local-agent-instructions.md',
+  'repo/docs/agent-playbooks/n8n-safety-and-workflows.md',
+  'repo/docs/agent-playbooks/hostinger-coolify-vps.md',
+  'repo/docs/agent-playbooks/pr-review-and-ci.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py',
@@ -94,6 +102,13 @@ const expectedFiles = [
   'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
   'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
   'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+  'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks/INDEX.md',
+  'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks/baseline-workflow.md',
+  'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks/generated-files.md',
+  'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks/git-completion.md',
+  'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks/local-docs.md',
+  'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks/managed-memory.md',
+  'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks/safety-gates.md',
   'skills/n8n-agent-rules/SKILL.md',
   'skills/n8n-agent-rules/README.md',
   'skills/n8n-agent-rules/n8n-agent-rules.md',
@@ -106,6 +121,13 @@ const expectedFiles = [
   'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
   '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/INDEX.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/baseline-workflow.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/generated-files.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/git-completion.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/local-docs.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/managed-memory.md',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/safety-gates.md',
   '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
   '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
   '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
@@ -138,8 +160,13 @@ const expectedDirs = [
   '_projects/development/ai-coding-agent-rules',
   '_projects/development/ai-coding-agent-rules/_main',
   '_projects/development/ai-coding-agent-rules/_main/_partials',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/docs',
+  '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks',
   '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local',
   'skills/ai-coding-agent-rules/repo-local',
+  'skills/ai-coding-agent-rules/repo-local/docs',
+  'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks',
   '_projects/n8n/workflow-toolkit',
   '_projects/n8n/workflow-toolkit/_main',
   '_projects/cicd/secure-installer',
@@ -174,6 +201,7 @@ const expectedDirs = [
   'skills/n8n-local-setup/packs/codex-n8n-local',
   'skills/n8n-local-setup/packs/claude-code-n8n-local',
   'skills/secure-cicd-installer/packs/secure-cicd',
+  'repo/docs/agent-playbooks',
   '.agents',
   '.agents/rules',
   '.github/workflows'
@@ -199,6 +227,7 @@ const allowedRootEntries = new Set([
   'AGENTS.md',
   'CLAUDE.md',
   'GEMINI.md',
+  'MEMORY.md',
   'README.md',
   '_projects',
   'package.json',
@@ -1042,10 +1071,18 @@ function validateAgentRuleSources(errors) {
   for (const entry of rootPartialFiles) {
     if (entry.relPath.startsWith('skills/')) fail(errors, `Agent-rule partials must stay in project _main source, not published skill folders: ${entry.relPath}`);
   }
+  const allowedMainRepoLocalDocs = new Set([
+    '_projects/development/ai-coding-agent-rules/_main/repo-local',
+    '_projects/development/ai-coding-agent-rules/_main/repo-local/docs',
+    '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks'
+  ]);
+  const allowedMainRepoLocalDocsPrefix = '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/';
   for (const entry of walk()) {
     if (entry.relPath === '_projects/development/ai-coding-agent-rules/_main/repo-local' ||
         entry.relPath.startsWith('_projects/development/ai-coding-agent-rules/_main/repo-local/')) {
-      fail(errors, `Repo-local skill runtime templates must live under curated_output_for_ai, not _main: ${entry.relPath}`);
+      if (!allowedMainRepoLocalDocs.has(entry.relPath) && !entry.relPath.startsWith(allowedMainRepoLocalDocsPrefix)) {
+        fail(errors, `Repo-local skill runtime templates must live under curated_output_for_ai, not _main: ${entry.relPath}`);
+      }
     }
   }
   for (const relPath of [
@@ -1075,6 +1112,183 @@ function validateNoActiveAgentInstructionFilesInSkills(errors) {
     if (!entry.relPath.startsWith('skills/')) continue;
     if (/\/(?:AGENTS|CLAUDE|GEMINI)\.md$/.test(entry.relPath)) {
       fail(errors, `Skill folder must use inert agent-rule template filenames: ${entry.relPath}`);
+    }
+  }
+}
+
+const agentPlaybookIndexPath = 'repo/docs/agent-playbooks/INDEX.md';
+const portablePlaybookSourceDir = '_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks';
+const portablePlaybookPublishedDir = 'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks';
+const portablePlaybookIndexRel = 'docs/agent-playbooks/INDEX.md';
+const portableRepoLocalTemplatePaths = [
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+  '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+  'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+  'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+  'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+  'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
+];
+const toolkitOnlyPortablePathTokens = [
+  'repo/docs/agent-playbooks/',
+  '_projects/',
+  'repo/scripts/',
+  'toolkit.project.json',
+  'SOURCE-LOCK.json'
+];
+const portableAgentsTemplateRequiredSnippets = [
+  { label: 'portable local documentation discovery', text: '## Local Documentation' },
+  { label: 'portable docs-as-context rule', text: 'Treat repo-local documentation as active task context, not optional background.' },
+  { label: 'portable playbook index link', text: '[Portable playbook index](docs/agent-playbooks/INDEX.md)' },
+  { label: 'portable playbook index raw path', text: '(`docs/agent-playbooks/INDEX.md`)' },
+  { label: 'portable missing-index fallback', text: 'If the portable playbook index is missing, continue safely using `AGENTS.md` and local repo docs.' },
+  { label: 'portable managed memory section', text: '## Managed Memory' },
+  { label: 'portable non-authoritative memory contract', text: 'Treat `MEMORY.md` as managed, non-authoritative project memory.' },
+  { label: 'portable final instruction-source report', text: 'Instruction sources used' },
+  { label: 'portable memory change report', text: 'MEMORY.md changed: Yes/No' }
+];
+
+function lineCount(text) {
+  return text.replace(/\r\n/g, '\n').split('\n').length;
+}
+
+function validateAgentPlaybookArchitecture(errors) {
+  const rootAgents = readText('AGENTS.md');
+  if (!rootAgents.includes(agentPlaybookIndexPath)) {
+    fail(errors, `AGENTS.md must reference ${agentPlaybookIndexPath}`);
+  }
+  if (!rootAgents.includes('[Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (`repo/docs/agent-playbooks/INDEX.md`)')) {
+    fail(errors, 'AGENTS.md must link the toolkit playbook index with clickable Markdown plus the raw path');
+  }
+  if (!rootAgents.includes('AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1')) {
+    fail(errors, 'AGENTS.md must keep the managed ai-coding-agent execution block');
+  }
+  if (!rootAgents.includes('AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1')) {
+    fail(errors, 'AGENTS.md must keep the managed n8n adapter block');
+  }
+  if (/toolkit-root-agent-rules\.md/.test(rootAgents)) {
+    fail(errors, 'AGENTS.md must not source toolkit-specific root rules from the ai-coding-agent-rules project');
+  }
+  if (!rootAgents.includes(currentContractBegin)) {
+    fail(errors, 'AGENTS.md must preserve the managed source-of-truth contract block');
+  }
+  if (lineCount(rootAgents) > 360 || rootAgents.length > 28000) {
+    fail(errors, 'AGENTS.md must stay compact enough for always-loaded root instructions');
+  }
+
+  const indexText = readText(agentPlaybookIndexPath);
+  const referenced = new Set(indexText.match(/repo\/docs\/agent-playbooks\/[A-Za-z0-9._-]+\.md/g) || []);
+  if (referenced.size === 0) fail(errors, `${agentPlaybookIndexPath} must reference at least one playbook`);
+  for (const relPath of referenced) {
+    if (!existsRel(relPath)) fail(errors, `${agentPlaybookIndexPath} references missing playbook: ${relPath}`);
+  }
+}
+
+function portableTemplateLineIsAllowed(line) {
+  // Managed marker comments must retain source identities so repair/check logic can map
+  // copied portable files back to toolkit-owned source without making the payload depend
+  // on those toolkit-only paths at runtime.
+  if (/^<!-- AI-AGENT-TOOLKIT:_projects\//.test(line.trim())) return true;
+  return false;
+}
+
+function validatePortableRepoLocalTemplates(errors) {
+  for (const relPath of portableRepoLocalTemplatePaths) {
+    if (!existsRel(relPath)) continue;
+    const text = readText(relPath);
+    const lines = lineCount(text);
+    const isShim = !/AGENTS\.managed\.template\.md$/.test(relPath);
+    const maxLines = isShim ? 35 : 190;
+    const maxChars = isShim ? 2500 : 14000;
+    if (lines > maxLines || text.length > maxChars) {
+      fail(errors, `${relPath} must stay compact for portable repo-local installation`);
+    }
+    if (!isShim) {
+      for (const requirement of portableAgentsTemplateRequiredSnippets) {
+        if (!text.includes(requirement.text)) {
+          fail(errors, `${relPath} missing ${requirement.label}`);
+        }
+      }
+    }
+    for (const line of text.split('\n')) {
+      for (const token of toolkitOnlyPortablePathTokens) {
+        if (line.includes(token) && !portableTemplateLineIsAllowed(line)) {
+          fail(errors, `${relPath} contains non-portable toolkit-only path token "${token}"`);
+        }
+      }
+    }
+  }
+}
+
+function validatePortablePlaybookDocs(errors) {
+  const sourceIndex = `${portablePlaybookSourceDir}/INDEX.md`;
+  const publishedIndex = `${portablePlaybookPublishedDir}/INDEX.md`;
+  for (const relPath of [sourceIndex, publishedIndex]) {
+    if (!existsRel(relPath)) fail(errors, `Missing portable playbook index: ${relPath}`);
+  }
+  if (!existsRel(sourceIndex) || !existsRel(publishedIndex)) return;
+
+  const sourceIndexText = readText(sourceIndex);
+  const refs = new Set();
+  const linkPattern = /\]\(([A-Za-z0-9._-]+\.md)\)\s+\(`docs\/agent-playbooks\/([A-Za-z0-9._-]+\.md)`\)/g;
+  for (const match of sourceIndexText.matchAll(linkPattern)) {
+    if (match[1] !== match[2]) {
+      fail(errors, `${sourceIndex} link ${match[1]} must match raw path ${match[2]}`);
+    }
+    refs.add(match[1]);
+  }
+  if (refs.size === 0) fail(errors, `${sourceIndex} must route to at least one portable playbook`);
+
+  for (const fileName of refs) {
+    const sourcePath = `${portablePlaybookSourceDir}/${fileName}`;
+    const publishedPath = `${portablePlaybookPublishedDir}/${fileName}`;
+    if (!existsRel(sourcePath)) fail(errors, `${sourceIndex} references missing source playbook: ${sourcePath}`);
+    if (!existsRel(publishedPath)) fail(errors, `${sourceIndex} references missing published playbook: ${publishedPath}`);
+  }
+
+  for (const dir of [portablePlaybookSourceDir, portablePlaybookPublishedDir]) {
+    for (const entry of listFiles().filter((item) => item.relPath.startsWith(`${dir}/`) && item.relPath.endsWith('.md'))) {
+      const text = fs.readFileSync(entry.fullPath, 'utf8').replace(/\r\n/g, '\n');
+      if (lineCount(text) > 90 || text.length > 5500) {
+        fail(errors, `${entry.relPath} must stay lean for portable repo-local playbook use`);
+      }
+      for (const token of toolkitOnlyPortablePathTokens) {
+        if (text.includes(token)) fail(errors, `${entry.relPath} contains non-portable toolkit-only path token "${token}"`);
+      }
+    }
+  }
+}
+
+function memoryAuthorityClaimIsNegated(line, matchIndex) {
+  const prefix = line.slice(0, matchIndex).toLowerCase();
+  return /\b(cannot|can't|must not|does not|do not|never|non-authoritative|not authoritative)\b/.test(prefix);
+}
+
+function validateManagedMemory(errors) {
+  const relPath = 'MEMORY.md';
+  if (!existsRel(relPath)) return;
+  const text = readText(relPath);
+  const headerWindow = text.split('\n').slice(0, 8).join('\n');
+  if (!/managed/i.test(headerWindow) || !/non-authoritative project memory/i.test(headerWindow)) {
+    fail(errors, 'MEMORY.md must start with a header stating it is managed, non-authoritative project memory');
+  }
+  if (lineCount(text) > 120 || text.length > 8000) {
+    fail(errors, 'MEMORY.md must stay compact');
+  }
+  for (const pattern of secretPatterns) {
+    if (pattern.regex.test(text)) fail(errors, `MEMORY.md contains possible secret: ${pattern.label}`);
+  }
+  const forbiddenSectionPattern = /^#{1,3}\s*(todo(?:s)?|task log|tasks?|status(?: report)?|pr summary|pull request summary|implementation plan|progress log)\b/im;
+  if (forbiddenSectionPattern.test(text)) {
+    fail(errors, 'MEMORY.md must not become a task log, TODO list, PR status file, or implementation plan');
+  }
+  const authorityPattern = /\b(MEMORY\.md|memory)\b[^\n.]{0,120}\b(overrides?|supersedes?|replaces?|source of truth|authoritative)\b/i;
+  for (const line of text.split('\n')) {
+    const match = authorityPattern.exec(line);
+    if (match && !memoryAuthorityClaimIsNegated(line, match.index)) {
+      fail(errors, 'MEMORY.md must not claim authority over AGENTS.md, playbooks, safety gates, source-of-truth docs, validation, generated-file rules, or code');
+      break;
     }
   }
 }
@@ -1755,6 +1969,14 @@ function markdownLinkTargets(text) {
   return targets;
 }
 
+function isAllowedConditionalMarkdownLink(entryRel, rel) {
+  return (
+    entryRel === 'AGENTS.md' &&
+    rel === portablePlaybookIndexRel &&
+    existsRel(`${portablePlaybookPublishedDir}/INDEX.md`)
+  );
+}
+
 function validateMarkdownLinks(errors) {
   const markdownFiles = listFiles().filter((entry) =>
     entry.relPath.toLowerCase().endsWith('.md') && !isIgnoredMarkdown(entry.relPath)
@@ -1769,7 +1991,9 @@ function validateMarkdownLinks(errors) {
         fail(errors, `${entry.relPath} links outside the repo: ${target}`);
         continue;
       }
-      if (!existsRel(rel)) fail(errors, `${entry.relPath} links to missing path: ${rel}`);
+      if (!existsRel(rel) && !isAllowedConditionalMarkdownLink(entry.relPath, rel)) {
+        fail(errors, `${entry.relPath} links to missing path: ${rel}`);
+      }
     }
   }
 }
@@ -1899,6 +2123,10 @@ function runValidation() {
   validateSkillPortability(errors);
   validateAgentRuleSources(errors);
   validateNoActiveAgentInstructionFilesInSkills(errors);
+  validateAgentPlaybookArchitecture(errors);
+  validatePortableRepoLocalTemplates(errors);
+  validatePortablePlaybookDocs(errors);
+  validateManagedMemory(errors);
   validateNoOldForAiReferences(errors);
   validateStaleReferences(errors);
   validateSecretStrings(errors);

@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.1.5",
+  "version": "2.2.0",
   "version_policy": "semver",
-  "version_notes": "Adds a top-level H1 to the canonical execution prompt partial so generated managed AGENTS.md toolkit blocks carry a document title.",
+  "version_notes": "Adds portable repo-local docs/playbook routing, published portable playbook docs, optional managed MEMORY.md behavior, and final-report requirements while preserving self-contained templates and the existing managed root AGENTS.md execution-block structure; moves toolkit-specific heavy context into root-routed playbooks and validates playbook routing, size budgets, memory hygiene, and dangling toolkit-only portable paths.",
   "outputs": [
     {
       "kind": "curated",
@@ -54,6 +54,14 @@
       "notes": "Published bare copy-ready repo-local Antigravity bootstrap payload for .agents/rules/00-agent-toolkit-bootstrap.md generated from reviewed skill-facing source.",
       "notice": false,
       "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/repo-local/docs/agent-playbooks",
+      "output": "skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks",
+      "notes": "Portable repo-local playbook docs copied beside AGENTS.managed.template.md so installed consumer repos do not get dead playbook links.",
+      "notice": false,
+      "fidelity": "exact"
     },
     {
       "kind": "curated",
@@ -152,6 +160,7 @@
       "skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
       "skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md",
       "skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md",
+      "skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks",
       "skills/n8n-agent-rules/SKILL.md",
       "skills/n8n-agent-rules/README.md",
       "skills/n8n-agent-rules/n8n-agent-rules.md",

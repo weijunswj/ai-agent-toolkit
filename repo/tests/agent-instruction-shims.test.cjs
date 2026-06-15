@@ -189,20 +189,22 @@ test('source structure keeps reusable prompt and adapter partials with no tiny s
     '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md',
     '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md',
-    '_projects/development/ai-coding-agent-rules/_main/repo-local'
+    '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md'
   ]) {
     assert.equal(exists(relPath), false, relPath);
   }
+  assert.equal(exists('_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/INDEX.md'), true);
+  assert.equal(exists('_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md'), false);
 });
 
 test('manual global source templates exist and are generated from execution prompt partial', () => {
   const prompt = readText(executionPromptPath).trimEnd();
   assert.match(prompt, /## Git Completion/);
   assert.match(prompt, /check PR CI\/status before reporting completion/i);
-  assert.match(prompt, /Never:\n\n- Push to `main`/);
-  assert.match(prompt, /- Claim CI passed unless checked/);
+  assert.match(prompt, /- Push to `main`, secrets, credentials, live\/runtime files, failed targeted validation, or safety-blocked changes\./);
+  assert.match(prompt, /claim CI passed unless checked/i);
   assert.doesNotMatch(prompt, /## Pull Request Description/);
-  assert.match(prompt, /keep the PR body aligned with the full base-to-head diff/i);
+  assert.match(prompt, /opening or updating a pull request/i);
   for (const relPath of [
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
@@ -218,12 +220,21 @@ test('manual global source templates exist and are generated from execution prom
 
 test('execution prompt requires full-bold user-action questions and generated surfaces stay synced', () => {
   const requiredRule = /When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold\./;
-  const requiredClarifier = /The entire user-action question must be bolded\./;
+  const portableContextRules = [
+    /## Local Documentation/,
+    /Treat repo-local documentation as active task context, not optional background\./,
+    /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/,
+    /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./,
+    /## Managed Memory/,
+    /Treat `MEMORY\.md` as managed, non-authoritative project memory\./,
+    /Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task/,
+    /Instruction sources used/,
+    /MEMORY\.md changed: Yes\/No/
+  ];
 
   assert.match(readText(executionPromptPath), /## User Action Questions/);
   for (const relPath of [
     executionPromptPath,
-    'AGENTS.md',
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
     '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
     '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
@@ -232,7 +243,9 @@ test('execution prompt requires full-bold user-action questions and generated su
   ]) {
     const text = readText(relPath);
     assert.match(text, requiredRule, relPath);
-    assert.match(text, requiredClarifier, relPath);
+    for (const rule of portableContextRules) {
+      assert.match(text, rule, relPath);
+    }
   }
 });
 
@@ -295,11 +308,17 @@ test('repo-local shim marker structural check rejects invalid marker states', ()
   assert.equal(isStructurallyCurrentManagedText(`${template.end}${body}${template.begin}`), false, 'out-of-order marker pair is not structurally current');
 });
 
-test('managed toolkit block comes from the execution prompt partial', () => {
+test('root AGENTS is directly maintained while repo-local block comes from execution prompt partial', () => {
+  const rootAgents = readText('AGENTS.md');
   const prompt = readText(executionPromptPath).trimEnd();
-  const rootToolkit = block(readText('AGENTS.md'), toolkitBegin, toolkitEnd, 'root toolkit block')
+  const n8nAdapter = readText(n8nAdapterPath).trimEnd();
+  const rootToolkit = block(rootAgents, toolkitBegin, toolkitEnd, 'root managed toolkit block')
     .replace(toolkitBegin, '')
     .replace(toolkitEnd, '')
+    .trim();
+  const rootN8n = block(rootAgents, n8nBegin, n8nEnd, 'root managed n8n block')
+    .replace(n8nBegin, '')
+    .replace(n8nEnd, '')
     .trim();
   const managedPayload = repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template');
   const sourceToolkit = block(managedPayload, toolkitBegin, toolkitEnd, 'repo-local managed toolkit block')
@@ -308,17 +327,17 @@ test('managed toolkit block comes from the execution prompt partial', () => {
     .trim();
 
   assert.equal(rootToolkit, prompt);
+  assert.equal(rootN8n, n8nAdapter);
+  assert.doesNotMatch(rootAgents, /toolkit-root-agent-rules\.md/);
+  assert.match(rootAgents, /Toolkit-specific root rules are maintained directly in this file after the managed execution blocks/);
+  assert.match(rootAgents, /\[Toolkit playbook index\]\(repo\/docs\/agent-playbooks\/INDEX\.md\) \(`repo\/docs\/agent-playbooks\/INDEX\.md`\)/i);
+  assert.match(rootAgents, /MEMORY\.md changed: Yes\/No/i);
+  assert.match(rootAgents, /Source-watch is PR-notification-only/i);
   assert.equal(sourceToolkit, prompt);
-  assertNoForbiddenDefaultPromptPhrases(rootToolkit, 'root toolkit block');
-  assert.match(rootToolkit, /read the relevant docs before editing and treat them as active context/i);
-  assert.match(rootToolkit, /Put persistent status, report, implementation plan, handoff, or operations notes under an existing `docs\/` path/i);
-  assert.match(rootToolkit, /Keep relevant docs and implementation plans current as the work changes/i);
-  assert.match(rootToolkit, /Check whether the change affects existing setup, usage, operations, CI\/CD, deployment, safety, troubleshooting, or implementation-plan docs/i);
 });
 
 test('n8n adapter is compact and fail-closed', () => {
   for (const [label, text] of [
-    ['root AGENTS.md', readText('AGENTS.md')],
     ['repo-local AGENTS managed template', repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template')],
     ['published repo-local AGENTS managed template', repoLocalPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'published repo-local AGENTS managed template')]
   ]) {
@@ -474,6 +493,8 @@ test('skill README documents required file sets and shim dependency', () => {
     const text = readText(relPath);
     assert.match(text, /Do not install a shim alone/i, relPath);
     assert.match(text, /Shims require root `AGENTS\.md`/i, relPath);
+    assert.match(text, /repo-local\/docs\/agent-playbooks\/INDEX\.md/, relPath);
+    assert.match(text, /target repo `docs\/agent-playbooks\/`/, relPath);
     assert.match(text, /`AGENTS\.managed\.template\.md` is canonical for the managed toolkit block/i, relPath);
     assert.match(text, /Preserve unmarked user-authored content\./i, relPath);
     assert.match(text, /toolkit-managed block is broken or edited during an explicit install\/check\/repair\/refresh\/bootstrap request/i, relPath);
@@ -514,6 +535,8 @@ test('skill instructions add only target platform shims by default', () => {
     const text = readText(relPath);
     assert.match(text, /Check only the required files for the selected platform/i, relPath);
     assert.match(text, /Do not create shims for platforms that are not in scope/i, relPath);
+    assert.match(text, /repo-local\/docs\/agent-playbooks\/` -> target repo `docs\/agent-playbooks\/`/, relPath);
+    assert.match(text, /also install or refresh the portable playbook docs under `docs\/agent-playbooks\/` when missing or stale/i, relPath);
     assert.match(text, /install, check, repair, refresh, or bootstrap repo-local agent rules/i, relPath);
     assert.match(text, /user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions/i, relPath);
     assert.match(text, /For ordinary follow-up coding tasks, stop after the cheap structural managed-marker check/i, relPath);
