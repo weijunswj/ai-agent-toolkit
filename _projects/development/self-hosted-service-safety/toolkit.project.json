@@ -5,9 +5,9 @@
   "title": "Self-Hosted Service Safety",
   "module_path": "_projects/development/self-hosted-service-safety",
   "main_path": "_projects/development/self-hosted-service-safety/_main",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "version_policy": "semver",
-  "version_notes": "Adds public-path, honeypot/canary, traffic visibility, SSH, and port-exposure review guidance.",
+  "version_notes": "Adds privacy-safe deployment and AI-module observability baseline review guidance.",
   "outputs": [
     {
       "kind": "copy",
@@ -63,7 +63,7 @@
     "unique_value": "Forces a short risk review before high-impact local setup or service exposure work that agents might otherwise treat as ordinary setup commands.",
     "runtime_footprint": "SKILL.md is intentionally short, review-only, and has no required long references or bundled tools; optional detail is not loaded by default.",
     "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because the useful behavior is a compact safety review, not an installer or tutorial.",
-    "output_contract": "Return a compact Self-Hosted Service Safety Review with risk level, blocked actions, approval-gated actions, safe first-run plan, required config changes, backup/restore notes, and verification checks before public exposure.",
+    "output_contract": "Return a compact Self-Hosted Service Safety Review with risk level, blocked actions, approval-gated actions, safe first-run plan, required config changes, backup/restore notes, privacy-safe deployment/AI observability baseline, and verification checks before public exposure.",
     "anti_bloat_review": "The skill is rejected for ordinary coding and model-general advice; it triggers only on setup/exposure/credential/live-system risk and produces a compact review instead of a tutorial.",
     "safety_boundary": "Review-only by default. Docker, DNS/TLS, tunnels, firewall/public ports, VPS/cloud changes, credentials, production data, or deployment commands require explicit current-turn approval.",
     "source_provenance": "first_party",

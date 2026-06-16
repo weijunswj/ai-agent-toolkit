@@ -29,6 +29,8 @@ This is a short reviewed operating overview and safety wrapper. It is not the fu
 - Prefer CI first, deployment later.
 - Use GitHub Secrets for private values.
 - Keep `docs/ci-cd/CURRENT_CICD_STATUS.md` updated in the consumer repo, unless the repo already documents another CI/CD status path.
+- Add a privacy-safe observability baseline before deployment or background AI features: daily PASS/WARN/FAIL rollups, metadata-only event allowlists, AI attempt ledger fields, failure taxonomy, and safe output-shape diagnostics.
+- Never log raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, or private connector data. Do not run provider calls, notification tests, production mutations, or auto-remediation from observability without explicit approval.
 
 ## Pipeline Defaults
 

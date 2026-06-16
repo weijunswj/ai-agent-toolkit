@@ -15,3 +15,5 @@ Reusable secure CI/CD source materials.
 - `safe-source-update-policy.md`: policy for source update detection and review.
 
 These are templates. Review and adapt them before use.
+
+The status template includes a privacy-safe deployment and AI-module observability baseline. Keep it metadata-only: daily PASS/WARN/FAIL summaries, event allowlists, AI attempt ledger fields, failure taxonomy, and output-shape diagnostics are allowed; raw prompts, uploads, model responses, secrets, auth headers, cookies, private connector data, provider calls, notification tests, production mutations, and auto-remediation are not.
