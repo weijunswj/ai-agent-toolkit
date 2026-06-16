@@ -15,6 +15,7 @@ Small planning skill for deciding whether to use low-cost, free, managed, or own
 - Consider self-hosted n8n on Hostinger/Coolify for suitable internal workflow automation, while applying `n8n-agent-rules` before any n8n workflow design, JSON, import/export, activation, execution, credentials, or live-instance work.
 - Produce a low-cost or free-tier-first foundation plan with clear remaining security responsibilities.
 - Define upgrade-watch thresholds so Codex can later suggest cleanup, optimization, or owner-approved upgrades when usage approaches free/low-cost limits.
+- Define privacy-safe deployment and AI-module observability before go-live, using daily PASS/WARN/FAIL summaries, event allowlists, AI attempt ledger metadata, failure taxonomy, and output-shape diagnostics without raw prompts, uploads, model responses, secrets, auth headers, cookies, or private connector data.
 - Ask whether to compare managed options before introducing or materially changing common platform primitives, then verify current official pricing and docs when concrete provider recommendations are needed.
 
 ## Not For
@@ -27,4 +28,4 @@ Small planning skill for deciding whether to use low-cost, free, managed, or own
 
 ## Expected Output
 
-Return a compact Managed App Foundation Review with a build/buy/skip/hybrid table, low-cost or owner-hosted foundation candidates, security work avoided, remaining security tasks, cost caveats, upgrade-watch thresholds, and a cut list for custom work that should not be built from scratch.
+Return a compact Managed App Foundation Review with a build/buy/skip/hybrid table, low-cost or owner-hosted foundation candidates, security work avoided, remaining security tasks, cost caveats, upgrade-watch thresholds, privacy-safe deployment/AI observability baseline, and a cut list for custom work that should not be built from scratch.

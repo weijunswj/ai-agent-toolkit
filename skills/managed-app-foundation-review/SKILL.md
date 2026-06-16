@@ -27,6 +27,7 @@ Keep the review practical: recommend building from scratch only when product con
 - Do not treat a provider as secure by default. Identify the configuration still required: rate limits, email verification, RLS/security rules, least-privilege keys, webhook verification, CSRF/session settings, backup/restore, export path, and data retention.
 - Do not claim current pricing, free-tier limits, feature availability, or compliance posture unless you have checked current official provider docs in this turn. If browsing is unavailable or not requested, state that pricing and limits must be verified before commitment.
 - For each recommended managed provider, capture upgrade-watch signals such as storage, bandwidth, request volume, database size, email volume, contacts, seats, monthly active users, execution minutes, compute/RAM/disk, API quotas, error rates, and rate-limit events when relevant.
+- For deployment and AI modules, define privacy-safe observability before recommending go-live: daily PASS/WARN/FAIL summaries, metadata-only event allowlists, AI attempt ledger fields, failure taxonomy, and output-shape diagnostics. Do not log raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, private connector data, payment data, or private files.
 - Treat upgrade recommendations as advisory. Do not upgrade paid plans, change billing, add seats, resize servers, or enable paid add-ons without explicit owner approval naming the provider and operation.
 - Do not create accounts, enter secrets, migrate data, modify DNS, configure production services, or write to external systems without explicit current-turn approval naming the provider and operation.
 
@@ -77,6 +78,7 @@ Keep the review practical: recommend building from scratch only when product con
 - Browser code must not receive private API keys, database credentials, service-role keys, webhook secrets, Firebase service account JSON, or paid provider tokens.
 - Public/anon client keys must be backed by RLS, Firebase Security Rules, scoped API routes, auth checks, and provider quotas.
 - Traffic/security monitoring should use first-party logs, proxy/WAF events, rate-limit counters, and privacy-preserving telemetry before broad third-party trackers.
+- AI-module observability should be metadata-only: attempt id, module name, provider/model identifier, status, latency, retry count, safe token or byte counts, failure taxonomy, and output-shape validation. No provider calls, notification tests, production mutations, or auto-remediation without explicit current-turn approval.
 
 ## Output
 
@@ -86,6 +88,7 @@ Return:
 - A `Cut List` of custom work to remove or defer.
 - A `Keep/Build List` for genuinely product-specific work.
 - An `Upgrade Watch` list for each selected managed service: key quota, current/expected usage, warning threshold, read-only signal to inspect, review cadence, and owner-approved next action.
+- A `Deployment And AI Observability Baseline` with daily PASS/WARN/FAIL signals, allowed metadata events, AI attempt ledger fields, failure taxonomy, and private-payload exclusions.
 - A `Verify Before Commit` list of official pricing/docs, free-tier limits, export paths, and security settings to check before implementation.
 - A `Security Still Required` list so managed-service adoption does not hide remaining rate-limit, CSRF, key-handling, backup, logging, and access-control work.
 

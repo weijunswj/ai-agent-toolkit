@@ -34,10 +34,12 @@ Keep this skill lightweight. Do not use it as general advice when the task has n
 - Canary paths and honeypots: if obvious paths are used as decoys, they must be inert, contain no real data, trigger no privileged behavior, and log only minimal safe metadata for abuse review.
 - Traffic visibility: prefer first-party access logs, reverse-proxy logs, WAF events, rate-limit counters, and privacy-preserving security telemetry for identifying abuse. Do not add third-party trackers or log sensitive payloads without approval.
 - Host access and ports: prefer SSH key-only access with password login disabled only after key access, recovery access, and a second session are verified. Expose only required ports, usually HTTP/HTTPS and tightly controlled SSH; keep database, cache, and admin ports private by default.
+- Deployment observability: before public exposure, define a metadata-only daily PASS/WARN/FAIL rollup, event allowlist, health/smoke-test status, rollback-readiness signal, and manual-approval state. Do not run provider calls, notification tests, production mutations, or auto-remediation without explicit current-turn approval naming the target operation.
+- AI-module observability: if the service includes AI features, log only a metadata AI attempt ledger, failure taxonomy, latency/retry/status fields, and safe output-shape diagnostics. Do not log raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, private connector data, payment data, or private files.
 
 ## Output
 
-Return a compact Self-Hosted Service Safety Review with risk level, blocked actions, approval-gated actions, safe first-run plan, required config changes, backup/restore notes, and verification checks before public exposure.
+Return a compact Self-Hosted Service Safety Review with risk level, blocked actions, approval-gated actions, safe first-run plan, required config changes, backup/restore notes, privacy-safe deployment/AI observability baseline, and verification checks before public exposure.
 
 ## Safety Boundary
 

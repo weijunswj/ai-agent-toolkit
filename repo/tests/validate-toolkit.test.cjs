@@ -1061,11 +1061,92 @@ test('source-watch PR notifier is the only scheduled source-watch workflow', () 
     .map((name) => `.github/workflows/${name}`);
   const scheduledSourceWatch = workflowFiles.filter((relPath) => {
     const text = readTextFile(path.join(repoRoot, relPath));
-    return /source[- ]watch/i.test(`${relPath}\n${text}`) && /^\s{2}schedule:\s*$/m.test(text);
+    return relPath !== '.github/workflows/weekly-ecosystem-radar.yml' &&
+      /source[- ]watch/i.test(`${relPath}\n${text}`) &&
+      /^\s{2}schedule:\s*$/m.test(text);
+  });
+  const scheduledWeeklyRadar = workflowFiles.filter((relPath) => {
+    const text = readTextFile(path.join(repoRoot, relPath));
+    return relPath === '.github/workflows/weekly-ecosystem-radar.yml' &&
+      /^name:\s*Weekly Ecosystem Radar\s*$/m.test(text) &&
+      /^\s{2}schedule:\s*$/m.test(text);
   });
 
   assert.deepEqual(scheduledSourceWatch, ['.github/workflows/source-watch-pr.yml']);
+  assert.deepEqual(scheduledWeeklyRadar, ['.github/workflows/weekly-ecosystem-radar.yml']);
   assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'safe-source-update.yml')), false);
+});
+
+test('weekly ecosystem radar workflow uses the stable report-only PR contract', () => {
+  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'weekly-ecosystem-radar.yml'));
+  assert.match(workflow, /^name:\s*Weekly Ecosystem Radar\s*$/m);
+  assert.match(workflow, /cron: "37 6 \* \* 2"/);
+  assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/m);
+  assert.match(workflow, /^  contents: write$/m);
+  assert.match(workflow, /^  pull-requests: write$/m);
+  assert.doesNotMatch(workflow, /^  issues: write$/m);
+  assert.match(workflow, /repo\/scripts\/check-ecosystem-updates\.cjs --report "\$REPORT_TEMP"/);
+  assert.match(workflow, /BRANCH: codex\/weekly-ecosystem-radar/);
+  assert.match(workflow, /PR_TITLE: "\[radar\] Weekly ecosystem update review"/);
+  assert.match(workflow, /REPORT_PATH: repo\/source-watch\/reviews\/weekly-ecosystem-radar\.md/);
+  assert.match(workflow, /git add -- "\$REPORT_PATH"/);
+  assert.match(workflow, /if \[ "\$staged_files" != "\$REPORT_PATH" \]; then/);
+  assert.match(workflow, /Find existing weekly radar PR/);
+  assert.match(workflow, /if: steps\.radar\.outputs\.pr_needed == 'true' && steps\.update_branch\.outputs\.pushed != 'true'/);
+  assert.match(workflow, /if: steps\.radar\.outputs\.pr_needed == 'true' && \(steps\.update_branch\.outputs\.pushed == 'true' \|\| steps\.existing_pr\.outputs\.exists == 'true'\)/);
+  assert.match(workflow, /Skip weekly radar PR without diff/);
+  assert.match(workflow, /No report commit was pushed and no existing open radar PR was found, so no PR was created\./);
+  assert.match(workflow, /\[radar\] Weekly ecosystem update review/);
+  assert.match(workflow, /No issues are created and no `issues: write` permission is requested\./);
+  assert.match(workflow, /No source pins or advisory baselines were changed\./);
+  assert.match(workflow, /No SOURCE-LOCK pins were changed\./);
+  assert.match(workflow, /Advisory baseline advancement requires a separate human-approved PR\./);
+  assert.doesNotMatch(workflow, /gh issue create|safe-source-update\.cjs|gh pr merge|--auto/i);
+  assert.doesNotMatch(workflow, /git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json|skills\/|repo\/ecosystem-radar\.json)/i);
+});
+
+test('validator rejects weekly ecosystem radar issue permission', () => {
+  const cwd = tempCopy();
+  const workflowPath = path.join(cwd, '.github', 'workflows', 'weekly-ecosystem-radar.yml');
+  const workflow = readTextFile(workflowPath);
+  fs.writeFileSync(workflowPath, workflow.replace('  pull-requests: write\n', '  pull-requests: write\n  issues: write\n'));
+
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /weekly-ecosystem-radar\.yml must not request issues: write/);
+});
+
+test('validator rejects weekly ecosystem radar staging outside the report path', () => {
+  const cwd = tempCopy();
+  const workflowPath = path.join(cwd, '.github', 'workflows', 'weekly-ecosystem-radar.yml');
+  const workflow = readTextFile(workflowPath);
+  fs.writeFileSync(workflowPath, workflow.replace('git add -- "$REPORT_PATH"', 'git add -- "$REPORT_PATH" repo/ecosystem-radar.json'));
+
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /weekly-ecosystem-radar\.yml must stage only the weekly radar report path/);
+});
+
+test('validator rejects weekly ecosystem radar PR creation gated only on pr_needed', () => {
+  const cwd = tempCopy();
+  const workflowPath = path.join(cwd, '.github', 'workflows', 'weekly-ecosystem-radar.yml');
+  const workflow = readTextFile(workflowPath);
+  fs.writeFileSync(
+    workflowPath,
+    workflow.replace(
+      "if: steps.radar.outputs.pr_needed == 'true' && (steps.update_branch.outputs.pushed == 'true' || steps.existing_pr.outputs.exists == 'true')",
+      "if: steps.radar.outputs.pr_needed == 'true'"
+    )
+  );
+
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /weekly-ecosystem-radar\.yml must create or update the weekly radar PR only after a pushed report commit or existing open PR/);
+});
+
+test('validator accepts the weekly ecosystem radar workflow allowance only for its reviewed path', () => {
+  const errors = validator.runValidation();
+  assert.equal(errors.filter((error) => /weekly-ecosystem-radar\.yml/.test(error)).length, 0, errors.join('\n'));
 });
 
 test('auto-sync workflow owns agent instruction shim freshness', () => {
