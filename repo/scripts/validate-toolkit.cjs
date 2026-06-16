@@ -1958,6 +1958,33 @@ function validateWeeklyEcosystemRadarWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} must push with force-with-lease when updating the stable branch`);
   }
 
+  const existingPrStep = workflowStepText(steps, 'Find existing weekly radar PR');
+  const openPrStep = workflowStepText(steps, 'Open or update weekly radar PR');
+  const skipNoDiffStep = workflowStepText(steps, 'Skip weekly radar PR without diff');
+  if (!existingPrStep ||
+      !existingPrStep.includes("if: steps.radar.outputs.pr_needed == 'true' && steps.update_branch.outputs.pushed != 'true'") ||
+      !existingPrStep.includes('gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1') ||
+      !existingPrStep.includes('echo "exists=true" >> "$GITHUB_OUTPUT"') ||
+      !existingPrStep.includes('echo "exists=false" >> "$GITHUB_OUTPUT"')) {
+    fail(errors, `${entry.relPath} must check whether an open weekly radar PR already exists when no report commit was pushed`);
+  }
+  if (/gh\s+pr\s+(?:create|edit)/i.test(existingPrStep)) {
+    fail(errors, `${entry.relPath} existing-PR check must not create or edit PRs`);
+  }
+  if (!openPrStep ||
+      !openPrStep.includes("if: steps.radar.outputs.pr_needed == 'true' && (steps.update_branch.outputs.pushed == 'true' || steps.existing_pr.outputs.exists == 'true')")) {
+    fail(errors, `${entry.relPath} must create or update the weekly radar PR only after a pushed report commit or existing open PR`);
+  }
+  if (!skipNoDiffStep ||
+      !skipNoDiffStep.includes("if: steps.radar.outputs.pr_needed == 'true' && steps.update_branch.outputs.pushed != 'true' && steps.existing_pr.outputs.exists != 'true'") ||
+      !skipNoDiffStep.includes('No report commit was pushed and no existing open radar PR was found, so no PR was created.') ||
+      !skipNoDiffStep.includes('$GITHUB_STEP_SUMMARY')) {
+    fail(errors, `${entry.relPath} must summarize and exit successfully when a report is generated but no diff or existing PR exists`);
+  }
+  if (/gh\s+pr\s+(?:create|edit)|git\s+(?:add|commit|push)/i.test(skipNoDiffStep)) {
+    fail(errors, `${entry.relPath} no-diff/no-PR summary step must not create PRs or mutate git state`);
+  }
+
   for (const required of [
     'This PR is a weekly ecosystem radar report only.',
     'The scheduled workflow stages only `repo/source-watch/reviews/weekly-ecosystem-radar.md`.',

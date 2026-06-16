@@ -99,8 +99,22 @@ jobs:
           fi
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
+      - name: Find existing weekly radar PR
+        id: existing_pr
+        if: steps.radar.outputs.pr_needed == 'true' && steps.update_branch.outputs.pushed != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ecosystem-radar/weekly-review
+        run: |
+          set -euo pipefail
+          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Open or update weekly radar PR
-        if: steps.radar.outputs.pr_needed == 'true'
+        if: steps.radar.outputs.pr_needed == 'true' && (steps.update_branch.outputs.pushed == 'true' || steps.existing_pr.outputs.exists == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ecosystem-radar/weekly-review
@@ -131,3 +145,16 @@ jobs:
           else
             gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$PR_TITLE" --body-file "$PR_BODY"
           fi
+
+      - name: Skip weekly radar PR without diff
+        if: steps.radar.outputs.pr_needed == 'true' && steps.update_branch.outputs.pushed != 'true' && steps.existing_pr.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          {
+            echo "## Weekly ecosystem radar"
+            echo ""
+            echo "The radar generated a report, but it matched the report already on main."
+            echo "No report commit was pushed and no existing open radar PR was found, so no PR was created."
+            echo ""
+            echo "Only \`repo/source-watch/reviews/weekly-ecosystem-radar.md\` is an allowed scheduled write target."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -70,6 +70,37 @@ test('weekly ecosystem radar rejects symlink report writes and pushes with a lea
   assert.doesNotMatch(script, /git push origin "HEAD:main"/i);
 });
 
+test('weekly ecosystem radar handles no-diff runs without creating useless PRs', () => {
+  const updateScript = stepScript('Update weekly radar branch');
+  assert.match(updateScript, /if git diff --cached --quiet; then/);
+  assert.match(updateScript, /echo "pushed=false" >> "\$GITHUB_OUTPUT"/);
+  assert.match(updateScript, /echo "pushed=true" >> "\$GITHUB_OUTPUT"/);
+
+  const existingPrScript = stepScript('Find existing weekly radar PR');
+  assert.match(existingPrScript, /if: steps\.radar\.outputs\.pr_needed == 'true' && steps\.update_branch\.outputs\.pushed != 'true'/);
+  assert.match(existingPrScript, /gh pr view "\$BRANCH" --repo "\$GITHUB_REPOSITORY" >/);
+  assert.match(existingPrScript, /echo "exists=true" >> "\$GITHUB_OUTPUT"/);
+  assert.match(existingPrScript, /echo "exists=false" >> "\$GITHUB_OUTPUT"/);
+  assert.doesNotMatch(existingPrScript, /gh pr create|gh pr edit/i);
+
+  const openScript = stepScript('Open or update weekly radar PR');
+  assert.match(
+    openScript,
+    /if: steps\.radar\.outputs\.pr_needed == 'true' && \(steps\.update_branch\.outputs\.pushed == 'true' \|\| steps\.existing_pr\.outputs\.exists == 'true'\)/
+  );
+  assert.match(openScript, /gh pr edit "\$BRANCH"/);
+  assert.match(openScript, /gh pr create --repo "\$GITHUB_REPOSITORY"/);
+
+  const skipScript = stepScript('Skip weekly radar PR without diff');
+  assert.match(
+    skipScript,
+    /if: steps\.radar\.outputs\.pr_needed == 'true' && steps\.update_branch\.outputs\.pushed != 'true' && steps\.existing_pr\.outputs\.exists != 'true'/
+  );
+  assert.match(skipScript, /No report commit was pushed and no existing open radar PR was found, so no PR was created\./);
+  assert.match(skipScript, />> "\$GITHUB_STEP_SUMMARY"/);
+  assert.doesNotMatch(skipScript, /gh pr create|gh pr edit|git add|git commit|git push/i);
+});
+
 test('weekly ecosystem radar PR body documents the non-mutating safety contract', () => {
   assert.match(workflow, /\[ecosystem-radar\] Weekly ecosystem radar review/);
   for (const required of [
