@@ -5,9 +5,9 @@
   "title": "Self-Hosted Service Safety",
   "module_path": "_projects/development/self-hosted-service-safety",
   "main_path": "_projects/development/self-hosted-service-safety/_main",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "version_policy": "semver",
-  "version_notes": "Initial first-party lightweight safety-review skill version.",
+  "version_notes": "Adds public-path, honeypot/canary, traffic visibility, SSH, and port-exposure review guidance.",
   "outputs": [
     {
       "kind": "copy",
@@ -57,7 +57,7 @@
   "ci_live_actions": false,
   "skill_creation_review": {
     "existing_skill_review": "Reviewed current skills before adding self-hosted-service-safety: n8n-agent-rules, n8n-local-setup, windows-localhost-workflows, secure-cicd-installer, ai-coding-agent-rules, and context-preserving-ai-publisher. No existing skill covers this exact non-n8n safety-review trigger without either being too narrow or too broad.",
-    "trigger": "Use only when reviewing or planning non-n8n self-hosted service setup, Docker Compose services, VPS deployment notes, reverse proxies, public ports, DNS/TLS, tunnels, admin panels, backups, or first-run hardening. Do not use for ordinary app coding, local-only dev servers, or n8n work.",
+    "trigger": "Use only when reviewing or planning non-n8n self-hosted service setup, Docker Compose services, VPS deployment notes, reverse proxies, public ports, DNS/TLS, tunnels, admin panels, backups, public admin/backup paths, honeypot/canary paths, traffic logs, SSH access, firewall exposure, or first-run hardening. Do not use for ordinary app coding, local-only dev servers, or n8n work.",
     "decision": "new_project_skill",
     "decision_reason": "Self-Hosted Service Safety has a distinct safety boundary and invocation trigger, so folding it into ai-coding-agent-rules would make the always-adjacent coding rules heavier while hiding the setup/exposure review boundary.",
     "unique_value": "Forces a short risk review before high-impact local setup or service exposure work that agents might otherwise treat as ordinary setup commands.",

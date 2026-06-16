@@ -1,6 +1,6 @@
 ---
 name: codex-ssh-hostinger-coolify-setup-maintainer
-description: Guide Codex through production-sensitive Hostinger VPS plus Coolify setup, SSH preflight, deployment, maintenance, daily security checks, optional Telegram/email daily notifications, intrusion-signal review, and incident response. Use when the user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, bootstrap or maintain Coolify, deploy apps through Coolify, inspect a Hostinger server over SSH, configure daily maintenance alerts, review possible intruders/security signals, or produce evidence-based PASS/WARN/FAIL maintenance reports with owner approval gates.
+description: Guide Codex through production-sensitive Hostinger VPS plus Coolify setup, SSH preflight, deployment, maintenance, daily security checks, optional Telegram/email daily notifications, upgrade advisory, intrusion-signal review, and incident response. Use when the user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, bootstrap or maintain Coolify, deploy apps through Coolify, inspect a Hostinger server over SSH, configure daily maintenance alerts, review upgrade timing, review possible intruders/security signals, or produce evidence-based PASS/WARN/FAIL maintenance reports with owner approval gates.
 ---
 
 <!--
@@ -17,7 +17,7 @@ Review rule: Preserve production safety constraints. Do not weaken secret, SSH, 
 
 # Codex SSH Hostinger Coolify Setup Maintainer
 
-Use this skill when the user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, bootstrap or maintain Coolify, deploy apps through Coolify, inspect a Hostinger server over SSH, run daily security checks, configure daily maintenance alerts, review intrusion/security signals, perform maintenance, or respond to incidents. For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`.
+Use this skill when the user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, bootstrap or maintain Coolify, deploy apps through Coolify, inspect a Hostinger server over SSH, run daily security checks, configure daily maintenance alerts, review upgrade timing from usage pressure, review intrusion/security signals, perform maintenance, or respond to incidents. For Hostinger VPS plus Coolify deployment setup/maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer`.
 
 Do not replace the n8n-specific Hostinger Coolify VPS deployment reference with this skill. Use this skill to prepare or maintain the Hostinger VPS plus Coolify host, then use `n8n-local-setup` for local n8n and for deploying n8n inside Coolify after Coolify exists. If the deployed app is n8n or the task touches live n8n workflows, credentials, import/export, activation, execution, or repo/live sync, also apply `n8n-agent-rules` before n8n-specific work.
 
@@ -32,7 +32,9 @@ Do not replace the n8n-specific Hostinger Coolify VPS deployment reference with 
 - Do not ask the user to paste secrets into chat.
 - Do not print secrets, tokens, private keys, cookies, database URLs, or env files.
 - Do not ask the user to paste SSH private keys or production passwords into chat; use owner-controlled SSH/session tooling and owner-entered secrets.
+- Prefer SSH key-only access, such as Ed25519 or strong RSA keys, but do not disable password authentication or change sshd configuration until key access, owner recovery access, the current session, and a second SSH session are verified.
 - Treat `daily-security-check.sh` as read-only reporting and optional owner-configured notification delivery only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
+- Treat upgrade advice as read-only reporting only: suggest cleanup, optimization, archival, workload split, storage resize, VPS resize, or managed-provider upgrade when evidence shows pressure, but never change billing or capacity without explicit owner approval.
 - Treat intrusion checks as signals, not proof that no intrusion occurred.
 - Store Telegram/email notification secrets only in owner-managed server config outside chat.
 
@@ -50,6 +52,7 @@ Use these exact statuses:
 ## Hard Safety Gates
 
 - Do not disable SSH.
+- Do not disable SSH password authentication or change sshd configuration until recovery access is documented, SSH key access is confirmed, the current SSH session is kept open, and a second SSH session has been tested.
 - Do not enable UFW or apply restrictive firewall changes until the recovery path is documented, SSH allow rules are confirmed, the current SSH session is kept open, and a second SSH session has been tested.
 - Do not expose database/cache/admin ports publicly by default.
 - Do not delete Docker volumes, Coolify apps, databases, backups, or persistent data without explicit owner approval.
@@ -58,6 +61,7 @@ Use these exact statuses:
 - Do not run destructive cleanup commands automatically.
 - Do not modify DNS without explicit owner approval.
 - Do not change production env vars without explicit owner approval.
+- Do not resize the VPS, upgrade paid plans, add paid provider capacity, or change billing without explicit owner approval.
 - Do not install random third-party scripts except official documented installers that are explicitly part of the checklist.
 - For official install scripts, record the source URL and require owner approval before execution.
 
@@ -81,5 +85,5 @@ The owner must buy the VPS, secure the Hostinger account, create the first Cooli
 1. Confirm target host, OS, domain, intended apps, and owner recovery access.
 2. Run only read-only preflight commands until the owner approves a named change.
 3. Write or update the relevant evidence report under `docs/hostinger-coolify/` or the repo's documented Hostinger/Coolify docs path.
-4. Ask for explicit owner approval before installs, firewall changes, DNS changes, production deploys, env var changes, reboots, destructive actions, or official installer execution.
+4. Ask for explicit owner approval before installs, firewall changes, DNS changes, production deploys, env var changes, reboots, destructive actions, paid upgrades, server resizing, billing changes, or official installer execution.
 5. After any approved change, run smoke tests and record PASS/WARN/FAIL evidence.

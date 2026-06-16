@@ -13,6 +13,7 @@ Small safety-review skill for non-n8n self-hosted service setup, Docker/VPS plan
 - A user asks to review a Docker Compose, VPS, reverse proxy, tunnel, DNS/TLS, or public-port setup for a self-hosted service.
 - A setup guide includes admin panels, default credentials, webhooks, persistent volumes, backups, or production-like data.
 - The user wants a safer first-run plan before exposing a service beyond localhost.
+- The user wants to check public admin/backup paths, honeypot/canary paths, traffic logs, SSH access, or firewall port exposure before going live.
 
 ## Not For
 

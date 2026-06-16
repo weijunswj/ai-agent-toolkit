@@ -521,6 +521,7 @@ test('skill discovery includes migrated skills', () => {
   assert.ok(skills.includes('skills/local-ai-stack-safety'));
   assert.ok(skills.includes('skills/codex-ssh-hostinger-coolify-setup-maintainer'));
   assert.ok(skills.includes('skills/self-hosted-service-safety'));
+  assert.ok(skills.includes('skills/managed-app-foundation-review'));
 });
 
 test('repo-local agent rules bootstrap skill metadata stays in the skill surface', () => {
@@ -537,6 +538,7 @@ test('project manifests include the current project modules without repo-wide MC
     'development.ai-coding-agent-rules',
     'development.hostinger-coolify-production-guide',
     'development.local-ai-stack-safety',
+    'development.managed-app-foundation-review',
     'development.self-hosted-service-safety',
     'development.windows-localhost-workflows',
     'knowledge.knowledge-index-updater',

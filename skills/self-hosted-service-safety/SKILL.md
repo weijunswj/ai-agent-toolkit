@@ -36,6 +36,10 @@ Keep this skill lightweight. Do not use it as general advice when the task has n
 - Secrets: .env files, compose variables, private keys, webhook secrets, database credentials, and logs.
 - Persistence and recovery: volumes, backups, restore test, upgrade path, and data ownership.
 - Transport and abuse risks: TLS, allowed hosts, rate limits, webhook endpoints, email sending, and background jobs.
+- Public paths and live data: do not place real admin panels, backups, exports, database dumps, logs, or private files under obvious public paths such as `/admin/`, `/backup/`, `/backups/`, `/dump/`, or `/exports/`.
+- Canary paths and honeypots: if obvious paths are used as decoys, they must be inert, contain no real data, trigger no privileged behavior, and log only minimal safe metadata for abuse review.
+- Traffic visibility: prefer first-party access logs, reverse-proxy logs, WAF events, rate-limit counters, and privacy-preserving security telemetry for identifying abuse. Do not add third-party trackers or log sensitive payloads without approval.
+- Host access and ports: prefer SSH key-only access with password login disabled only after key access, recovery access, and a second session are verified. Expose only required ports, usually HTTP/HTTPS and tightly controlled SSH; keep database, cache, and admin ports private by default.
 
 ## Output
 
