@@ -17,7 +17,7 @@ Use this skill before implementation momentum turns common platform work into cu
 
 Also use this skill to define an upgrade watch for selected providers: what usage limits matter, what signals Codex should inspect later, what warning threshold should trigger a suggestion, and what owner approval is required before any paid plan change.
 
-Do not run a full provider search for every ordinary feature. Trigger the full review when the plan includes platform primitives such as auth, accounts, backend APIs, databases, workflow automation, CRM/contact records, forms, email, storage, admin dashboards, billing, queues, scheduled jobs, webhooks, search, analytics, traffic/security monitoring, or abuse prevention.
+Do not run a full provider search for every ordinary feature. Use this skill when the task introduces or materially changes a foundation primitive, or when the user asks to reduce build scope, compare managed options, choose low-cost foundations, or define upgrade triggers. Foundation primitives include auth, accounts, backend APIs, databases, workflow automation, CRM/contact records, forms, email, storage, admin dashboards, billing, queues, scheduled jobs, webhooks, search, analytics, traffic/security monitoring, or abuse prevention. Do not interrupt small follow-up implementation tasks after the foundation decision is already recorded.
 
 Keep the review practical: recommend building from scratch only when product constraints, data ownership, compliance, offline needs, cost at expected scale, or provider lock-in make managed services a poor fit.
 
@@ -33,7 +33,7 @@ Keep the review practical: recommend building from scratch only when product con
 ## Review Workflow
 
 1. Inspect the current plan, repo, or requested feature list.
-2. If the user has not already asked for managed alternatives, pause with a compact choice: explain that the feature can be built from scratch, but managed low-cost options may cut work and security risk; ask whether to compare them before implementing.
+2. If the task introduces or materially changes a foundation primitive and the user has not already asked for managed alternatives, pause with a compact choice: explain that the feature can be built from scratch, but managed low-cost options may cut work and security risk; ask whether to compare them before implementing. If the repo or thread already records the foundation decision and the task is a small follow-up, continue without pausing.
 3. List the foundation capabilities being custom-built:
    - Auth, signup, login, password reset, email verification, MFA, roles, and sessions.
    - User/customer database, row permissions, backend APIs, storage, backups, and exports.

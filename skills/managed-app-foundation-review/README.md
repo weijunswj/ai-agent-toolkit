@@ -15,11 +15,12 @@ Small planning skill for deciding whether to use low-cost, free, managed, or own
 - Consider self-hosted n8n on Hostinger/Coolify for suitable internal workflow automation, while applying `n8n-agent-rules` before any n8n workflow design, JSON, import/export, activation, execution, credentials, or live-instance work.
 - Produce a low-cost or free-tier-first foundation plan with clear remaining security responsibilities.
 - Define upgrade-watch thresholds so Codex can later suggest cleanup, optimization, or owner-approved upgrades when usage approaches free/low-cost limits.
-- Ask whether to compare managed options before building common platform primitives from scratch, then verify current official pricing and docs when concrete provider recommendations are needed.
+- Ask whether to compare managed options before introducing or materially changing common platform primitives, then verify current official pricing and docs when concrete provider recommendations are needed.
 
 ## Not For
 
 - Do not use for ordinary feature implementation after the foundation decision is already made.
+- Do not interrupt small follow-up implementation tasks when the repo or thread already records the foundation decision.
 - Do not use this skill to bypass n8n safety rules. n8n workflow work still belongs under `n8n-agent-rules`, and live n8n actions require explicit current-turn approval.
 - Do not claim current provider pricing, free-tier limits, or plan features without checking official sources.
 - Do not create provider accounts, enter secrets, migrate production data, change DNS, configure live services, change billing, or upgrade paid plans without explicit current-turn approval naming the target operation.
