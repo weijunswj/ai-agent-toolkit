@@ -1872,9 +1872,12 @@ function validateWeeklyEcosystemRadarWorkflow(entry, text, errors) {
   if (!text.includes('cron: "37 6 * * 2"')) {
     fail(errors, `${entry.relPath} missing weekly cron 37 6 * * 2`);
   }
-  for (const forbiddenEvent of ['workflow_dispatch', 'repository_dispatch', 'pull_request', 'pull_request_target', 'workflow_call']) {
+  if (!/^\s{2}workflow_dispatch:\s*$/m.test(text)) {
+    fail(errors, `${entry.relPath} must allow safe manual workflow_dispatch`);
+  }
+  for (const forbiddenEvent of ['repository_dispatch', 'pull_request', 'pull_request_target', 'workflow_call']) {
     if (new RegExp(`^\\s{2}${forbiddenEvent}:\\s*$`, 'm').test(text)) {
-      fail(errors, `${entry.relPath} must stay scheduled-only and must not trigger on ${forbiddenEvent}`);
+      fail(errors, `${entry.relPath} must trigger only on schedule or workflow_dispatch, not ${forbiddenEvent}`);
     }
   }
   const permissions = workflowPermissionLines(text) || [];
@@ -1912,10 +1915,10 @@ function validateWeeklyEcosystemRadarWorkflow(entry, text, errors) {
   if (/\bn8n\s+(?:import|export)\b|(?:import|export)-n8n-workflows-live|docker\s+exec[^\n]*\bn8n\b/i.test(text)) {
     fail(errors, `${entry.relPath} must not run live n8n import/export`);
   }
-  if (!/ecosystem-radar\/weekly-review/.test(text)) {
+  if (!/codex\/weekly-ecosystem-radar/.test(text)) {
     fail(errors, `${entry.relPath} must use the stable weekly radar review branch`);
   }
-  if (!/\[ecosystem-radar\] Weekly ecosystem radar review/.test(text)) {
+  if (!/\[radar\] Weekly ecosystem update review/.test(text)) {
     fail(errors, `${entry.relPath} must use the stable weekly radar PR title`);
   }
   if (!/REPORT_PATH:\s*repo\/source-watch\/reviews\/weekly-ecosystem-radar\.md/.test(text)) {
@@ -1987,7 +1990,7 @@ function validateWeeklyEcosystemRadarWorkflow(entry, text, errors) {
 
   for (const required of [
     'This PR is a weekly ecosystem radar report only.',
-    'The scheduled workflow stages only `repo/source-watch/reviews/weekly-ecosystem-radar.md`.',
+    'The workflow stages only `repo/source-watch/reviews/weekly-ecosystem-radar.md`.',
     'No `_projects/**`, `SOURCE-LOCK.json`, generated `skills/**`, advisory baselines, provider or deployment config, secrets, or application code were staged by the workflow.',
     'No issues are created and no `issues: write` permission is requested.',
     'No source pins or advisory baselines were changed.',

@@ -1081,11 +1081,13 @@ test('weekly ecosystem radar workflow uses the stable report-only PR contract', 
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'weekly-ecosystem-radar.yml'));
   assert.match(workflow, /^name:\s*Weekly Ecosystem Radar\s*$/m);
   assert.match(workflow, /cron: "37 6 \* \* 2"/);
-  assert.doesNotMatch(workflow, /^\s{2}workflow_dispatch:\s*$/m);
+  assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/m);
   assert.match(workflow, /^  contents: write$/m);
   assert.match(workflow, /^  pull-requests: write$/m);
   assert.doesNotMatch(workflow, /^  issues: write$/m);
   assert.match(workflow, /repo\/scripts\/check-ecosystem-updates\.cjs --report "\$REPORT_TEMP"/);
+  assert.match(workflow, /BRANCH: codex\/weekly-ecosystem-radar/);
+  assert.match(workflow, /PR_TITLE: "\[radar\] Weekly ecosystem update review"/);
   assert.match(workflow, /REPORT_PATH: repo\/source-watch\/reviews\/weekly-ecosystem-radar\.md/);
   assert.match(workflow, /git add -- "\$REPORT_PATH"/);
   assert.match(workflow, /if \[ "\$staged_files" != "\$REPORT_PATH" \]; then/);
@@ -1094,7 +1096,7 @@ test('weekly ecosystem radar workflow uses the stable report-only PR contract', 
   assert.match(workflow, /if: steps\.radar\.outputs\.pr_needed == 'true' && \(steps\.update_branch\.outputs\.pushed == 'true' \|\| steps\.existing_pr\.outputs\.exists == 'true'\)/);
   assert.match(workflow, /Skip weekly radar PR without diff/);
   assert.match(workflow, /No report commit was pushed and no existing open radar PR was found, so no PR was created\./);
-  assert.match(workflow, /\[ecosystem-radar\] Weekly ecosystem radar review/);
+  assert.match(workflow, /\[radar\] Weekly ecosystem update review/);
   assert.match(workflow, /No issues are created and no `issues: write` permission is requested\./);
   assert.match(workflow, /No source pins or advisory baselines were changed\./);
   assert.match(workflow, /No SOURCE-LOCK pins were changed\./);

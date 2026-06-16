@@ -23,11 +23,11 @@ function stepScript(name) {
   return workflow.slice(start, nextStep === -1 ? workflow.length : nextStep);
 }
 
-test('weekly ecosystem radar is scheduled-only and PR-only with no issue permission', () => {
+test('weekly ecosystem radar is scheduled and manually dispatchable with no issue permission', () => {
   assert.match(workflow, /^name:\s*Weekly Ecosystem Radar\s*$/m);
   assert.match(workflow, /^\s{2}schedule:\s*$/m);
   assert.match(workflow, /^\s*-\s*cron:\s*"37 6 \* \* 2"\s*$/m);
-  assert.doesNotMatch(workflow, /^\s*workflow_dispatch:\s*$/m);
+  assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/m);
   assert.doesNotMatch(workflow, /^\s*repository_dispatch:\s*$/m);
   assert.doesNotMatch(workflow, /^\s*pull_request:\s*$/m);
   assert.doesNotMatch(workflow, /^\s*pull_request_target:\s*$/m);
@@ -50,6 +50,7 @@ test('weekly ecosystem radar runs trusted main code before branch writes', () =>
 
 test('weekly ecosystem radar stages only the generated report path', () => {
   const script = stepScript('Update weekly radar branch');
+  assert.match(script, /BRANCH: codex\/weekly-ecosystem-radar/);
   assert.match(script, /REPORT_PATH: repo\/source-watch\/reviews\/weekly-ecosystem-radar\.md/);
   assert.match(script, /git switch -C "\$BRANCH" origin\/main/);
   assert.match(script, /git add -- "\$REPORT_PATH"/);
@@ -77,6 +78,7 @@ test('weekly ecosystem radar handles no-diff runs without creating useless PRs',
   assert.match(updateScript, /echo "pushed=true" >> "\$GITHUB_OUTPUT"/);
 
   const existingPrScript = stepScript('Find existing weekly radar PR');
+  assert.match(existingPrScript, /BRANCH: codex\/weekly-ecosystem-radar/);
   assert.match(existingPrScript, /if: steps\.radar\.outputs\.pr_needed == 'true' && steps\.update_branch\.outputs\.pushed != 'true'/);
   assert.match(existingPrScript, /gh pr view "\$BRANCH" --repo "\$GITHUB_REPOSITORY" >/);
   assert.match(existingPrScript, /echo "exists=true" >> "\$GITHUB_OUTPUT"/);
@@ -84,6 +86,8 @@ test('weekly ecosystem radar handles no-diff runs without creating useless PRs',
   assert.doesNotMatch(existingPrScript, /gh pr create|gh pr edit/i);
 
   const openScript = stepScript('Open or update weekly radar PR');
+  assert.match(openScript, /BRANCH: codex\/weekly-ecosystem-radar/);
+  assert.match(openScript, /PR_TITLE: "\[radar\] Weekly ecosystem update review"/);
   assert.match(
     openScript,
     /if: steps\.radar\.outputs\.pr_needed == 'true' && \(steps\.update_branch\.outputs\.pushed == 'true' \|\| steps\.existing_pr\.outputs\.exists == 'true'\)/
@@ -102,10 +106,10 @@ test('weekly ecosystem radar handles no-diff runs without creating useless PRs',
 });
 
 test('weekly ecosystem radar PR body documents the non-mutating safety contract', () => {
-  assert.match(workflow, /\[ecosystem-radar\] Weekly ecosystem radar review/);
+  assert.match(workflow, /\[radar\] Weekly ecosystem update review/);
   for (const required of [
     'This PR is a weekly ecosystem radar report only.',
-    'The scheduled workflow stages only `repo/source-watch/reviews/weekly-ecosystem-radar.md`.',
+    'The workflow stages only `repo/source-watch/reviews/weekly-ecosystem-radar.md`.',
     'No `_projects/**`, `SOURCE-LOCK.json`, generated `skills/**`, advisory baselines, provider or deployment config, secrets, or application code were staged by the workflow.',
     'No issues are created and no `issues: write` permission is requested.',
     'No source pins or advisory baselines were changed.',
