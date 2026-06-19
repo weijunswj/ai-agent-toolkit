@@ -6,29 +6,31 @@ Update the project source and run sync.
 -->
 # Antigravity MCP Config
 
-Use this to connect Google Antigravity globally to the same n8n setup.
+Use this to connect Google Antigravity globally to the same official n8n instance-level MCP setup.
 
 * Do not paste real n8n tokens into this file or any repo file.
 * Open Antigravity MCP settings, then use the raw MCP config editor if available.
+* [Official n8n Skills](https://github.com/n8n-io/skills) plugin hooks are documented for Codex and Claude Code. For Antigravity, use the official "Other platforms" route, `npx skills add n8n-io/skills`, when your runtime is supported by [skills.sh](https://skills.sh).
+* Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Add the official `using-n8n-skills` cue to the target repo `AGENTS.md` before relying on automatic n8n task routing.
 
 1. Common Windows path for Antigravity/Gemini MCP config:
 
-    ```text
-    C:\Users\<your-user>\.gemini\antigravity\mcp_config.json
-    ```
+   ```text
+   C:\Users\<your-user>\.gemini\antigravity\mcp_config.json
+   ```
 
 2. Or create it in PowerShell:
 
-    ```text
-    mkdir $HOME\.gemini\antigravity -Force
-    notepad $HOME\.gemini\antigravity\mcp_config.json
-    ```
+   ```text
+   mkdir $HOME\.gemini\antigravity -Force
+   notepad $HOME\.gemini\antigravity\mcp_config.json
+   ```
 
 ---
 
-## 1. Save The Live MCP URL And Token
+## 1. Save The Official MCP URL And Token
 
-1. Set the live MCP URL at user scope.
+1. Set the official MCP URL at user scope.
 
    - For normal local n8n on the default port:
 
@@ -42,114 +44,75 @@ Use this to connect Google Antigravity globally to the same n8n setup.
       [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'https://your-ngrok-or-domain.example/mcp-server/http', 'User')
       ```
 
-2. Then save the live MCP token at user scope:
+2. Then save the official MCP token at user scope:
 
-    ```powershell
-    [Environment]::SetEnvironmentVariable('N8N_MCP_TOKEN', '<paste-token-here>', 'User')
-    ```
+   ```powershell
+   [Environment]::SetEnvironmentVariable('N8N_MCP_TOKEN', '<paste-token-here>', 'User')
+   ```
 
 3. Close and reopen Antigravity after changing either value.
 
 4. Verify both values are available from a fresh PowerShell:
 
-    ```powershell
-    [Environment]::GetEnvironmentVariable('N8N_MCP_URL', 'User')
-    [Environment]::GetEnvironmentVariable('N8N_MCP_TOKEN', 'User')
-    ```
+   ```powershell
+   [Environment]::GetEnvironmentVariable('N8N_MCP_URL', 'User')
+   [Environment]::GetEnvironmentVariable('N8N_MCP_TOKEN', 'User')
+   ```
 
 ---
 
 ## 2. Add The Global Antigravity MCP Config
 
-1. Paste the following into `mcp_config.json`:
+Paste the following into `mcp_config.json`:
 
-    ```json
-    {
-      "mcpServers": {
-        "n8n_docs": {
-          "command": "npx",
-          "args": [
-            "-y",
-            "n8n-mcp@latest"
-          ],
-          "env": {
-            "MCP_MODE": "stdio",
-            "LOG_LEVEL": "error",
-            "DISABLE_CONSOLE_OUTPUT": "true"
-          }
-        },
-        "n8n_live": {
-          "command": "node",
-          "args": [
-            "-e",
-            "if(!process.env.N8N_MCP_TOKEN){console.error('N8N_MCP_TOKEN not set');process.exit(1)}require('child_process').spawn('npx',['--yes','supergateway','--streamableHttp',process.env.N8N_MCP_URL,'--oauth2Bearer',process.env.N8N_MCP_TOKEN],{stdio:'inherit',shell:true}).on('exit',c=>process.exit(c))"
-          ]
-        }
-      }
+```json
+{
+  "mcpServers": {
+    "n8n_live": {
+      "command": "node",
+      "args": [
+        "-e",
+        "if(!process.env.N8N_MCP_TOKEN){console.error('N8N_MCP_TOKEN not set');process.exit(1)}require('child_process').spawn('npx',['--yes','supergateway','--streamableHttp',process.env.N8N_MCP_URL,'--oauth2Bearer',process.env.N8N_MCP_TOKEN],{stdio:'inherit',shell:true}).on('exit',c=>process.exit(c))"
+      ]
     }
-    ```
+  }
+}
+```
 
 ---
 
-## 3. Verify Both MCP Servers
+## 3. Verify The Official Skills And MCP Setup
 
-1. Use Antigravity's MCP server UI to confirm both servers are configured:
+1. Use Antigravity's MCP server UI to confirm the n8n instance-level MCP server is configured:
 
-    * `n8n_docs`
-    * `n8n_live`
+   * `n8n_live`
 
-2. If `n8n_live` fails:
+2. If [official n8n Skills](https://github.com/n8n-io/skills) are installed in your Antigravity runtime, confirm the target repo `AGENTS.md` cues `using-n8n-skills`, then ask Antigravity to load them:
 
-    * Confirm `N8N_MCP_URL` is the MCP endpoint, not just the n8n UI URL.
-    * Confirm `N8N_MCP_TOKEN` is set at user scope.
-    * Restart Antigravity after changing environment variables.
-    * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
+   ```text
+   Load `using-n8n-skills` and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything.
+   ```
 
----
+3. Perform a live read-only MCP check inside Antigravity:
 
-## 4. Test The MCP Setup
+   ```text
+   Use n8n_live. List workflows. Do not modify anything.
+   ```
 
-1. Perform docs-only smoke test inside Antigravity:
+4. If `n8n_live` fails:
 
-    ```text
-    Use n8n_docs. Find the smallest no-credentials workflow pattern that uses Manual Trigger and Set. Do not create anything yet.
-    ```
-
-2. Perform live read-only smoke test inside Antigravity:
-
-    ```text
-    Use n8n_live. List workflows. Do not modify anything.
-    ```
+   * Confirm `N8N_MCP_URL` is the MCP endpoint, not just the n8n UI URL.
+   * Confirm `N8N_MCP_TOKEN` is set at user scope.
+   * Restart Antigravity after changing environment variables.
+   * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
 
 ---
 
-## 5. Create A Tiny Live Smoke-Test Workflow
+## 4. Safety Rules
 
-1. This is the safest first workflow:
-
-    * Manual Trigger.
-    * Set.
-    * No credentials.
-    * Inactive by default.
-
-2. Use this prompt in Antigravity:
-
-    ```text
-    Use n8n_docs first. Design and validate a tiny no-credentials workflow with Manual Trigger and Set. Then use n8n_live to create it in my n8n instance as INACTIVE. Name it "Antigravity Smoke Test".
-    ```
-
-3. After Antigravity creates it, ask Antigravity to read it back and confirm:
-
-    ```text
-    Use n8n_live. Read back "Antigravity Smoke Test" and confirm it is inactive.
-    ```
-
----
-
-## 6. Why This Shape
-
-* `n8n_docs` uses the community MCP through `npx`.
-* `MCP_MODE=stdio`, `LOG_LEVEL=error`, and `DISABLE_CONSOLE_OUTPUT=true` keep the stdio MCP channel clean.
+* Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance.
+* Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
+* Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live` uses `supergateway` to bridge Antigravity's local command MCP shape to n8n's streamable HTTP MCP endpoint.
 * `N8N_MCP_URL` keeps the live MCP URL configurable for localhost, ngrok, or another domain.
 * `N8N_MCP_TOKEN` keeps the live MCP token out of repo files and config text.
@@ -157,18 +120,19 @@ Use this to connect Google Antigravity globally to the same n8n setup.
 
 ---
 
-## 7. Troubleshooting
+## 5. Troubleshooting
 
-1. If `n8n_docs` fails:
+1. If `using-n8n-skills` is unavailable:
 
-    * Confirm Node.js and `npx` are installed.
-    * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
+   * Confirm your Antigravity runtime supports the [official n8n Skills](https://github.com/n8n-io/skills) package through `npx skills add n8n-io/skills`.
+   * Confirm the target repo `AGENTS.md` includes the `using-n8n-skills` cue because plain skill installs do not have the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks.
+   * Restart Antigravity after installing skills.
+   * If platform support is unavailable, do not pretend parity; use the official n8n documentation manually and keep live MCP actions approval-gated.
 
 2. If `n8n_live` fails:
 
-    * Confirm `N8N_MCP_URL` is set to the MCP endpoint, not just the n8n UI URL.
-    * Confirm `N8N_MCP_TOKEN` is set at user scope.
-    * Restart Antigravity after changing environment variables.
-    * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
-
-    * Do not replace the environment variables with real token values in this repo.
+   * Confirm `N8N_MCP_URL` is set to the MCP endpoint, not just the n8n UI URL.
+   * Confirm `N8N_MCP_TOKEN` is set at user scope.
+   * Restart Antigravity after changing environment variables.
+   * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
+   * Do not replace environment variables with real token values in this repo.

@@ -33,7 +33,7 @@ Apply `n8n-agent-rules` first for the full n8n operating contract. A generated l
 ## Rules
 
 - Treat these scripts as review-required templates, not trusted runtime code.
-- Follow `n8n-agent-rules` for workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and live n8n safety.
+- Follow `n8n-agent-rules` for [official n8n Skills](https://github.com/n8n-io/skills), `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and live n8n safety.
 - Do not run live n8n import/export from this toolkit repo.
 - Do not run live n8n import/export in CI.
 - Do not commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, live import/export JSON, credentials, credential bindings, private keys, or `.env` files.

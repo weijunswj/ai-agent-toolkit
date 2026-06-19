@@ -14,7 +14,7 @@ Repo-wide MCP generated/published output is intentionally absent for now:
 - Project manifests must not declare repo-wide `mcp/**` outputs or `publish_as: "mcp"` / `publish_as: "both"`.
 - Future PRs that change published skill surfaces should run the published-surface audit and keep new `skills/**` outputs source-owned.
 
-The n8n local setup optional MCP feature references are preserved as secondary AI-coding-agent setup material, not as repo-wide MCP support:
+The n8n local setup [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are preserved as secondary AI-coding-agent setup material, not as repo-wide MCP support:
 
 - `_projects/n8n/local-setup/_main/mcp setup - *.md`
 - `_projects/n8n/local-setup/_main/templates/mcp-configs/**`
@@ -162,7 +162,7 @@ Earlier audit passes are retained here only as historical context. They do not d
 Completed historical passes:
 
 - Secure CI/CD prompt exact-extract pass: fixed a real truncation by generating `skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md` from the preserved `_main/README.md` prompt section.
-- n8n local setup fidelity pass: restored full-fidelity local setup references inside `skills/n8n-local-setup/references/**` and kept optional n8n MCP feature references as secondary setup material.
+- n8n local setup fidelity pass: restored full-fidelity local setup references inside `skills/n8n-local-setup/references/**` and kept n8n AI-coding-agent setup references as secondary setup material.
 - Secure CI/CD template declaration pass: declared remaining short status, policy, GitHub Actions, and pack README outputs as curated generated outputs.
 - n8n workflow toolkit reshape: rehomed sanitizer/import/export helpers and reusable workflow templates under `n8n.workflow-toolkit`, removing the old workflow-sync skill surface.
 - Standalone skill declaration pass: made `knowledge-index-updater` and `windows-localhost-workflows` project-owned generated skill surfaces.
@@ -178,5 +178,5 @@ Superseded MCP-ready registry pass:
 ## Current recommended follow-up
 
 - Keep future changes focused on `skills/**` and source-owned project recipes unless a separate approved PR deliberately reintroduces a repo-wide MCP strategy.
-- Keep optional n8n local setup MCP feature references in the n8n local setup skill, not in a repo-wide MCP surface.
+- Keep [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references in the n8n local setup skill, not in a repo-wide MCP surface.
 - Continue clarifying UI/UX skill attribution and source ownership in separate narrow PRs when needed.

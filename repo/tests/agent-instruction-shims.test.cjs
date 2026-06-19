@@ -381,7 +381,7 @@ test('n8n adapter is compact and fail-closed', () => {
     ]) {
       assert.match(inner, requiredTerm, `${label}: ${requiredTerm}`);
     }
-    assert.doesNotMatch(inner, /n8n_docs|n8n_live|webhook IDs|archive\/delete|Adapter Auto-Check Protocol|Keep workflows inactive/i, label);
+    assert.doesNotMatch(inner, /n8n_live|webhook IDs|archive\/delete|Adapter Auto-Check Protocol|Keep workflows inactive/i, label);
   }
 });
 
@@ -485,7 +485,7 @@ test('root README platform guidance requires AGENTS before platform shims', () =
   assert.match(section, /\| Codex \|[^\n]*Direct whole-skill-folder install/);
   assert.match(section, /\| OpenCode \|[^\n]*Short manual whole-skill-folder install only/);
   assert.match(section, /\| Claude Code \|[^\n]*Direct whole-skill-folder install/);
-  assert.match(section, /\| Platform \| Preferred install \| Active instruction files \| References \|/);
+  assert.match(section, /\| Platform \| Toolkit-owned skill install \| Active instruction files \| References \|/);
   assert.match(section, /\| Codex \|[^\n]*\*\*Choose any one supported Codex skill-folder location:\*\*[^\n]*\| `AGENTS\.md` \|/);
   assert.match(section, /\| OpenCode \|[^\n]*\*\*Choose any one supported OpenCode skill-folder location:\*\*[^\n]*\| `AGENTS\.md` \|/);
   assert.match(section, /\| Claude Code \|[^\n]*\*\*Choose any one supported Claude Code skill-folder location:\*\*[^\n]*\| `AGENTS\.md`, `CLAUDE\.md` shim \|/);

@@ -1,9 +1,11 @@
 # Codex MCP Config
 
-Use this for the normal Codex + n8n MCP setup.
+Use this for the normal Codex + official n8n instance-level MCP setup.
 
 * Do not paste your real n8n token into this file or any repo file.
 * Keep `bearer_token_env_var = "N8N_MCP_TOKEN"` exactly as shown.
+* Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`.
+* Restart Codex and approve or trust the official plugin hooks so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
 1. Common Windows path for Codex MCP config:
 
@@ -20,7 +22,7 @@ Use this for the normal Codex + n8n MCP setup.
 
 ---
 
-## 1. Save The Live MCP URL And Token
+## 1. Save The Official MCP URL And Token
 
 1. Decide which MCP URL you will use.
 
@@ -36,9 +38,9 @@ Use this for the normal Codex + n8n MCP setup.
       https://your-n8n-domain.com/mcp-server/http
       ```
 
-      **Codex treats `url` as a literal string, so do not use `${N8N_MCP_URL}` in the Codex config. You will paste the URL directly into the config in the next section.**
+      **Codex treats `url` as a literal string, so do not use `${N8N_MCP_URL}` in the Codex config. Paste the URL directly into the config in the next section.**
 
-2. Save the live MCP token at user scope in PowerShell:
+2. Save the official MCP token at user scope in PowerShell:
 
    ```powershell
    [Environment]::SetEnvironmentVariable('N8N_MCP_TOKEN', '<paste-token-here>', 'User')
@@ -58,32 +60,18 @@ Use this for the normal Codex + n8n MCP setup.
 
 ## 2. Add The Codex Config
 
-1. Paste the following into `config.toml` and set the `url` value to the MCP URL you chose in Section 1:
+Paste the following into `config.toml` and set the `url` value to the MCP URL you chose in Section 1:
 
-   ```toml
-   [mcp_servers.n8n_docs]
-   command = "npx"
-   args = ["-y", "n8n-mcp@latest"]
-   env = { MCP_MODE = "stdio", LOG_LEVEL = "error", DISABLE_CONSOLE_OUTPUT = "true" }
-
-   [mcp_servers.n8n_live]
-   url = "http://localhost:5678/mcp-server/http"
-   bearer_token_env_var = "N8N_MCP_TOKEN"
-   enabled = true
-   ```
-
-2. If `npx` is blocked on Windows, replace the `n8n_docs` block with this:
-
-   ```toml
-   [mcp_servers.n8n_docs]
-   command = "C:\\Program Files\\nodejs\\npx.cmd"
-   args = ["-y", "n8n-mcp@latest"]
-   env = { MCP_MODE = "stdio", LOG_LEVEL = "error", DISABLE_CONSOLE_OUTPUT = "true" }
-   ```
+```toml
+[mcp_servers.n8n_live]
+url = "http://localhost:5678/mcp-server/http"
+bearer_token_env_var = "N8N_MCP_TOKEN"
+enabled = true
+```
 
 ---
 
-## 3. Verify Both MCP Servers
+## 3. Verify The Official Skills And MCP Setup
 
 1. In Codex, open:
 
@@ -91,12 +79,23 @@ Use this for the normal Codex + n8n MCP setup.
    Settings -> MCP servers
    ```
 
-2. You should see:
+2. You should see only the n8n instance-level MCP server from this template:
 
-   * `n8n_docs`
    * `n8n_live`
 
-3. If `n8n_live` fails:
+3. Ask Codex to load the [official n8n Skills](https://github.com/n8n-io/skills):
+
+   ```text
+   Load `using-n8n-skills` and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything.
+   ```
+
+4. Perform a live read-only MCP check:
+
+   ```text
+   Use n8n_live. List workflows. Do not modify anything.
+   ```
+
+5. If `n8n_live` fails:
 
    * Confirm the `url` in `config.toml` matches your actual n8n MCP endpoint.
    * Confirm `N8N_MCP_TOKEN` is set at user scope.
@@ -104,62 +103,24 @@ Use this for the normal Codex + n8n MCP setup.
 
 ---
 
-## 4. Test The MCP Setup
+## 4. Safety Rules
 
-1. Perform docs-only smoke test:
-
-   ```text
-   Use n8n_docs. Find the smallest no-credentials workflow pattern that uses Manual Trigger and Set. Do not create anything yet.
-   ```
-
-2. Perform live read-only smoke test:
-
-   ```text
-   Use n8n_live. List workflows. Do not modify anything.
-   ```
-
----
-
-## 5. Create A Tiny Live Smoke-Test Workflow
-
-1. This is the safest first workflow:
-
-   * Manual Trigger.
-   * Set.
-   * No credentials.
-   * Inactive by default.
-
-2. Use this prompt in Codex:
-
-   ```text
-   Use n8n_docs first. Design and validate a tiny no-credentials workflow with Manual Trigger and Set. Then use n8n_live to create it in my n8n instance as INACTIVE. Name it "Codex Smoke Test".
-   ```
-
-3. After Codex creates it, ask Codex to read it back and confirm:
-
-   ```text
-   Use n8n_live. Read back "Codex Smoke Test" and confirm it is inactive.
-   ```
-
----
-
-## 6. Why This Shape
-
-* `n8n_docs` uses the community MCP through `npx`.
-* `MCP_MODE=stdio`, `LOG_LEVEL=error`, and `DISABLE_CONSOLE_OUTPUT=true` keep the stdio MCP channel clean.
+* Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance.
+* Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
+* Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live.url` is a literal MCP endpoint. Change the URL manually if your n8n is not on `localhost:5678`.
 * `bearer_token_env_var = "N8N_MCP_TOKEN"` keeps the real token out of config and repo files.
 * Codex does not support `${N8N_MCP_URL}` expansion in the `url` field, so the URL must be set as a literal value.
 
 ---
 
-## 7. Troubleshooting
+## 5. Troubleshooting
 
-1. If `n8n_docs` fails:
+1. If `using-n8n-skills` is unavailable:
 
-   * Confirm Node.js and `npx` are installed.
-   * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
-   * If `npx` is blocked, use the full path fallback from Section 2.
+   * Confirm the official plugin was installed with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`.
+   * Restart Codex.
+   * Approve or trust the official plugin hooks when prompted.
 
 2. If `n8n_live` fails:
 
@@ -167,5 +128,4 @@ Use this for the normal Codex + n8n MCP setup.
    * Confirm `N8N_MCP_TOKEN` is set at user scope.
    * Restart Codex after changing environment variables or config.
    * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
-
-   * Do not replace the environment variables with real token values in this repo.
+   * Do not replace environment variables with real token values in this repo.

@@ -19,6 +19,18 @@ function exists(relPath) {
   return fs.existsSync(path.join(repoRoot, relPath));
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const overstatedOfficialMcpCapabilityPattern = new RegExp([
+  'official n8n MCP ' + 'validation' + '/build tools',
+  'official n8n MCP ' + 'validation',
+  'official n8n MCP ' + 'build',
+  'MCP ' + 'validation' + '/build'
+].map(escapeRegExp).join('|'), 'i');
+const officialN8nSkillsLink = '[official n8n Skills](https://github.com/n8n-io/skills)';
+
 function stripGeneratedNotices(text) {
   let remaining = text.trimStart();
   while (remaining.startsWith('<!--') && !remaining.startsWith('<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->')) {
@@ -90,9 +102,10 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   const frontMatter = parseFrontMatter(readText(skillPath));
   assert.equal(frontMatter.name, 'n8n-agent-rules');
   for (const phrase of [
+    officialN8nSkillsLink,
+    'using-n8n-skills',
     'n8n workflow JSON',
-    'n8n MCP',
-    'n8n_docs',
+    'official n8n MCP',
     'n8n_live',
     'workflow creation',
     'workflow updates',
@@ -114,7 +127,11 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   assert.equal(published, canonical);
 
   for (const safetyPhrase of [
-    'Use documentation or builder tools first',
+    `Use ${officialN8nSkillsLink} first, then use the official n8n MCP tools that are actually available in the connected instance`,
+    `Start by loading \`using-n8n-skills\` when the ${officialN8nSkillsLink} are available`,
+    'Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities',
+    'When validation or build tools are available, use them before proposing or performing live-instance changes',
+    'If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour',
     'Use live n8n instance tools only when the user clearly asks',
     'Do not create or update a workflow from unvalidated workflow code when a validation tool is available',
     'Do not modify credentials unless the user explicitly asks',
@@ -124,8 +141,11 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
     'Sticky notes must stay concise',
     'Prompt-injection and untrusted input'
   ]) {
-    assert.match(canonical, new RegExp(safetyPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), safetyPhrase);
+    assert.match(canonical, new RegExp(escapeRegExp(safetyPhrase)), safetyPhrase);
   }
+
+  assert.doesNotMatch(canonical, overstatedOfficialMcpCapabilityPattern);
+  assert.doesNotMatch(readText(skillPath), overstatedOfficialMcpCapabilityPattern);
 });
 
 test('n8n-agent-rules skill documents the adapter auto-check approval protocol', () => {
@@ -194,7 +214,7 @@ test('generic AI coding agent templates stay slim and obsolete heavy templates a
   ]) {
     const text = readText(relPath);
     assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);
-    assert.doesNotMatch(text, /\bn8n_docs\b|\bn8n_live\b/, relPath);
+    assert.doesNotMatch(text, /\bn8n_live\b/, relPath);
     assert.doesNotMatch(text, /\n# Skill Routing Rules\n/, relPath);
     assert.doesNotMatch(text, /Current Toolkit Skill Routing/, relPath);
   }

@@ -170,7 +170,7 @@ function detectN8nInvolvement(root) {
     }
     if (!/\.(md|txt|json|cjs|js|ps1|cmd|yml|yaml)$/i.test(lower)) continue;
     const text = fs.readFileSync(full, 'utf8');
-    if (/\bn8n_docs\b|\bn8n_live\b|\bn8n\s+MCP\b|n8n import|n8n export|n8n-workflows|sanitis[ez]e|validate-n8n/i.test(text)) {
+    if (/\bn8n_live\b|\bn8n\s+MCP\b|official\s+n8n\s+Skills|using-n8n-skills|n8n import|n8n export|n8n-workflows|sanitis[ez]e|validate-n8n/i.test(text)) {
       hits.push(rel);
     }
   }

@@ -7,7 +7,7 @@ Use [Page 2 - Hostinger Coolify VPS n8n](./Page%202%20-%20Hostinger%20VPS.md) in
 * Start local n8n first.
 * Add ngrok only when something outside your computer must reach n8n.
 * Keep this toolkit skills-first: humans use `_projects/**`; agents use `skills/**`.
-* Optional AI-coding-agent MCP feature references are secondary. Do not start there.
+* [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary. Do not start there.
 * Do not paste real tokens, credentials, `.env` values, backups, or live exports into repo files.
 
 ---
@@ -646,10 +646,10 @@ This toolkit is skills-first.
 
 * Humans use `_projects/**` for source review and maintenance.
 * Agents use `skills/**` after generated outputs are synced.
-* Optional AI-coding-agent MCP feature references are available as secondary material, not as the beginner setup path.
+* [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are available as secondary material, not as the beginner setup path.
 * Use [n8n Agent Rules](../../../../skills/n8n-agent-rules/) before workflow, helper-script, import/export, credential, execution, repo/live sync, or live-instance work.
 
-Use this table only when you want an AI coding agent to work with n8n workflows through the optional MCP feature setup:
+Use this table only when you want an AI coding agent to work with n8n workflows through the [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP setup:
 
 | Platform | Setup guide | Config template |
 | --- | --- | --- |

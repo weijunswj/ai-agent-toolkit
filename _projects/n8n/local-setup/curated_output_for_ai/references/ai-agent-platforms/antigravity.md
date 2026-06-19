@@ -6,7 +6,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Antigravity Platform Router
 
-Antigravity can consume this toolkit through a plugin-scoped skill folder and repo-local instruction files. This is a skills-first router; use the linked full-fidelity files for runtime setup detail.
+Antigravity can consume this toolkit through platform-supported skills and repo-local instruction files. For upstream [official n8n Skills](https://github.com/n8n-io/skills), follow the official "Other platforms" route unless Antigravity later documents plugin parity. This is a skills-first router; use the linked full-fidelity files for runtime setup detail.
 
 ## Boundary
 
@@ -16,7 +16,19 @@ For full setup detail, use the local full-fidelity references and templates in t
 
 ## Skill Install
 
-Copy the whole `skills/<skill-name>/` folder into the plugin-scoped Antigravity/Gemini skill location.
+### Official n8n Skills
+
+From the target project folder, install the upstream [official n8n Skills](https://github.com/n8n-io/skills) with `skills.sh` when your Antigravity runtime is supported:
+
+```powershell
+npx skills add n8n-io/skills
+```
+
+Plain skill installs do not include the plugin `SessionStart` hook that loads `using-n8n-skills` automatically. Add the official `using-n8n-skills` cue to the target repo `AGENTS.md` so n8n tasks start from the meta-skill. Plugin `PreToolUse` and `PostToolUse` reminders are also not guaranteed on plain installs.
+
+### Toolkit-Owned Skills
+
+Copy the whole `skills/<skill-name>/` folder into the plugin-scoped Antigravity/Gemini skill location when your Antigravity runtime supports that layout.
 
 | Location type | Skill folder path |
 | --- | --- |
@@ -36,4 +48,4 @@ Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
 ## Toolkit Boundary
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional AI-coding-agent MCP feature references are secondary and not part of the beginner local setup path.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and not part of the beginner local setup path.

@@ -4,11 +4,11 @@ Project: n8n.local-setup
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-# Optional AI-Coding-Agent MCP Config Templates
+# Official n8n Instance-Level MCP Template Index
 
-These source templates configure optional n8n MCP access for different AI-coding-agent platforms.
+These source templates point AI-coding-agent platforms at official n8n instance-level MCP access.
 
-Skip these for beginner local setup. Use them only when intentionally enabling n8n MCP features for an AI coding agent.
+Skip these for the beginner local guide. Use them only when intentionally enabling n8n workflow work for an AI coding agent.
 
 ## Files
 
@@ -21,5 +21,7 @@ Skip these for beginner local setup. Use them only when intentionally enabling n
 
 - Keep live tokens in environment variables.
 - Do not paste real token values into repo files.
-- Use docs MCP access before live n8n access.
+- Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance.
+- Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
+- Keep only the official instance-level MCP connection, normally named `n8n_live`.
 - Restart the target AI client after changing MCP config or environment variables.
