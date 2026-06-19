@@ -10,7 +10,7 @@ This repo is organized for AI-agent reuse. Prefer local repo truth over assumpti
 | Guide | Setup or workflow documentation under `_projects/**/_main/`, skill `references/`, or `repo/docs/`. |
 | Template | Copy-safe source material inside the relevant skill folder. |
 | Pack | Approval-gated bundle manifest inside the relevant skill folder under `packs/`. |
-| MCP | Repo-wide MCP is intentionally not shipped or maintained as a generated surface for now. Optional n8n MCP feature references remain inside `skills/n8n-local-setup/`. |
+| MCP | Repo-wide MCP is intentionally not shipped or maintained as a generated surface for now. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-local-setup/`. |
 | Toolkit project version | The `version` in `_projects/**/toolkit.project.json`; it versions the toolkit module/adaptation, not upstream source. |
 | Source lock | `_projects/**/SOURCE-LOCK.json`; it records source provenance, source pins, blob pins, lifecycle, attribution, and source-watch policy. |
 
@@ -42,8 +42,8 @@ Use installed skills only when they clearly match the task and improve correctne
 | Skill | Use when the task involves |
 | --- | --- |
 | `ai-coding-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates. |
-| `n8n-agent-rules` | Any n8n task, including workflow JSON, n8n MCP, `n8n_docs`, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
-| `n8n-local-setup` | Safe local n8n Docker Compose setup, hosted n8n Hostinger Coolify VPS notes, Postgres/ngrok stack templates, MCP config selection, or platform-specific n8n agent-rule setup. |
+| `n8n-agent-rules` | Any n8n task, including official n8n Skills, `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
+| `n8n-local-setup` | Safe local n8n Docker Compose setup, hosted n8n Hostinger Coolify VPS notes, Postgres/ngrok stack templates, official n8n Skills setup, official instance-level MCP config selection, or platform-specific n8n agent-rule setup. |
 | `n8n-workflow-helper-scripts` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
 | `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
 | `secure-cicd-installer` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |

@@ -1,10 +1,11 @@
 # OpenCode MCP Config
 
-Use this to connect OpenCode globally to the same n8n setup.
+Use this to connect OpenCode globally to the same official n8n instance-level MCP setup.
 
 * Do not paste your real n8n token into this file or any repo file.
 * Keep `{env:N8N_MCP_URL}` and `{env:N8N_MCP_TOKEN}` exactly as shown.
 * Do not put this in a repo-level `opencode.json` unless you intentionally want project-specific OpenCode overrides.
+* Official n8n Skills plugin support is platform-dependent. If your OpenCode runtime supports plain skill installs from the official n8n Skills package, start n8n work by loading `using-n8n-skills`.
 
 1. Common Windows path for OpenCode MCP config:
 
@@ -21,9 +22,9 @@ Use this to connect OpenCode globally to the same n8n setup.
 
 ---
 
-## 1. Save The Live MCP URL And Token
+## 1. Save The Official MCP URL And Token
 
-1. Set the live MCP URL at user scope.
+1. Set the official MCP URL at user scope.
 
    - For normal local n8n on the default port:
 
@@ -37,7 +38,7 @@ Use this to connect OpenCode globally to the same n8n setup.
       [Environment]::SetEnvironmentVariable('N8N_MCP_URL', 'https://your-n8n-domain.com/mcp-server/http', 'User')
       ```
 
-2. Then save the live MCP token:
+2. Then save the official MCP token:
 
    ```powershell
    [Environment]::SetEnvironmentVariable('N8N_MCP_TOKEN', '<paste-token-here>', 'User')
@@ -56,46 +57,35 @@ Use this to connect OpenCode globally to the same n8n setup.
 
 ## 2. Add The Global OpenCode Config
 
-1. Paste the following into `opencode.json`:
+Paste the following into `opencode.json`:
 
-   ```jsonc
-   {
-     "$schema": "https://opencode.ai/config.json",
-     "mcp": {
-       "n8n_docs": {
-         "type": "local",
-         "command": ["cmd", "/c", "npx", "-y", "n8n-mcp@latest"],
-         "enabled": true,
-         "timeout": 40000,
-         "environment": {
-           "MCP_MODE": "stdio",
-           "LOG_LEVEL": "error",
-           "DISABLE_CONSOLE_OUTPUT": "true"
-         }
-       },
-       "n8n_live": {
-         "type": "remote",
-         "url": "{env:N8N_MCP_URL}",
-         "enabled": true,
-         "oauth": false,
-         "timeout": 40000,
-         "headers": {
-           "Authorization": "Bearer {env:N8N_MCP_TOKEN}"
-         }
-       }
-     },
-     "tools": {
-       "n8n_live_*": true
-     },
-     "permission": {
-       "n8n_live_*": "ask"
-     }
-   }
-   ```
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "n8n_live": {
+      "type": "remote",
+      "url": "{env:N8N_MCP_URL}",
+      "enabled": true,
+      "oauth": false,
+      "timeout": 40000,
+      "headers": {
+        "Authorization": "Bearer {env:N8N_MCP_TOKEN}"
+      }
+    }
+  },
+  "tools": {
+    "n8n_live_*": true
+  },
+  "permission": {
+    "n8n_live_*": "ask"
+  }
+}
+```
 
 ---
 
-## 3. Verify Both MCP Servers
+## 3. Verify The Official Skills And MCP Setup
 
 1. List configured MCP servers:
 
@@ -103,19 +93,23 @@ Use this to connect OpenCode globally to the same n8n setup.
    opencode mcp list
    ```
 
-2. You should see:
+2. You should see only the n8n instance-level MCP server from this template:
 
-   * `n8n_docs`
    * `n8n_live`
 
-3. If `n8n_live` fails:
+3. If official n8n Skills are installed in your OpenCode runtime, ask OpenCode to load them:
 
-   * Confirm `N8N_MCP_URL` is set to the MCP endpoint, not just the n8n UI URL.
-   * Confirm `N8N_MCP_TOKEN` is set at user scope.
-   * Restart OpenCode after changing environment variables.
-   * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
+   ```powershell
+   opencode run "Load using-n8n-skills and confirm the official n8n Skills are available. Do not use n8n_live and do not modify anything."
+   ```
 
-4. If `n8n_live` is enabled and authentication fails, debug it:
+4. Perform a live read-only MCP check:
+
+   ```powershell
+   opencode run "Use n8n_live. List workflows. Do not modify anything."
+   ```
+
+5. If `n8n_live` is enabled and authentication fails, debug it:
 
    ```powershell
    opencode mcp debug n8n_live
@@ -123,62 +117,23 @@ Use this to connect OpenCode globally to the same n8n setup.
 
 ---
 
-## 4. Test The MCP Setup
+## 4. Safety Rules
 
-1. Perform docs-only smoke test:
-
-   ```powershell
-   opencode run "Use n8n_docs. Find the smallest no-credentials workflow pattern that uses Manual Trigger and Set. Do not create anything yet."
-   ```
-
-2. Perform live read-only smoke test:
-
-   ```powershell
-   opencode run "Use n8n_live. List workflows. Do not modify anything."
-   ```
-
----
-
-## 5. Create A Tiny Live Smoke-Test Workflow
-
-1. This is the safest first workflow:
-
-   * Manual Trigger.
-   * Set.
-   * No credentials.
-   * Inactive by default.
-
-2. Use this prompt in OpenCode:
-
-   ```powershell
-   opencode run "Use n8n_docs first. Design and validate a tiny no-credentials workflow with Manual Trigger and Set. Then use n8n_live to create it in my n8n instance as INACTIVE. Name it OpenCode Smoke Test."
-   ```
-
-3. After OpenCode creates it, ask OpenCode to read it back and confirm:
-
-   ```powershell
-   opencode run "Use n8n_live. Read back OpenCode Smoke Test and confirm it is inactive."
-   ```
-
----
-
-## 6. Why This Shape
-
-* `n8n_docs` uses the community MCP through `npx`.
-* `MCP_MODE=stdio`, `LOG_LEVEL=error`, and `DISABLE_CONSOLE_OUTPUT=true` keep the stdio MCP channel clean.
+* Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes.
+* Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live` is available but approval-gated by the `"permission"` rule for live instance actions.
 * `{env:N8N_MCP_URL}` and `{env:N8N_MCP_TOKEN}` keep secrets out of repo and config files.
-* `cmd /c npx` is used for native Windows stdio reliability.
-* `timeout: 40000` gives MCP servers enough startup time on slower machines.
+* `timeout: 40000` gives the MCP server enough startup time on slower machines.
 
 ---
 
-## 7. Troubleshooting
+## 5. Troubleshooting
 
-1. If `n8n_docs` fails:
+1. If `using-n8n-skills` is unavailable:
 
-   * Confirm Node.js and `npx` are installed.
-   * Try running `npx -y n8n-mcp@latest` from a fresh terminal.
+   * Confirm your OpenCode runtime supports the official n8n Skills package as a plain skill install.
+   * Restart OpenCode after installing skills.
+   * If platform support is unavailable, do not pretend parity; use the official n8n documentation manually and keep live MCP actions approval-gated.
 
 2. If `n8n_live` fails:
 
@@ -187,4 +142,4 @@ Use this to connect OpenCode globally to the same n8n setup.
    * Restart OpenCode after changing environment variables.
    * Confirm the same URL and token work from the n8n MCP client menu or another known-good client.
    * Run `opencode mcp debug n8n_live` for detailed error output.
-   * Do not replace the environment variables with real token values in this repo.
+   * Do not replace environment variables with real token values in this repo.

@@ -4,18 +4,19 @@ Project: n8n.local-setup
 Source: _projects/n8n/local-setup/_main/mcp setup - antigravity.md
 Update the project source and run sync.
 -->
-# Antigravity MCP Setup
+# Antigravity Official n8n Skills And MCP Setup
 
 The primary local setup guide is [Page 1 - Local Setup](../n8n/local-setup.md).
 
-This page is an optional Antigravity AI-coding-agent MCP feature reference, not a required local setup path.
+This page is an optional Antigravity AI-coding-agent setup reference, not a required local setup path.
 
 ## What This Adds
 
 | Item | Use |
 | --- | --- |
-| `n8n_docs` | Node search and workflow validation using the community MCP. |
-| `n8n_live` | Read or mutate the real n8n instance only after explicit approval. |
+| Official n8n Skills | Workflow design, node guidance, validation, and build guidance when official Skills are installed on a supported platform. |
+| `using-n8n-skills` | The first skill to load when starting n8n workflow work. |
+| `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | Antigravity skills | Plugin-scoped skill folders. |
 | Antigravity MCP config | User-scoped MCP server setup. |
 
@@ -24,12 +25,14 @@ This page is an optional Antigravity AI-coding-agent MCP feature reference, not 
 1. Finish [Page 1 - Local Setup](../n8n/local-setup.md) first if you are using local n8n.
 2. You should already have:
    1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed if you are running local n8n.
-   2. [Node.js](https://nodejs.org/en/download) installed.
+   2. [Node.js](https://nodejs.org/en/download) installed because this guide's MCP bridge uses Node.js.
    3. [Antigravity](https://antigravity.google/) installed.
    4. n8n running locally, through a tunnel, or on a hosted domain.
-   5. Instance-level MCP enabled in n8n.
-   6. The live n8n MCP server URL copied from n8n.
-   7. A live n8n MCP token copied from n8n.
+   5. Official instance-level MCP enabled in n8n.
+   6. The official n8n MCP server URL copied from n8n.
+   7. An official n8n MCP token copied from n8n.
+
+Do not copy, fork, vendor, mirror, or recreate the official `n8n-io/skills` content inside this toolkit. Install or reference official upstream material only.
 
 ## 2. Install Antigravity
 
@@ -39,12 +42,23 @@ This page is an optional Antigravity AI-coding-agent MCP feature reference, not 
    ```powershell
    node -v
    npm -v
-   npx --version
    ```
 
    - The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
 
-## 3. Install Toolkit Skills For Antigravity
+## 3. Official n8n Skills On Antigravity
+
+Official plugin support is platform-dependent. This toolkit does not claim Antigravity plugin parity for the official `n8n-io/skills` plugin.
+
+If your Antigravity runtime supports plain skill installs from the official n8n Skills package, install the complete upstream skill folder outside this toolkit and start n8n work with this instruction:
+
+```text
+Load `using-n8n-skills` before any n8n workflow design, validation, or live-instance proposal.
+```
+
+Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
+
+## 4. Install Toolkit Safety Rules For Antigravity
 
 1. **Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
 
@@ -64,13 +78,12 @@ This page is an optional Antigravity AI-coding-agent MCP feature reference, not 
                   `-- SKILL.md
       ```
 
-2. Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder
+2. Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder.
 3. Use a minimal `plugin.json` only when the installed Antigravity runtime or docs require plugin metadata.
-   - This plugin-scoped folder is for loading toolkit skills.
 4. Do not copy only `SKILL.md`.
 5. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
-## 4. Agent Rules
+## 5. Agent Rules
 
 1. **If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
 
@@ -82,29 +95,31 @@ This page is an optional Antigravity AI-coding-agent MCP feature reference, not 
 
 2. If the target repo already has `GEMINI.md`, do not overwrite it.
    - Merge manually or produce a diff/merge plan.
-3. If Antigravity does not invoke skills automatically, keep any global `GEMINI.md` nudge tiny: remind it to use `ai-coding-agent-rules` before the first repo file edit.
+3. If Antigravity does not invoke skills automatically, keep any global `GEMINI.md` nudge tiny:
 
    ```text
-   Before editing files in any repository, always use the `ai-coding-agent-rules` skill once per new chat/session to check, bootstrap, or repair repo-local instructions. If the skill is unavailable, report that before editing.
+   Before editing files in any repository, always use the `ai-coding-agent-rules` skill once per new chat/session to check, bootstrap, or repair repo-local instructions. For n8n work, load `using-n8n-skills` and `n8n-agent-rules` before workflow design or live-instance proposals.
    ```
 
-## 5. Antigravity MCP Config
+## 6. Antigravity MCP Config
 
 1. Use the [Antigravity MCP config](../../templates/mcp-configs/antigravity-mcp-config.md).
-2. Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
+2. Add only the official instance-level MCP connection, normally named `n8n_live`.
+3. Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
 
-## 6. Restart Antigravity
+## 7. Restart Antigravity
 
 1. After changing any of these:
-   - `$HOME\.gemini\antigravity\mcp_config.json`
-   - `$HOME\.gemini\GEMINI.md`
-   - `N8N_MCP_URL`
-   - `N8N_MCP_TOKEN`
+   - Official n8n Skills installation, if your Antigravity runtime supports it.
+   - `$HOME\.gemini\antigravity\mcp_config.json`.
+   - `$HOME\.gemini\GEMINI.md`.
+   - `N8N_MCP_URL`.
+   - `N8N_MCP_TOKEN`.
 2. Fully close and reopen Antigravity.
    - You can open any folder.
    - Open a specific repo only when you actually want Antigravity to inspect or edit that repo.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 ### Antigravity Agent Stops Replying After An Update
 

@@ -1,6 +1,6 @@
 ---
 name: n8n-local-setup
-description: Guide AI agents through safe local n8n setup with Docker Compose, Postgres, Compose ngrok, hosted n8n on Hostinger Coolify VPS, launcher/menu use, skills-first routing, and optional AI-coding-agent MCP feature references. For any n8n workflow, helper-script, or live n8n task, first apply n8n-agent-rules.
+description: Guide AI agents through safe local n8n setup with Docker Compose, Postgres, Compose ngrok, hosted n8n on Hostinger Coolify VPS, launcher/menu use, official n8n Skills setup, and official instance-level MCP references. For any n8n workflow, helper-script, or live n8n task, first apply n8n-agent-rules.
 ---
 
 <!--
@@ -11,11 +11,11 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup
 
-Use this skill when the user needs to set up or explain local n8n, the Docker Compose local stack, Compose ngrok tunneling, hosted n8n on Hostinger Coolify VPS, the guided launcher/menu, skills-first agent routing, or optional AI-coding-agent MCP feature references.
+Use this skill when the user needs to set up or explain local n8n, the Docker Compose local stack, Compose ngrok tunneling, hosted n8n on Hostinger Coolify VPS, the guided launcher/menu, official n8n Skills routing, or official instance-level MCP references.
 
 For Hostinger VPS plus Coolify setup or server maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer` first. Return to this skill for n8n-specific deployment guidance after Coolify exists.
 
-For any n8n workflow, helper-script, `n8n_docs`, `n8n_live`, import/export, validation, credential, webhook ID, activation, execution, repo/live sync, or live n8n task, apply `n8n-agent-rules` first.
+For any n8n workflow, helper-script, official n8n Skills, `using-n8n-skills`, `n8n_live`, import/export, validation, credential, webhook ID, activation, execution, repo/live sync, or live n8n task, apply `n8n-agent-rules` first.
 
 ## Source And Runtime Material
 
@@ -28,10 +28,9 @@ For any n8n workflow, helper-script, `n8n_docs`, `n8n_live`, import/export, vali
 - Treat the Compose ngrok service as the supported local tunnel path in this guide.
 - Use the local stack templates in [templates/local-stack/](templates/local-stack/) for local `n8n + postgres`.
 - Treat [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, Postgres backup packages, and local backup restore actions.
-- Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for skills-first Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, Claude web routing, and optional AI-coding-agent MCP feature references.
-- Use direct whole-skill-folder installs for Codex and Claude Code, plugin-scoped skill-folder install for Antigravity, and short manual whole-skill-folder install notes for OpenCode. Keep whole skill folders together when copying.
-- Defer Codex and Claude Code plugin/package packaging until the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup.
-- Optional AI-coding-agent MCP feature setup/config references are secondary and not part of the beginner local setup path.
+- Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, Claude web routing, official n8n Skills installation notes, and official instance-level MCP references.
+- Use the official `n8n-io/skills` plugin instructions for Codex and Claude Code where supported. For other platforms, official plugin support is platform-dependent; use plain skill-folder installs only when that platform supports them and start n8n work by loading `using-n8n-skills`.
+- Official n8n Skills plus official instance-level MCP setup/config references are secondary and not part of the beginner local setup path.
 - Use `skills/ai-coding-agent-rules` for generic AI coding agent rules.
 - Use `skills/n8n-agent-rules` or [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for the full n8n operating ruleset.
 - Keep tokens, API keys, and webhook secrets out of repo files.
@@ -43,12 +42,12 @@ For any n8n workflow, helper-script, `n8n_docs`, `n8n_live`, import/export, vali
 - Generic Codex rules template: `skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`
 - n8n rules skill: `skills/n8n-agent-rules`
 - n8n rules local reference: [references/n8n-agent-rules.md](references/n8n-agent-rules.md)
-- Skills-first agent guidance: [references/ai-agent-platforms/](references/ai-agent-platforms/)
+- Official n8n Skills and agent guidance: [references/ai-agent-platforms/](references/ai-agent-platforms/)
 - Docker Compose local stack: [templates/local-stack/docker-compose.yml](templates/local-stack/docker-compose.yml)
 - Placeholder environment template: [templates/local-stack/.env.example](templates/local-stack/.env.example)
 - Guided local stack launcher: [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd)
 - PowerShell local stack menu: [templates/local-stack/scripts/n8n-local-menu.ps1](templates/local-stack/scripts/n8n-local-menu.ps1), including local-only backup and restore recovery actions.
-- Optional MCP config templates: [templates/mcp-configs/](templates/mcp-configs/)
+- Official instance-level MCP config templates: [templates/mcp-configs/](templates/mcp-configs/)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
 - Hostinger Coolify VPS n8n reference: [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md)
 - Pack checklist: [packs/codex-n8n-local/pack.json](packs/codex-n8n-local/pack.json)

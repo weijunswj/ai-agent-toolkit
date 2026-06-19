@@ -24,19 +24,21 @@ Generated cross-skill reference.
 
 ---
 
-# n8n MCP workflow rules
+# n8n workflow MCP and Skills rules
 
 ## Scope
 
 These rules apply when the task involves designing, building, repairing, inspecting, documenting, validating, importing, exporting, testing, executing, publishing, unpublishing, activating, deactivating, archiving, deleting, or modifying n8n workflows.
 
-They also apply when using n8n MCP tools for workflow management, workflow building, executions, projects, folders, or data tables.
+They also apply when using official n8n Skills or n8n MCP tools for workflow management, workflow building, executions, projects, folders, or data tables.
 
 For non-n8n tasks, prefer the current user request and local project files first. Do not use n8n MCP tools unless they clearly help.
 
 ## MCP routing
 
-Use documentation or builder tools first for n8n workflow design and workflow JSON work, including:
+Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes. Start by loading `using-n8n-skills` when the official n8n Skills are available.
+
+Use Skills, documentation, or builder tools first for n8n workflow design and workflow JSON work, including:
 
 - Finding the right n8n nodes.
 - Checking exact node parameters.
@@ -47,9 +49,9 @@ Use documentation or builder tools first for n8n workflow design and workflow JS
 - Validating workflow structure.
 - Confirming current n8n node behaviour.
 
-When both `n8n_docs` and `n8n_live` style tools are available, use `n8n_docs` or equivalent documentation/build/validation tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
+When both official n8n Skills and `n8n_live` are available, use `using-n8n-skills` and official n8n MCP validation/build tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
 
-Do not use n8n docs or builder tools for:
+Do not use n8n Skills, documentation, or builder tools for:
 
 - General coding.
 - Markdown edits.

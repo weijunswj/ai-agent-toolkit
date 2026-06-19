@@ -41,7 +41,7 @@ Codex plugin/package support exists, but this repo does not make it the primary 
 
 ## Toolkit Boundary
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional AI-coding-agent MCP feature references are secondary and not part of the beginner local setup path.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Official n8n Skills plus instance-level MCP references are secondary and not part of the beginner local setup path.
 
 ## Smoke Tests
 

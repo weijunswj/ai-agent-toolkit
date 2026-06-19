@@ -10,7 +10,7 @@ This repo keeps reusable AI-agent material in a source-first layout:
 - [skills/](skills/) contains copyable AI-agent skill folders.
 - [repo/](repo/) contains repo maintenance docs, scripts, tests, and validation policy.
 
-Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. Optional n8n AI-coding-agent MCP feature references remain inside [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material.
+Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. Official n8n Skills plus instance-level MCP references remain inside [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material.
 
 ## Quick Start
 
@@ -27,7 +27,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 |---|---|
 | Project | The source/provenance area where the real material is maintained. |
 | Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files. |
-| MCP | Not a repo-wide shipped/generated surface in this repo right now. Optional n8n AI-coding-agent MCP feature references live inside the n8n local setup skill as secondary material. |
+| MCP | Not a repo-wide shipped/generated surface in this repo right now. Official n8n Skills plus instance-level MCP references live inside the n8n local setup skill as secondary material. |
 | Generated surface | A published file under [skills/](skills/) that is rebuilt from project source by a deterministic sync script. |
 
 ## Project Categories
@@ -47,7 +47,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 
 | Project | Purpose | Source |
 |---|---|---|
-| [Local n8n Setup](_projects/n8n/local-setup/) | Local n8n setup, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu cleanup, local stack templates, skills-first agent routing, and optional AI-coding-agent MCP feature references. | [_main/](_projects/n8n/local-setup/_main/) |
+| [Local n8n Setup](_projects/n8n/local-setup/) | Local n8n setup, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu cleanup, local stack templates, skills-first agent routing, and official n8n Skills plus instance-level MCP references. | [_main/](_projects/n8n/local-setup/_main/) |
 | [n8n Workflow Toolkit](_projects/n8n/workflow-toolkit/) | n8n helper-script sources and inactive workflow templates. | [_main/](_projects/n8n/workflow-toolkit/_main/) |
 | [Secure CI/CD Installer](_projects/cicd/secure-installer/) | CI/CD planning prompt, status templates, and safety policy source. | [_main/](_projects/cicd/secure-installer/_main/) |
 | [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Frontend design guidance, local generator source, and attribution notes. | [_main/](_projects/design/ui-ux-pro-max/_main/) |
@@ -69,7 +69,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 |---|---|
 | [AI Coding Agent Rules](skills/ai-coding-agent-rules/) | Install generic execution-first agent rules for supported coding agents. |
 | [n8n Agent Rules](skills/n8n-agent-rules/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
-| [n8n Local Setup](skills/n8n-local-setup/) | Set up local n8n with Docker Compose, Postgres, Compose ngrok, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu use, skills-first agent routing, and optional AI-coding-agent MCP feature references. |
+| [n8n Local Setup](skills/n8n-local-setup/) | Set up local n8n with Docker Compose, Postgres, Compose ngrok, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu use, skills-first agent routing, and official n8n Skills plus instance-level MCP references. |
 | [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
 | [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
 | [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |
@@ -90,20 +90,32 @@ For deeper setup notes, use [How To Use: Install Toolkit Skills](repo/docs/HOW-T
 > [!IMPORTANT]
 > Repo-local agent instruction installs require a selected/open target repo or an explicit target path. Standalone chats without a workspace cannot safely infer where to install `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+For toolkit-owned skills, copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
-Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
+Official n8n Skills are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. For n8n work, install the official `n8n-io/skills` plugin where the platform supports it:
+
+```powershell
+codex plugin marketplace add n8n-io/skills
+codex plugin add n8n-skills@n8n-io
+```
+
+```text
+/plugin marketplace add n8n-io/skills
+/plugin install n8n-skills@n8n-io
+```
+
+Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire. For platforms without proven plugin parity, official plugin support is platform-dependent; plain skill installs should start n8n work by loading `using-n8n-skills`.
 
 `AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
 
-| Platform | Preferred install | Active instruction files | References |
+| Platform | Toolkit-owned skill install | Active instruction files | References |
 |---|---|---|---|
 | Codex | Direct whole-skill-folder install.<br>**Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. | `AGENTS.md` | [Codex reference](skills/n8n-local-setup/references/ai-agent-platforms/codex.md). |
 | Claude Code | Direct whole-skill-folder install.<br>**Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. | `AGENTS.md`, `CLAUDE.md` shim | [Claude Code reference](skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md). |
 | OpenCode | Short manual whole-skill-folder install only.<br>**Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. | `AGENTS.md` | [OpenCode reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md). |
 | Antigravity | Plugin-scoped skill-folder install.<br>`C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\`. | `AGENTS.md`, `GEMINI.md`, Antigravity bootstrap | [Antigravity reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md). |
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional n8n AI-coding-agent MCP feature references are secondary and not the beginner local setup path.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Official n8n Skills plus instance-level MCP references are secondary and not the beginner local setup path.
 
 Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [skills/n8n-agent-rules/](skills/n8n-agent-rules/). Optional adapters in [skills/n8n-agent-rules/adapters/](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
 
@@ -113,7 +125,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 
 The supported path is skills-first: humans use `_projects/**`; agents use `skills/**`.
 
-Optional n8n AI-coding-agent MCP feature references remain under [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material. They are not a repo-wide MCP surface.
+Official n8n Skills plus instance-level MCP references remain under [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material. They are not a repo-wide MCP surface.
 
 ## Folder Map
 
@@ -167,7 +179,7 @@ This repo has a source layer and a published layer.
 - Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.
 - `skills/` contains copyable AI-agent skill folders. The whole skill folder is the install unit.
 - Toolkit skill-routing source lives in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`; keep it aligned with current `skills/*/SKILL.md` when skills or skill-publishing project modules change, and document any intentionally omitted skill.
-- This repo intentionally does not ship or maintain a repo-wide MCP generated surface for now. Optional n8n AI-coding-agent MCP feature references remain under `skills/n8n-local-setup/` as secondary n8n setup material.
+- This repo intentionally does not ship or maintain a repo-wide MCP generated surface for now. Official n8n Skills plus instance-level MCP references remain under `skills/n8n-local-setup/` as secondary n8n setup material.
 - Generated `skills/` files must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
 - `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
 - Publish declared outputs with:

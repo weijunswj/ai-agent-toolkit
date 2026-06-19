@@ -90,9 +90,10 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   const frontMatter = parseFrontMatter(readText(skillPath));
   assert.equal(frontMatter.name, 'n8n-agent-rules');
   for (const phrase of [
+    'official n8n Skills',
+    'using-n8n-skills',
     'n8n workflow JSON',
-    'n8n MCP',
-    'n8n_docs',
+    'official n8n MCP',
     'n8n_live',
     'workflow creation',
     'workflow updates',
@@ -114,7 +115,8 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   assert.equal(published, canonical);
 
   for (const safetyPhrase of [
-    'Use documentation or builder tools first',
+    'Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes',
+    'Start by loading `using-n8n-skills` when the official n8n Skills are available',
     'Use live n8n instance tools only when the user clearly asks',
     'Do not create or update a workflow from unvalidated workflow code when a validation tool is available',
     'Do not modify credentials unless the user explicitly asks',
@@ -194,7 +196,7 @@ test('generic AI coding agent templates stay slim and obsolete heavy templates a
   ]) {
     const text = readText(relPath);
     assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);
-    assert.doesNotMatch(text, /\bn8n_docs\b|\bn8n_live\b/, relPath);
+    assert.doesNotMatch(text, /\bn8n_live\b/, relPath);
     assert.doesNotMatch(text, /\n# Skill Routing Rules\n/, relPath);
     assert.doesNotMatch(text, /Current Toolkit Skill Routing/, relPath);
   }

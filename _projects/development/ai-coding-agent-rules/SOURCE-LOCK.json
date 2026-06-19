@@ -20,7 +20,7 @@
       "source_path": "templates/partials/n8n-mcp-rules.md",
       "project_path": "_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md",
       "source_blob_sha": "ed961cd1b9a5ff25b7a077d98fa32f0e8b790e72",
-      "notes": "Moved from n8n.local-setup into the ai-coding-agent-rules project because this is an agent operating ruleset. The moved rules were renamed and strengthened with explicit n8n_docs before n8n_live, webhook ID, and staticData guidance while preserving live-action approval gates."
+      "notes": "Moved from n8n.local-setup into the ai-coding-agent-rules project because this is an agent operating ruleset. The moved rules were renamed and later updated to route through official n8n Skills plus the official instance-level MCP while preserving webhook ID, staticData, and live-action approval gates."
     }
   ]
 }

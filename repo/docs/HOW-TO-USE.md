@@ -46,8 +46,8 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 
 ## Install Toolkit Skills
 
-Preferred install: copy the whole `skills/<skill-name>/` folder into one supported location.
-OpenCode stays on a short manual whole-skill-folder install note for now.
+Preferred install for toolkit-owned skills: copy the whole `skills/<skill-name>/` folder into one supported location.
+OpenCode stays on a short manual whole-skill-folder install note for toolkit-owned skills for now.
 
 1. Use the whole `skills/<skill-name>/` folder as the install unit.
 2. Copy whole skill folders, not just `SKILL.md`.
@@ -55,11 +55,23 @@ OpenCode stays on a short manual whole-skill-folder install note for now.
 4. Choose **ANY ONE** supported install location per platform.
 5. Do not paste secrets, tokens, `.env` values, or credentials into repo files.
 
-Codex and Claude Code plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex/Claude plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex and Claude Code should use direct whole-skill-folder installs.
+Official n8n Skills are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. For n8n work, install the official `n8n-io/skills` plugin where the platform supports it:
+
+```powershell
+codex plugin marketplace add n8n-io/skills
+codex plugin add n8n-skills@n8n-io
+```
+
+```text
+/plugin marketplace add n8n-io/skills
+/plugin install n8n-skills@n8n-io
+```
+
+Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire. For platforms without proven plugin parity, official plugin support is platform-dependent; plain skill installs should start n8n work by loading `using-n8n-skills`.
 
 ### Preferred Routes
 
-| Platform | Preferred route | Location guidance | Notes |
+| Platform | Toolkit-owned skill route | Location guidance | Notes |
 |---|---|---|---|
 | Codex | Direct whole-skill-folder install | See Codex locations below. | Current path for Codex skills. |
 | Claude Code | Direct whole-skill-folder install | See Claude Code locations below. | Current path for Claude Code skills. |
@@ -68,7 +80,7 @@ Codex and Claude Code plugin/package support exists, but this repo does not make
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional n8n AI-coding-agent MCP feature references are secondary and not the beginner local setup path.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Official n8n Skills plus instance-level MCP references are secondary and not the beginner local setup path.
 
 ### Codex
 
@@ -148,9 +160,9 @@ Templates are published material. Review them before copying into a consumer rep
 - [n8n agent rules](../../skills/n8n-agent-rules/) contain the full n8n operating ruleset plus optional brief adapters under `adapters/`.
 - [n8n local setup](../../skills/n8n-local-setup/references/n8n/local-setup.md) and [Hostinger Coolify VPS n8n](../../skills/n8n-local-setup/references/n8n/hostinger-vps.md) contain the full local and hosted n8n setup guides.
 - [Codex SSH Hostinger Coolify Setup Maintainer](../../skills/codex-ssh-hostinger-coolify-setup-maintainer/) is the separate skill for Hostinger VPS plus Coolify setup, SSH preflight, maintenance, and incident response. Use it before the hosted n8n guide when Coolify is not already running.
-- [n8n AI-agent platform references](../../skills/n8n-local-setup/references/ai-agent-platforms/) contain platform-specific skills/rules pointers and optional n8n MCP feature setup.
+- [n8n AI-agent platform references](../../skills/n8n-local-setup/references/ai-agent-platforms/) contain platform-specific skills/rules pointers, official n8n Skills setup, and official n8n MCP setup.
 - [n8n local stack templates](../../skills/n8n-local-setup/templates/local-stack/) contain the local Docker Compose, placeholder environment, launcher, and menu files.
-- [n8n optional MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) contain AI-coding-agent MCP config examples for users intentionally enabling n8n MCP.
+- [n8n MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) contain official instance-level MCP config examples for users intentionally enabling n8n MCP.
 - [n8n import/export sync helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/) contain n8n import/export, validation, compare, prepare, and sync helper templates.
 - [n8n sanitizer helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/) contain sanitizer tooling.
 - [n8n workflow templates](../../skills/n8n-workflow-templates/templates/) contain public generic inactive workflow JSON templates.
@@ -186,7 +198,7 @@ Use:
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
 - [Local n8n setup source module](../../_projects/n8n/local-setup/)
 
-Keep live n8n tokens in user environment variables, not repo files. Optional Codex MCP feature config is secondary and not part of the beginner local setup path.
+Keep live n8n tokens in user environment variables, not repo files. Codex official n8n Skills plus MCP setup is secondary and not part of the beginner local setup path.
 
 ## Claude Code Setup
 
@@ -200,7 +212,7 @@ Use:
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
 
-Optional Claude Code MCP feature config is secondary and not part of the beginner local setup path.
+Claude Code official n8n Skills plus MCP setup is secondary and not part of the beginner local setup path.
 
 ## OpenCode Setup
 
@@ -213,7 +225,7 @@ Use:
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
 
-Optional OpenCode MCP feature config is secondary and not part of the beginner local setup path.
+OpenCode official n8n Skills support is platform-dependent; the official instance-level MCP setup is secondary and not part of the beginner local setup path.
 
 ## Antigravity Setup
 
@@ -228,7 +240,7 @@ Use:
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
 
-Optional Antigravity MCP feature config is secondary and not part of the beginner local setup path.
+Antigravity official n8n Skills support is platform-dependent; the official instance-level MCP setup is secondary and not part of the beginner local setup path.
 
 ## ChatGPT Web And Claude Web
 
@@ -242,7 +254,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 
 The supported path is skills-first: humans use `_projects/**`, and agents use `skills/**`.
 
-Optional n8n AI-coding-agent MCP feature references are packaged under [skills/n8n-local-setup/](../../skills/n8n-local-setup/) as secondary setup material. They are not a repo-wide MCP surface.
+Official n8n Skills plus instance-level MCP references are packaged under [skills/n8n-local-setup/](../../skills/n8n-local-setup/) as secondary setup material. They are not a repo-wide MCP surface.
 
 ## Optional Design Tool
 

@@ -6,7 +6,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup Skill
 
-Instruction-only skill for safe local n8n setup, Docker Compose plus Postgres, Compose ngrok, hosted n8n on Hostinger Coolify VPS, launcher/menu use, local backup/restore recovery, skills-first agent guidance, and optional AI-coding-agent MCP feature references.
+Instruction-only skill for safe local n8n, hosted n8n references, local stack templates, official n8n Skills routing, and official instance-level MCP references.
 
 ## Start Here
 
@@ -15,24 +15,17 @@ Instruction-only skill for safe local n8n setup, Docker Compose plus Postgres, C
 | Beginner local setup guide | [references/n8n/local-setup.md](references/n8n/local-setup.md) |
 | Hostinger Coolify VPS n8n guide | [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md) |
 | n8n reference index | [references/n8n/](references/n8n/) |
-| Skills-first agent guidance | [references/ai-agent-platforms/](references/ai-agent-platforms/) |
+| Official n8n Skills and agent routing | [references/ai-agent-platforms/](references/ai-agent-platforms/) |
 | Local stack templates | [templates/local-stack/](templates/local-stack/) |
-| Optional MCP config templates | [templates/mcp-configs/](templates/mcp-configs/) |
+| Official MCP config templates | [templates/mcp-configs/](templates/mcp-configs/) |
 
 Normal use of this skill does not require `_projects/`.
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Optional AI-coding-agent MCP feature references are secondary and not part of the beginner local setup path.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Official n8n Skills plus instance-level MCP references are secondary and not part of the beginner local setup path.
 
-## Skill Install Note
+## Skill Note
 
-Copy whole skill folders, not just `SKILL.md`.
-
-| Platform | Current install path |
-| --- | --- |
-| Codex | Direct whole-skill-folder install. |
-| Claude Code | Direct whole-skill-folder install. |
-| OpenCode | Short manual whole-skill-folder install note only. |
-| Antigravity | Plugin-scoped skill-folder install. |
+Copy whole toolkit-owned skill folders, not just `SKILL.md`. Official n8n Skills are upstream-owned; use the platform references for the supported upstream route.
 
 ## Agent Rules And Adapters
 

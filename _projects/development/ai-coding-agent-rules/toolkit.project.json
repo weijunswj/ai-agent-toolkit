@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "version_policy": "semver",
-  "version_notes": "Clarifies portable playbook docs as a complete folder-level install unit for repo-local repair/refresh so consumer repos receive every index-linked Markdown file, while preserving the split portable/root instruction architecture.",
+  "version_notes": "Updates n8n agent routing to prefer the official n8n Skills plugin, using-n8n-skills, and official instance-level n8n MCP before any approved live-instance work.",
   "outputs": [
     {
       "kind": "curated",
@@ -191,7 +191,7 @@
   "project": {
     "name": "AI Coding Agent Rules",
     "category": "development",
-    "summary": "Generic execution-first AI coding agent rule templates plus the n8n-agent-rules operating contract and optional n8n adapter snippets."
+    "summary": "Generic execution-first AI coding agent rule templates plus the n8n-agent-rules operating contract, official n8n Skills routing, and optional n8n adapter snippets."
   },
   "surface": {
     "publish_as": "skill",

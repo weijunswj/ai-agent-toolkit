@@ -4,18 +4,19 @@ Project: n8n.local-setup
 Source: _projects/n8n/local-setup/_main/mcp setup - opencode.md
 Update the project source and run sync.
 -->
-# OpenCode MCP Setup
+# OpenCode Official n8n Skills And MCP Setup
 
 The primary local setup guide is [Page 1 - Local Setup](../n8n/local-setup.md).
 
-This page is an optional OpenCode AI-coding-agent MCP feature reference, not a required local setup path.
+This page is an optional OpenCode AI-coding-agent setup reference, not a required local setup path.
 
 ## What This Adds
 
 | Item | Use |
 | --- | --- |
-| `n8n_docs` | Node search and workflow validation using the community MCP. |
-| `n8n_live` | Read or mutate the real n8n instance only after explicit approval. |
+| Official n8n Skills | Workflow design, node guidance, validation, and build guidance when official Skills are installed on a supported platform. |
+| `using-n8n-skills` | The first skill to load when starting n8n workflow work. |
+| `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | OpenCode rules | User or repo instructions for safer agent behavior. |
 | OpenCode MCP config | User-scoped MCP server setup. |
 
@@ -26,12 +27,14 @@ Finish [Page 1 - Local Setup](../n8n/local-setup.md) first if you are using loca
 You should already have:
 
 1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed if you are running local n8n.
-2. [Node.js](https://nodejs.org/en/download) installed.
+2. [Node.js](https://nodejs.org/en/download) installed if your OpenCode setup requires it.
 3. [OpenCode](https://opencode.ai/docs/) installed.
 4. n8n running locally, through a tunnel, or on a hosted domain.
-5. Instance-level MCP enabled in n8n.
-6. The live n8n MCP server URL copied from n8n.
-7. A live n8n MCP token copied from n8n.
+5. Official instance-level MCP enabled in n8n.
+6. The official n8n MCP server URL copied from n8n.
+7. An official n8n MCP token copied from n8n.
+
+Do not copy, fork, vendor, mirror, or recreate the official `n8n-io/skills` content inside this toolkit. Install or reference official upstream material only.
 
 ## 2. Install OpenCode
 
@@ -42,52 +45,65 @@ You should already have:
    opencode --version
    node -v
    npm -v
-   npx --version
    ```
 
    - If `opencode` is not found, close and reopen PowerShell first.
    - If it is still not found, check that the OpenCode install location is on your Windows `PATH`.
 
-## 3. Install Toolkit Skills For OpenCode
+## 3. Official n8n Skills On OpenCode
 
-Copy the whole `skills/<skill-name>/` folder.
+Official plugin support is platform-dependent. This toolkit does not claim OpenCode plugin parity for the official `n8n-io/skills` plugin.
 
-- **Choose any one supported OpenCode skill-folder location:**
+If your OpenCode runtime supports plain skill installs from the official n8n Skills package, install the complete upstream skill folder outside this toolkit and start n8n work with this instruction:
 
-   | Scope | Skill folder location |
-   | --- | --- |
-   | Project OpenCode config | `<repo>/.opencode/skills/<skill-name>/SKILL.md` |
-   | User OpenCode config | `C:\Users\<your-user>\.config\opencode\skills\<skill-name>\SKILL.md` |
-   | Compatible fallback | `.agents/skills/` or `.claude/skills/`, if that is how the target OpenCode runtime is configured |
+```text
+Load `using-n8n-skills` before any n8n workflow design, validation, or live-instance proposal.
+```
+
+Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
+
+## 4. Install Toolkit Safety Rules For OpenCode
+
+Copy the whole toolkit `skills/<skill-name>/` folder when installing toolkit-owned skills.
+
+**Choose any one supported OpenCode skill-folder location:**
+
+| Scope | Skill folder location |
+| --- | --- |
+| Project OpenCode config | `<repo>/.opencode/skills/<skill-name>/SKILL.md` |
+| User OpenCode config | `C:\Users\<your-user>\.config\opencode\skills\<skill-name>\SKILL.md` |
+| Compatible fallback | `.agents/skills/` or `.claude/skills/`, if that is how the target OpenCode runtime is configured |
 
 - Do not copy only `SKILL.md`.
 - Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
-
-## 4. Agent Rules
+## 5. Agent Rules
 
 **If the [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
 
-   | Need | Use |
-   | --- | --- |
-   | Generic OpenCode rules | [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) |
-   | Full n8n operating contract | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) |
-   | Optional n8n pointer | `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
+| Need | Use |
+| --- | --- |
+| Generic OpenCode rules | [AI Coding Agent Rules](../../../../skills/ai-coding-agent-rules/) |
+| Full n8n operating contract | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) |
+| Optional n8n pointer | `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
 
 - If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
 
-## 5. OpenCode MCP Config
+## 6. OpenCode MCP Config
 
 Use the [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md).
+
+- Add only the official instance-level MCP connection, normally named `n8n_live`.
 - Keep `N8N_MCP_URL` and `N8N_MCP_TOKEN` in user-scoped environment variables or supported secret storage, not repo files.
 
-## 6. Restart OpenCode
+## 7. Restart OpenCode
 
 1. After changing any of these:
-   - `$HOME\.config\opencode\opencode.json`
-   - `$HOME\.config\opencode\AGENTS.md`
-   - `N8N_MCP_URL`
-   - `N8N_MCP_TOKEN`
+   - Official n8n Skills installation, if your OpenCode runtime supports it.
+   - `$HOME\.config\opencode\opencode.json`.
+   - `$HOME\.config\opencode\AGENTS.md`.
+   - `N8N_MCP_URL`.
+   - `N8N_MCP_TOKEN`.
 2. Restart OpenCode from a fresh PowerShell window:
 
    ```powershell
