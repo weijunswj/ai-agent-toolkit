@@ -128,7 +128,9 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
 
   for (const safetyPhrase of [
     `Use ${officialN8nSkillsLink} first, then use the official n8n MCP tools that are actually available in the connected instance`,
-    `Start by loading \`using-n8n-skills\` when the ${officialN8nSkillsLink} are available`,
+    `Start by loading the ${officialN8nSkillsLink} entry-point meta-skill, currently \`using-n8n-skills\`, when ${officialN8nSkillsLink} are available`,
+    `If the ${officialN8nSkillsLink} entry-point meta-skill is unavailable, report that ${officialN8nSkillsLink} are not installed or not available in the session`,
+    'Do not invent a fallback route or pretend the current entry-point skill exists',
     'Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities',
     'When validation or build tools are available, use them before proposing or performing live-instance changes',
     'If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour',

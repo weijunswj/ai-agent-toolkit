@@ -11,7 +11,7 @@ This repo contains or may contain n8n workflow/helper work.
 
 For any n8n task, follow the `n8n-agent-rules` skill or local n8n rule reference before planning or editing.
 
-n8n tasks include [official n8n Skills](https://github.com/n8n-io/skills), `using-n8n-skills`, workflow JSON, official n8n MCP, n8n_live, import/export, helper scripts, validation, credentials, webhook IDs, activation, execution, repo/live sync, and workflow templates.
+n8n tasks include [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, n8n_live, import/export, helper scripts, validation, credentials, webhook IDs, activation, execution, repo/live sync, and workflow templates.
 
 If `n8n-agent-rules` is not available, stop and ask the user to install or provide it before making n8n workflow or live n8n changes.
 

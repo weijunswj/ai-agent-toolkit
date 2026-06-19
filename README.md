@@ -112,13 +112,15 @@ For OpenCode, Antigravity, and other platforms without proven official plugin pa
 npx skills add n8n-io/skills
 ```
 
-Compatibility varies by agent; check `skills.sh` support for the specific platform. Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks, so add this cue to the target repo's `AGENTS.md`:
+Compatibility varies by agent; check `skills.sh` support for the specific platform. Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks, so add the current official entry-point cue to the target repo's `AGENTS.md`:
 
 ```text
 This project uses n8n. When working with workflows, nodes, expressions, or
 the n8n MCP tools, always start by loading the `using-n8n-skills` meta-skill
 and follow its routing into the matching capability skill before acting.
 ```
+
+The cue names the current [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`. If the upstream entry point changes, update this cue from the official README instead of inventing a local alias.
 
 `AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
 

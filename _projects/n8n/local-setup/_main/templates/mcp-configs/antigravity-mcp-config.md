@@ -5,7 +5,7 @@ Use this to connect Google Antigravity globally to the same official n8n instanc
 * Do not paste real n8n tokens into this file or any repo file.
 * Open Antigravity MCP settings, then use the raw MCP config editor if available.
 * [Official n8n Skills](https://github.com/n8n-io/skills) plugin hooks are documented for Codex and Claude Code. For Antigravity, use the official "Other platforms" route, `npx skills add n8n-io/skills`, when your runtime is supported by [skills.sh](https://skills.sh).
-* Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Add the official `using-n8n-skills` cue to the target repo `AGENTS.md` before relying on automatic n8n task routing.
+* Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Add the current [official n8n Skills](https://github.com/n8n-io/skills) entry-point cue, which names `using-n8n-skills` today, to the target repo `AGENTS.md` before relying on automatic n8n task routing.
 
 1. Common Windows path for Antigravity/Gemini MCP config:
 
@@ -81,10 +81,10 @@ Paste the following into `mcp_config.json`:
 
    * `n8n_live`
 
-2. If [official n8n Skills](https://github.com/n8n-io/skills) are installed in your Antigravity runtime, confirm the target repo `AGENTS.md` cues `using-n8n-skills`, then ask Antigravity to load them:
+2. If [official n8n Skills](https://github.com/n8n-io/skills) are installed in your Antigravity runtime, confirm the target repo `AGENTS.md` cues the official entry-point meta-skill, currently `using-n8n-skills`, then ask Antigravity to load them:
 
    ```text
-   Load `using-n8n-skills` and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything.
+   Load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything.
    ```
 
 3. Perform a live read-only MCP check inside Antigravity:
@@ -116,10 +116,10 @@ Paste the following into `mcp_config.json`:
 
 ## 5. Troubleshooting
 
-1. If `using-n8n-skills` is unavailable:
+1. If the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, is unavailable:
 
    * Confirm your Antigravity runtime supports the [official n8n Skills](https://github.com/n8n-io/skills) package through `npx skills add n8n-io/skills`.
-   * Confirm the target repo `AGENTS.md` includes the `using-n8n-skills` cue because plain skill installs do not have the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks.
+   * Confirm the target repo `AGENTS.md` includes the current official entry-point cue because plain skill installs do not have the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks.
    * Restart Antigravity after installing skills.
    * If platform support is unavailable, do not pretend parity; use the official n8n documentation manually and keep live MCP actions approval-gated.
 

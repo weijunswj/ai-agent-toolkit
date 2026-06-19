@@ -36,7 +36,9 @@ For non-n8n tasks, prefer the current user request and local project files first
 
 ## MCP routing
 
-Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Start by loading `using-n8n-skills` when the [official n8n Skills](https://github.com/n8n-io/skills) are available.
+Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Start by loading the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, when [official n8n Skills](https://github.com/n8n-io/skills) are available.
+
+If the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill is unavailable, report that [official n8n Skills](https://github.com/n8n-io/skills) are not installed or not available in the session. Do not invent a fallback route or pretend the current entry-point skill exists.
 
 Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. When validation or build tools are available, use them before proposing or performing live-instance changes. If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour.
 
@@ -51,7 +53,7 @@ Use [official n8n Skills](https://github.com/n8n-io/skills), documentation, or a
 - Validating workflow structure.
 - Confirming current n8n node behaviour.
 
-When both [official n8n Skills](https://github.com/n8n-io/skills) and `n8n_live` are available, use `using-n8n-skills` first. Then use the available n8n MCP inspection, validation, or build tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation when those capabilities exist. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
+When both [official n8n Skills](https://github.com/n8n-io/skills) and `n8n_live` are available, use the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, first. Then use the available n8n MCP inspection, validation, or build tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation when those capabilities exist. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
 
 Do not use n8n Skills, documentation, or available MCP workflow tools for:
 
