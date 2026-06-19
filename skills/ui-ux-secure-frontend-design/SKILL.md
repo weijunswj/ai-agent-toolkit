@@ -90,7 +90,11 @@ Use when the user asks to create, redesign, polish, review, or plan:
 - Treat server-side rate limits, email verification, CSRF protection for state-changing requests, and server-only secret handling as security requirements, not optional UX friction.
 - Never recommend dark patterns, fake urgency, manipulative consent, hidden fees, deceptive opt-ins, or confusing unsubscribe flows.
 - Prefer privacy-preserving defaults.
+- For frontend app work, create or preserve linked Privacy Policy and Terms of Use pages in the app shell or footer when the app is public-facing or handles accounts, forms, uploads, analytics, AI, payments, user data, or business data. If final legal copy is unavailable, mark the content as draft owner/legal-review copy and report that legal review is still required.
 - Treat forms, dashboards, admin pages, file upload UI, automation UI, AI-agent controls, and n8n workflow screens as high-risk surfaces.
+- User-facing unexpected errors must use generic copy such as `Something went wrong. Please try again. Contact support if this keeps happening. Error code: <code>.` Do not show stack traces, raw provider errors, internal paths, request headers, secrets, or private data in the UI.
+- The same public-safe error code or reference shown to the user must be appended to detailed server-side logs or the approved logging backend so support can trace the failure. Keep logs GDPR/PDPA-aware: log metadata, failure taxonomy, route/action, provider/model/status/latency/token counts when relevant, and opaque user/account IDs only when necessary; do not log raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, payment data, or unnecessary PII.
+- Do not add broad fallback behavior, silent fallback paths, or backwards compatibility shims by default. Ask the user before implementing fallbacks or backwards compatibility; if not approved, display the generic error with the error code and log it.
 - If the task requires risky changes, state the risk and propose a safer alternative.
 
 ## Operating principles
@@ -133,6 +137,7 @@ Use when the user asks to create, redesign, polish, review, or plan:
    - Empty/loading/error/success states.
    - Mobile behaviour.
    - Security/privacy notes.
+   - Privacy Policy and Terms of Use link placement when the frontend is product-facing or handles user/business data.
 6. Implement or recommend changes.
    - When a mockup or screenshot has been confirmed as the implementation target, use the mockup-driven implementation loop below.
 7. Run review checklist.
@@ -167,6 +172,7 @@ For each page or major view, include:
 - Mobile, tablet, desktop, and wide layout behavior.
 - Copy tone and content constraints.
 - Security, privacy, consent, and data-display notes.
+- Privacy Policy and Terms of Use page/link requirements.
 
 ## Component planning
 
@@ -177,6 +183,7 @@ Plan components before implementation:
 - Define props, states, variants, and responsive behavior.
 - Include keyboard behavior and focus management for interactive components.
 - Specify validation, error copy, and recovery paths for forms.
+- For unexpected failures, specify the generic user-facing error message, the visible error code/reference, and the backend logging event that stores the same code. Do not invent silent fallbacks or backwards compatibility paths unless the user approves that scope.
 - Specify confirmation, undo, audit, and permission handling for destructive actions.
 - Avoid components that require new dependencies unless approved.
 
@@ -206,7 +213,8 @@ Review implemented UI against:
 - Analytics/tracking: require explicit approval for new trackers, pixels, scripts, or external calls. Prefer first-party access logs or privacy-preserving security telemetry for abuse investigation, and avoid sending sensitive payloads, tokens, or PII to analytics tools.
 - AI-agent controls: make autonomy, permissions, data sources, and irreversible actions visible.
 - n8n workflow screens: treat triggers, credentials, executions, webhooks, and active workflow changes as high-risk controls.
-- Errors/logs/debug UI: do not expose stack traces, secrets, request headers, customer data, or private infrastructure details.
+- Errors/logs/debug UI: use generic public-facing error copy with an error code or reference, ask the user to contact support if this keeps happening, and append the same code to detailed server-side logs or the approved logging backend. Do not expose stack traces, secrets, request headers, raw prompts, model responses, customer data, or private infrastructure details.
+- GDPR/PDPA privacy baseline: minimize collection, define retention and deletion expectations, keep support diagnostics privacy-safe, and link the Privacy Policy and Terms of Use from app chrome for product-facing frontend work.
 - Consent/unsubscribe: keep choices clear, reversible, and non-manipulative.
 - Dark patterns: reject deceptive defaults, fake scarcity, hidden fees, forced continuity, and confusing opt-outs.
 
@@ -256,6 +264,9 @@ Choose the smallest useful format:
 - Components reuse existing patterns where practical.
 - If a mockup or screenshot was confirmed as the implementation target, screenshot comparison was repeated until the UI closely matched it.
 - Accessibility, responsive, performance, privacy, security, and safety gates reviewed.
+- Privacy Policy and Terms of Use pages/links created or preserved when applicable, with any legal-review gap reported.
+- Generic user-facing error copy, traceable error code/reference, and backend logging linkage reviewed for unexpected errors.
 - No secrets, private data, third-party scripts, trackers, remote assets, or new dependencies added without approval.
+- No broad fallbacks, silent fallback behavior, or backwards compatibility shims added without user approval.
 - Risky UI surfaces identified and safer alternatives proposed.
 - Final response states what changed, what was not changed, validation run, and remaining risks.

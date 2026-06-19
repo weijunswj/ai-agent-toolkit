@@ -15,12 +15,19 @@ Use these gates before implementing or approving frontend changes on high-risk s
 ## Forms
 
 - Keep client validation aligned with server validation.
-- Show actionable errors without leaking system details.
+- Show actionable validation errors without leaking system details. Unexpected failures must use generic public-facing copy such as `Something went wrong. Please try again. Contact support if this keeps happening. Error code: <code>.`
 - Mark required fields clearly.
 - Preserve consent and communication preferences.
 - Avoid prechecked marketing opt-ins unless explicitly required and legally reviewed.
 - Rate-limit public forms that send email, create records, call paid/provider APIs, or trigger automation. Use server-side IP and account/email limits where appropriate; do not rely only on disabled buttons or client-side cooldowns.
 - Contact forms should avoid confirming whether a target mailbox, user, or tenant exists.
+
+## Privacy notices and legal pages
+
+- For frontend app work, create or preserve linked Privacy Policy and Terms of Use pages in the app shell or footer when the app is public-facing or handles accounts, contact forms, uploads, analytics, AI, payments, user data, or confidential business data.
+- Keep legal pages visible from normal navigation or footer chrome; do not hide them only inside settings, source code, or a modal that is hard to rediscover.
+- If final legal copy is unavailable, use clearly labelled draft owner/legal-review content only when appropriate and report that counsel or the owner must review the live Privacy Policy, Terms of Use, sub-processors, retention periods, deletion process, and cross-border transfer terms before launch.
+- Treat GDPR and PDPA compliance as a product requirement, not a copywriting afterthought: minimize collection, document purposes, define retention/deletion expectations, provide a support/data-request path, and keep consent choices clear and reversible.
 
 ## CSRF and state-changing requests
 
@@ -86,6 +93,8 @@ Use these gates before implementing or approving frontend changes on high-risk s
 ## Error messages
 
 - Say what the user can do next.
+- Unexpected user-facing errors must be generic public-facing messages that do not reveal internals. Use wording like `Something went wrong. Please try again. Contact support if this keeps happening. Error code: <code>.`
+- Generate a support-safe error code or reference for unexpected failures and append the same code to detailed server-side logs or the approved logging backend so support can trace the event.
 - Avoid stack traces, raw database errors, request headers, private URLs, secrets, or infrastructure names.
 - Use generic public-facing copy and detailed server-side logs where appropriate.
 
@@ -93,8 +102,17 @@ Use these gates before implementing or approving frontend changes on high-risk s
 
 - Hide debug panels in production unless explicitly authorized.
 - Redact headers, cookies, tokens, PII, and private payloads.
+- Keep logs GDPR/PDPA-aware and privacy-minimized: prefer metadata, failure taxonomy, route/action, status, latency, request id, provider/model, retry count, token or byte counts, and opaque or hashed user/account IDs only when needed for support, abuse prevention, billing, or security review.
+- Do not log raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, payment data, reset links, private connector data, or long free-text/user-provided payloads unless the owner explicitly approves a reviewed retention and access-control plan.
+- For AI features, log an AI attempt ledger with provider, model, feature, status, latency, retry count, safe token/count metrics, failure taxonomy, output-shape diagnostics, and the visible error code/reference when a user-facing failure occurs.
 - Avoid copy buttons for sensitive logs unless there is a clear safety reason.
 - Make environment labels visible.
+
+## Fallbacks and backwards compatibility
+
+- Do not add broad fallback behavior, silent fallback paths, or backwards compatibility shims by default.
+- Ask the user before implementing fallbacks or backwards compatibility. If approved, keep the path narrow, visible, logged, tested, and documented with a removal or review condition.
+- If a feature fails and no approved fallback exists, display the generic error with the error code/reference and log the detailed server-side diagnostics.
 
 ## Consent and unsubscribe flows
 

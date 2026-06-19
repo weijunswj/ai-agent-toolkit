@@ -28,6 +28,10 @@ Keep the review practical: recommend building from scratch only when product con
 - Do not claim current pricing, free-tier limits, feature availability, or compliance posture unless you have checked current official provider docs in this turn. If browsing is unavailable or not requested, state that pricing and limits must be verified before commitment.
 - For each recommended managed provider, capture upgrade-watch signals such as storage, bandwidth, request volume, database size, email volume, contacts, seats, monthly active users, execution minutes, compute/RAM/disk, API quotas, error rates, and rate-limit events when relevant.
 - For deployment and AI modules, define privacy-safe observability before recommending go-live: daily PASS/WARN/FAIL summaries, metadata-only event allowlists, AI attempt ledger fields, failure taxonomy, and output-shape diagnostics. Do not log raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, private connector data, payment data, or private files.
+- For application error handling, require generic public-facing errors with a support-safe error code or reference, and append the same code to detailed server-side logs or the approved logging backend. Suggested public copy: `Something went wrong. Please try again. Contact support if this keeps happening. Error code: <code>.`
+- Keep logging and support diagnostics GDPR/PDPA-aware: collect only what is needed for support, abuse prevention, cost control, security review, billing, and reliability; define retention/deletion expectations; avoid raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, payment data, and unnecessary PII.
+- For frontend app foundations, require linked Privacy Policy and Terms of Use pages when the app is public-facing or handles accounts, forms, uploads, analytics, AI, payments, user data, or confidential business data.
+- Do not add broad fallback behavior, silent fallback paths, or backwards compatibility shims by default. Ask the user before implementing fallbacks or backwards compatibility; if not approved, display the generic error with the error code and log it.
 - Treat upgrade recommendations as advisory. Do not upgrade paid plans, change billing, add seats, resize servers, or enable paid add-ons without explicit owner approval naming the provider and operation.
 - Do not create accounts, enter secrets, migrate data, modify DNS, configure production services, or write to external systems without explicit current-turn approval naming the provider and operation.
 
@@ -79,6 +83,8 @@ Keep the review practical: recommend building from scratch only when product con
 - Public/anon client keys must be backed by RLS, Firebase Security Rules, scoped API routes, auth checks, and provider quotas.
 - Traffic/security monitoring should use first-party logs, proxy/WAF events, rate-limit counters, and privacy-preserving telemetry before broad third-party trackers.
 - AI-module observability should be metadata-only: attempt id, module name, provider/model identifier, status, latency, retry count, safe token or byte counts, failure taxonomy, and output-shape validation. No provider calls, notification tests, production mutations, or auto-remediation without explicit current-turn approval.
+- User-facing unexpected failures should show generic public-facing copy with a traceable error code/reference and no stack trace, raw provider error, private URL, request header, internal path, prompt, model response, or private payload. The same code/reference must appear in server-side logs or the approved logging backend.
+- Public or production frontend apps should link Privacy Policy and Terms of Use pages from the app shell or footer, with final legal review called out before launch.
 
 ## Output
 
@@ -89,6 +95,7 @@ Return:
 - A `Keep/Build List` for genuinely product-specific work.
 - An `Upgrade Watch` list for each selected managed service: key quota, current/expected usage, warning threshold, read-only signal to inspect, review cadence, and owner-approved next action.
 - A `Deployment And AI Observability Baseline` with daily PASS/WARN/FAIL signals, allowed metadata events, AI attempt ledger fields, failure taxonomy, and private-payload exclusions.
+- An `Application Error And Privacy Baseline` covering generic user-facing error copy, visible error code/reference, server-side log linkage, GDPR/PDPA minimization, Privacy Policy and Terms of Use link requirements, and any owner-approved fallback/backwards-compatibility scope.
 - A `Verify Before Commit` list of official pricing/docs, free-tier limits, export paths, and security settings to check before implementation.
 - A `Security Still Required` list so managed-service adoption does not hide remaining rate-limit, CSRF, key-handling, backup, logging, and access-control work.
 
