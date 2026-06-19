@@ -92,7 +92,7 @@ For deeper setup notes, use [How To Use: Install Toolkit Skills](repo/docs/HOW-T
 
 For toolkit-owned skills, copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. For n8n work, install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin where the platform supports it:
+[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. For n8n work, install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin where the platform supports plugin hooks:
 
 ```powershell
 codex plugin marketplace add n8n-io/skills
@@ -104,7 +104,21 @@ codex plugin add n8n-skills@n8n-io
 /plugin install n8n-skills@n8n-io
 ```
 
-Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire. For platforms without proven plugin parity, official plugin support is platform-dependent; plain skill installs should start n8n work by loading `using-n8n-skills`.
+Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
+
+For OpenCode, Antigravity, and other platforms without proven official plugin parity, follow the upstream "Other platforms" route from the [official n8n Skills](https://github.com/n8n-io/skills) README. From the target project folder, run:
+
+```powershell
+npx skills add n8n-io/skills
+```
+
+Compatibility varies by agent; check `skills.sh` support for the specific platform. Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks, so add this cue to the target repo's `AGENTS.md`:
+
+```text
+This project uses n8n. When working with workflows, nodes, expressions, or
+the n8n MCP tools, always start by loading the `using-n8n-skills` meta-skill
+and follow its routing into the matching capability skill before acting.
+```
 
 `AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
 

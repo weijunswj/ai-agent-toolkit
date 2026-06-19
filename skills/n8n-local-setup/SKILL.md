@@ -35,7 +35,8 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - Use the local stack templates in [templates/local-stack/](templates/local-stack/) for local `n8n + postgres`.
 - Treat [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, Postgres backup packages, and local backup restore actions.
 - Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, Claude web routing, [official n8n Skills](https://github.com/n8n-io/skills) installation notes, and official instance-level MCP references.
-- Use the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin instructions for Codex and Claude Code where supported. For other platforms, official plugin support is platform-dependent; use plain skill-folder installs only when that platform supports them and start n8n work by loading `using-n8n-skills`.
+- Use the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin instructions for Codex and Claude Code where plugin hooks are supported. For OpenCode, Antigravity, and other platforms, follow the official "Other platforms" route (`npx skills add n8n-io/skills`) when supported by [skills.sh](https://skills.sh).
+- Plain official n8n Skills installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Make sure the target repo `AGENTS.md` cues the agent to load `using-n8n-skills` before n8n work.
 - [Official n8n Skills](https://github.com/n8n-io/skills) plus official instance-level MCP setup/config references are secondary and not part of the beginner local setup path.
 - Use `skills/ai-coding-agent-rules` for generic AI coding agent rules.
 - Use `skills/n8n-agent-rules` or [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for the full n8n operating ruleset.

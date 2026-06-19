@@ -55,7 +55,7 @@ OpenCode stays on a short manual whole-skill-folder install note for toolkit-own
 4. Choose **ANY ONE** supported install location per platform.
 5. Do not paste secrets, tokens, `.env` values, or credentials into repo files.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. For n8n work, install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin where the platform supports it:
+[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. For n8n work, install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin where the platform supports plugin hooks:
 
 ```powershell
 codex plugin marketplace add n8n-io/skills
@@ -67,7 +67,21 @@ codex plugin add n8n-skills@n8n-io
 /plugin install n8n-skills@n8n-io
 ```
 
-Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire. For platforms without proven plugin parity, official plugin support is platform-dependent; plain skill installs should start n8n work by loading `using-n8n-skills`.
+Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
+
+For OpenCode, Antigravity, and other platforms without proven official plugin parity, follow the upstream "Other platforms" route from the [official n8n Skills](https://github.com/n8n-io/skills) README. From the target project folder, run:
+
+```powershell
+npx skills add n8n-io/skills
+```
+
+Compatibility varies by agent; check `skills.sh` support for the specific platform. Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks, so add this cue to the target repo's `AGENTS.md`:
+
+```text
+This project uses n8n. When working with workflows, nodes, expressions, or
+the n8n MCP tools, always start by loading the `using-n8n-skills` meta-skill
+and follow its routing into the matching capability skill before acting.
+```
 
 ### Preferred Routes
 

@@ -1102,6 +1102,21 @@ test('linked n8n Skills and MCP setup surfaces are shipped as secondary AI-codin
     assertCapabilityAwareMcpGuidance(text, page);
   }
 
+  for (const page of [
+    'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md'
+  ]) {
+    const text = readText(repoRoot, page);
+    assert.match(text, /official README's "Other platforms" category/, page);
+    assert.match(text, /npx skills add n8n-io\/skills/, page);
+    assert.match(text, /`SessionStart` loads the `using-n8n-skills` meta-skill automatically/, page);
+    assert.match(text, /`PreToolUse` nudges the agent to consult the matching skill/, page);
+    assert.match(text, /`PostToolUse` can provide follow-up reminders/, page);
+    assert.match(text, /Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks/, page);
+    assert.match(text, /always start by loading the `using-n8n-skills` meta-skill/, page);
+    assert.doesNotMatch(text, /Official plugin support is platform-dependent/, page);
+  }
+
   for (const page of mcpConfigOutputs.map((entry) => entry.output)) {
     const text = readText(repoRoot, page);
     assert.match(text, /\bn8n_live\b/, page);
@@ -1111,6 +1126,17 @@ test('linked n8n Skills and MCP setup surfaces are shipped as secondary AI-codin
     assert.doesNotMatch(text, retiredMcpSetupPattern, page);
     assert.doesNotMatch(text, /Smoke Test|create it in my n8n instance/i, page);
     assertCapabilityAwareMcpGuidance(text, page);
+  }
+
+  for (const page of [
+    'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md',
+    'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md'
+  ]) {
+    const text = readText(repoRoot, page);
+    assert.match(text, /npx skills add n8n-io\/skills/, page);
+    assert.match(text, /Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks/, page);
+    assert.match(text, /target repo `AGENTS\.md`/, page);
+    assert.doesNotMatch(text, /plugin support is platform-dependent/i, page);
   }
 
   const mcpConfigIndex = readText(repoRoot, mcpConfigIndexOutput.output);

@@ -14,7 +14,7 @@ This page is an optional OpenCode AI-coding-agent setup reference, not a require
 
 | Item | Use |
 | --- | --- |
-| [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance when official Skills are installed on a supported platform. |
+| [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance when official Skills are installed. Plugin lifecycle hooks are available only on supported plugin platforms. |
 | `using-n8n-skills` | The first skill to load when starting n8n workflow work. |
 | `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | OpenCode rules | User or repo instructions for safer agent behavior. |
@@ -52,19 +52,35 @@ Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](ht
 
 ## 3. [Official n8n Skills](https://github.com/n8n-io/skills) On OpenCode
 
-Official plugin support is platform-dependent. This toolkit does not claim OpenCode plugin parity for the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin.
+The official [`n8n-io/skills`](https://github.com/n8n-io/skills) README documents plugin installs for Codex and Claude Code. Those plugin installs ship lifecycle hooks:
 
-If your OpenCode runtime supports plain skill installs from the [official n8n Skills](https://github.com/n8n-io/skills) package, install the complete upstream skill folder outside this toolkit and start n8n work with this instruction:
+- `SessionStart` loads the `using-n8n-skills` meta-skill automatically.
+- `PreToolUse` nudges the agent to consult the matching skill before high-impact n8n MCP calls.
+- `PostToolUse` can provide follow-up reminders after tool use.
 
-```text
-Load `using-n8n-skills` before any n8n workflow design, validation, or live-instance proposal.
+OpenCode is in the official README's "Other platforms" category unless OpenCode later documents official plugin parity. From the target project folder, install with `skills.sh` via `npx`:
+
+```powershell
+npx skills add n8n-io/skills
 ```
+
+Compatibility varies by agent. Check [skills.sh](https://skills.sh) support for your OpenCode runtime.
+
+Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Add this cue to the target repo's `AGENTS.md` so the missing `SessionStart` hook is covered for n8n tasks:
+
+```markdown
+This project uses n8n. When working with workflows, nodes, expressions, or
+the n8n MCP tools, always start by loading the `using-n8n-skills` meta-skill
+and follow its routing into the matching capability skill before acting.
+```
+
+For the current session, explicitly ask OpenCode to load `using-n8n-skills` before any n8n workflow design, validation, or live-instance proposal.
 
 Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
 
 ## 4. Install Toolkit Safety Rules For OpenCode
 
-Copy the whole toolkit `skills/<skill-name>/` folder when installing toolkit-owned skills.
+This section is for this toolkit's own safety skills, not the upstream [official n8n Skills](https://github.com/n8n-io/skills) install above. Copy the whole toolkit `skills/<skill-name>/` folder when installing toolkit-owned skills.
 
 **Choose any one supported OpenCode skill-folder location:**
 
@@ -88,6 +104,7 @@ Copy the whole toolkit `skills/<skill-name>/` folder when installing toolkit-own
 | Optional n8n pointer | `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
 
 - If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
+- If you installed [official n8n Skills](https://github.com/n8n-io/skills) through `npx skills add n8n-io/skills`, make sure the `using-n8n-skills` cue from section 3 is present in the same target repo `AGENTS.md`.
 
 ## 6. OpenCode MCP Config
 
@@ -99,7 +116,8 @@ Use the [OpenCode MCP config](../../templates/mcp-configs/opencode-mcp-config.md
 ## 7. Restart OpenCode
 
 1. After changing any of these:
-   - [Official n8n Skills](https://github.com/n8n-io/skills) installation, if your OpenCode runtime supports it.
+   - [Official n8n Skills](https://github.com/n8n-io/skills) plain skill install.
+   - Target repo `AGENTS.md` n8n cue.
    - `$HOME\.config\opencode\opencode.json`.
    - `$HOME\.config\opencode\AGENTS.md`.
    - `N8N_MCP_URL`.

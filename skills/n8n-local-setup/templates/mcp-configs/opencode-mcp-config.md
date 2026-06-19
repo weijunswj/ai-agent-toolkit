@@ -11,7 +11,8 @@ Use this to connect OpenCode globally to the same official n8n instance-level MC
 * Do not paste your real n8n token into this file or any repo file.
 * Keep `{env:N8N_MCP_URL}` and `{env:N8N_MCP_TOKEN}` exactly as shown.
 * Do not put this in a repo-level `opencode.json` unless you intentionally want project-specific OpenCode overrides.
-* [Official n8n Skills](https://github.com/n8n-io/skills) plugin support is platform-dependent. If your OpenCode runtime supports plain skill installs from the [official n8n Skills](https://github.com/n8n-io/skills) package, start n8n work by loading `using-n8n-skills`.
+* [Official n8n Skills](https://github.com/n8n-io/skills) plugin hooks are documented for Codex and Claude Code. For OpenCode, use the official "Other platforms" route, `npx skills add n8n-io/skills`, when your runtime is supported by [skills.sh](https://skills.sh).
+* Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Add the official `using-n8n-skills` cue to the target repo `AGENTS.md` before relying on automatic n8n task routing.
 
 1. Common Windows path for OpenCode MCP config:
 
@@ -103,7 +104,7 @@ Paste the following into `opencode.json`:
 
    * `n8n_live`
 
-3. If [official n8n Skills](https://github.com/n8n-io/skills) are installed in your OpenCode runtime, ask OpenCode to load them:
+3. If [official n8n Skills](https://github.com/n8n-io/skills) are installed in your OpenCode runtime, confirm the target repo `AGENTS.md` cues `using-n8n-skills`, then ask OpenCode to load them:
 
    ```powershell
    opencode run "Load using-n8n-skills and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything."
@@ -138,7 +139,8 @@ Paste the following into `opencode.json`:
 
 1. If `using-n8n-skills` is unavailable:
 
-   * Confirm your OpenCode runtime supports the [official n8n Skills](https://github.com/n8n-io/skills) package as a plain skill install.
+   * Confirm your OpenCode runtime supports the [official n8n Skills](https://github.com/n8n-io/skills) package through `npx skills add n8n-io/skills`.
+   * Confirm the target repo `AGENTS.md` includes the `using-n8n-skills` cue because plain skill installs do not have the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks.
    * Restart OpenCode after installing skills.
    * If platform support is unavailable, do not pretend parity; use the official n8n documentation manually and keep live MCP actions approval-gated.
 

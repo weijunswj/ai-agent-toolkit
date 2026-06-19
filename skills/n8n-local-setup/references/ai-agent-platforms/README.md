@@ -24,8 +24,8 @@ Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`. Open 
 | --- | --- |
 | Codex | Official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin install. |
 | Claude Code | Official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin install. |
-| OpenCode | Platform-dependent plain skill install only when supported; start with `using-n8n-skills`. |
-| Antigravity | Platform-dependent plain skill install only when supported; start with `using-n8n-skills`. |
+| OpenCode | Official "Other platforms" path: `npx skills add n8n-io/skills` when supported by [skills.sh](https://skills.sh), plus an `AGENTS.md` cue because plain installs lack plugin hooks. |
+| Antigravity | Official "Other platforms" path: `npx skills add n8n-io/skills` when supported by [skills.sh](https://skills.sh), plus an `AGENTS.md` cue because plain installs lack plugin hooks. |
 
 | Reference | Use when |
 | --- | --- |
