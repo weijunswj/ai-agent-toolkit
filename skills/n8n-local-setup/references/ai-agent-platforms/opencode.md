@@ -60,7 +60,7 @@ If your OpenCode runtime supports plain skill installs from the official n8n Ski
 Load `using-n8n-skills` before any n8n workflow design, validation, or live-instance proposal.
 ```
 
-Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
+Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
 
 ## 4. Install Toolkit Safety Rules For OpenCode
 

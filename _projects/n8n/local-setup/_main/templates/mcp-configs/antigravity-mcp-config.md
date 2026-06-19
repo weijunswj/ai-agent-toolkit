@@ -103,7 +103,8 @@ Paste the following into `mcp_config.json`:
 
 ## 4. Safety Rules
 
-* Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes.
+* Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+* Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 * Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live` uses `supergateway` to bridge Antigravity's local command MCP shape to n8n's streamable HTTP MCP endpoint.
 * `N8N_MCP_URL` keeps the live MCP URL configurable for localhost, ngrok, or another domain.

@@ -36,9 +36,11 @@ For non-n8n tasks, prefer the current user request and local project files first
 
 ## MCP routing
 
-Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes. Start by loading `using-n8n-skills` when the official n8n Skills are available.
+Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance. Start by loading `using-n8n-skills` when the official n8n Skills are available.
 
-Use Skills, documentation, or builder tools first for n8n workflow design and workflow JSON work, including:
+Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. When validation or build tools are available, use them before proposing or performing live-instance changes. If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour.
+
+Use official n8n Skills, documentation, or available MCP tools first for n8n workflow design and workflow JSON work, including:
 
 - Finding the right n8n nodes.
 - Checking exact node parameters.
@@ -49,9 +51,9 @@ Use Skills, documentation, or builder tools first for n8n workflow design and wo
 - Validating workflow structure.
 - Confirming current n8n node behaviour.
 
-When both official n8n Skills and `n8n_live` are available, use `using-n8n-skills` and official n8n MCP validation/build tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
+When both official n8n Skills and `n8n_live` are available, use `using-n8n-skills` first. Then use the available n8n MCP inspection, validation, or build tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation when those capabilities exist. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
 
-Do not use n8n Skills, documentation, or builder tools for:
+Do not use n8n Skills, documentation, or available MCP workflow tools for:
 
 - General coding.
 - Markdown edits.
@@ -79,23 +81,25 @@ Never use live n8n tools speculatively.
 
 Do not assume every n8n MCP tool exists on every instance.
 
-Before relying on a live or builder capability, use the tools actually available in the current environment.
+Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 
-When an expected tool is unavailable, use the closest safer local validation path and clearly state the limitation.
+If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour.
+
+When an expected tool is unavailable, use official n8n Skills or local repo validation only when those paths actually cover the gap, and clearly state the limitation.
 
 Some n8n MCP capabilities are version-dependent. If a task depends on a specific capability, confirm tool availability before using it.
 
 ## Workflow builder order
 
-When building or materially updating a workflow through n8n MCP workflow builder tools, use this order when the tools are available:
+When building or materially updating a workflow through n8n MCP workflow tools, use this order when the relevant tools are available:
 
 1. Call the SDK/reference tool first to check patterns, expression syntax, import syntax, coding rules, naming guidelines, and design guidance.
 2. Search for suitable nodes.
 3. Fetch exact node type definitions before writing node configuration.
 4. Build the smallest workflow that satisfies the request.
-5. Validate the workflow before creating or updating it.
-6. Fix validation errors before live creation or update.
-7. Create or update only after validation succeeds.
+5. Validate the workflow before creating or updating it when a validation tool is available.
+6. Fix validation errors before live creation or update when a validation tool reports them.
+7. Create or update only after required validation succeeds, or report when the needed validation capability is unavailable.
 
 Do not create or update a workflow from unvalidated workflow code when a validation tool is available.
 

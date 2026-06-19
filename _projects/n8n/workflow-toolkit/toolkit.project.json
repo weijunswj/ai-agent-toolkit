@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "version_policy": "semver",
-  "version_notes": "Refreshes n8n workflow skill dependency wording to route through official n8n Skills and official n8n MCP validation/build tools before live work.",
+  "version_notes": "Refreshes n8n workflow skill dependency wording to route through official n8n Skills and capability-aware official n8n MCP use before live work.",
   "outputs": [
     {
       "kind": "curated",

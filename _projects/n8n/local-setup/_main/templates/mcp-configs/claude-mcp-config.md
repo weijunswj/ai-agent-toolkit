@@ -135,7 +135,8 @@ Use this to connect Claude Code globally to the same official n8n instance-level
 
 ## 5. Safety Rules
 
-* Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes.
+* Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+* Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 * Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live` connects to whichever n8n MCP URL is stored in `N8N_MCP_URL`.
 * `${N8N_MCP_URL}` keeps the live MCP endpoint configurable.

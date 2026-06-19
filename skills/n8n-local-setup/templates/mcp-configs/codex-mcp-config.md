@@ -111,7 +111,8 @@ enabled = true
 
 ## 4. Safety Rules
 
-* Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes.
+* Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+* Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 * Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live.url` is a literal MCP endpoint. Change the URL manually if your n8n is not on `localhost:5678`.
 * `bearer_token_env_var = "N8N_MCP_TOKEN"` keeps the real token out of config and repo files.

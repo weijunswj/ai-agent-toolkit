@@ -73,6 +73,13 @@ const retiredMcpSetupPattern = new RegExp([
   'n8n_' + 'docs'
 ].map(escapeRegExp).join('|'), 'i');
 
+const overstatedOfficialMcpCapabilityPattern = new RegExp([
+  'official n8n MCP ' + 'validation' + '/build tools',
+  'official n8n MCP ' + 'validation',
+  'official n8n MCP ' + 'build',
+  'MCP ' + 'validation' + '/build'
+].map(escapeRegExp).join('|'), 'i');
+
 const localStackOutputs = [
   {
     source: '_main/templates/local-stack/docker-compose.yml',
@@ -190,6 +197,13 @@ function stripGeneratedNotices(text) {
     remaining = remaining.slice(end + '-->'.length).trimStart();
   }
   return remaining.trimEnd() + '\n';
+}
+
+function assertCapabilityAwareMcpGuidance(text, label) {
+  assert.match(text, /official n8n Skills first/i, label);
+  assert.match(text, /n8n MCP tools that are actually available/i, label);
+  assert.match(text, /Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities/i, label);
+  assert.doesNotMatch(text, overstatedOfficialMcpCapabilityPattern, label);
 }
 
 function applyTextRewrites(text, output) {
@@ -1082,6 +1096,7 @@ test('official n8n Skills and MCP setup surfaces are shipped as secondary AI-cod
     assert.match(text, /\]\(\.\.\/\.\.\/templates\/mcp-configs\//, page);
     assert.doesNotMatch(text, /_Page%201|\]\(\.\/templates\//, page);
     assert.doesNotMatch(text, retiredMcpSetupPattern, page);
+    assertCapabilityAwareMcpGuidance(text, page);
   }
 
   for (const page of mcpConfigOutputs.map((entry) => entry.output)) {
@@ -1092,7 +1107,11 @@ test('official n8n Skills and MCP setup surfaces are shipped as secondary AI-cod
     assert.match(text, /Do not modify anything\./, page);
     assert.doesNotMatch(text, retiredMcpSetupPattern, page);
     assert.doesNotMatch(text, /Smoke Test|create it in my n8n instance/i, page);
+    assertCapabilityAwareMcpGuidance(text, page);
   }
+
+  const mcpConfigIndex = readText(repoRoot, mcpConfigIndexOutput.output);
+  assertCapabilityAwareMcpGuidance(mcpConfigIndex, mcpConfigIndexOutput.output);
 
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
   assert.match(localSetup, /mcp setup - codex\.md/);

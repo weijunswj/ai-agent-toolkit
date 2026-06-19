@@ -101,7 +101,8 @@ Copy the whole toolkit `skills/<skill-name>/` folder when installing toolkit-own
 | Optional n8n pointer | `CLAUDE.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
 
 - If the target repo already has `CLAUDE.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
-- For n8n workflow work, use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes.
+- For n8n workflow work, use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+- Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 - Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
 
 ## 6. Claude Code MCP Config

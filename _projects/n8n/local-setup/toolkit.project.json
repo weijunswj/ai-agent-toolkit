@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "version_policy": "semver",
-  "version_notes": "Replaces the retired third-party documentation MCP setup with official n8n Skills installation guidance plus official instance-level n8n MCP templates.",
+  "version_notes": "Keeps official n8n Skills installation guidance and official instance-level n8n MCP templates, with capability-aware MCP wording.",
   "outputs": [
     {
       "kind": "curated",

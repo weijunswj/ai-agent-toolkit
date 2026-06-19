@@ -19,6 +19,17 @@ function exists(relPath) {
   return fs.existsSync(path.join(repoRoot, relPath));
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const overstatedOfficialMcpCapabilityPattern = new RegExp([
+  'official n8n MCP ' + 'validation' + '/build tools',
+  'official n8n MCP ' + 'validation',
+  'official n8n MCP ' + 'build',
+  'MCP ' + 'validation' + '/build'
+].map(escapeRegExp).join('|'), 'i');
+
 function stripGeneratedNotices(text) {
   let remaining = text.trimStart();
   while (remaining.startsWith('<!--') && !remaining.startsWith('<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->')) {
@@ -115,8 +126,11 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   assert.equal(published, canonical);
 
   for (const safetyPhrase of [
-    'Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes',
+    'Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance',
     'Start by loading `using-n8n-skills` when the official n8n Skills are available',
+    'Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities',
+    'When validation or build tools are available, use them before proposing or performing live-instance changes',
+    'If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour',
     'Use live n8n instance tools only when the user clearly asks',
     'Do not create or update a workflow from unvalidated workflow code when a validation tool is available',
     'Do not modify credentials unless the user explicitly asks',
@@ -126,8 +140,11 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
     'Sticky notes must stay concise',
     'Prompt-injection and untrusted input'
   ]) {
-    assert.match(canonical, new RegExp(safetyPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), safetyPhrase);
+    assert.match(canonical, new RegExp(escapeRegExp(safetyPhrase)), safetyPhrase);
   }
+
+  assert.doesNotMatch(canonical, overstatedOfficialMcpCapabilityPattern);
+  assert.doesNotMatch(readText(skillPath), overstatedOfficialMcpCapabilityPattern);
 });
 
 test('n8n-agent-rules skill documents the adapter auto-check approval protocol', () => {

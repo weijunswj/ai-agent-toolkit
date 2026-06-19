@@ -58,7 +58,7 @@ The answer `none` is allowed and must be respected.
 
 ## Safety
 
-- Use official n8n Skills and official n8n MCP validation/build tools before proposing live-instance changes.
+- Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 - Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, archive/delete, credential, source-watch, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
 - Keep workflows inactive or unpublished by default unless the user explicitly asks otherwise.
 - Never put secrets, credentials, tokens, webhook secrets, private keys, `.env` values, credential bindings, or live import/export payloads into repo files.
