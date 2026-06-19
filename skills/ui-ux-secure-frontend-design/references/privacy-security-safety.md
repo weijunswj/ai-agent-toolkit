@@ -30,7 +30,8 @@ Use these gates before implementing or approving frontend changes on high-risk s
 
 ## Privacy notices and legal pages
 
-- For frontend app work, create or preserve linked Privacy Policy and Terms of Use pages in the app shell or footer when the app is public-facing or handles accounts, contact forms, uploads, analytics, AI, payments, user data, or confidential business data.
+- For product-facing and/or data-handling frontend apps, create or preserve linked Privacy Policy and Terms of Use pages in the app shell or footer when the app is public-facing or handles accounts, forms, uploads, analytics, AI, payments, user data, customer/business data, admin workflows, dashboards, or confidential business data.
+- Privacy Policy and Terms of Use pages are not required for every isolated component, static UI experiment, internal throwaway mock, or non-product frontend-only task unless the task is intended for product use or handles user/business/confidential data.
 - Keep legal pages visible from normal navigation or footer chrome; do not hide them only inside settings, source code, or a modal that is hard to rediscover.
 - If final legal copy is unavailable, use clearly labelled draft owner/legal-review content only when appropriate and report that counsel or the owner must review the live Privacy Policy, Terms of Use, sub-processors, retention periods, deletion process, and cross-border transfer terms before launch.
 - Treat GDPR and PDPA compliance as a product requirement, not a copywriting afterthought: minimize collection, document purposes, define retention/deletion expectations, provide a support/data-request path, and keep consent choices clear and reversible.
@@ -99,8 +100,9 @@ Use these gates before implementing or approving frontend changes on high-risk s
 ## Error messages
 
 - Say what the user can do next.
-- Unexpected user-facing errors must be generic public-facing messages that do not reveal internals. Use wording like `Something went wrong. Please try again. Contact support if this keeps happening. Error code: <code>.`
-- Generate a support-safe error code or reference for unexpected failures and append the same code to detailed server-side logs or the approved logging backend so support can trace the event.
+- Unexpected user-facing errors must be generic public-facing messages that do not reveal internals. Use wording like `Something went wrong. Please try again. Contact support if this keeps happening. Error code: <event-specific-code-or-reference>.`
+- Generate a support-safe, non-PII, non-secret, event/request-specific error code or reference for unexpected failures. The same visible error code/reference must appear in detailed backend logs, server-side logs, or the approved logging backend for the exact backend log event. It must be unique enough to correlate the user-facing error to the exact backend log event or approved logging-backend entry, stable enough for the user to quote to support, and not revealing internals.
+- Static-only codes such as `UNKNOWN_ERROR`, `INTERNAL_ERROR`, or `ERR_GENERIC` are not sufficient by themselves. They may appear in logs as failure taxonomy only when paired with a unique request id, event id, trace id, or error reference that is also present in backend logs and, for user-facing failures, visible to the user.
 - Avoid stack traces, raw database errors, request headers, private URLs, secrets, or infrastructure names.
 - Use generic public-facing copy and detailed server-side logs where appropriate.
 
@@ -110,7 +112,7 @@ Use these gates before implementing or approving frontend changes on high-risk s
 - Redact headers, cookies, tokens, PII, and private payloads.
 - Keep logs GDPR/PDPA-aware and privacy-minimized: prefer metadata, failure taxonomy, route/action, status, latency, request id, provider/model, retry count, token or byte counts, and opaque or hashed user/account IDs only when needed for support, abuse prevention, billing, or security review.
 - Do not log raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, payment data, reset links, private connector data, or long free-text/user-provided payloads unless the owner explicitly approves a reviewed retention and access-control plan.
-- For AI features, log an AI attempt ledger with provider, model, feature, status, latency, retry count, safe token/count metrics, failure taxonomy, output-shape diagnostics, and the visible error code/reference when a user-facing failure occurs.
+- For AI features, log a metadata-only AI attempt ledger by default with provider, model, feature/module, status, latency, retry count, safe token/byte counts, failure taxonomy, output-shape diagnostics, and the same visible error reference when a user-facing AI failure occurs.
 - Avoid copy buttons for sensitive logs unless there is a clear safety reason.
 - Make environment labels visible.
 

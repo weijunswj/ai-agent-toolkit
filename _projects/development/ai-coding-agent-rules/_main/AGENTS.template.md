@@ -128,16 +128,13 @@ Never introduce secrets, credentials, tokens, private keys, `.env` values, or pr
 
 ## Application Error, Logging, And Privacy Defaults
 
-When touching frontend or backend product behavior, preserve privacy-safe diagnostics and clear user-facing failure behavior.
+When touching product frontend/backend behavior, preserve privacy-safe diagnostics without turning root instructions into a full policy manual.
 
-- User-facing unexpected errors must be generic: do not show stack traces, raw provider/database errors, private URLs, internal paths, request headers, secrets, prompts, model responses, or private payloads.
-- Include a support-safe error code or reference in the user-facing error, such as `Something went wrong. Please try again. Contact support if this keeps happening. Error code: <code>.`
-- Append the same error code/reference to detailed server-side logs or the approved logging backend so support can trace the failure.
-- Keep logs GDPR/PDPA-aware and data-minimized. Prefer metadata, failure taxonomy, route/action, status, latency, request id, provider/model, retry count, token or byte counts, and opaque or hashed user/account IDs only when needed. Do not log raw prompts, uploads, model responses, customer content, secrets, auth headers, cookies, payment data, private connector data, or unnecessary PII.
-- For frontend app work, create or preserve linked Privacy Policy and Terms of Use pages when the app is public-facing or handles accounts, forms, uploads, analytics, AI, payments, user data, or confidential business data. If legal text is not final, mark the content as draft owner/legal-review copy and report that legal review remains.
-- Do not add broad fallback behavior, silent fallback paths, or masking fallbacks by default. Display the error instead when no approved fallback exists.
-- Do not introduce backwards compatibility shims, legacy aliases, dual paths, or migration fallbacks by default.
-- Ask the user before implementing fallbacks or backwards compatibility. If approved, keep the fallback narrow, visible, logged, tested, and documented with a removal or review condition.
+- Show generic user-facing errors with a support-safe traceable reference; do not expose internals or private payloads in UI.
+- Store the same event/request-specific reference in server logs or the approved logging backend so support can trace the failure.
+- Keep logs privacy-minimized; do not log raw prompts, uploads, model responses, secrets, auth headers, cookies, payment data, private connector data, private files, or unnecessary PII.
+- Do not add broad fallbacks or backwards compatibility by default. Ask the user first; if approved, keep the path narrow, visible, logged, tested, and documented with a removal or review condition.
+- For detailed frontend, backend, privacy, AI observability, and legal-page requirements, route to the relevant frontend/backend/privacy/observability skills and reference docs.
 
 ## User Action Questions
 
