@@ -83,6 +83,16 @@ Do not treat previous approval as approval for a new risky action. Words like `c
 
 Never introduce secrets, credentials, tokens, private keys, `.env` values, or private values into repo files.
 
+## Application Error, Logging, And Privacy Defaults
+
+When touching product frontend/backend behavior, preserve privacy-safe diagnostics without turning root instructions into a full policy manual.
+
+- Show generic user-facing errors with a support-safe traceable reference; do not expose internals or private payloads in UI.
+- Store the same event/request-specific reference in server logs or the approved logging backend so support can trace the failure.
+- Keep logs privacy-minimized; do not log raw prompts, uploads, model responses, secrets, auth headers, cookies, payment data, private connector data, private files, or unnecessary PII.
+- Do not add broad fallbacks or backwards compatibility by default. Ask the user first; if approved, keep the path narrow, visible, logged, tested, and documented with a removal or review condition.
+- For detailed frontend, backend, privacy, AI observability, and legal-page requirements, route to the relevant frontend/backend/privacy/observability skills and reference docs.
+
 ## User Action Questions
 
 When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold.
