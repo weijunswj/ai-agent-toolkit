@@ -4,17 +4,17 @@
 
 These rules apply when the task involves designing, building, repairing, inspecting, documenting, validating, importing, exporting, testing, executing, publishing, unpublishing, activating, deactivating, archiving, deleting, or modifying n8n workflows.
 
-They also apply when using official n8n Skills or n8n MCP tools for workflow management, workflow building, executions, projects, folders, or data tables.
+They also apply when using [official n8n Skills](https://github.com/n8n-io/skills) or n8n MCP tools for workflow management, workflow building, executions, projects, folders, or data tables.
 
 For non-n8n tasks, prefer the current user request and local project files first. Do not use n8n MCP tools unless they clearly help.
 
 ## MCP routing
 
-Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance. Start by loading `using-n8n-skills` when the official n8n Skills are available.
+Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Start by loading `using-n8n-skills` when the [official n8n Skills](https://github.com/n8n-io/skills) are available.
 
 Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. When validation or build tools are available, use them before proposing or performing live-instance changes. If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour.
 
-Use official n8n Skills, documentation, or available MCP tools first for n8n workflow design and workflow JSON work, including:
+Use [official n8n Skills](https://github.com/n8n-io/skills), documentation, or available MCP tools first for n8n workflow design and workflow JSON work, including:
 
 - Finding the right n8n nodes.
 - Checking exact node parameters.
@@ -25,7 +25,7 @@ Use official n8n Skills, documentation, or available MCP tools first for n8n wor
 - Validating workflow structure.
 - Confirming current n8n node behaviour.
 
-When both official n8n Skills and `n8n_live` are available, use `using-n8n-skills` first. Then use the available n8n MCP inspection, validation, or build tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation when those capabilities exist. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
+When both [official n8n Skills](https://github.com/n8n-io/skills) and `n8n_live` are available, use `using-n8n-skills` first. Then use the available n8n MCP inspection, validation, or build tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation when those capabilities exist. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
 
 Do not use n8n Skills, documentation, or available MCP workflow tools for:
 
@@ -59,7 +59,7 @@ Discover available n8n MCP tools before relying on validation, build, update, ex
 
 If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour.
 
-When an expected tool is unavailable, use official n8n Skills or local repo validation only when those paths actually cover the gap, and clearly state the limitation.
+When an expected tool is unavailable, use [official n8n Skills](https://github.com/n8n-io/skills) or local repo validation only when those paths actually cover the gap, and clearly state the limitation.
 
 Some n8n MCP capabilities are version-dependent. If a task depends on a specific capability, confirm tool availability before using it.
 

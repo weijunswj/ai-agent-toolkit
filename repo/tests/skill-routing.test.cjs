@@ -306,7 +306,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   }
 
   assert.match(howToUse, /Preferred install for toolkit-owned skills: copy the whole `skills\/<skill-name>\/` folder into one supported location/);
-  assert.match(howToUse, /Official n8n Skills are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
+  assert.match(howToUse, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
   assert.match(howToUse, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(howToUse, /codex plugin add n8n-skills@n8n-io/);
   assert.match(howToUse, /\/plugin marketplace add n8n-io\/skills/);
@@ -336,7 +336,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /Claude Code \| Direct whole-skill-folder install/);
   assert.match(readme, /Antigravity \| Plugin-scoped skill-folder install/);
   assert.match(readme, /OpenCode \| Short manual whole-skill-folder install only/);
-  assert.match(readme, /Official n8n Skills are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
+  assert.match(readme, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
   assert.match(readme, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(readme, /codex plugin add n8n-skills@n8n-io/);
   assert.match(readme, /\/plugin marketplace add n8n-io\/skills/);
@@ -395,12 +395,12 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\[OpenCode reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/opencode\.md\)/);
   assert.match(howToUse, /\[Antigravity reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/antigravity\.md\)/);
 
-  assert.match(codexRef, /Do not copy, fork, vendor, mirror, or recreate the official `n8n-io\/skills` content inside this toolkit/);
+  assert.match(codexRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);
   assert.match(codexRef, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(codexRef, /codex plugin add n8n-skills@n8n-io/);
   assert.match(codexRef, /Start n8n work by loading `using-n8n-skills`/);
   assert.match(codexRef, /`n8n_live`/);
-  assert.match(claudeCodeRef, /Do not copy, fork, vendor, mirror, or recreate the official `n8n-io\/skills` content inside this toolkit/);
+  assert.match(claudeCodeRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);
   assert.match(claudeCodeRef, /\/plugin marketplace add n8n-io\/skills/);
   assert.match(claudeCodeRef, /\/plugin install n8n-skills@n8n-io/);
   assert.match(claudeCodeRef, /Start n8n work by loading `using-n8n-skills`/);

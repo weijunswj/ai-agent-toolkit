@@ -1,7 +1,7 @@
 {
   "id": "codex-n8n-local",
   "title": "Codex n8n Local",
-  "description": "Generic Codex agent rules, n8n-agent-rules, optional n8n adapter, official n8n Skills plus MCP setup references, and n8n local/Hostinger Coolify setup materials.",
+  "description": "Generic Codex agent rules, n8n-agent-rules, optional n8n adapter, official n8n Skills (https://github.com/n8n-io/skills) plus MCP setup references, and n8n local/Hostinger Coolify setup materials.",
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [
@@ -73,7 +73,7 @@
   "notes": [
     "Copy .env.example to .env locally and do not commit .env.",
     "Local backup packages may include SECRET-DO-NOT-COMMIT.env with the restore-critical N8N_ENCRYPTION_KEY. Keep it local and private.",
-    "Codex official n8n Skills plus MCP setup is secondary and not part of the beginner local setup path.",
+    "Codex official n8n Skills (https://github.com/n8n-io/skills) plus MCP setup is secondary and not part of the beginner local setup path.",
     "Live n8n actions require separate explicit confirmation."
   ]
 }

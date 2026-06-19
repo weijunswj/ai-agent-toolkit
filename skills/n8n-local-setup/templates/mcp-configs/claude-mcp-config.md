@@ -11,7 +11,7 @@ Use this to connect Claude Code globally to the same official n8n instance-level
 * Do not paste your real n8n token into this file or any repo file.
 * This uses Claude Code user scope, so the MCP server is available across projects.
 * Do not create `.mcp.json` unless you intentionally want project-specific Claude Code MCP config.
-* Install the official n8n Skills plugin separately with `/plugin marketplace add n8n-io/skills` and `/plugin install n8n-skills@n8n-io`.
+* Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `/plugin marketplace add n8n-io/skills` and `/plugin install n8n-skills@n8n-io`.
 * Restart Claude Code and approve or trust the official plugin hooks so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
 1. Claude Code stores user-scoped MCP config here:
@@ -118,10 +118,10 @@ Use this to connect Claude Code globally to the same official n8n instance-level
 
    * `n8n_live`
 
-3. Ask Claude Code to load the official n8n Skills:
+3. Ask Claude Code to load the [official n8n Skills](https://github.com/n8n-io/skills):
 
    ```text
-   Load `using-n8n-skills` and confirm the official n8n Skills are available. Do not use n8n_live and do not modify anything.
+   Load `using-n8n-skills` and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything.
    ```
 
 4. Perform a live read-only MCP check:
@@ -141,7 +141,7 @@ Use this to connect Claude Code globally to the same official n8n instance-level
 
 ## 5. Safety Rules
 
-* Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+* Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance.
 * Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 * Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live` connects to whichever n8n MCP URL is stored in `N8N_MCP_URL`.

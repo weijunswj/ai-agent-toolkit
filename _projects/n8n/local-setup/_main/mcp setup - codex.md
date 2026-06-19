@@ -1,4 +1,4 @@
-# Codex Official n8n Skills And MCP Setup
+# Codex [Official n8n Skills](https://github.com/n8n-io/skills) And MCP Setup
 
 The primary local setup guide is [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md).
 
@@ -8,7 +8,7 @@ This page is an optional Codex AI-coding-agent setup reference, not a required l
 
 | Item | Use |
 | --- | --- |
-| Official n8n Skills | Workflow design, node guidance, validation, and build guidance through the official `n8n-io/skills` plugin. |
+| [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance through the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin. |
 | `using-n8n-skills` | The first skill to load when starting n8n workflow work. |
 | `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | Codex rules | Repo or user instructions for safer agent behavior. |
@@ -26,7 +26,7 @@ This page is an optional Codex AI-coding-agent setup reference, not a required l
    6. The official n8n MCP server URL copied from n8n.
    7. An official n8n MCP token copied from n8n.
 
-Do not copy, fork, vendor, mirror, or recreate the official `n8n-io/skills` content inside this toolkit. Install the official plugin from its upstream source.
+Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](https://github.com/n8n-io/skills) content inside this toolkit. Install the official plugin from its upstream source.
 
 ## 2. Install Codex
 
@@ -38,7 +38,7 @@ Do not copy, fork, vendor, mirror, or recreate the official `n8n-io/skills` cont
    npm -v
    ```
 
-## 3. Install Official n8n Skills For Codex
+## 3. Install [Official n8n Skills](https://github.com/n8n-io/skills) For Codex
 
 Run these Codex plugin commands:
 
@@ -79,7 +79,7 @@ Copy the whole toolkit `skills/<skill-name>/` folder when installing toolkit-own
 | Optional n8n pointer | `AGENTS.n8n-brief.template.md` from `skills/n8n-agent-rules/adapters/` |
 
 - If the target repo already has `AGENTS.md`, do not overwrite it. Merge manually or produce a diff/merge plan.
-- For n8n workflow work, use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+- For n8n workflow work, use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance.
 - Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 - Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
 

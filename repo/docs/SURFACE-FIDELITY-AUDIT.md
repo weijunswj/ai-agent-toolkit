@@ -14,7 +14,7 @@ Repo-wide MCP generated/published output is intentionally absent for now:
 - Project manifests must not declare repo-wide `mcp/**` outputs or `publish_as: "mcp"` / `publish_as: "both"`.
 - Future PRs that change published skill surfaces should run the published-surface audit and keep new `skills/**` outputs source-owned.
 
-The n8n local setup official n8n Skills plus instance-level MCP references are preserved as secondary AI-coding-agent setup material, not as repo-wide MCP support:
+The n8n local setup [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are preserved as secondary AI-coding-agent setup material, not as repo-wide MCP support:
 
 - `_projects/n8n/local-setup/_main/mcp setup - *.md`
 - `_projects/n8n/local-setup/_main/templates/mcp-configs/**`
@@ -178,5 +178,5 @@ Superseded MCP-ready registry pass:
 ## Current recommended follow-up
 
 - Keep future changes focused on `skills/**` and source-owned project recipes unless a separate approved PR deliberately reintroduces a repo-wide MCP strategy.
-- Keep official n8n Skills plus instance-level MCP references in the n8n local setup skill, not in a repo-wide MCP surface.
+- Keep [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references in the n8n local setup skill, not in a repo-wide MCP surface.
 - Continue clarifying UI/UX skill attribution and source ownership in separate narrow PRs when needed.

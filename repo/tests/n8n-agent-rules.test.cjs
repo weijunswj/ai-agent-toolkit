@@ -29,6 +29,7 @@ const overstatedOfficialMcpCapabilityPattern = new RegExp([
   'official n8n MCP ' + 'build',
   'MCP ' + 'validation' + '/build'
 ].map(escapeRegExp).join('|'), 'i');
+const officialN8nSkillsLink = '[official n8n Skills](https://github.com/n8n-io/skills)';
 
 function stripGeneratedNotices(text) {
   let remaining = text.trimStart();
@@ -101,7 +102,7 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   const frontMatter = parseFrontMatter(readText(skillPath));
   assert.equal(frontMatter.name, 'n8n-agent-rules');
   for (const phrase of [
-    'official n8n Skills',
+    officialN8nSkillsLink,
     'using-n8n-skills',
     'n8n workflow JSON',
     'official n8n MCP',
@@ -126,8 +127,8 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   assert.equal(published, canonical);
 
   for (const safetyPhrase of [
-    'Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance',
-    'Start by loading `using-n8n-skills` when the official n8n Skills are available',
+    `Use ${officialN8nSkillsLink} first, then use the official n8n MCP tools that are actually available in the connected instance`,
+    `Start by loading \`using-n8n-skills\` when the ${officialN8nSkillsLink} are available`,
     'Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities',
     'When validation or build tools are available, use them before proposing or performing live-instance changes',
     'If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour',

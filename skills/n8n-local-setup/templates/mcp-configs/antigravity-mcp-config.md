@@ -10,7 +10,7 @@ Use this to connect Google Antigravity globally to the same official n8n instanc
 
 * Do not paste real n8n tokens into this file or any repo file.
 * Open Antigravity MCP settings, then use the raw MCP config editor if available.
-* Official n8n Skills plugin support is platform-dependent. If your Antigravity runtime supports plain skill installs from the official n8n Skills package, start n8n work by loading `using-n8n-skills`.
+* [Official n8n Skills](https://github.com/n8n-io/skills) plugin support is platform-dependent. If your Antigravity runtime supports plain skill installs from the [official n8n Skills](https://github.com/n8n-io/skills) package, start n8n work by loading `using-n8n-skills`.
 
 1. Common Windows path for Antigravity/Gemini MCP config:
 
@@ -86,10 +86,10 @@ Paste the following into `mcp_config.json`:
 
    * `n8n_live`
 
-2. If official n8n Skills are installed in your Antigravity runtime, ask Antigravity to load them:
+2. If [official n8n Skills](https://github.com/n8n-io/skills) are installed in your Antigravity runtime, ask Antigravity to load them:
 
    ```text
-   Load `using-n8n-skills` and confirm the official n8n Skills are available. Do not use n8n_live and do not modify anything.
+   Load `using-n8n-skills` and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything.
    ```
 
 3. Perform a live read-only MCP check inside Antigravity:
@@ -109,7 +109,7 @@ Paste the following into `mcp_config.json`:
 
 ## 4. Safety Rules
 
-* Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+* Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance.
 * Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 * Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live` uses `supergateway` to bridge Antigravity's local command MCP shape to n8n's streamable HTTP MCP endpoint.
@@ -123,7 +123,7 @@ Paste the following into `mcp_config.json`:
 
 1. If `using-n8n-skills` is unavailable:
 
-   * Confirm your Antigravity runtime supports the official n8n Skills package as a plain skill install.
+   * Confirm your Antigravity runtime supports the [official n8n Skills](https://github.com/n8n-io/skills) package as a plain skill install.
    * Restart Antigravity after installing skills.
    * If platform support is unavailable, do not pretend parity; use the official n8n documentation manually and keep live MCP actions approval-gated.
 

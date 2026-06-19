@@ -79,6 +79,9 @@ const overstatedOfficialMcpCapabilityPattern = new RegExp([
   'official n8n MCP ' + 'build',
   'MCP ' + 'validation' + '/build'
 ].map(escapeRegExp).join('|'), 'i');
+const officialN8nSkillsUrl = 'https://github.com/n8n-io/skills';
+const officialN8nSkillsLink = `[official n8n Skills](${officialN8nSkillsUrl})`;
+const officialN8nSkillsTitleLink = `[Official n8n Skills](${officialN8nSkillsUrl})`;
 
 const localStackOutputs = [
   {
@@ -200,7 +203,7 @@ function stripGeneratedNotices(text) {
 }
 
 function assertCapabilityAwareMcpGuidance(text, label) {
-  assert.match(text, /official n8n Skills first/i, label);
+  assert.match(text, new RegExp(escapeRegExp(`${officialN8nSkillsLink} first`), 'i'), label);
   assert.match(text, /n8n MCP tools that are actually available/i, label);
   assert.match(text, /Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities/i, label);
   assert.doesNotMatch(text, overstatedOfficialMcpCapabilityPattern, label);
@@ -359,8 +362,8 @@ test('n8n local setup source README exposes two main beginner pages', () => {
   assert.match(readme, /^## Skills-First Routing$/m);
   assert.match(readme, /Humans use `_projects\/\*\*`/);
   assert.match(readme, /Agents use generated `skills\/\*\*` surfaces after sync/);
-  assert.match(readme, /Official n8n Skills plus instance-level MCP references are secondary and only for users intentionally enabling n8n workflow work through an AI coding agent\./);
-  assert.match(readme, /^## Official n8n Skills And MCP References$/m);
+  assert.match(readme, new RegExp(`${escapeRegExp(officialN8nSkillsTitleLink)} plus instance-level MCP references are secondary and only for users intentionally enabling n8n workflow work through an AI coding agent\\.`));
+  assert.match(readme, new RegExp(`^## ${escapeRegExp(officialN8nSkillsTitleLink)} And MCP References$`, 'm'));
   assert.match(readme, /This section is for using AI coding agents to work on n8n workflows\./);
   assert.doesNotMatch(readme, /Skip this section for beginner local setup/);
   assert.match(readme, /\[mcp setup - codex\.md\]\(\.\/mcp%20setup%20-%20codex\.md\)/);
@@ -511,9 +514,9 @@ test('Local Setup keeps skills-first guidance and official n8n setup table', () 
   assert.match(localSetup, /This toolkit is skills-first\./);
   assert.match(localSetup, /Humans use `_projects\/\*\*` for source review and maintenance\./);
   assert.match(localSetup, /Agents use `skills\/\*\*` after generated outputs are synced\./);
-  assert.match(localSetup, /Official n8n Skills plus instance-level MCP references are available as secondary material, not as the beginner setup path\./);
+  assert.match(localSetup, new RegExp(`${escapeRegExp(officialN8nSkillsTitleLink)} plus instance-level MCP references are available as secondary material, not as the beginner setup path\\.`));
   assert.match(localSetup, /Use \[n8n Agent Rules\]/);
-  assert.match(localSetup, /Use this table only when you want an AI coding agent to work with n8n workflows through the official n8n Skills plus instance-level MCP setup/);
+  assert.match(localSetup, new RegExp(`Use this table only when you want an AI coding agent to work with n8n workflows through the ${escapeRegExp(officialN8nSkillsLink)} plus instance-level MCP setup`));
 
   for (const expected of [
     'mcp setup - codex.md',
@@ -1080,7 +1083,7 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
   assert.doesNotMatch(vps, /unrelated hosting providers/i);
 });
 
-test('official n8n Skills and MCP setup surfaces are shipped as secondary AI-coding-agent references', () => {
+test('linked n8n Skills and MCP setup surfaces are shipped as secondary AI-coding-agent references', () => {
   assert.equal(fs.existsSync(path.join(repoRoot, 'mcp/projects/n8n-local-setup.md')), false);
 
   for (const expected of [...platformOutputs, ...mcpConfigOutputs, mcpConfigIndexOutput]) {
@@ -1089,7 +1092,7 @@ test('official n8n Skills and MCP setup surfaces are shipped as secondary AI-cod
 
   for (const page of platformOutputs.map((entry) => entry.output)) {
     const text = readText(repoRoot, page);
-    assert.match(text, /official n8n Skills/i, page);
+    assert.match(text, new RegExp(escapeRegExp(officialN8nSkillsLink), 'i'), page);
     assert.match(text, /instance-level MCP|`n8n_live`/i, page);
     assert.match(text, /not a required local setup path|not part of the beginner local setup path/i, page);
     assert.match(text, /\]\(\.\.\/n8n\/local-setup\.md\)/, page);
@@ -1138,7 +1141,7 @@ test('curated indexes, skill metadata, and packs point to current skills-first s
   assert.match(combined, /n8n-local-desktop-shortcut\.cmd/);
   assert.match(combined, /references\/ai-agent-platforms/);
   assert.match(combined, /skills-first|Skills-First/);
-  assert.match(combined, /official n8n Skills plus/i);
+  assert.match(combined, new RegExp(`${escapeRegExp(officialN8nSkillsLink)} plus`, 'i'));
   assert.match(combined, /templates\/mcp-configs\/codex-mcp-config\.md|codex-mcp-config\.md/);
 
   for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'mcp/projects/n8n-local-setup.md']) {
@@ -1165,7 +1168,7 @@ test('repo README and usage docs route to n8n skills-first local setup surfaces'
   assert.match(combined, /Humans use `_projects\/\*\*`/);
   assert.match(combined, /Agents use (generated )?`skills\/\*\*`/);
   assert.match(combined, /Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now\./);
-  assert.match(combined, /Official n8n Skills plus instance-level MCP references are secondary and not the beginner local setup path\./);
+  assert.match(combined, new RegExp(`${escapeRegExp(officialN8nSkillsTitleLink)} plus instance-level MCP references are secondary and not the beginner local setup path\\.`));
 
   for (const forbidden of [
     'mcp setup - codex',

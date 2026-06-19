@@ -21,7 +21,7 @@ Skip these for the beginner local guide. Use them only when intentionally enabli
 
 - Keep live tokens in environment variables.
 - Do not paste real token values into repo files.
-- Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+- Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance.
 - Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 - Keep only the official instance-level MCP connection, normally named `n8n_live`.
 - Restart the target AI client after changing MCP config or environment variables.

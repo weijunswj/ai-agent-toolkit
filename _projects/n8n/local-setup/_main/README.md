@@ -21,9 +21,9 @@ Start with Local Setup for Docker Desktop on your own computer. Use Page 2 when 
 
 Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync.
 
-Start with [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md). Official n8n Skills plus instance-level MCP references are secondary and only for users intentionally enabling n8n workflow work through an AI coding agent.
+Start with [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md). [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and only for users intentionally enabling n8n workflow work through an AI coding agent.
 
-## Official n8n Skills And MCP References
+## [Official n8n Skills](https://github.com/n8n-io/skills) And MCP References
 
 This section is for using AI coding agents to work on n8n workflows.
 

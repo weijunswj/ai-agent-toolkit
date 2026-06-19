@@ -1,4 +1,4 @@
-# OpenCode Official n8n Skills And MCP Setup
+# OpenCode [Official n8n Skills](https://github.com/n8n-io/skills) And MCP Setup
 
 The primary local setup guide is [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md).
 
@@ -8,7 +8,7 @@ This page is an optional OpenCode AI-coding-agent setup reference, not a require
 
 | Item | Use |
 | --- | --- |
-| Official n8n Skills | Workflow design, node guidance, validation, and build guidance when official Skills are installed on a supported platform. |
+| [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance when official Skills are installed on a supported platform. |
 | `using-n8n-skills` | The first skill to load when starting n8n workflow work. |
 | `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | OpenCode rules | User or repo instructions for safer agent behavior. |
@@ -28,7 +28,7 @@ You should already have:
 6. The official n8n MCP server URL copied from n8n.
 7. An official n8n MCP token copied from n8n.
 
-Do not copy, fork, vendor, mirror, or recreate the official `n8n-io/skills` content inside this toolkit. Install or reference official upstream material only.
+Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](https://github.com/n8n-io/skills) content inside this toolkit. Install or reference official upstream material only.
 
 ## 2. Install OpenCode
 
@@ -44,17 +44,17 @@ Do not copy, fork, vendor, mirror, or recreate the official `n8n-io/skills` cont
    - If `opencode` is not found, close and reopen PowerShell first.
    - If it is still not found, check that the OpenCode install location is on your Windows `PATH`.
 
-## 3. Official n8n Skills On OpenCode
+## 3. [Official n8n Skills](https://github.com/n8n-io/skills) On OpenCode
 
-Official plugin support is platform-dependent. This toolkit does not claim OpenCode plugin parity for the official `n8n-io/skills` plugin.
+Official plugin support is platform-dependent. This toolkit does not claim OpenCode plugin parity for the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin.
 
-If your OpenCode runtime supports plain skill installs from the official n8n Skills package, install the complete upstream skill folder outside this toolkit and start n8n work with this instruction:
+If your OpenCode runtime supports plain skill installs from the [official n8n Skills](https://github.com/n8n-io/skills) package, install the complete upstream skill folder outside this toolkit and start n8n work with this instruction:
 
 ```text
 Load `using-n8n-skills` before any n8n workflow design, validation, or live-instance proposal.
 ```
 
-Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
+Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
 
 ## 4. Install Toolkit Safety Rules For OpenCode
 
@@ -93,7 +93,7 @@ Use the [OpenCode MCP config](./templates/mcp-configs/opencode-mcp-config.md).
 ## 7. Restart OpenCode
 
 1. After changing any of these:
-   - Official n8n Skills installation, if your OpenCode runtime supports it.
+   - [Official n8n Skills](https://github.com/n8n-io/skills) installation, if your OpenCode runtime supports it.
    - `$HOME\.config\opencode\opencode.json`.
    - `$HOME\.config\opencode\AGENTS.md`.
    - `N8N_MCP_URL`.

@@ -4,7 +4,7 @@ Project: n8n.local-setup
 Source: _projects/n8n/local-setup/_main/mcp setup - antigravity.md
 Update the project source and run sync.
 -->
-# Antigravity Official n8n Skills And MCP Setup
+# Antigravity [Official n8n Skills](https://github.com/n8n-io/skills) And MCP Setup
 
 The primary local setup guide is [Page 1 - Local Setup](../n8n/local-setup.md).
 
@@ -14,7 +14,7 @@ This page is an optional Antigravity AI-coding-agent setup reference, not a requ
 
 | Item | Use |
 | --- | --- |
-| Official n8n Skills | Workflow design, node guidance, validation, and build guidance when official Skills are installed on a supported platform. |
+| [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance when official Skills are installed on a supported platform. |
 | `using-n8n-skills` | The first skill to load when starting n8n workflow work. |
 | `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | Antigravity skills | Plugin-scoped skill folders. |
@@ -32,7 +32,7 @@ This page is an optional Antigravity AI-coding-agent setup reference, not a requ
    6. The official n8n MCP server URL copied from n8n.
    7. An official n8n MCP token copied from n8n.
 
-Do not copy, fork, vendor, mirror, or recreate the official `n8n-io/skills` content inside this toolkit. Install or reference official upstream material only.
+Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](https://github.com/n8n-io/skills) content inside this toolkit. Install or reference official upstream material only.
 
 ## 2. Install Antigravity
 
@@ -46,17 +46,17 @@ Do not copy, fork, vendor, mirror, or recreate the official `n8n-io/skills` cont
 
    - The Antigravity MCP config in this guide uses `node`, `npx`, and `supergateway`, so Node.js must be available on your Windows `PATH`.
 
-## 3. Official n8n Skills On Antigravity
+## 3. [Official n8n Skills](https://github.com/n8n-io/skills) On Antigravity
 
-Official plugin support is platform-dependent. This toolkit does not claim Antigravity plugin parity for the official `n8n-io/skills` plugin.
+Official plugin support is platform-dependent. This toolkit does not claim Antigravity plugin parity for the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin.
 
-If your Antigravity runtime supports plain skill installs from the official n8n Skills package, install the complete upstream skill folder outside this toolkit and start n8n work with this instruction:
+If your Antigravity runtime supports plain skill installs from the [official n8n Skills](https://github.com/n8n-io/skills) package, install the complete upstream skill folder outside this toolkit and start n8n work with this instruction:
 
 ```text
 Load `using-n8n-skills` before any n8n workflow design, validation, or live-instance proposal.
 ```
 
-Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
+Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
 
 ## 4. Install Toolkit Safety Rules For Antigravity
 
@@ -110,7 +110,7 @@ Use official n8n Skills first, then use the official n8n MCP tools that are actu
 ## 7. Restart Antigravity
 
 1. After changing any of these:
-   - Official n8n Skills installation, if your Antigravity runtime supports it.
+   - [Official n8n Skills](https://github.com/n8n-io/skills) installation, if your Antigravity runtime supports it.
    - `$HOME\.gemini\antigravity\mcp_config.json`.
    - `$HOME\.gemini\GEMINI.md`.
    - `N8N_MCP_URL`.

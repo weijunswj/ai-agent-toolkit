@@ -23,4 +23,4 @@ These references are local to the copyable skill folder. Use them for normal exe
 
 ## Skills-First Note
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Official n8n Skills plus instance-level MCP references are secondary and not part of the beginner local setup flow.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and not part of the beginner local setup flow.

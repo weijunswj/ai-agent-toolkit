@@ -5,7 +5,7 @@ Use this to connect OpenCode globally to the same official n8n instance-level MC
 * Do not paste your real n8n token into this file or any repo file.
 * Keep `{env:N8N_MCP_URL}` and `{env:N8N_MCP_TOKEN}` exactly as shown.
 * Do not put this in a repo-level `opencode.json` unless you intentionally want project-specific OpenCode overrides.
-* Official n8n Skills plugin support is platform-dependent. If your OpenCode runtime supports plain skill installs from the official n8n Skills package, start n8n work by loading `using-n8n-skills`.
+* [Official n8n Skills](https://github.com/n8n-io/skills) plugin support is platform-dependent. If your OpenCode runtime supports plain skill installs from the [official n8n Skills](https://github.com/n8n-io/skills) package, start n8n work by loading `using-n8n-skills`.
 
 1. Common Windows path for OpenCode MCP config:
 
@@ -97,10 +97,10 @@ Paste the following into `opencode.json`:
 
    * `n8n_live`
 
-3. If official n8n Skills are installed in your OpenCode runtime, ask OpenCode to load them:
+3. If [official n8n Skills](https://github.com/n8n-io/skills) are installed in your OpenCode runtime, ask OpenCode to load them:
 
    ```powershell
-   opencode run "Load using-n8n-skills and confirm the official n8n Skills are available. Do not use n8n_live and do not modify anything."
+   opencode run "Load using-n8n-skills and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything."
    ```
 
 4. Perform a live read-only MCP check:
@@ -119,7 +119,7 @@ Paste the following into `opencode.json`:
 
 ## 4. Safety Rules
 
-* Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+* Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance.
 * Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 * Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live` is available but approval-gated by the `"permission"` rule for live instance actions.
@@ -132,7 +132,7 @@ Paste the following into `opencode.json`:
 
 1. If `using-n8n-skills` is unavailable:
 
-   * Confirm your OpenCode runtime supports the official n8n Skills package as a plain skill install.
+   * Confirm your OpenCode runtime supports the [official n8n Skills](https://github.com/n8n-io/skills) package as a plain skill install.
    * Restart OpenCode after installing skills.
    * If platform support is unavailable, do not pretend parity; use the official n8n documentation manually and keep live MCP actions approval-gated.
 

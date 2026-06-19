@@ -10,7 +10,7 @@ Use this for the normal Codex + official n8n instance-level MCP setup.
 
 * Do not paste your real n8n token into this file or any repo file.
 * Keep `bearer_token_env_var = "N8N_MCP_TOKEN"` exactly as shown.
-* Install the official n8n Skills plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`.
+* Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`.
 * Restart Codex and approve or trust the official plugin hooks so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
 1. Common Windows path for Codex MCP config:
@@ -89,10 +89,10 @@ enabled = true
 
    * `n8n_live`
 
-3. Ask Codex to load the official n8n Skills:
+3. Ask Codex to load the [official n8n Skills](https://github.com/n8n-io/skills):
 
    ```text
-   Load `using-n8n-skills` and confirm the official n8n Skills are available. Do not use n8n_live and do not modify anything.
+   Load `using-n8n-skills` and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything.
    ```
 
 4. Perform a live read-only MCP check:
@@ -111,7 +111,7 @@ enabled = true
 
 ## 4. Safety Rules
 
-* Use official n8n Skills first, then use the official n8n MCP tools that are actually available in the connected instance.
+* Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance.
 * Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
 * Do not create, update, execute, activate, publish, unpublish, archive, delete, import, export, sync, or modify credentials without explicit current-turn approval naming the exact target and allowed operation.
 * `n8n_live.url` is a literal MCP endpoint. Change the URL manually if your n8n is not on `localhost:5678`.

@@ -7,7 +7,7 @@
   "main_path": "_projects/n8n/local-setup/_main",
   "version": "3.4.1",
   "version_policy": "semver",
-  "version_notes": "Keeps official n8n Skills installation guidance and official instance-level n8n MCP templates, with capability-aware MCP wording.",
+  "version_notes": "Keeps official n8n Skills (https://github.com/n8n-io/skills) installation guidance and official instance-level n8n MCP templates, with capability-aware MCP wording.",
   "outputs": [
     {
       "kind": "curated",
@@ -81,7 +81,7 @@
       "kind": "copy",
       "source": "_main/mcp setup - codex.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
-      "notes": "Codex official n8n Skills and instance-level MCP setup guide copied from preserved source.",
+      "notes": "Codex official n8n Skills (https://github.com/n8n-io/skills) and instance-level MCP setup guide copied from preserved source.",
       "fidelity": "exact",
       "text_rewrites": [
         {
@@ -98,7 +98,7 @@
       "kind": "copy",
       "source": "_main/mcp setup - claude code.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
-      "notes": "Claude Code official n8n Skills and instance-level MCP setup guide copied from preserved source.",
+      "notes": "Claude Code official n8n Skills (https://github.com/n8n-io/skills) and instance-level MCP setup guide copied from preserved source.",
       "fidelity": "exact",
       "text_rewrites": [
         {
@@ -115,7 +115,7 @@
       "kind": "copy",
       "source": "_main/mcp setup - opencode.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",
-      "notes": "OpenCode official n8n Skills and instance-level MCP setup guide copied from preserved source.",
+      "notes": "OpenCode official n8n Skills (https://github.com/n8n-io/skills) and instance-level MCP setup guide copied from preserved source.",
       "fidelity": "exact",
       "text_rewrites": [
         {
@@ -132,7 +132,7 @@
       "kind": "copy",
       "source": "_main/mcp setup - antigravity.md",
       "output": "skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md",
-      "notes": "Antigravity official n8n Skills and instance-level MCP setup guide copied from preserved source.",
+      "notes": "Antigravity official n8n Skills (https://github.com/n8n-io/skills) and instance-level MCP setup guide copied from preserved source.",
       "fidelity": "exact",
       "text_rewrites": [
         {
@@ -322,14 +322,14 @@
   "project": {
     "name": "Local n8n Setup",
     "category": "n8n",
-    "summary": "Preserved local n8n setup guides, Hostinger Coolify VPS n8n guidance, Docker Compose local templates, skills-first agent routing, official n8n Skills plus instance-level MCP references, and the underscore-prefixed guided launcher."
+    "summary": "Preserved local n8n setup guides, Hostinger Coolify VPS n8n guidance, Docker Compose local templates, skills-first agent routing, official n8n Skills (https://github.com/n8n-io/skills) plus instance-level MCP references, and the underscore-prefixed guided launcher."
   },
   "surface": {
     "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/n8n-local-setup",
-      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger Coolify VPS n8n reference, local stack templates, skills-first agent guidance, and official n8n Skills plus instance-level MCP references while depending on n8n-agent-rules for workflow/live n8n rules."
+      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger Coolify VPS n8n reference, local stack templates, skills-first agent guidance, and official n8n Skills (https://github.com/n8n-io/skills) plus instance-level MCP references while depending on n8n-agent-rules for workflow/live n8n rules."
     },
     "mcp": {
       "status": "not_applicable"
