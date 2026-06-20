@@ -25,7 +25,7 @@ Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`. Open 
 | Codex | Official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin install. |
 | Claude Code | Official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin install. |
 | OpenCode | Official "Other platforms" path: `npx skills add n8n-io/skills` when supported by [skills.sh](https://skills.sh), plus an `AGENTS.md` cue because plain installs lack plugin hooks. |
-| Antigravity | Official "Other platforms" path: `npx skills add n8n-io/skills` when supported by [skills.sh](https://skills.sh), plus an `AGENTS.md` cue because plain installs lack plugin hooks. |
+| Antigravity | Official upstream n8n skill folders installed into an Antigravity plugin-scoped folder such as `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\`, plus an `AGENTS.md` cue because local folder installs lack official plugin hooks. |
 
 | Reference | Use when |
 | --- | --- |
