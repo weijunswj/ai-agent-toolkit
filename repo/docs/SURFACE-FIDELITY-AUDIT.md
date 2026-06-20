@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-16 (managed app foundation review skill)
+Latest update: 2026-06-21 (project completion audit skill)
 
 ## Current state
 
@@ -27,9 +27,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 13 |
-| publishedFiles | 198 |
-| declaredOutputFiles | 198 |
+| projects | 14 |
+| publishedFiles | 202 |
+| declaredOutputFiles | 202 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 198 |
+| boundaryRecipeOutputs | 202 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 0 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 124 |
+| declared_generated | 128 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
@@ -64,13 +64,13 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 146 |
+| main_full_fidelity | 150 |
 
 Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by adding the first-party `managed-app-foundation-review` project and its three generated skill files, while preserving the existing n8n shared-surface references and generated agent-rule playbook surfaces.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by adding the first-party `project-completion-audit` project, its three generated skill files, and one generated portable repo-local playbook file, while preserving the existing n8n shared-surface references.
 
 ## Current project modules
 
@@ -79,6 +79,7 @@ Known baseline context:
 - `_projects/development/ai-coding-agent-rules`
 - `_projects/development/local-ai-stack-safety`
 - `_projects/development/managed-app-foundation-review`
+- `_projects/development/project-completion-audit`
 - `_projects/development/hostinger-coolify-production-guide`
 - `_projects/development/self-hosted-service-safety`
 - `_projects/development/windows-localhost-workflows`
@@ -97,6 +98,7 @@ Known baseline context:
 - `skills/knowledge-index-updater/`
 - `skills/local-ai-stack-safety/`
 - `skills/managed-app-foundation-review/`
+- `skills/project-completion-audit/`
 - `skills/n8n-agent-rules/`
 - `skills/n8n-local-setup/`
 - `skills/n8n-workflow-helper-scripts/`

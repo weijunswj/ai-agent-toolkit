@@ -1,0 +1,98 @@
+{
+  "id": "development.project-completion-audit",
+  "category": "development",
+  "name": "project-completion-audit",
+  "title": "Project Completion Audit",
+  "module_path": "_projects/development/project-completion-audit",
+  "main_path": "_projects/development/project-completion-audit/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial first-party guarded project completion and production-readiness audit workflow.",
+  "outputs": [
+    {
+      "kind": "copy",
+      "source": "_main/skill/README.md",
+      "output": "skills/project-completion-audit/README.md",
+      "notes": "Standalone skill README copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
+      "output": "skills/project-completion-audit/SKILL.md",
+      "notes": "Standalone skill entrypoint copied from first-party module source.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
+      "output": "skills/project-completion-audit/agents/openai.yaml",
+      "notes": "OpenAI platform metadata copied from first-party module source.",
+      "fidelity": "exact"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/project-completion-audit/README.md",
+      "skills/project-completion-audit/SKILL.md",
+      "skills/project-completion-audit/agents/openai.yaml"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "skill_creation_review": {
+    "existing_skill_review": "Reviewed current skills and modules before adding project-completion-audit: ai-coding-agent-rules for baseline repo execution and portable playbooks, context-preserving-ai-publisher for generated-surface discipline, secure-cicd-installer for CI/CD setup, ui-ux-secure-frontend-design for frontend implementation review, managed-app-foundation-review for build-vs-buy foundation decisions, self-hosted-service-safety and codex-ssh-hostinger-coolify-setup-maintainer for hosting/deployment exposure, windows-localhost-workflows for local dev server verification, local-ai-stack-safety for local AI setup risk, n8n-agent-rules for n8n work, README skill tables, toolkit skill routing source, and the skill safety matrix. No existing skill owns a guarded final project completion or production-readiness audit and remediation loop across frontend, backend, full-stack, data/tooling, and mixed products without becoming too broad.",
+    "trigger": "Use project-completion-audit when the user asks for a final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, security-readiness check, final readiness check, make sure everything works, asks whether the repo/app is production ready, asks to use /goal to finish readiness remediation, or asks to audit against original docs. Do not use it for ordinary implementation or narrow code review unless the user is explicitly asking for readiness/completion status.",
+    "decision": "new_project_skill",
+    "decision_reason": "The trigger is a high-blast-radius final readiness gate with mandatory preflight confirmation, report creation, security scan coordination, browser verification, remediation batching, and production-ready claim limits. Folding it into always-on agent rules or a domain-specific skill would either bloat root instructions or hide the heavy audit approval boundary.",
+    "unique_value": "Forces lightweight preflight before broad validation or remediation, requires an explicit target/scope confirmation phrase, integrates standard-vs-deep Codex Security approval, records skipped/unavailable checks, prevents overclaiming production readiness, and structures remediation after a repo-local audit report exists.",
+    "runtime_footprint": "SKILL.md stays instruction-only and compact enough to load when explicitly requested. Optional heavy evidence remains in the target repo audit report, not in the skill. The platform metadata disables implicit invocation where supported; if implicit routing occurs, the body limits it to preflight only.",
+    "local_assets": "No scripts or assets beyond README, SKILL.md, and small platform metadata because the workflow must adapt to each target repo's docs, tests, browser tooling, and security-scan availability.",
+    "output_contract": "First return a lightweight preflight summary and explicit confirmation prompt. After confirmation, create or update a repo-local production-readiness audit report with scope, instructions/docs reviewed, branch/ref, app type, validation results, UI/browser checks, security scan status, findings, release gates, remediation batches, manual checks, and unverified/skipped/deferred areas; then remediate P0/P1/P2 findings in small validated batches while keeping the report current.",
+    "anti_bloat_review": "The skill is rejected for normal feature work, setup-only decisions, deployment execution, or narrow code review. Its trigger is final readiness/completion language and its first action is preflight, so it avoids root AGENTS.md bloat and accidental full-repo audits.",
+    "safety_boundary": "Preflight-only until explicit confirmation. Full audit still cannot run live-system, production, deployment, external-service, destructive, credential, import/export, sync, payment, customer-data, private-data, or irreversible actions without separate explicit current-turn approval naming the target and action. Deep security scan and browser click-through verification require approval in the confirmation step.",
+    "source_provenance": "first_party",
+    "third_party_audit": "not_applicable_first_party; no third-party text, scanner output, browser artifacts, code, or vendor docs copied or adapted.",
+    "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, portable repo-local playbook routing update, toolkit skill routing update, README table update, safety matrix update, sync, and validation.",
+    "routing": "project-completion-audit is routed for final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, make sure everything works, is this production ready, use /goal to finish readiness remediation, audit against original docs, security-readiness check, and final readiness check. It is intentionally not routed for ordinary feature implementation or narrow code review.",
+    "validation": [
+      "node repo/scripts/sync-toolkit-projects.cjs --write",
+      "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "node repo/scripts/audit-published-surfaces.cjs --check",
+      "node --test repo/tests/skill-routing.test.cjs",
+      "node repo/scripts/validate-toolkit.cjs"
+    ]
+  },
+  "project": {
+    "name": "Project Completion Audit",
+    "category": "development",
+    "summary": "Guarded final completion and production-readiness audit workflow with preflight confirmation, security-readiness review, report creation, and remediation batches."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/project-completion-audit",
+      "summary": "Guarded final completion and production-readiness audit workflow with preflight confirmation, security-readiness review, report creation, and remediation batches."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}
+
