@@ -6,6 +6,7 @@ Use this to connect Google Antigravity globally to the same official n8n instanc
 * Open Antigravity MCP settings, then use the raw MCP config editor if available.
 * [Official n8n Skills](https://github.com/n8n-io/skills) plugin hooks are documented for Codex and Claude Code. For Antigravity/AG2, install or copy the official upstream n8n skill folders into an Antigravity plugin-scoped folder such as `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\`.
 * Do not stop after `npx skills add n8n-io/skills` if it writes to `$HOME\.agents\skills` or a loose `$HOME\.gemini\antigravity\skills` folder; Antigravity must be able to see `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md`.
+* Keep `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json` BOM-less UTF-8 and add `installed_version.json` beside it so the local plugin resembles Antigravity's installed multi-skill plugin shape.
 * Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Local Antigravity plugin-scoped folder installs also do not include the official n8n plugin hooks. Add the current [official n8n Skills](https://github.com/n8n-io/skills) entry-point cue, which names `using-n8n-skills` today, to the target repo `AGENTS.md` before relying on automatic n8n task routing.
 
 1. Common Windows path for Antigravity/Gemini MCP config:
@@ -127,7 +128,8 @@ Paste the following into `mcp_config.json`:
 
    * Confirm `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md` exists.
    * If `npx skills add n8n-io/skills` wrote to `$HOME\.agents\skills` or `$HOME\.gemini\antigravity\skills`, copy the whole official n8n skill folders into `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\`.
-   * Confirm `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json` exists when your Antigravity build expects plugin metadata.
+   * Confirm `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json` exists, is BOM-less UTF-8, and uses the same JSON object shape as Antigravity's installed multi-skill plugins.
+   * Confirm `C:\Users\<user>\.gemini\config\plugins\n8n-skills\installed_version.json` exists beside `plugin.json`.
    * Confirm the target repo `AGENTS.md` includes the current official entry-point cue because local folder installs do not have the official plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks.
    * Restart Antigravity after installing skills.
    * If platform support is unavailable, do not pretend parity; use the official n8n documentation manually and keep live MCP actions approval-gated.

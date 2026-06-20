@@ -83,6 +83,8 @@ For Antigravity/AG2, use the observed plugin-scoped skill folder for both toolki
 C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\<skill-name>\SKILL.md
 ```
 
+Keep `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json` BOM-less UTF-8, use an `author` object such as `{ "name": "n8n-io" }`, and add `installed_version.json` beside it so the local plugin resembles Antigravity's installed multi-skill plugin shape.
+
 Verify this path exists before relying on Antigravity to load the official entry point:
 
 ```text

@@ -55,18 +55,30 @@ Use the official upstream package as the source, then install or copy the whole 
 | Item | Path |
 | --- | --- |
 | Plugin metadata | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json` |
+| Installed version marker | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\installed_version.json` |
+| Optional plugin README | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\README.md` |
 | Official n8n skills root | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\` |
 | Required entry point | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md` |
 
-A minimal local plugin file is enough when your Antigravity build expects plugin metadata:
+Use BOM-less UTF-8 for metadata files. A plugin file that mirrors Antigravity's installed multi-skill plugin shape is:
 
 ```json
 {
   "name": "n8n-skills",
   "version": "1.0.0",
-  "description": "Official n8n Skills for Antigravity",
-  "author": "n8n-io"
+  "description": "Official n8n Skills for Antigravity.",
+  "author": {
+    "name": "n8n-io"
+  },
+  "repository": "https://github.com/n8n-io/skills",
+  "license": "MIT"
 }
+```
+
+Add this version marker beside it:
+
+```json
+{"version": "1.0.0"}
 ```
 
 If `skills.sh` supports your environment, use it only as the official upstream install or fetch step and verify where it wrote files:
@@ -167,9 +179,10 @@ This section is for this toolkit's own safety skills, not the upstream [official
    ```
 
 2. If the official skills were installed under `$HOME\.agents\skills` or `$HOME\.gemini\antigravity\skills`, copy the whole official n8n skill folders into the plugin-scoped `n8n-skills\skills` folder.
-3. Confirm a minimal `plugin.json` exists at `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json`.
-4. Confirm the target repo `AGENTS.md` includes the current official entry-point cue because local folder installs do not have the official plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks.
-5. Fully close and reopen Antigravity after installing or moving skills.
+3. Confirm `plugin.json` is BOM-less UTF-8 and exists at `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json`.
+4. Confirm `installed_version.json` exists beside `plugin.json`.
+5. Confirm the target repo `AGENTS.md` includes the current official entry-point cue because local folder installs do not have the official plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks.
+6. Fully close and reopen Antigravity after installing or moving skills.
 
 ### Antigravity Agent Stops Replying After An Update
 
