@@ -314,6 +314,8 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /npx skills add n8n-io\/skills/);
   assert.match(howToUse, /Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks/);
   assert.match(howToUse, /always start by loading the `using-n8n-skills` meta-skill/);
+  assert.match(howToUse, /current \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
+  assert.match(howToUse, /If the upstream entry point changes, update this cue from the official README instead of inventing a local alias/);
   assert.match(howToUse, /OpenCode stays on a short manual whole-skill-folder install note for toolkit-owned skills for now/);
   assert.match(howToUse, /Copy whole skill folders, not just `SKILL\.md`/);
   assert.match(howToUse, /Keep `README\.md`, `references\/`, `templates\/`, `agents\/`, `packs\/`, and other supporting files beside `SKILL\.md` when present/);
@@ -346,6 +348,8 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /npx skills add n8n-io\/skills/);
   assert.match(readme, /Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks/);
   assert.match(readme, /always start by loading the `using-n8n-skills` meta-skill/);
+  assert.match(readme, /current \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
+  assert.match(readme, /If the upstream entry point changes, update this cue from the official README instead of inventing a local alias/);
   assert.match(readme, /into \*\*ANY ONE\*\* supported location/);
   assert.match(readme, /\*\*Choose any one supported Codex skill-folder location:\*\*/);
   assert.match(readme, /\*\*Choose any one supported Claude Code skill-folder location:\*\*/);
@@ -403,16 +407,16 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(codexRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);
   assert.match(codexRef, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(codexRef, /codex plugin add n8n-skills@n8n-io/);
-  assert.match(codexRef, /Start n8n work by loading `using-n8n-skills`/);
+  assert.match(codexRef, /Start n8n work by loading the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
   assert.match(codexRef, /`n8n_live`/);
   assert.match(claudeCodeRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);
   assert.match(claudeCodeRef, /\/plugin marketplace add n8n-io\/skills/);
   assert.match(claudeCodeRef, /\/plugin install n8n-skills@n8n-io/);
-  assert.match(claudeCodeRef, /Start n8n work by loading `using-n8n-skills`/);
+  assert.match(claudeCodeRef, /Start n8n work by loading the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
   assert.match(claudeCodeRef, /`n8n_live`/);
   assert.match(opencodeRef, /official README's "Other platforms" category/);
   assert.match(opencodeRef, /npx skills add n8n-io\/skills/);
-  assert.match(opencodeRef, /`SessionStart` loads the `using-n8n-skills` meta-skill automatically/);
+  assert.match(opencodeRef, /`SessionStart` loads the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`, automatically/);
   assert.match(opencodeRef, /`PreToolUse` nudges the agent to consult the matching skill/);
   assert.match(opencodeRef, /`PostToolUse` can provide follow-up reminders/);
   assert.match(opencodeRef, /Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks/);
@@ -420,7 +424,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(opencodeRef, /`n8n_live`/);
   assert.match(antigravityRef, /official README's "Other platforms" category/);
   assert.match(antigravityRef, /npx skills add n8n-io\/skills/);
-  assert.match(antigravityRef, /`SessionStart` loads the `using-n8n-skills` meta-skill automatically/);
+  assert.match(antigravityRef, /`SessionStart` loads the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`, automatically/);
   assert.match(antigravityRef, /`PreToolUse` nudges the agent to consult the matching skill/);
   assert.match(antigravityRef, /`PostToolUse` can provide follow-up reminders/);
   assert.match(antigravityRef, /Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks/);

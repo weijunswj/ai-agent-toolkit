@@ -15,7 +15,7 @@ This page is an optional Codex AI-coding-agent setup reference, not a required l
 | Item | Use |
 | --- | --- |
 | [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance through the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin. |
-| `using-n8n-skills` | The first skill to load when starting n8n workflow work. |
+| Official entry-point meta-skill | The first [official n8n Skills](https://github.com/n8n-io/skills) skill to load when starting n8n workflow work; currently `using-n8n-skills`. |
 | `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | Codex rules | Repo or user instructions for safer agent behavior. |
 | Codex MCP config | User-scoped MCP server setup. |
@@ -57,7 +57,7 @@ Then:
 
 1. Restart Codex.
 2. Approve or trust the plugin hooks when Codex prompts you so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
-3. Start n8n work by loading `using-n8n-skills`.
+3. Start n8n work by loading the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`.
 
 ## 4. Install Toolkit Safety Rules For Codex
 

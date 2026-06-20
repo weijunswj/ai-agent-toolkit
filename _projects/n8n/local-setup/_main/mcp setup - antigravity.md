@@ -8,8 +8,8 @@ This page is an optional Antigravity AI-coding-agent setup reference, not a requ
 
 | Item | Use |
 | --- | --- |
-| [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance when official Skills are installed. Plugin lifecycle hooks are available only on supported plugin platforms. |
-| `using-n8n-skills` | The first skill to load when starting n8n workflow work. |
+| [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance when [official n8n Skills](https://github.com/n8n-io/skills) are installed. Plugin lifecycle hooks are available only on supported plugin platforms. |
+| Official entry-point meta-skill | The first [official n8n Skills](https://github.com/n8n-io/skills) skill to load when starting n8n workflow work; currently `using-n8n-skills`. |
 | `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | Antigravity skill support | Platform-specific skill loading. Use official `skills.sh` support for upstream n8n Skills unless Antigravity later documents plugin parity. |
 | Antigravity MCP config | User-scoped MCP server setup. |
@@ -44,7 +44,7 @@ Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](ht
 
 The official [`n8n-io/skills`](https://github.com/n8n-io/skills) README documents plugin installs for Codex and Claude Code. Those plugin installs ship lifecycle hooks:
 
-- `SessionStart` loads the `using-n8n-skills` meta-skill automatically.
+- `SessionStart` loads the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, automatically.
 - `PreToolUse` nudges the agent to consult the matching skill before high-impact n8n MCP calls.
 - `PostToolUse` can provide follow-up reminders after tool use.
 
@@ -56,7 +56,7 @@ npx skills add n8n-io/skills
 
 Compatibility varies by agent. Check [skills.sh](https://skills.sh) support for your Antigravity runtime.
 
-Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Add this cue to the target repo's `AGENTS.md` so the missing `SessionStart` hook is covered for n8n tasks:
+Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Add this current official entry-point cue to the target repo's `AGENTS.md` so the missing `SessionStart` hook is covered for n8n tasks:
 
 ```markdown
 This project uses n8n. When working with workflows, nodes, expressions, or
@@ -64,7 +64,7 @@ the n8n MCP tools, always start by loading the `using-n8n-skills` meta-skill
 and follow its routing into the matching capability skill before acting.
 ```
 
-For the current session, explicitly ask Antigravity to load `using-n8n-skills` before any n8n workflow design, validation, or live-instance proposal.
+For the current session, explicitly ask Antigravity to load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, before any n8n workflow design, validation, or live-instance proposal.
 
 Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
 
@@ -107,11 +107,11 @@ This section is for this toolkit's own safety skills, not the upstream [official
 
 2. If the target repo already has `GEMINI.md`, do not overwrite it.
    - Merge manually or produce a diff/merge plan.
-3. If you installed [official n8n Skills](https://github.com/n8n-io/skills) through `npx skills add n8n-io/skills`, make sure the `using-n8n-skills` cue from section 3 is present in the target repo `AGENTS.md`.
+3. If you installed [official n8n Skills](https://github.com/n8n-io/skills) through `npx skills add n8n-io/skills`, make sure the current official entry-point cue from section 3 is present in the target repo `AGENTS.md`.
 4. If Antigravity does not invoke toolkit skills automatically, keep any global `GEMINI.md` nudge tiny:
 
    ```text
-   Before editing files in any repository, always use the `ai-coding-agent-rules` skill once per new chat/session to check, bootstrap, or repair repo-local instructions. For n8n work, load `using-n8n-skills` and `n8n-agent-rules` before workflow design or live-instance proposals.
+   Before editing files in any repository, always use the `ai-coding-agent-rules` skill once per new chat/session to check, bootstrap, or repair repo-local instructions. For n8n work, load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, and `n8n-agent-rules` before workflow design or live-instance proposals.
    ```
 
 ## 6. Antigravity MCP Config

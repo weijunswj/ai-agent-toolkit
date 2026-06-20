@@ -37,7 +37,7 @@ Apply `n8n-agent-rules` first for the full n8n operating contract. A generated l
 ## Rules
 
 - Templates must be public, generic, inactive, and credential-free.
-- Follow `n8n-agent-rules` for [official n8n Skills](https://github.com/n8n-io/skills), `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and live n8n safety.
+- Follow `n8n-agent-rules` for [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and live n8n safety.
 - Do not include live workflow IDs, live webhook IDs, credential bindings, credential names that reveal private context, `.env` values, private URLs, customer data, or live import/export payloads.
 - Required manual configuration may be documented for non-secret literal placeholders.
 - Do not run live n8n actions from this toolkit repo.

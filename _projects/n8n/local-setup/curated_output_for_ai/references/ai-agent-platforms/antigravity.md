@@ -24,7 +24,7 @@ From the target project folder, install the upstream [official n8n Skills](https
 npx skills add n8n-io/skills
 ```
 
-Plain skill installs do not include the plugin `SessionStart` hook that loads `using-n8n-skills` automatically. Add the official `using-n8n-skills` cue to the target repo `AGENTS.md` so n8n tasks start from the meta-skill. Plugin `PreToolUse` and `PostToolUse` reminders are also not guaranteed on plain installs.
+Plain skill installs do not include the plugin `SessionStart` hook that loads the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, automatically. Add the current official entry-point cue to the target repo `AGENTS.md` so n8n tasks start from the meta-skill. Plugin `PreToolUse` and `PostToolUse` reminders are also not guaranteed on plain installs.
 
 ### Toolkit-Owned Skills
 
@@ -33,8 +33,6 @@ Copy the whole `skills/<skill-name>/` folder into the plugin-scoped Antigravity/
 | Location type | Skill folder path |
 | --- | --- |
 | Plugin-level | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` |
-
-This plugin-scoped folder is for loading toolkit skills.
 
 Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
