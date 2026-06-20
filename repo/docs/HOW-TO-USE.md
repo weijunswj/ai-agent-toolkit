@@ -69,13 +69,27 @@ codex plugin add n8n-skills@n8n-io
 
 Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
-For OpenCode, Antigravity, and other platforms without proven official plugin parity, follow the upstream "Other platforms" route from the [official n8n Skills](https://github.com/n8n-io/skills) README. From the target project folder, run:
+For OpenCode and other platforms without proven official plugin parity, follow the upstream "Other platforms" route from the [official n8n Skills](https://github.com/n8n-io/skills) README when the target runtime supports it. From the target project folder, run:
 
 ```powershell
 npx skills add n8n-io/skills
 ```
 
-Compatibility varies by agent; check `skills.sh` support for the specific platform. Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks, so add the current official entry-point cue to the target repo's `AGENTS.md`:
+Compatibility varies by agent; check `skills.sh` support for the specific platform.
+
+For Antigravity/AG2, use the observed plugin-scoped skill folder for both toolkit-owned skills and locally installed official n8n Skills. Do not stop after `npx skills add n8n-io/skills` if it writes to `$HOME\.agents\skills` or a loose `$HOME\.gemini\antigravity\skills` folder. Use official upstream `n8n-io/skills` content as the source, then place the whole official n8n skill folders under:
+
+```text
+C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\<skill-name>\SKILL.md
+```
+
+Verify this path exists before relying on Antigravity to load the official entry point:
+
+```text
+C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md
+```
+
+Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Local Antigravity plugin-scoped folder installs also do not include the official n8n plugin hooks, so add the current official entry-point cue to the target repo's `AGENTS.md`:
 
 ```text
 This project uses n8n. When working with workflows, nodes, expressions, or

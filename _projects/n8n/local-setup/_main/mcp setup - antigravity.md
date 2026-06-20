@@ -11,7 +11,7 @@ This page is an optional Antigravity AI-coding-agent setup reference, not a requ
 | [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance when [official n8n Skills](https://github.com/n8n-io/skills) are installed. Plugin lifecycle hooks are available only on supported plugin platforms. |
 | Official entry-point meta-skill | The first [official n8n Skills](https://github.com/n8n-io/skills) skill to load when starting n8n workflow work; currently `using-n8n-skills`. |
 | `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
-| Antigravity skill support | Platform-specific skill loading. Use official `skills.sh` support for upstream n8n Skills unless Antigravity later documents plugin parity. |
+| Antigravity skill support | Platform-specific skill loading. Use official upstream n8n Skills inside an Antigravity plugin-scoped skill folder unless Antigravity later documents native n8n plugin parity. |
 | Antigravity MCP config | User-scoped MCP server setup. |
 
 ## 1. Before You Start
@@ -48,15 +48,38 @@ The official [`n8n-io/skills`](https://github.com/n8n-io/skills) README document
 - `PreToolUse` nudges the agent to consult the matching skill before high-impact n8n MCP calls.
 - `PostToolUse` can provide follow-up reminders after tool use.
 
-Antigravity is in the official README's "Other platforms" category unless Antigravity later documents official plugin parity. From the target project folder, install with `skills.sh` via `npx`:
+Antigravity is in the official README's "Other platforms" category unless Antigravity later documents official plugin parity. For AG2, treat the install target as Antigravity's plugin-scoped skill folder, not `$HOME\.agents\skills` or a loose `$HOME\.gemini\antigravity\skills` folder.
+
+Use the official upstream package as the source, then install or copy the whole official n8n skill folders into a dedicated local Antigravity plugin:
+
+| Item | Path |
+| --- | --- |
+| Plugin metadata | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json` |
+| Official n8n skills root | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\` |
+| Required entry point | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md` |
+
+A minimal local plugin file is enough when your Antigravity build expects plugin metadata:
+
+```json
+{
+  "name": "n8n-skills",
+  "version": "1.0.0",
+  "description": "Official n8n Skills for Antigravity",
+  "author": "n8n-io"
+}
+```
+
+If `skills.sh` supports your environment, use it only as the official upstream install or fetch step and verify where it wrote files:
 
 ```powershell
 npx skills add n8n-io/skills
 ```
 
+If that command writes to `$HOME\.agents\skills` or another non-Antigravity location, move or copy only the official n8n skill folders into the `n8n-skills` plugin-scoped `skills\` folder above. Keep each whole upstream skill folder, not just `SKILL.md`, so references and examples stay beside the skill. Do not stop after a successful `npx skills add` unless Antigravity can see `using-n8n-skills` from the plugin-scoped path.
+
 Compatibility varies by agent. Check [skills.sh](https://skills.sh) support for your Antigravity runtime.
 
-Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Add this current official entry-point cue to the target repo's `AGENTS.md` so the missing `SessionStart` hook is covered for n8n tasks:
+Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Local Antigravity plugin-scoped folder installs also do not include the official n8n plugin hooks. Add this current official entry-point cue to the target repo's `AGENTS.md` so the missing `SessionStart` hook is covered for n8n tasks:
 
 ```markdown
 This project uses n8n. When working with workflows, nodes, expressions, or
@@ -107,7 +130,7 @@ This section is for this toolkit's own safety skills, not the upstream [official
 
 2. If the target repo already has `GEMINI.md`, do not overwrite it.
    - Merge manually or produce a diff/merge plan.
-3. If you installed [official n8n Skills](https://github.com/n8n-io/skills) through `npx skills add n8n-io/skills`, make sure the current official entry-point cue from section 3 is present in the target repo `AGENTS.md`.
+3. If you installed or staged [official n8n Skills](https://github.com/n8n-io/skills) for Antigravity, make sure the current official entry-point cue from section 3 is present in the target repo `AGENTS.md`.
 4. If Antigravity does not invoke toolkit skills automatically, keep any global `GEMINI.md` nudge tiny:
 
    ```text
@@ -123,7 +146,7 @@ This section is for this toolkit's own safety skills, not the upstream [official
 ## 7. Restart Antigravity
 
 1. After changing any of these:
-   - [Official n8n Skills](https://github.com/n8n-io/skills) plain skill install.
+   - [Official n8n Skills](https://github.com/n8n-io/skills) plugin-scoped skill install under `$HOME\.gemini\config\plugins\n8n-skills\skills`.
    - Target repo `AGENTS.md` n8n cue.
    - `$HOME\.gemini\antigravity\mcp_config.json`.
    - `$HOME\.gemini\GEMINI.md`.
@@ -134,6 +157,19 @@ This section is for this toolkit's own safety skills, not the upstream [official
    - Open a specific repo only when you actually want Antigravity to inspect or edit that repo.
 
 ## 8. Troubleshooting
+
+### Official n8n Skills Do Not Appear
+
+1. Confirm this file exists:
+
+   ```text
+   C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md
+   ```
+
+2. If the official skills were installed under `$HOME\.agents\skills` or `$HOME\.gemini\antigravity\skills`, copy the whole official n8n skill folders into the plugin-scoped `n8n-skills\skills` folder.
+3. Confirm a minimal `plugin.json` exists at `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json`.
+4. Confirm the target repo `AGENTS.md` includes the current official entry-point cue because local folder installs do not have the official plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks.
+5. Fully close and reopen Antigravity after installing or moving skills.
 
 ### Antigravity Agent Stops Replying After An Update
 

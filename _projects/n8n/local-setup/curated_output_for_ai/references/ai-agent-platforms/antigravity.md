@@ -6,44 +6,16 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Antigravity Platform Router
 
-Antigravity can consume this toolkit through platform-supported skills and repo-local instruction files. For upstream [official n8n Skills](https://github.com/n8n-io/skills), follow the official "Other platforms" route unless Antigravity later documents plugin parity. This is a skills-first router; use the linked full-fidelity files for runtime setup detail.
+This short router points to the full Antigravity setup guide. The authoritative Antigravity n8n Skills and MCP instructions are maintained in `_main/mcp setup - antigravity.md` and published to `skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md`.
 
-## Boundary
+For Antigravity/AG2, the official upstream n8n Skills entry point must be visible from an Antigravity plugin-scoped skill path:
 
-This is a short platform overview and routing note. It is not the full runtime setup guide.
-
-For full setup detail, use the local full-fidelity references and templates in this copied skill folder.
-
-## Skill Install
-
-### Official n8n Skills
-
-From the target project folder, install the upstream [official n8n Skills](https://github.com/n8n-io/skills) with `skills.sh` when your Antigravity runtime is supported:
-
-```powershell
-npx skills add n8n-io/skills
+```text
+C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md
 ```
 
-Plain skill installs do not include the plugin `SessionStart` hook that loads the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, automatically. Add the current official entry-point cue to the target repo `AGENTS.md` so n8n tasks start from the meta-skill. Plugin `PreToolUse` and `PostToolUse` reminders are also not guaranteed on plain installs.
+Do not treat `$HOME\.agents\skills` or a loose `$HOME\.gemini\antigravity\skills` folder as the final AG2 install path. Use `npx skills add n8n-io/skills` only as an upstream fetch or install step when supported, then put the whole official n8n skill folders under the plugin-scoped `n8n-skills\skills` folder.
 
-### Toolkit-Owned Skills
+Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Local Antigravity plugin-scoped folder installs also do not include the official n8n plugin hooks, so keep the target repo `AGENTS.md` cue that loads the current official entry-point meta-skill, `using-n8n-skills`, before n8n work.
 
-Copy the whole `skills/<skill-name>/` folder into the plugin-scoped Antigravity/Gemini skill location when your Antigravity runtime supports that layout.
-
-| Location type | Skill folder path |
-| --- | --- |
-| Plugin-level | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` |
-
-Do not copy only `SKILL.md`. Keep supporting files beside it when present.
-
-## Local Routes
-
-- Use [local setup](../n8n/local-setup.md) for the full local n8n setup guide.
-- Use [local stack templates](../../templates/local-stack/) for `n8n + postgres + ngrok`.
-- Use [skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for generic agent rules.
-- Use [skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md](../../../ai-coding-agent-rules/repo-local/GEMINI.shim.template.md) when the target repo needs an Antigravity/Gemini shim.
-- Use `skills/n8n-agent-rules` or [n8n-agent-rules.md](../n8n-agent-rules.md) before workflow, helper-script, or live n8n work.
-
-## Toolkit Boundary
-
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and not part of the beginner local setup path.
+Use [local setup](../n8n/local-setup.md), [local stack templates](../../templates/local-stack/), and `skills/n8n-agent-rules` before workflow, helper-script, or live n8n work.
