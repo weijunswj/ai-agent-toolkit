@@ -224,9 +224,13 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   const codexCommand = codexHooks.hooks.SessionStart[0].hooks[0].command;
   const claudeCommand = claudeHooks.hooks.SessionStart[0].hooks[0].command;
   assert.match(codexCommand, /toolkit-local-bridge\.cjs/);
+  assert.match(codexCommand, /\$\{CODEX_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-local-bridge\.cjs/);
+  assert.doesNotMatch(codexCommand, /CLAUDE_PLUGIN_ROOT/);
   assert.match(codexCommand, /--sync-enabled/);
   assert.match(codexCommand, /--sync-source codex-plugin/);
   assert.match(claudeCommand, /toolkit-local-bridge\.cjs/);
+  assert.match(claudeCommand, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-local-bridge\.cjs/);
+  assert.doesNotMatch(claudeCommand, /CODEX_PLUGIN_ROOT/);
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
@@ -276,6 +280,19 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|AG2 adapter support|stale bridge state/i.test(skillText);
   });
   assert.deepEqual(bridgeSkillNames, ['toolkit-setup'], 'exactly one Toolkit setup/bridge discoverability skill should exist');
+
+  const curatedSkillsDir = path.join(repoRoot, '_projects', 'development', 'toolkit-local-bridge', 'curated_output_for_ai', 'skills');
+  const curatedSkillNames = fs.readdirSync(curatedSkillsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  const curatedBridgeSkillNames = curatedSkillNames.filter((skill) => {
+    const skillPath = path.join(curatedSkillsDir, skill, 'SKILL.md');
+    if (!fs.existsSync(skillPath)) return false;
+    const skillText = fs.readFileSync(skillPath, 'utf8');
+    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|AG2 adapter support|stale bridge state/i.test(skillText);
+  });
+  assert.deepEqual(curatedBridgeSkillNames, ['toolkit-setup'], 'curated output should contain exactly one Toolkit setup/bridge discoverability skill');
   for (const rel of [
     'skills/toolkit-setup/README.md',
     'skills/toolkit-setup/SKILL.md',

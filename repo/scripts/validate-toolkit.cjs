@@ -1018,6 +1018,8 @@ function validateNativePluginPackages(errors) {
       manifestPath: '.codex-plugin/plugin.json',
       hooksPath: '.codex-plugin/hooks/hooks.json',
       syncSource: 'codex-plugin',
+      rootEnvVar: 'CODEX_PLUGIN_ROOT',
+      forbiddenEnvVars: ['CLAUDE_PLUGIN_ROOT'],
       requiredNativeBoundary: /never installs or updates Claude Code/i
     },
     {
@@ -1026,6 +1028,8 @@ function validateNativePluginPackages(errors) {
       manifestPath: '.claude-plugin/plugin.json',
       hooksPath: '.claude-plugin/hooks/hooks.json',
       syncSource: 'claude-plugin',
+      rootEnvVar: 'CLAUDE_PLUGIN_ROOT',
+      forbiddenEnvVars: ['CODEX_PLUGIN_ROOT'],
       requiredNativeBoundary: /never installs or updates Codex/i
     }
   ];
@@ -1066,6 +1070,14 @@ function validateNativePluginPackages(errors) {
     if (commandHook?.type !== 'command') fail(errors, `${plugin.hooksPath} SessionStart hook must be a command hook`);
     if (!command.includes('repo/scripts/toolkit-local-bridge.cjs')) {
       fail(errors, `${plugin.hooksPath} hook must call the shared toolkit-local-bridge.cjs updater`);
+    }
+    if (!command.includes(`\${${plugin.rootEnvVar}}/repo/scripts/toolkit-local-bridge.cjs`)) {
+      fail(errors, `${plugin.hooksPath} hook must use \${${plugin.rootEnvVar}} as its native plugin root`);
+    }
+    for (const envVar of plugin.forbiddenEnvVars) {
+      if (command.includes(`\${${envVar}}`)) {
+        fail(errors, `${plugin.hooksPath} hook must not reference ${envVar}`);
+      }
     }
     if (!command.includes('--hook') || !command.includes('--write') || !command.includes(`--sync-source ${plugin.syncSource}`)) {
       fail(errors, `${plugin.hooksPath} hook must run updater in hook write mode with ${plugin.syncSource}`);
