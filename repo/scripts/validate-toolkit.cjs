@@ -1018,8 +1018,8 @@ function validateNativePluginPackages(errors) {
       manifestPath: '.codex-plugin/plugin.json',
       hooksPath: '.codex-plugin/hooks/hooks.json',
       syncSource: 'codex-plugin',
-      rootEnvVar: 'CODEX_PLUGIN_ROOT',
-      forbiddenEnvVars: ['CLAUDE_PLUGIN_ROOT'],
+      rootEnvVar: 'PLUGIN_ROOT',
+      forbiddenEnvVars: ['CODEX_PLUGIN_ROOT', 'CODEX_PLUGIN_DATA', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_PLUGIN_DATA'],
       requiredNativeBoundary: /never installs or updates Claude Code/i
     },
     {
@@ -1029,7 +1029,7 @@ function validateNativePluginPackages(errors) {
       hooksPath: '.claude-plugin/hooks/hooks.json',
       syncSource: 'claude-plugin',
       rootEnvVar: 'CLAUDE_PLUGIN_ROOT',
-      forbiddenEnvVars: ['CODEX_PLUGIN_ROOT'],
+      forbiddenEnvVars: ['CODEX_PLUGIN_ROOT', 'CODEX_PLUGIN_DATA'],
       requiredNativeBoundary: /never installs or updates Codex/i
     }
   ];
