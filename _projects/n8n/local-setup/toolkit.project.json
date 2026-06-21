@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.4.1",
+  "version": "3.4.3",
   "version_policy": "semver",
-  "version_notes": "Keeps official n8n Skills (https://github.com/n8n-io/skills) installation guidance and official instance-level n8n MCP templates, with capability-aware MCP wording.",
+  "version_notes": "Adds Windows recovery guidance for already-approved official n8n Skills hook installs and keeps official instance-level n8n MCP templates capability-aware.",
   "outputs": [
     {
       "kind": "curated",
