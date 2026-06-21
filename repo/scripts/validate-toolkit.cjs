@@ -38,6 +38,14 @@ const expectedFiles = [
   'package.json',
   '.gitignore',
   '.gitattributes',
+  '.codex-plugin/plugin.json',
+  '.codex-plugin/hooks/hooks.json',
+  '.claude-plugin/plugin.json',
+  '.claude-plugin/hooks/hooks.json',
+  'skills/toolkit-setup/README.md',
+  'skills/toolkit-setup/SKILL.md',
+  'skills/toolkit-setup/agents/openai.yaml',
+  'repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md',
   'repo/docs/HOW-TO-USE.md',
   'repo/docs/SKILL-PORTABILITY-AND-FIDELITY.md',
   '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md',
@@ -146,6 +154,7 @@ const expectedFiles = [
   'repo/scripts/audit-skill-portability.cjs',
   'repo/scripts/run-design-tests.cjs',
   'repo/scripts/safe-source-update.cjs',
+  'repo/scripts/toolkit-local-bridge.cjs',
   'repo/scripts/sync-repo-doc-contract.cjs',
   'repo/docs/published-surface-audit-baseline.json',
   '.github/workflows/auto-sync-generated-surfaces.yml',
@@ -182,6 +191,8 @@ const expectedDirs = [
   'skills/n8n-agent-rules/adapters',
   'skills/n8n-agent-rules/scripts',
   'skills/windows-localhost-workflows',
+  'skills/toolkit-setup',
+  'skills/toolkit-setup/agents',
   'skills/n8n-workflow-helper-scripts',
   'skills/n8n-workflow-templates',
   'skills/n8n-local-setup',
@@ -205,6 +216,10 @@ const expectedDirs = [
   'skills/n8n-local-setup/packs/claude-code-n8n-local',
   'skills/secure-cicd-installer/packs/secure-cicd',
   'repo/docs/agent-playbooks',
+  '.codex-plugin',
+  '.codex-plugin/hooks',
+  '.claude-plugin',
+  '.claude-plugin/hooks',
   '.agents',
   '.agents/rules',
   '.github/workflows'
@@ -226,6 +241,8 @@ const allowedRootEntries = new Set([
   '.github',
   '.gitattributes',
   '.gitignore',
+  '.codex-plugin',
+  '.claude-plugin',
   '.agents',
   'AGENTS.md',
   'CLAUDE.md',
@@ -991,6 +1008,141 @@ function validateDocContract(errors) {
 function validateAgentInstructionShims(errors) {
   const result = agentInstructionSync.validateAndSync({ mode: 'check' });
   for (const error of result.errors) fail(errors, error);
+}
+
+function stripOuterCommandQuotes(value) {
+  const trimmed = String(value || '').trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function firstCommandToken(command) {
+  const trimmed = String(command || '').trim();
+  const match = trimmed.match(/^"([^"]+)"|^'([^']+)'|^([^\s]+)/);
+  return match ? (match[1] || match[2] || match[3]) : '';
+}
+
+function normalizeCommandToken(token) {
+  return stripOuterCommandQuotes(token).replace(/\\/g, '/').toLowerCase();
+}
+
+function validateToolkitBridgeHookCommandSafety(errors, hooksPath, command) {
+  const firstToken = normalizeCommandToken(firstCommandToken(command));
+
+  if (firstToken !== 'node') {
+    fail(errors, `${hooksPath} hook must invoke toolkit-local-bridge.cjs with an explicit node command`);
+  }
+  if (/\.sh(?:$|[\s"'])/i.test(command) || /\.sh$/i.test(firstToken)) {
+    fail(errors, `${hooksPath} hook must not invoke bare .sh hook commands`);
+  }
+  if (firstToken === 'bash' || firstToken === 'bash.exe' || /^[a-z]:\/windows\/system32\/bash\.exe$/.test(firstToken)) {
+    fail(errors, `${hooksPath} hook must not use a Windows bash launcher`);
+  }
+  if (/\b(?:jq|python3)\b/i.test(command)) {
+    fail(errors, `${hooksPath} hook must not require jq or python3 to emit hook JSON`);
+  }
+}
+
+function validateNativePluginPackages(errors) {
+  const plugins = [
+    {
+      label: 'Codex',
+      marker: '.codex-plugin',
+      manifestPath: '.codex-plugin/plugin.json',
+      hooksPath: '.codex-plugin/hooks/hooks.json',
+      syncSource: 'codex-plugin',
+      rootEnvVar: 'PLUGIN_ROOT',
+      forbiddenEnvVars: ['CODEX_PLUGIN_ROOT', 'CODEX_PLUGIN_DATA', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_PLUGIN_DATA'],
+      requiredNativeBoundary: /never installs or updates Claude Code/i
+    },
+    {
+      label: 'Claude Code',
+      marker: '.claude-plugin',
+      manifestPath: '.claude-plugin/plugin.json',
+      hooksPath: '.claude-plugin/hooks/hooks.json',
+      syncSource: 'claude-plugin',
+      rootEnvVar: 'CLAUDE_PLUGIN_ROOT',
+      forbiddenEnvVars: ['CODEX_PLUGIN_ROOT', 'CODEX_PLUGIN_DATA'],
+      requiredNativeBoundary: /never installs or updates Codex/i
+    }
+  ];
+
+  for (const plugin of plugins) {
+    let manifest;
+    let hooks;
+    try {
+      manifest = readJson(plugin.manifestPath);
+    } catch (error) {
+      fail(errors, `${plugin.manifestPath} is not valid JSON: ${error.message}`);
+      continue;
+    }
+    try {
+      hooks = readJson(plugin.hooksPath);
+    } catch (error) {
+      fail(errors, `${plugin.hooksPath} is not valid JSON: ${error.message}`);
+      continue;
+    }
+
+    if (manifest.name !== 'ai-agent-toolkit') fail(errors, `${plugin.manifestPath} name must be ai-agent-toolkit`);
+    if (!/^\d+\.\d+\.\d+$/.test(String(manifest.version || ''))) fail(errors, `${plugin.manifestPath} version must be semver`);
+    if (manifest.skills !== './skills') fail(errors, `${plugin.manifestPath} skills must point to ./skills`);
+    if (manifest.hooks !== `./${plugin.marker}/hooks/hooks.json`) {
+      fail(errors, `${plugin.manifestPath} hooks must point to ./${plugin.marker}/hooks/hooks.json`);
+    }
+    if (!plugin.requiredNativeBoundary.test(JSON.stringify(manifest))) {
+      fail(errors, `${plugin.manifestPath} must state the native cross-update boundary`);
+    }
+
+    const sessionStart = hooks.hooks?.SessionStart;
+    if (!Array.isArray(sessionStart) || sessionStart.length !== 1) {
+      fail(errors, `${plugin.hooksPath} must declare exactly one SessionStart hook group`);
+      continue;
+    }
+    const commandHook = sessionStart[0]?.hooks?.[0];
+    const command = String(commandHook?.command || '');
+    if (commandHook?.type !== 'command') fail(errors, `${plugin.hooksPath} SessionStart hook must be a command hook`);
+    validateToolkitBridgeHookCommandSafety(errors, plugin.hooksPath, command);
+    if (!command.includes('repo/scripts/toolkit-local-bridge.cjs')) {
+      fail(errors, `${plugin.hooksPath} hook must call the shared toolkit-local-bridge.cjs updater`);
+    }
+    if (!command.includes(`\${${plugin.rootEnvVar}}/repo/scripts/toolkit-local-bridge.cjs`)) {
+      fail(errors, `${plugin.hooksPath} hook must use \${${plugin.rootEnvVar}} as its native plugin root`);
+    }
+    for (const envVar of plugin.forbiddenEnvVars) {
+      if (command.includes(`\${${envVar}}`)) {
+        fail(errors, `${plugin.hooksPath} hook must not reference ${envVar}`);
+      }
+    }
+    if (!command.includes('--hook') || !command.includes('--write') || !command.includes(`--sync-source ${plugin.syncSource}`)) {
+      fail(errors, `${plugin.hooksPath} hook must run updater in hook write mode with ${plugin.syncSource}`);
+    }
+    if (/--enable-target|--disable-target|--force-downgrade/.test(command)) {
+      fail(errors, `${plugin.hooksPath} hook must not enable, disable, or force-downgrade targets`);
+    }
+  }
+
+  const checkedTexts = [
+    '.codex-plugin/plugin.json',
+    '.codex-plugin/hooks/hooks.json',
+    '.claude-plugin/plugin.json',
+    '.claude-plugin/hooks/hooks.json',
+    'repo/scripts/toolkit-local-bridge.cjs',
+    'repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md'
+  ].filter(existsRel).map((relPath) => ({ relPath, text: readText(relPath) }));
+
+  for (const { relPath, text } of checkedTexts) {
+    if (/\.codex[\\/]+plugins[\\/]+cache|\.claude[\\/]+plugins/i.test(text)) {
+      fail(errors, `${relPath} must not use Codex/Claude private plugin caches as bridge source`);
+    }
+    if (/\b(?:npm|pnpm|yarn|pip)\s+install\b/i.test(text)) {
+      fail(errors, `${relPath} must not install npm or pip packages by default`);
+    }
+  }
 }
 
 function validateReadmeSurface(errors) {
@@ -2267,6 +2419,7 @@ function runValidation() {
   validateDesignGeneratorLocalOnly(errors);
   validateDocContract(errors);
   validateAgentInstructionShims(errors);
+  validateNativePluginPackages(errors);
   validateReadmeSurface(errors);
   validateProjectModules(errors);
   validateSkillCreationCenter(errors);

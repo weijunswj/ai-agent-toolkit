@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "first-party-authored",
+  "source_commit": "78225002ab618382209f0119a062a865b93c97d5",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party toolkit-authored source for native plugin packaging, one compact Toolkit setup discoverability skill, and opt-in local bridge setup infrastructure. No third-party source, private plugin cache content, marketplace package, credential material, generated local hub output, or command-per-bridge skill surface is copied or adapted.",
+  "files": []
+}

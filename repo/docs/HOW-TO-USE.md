@@ -46,8 +46,15 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 
 ## Install Toolkit Skills
 
-Preferred install for toolkit-owned skills: copy the whole `skills/<skill-name>/` folder into one supported location.
-OpenCode stays on a short manual whole-skill-folder install note for toolkit-owned skills for now.
+Preferred v2 install for toolkit-owned skills:
+
+- Codex updates Toolkit through the Codex native plugin system using [`.codex-plugin/plugin.json`](../../.codex-plugin/plugin.json).
+- Claude Code updates Toolkit through the Claude Code native plugin system using [`.claude-plugin/plugin.json`](../../.claude-plugin/plugin.json).
+- Codex does not install or update Claude Code.
+- Claude Code does not install or update Codex.
+- OpenCode and AG2 are opt-in local bridge targets, not native plugin update targets.
+
+Manual fallback: copy the whole `skills/<skill-name>/` folder into one supported location.
 
 1. Use the whole `skills/<skill-name>/` folder as the install unit.
 2. Copy whole skill folders, not just `SKILL.md`.
@@ -111,9 +118,10 @@ The cue names the current [official n8n Skills](https://github.com/n8n-io/skills
 
 | Platform | Toolkit-owned skill route | Location guidance | Notes |
 |---|---|---|---|
-| Codex | Direct whole-skill-folder install | See Codex locations below. | Current path for Codex skills. |
-| Claude Code | Direct whole-skill-folder install | See Claude Code locations below. | Current path for Claude Code skills. |
-| OpenCode | Short manual whole-skill-folder note only | See OpenCode locations below. | No OpenCode plugin packaging is introduced here. |
+| Codex | Native plugin package | `.codex-plugin/plugin.json` points to `./skills` and optional hooks. | Codex updates natively; it does not update Claude Code. |
+| Claude Code | Native plugin package | `.claude-plugin/plugin.json` points to `./skills` and optional hooks. | Claude Code updates natively; it does not update Codex. |
+| OpenCode | Opt-in local bridge target | `$HOME/.config/opencode/skills/ai-agent-toolkit/` after approval. | Autocheck may detect OpenCode; autosetup is forbidden. |
+| AG2 | Opt-in local bridge target | `$HOME/.ai-agent-toolkit/current/adapters/ag2/` after approval. | Adapter metadata only; no Python packages are installed. |
 | Antigravity | Plugin-scoped skill-folder install | See Antigravity path below. | Skill loading stays separate from repo-local bootstrap outputs. |
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
@@ -122,7 +130,9 @@ Humans use `_projects/**` for source review and maintenance. Agents use generate
 
 ### Codex
 
-For Codex, use direct whole-skill-folder install first.
+For Codex, use the native Toolkit plugin package first. The generated manifest is [`.codex-plugin/plugin.json`](../../.codex-plugin/plugin.json), and it points to the root `skills/` folder.
+
+Direct whole-skill-folder install remains a manual fallback.
 
 **Choose any one supported Codex skill-folder location:**
 
@@ -136,7 +146,9 @@ Codex scans repo skills from `.agents/skills` from the current working directory
 
 ### Claude Code
 
-For Claude Code, use direct whole-skill-folder install first.
+For Claude Code, use the native Toolkit plugin package first. The generated manifest is [`.claude-plugin/plugin.json`](../../.claude-plugin/plugin.json), and it points to the root `skills/` folder.
+
+Direct whole-skill-folder install remains a manual fallback.
 
 **Choose any one supported Claude Code skill-folder location:**
 
@@ -149,7 +161,25 @@ Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Cod
 
 ### OpenCode
 
-For OpenCode, use a short manual whole-skill-folder install only.
+For OpenCode, use the opt-in Toolkit Local Bridge target when the user asks for setup. The bridge writes only the managed global skill folder:
+
+```text
+$HOME/.config/opencode/skills/ai-agent-toolkit/
+```
+
+Run a dry-run audit first:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode
+```
+
+After explicit approval:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
+```
+
+Manual whole-skill-folder install remains a fallback.
 
 **Choose any one supported OpenCode skill-folder location:**
 
@@ -163,6 +193,24 @@ For OpenCode, use a short manual whole-skill-folder install only.
 | User agent-compatible | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
 
 OpenCode walks upward from the current working directory to the git worktree for project-local skill paths, and it also loads global skill definitions. Use `AGENTS.md`, `AGENTS.override.md`, or the configured OpenCode rules file for always-on OpenCode instructions.
+
+### AG2
+
+AG2 is an opt-in local adapter target, not a native plugin marketplace.
+
+Run a dry-run audit first:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
+```
+
+After explicit approval:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+```
+
+The bridge writes AG2 adapter metadata under the Toolkit Local Bridge Hub only. It does not install Python, AG2, or pip packages.
 
 ### Antigravity
 
@@ -189,6 +237,50 @@ Use `GEMINI.md` or the configured context file for always-on Antigravity instruc
 ## Documentation Links
 
 Human-facing navigational paths and URLs must be clickable Markdown links. Do not leave important links only inside code fences or inline code. Code blocks are for commands, payloads, literal examples, and copy/paste prompts.
+
+## Use The Toolkit Local Bridge
+
+The Toolkit Local Bridge is for user-local, PC-level adapter state. It is not a project-repo installer.
+
+Default paths:
+
+| Platform | Hub path |
+|---|---|
+| POSIX | `~/.ai-agent-toolkit/current` |
+| Windows | `%USERPROFILE%\.ai-agent-toolkit\current` |
+
+Audit without writes:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --audit
+```
+
+Sync already-enabled targets after approval:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
+```
+
+Disable a target without deleting files:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
+```
+
+Disable auto-sync:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --disable-auto-sync --write
+```
+
+The bridge is Toolkit setup and maintenance infrastructure with one compact `toolkit-setup` discoverability skill, not a command-per-bridge skill family. It never silently sets up new non-native targets. Enabled targets may auto-sync from whichever native plugin is newer. Disabled and never-enabled targets are not touched.
+
+Policy layering stays portable:
+
+1. `AGENTS.md` is compact context and routing.
+2. Skills/docs carry detailed portable workflows.
+3. Validators and schemas enforce deterministic rules.
+4. Hooks provide optional native automation around the shared updater.
 
 ## Use Skill-Local Templates Manually
 

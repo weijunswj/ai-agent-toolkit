@@ -1,0 +1,135 @@
+{
+  "id": "development.toolkit-local-bridge",
+  "category": "development",
+  "name": "toolkit-local-bridge",
+  "title": "Toolkit Local Bridge",
+  "module_path": "_projects/development/toolkit-local-bridge",
+  "main_path": "_projects/development/toolkit-local-bridge/_main",
+  "version": "2.0.0",
+  "version_policy": "semver",
+  "version_notes": "V2 native plugin/update architecture with one compact Toolkit setup discoverability skill plus opt-in OpenCode and AG2 local bridge setup infrastructure.",
+  "outputs": [
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/toolkit-setup/README.md",
+      "output": "skills/toolkit-setup/README.md",
+      "notes": "Compact Toolkit setup skill README generated from first-party curated source.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/toolkit-setup/SKILL.md",
+      "output": "skills/toolkit-setup/SKILL.md",
+      "notes": "Compact Toolkit setup skill entrypoint generated from first-party curated source.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/toolkit-setup/agents/openai.yaml",
+      "output": "skills/toolkit-setup/agents/openai.yaml",
+      "notes": "OpenAI-facing metadata for the compact Toolkit setup skill.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "json",
+      "source": "_main/codex-plugin/plugin.json",
+      "output": ".codex-plugin/plugin.json",
+      "notes": "Codex native plugin manifest generated from first-party module source.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "json",
+      "source": "_main/codex-plugin/hooks/hooks.json",
+      "output": ".codex-plugin/hooks/hooks.json",
+      "notes": "Codex native plugin hook config generated from first-party module source; hook only calls the shared updater.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "json",
+      "source": "_main/claude-plugin/plugin.json",
+      "output": ".claude-plugin/plugin.json",
+      "notes": "Claude Code native plugin manifest generated from first-party module source.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "json",
+      "source": "_main/claude-plugin/hooks/hooks.json",
+      "output": ".claude-plugin/hooks/hooks.json",
+      "notes": "Claude Code native plugin hook config generated from first-party module source; hook only calls the shared updater.",
+      "fidelity": "generated_metadata"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/toolkit-setup/README.md",
+      "skills/toolkit-setup/SKILL.md",
+      "skills/toolkit-setup/agents/openai.yaml",
+      ".codex-plugin/plugin.json",
+      ".codex-plugin/hooks/hooks.json",
+      ".claude-plugin/plugin.json",
+      ".claude-plugin/hooks/hooks.json"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "skill_creation_review": {
+    "existing_skill_review": "Reviewed current skills, README skill table, Skill Safety Matrix, toolkit skill-routing source, context-preserving-ai-publisher, ai-coding-agent-rules, n8n-local-setup, windows-localhost-workflows, and the removed bridge command skills before adding toolkit-setup. Existing skills cover repo rules, source publishing, n8n setup, localhost startup, and safety reviews, but no existing single skill routes Toolkit native plugin setup plus OpenCode and AG2 local bridge troubleshooting without becoming a command-per-bridge family.",
+    "trigger": "Use toolkit-setup when the user asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, or bridge setup safety. Do not invoke it for ordinary project coding, unrelated n8n setup, or as permission to run write commands without explicit approval.",
+    "decision": "new_project_skill",
+    "decision_reason": "A single compact toolkit-setup router skill is safer than a command-per-bridge skill family because it lets agents recognise setup requests while keeping implementation, command details, hooks, and policy in the shared updater, docs, validators, and tests.",
+    "unique_value": "The skill preserves the bridge safety model in the trigger path: dry-run first, OpenCode and AG2 opt-in only, detection without autosetup, sync only enabled targets, no npm or pip installs, no project repo mutation by default, no Codex-to-Claude or Claude-to-Codex cross-update, and downgrade refusal unless explicitly forced.",
+    "runtime_footprint": "SKILL.md stays a short router and safety checklist. It does not embed the updater implementation or repeat command-per-target procedures; detailed behavior stays in repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md, repo/docs/HOW-TO-USE.md, repo/scripts/toolkit-local-bridge.cjs, and tests.",
+    "local_assets": "Only the toolkit-setup README, SKILL.md, and OpenAI metadata are published. No scripts, references, templates, package archives, third-party code, or generated bridge hub outputs are bundled in the skill.",
+    "output_contract": "When used, the agent routes to the Toolkit setup subsystem, starts with audit or dry-run behavior, uses repo/scripts/toolkit-local-bridge.cjs for any requested operation, preserves explicit approval gates for writes, and runs relevant validators or tests before final reporting.",
+    "anti_bloat_review": "The skill intentionally replaces a command-per-bridge skill family with one small discoverability surface. It is not generic setup advice, and it does not duplicate existing source-publishing, n8n, localhost, or safety-review skills.",
+    "safety_boundary": "User-level hub writes, OpenCode global skill writes, AG2 adapter writes, auto-sync enablement, target enablement, downgrade forcing, package installation, project-repo mutation, live-system actions, credentials, and destructive operations require explicit current-turn approval when applicable. Hooks remain optional policy-light automation.",
+    "source_provenance": "first_party",
+    "third_party_audit": "not_applicable_first_party; no third-party plugin source, private plugin cache material, marketplace package, executable dependency, or vendor docs are copied or adapted.",
+    "publisher_workflow": "context-preserving-ai-publisher maintenance workflow: create reviewed curated output for the compact toolkit-setup router, declare exact generated skill and native plugin metadata outputs, run deterministic sync, update routing/docs/safety matrix/audit baseline, and validate source-to-surface freshness.",
+    "routing": "toolkit-setup is routed in the Toolkit skill-routing table as the single discoverability skill for Toolkit plugin and bridge setup requests. The command-specific bridge skills are omitted and removed: setup-local-toolkit-bridge, setup-opencode-bridge, setup-ag2-bridge, setup-all-non-native-bridges, sync-enabled-bridges, audit-local-toolkit-bridge, and disable-local-toolkit-bridge.",
+    "validation": [
+      "node repo/scripts/sync-toolkit-projects.cjs --write",
+      "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "node --test repo/tests/toolkit-local-bridge.test.cjs",
+      "node --test repo/tests/skill-routing.test.cjs",
+      "node repo/scripts/validate-toolkit.cjs"
+    ]
+  },
+  "project": {
+    "name": "Toolkit Local Bridge",
+    "category": "development",
+    "summary": "Native Codex and Claude Code plugin metadata plus one compact setup discoverability skill and opt-in local bridge infrastructure for OpenCode and AG2 adapter targets."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/toolkit-setup",
+      "summary": "Compact discoverability skill that routes Toolkit plugin, local bridge, OpenCode, and AG2 setup requests to the shared setup subsystem."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    },
+    "native_plugin_metadata": {
+      "status": "published",
+      "paths": [
+        ".codex-plugin",
+        ".claude-plugin"
+      ],
+      "summary": "Generated native plugin metadata for Codex and Claude Code plus optional hooks that call the shared local bridge updater."
+    }
+  }
+}

@@ -19,8 +19,8 @@ const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT ||
 const rootReal = fs.realpathSync.native(root);
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 const projectRoot = '_projects';
-const approvedOutputPrefixes = ['skills/'];
-const rootSurfacePrefixes = ['skills/'];
+const approvedOutputPrefixes = ['skills/', '.codex-plugin/', '.claude-plugin/'];
+const rootSurfacePrefixes = ['skills/', '.codex-plugin/', '.claude-plugin/'];
 const forbiddenNames = new Set([
   '.n8n-local',
   '.tmp',

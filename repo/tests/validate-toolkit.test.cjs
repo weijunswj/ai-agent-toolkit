@@ -497,14 +497,16 @@ test('repo-wide MCP generated surface is absent', () => {
   assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'repo-methodology', 'mcp-ready-registry')), false);
 });
 
-test('advanced Codex and Claude plugin manifests stay out of the simple install PR', () => {
+test('native Codex and Claude plugin manifests are generated package metadata', () => {
   for (const relPath of [
     '.codex-plugin/plugin.json',
+    '.codex-plugin/hooks/hooks.json',
     '.claude-plugin/plugin.json',
-    '.claude-plugin/marketplace.json'
+    '.claude-plugin/hooks/hooks.json'
   ]) {
-    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
+    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), true, relPath);
   }
+  assert.equal(fs.existsSync(path.join(repoRoot, '.claude-plugin', 'marketplace.json')), false);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -542,6 +544,7 @@ test('project manifests include the current project modules without repo-wide MC
     'development.managed-app-foundation-review',
     'development.project-completion-audit',
     'development.self-hosted-service-safety',
+    'development.toolkit-local-bridge',
     'development.windows-localhost-workflows',
     'knowledge.knowledge-index-updater',
     'n8n.local-setup',
@@ -630,15 +633,22 @@ test('project metadata supports all declared publish_as values', () => {
   }
 });
 
-test('sync output declarations target skills, not legacy or repo-wide MCP surfaces', () => {
+test('sync output declarations target approved generated surfaces', () => {
+  const approvedOutputRoot = /^(?:skills|\.codex-plugin|\.claude-plugin)\//;
   for (const manifest of validator.projectManifests()) {
     for (const output of manifest.outputs || []) {
-      assert.match(output.output, /^skills\//, `${manifest.id}: ${output.output}`);
+      assert.match(output.output, approvedOutputRoot, `${manifest.id}: ${output.output}`);
+      if (/^\.(?:codex|claude)-plugin\//.test(output.output)) {
+        assert.equal(manifest.id, 'development.toolkit-local-bridge', `${manifest.id}: ${output.output}`);
+      }
       assert.doesNotMatch(output.output, /(^|[^A-Za-z0-9_])for_ai\//);
     }
     for (const allowed of manifest.writes.allowed || []) {
       if (allowed.endsWith('/output/**')) continue;
-      assert.match(allowed, /^skills\//, `${manifest.id}: ${allowed}`);
+      assert.match(allowed, approvedOutputRoot, `${manifest.id}: ${allowed}`);
+      if (/^\.(?:codex|claude)-plugin\//.test(allowed)) {
+        assert.equal(manifest.id, 'development.toolkit-local-bridge', `${manifest.id}: ${allowed}`);
+      }
     }
   }
 });

@@ -1,18 +1,18 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-21 (project completion audit skill)
+Latest update: 2026-06-21 (Toolkit Local Bridge v2 native plugin metadata and one setup discoverability skill)
 
 ## Current state
 
-This audit is now a skills-first published-surface audit. The current generated/published root surface is `skills/**`.
+This audit is now a skills-first published-surface audit. The current generated/published root surface is `skills/**` plus generated native plugin metadata under `.codex-plugin/**` and `.claude-plugin/**`.
 
 Repo-wide MCP generated/published output is intentionally absent for now:
 
 - `mcp/**` is not shipped.
 - `_projects/repo-methodology/mcp-ready-registry/**` is not shipped.
 - Project manifests must not declare repo-wide `mcp/**` outputs or `publish_as: "mcp"` / `publish_as: "both"`.
-- Future PRs that change published skill surfaces should run the published-surface audit and keep new `skills/**` outputs source-owned.
+- Future PRs that change published skill or native plugin metadata surfaces should run the published-surface audit and keep new `skills/**`, `.codex-plugin/**`, and `.claude-plugin/**` outputs source-owned.
 
 The n8n local setup [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are preserved as secondary AI-coding-agent setup material, not as repo-wide MCP support:
 
@@ -27,9 +27,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 14 |
-| publishedFiles | 202 |
-| declaredOutputFiles | 202 |
+| projects | 15 |
+| publishedFiles | 209 |
+| declaredOutputFiles | 209 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 202 |
+| boundaryRecipeOutputs | 209 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 0 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 128 |
+| declared_generated | 135 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
@@ -54,23 +54,23 @@ Current boundary recipe classifications:
 | Classification | Count |
 | --- | ---: |
 | curated_adapter | 3 |
-| curated_agent_metadata | 1 |
-| curated_index | 11 |
+| curated_agent_metadata | 2 |
+| curated_index | 12 |
 | curated_metadata | 3 |
 | curated_pack_readme | 3 |
 | curated_reference | 7 |
 | curated_repo_local_agent_template | 4 |
-| curated_router | 8 |
+| curated_router | 9 |
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 150 |
+| main_full_fidelity | 154 |
 
 Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by adding the first-party `project-completion-audit` project, its three generated skill files, and one generated portable repo-local playbook file, while preserving the existing n8n shared-surface references.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by keeping the first-party `toolkit-local-bridge` project and four generated native plugin metadata files, while adding exactly one compact `toolkit-setup` discoverability skill instead of a command-per-bridge skill family.
 
 ## Current project modules
 
@@ -82,6 +82,7 @@ Known baseline context:
 - `_projects/development/project-completion-audit`
 - `_projects/development/hostinger-coolify-production-guide`
 - `_projects/development/self-hosted-service-safety`
+- `_projects/development/toolkit-local-bridge`
 - `_projects/development/windows-localhost-workflows`
 - `_projects/knowledge/knowledge-index-updater`
 - `_projects/n8n/local-setup`
@@ -105,8 +106,16 @@ Known baseline context:
 - `skills/n8n-workflow-templates/`
 - `skills/self-hosted-service-safety/`
 - `skills/secure-cicd-installer/`
+- `skills/toolkit-setup/`
 - `skills/ui-ux-secure-frontend-design/`
 - `skills/windows-localhost-workflows/`
+
+## Current native plugin metadata
+
+- `.codex-plugin/plugin.json`
+- `.codex-plugin/hooks/hooks.json`
+- `.claude-plugin/plugin.json`
+- `.claude-plugin/hooks/hooks.json`
 
 ## Deterministic audit command
 
@@ -119,7 +128,7 @@ node repo/scripts/audit-published-surfaces.cjs
 node repo/scripts/audit-published-surfaces.cjs --check
 ```
 
-The command inspects local Git-tracked `skills/**` files, `_projects/**/toolkit.project.json`, and `skills/**/packs/**/pack.json`. It does not call the network, run project scripts, install packages, summarize with AI, or touch live n8n.
+The command inspects local Git-tracked `skills/**`, `.codex-plugin/**`, and `.claude-plugin/**` files, `_projects/**/toolkit.project.json`, and `skills/**/packs/**/pack.json`. It does not call the network, run project scripts, install packages, summarize with AI, or touch live n8n.
 
 `--check` compares the current findings with `repo/docs/published-surface-audit-baseline.json`. If a PR intentionally resolves or reclassifies a known issue, update the baseline in the same PR after reviewing the exact count movement.
 

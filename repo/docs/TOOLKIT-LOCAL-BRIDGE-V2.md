@@ -1,0 +1,269 @@
+# Toolkit Local Bridge V2
+
+This document defines the v2 plugin/update architecture for `weijunswj/ai-agent-toolkit`.
+
+## Current Source-Of-Truth Chain
+
+Current inspected chain:
+
+1. Root `AGENTS.md` routes repo work and includes the managed source-of-truth contract.
+2. `_projects/**/_main/` stores full source material.
+3. `_projects/**/curated_output_for_ai/` stores reviewed AI-facing adapters, routers, and metadata.
+4. `_projects/**/toolkit.project.json` declares generated outputs and write boundaries.
+5. `_projects/**/SOURCE-LOCK.json` records first-party or third-party provenance.
+6. `repo/scripts/sync-toolkit-projects.cjs` publishes declared generated outputs.
+7. `skills/**` is the generated copyable skill surface.
+8. `repo/scripts/validate-toolkit.cjs`, `repo/tests/*.test.cjs`, package checks, source-lock audit, and published-surface audit enforce drift and safety rules.
+9. `.codex-plugin/**` and `.claude-plugin/**` are v2 native plugin package metadata generated from the Toolkit project module. They are not source of truth.
+10. The Toolkit Local Bridge Hub under the user profile stores generated OpenCode and AG2 adapter state. It is not source of truth.
+
+## V2 Architecture
+
+Codex and Claude Code update Toolkit through their own native plugin systems.
+
+- Codex uses `.codex-plugin/plugin.json`.
+- Claude Code uses `.claude-plugin/plugin.json`.
+- Both native package manifests point at the same Toolkit `skills/` surface.
+- Both native packages use hooks only for optional bridge autocheck and enabled-target auto-sync.
+- Codex never installs or updates Claude Code.
+- Claude Code never installs or updates Codex.
+- Toolkit does not publish to public marketplaces from this repo. Marketplace-ready metadata is present in the manifests, but publication remains a separate human action.
+
+The shared bridge manages only non-native local adapter targets:
+
+- OpenCode global skills.
+- AG2-style local adapter metadata.
+
+OpenCode and AG2 are opt-in. The bridge may detect them during audit or hook autocheck, but it must not write target files until the user explicitly enables that target.
+
+## Local Bridge Hub
+
+Default hub paths:
+
+| Platform | Path |
+|---|---|
+| POSIX | `~/.ai-agent-toolkit/current` |
+| Windows | `%USERPROFILE%\.ai-agent-toolkit\current` |
+
+The hub contains:
+
+- `manifest.json`.
+- `state.json`.
+- `adapters/opencode/**`.
+- `adapters/ag2/**`.
+- Version and checksum data.
+- Source commit or `unknown` when Git metadata is unavailable.
+- Sync source: `repo`, `codex-plugin`, or `claude-plugin`.
+- Sync timestamp.
+- Target paths.
+- Target detected, enabled, disabled, stale, and synced state.
+
+The lock file lives beside the hub at `%USERPROFILE%\.ai-agent-toolkit\update.lock` or `~/.ai-agent-toolkit/update.lock`.
+
+Writes are atomic:
+
+1. Write a staging directory.
+2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and AG2 adapter output.
+3. Rename staging into `current`.
+4. For OpenCode target sync, stage the `ai-agent-toolkit` skill folder beside the target and atomically replace only that managed folder.
+
+Fresh locks cause a safe skip. Stale locks are removed before retry. Older bridge versions refuse to overwrite newer hub state unless `--force-downgrade` is supplied for explicit manual recovery.
+
+## Shared Updater
+
+The canonical updater is [toolkit-local-bridge.cjs](../scripts/toolkit-local-bridge.cjs).
+
+Dry-run is default:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --audit
+```
+
+Write mode requires explicit `--write`:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
+node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
+```
+
+Supported flags:
+
+- `--enable-target opencode`.
+- `--enable-target ag2`.
+- `--disable-target opencode`.
+- `--disable-target ag2`.
+- `--sync-enabled`.
+- `--enable-auto-sync`.
+- `--disable-auto-sync`.
+- `--audit`.
+- `--force-downgrade`.
+- `--sync-source repo|codex-plugin|claude-plugin`.
+
+The updater must not:
+
+- Install npm, pip, Python, AG2, OpenCode, Codex, or Claude Code.
+- Manage Codex plugin installation or update.
+- Manage Claude Code plugin installation or update.
+- Mutate project repositories by default.
+- Write outside the current user home or temp directories.
+- Use Codex or Claude private plugin cache paths as source.
+
+## Target Discovery
+
+OpenCode detection signals:
+
+- `opencode --version` succeeds.
+- `OPENCODE_CONFIG_DIR` is set.
+- `~/.config/opencode` or an explicit OpenCode config dir exists.
+- The managed OpenCode target exists.
+- The user explicitly enabled the target.
+
+OpenCode target path:
+
+- POSIX: `~/.config/opencode/skills/ai-agent-toolkit/`.
+- Windows: `%USERPROFILE%\.config\opencode\skills\ai-agent-toolkit\`.
+
+The bridge intentionally does not use `.agents/skills` for OpenCode output, avoiding duplicate Codex skill discovery.
+
+AG2 detection signals:
+
+- Python command exists and returns a version.
+- `python -m pip show ag2` succeeds.
+- The user explicitly enabled the target.
+
+AG2 output stays under the Toolkit Local Bridge Hub. The bridge does not install AG2 or Python packages.
+
+## Auto-Check, Auto-Setup, And Auto-Sync
+
+Autocheck is allowed. Autosetup is forbidden.
+
+- Detected but never-enabled target: no target writes.
+- Not detected and never-enabled target: skip.
+- Enabled target: sync only that target when stale.
+- Explicitly disabled target: never touch.
+- Auto-sync enabled: native hooks may sync enabled stale targets.
+- Auto-sync disabled: hooks may print a concise reminder or do nothing.
+
+## Setup Command Surface
+
+The bridge is Toolkit setup and maintenance infrastructure. It may have one compact `toolkit-setup` discoverability skill, but it must not become a family of reusable command skills.
+
+Audit:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --audit
+```
+
+Dry-run OpenCode setup:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode
+```
+
+Apply OpenCode setup:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
+```
+
+Dry-run AG2 setup:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
+```
+
+Apply AG2 setup:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+```
+
+Sync enabled targets:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
+```
+
+Disable a target:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
+node repo/scripts/toolkit-local-bridge.cjs --disable-target ag2 --write
+```
+
+Do not add one bridge skill per command. Keep `toolkit-setup` as the only bridge/setup discoverability skill, and keep setup guidance in this doc, the updater help, validators, and tests.
+
+## Hook Policy
+
+Hooks are optional automation. They must not contain unique critical policy.
+
+The v2 hooks only call the shared updater:
+
+- Codex hook source: `.codex-plugin/hooks/hooks.json`.
+- Claude Code hook source: `.claude-plugin/hooks/hooks.json`.
+- Shared policy source: this doc, `AGENTS.md`, Toolkit docs, and validators.
+- Deterministic enforcement: `repo/scripts/toolkit-local-bridge.cjs` and tests.
+
+OpenCode and AG2 do not need Codex or Claude hooks to receive core policy because the policy remains in portable docs, validators, and generated adapter content.
+
+## Portable Policy-First Layering
+
+Layering:
+
+1. `AGENTS.md` is compact cross-platform context and routing.
+2. Portable skills and docs contain detailed cross-platform workflows; bridge setup specifics stay in docs and the shared updater.
+3. Validators and schema checks enforce deterministic rules where practical.
+4. Hooks provide optional native automation around validators and the shared updater.
+
+Rules that affect agent judgement must remain available outside hooks. Deterministic rules should be script-validated where practical. Hooks should call those scripts.
+
+## AGENTS.md Slimming Plan
+
+Keep in root `AGENTS.md`:
+
+- Instruction priority and repo routing.
+- Compact source-of-truth hierarchy.
+- Compact native plugin/update architecture summary.
+- Approval and user/global write safety rules.
+- Generated-output rule.
+- Skill routing rules and pointers.
+- Validation and final report expectations.
+
+Move or mirror outside root `AGENTS.md`:
+
+- Long bridge setup procedures: this doc and the shared updater help.
+- Exact bridge state schema: updater validation and tests.
+- Exact command implementations: [toolkit-local-bridge.cjs](../scripts/toolkit-local-bridge.cjs).
+- Hook behavior details: this doc, plugin hook manifests, and tests.
+- Mechanical validation logic: `repo/tests/toolkit-local-bridge.test.cjs` and `repo/scripts/validate-toolkit.cjs`.
+
+Do not move exclusively into hooks:
+
+- Source-of-truth policy.
+- Approval gates.
+- Generated-output ownership.
+- OpenCode and AG2 opt-in requirement.
+- Native plugin cross-update prohibition.
+- No package installs by default.
+- No project repo mutation by default.
+
+Root `AGENTS.md` changed in this PR only to add compact v2 architecture context and synced source-of-truth wording. No critical shared policy exists only in hooks.
+
+## Disable And Rollback
+
+Disable auto-sync:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --disable-auto-sync --write
+```
+
+Disable a target without deleting files:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
+node repo/scripts/toolkit-local-bridge.cjs --disable-target ag2 --write
+```
+
+The bridge does not delete user files unless a separate future command explicitly asks for deletion and the user approves it.
