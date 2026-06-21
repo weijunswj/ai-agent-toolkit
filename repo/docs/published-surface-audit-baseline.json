@@ -3,7 +3,7 @@
   "description": "Known published-surface audit findings allowed until follow-up PRs classify or generate them.",
   "summary": {
     "projects": 15,
-    "publishedFiles": 206,
+    "publishedFiles": 209,
     "declaredOutputFiles": 209,
     "packInstalledFiles": 74,
     "undeclaredPublishedFiles": 0,
