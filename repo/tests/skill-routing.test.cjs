@@ -40,6 +40,18 @@ function duplicates(values) {
   return [...repeated].sort();
 }
 
+function assertWindowsHookRecoveryGuidance(text, label) {
+  assert.match(text, /session-start\.sh/, label);
+  assert.match(text, /bare `?\.sh`? hook on Windows/i, label);
+  assert.match(text, /audit-n8n-skills-plugin-hooks\.cjs --plugin-root/, label);
+  assert.match(text, /remove, disable, untrust, or uninstall/i, label);
+  assert.match(text, /Restart (?:Codex|Claude Code|the agent)/, label);
+  assert.match(text, /npx skills add n8n-io\/skills/, label);
+  assert.match(text, /using-n8n-skills/, label);
+  assert.match(text, /Only reinstall or re-trust/i, label);
+  assert.match(text, /installed plugin cache may need (?:manual )?(?:reinstall|update)/i, label);
+}
+
 function isInsideRoot(rootRealPath, realPath) {
   const relative = path.relative(rootRealPath, realPath);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -307,6 +319,10 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
 
   assert.match(howToUse, /Preferred install for toolkit-owned skills: copy the whole `skills\/<skill-name>\/` folder into one supported location/);
   assert.match(howToUse, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
+  assert.match(howToUse, /On Windows, do not approve or trust current official plugin hooks unless/);
+  assert.match(howToUse, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assert.match(howToUse, /valid JSON with Node when `jq` and `python3` are unavailable/);
+  assertWindowsHookRecoveryGuidance(howToUse, 'HOW-TO-USE recovery guidance');
   assert.match(howToUse, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(howToUse, /codex plugin add n8n-skills@n8n-io/);
   assert.match(howToUse, /\/plugin marketplace add n8n-io\/skills/);
@@ -341,6 +357,10 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /Antigravity \| Plugin-scoped skill-folder install/);
   assert.match(readme, /OpenCode \| Short manual whole-skill-folder install only/);
   assert.match(readme, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
+  assert.match(readme, /On Windows, do not approve or trust current official plugin hooks unless/);
+  assert.match(readme, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assert.match(readme, /valid JSON with Node when `jq` and `python3` are unavailable/);
+  assertWindowsHookRecoveryGuidance(readme, 'README recovery guidance');
   assert.match(readme, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(readme, /codex plugin add n8n-skills@n8n-io/);
   assert.match(readme, /\/plugin marketplace add n8n-io\/skills/);
@@ -405,11 +425,17 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\[Antigravity reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/antigravity\.md\)/);
 
   assert.match(codexRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);
+  assert.match(codexRef, /On Windows, use the plain skill install plus the `AGENTS\.md` cue(?: below)? unless the installed official plugin passes these hook checks/);
+  assert.match(codexRef, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assertWindowsHookRecoveryGuidance(codexRef, 'generated codex ref recovery guidance');
   assert.match(codexRef, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(codexRef, /codex plugin add n8n-skills@n8n-io/);
   assert.match(codexRef, /Start n8n work by loading the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
   assert.match(codexRef, /`n8n_live`/);
   assert.match(claudeCodeRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);
+  assert.match(claudeCodeRef, /On Windows, use the plain skill install plus the `AGENTS\.md` or `CLAUDE\.md` cue(?: below)? unless the installed official plugin passes these hook checks/);
+  assert.match(claudeCodeRef, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assertWindowsHookRecoveryGuidance(claudeCodeRef, 'generated claude ref recovery guidance');
   assert.match(claudeCodeRef, /\/plugin marketplace add n8n-io\/skills/);
   assert.match(claudeCodeRef, /\/plugin install n8n-skills@n8n-io/);
   assert.match(claudeCodeRef, /Start n8n work by loading the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
