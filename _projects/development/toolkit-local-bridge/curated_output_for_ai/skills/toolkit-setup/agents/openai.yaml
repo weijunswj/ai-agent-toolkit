@@ -1,0 +1,11 @@
+interface:
+  display_name: Toolkit Setup
+  short_description: Route Toolkit plugin and bridge setup safely.
+  primary_color: '#0F766E'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: true

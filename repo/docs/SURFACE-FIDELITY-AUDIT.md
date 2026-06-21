@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-21 (Toolkit Local Bridge v2 native plugin metadata and setup infrastructure)
+Latest update: 2026-06-21 (Toolkit Local Bridge v2 native plugin metadata and one setup discoverability skill)
 
 ## Current state
 
@@ -29,7 +29,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | --- | ---: |
 | projects | 15 |
 | publishedFiles | 206 |
-| declaredOutputFiles | 206 |
+| declaredOutputFiles | 209 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 206 |
+| boundaryRecipeOutputs | 209 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 0 |
 
@@ -54,13 +54,13 @@ Current boundary recipe classifications:
 | Classification | Count |
 | --- | ---: |
 | curated_adapter | 3 |
-| curated_agent_metadata | 1 |
-| curated_index | 11 |
+| curated_agent_metadata | 2 |
+| curated_index | 12 |
 | curated_metadata | 3 |
 | curated_pack_readme | 3 |
 | curated_reference | 7 |
 | curated_repo_local_agent_template | 4 |
-| curated_router | 8 |
+| curated_router | 9 |
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
@@ -70,7 +70,7 @@ Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by adding the first-party `toolkit-local-bridge` project and four generated native plugin metadata files, while keeping bridge setup as Toolkit infrastructure instead of published skill folders.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by keeping the first-party `toolkit-local-bridge` project and four generated native plugin metadata files, while adding exactly one compact `toolkit-setup` discoverability skill instead of a command-per-bridge skill family.
 
 ## Current project modules
 
@@ -106,6 +106,7 @@ Known baseline context:
 - `skills/n8n-workflow-templates/`
 - `skills/self-hosted-service-safety/`
 - `skills/secure-cicd-installer/`
+- `skills/toolkit-setup/`
 - `skills/ui-ux-secure-frontend-design/`
 - `skills/windows-localhost-workflows/`
 

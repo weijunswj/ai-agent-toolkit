@@ -232,9 +232,10 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
 });
 
-test('bridge surfaces avoid private plugin caches, package installs, and dedicated bridge skills', () => {
+test('bridge surfaces avoid private plugin caches, package installs, and command-per-bridge skills', () => {
   const files = [
     'repo/scripts/toolkit-local-bridge.cjs',
+    'skills/toolkit-setup/SKILL.md',
     '.codex-plugin/plugin.json',
     '.codex-plugin/hooks/hooks.json',
     '.claude-plugin/plugin.json',
@@ -258,6 +259,7 @@ test('bridge surfaces avoid private plugin caches, package installs, and dedicat
     .map((entry) => entry.name);
   assert.deepEqual([...new Set(skillNames)].sort(), skillNames.sort());
   assert.equal(skillNames.includes('ai-agent-toolkit'), false, 'OpenCode adapter skill name must not duplicate a root Toolkit skill');
+  assert.equal(skillNames.includes('toolkit-setup'), true, 'one compact Toolkit setup discoverability skill should be published');
   for (const skill of removedBridgeSkills) {
     assert.equal(skillNames.includes(skill), false, `${skill} should be setup infrastructure, not a published skill`);
     assert.equal(
@@ -267,9 +269,45 @@ test('bridge surfaces avoid private plugin caches, package installs, and dedicat
     );
   }
 
+  const bridgeSkillNames = skillNames.filter((skill) => {
+    const skillPath = path.join(repoRoot, 'skills', skill, 'SKILL.md');
+    if (!fs.existsSync(skillPath)) return false;
+    const skillText = fs.readFileSync(skillPath, 'utf8');
+    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|AG2 adapter support|stale bridge state/i.test(skillText);
+  });
+  assert.deepEqual(bridgeSkillNames, ['toolkit-setup'], 'exactly one Toolkit setup/bridge discoverability skill should exist');
+  for (const rel of [
+    'skills/toolkit-setup/README.md',
+    'skills/toolkit-setup/SKILL.md',
+    'skills/toolkit-setup/agents/openai.yaml'
+  ]) {
+    assert.equal(fs.existsSync(path.join(repoRoot, rel)), true, `${rel} should be generated`);
+  }
+  assert.match(fs.readFileSync(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8'), /Generated from toolkit curated output for AI/);
+
   const manifest = readJson(path.join(repoRoot, '_projects', 'development', 'toolkit-local-bridge', 'toolkit.project.json'));
-  assert.equal(manifest.surface.publish_as, 'source_only');
-  assert.equal(manifest.surface.skill.status, 'not_applicable');
-  assert.deepEqual((manifest.outputs || []).filter((output) => String(output.output || '').startsWith('skills/')), []);
-  assert.deepEqual((manifest.writes.allowed || []).filter((output) => String(output || '').startsWith('skills/')), []);
+  assert.equal(manifest.surface.publish_as, 'skill');
+  assert.equal(manifest.surface.skill.status, 'published');
+  assert.equal(manifest.surface.skill.path, 'skills/toolkit-setup');
+  assert.deepEqual(
+    (manifest.outputs || [])
+      .map((output) => String(output.output || ''))
+      .filter((output) => output.startsWith('skills/'))
+      .sort(),
+    [
+      'skills/toolkit-setup/README.md',
+      'skills/toolkit-setup/SKILL.md',
+      'skills/toolkit-setup/agents/openai.yaml'
+    ].sort()
+  );
+  assert.deepEqual(
+    (manifest.writes.allowed || [])
+      .filter((output) => String(output || '').startsWith('skills/'))
+      .sort(),
+    [
+      'skills/toolkit-setup/README.md',
+      'skills/toolkit-setup/SKILL.md',
+      'skills/toolkit-setup/agents/openai.yaml'
+    ].sort()
+  );
 });

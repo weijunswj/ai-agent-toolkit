@@ -267,7 +267,7 @@ Disable auto-sync:
 node repo/scripts/toolkit-local-bridge.cjs --disable-auto-sync --write
 ```
 
-The bridge is Toolkit setup and maintenance infrastructure, not a routed skill. It never silently sets up new non-native targets. Enabled targets may auto-sync from whichever native plugin is newer. Disabled and never-enabled targets are not touched.
+The bridge is Toolkit setup and maintenance infrastructure with one compact `toolkit-setup` discoverability skill, not a command-per-bridge skill family. It never silently sets up new non-native targets. Enabled targets may auto-sync from whichever native plugin is newer. Disabled and never-enabled targets are not touched.
 
 Policy layering stays portable:
 

@@ -148,7 +148,7 @@ Autocheck is allowed. Autosetup is forbidden.
 
 ## Setup Command Surface
 
-The bridge is Toolkit setup and maintenance infrastructure, not a family of reusable agent skills.
+The bridge is Toolkit setup and maintenance infrastructure. It may have one compact `toolkit-setup` discoverability skill, but it must not become a family of reusable command skills.
 
 Audit:
 
@@ -193,7 +193,7 @@ node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 node repo/scripts/toolkit-local-bridge.cjs --disable-target ag2 --write
 ```
 
-Do not add one bridge skill per command. Keep setup guidance in this doc, the updater help, validators, and tests.
+Do not add one bridge skill per command. Keep `toolkit-setup` as the only bridge/setup discoverability skill, and keep setup guidance in this doc, the updater help, validators, and tests.
 
 ## Hook Policy
 
@@ -256,14 +256,14 @@ Root `AGENTS.md` changed in this PR only to add compact v2 architecture context 
 Disable auto-sync:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --write --disable-auto-sync
+node repo/scripts/toolkit-local-bridge.cjs --disable-auto-sync --write
 ```
 
 Disable a target without deleting files:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --write --disable-target opencode
-node repo/scripts/toolkit-local-bridge.cjs --write --disable-target ag2
+node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
+node repo/scripts/toolkit-local-bridge.cjs --disable-target ag2 --write
 ```
 
 The bridge does not delete user files unless a separate future command explicitly asks for deletion and the user approves it.

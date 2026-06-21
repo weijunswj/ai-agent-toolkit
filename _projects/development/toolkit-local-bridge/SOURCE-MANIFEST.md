@@ -10,7 +10,11 @@
 
 ## Reviewed In `curated_output_for_ai/`
 
-- None currently. Bridge setup, sync, audit, and disable operations are deterministic Toolkit maintenance commands, not published agent skills.
+- `skills/toolkit-setup/README.md`
+- `skills/toolkit-setup/SKILL.md`
+- `skills/toolkit-setup/agents/openai.yaml`
+
+These files publish one compact discoverability skill. Bridge setup, sync, audit, and disable operations remain deterministic Toolkit maintenance commands implemented by the shared updater, not a command-per-bridge skill family.
 
 ## Repo Script Source
 
@@ -18,9 +22,10 @@
 
 ## AI-Facing Surfaces
 
+- `skills/toolkit-setup/` is generated from curated output as the only Toolkit setup or bridge discoverability skill.
 - `.codex-plugin/plugin.json` and `.codex-plugin/hooks/hooks.json` are generated from `_main/codex-plugin/**`.
 - `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json` are generated from `_main/claude-plugin/**`.
-- No `skills/**` output is published by this module.
+- The seven command-specific bridge skills are not published.
 
 ## Excluded
 
