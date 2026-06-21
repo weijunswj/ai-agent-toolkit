@@ -1128,6 +1128,25 @@ test('linked n8n Skills and MCP setup surfaces are shipped as secondary AI-codin
     assertCapabilityAwareMcpGuidance(text, page);
   }
 
+  const codexPage = readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md');
+  assert.match(codexPage, /On Windows, use the plain skill install plus the `AGENTS\.md` cue(?: below)? unless the installed official plugin passes these hook checks/);
+  assert.match(codexPage, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assert.match(codexPage, /Hook emitters can output valid JSON with Node when `jq` and `python3` are unavailable/);
+
+  const claudePage = readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md');
+  assert.match(claudePage, /On Windows, use the plain skill install plus the `AGENTS\.md` or `CLAUDE\.md` cue(?: below)? unless the installed official plugin passes these hook checks/);
+  assert.match(claudePage, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assert.match(claudePage, /Hook emitters can output valid JSON with Node when `jq` and `python3` are unavailable/);
+
+  for (const page of [
+    'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md',
+    'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md'
+  ]) {
+    const text = readText(repoRoot, page);
+    assert.match(text, /On Windows, do not trust official plugin hooks unless `hooks\/hooks\.json` invokes a Windows-safe command/, page);
+    assert.match(text, /output valid JSON with Node when `jq` and `python3` are unavailable/, page);
+  }
+
   for (const page of [
     'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md',
     'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md'

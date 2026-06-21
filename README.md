@@ -94,7 +94,11 @@ For deeper setup notes, use [How To Use: Install Toolkit Skills](repo/docs/HOW-T
 
 For toolkit-owned skills, copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. For n8n work, install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin where the platform supports plugin hooks:
+[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. Use the official plugin only where hooks are known to execute through a real interpreter.
+
+On Windows, do not approve or trust current official plugin hooks unless the installed package's `hooks/hooks.json` invokes a Windows-safe command such as a Node or PowerShell wrapper instead of a bare `.sh` path like `${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh`. The hook emitters must also be able to output valid JSON with Node when `jq` and `python3` are unavailable. WSL `bash.exe` is not enough unless a WSL distro is installed, and Git Bash must be invoked explicitly by the hook command.
+
+For macOS/Linux, or for Windows after the installed plugin passes those hook checks, install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin:
 
 ```powershell
 codex plugin marketplace add n8n-io/skills
@@ -108,7 +112,7 @@ codex plugin add n8n-skills@n8n-io
 
 Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
-For OpenCode, Antigravity, and other platforms without proven official plugin parity, follow the upstream "Other platforms" route from the [official n8n Skills](https://github.com/n8n-io/skills) README. From the target project folder, run:
+For Windows installs that fail the hook checks, OpenCode, Antigravity, and other platforms without proven official plugin parity, follow the upstream "Other platforms" route from the [official n8n Skills](https://github.com/n8n-io/skills) README. From the target project folder, run:
 
 ```powershell
 npx skills add n8n-io/skills

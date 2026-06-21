@@ -28,7 +28,7 @@ Copy the whole `skills/<skill-name>/` folder.
 
 Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
-Codex plugin/package support exists, but this repo does not make it the primary install path yet. Only introduce Codex plugin packaging later if the install experience becomes as simple as Antigravity-style folder copy / drag-and-drop setup. Until then, Codex should use direct whole-skill-folder installs.
+Codex plugin/package support exists, but this repo does not make it the primary install path yet. Until Codex plugin installs and Windows hooks are reliably safe, Codex should use direct whole-skill-folder installs.
 
 ## Local Routes
 

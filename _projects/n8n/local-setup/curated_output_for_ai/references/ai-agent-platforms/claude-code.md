@@ -27,6 +27,8 @@ Copy the whole `skills/<skill-name>/` folder.
 
 Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
+For upstream [official n8n Skills](https://github.com/n8n-io/skills) on Windows, use the plain skill install plus the target repo `AGENTS.md` or `CLAUDE.md` cue unless the installed plugin hook metadata invokes a Windows-safe wrapper instead of bare `.sh` files and can emit JSON with Node when `jq` and `python3` are unavailable.
+
 ## Local Routes
 
 - Use [local setup](../n8n/local-setup.md) for the full local n8n setup guide.

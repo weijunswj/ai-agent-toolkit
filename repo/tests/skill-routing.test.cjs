@@ -307,6 +307,9 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
 
   assert.match(howToUse, /Preferred install for toolkit-owned skills: copy the whole `skills\/<skill-name>\/` folder into one supported location/);
   assert.match(howToUse, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
+  assert.match(howToUse, /On Windows, do not approve or trust current official plugin hooks unless/);
+  assert.match(howToUse, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assert.match(howToUse, /valid JSON with Node when `jq` and `python3` are unavailable/);
   assert.match(howToUse, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(howToUse, /codex plugin add n8n-skills@n8n-io/);
   assert.match(howToUse, /\/plugin marketplace add n8n-io\/skills/);
@@ -341,6 +344,9 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /Antigravity \| Plugin-scoped skill-folder install/);
   assert.match(readme, /OpenCode \| Short manual whole-skill-folder install only/);
   assert.match(readme, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
+  assert.match(readme, /On Windows, do not approve or trust current official plugin hooks unless/);
+  assert.match(readme, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assert.match(readme, /valid JSON with Node when `jq` and `python3` are unavailable/);
   assert.match(readme, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(readme, /codex plugin add n8n-skills@n8n-io/);
   assert.match(readme, /\/plugin marketplace add n8n-io\/skills/);
@@ -405,11 +411,15 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\[Antigravity reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/antigravity\.md\)/);
 
   assert.match(codexRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);
+  assert.match(codexRef, /On Windows, use the plain skill install plus the `AGENTS\.md` cue(?: below)? unless the installed official plugin passes these hook checks/);
+  assert.match(codexRef, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
   assert.match(codexRef, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(codexRef, /codex plugin add n8n-skills@n8n-io/);
   assert.match(codexRef, /Start n8n work by loading the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
   assert.match(codexRef, /`n8n_live`/);
   assert.match(claudeCodeRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);
+  assert.match(claudeCodeRef, /On Windows, use the plain skill install plus the `AGENTS\.md` or `CLAUDE\.md` cue(?: below)? unless the installed official plugin passes these hook checks/);
+  assert.match(claudeCodeRef, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
   assert.match(claudeCodeRef, /\/plugin marketplace add n8n-io\/skills/);
   assert.match(claudeCodeRef, /\/plugin install n8n-skills@n8n-io/);
   assert.match(claudeCodeRef, /Start n8n work by loading the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);

@@ -4,8 +4,9 @@ Use this for the normal Codex + official n8n instance-level MCP setup.
 
 * Do not paste your real n8n token into this file or any repo file.
 * Keep `bearer_token_env_var = "N8N_MCP_TOKEN"` exactly as shown.
-* Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`.
-* Restart Codex and approve or trust the official plugin hooks so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
+* On Windows, do not trust official plugin hooks unless `hooks/hooks.json` invokes a Windows-safe command, such as a Node or PowerShell wrapper, instead of a bare `.sh` path. Hook emitters must also output valid JSON with Node when `jq` and `python3` are unavailable.
+* Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io` only where the hook checks pass. Otherwise use the upstream "Other platforms" route, `npx skills add n8n-io/skills`, plus the target repo `AGENTS.md` cue.
+* Restart Codex and approve or trust the official plugin hooks only after those checks pass so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
 1. Common Windows path for Codex MCP config:
 
@@ -120,7 +121,8 @@ enabled = true
 
    * Confirm the official plugin was installed with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`.
    * Restart Codex.
-   * Approve or trust the official plugin hooks when prompted.
+   * On Windows, inspect the installed plugin `hooks/hooks.json`. If it directly invokes `.sh` files, or the hook emitters require only `jq` or `python3` with no Node fallback, do not approve those hooks; use `npx skills add n8n-io/skills` and the target repo `AGENTS.md` cue instead.
+   * Approve or trust the official plugin hooks when prompted only after the hook checks pass.
 
 2. If `n8n_live` fails:
 
