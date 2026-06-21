@@ -55,6 +55,7 @@ The hub contains:
 - Source commit or `unknown` when Git metadata is unavailable.
 - Sync source: `repo`, `codex-plugin`, or `claude-plugin`.
 - Sync timestamp.
+- Repo auto-update state: `repo_auto_update_enabled`, `repo_path`, `repo_branch`, `repo_remote`, `last_repo_update`, `last_repo_update_status`, `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_error`.
 - Target paths.
 - Target detected, enabled, disabled, stale, and synced state.
 
@@ -97,6 +98,12 @@ Supported flags:
 - `--sync-enabled`.
 - `--enable-auto-sync`.
 - `--disable-auto-sync`.
+- `--enable-repo-auto-update`.
+- `--disable-repo-auto-update`.
+- `--repo-path <path>`.
+- `--repo-branch <branch>`, default `main`.
+- `--repo-remote <url>`, default `https://github.com/weijunswj/ai-agent-toolkit`.
+- `--repo-update-now`.
 - `--audit`.
 - `--force-downgrade`.
 - `--sync-source repo|codex-plugin|claude-plugin`.
@@ -109,6 +116,50 @@ The updater must not:
 - Mutate project repositories by default.
 - Write outside the current user home or temp directories.
 - Use Codex or Claude private plugin cache paths as source.
+
+## Repo-Backed Auto-Update
+
+Repo auto-update is opt-in and uses the configured local Toolkit Git repo as source of truth. Native Codex and Claude Code plugin hooks remain launchers only; they do not become source of truth and do not update each other.
+
+Enable once from a trusted local Toolkit checkout:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "C:\Users\<user>\GitHub Projects\ai-agent-toolkit" --repo-branch main --enable-auto-sync --enable-target opencode --enable-target ag2 --write
+```
+
+Use `--repo-remote <url>` only when intentionally testing or maintaining a non-default remote. The expected production remote is `https://github.com/weijunswj/ai-agent-toolkit`.
+
+When a native SessionStart hook runs and repo auto-update is enabled, the bridge:
+
+1. Acquires the Toolkit bridge lock.
+2. Validates `repo_path` exists and is a Git worktree.
+3. Validates the current branch matches `repo_branch`.
+4. Validates `origin` matches `repo_remote`.
+5. Refuses to continue when the working tree is dirty.
+6. Fetches `origin <repo_branch>`.
+7. Updates only with `git merge --ff-only FETCH_HEAD`.
+8. Runs hook-light validation:
+
+```powershell
+node repo/scripts/validate-toolkit.cjs
+node --test repo/tests/toolkit-local-bridge.test.cjs
+```
+
+9. Delegates enabled-target sync to the freshly updated repo script with `--skip-repo-auto-update`.
+
+The delegated command shape is:
+
+```powershell
+node <repo_path>/repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write --sync-source repo --hub <same-hub> --skip-repo-auto-update
+```
+
+The hook validation is intentionally lighter than `npm run validate:all` so SessionStart stays short. Run full validation manually before release, merge, or broad maintenance changes:
+
+```powershell
+npm run validate:all
+```
+
+Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. If validation, fetch, fast-forward, or delegation fails in hook mode, the hook prints a concise warning, records the last repo update status in hub state when possible, skips target sync, and exits successfully so agent startup is not blocked.
 
 ## Windows Codex Plugin Hook Repair
 

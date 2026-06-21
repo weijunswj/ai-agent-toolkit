@@ -14,7 +14,7 @@
 - `skills/toolkit-setup/SKILL.md`
 - `skills/toolkit-setup/agents/openai.yaml`
 
-These files publish one compact discoverability skill. Bridge setup, sync, audit, and disable operations remain deterministic Toolkit maintenance commands implemented by the shared updater, not a command-per-bridge skill family.
+These files publish one compact discoverability skill. Bridge setup, repo auto-update, sync, audit, and disable operations remain deterministic Toolkit maintenance commands implemented by the shared updater, not a command-per-bridge skill family.
 
 ## Repo Script Source
 
@@ -36,7 +36,7 @@ These files publish one compact discoverability skill. Bridge setup, sync, audit
 - User-local bridge hub state.
 - OpenCode global skill output.
 - AG2 adapter output.
-- Package archives, dependency installs, `.env*`, credentials, private keys, and project-repo mutations.
+- Package archives, dependency installs, `.env*`, credentials, private keys, and arbitrary project-repo mutations.
 
 ## Validation
 

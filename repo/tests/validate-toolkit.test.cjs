@@ -1600,7 +1600,31 @@ test('.gitattributes preserves _projects _main bytes for source locks', () => {
     /^_projects\/development\/ai-coding-agent-rules\/curated_output_for_ai\/skills\/ai-coding-agent-rules\/\*\*\/\*\.md text eol=lf$/m
   );
   assert.match(attrs, /^skills\/ai-coding-agent-rules\/\*\*\/\*\.md text eol=lf$/m);
+  assert.match(attrs, /^skills\/\*\*\/\*\.yaml text eol=lf$/m);
+  assert.match(attrs, /^skills\/\*\*\/\*\.yml text eol=lf$/m);
+  assert.match(attrs, /^skills\/\*\*\/\*\.sh text eol=lf$/m);
+  assert.match(attrs, /^skills\/\*\*\/\*\.env\.example text eol=lf$/m);
   assert.doesNotMatch(attrs, /^projects\/\*\*\/main\/\*\* -text$/m);
+});
+
+test('validator rejects missing LF checkout rules for generated text outputs', () => {
+  const cwd = tempCopy();
+  const attrsPath = path.join(cwd, '.gitattributes');
+  const attrs = readTextFile(attrsPath);
+  fs.writeFileSync(
+    attrsPath,
+    attrs
+      .replace(/^skills\/\*\*\/\*\.ya\?ml text eol=lf\n/m, '')
+      .replace(/^skills\/\*\*\/\*\.yaml text eol=lf\n/m, '')
+      .replace(/^skills\/\*\*\/\*\.yml text eol=lf\n/m, '')
+      .replace(/^skills\/\*\*\/\*\.sh text eol=lf\n/m, '')
+      .replace(/^skills\/\*\*\/\*\.env\.example text eol=lf\n/m, ''),
+    'utf8'
+  );
+
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Missing generated-output LF checkout rule/);
 });
 
 test('design skill front matter and OpenAI metadata are approved', () => {

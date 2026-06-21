@@ -28,6 +28,10 @@ skills/n8n-local-setup/templates/local-stack/** text eol=lf
 skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs text eol=lf
 skills/toolkit-setup/** text eol=lf
 skills/windows-localhost-workflows/agents/openai.yaml text eol=lf
+skills/**/*.yaml text eol=lf
+skills/**/*.yml text eol=lf
+skills/**/*.sh text eol=lf
+skills/**/*.env.example text eol=lf
 
 # Design skill Markdown is validated as LF-only.
 skills/ui-ux-secure-frontend-design/**/*.md text eol=lf

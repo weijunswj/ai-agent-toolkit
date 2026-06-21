@@ -1,7 +1,7 @@
 {
   "name": "ai-agent-toolkit",
   "version": "2.1.0",
-  "description": "Source-first AI-agent toolkit with native Claude Code plugin metadata and an opt-in local bridge for OpenCode and AG2 adapters.",
+  "description": "Source-first AI-agent toolkit with native Claude Code plugin metadata, Windows-safe hook repair, opt-in repo auto-update, and local bridge adapters.",
   "author": {
     "name": "weijunswj",
     "url": "https://github.com/weijunswj"
@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "AI Agent Toolkit",
     "shortDescription": "Source-first reusable agent skills with opt-in local bridge adapters",
-    "longDescription": "Use AI Agent Toolkit for reusable source-traceable skills, repo-local agent rules, validation guidance, and opt-in local OpenCode or AG2 bridge adapters. Claude Code updates this package natively and never installs or updates Codex.",
+    "longDescription": "Use AI Agent Toolkit for reusable source-traceable skills, repo-local agent rules, validation guidance, opt-in repo-backed updates, and local OpenCode or AG2 bridge adapters. Claude Code updates this package natively and never installs or updates Codex.",
     "developerName": "weijunswj",
     "category": "Developer Tools",
     "capabilities": [

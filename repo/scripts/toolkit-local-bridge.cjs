@@ -8,11 +8,13 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.0.0';
+const BRIDGE_VERSION = '2.1.0';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
+const DEFAULT_REPO_BRANCH = 'main';
+const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -45,6 +47,13 @@ function parseArgs(argv = process.argv.slice(2)) {
     disableTargets: [],
     enableAutoSync: false,
     disableAutoSync: false,
+    enableRepoAutoUpdate: false,
+    disableRepoAutoUpdate: false,
+    repoPath: '',
+    repoBranch: '',
+    repoRemote: '',
+    repoUpdateNow: false,
+    skipRepoAutoUpdate: false,
     syncSource: 'repo',
     hub: '',
     opencodeConfigDir: '',
@@ -63,6 +72,16 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--force-downgrade') args.forceDowngrade = true;
     else if (arg === '--enable-auto-sync') args.enableAutoSync = true;
     else if (arg === '--disable-auto-sync') args.disableAutoSync = true;
+    else if (arg === '--enable-repo-auto-update') args.enableRepoAutoUpdate = true;
+    else if (arg === '--disable-repo-auto-update') args.disableRepoAutoUpdate = true;
+    else if (arg === '--repo-path') args.repoPath = next();
+    else if (arg.startsWith('--repo-path=')) args.repoPath = arg.slice('--repo-path='.length);
+    else if (arg === '--repo-branch') args.repoBranch = next();
+    else if (arg.startsWith('--repo-branch=')) args.repoBranch = arg.slice('--repo-branch='.length);
+    else if (arg === '--repo-remote') args.repoRemote = next();
+    else if (arg.startsWith('--repo-remote=')) args.repoRemote = arg.slice('--repo-remote='.length);
+    else if (arg === '--repo-update-now') args.repoUpdateNow = true;
+    else if (arg === '--skip-repo-auto-update') args.skipRepoAutoUpdate = true;
     else if (arg === '--enable-target') args.enableTargets.push(...parseListValue(next()));
     else if (arg.startsWith('--enable-target=')) args.enableTargets.push(...parseListValue(arg.slice('--enable-target='.length)));
     else if (arg === '--disable-target') args.disableTargets.push(...parseListValue(next()));
@@ -96,6 +115,9 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.enableAutoSync && args.disableAutoSync) {
     throw new Error('--enable-auto-sync and --disable-auto-sync cannot be used together');
   }
+  if (args.enableRepoAutoUpdate && args.disableRepoAutoUpdate) {
+    throw new Error('--enable-repo-auto-update and --disable-repo-auto-update cannot be used together');
+  }
   return args;
 }
 
@@ -120,6 +142,13 @@ function printHelp() {
     '  --sync-enabled',
     '  --enable-auto-sync',
     '  --disable-auto-sync',
+    '  --enable-repo-auto-update',
+    '  --disable-repo-auto-update',
+    '  --repo-path <path>',
+    '  --repo-branch <branch>',
+    '  --repo-remote <url>',
+    '  --repo-update-now',
+    '  --skip-repo-auto-update     internal recursion guard for delegated repo sync',
     '  --audit',
     '  --force-downgrade',
     '  --sync-source repo|codex-plugin|claude-plugin',
@@ -178,6 +207,195 @@ function commandProbe(command, commandArgs) {
   }
 }
 
+function runCommand(command, commandArgs, options = {}) {
+  try {
+    const result = spawnSync(command, commandArgs, {
+      cwd: options.cwd,
+      encoding: 'utf8',
+      timeout: options.timeout || 30000,
+      windowsHide: true,
+      env: { ...process.env, ...(options.env || {}) }
+    });
+    return {
+      ok: result.status === 0,
+      status: result.status,
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+      error: result.error ? result.error.message : ''
+    };
+  } catch (error) {
+    return { ok: false, status: null, stdout: '', stderr: '', error: error.message };
+  }
+}
+
+function commandOutput(result) {
+  return `${result.stdout || ''}${result.stderr || ''}${result.error || ''}`.trim();
+}
+
+function gitCommand(repoPath, args, options = {}) {
+  return runCommand('git', args, { cwd: repoPath, timeout: options.timeout || 30000 });
+}
+
+function requireGit(repoPath, args, label) {
+  const result = gitCommand(repoPath, args);
+  if (!result.ok) {
+    throw new Error(`${label || `git ${args.join(' ')}`} failed: ${commandOutput(result)}`);
+  }
+  return result.stdout.trim();
+}
+
+function normalizeRemoteForCompare(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const slashValue = raw.replace(/\\/g, '/').replace(/\/+$/, '');
+  const githubSsh = slashValue.match(/^git@github\.com:(.+?)(?:\.git)?$/i);
+  if (githubSsh) return `https://github.com/${githubSsh[1].replace(/\/+$/, '')}`.toLowerCase();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(slashValue)) {
+    try {
+      const url = new URL(slashValue);
+      url.hash = '';
+      url.search = '';
+      url.pathname = url.pathname.replace(/\/+$/, '').replace(/\.git$/i, '');
+      url.protocol = url.protocol.toLowerCase();
+      url.hostname = url.hostname.toLowerCase();
+      return url.toString().replace(/\/$/, '');
+    } catch {
+      return slashValue.replace(/\.git$/i, '').toLowerCase();
+    }
+  }
+  return path.resolve(raw).replace(/\\/g, '/').replace(/\/+$/, '').replace(/\.git$/i, '').toLowerCase();
+}
+
+function repoUpdateError(status, message, details = {}) {
+  const error = new Error(message);
+  error.repoUpdateStatus = status;
+  error.repoUpdateDetails = details;
+  return error;
+}
+
+function applyRepoUpdateStatus(state, status, details = {}) {
+  const next = normalizedState(state);
+  next.last_repo_update = timestamp();
+  next.last_repo_update_status = status;
+  next.last_repo_update_from_commit = details.fromCommit || '';
+  next.last_repo_update_to_commit = details.toCommit || '';
+  next.last_repo_update_error = details.error || '';
+  return next;
+}
+
+function runRepoValidation(repoPath) {
+  const validations = [
+    {
+      label: 'node repo/scripts/validate-toolkit.cjs',
+      args: [path.join('repo', 'scripts', 'validate-toolkit.cjs')]
+    },
+    {
+      label: 'node --test repo/tests/toolkit-local-bridge.test.cjs',
+      args: ['--test', path.join('repo', 'tests', 'toolkit-local-bridge.test.cjs')]
+    }
+  ];
+  for (const validation of validations) {
+    const result = runCommand(process.execPath, validation.args, { cwd: repoPath, timeout: 120000 });
+    if (!result.ok) {
+      throw repoUpdateError(
+        'validation-failed',
+        `${validation.label} failed: ${commandOutput(result)}`,
+        { error: validation.label }
+      );
+    }
+  }
+}
+
+function validateAndUpdateRepo(state) {
+  const repoPath = path.resolve(state.repo_path || '');
+  const branch = state.repo_branch || DEFAULT_REPO_BRANCH;
+  const expectedRemote = state.repo_remote || DEFAULT_REPO_REMOTE;
+  if (!state.repo_path) {
+    throw repoUpdateError('skipped', 'repo auto-update enabled but repo_path is not configured', {
+      error: 'repo_path not configured'
+    });
+  }
+  if (!fs.existsSync(repoPath) || !fs.statSync(repoPath).isDirectory()) {
+    throw repoUpdateError('skipped', `configured repo_path does not exist: ${repoPath}`, {
+      error: 'repo_path does not exist'
+    });
+  }
+  const inside = gitCommand(repoPath, ['rev-parse', '--is-inside-work-tree']);
+  if (!inside.ok || inside.stdout.trim() !== 'true') {
+    throw repoUpdateError('skipped', `configured repo_path is not a git worktree: ${repoPath}`, {
+      error: 'not a git repo'
+    });
+  }
+  const currentBranch = requireGit(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'], 'read current branch');
+  if (currentBranch !== branch) {
+    throw repoUpdateError('skipped', `configured repo branch mismatch: expected ${branch}, got ${currentBranch}`, {
+      error: 'branch mismatch'
+    });
+  }
+  const remoteResult = gitCommand(repoPath, ['remote', 'get-url', '--all', 'origin']);
+  if (!remoteResult.ok) {
+    throw repoUpdateError('skipped', `could not read origin remote: ${commandOutput(remoteResult)}`, {
+      error: 'origin remote missing'
+    });
+  }
+  const actualRemotes = remoteResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const expectedComparable = normalizeRemoteForCompare(expectedRemote);
+  if (!actualRemotes.some((remote) => normalizeRemoteForCompare(remote) === expectedComparable)) {
+    throw repoUpdateError('skipped', `origin remote does not match configured Toolkit repo remote: ${expectedRemote}`, {
+      error: 'remote mismatch'
+    });
+  }
+  const dirty = requireGit(repoPath, ['status', '--porcelain'], 'check working tree');
+  if (dirty) {
+    throw repoUpdateError('skipped', 'configured repo working tree is dirty; refusing auto-update', {
+      error: 'dirty working tree'
+    });
+  }
+  const fromCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read current commit');
+  const fetchResult = gitCommand(repoPath, ['fetch', 'origin', branch], { timeout: 120000 });
+  if (!fetchResult.ok) {
+    throw repoUpdateError('skipped', `git fetch origin ${branch} failed: ${commandOutput(fetchResult)}`, {
+      fromCommit,
+      error: 'fetch failed'
+    });
+  }
+  const fetchedCommit = requireGit(repoPath, ['rev-parse', 'FETCH_HEAD'], 'read fetched commit');
+  const ancestor = gitCommand(repoPath, ['merge-base', '--is-ancestor', fromCommit, fetchedCommit]);
+  if (!ancestor.ok) {
+    throw repoUpdateError('skipped', 'fetched update is not a fast-forward from the current repo commit', {
+      fromCommit,
+      toCommit: fetchedCommit,
+      error: 'not fast-forward'
+    });
+  }
+  if (fromCommit !== fetchedCommit) {
+    const merge = gitCommand(repoPath, ['merge', '--ff-only', 'FETCH_HEAD'], { timeout: 120000 });
+    if (!merge.ok) {
+      throw repoUpdateError('skipped', `git merge --ff-only FETCH_HEAD failed: ${commandOutput(merge)}`, {
+        fromCommit,
+        toCommit: fetchedCommit,
+        error: 'fast-forward failed'
+      });
+    }
+  }
+  const toCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read updated commit');
+  try {
+    runRepoValidation(repoPath);
+  } catch (error) {
+    throw repoUpdateError(error.repoUpdateStatus || 'validation-failed', error.message, {
+      fromCommit,
+      toCommit,
+      error: error.repoUpdateDetails?.error || error.message
+    });
+  }
+  return {
+    repoPath,
+    fromCommit,
+    toCommit,
+    status: fromCommit === toCommit ? 'up-to-date' : 'updated'
+  };
+}
+
 function compareSemver(left, right) {
   const a = String(left || '0.0.0').split('.').map((part) => Number(part) || 0);
   const b = String(right || '0.0.0').split('.').map((part) => Number(part) || 0);
@@ -207,6 +425,15 @@ function defaultState() {
     architecture_version: ARCHITECTURE_VERSION,
     hub_version: '',
     auto_sync_enabled: false,
+    repo_auto_update_enabled: false,
+    repo_path: '',
+    repo_branch: DEFAULT_REPO_BRANCH,
+    repo_remote: DEFAULT_REPO_REMOTE,
+    last_repo_update: '',
+    last_repo_update_status: '',
+    last_repo_update_from_commit: '',
+    last_repo_update_to_commit: '',
+    last_repo_update_error: '',
     created_at: '',
     updated_at: '',
     last_sync_source: '',
@@ -223,6 +450,14 @@ function normalizedState(raw) {
   for (const target of SUPPORTED_TARGETS) {
     state.targets[target] = { ...defaultTargetState(), ...(state.targets[target] || {}) };
   }
+  state.repo_branch = state.repo_branch || DEFAULT_REPO_BRANCH;
+  state.repo_remote = state.repo_remote || DEFAULT_REPO_REMOTE;
+  state.repo_path = state.repo_path || '';
+  state.last_repo_update = state.last_repo_update || '';
+  state.last_repo_update_status = state.last_repo_update_status || '';
+  state.last_repo_update_from_commit = state.last_repo_update_from_commit || '';
+  state.last_repo_update_to_commit = state.last_repo_update_to_commit || '';
+  state.last_repo_update_error = state.last_repo_update_error || '';
   return state;
 }
 
@@ -230,6 +465,19 @@ function applyRequestedState(state, args) {
   const next = normalizedState(state);
   if (args.enableAutoSync) next.auto_sync_enabled = true;
   if (args.disableAutoSync) next.auto_sync_enabled = false;
+  if (args.repoPath) next.repo_path = path.resolve(args.repoPath);
+  if (args.repoBranch) next.repo_branch = args.repoBranch;
+  if (args.repoRemote) next.repo_remote = args.repoRemote;
+  if (args.enableRepoAutoUpdate) {
+    next.repo_auto_update_enabled = true;
+    next.last_repo_update_status = 'configured';
+    next.last_repo_update_error = '';
+  }
+  if (args.disableRepoAutoUpdate) {
+    next.repo_auto_update_enabled = false;
+    next.last_repo_update_status = 'disabled';
+    next.last_repo_update_error = '';
+  }
   for (const target of args.enableTargets) {
     next.targets[target].enabled = true;
     next.targets[target].explicitly_disabled = false;
@@ -418,12 +666,41 @@ function buildManifest({ state, discoveries, checksum, syncSource, hubPath }) {
   };
 }
 
+function prepareStateForWrite(state, args) {
+  const next = normalizedState(state);
+  next.schema_version = STATE_SCHEMA_VERSION;
+  next.architecture_version = ARCHITECTURE_VERSION;
+  next.hub_version = BRIDGE_VERSION;
+  next.created_at = next.created_at || timestamp();
+  next.updated_at = timestamp();
+  next.last_sync_source = args.syncSource;
+  return next;
+}
+
 function writePayloadTree(rootDir, payload) {
   for (const [rel, text] of Object.entries(payload)) {
     const target = path.join(rootDir, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, text, 'utf8');
   }
+}
+
+function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads }) {
+  const stagePath = path.join(path.dirname(hubPath), `.staging-${process.pid}-${Date.now()}`);
+  if (fs.existsSync(stagePath)) fs.rmSync(stagePath, { recursive: true, force: true });
+  fs.mkdirSync(stagePath, { recursive: true });
+  writePayloadTree(path.join(stagePath, 'adapters', 'opencode'), payloads.opencode);
+  writePayloadTree(path.join(stagePath, 'adapters', 'ag2'), payloads.ag2);
+  writeJson(path.join(stagePath, 'manifest.json'), buildManifest({
+    state,
+    discoveries,
+    checksum,
+    syncSource: args.syncSource,
+    hubPath
+  }));
+  writeJson(path.join(stagePath, 'state.json'), state);
+  validateStagedHub(stagePath, checksum);
+  replaceDirectoryAtomically(stagePath, hubPath);
 }
 
 function validateStagedHub(stagePath, checksum) {
@@ -519,6 +796,17 @@ function buildAudit({ args, hubPath, state, discoveries, checksum }) {
     lock_path: path.join(path.dirname(hubPath), 'update.lock'),
     sync_source: args.syncSource,
     auto_sync_enabled: state.auto_sync_enabled,
+    repo_auto_update: {
+      enabled: state.repo_auto_update_enabled,
+      repo_path: state.repo_path,
+      repo_branch: state.repo_branch,
+      repo_remote: state.repo_remote,
+      last_update: state.last_repo_update,
+      last_status: state.last_repo_update_status,
+      from_commit: state.last_repo_update_from_commit,
+      to_commit: state.last_repo_update_to_commit,
+      error: state.last_repo_update_error
+    },
     checksum,
     targets: Object.fromEntries(SUPPORTED_TARGETS.map((target) => {
       const targetState = state.targets[target];
@@ -538,8 +826,112 @@ function buildAudit({ args, hubPath, state, discoveries, checksum }) {
 function isHookNoop(args, existingState) {
   if (!args.hook) return false;
   if (!existingState || !existingState.hub_version) return true;
-  if (!existingState.auto_sync_enabled) return true;
+  const repoAutoUpdateActive = existingState.repo_auto_update_enabled && !args.skipRepoAutoUpdate;
+  if (!repoAutoUpdateActive && !existingState.auto_sync_enabled) return true;
+  if (repoAutoUpdateActive) return false;
   return !SUPPORTED_TARGETS.some((target) => existingState.targets[target]?.enabled);
+}
+
+function shouldRunRepoAutoUpdate(args, state) {
+  if (!args.write) return false;
+  if (args.skipRepoAutoUpdate) return false;
+  if (!state.repo_auto_update_enabled) return false;
+  return args.hook || args.repoUpdateNow;
+}
+
+function hookSafeWarning(args, message) {
+  if (args.hook) {
+    console.error(`Toolkit local bridge hook skipped: ${message}`);
+  }
+}
+
+function runDelegatedRepoSync({ args, hubPath, repoPath }) {
+  const scriptPath = path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
+  if (!fs.existsSync(scriptPath)) {
+    throw new Error(`updated repo bridge script not found: ${scriptPath}`);
+  }
+  const delegateArgs = [
+    scriptPath,
+    '--sync-enabled',
+    '--write',
+    '--sync-source',
+    'repo',
+    '--hub',
+    hubPath,
+    '--skip-repo-auto-update'
+  ];
+  const result = runCommand(process.execPath, delegateArgs, {
+    cwd: repoPath,
+    timeout: 120000
+  });
+  if (result.stdout.trim()) console.log(result.stdout.trim());
+  if (result.stderr.trim()) console.error(result.stderr.trim());
+  if (!result.ok) {
+    throw new Error(`delegated repo sync failed: ${commandOutput(result)}`);
+  }
+  return { status: 0 };
+}
+
+function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads }) {
+  const lock = acquireLock(path.dirname(hubPath), args);
+  if (!lock.acquired) {
+    console.log(`Toolkit local bridge: ${lock.skipReason}; skipping repo auto-update.`);
+    return { status: 0, audit: buildAudit({ args, hubPath, state, discoveries, checksum }) };
+  }
+
+  let statusState = state;
+  let updateResult = null;
+  try {
+    try {
+      updateResult = validateAndUpdateRepo(state);
+      statusState = prepareStateForWrite(applyRepoUpdateStatus(state, updateResult.status, {
+        fromCommit: updateResult.fromCommit,
+        toCommit: updateResult.toCommit
+      }), args);
+      writeHubSnapshot({ hubPath, args, state: statusState, discoveries, checksum, payloads });
+    } catch (error) {
+      statusState = prepareStateForWrite(applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
+        fromCommit: error.repoUpdateDetails?.fromCommit || '',
+        toCommit: error.repoUpdateDetails?.toCommit || '',
+        error: error.repoUpdateDetails?.error || error.message
+      }), args);
+      writeHubSnapshot({ hubPath, args, state: statusState, discoveries, checksum, payloads });
+      if (args.hook) {
+        hookSafeWarning(args, error.message);
+        return { status: 0, audit: buildAudit({ args, hubPath, state: statusState, discoveries, checksum }) };
+      }
+      throw error;
+    }
+  } finally {
+    releaseLock(lock);
+  }
+
+  try {
+    runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath });
+  } catch (error) {
+    const failedState = prepareStateForWrite(applyRepoUpdateStatus(statusState, 'sync-delegation-failed', {
+      fromCommit: updateResult.fromCommit,
+      toCommit: updateResult.toCommit,
+      error: error.message
+    }), args);
+    const relock = acquireLock(path.dirname(hubPath), args);
+    try {
+      if (relock.acquired) {
+        writeHubSnapshot({ hubPath, args, state: failedState, discoveries, checksum, payloads });
+      }
+    } finally {
+      releaseLock(relock);
+    }
+    if (args.hook) {
+      hookSafeWarning(args, error.message);
+      return { status: 0, audit: buildAudit({ args, hubPath, state: failedState, discoveries, checksum }) };
+    }
+    throw error;
+  }
+
+  const finalAudit = buildAudit({ args, hubPath, state: statusState, discoveries, checksum });
+  if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
+  return { status: 0, audit: finalAudit };
 }
 
 function run(argv = process.argv.slice(2)) {
@@ -559,6 +951,9 @@ function run(argv = process.argv.slice(2)) {
   }
 
   let nextState = applyRequestedState(existingState, args);
+  if (args.enableRepoAutoUpdate && !nextState.repo_path) {
+    throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
+  }
   const discoveries = {
     opencode: discoverOpenCode(args, nextState.targets.opencode),
     ag2: discoverAg2(args, nextState.targets.ag2, hubPath)
@@ -574,12 +969,17 @@ function run(argv = process.argv.slice(2)) {
     console.log(JSON.stringify(audit, null, 2));
   }
   if (!args.write) return { status: 0, audit };
+  if (shouldRunRepoAutoUpdate(args, nextState)) {
+    return runRepoAutoUpdate({ args, hubPath, state: nextState, discoveries, checksum, payloads });
+  }
   if (
     args.syncEnabled &&
     !args.enableTargets.length &&
     !args.disableTargets.length &&
     !args.enableAutoSync &&
     !args.disableAutoSync &&
+    !args.enableRepoAutoUpdate &&
+    !args.disableRepoAutoUpdate &&
     !SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum))
   ) {
     console.log('Toolkit local bridge: no enabled stale targets to sync.');
@@ -599,30 +999,8 @@ function run(argv = process.argv.slice(2)) {
     nextState = applyRequestedState(existingState, args);
     updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
     updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, false, nextState.targets.ag2.enabled ? '' : 'not enabled');
-    nextState.schema_version = STATE_SCHEMA_VERSION;
-    nextState.architecture_version = ARCHITECTURE_VERSION;
-    nextState.hub_version = BRIDGE_VERSION;
-    nextState.created_at = nextState.created_at || timestamp();
-    nextState.updated_at = timestamp();
-    nextState.last_sync_source = args.syncSource;
-
-    const stagePath = path.join(path.dirname(hubPath), `.staging-${process.pid}-${Date.now()}`);
-    if (fs.existsSync(stagePath)) fs.rmSync(stagePath, { recursive: true, force: true });
-    fs.mkdirSync(stagePath, { recursive: true });
-    writePayloadTree(path.join(stagePath, 'adapters', 'opencode'), payloads.opencode);
-    writePayloadTree(path.join(stagePath, 'adapters', 'ag2'), payloads.ag2);
-
-    const manifest = buildManifest({
-      state: nextState,
-      discoveries,
-      checksum,
-      syncSource: args.syncSource,
-      hubPath
-    });
-    writeJson(path.join(stagePath, 'manifest.json'), manifest);
-    writeJson(path.join(stagePath, 'state.json'), nextState);
-    validateStagedHub(stagePath, checksum);
-    replaceDirectoryAtomically(stagePath, hubPath);
+    nextState = prepareStateForWrite(nextState, args);
+    writeHubSnapshot({ hubPath, args, state: nextState, discoveries, checksum, payloads });
 
     if (targetWouldSync('opencode', nextState, checksum)) {
       const targetPath = assertSafeWritePath(discoveries.opencode.target_path, 'OpenCode target path');

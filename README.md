@@ -59,7 +59,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Local AI Stack Safety](_projects/development/local-ai-stack-safety/) | Lightweight local AI runtime, model download, local AI web UI, and endpoint exposure safety-review skill source. | [_main/](_projects/development/local-ai-stack-safety/_main/) |
 | [Managed App Foundation Review](_projects/development/managed-app-foundation-review/) | Build-vs-buy planning for low-cost managed or owner-hosted auth, backend, database, workflow automation, CRM, forms, email, storage, analytics, ops, and account-security foundations. | [_main/](_projects/development/managed-app-foundation-review/_main/) |
 | [Project Completion Audit](_projects/development/project-completion-audit/) | Guarded final completion, production-readiness, release-candidate, QA, security-readiness, and remediation audit workflow. | [_main/](_projects/development/project-completion-audit/_main/) |
-| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata, Windows-safe Codex plugin hook repair, one compact setup discoverability skill, and opt-in local bridge infrastructure for OpenCode and AG2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
+| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata, Windows-safe Codex plugin hook repair, one compact setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and AG2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
 | [Codex SSH Hostinger Coolify Setup Maintainer](_projects/development/hostinger-coolify-production-guide/) | Codex SSH Hostinger VPS plus Coolify setup, deployment, daily security checks, intrusion-signal review, optional maintenance alerts, and incident response workflow. | [_main/](_projects/development/hostinger-coolify-production-guide/_main/) |
 | [Self-Hosted Service Safety](_projects/development/self-hosted-service-safety/) | Lightweight non-n8n Docker/VPS, public exposure, credential, backup, SSH, traffic-log, and first-run safety-review skill source. | [_main/](_projects/development/self-hosted-service-safety/_main/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
@@ -72,7 +72,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | Skill | Use |
 |---|---|
 | [AI Coding Agent Rules](skills/ai-coding-agent-rules/) | Install generic execution-first agent rules for supported coding agents. |
-| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, local bridge setup, OpenCode bridge support, AG2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
+| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, AG2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
 | [n8n Agent Rules](skills/n8n-agent-rules/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
 | [n8n Local Setup](skills/n8n-local-setup/) | Set up local n8n with Docker Compose, Postgres, Compose ngrok, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu use, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. |
 | [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
@@ -180,7 +180,7 @@ node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 ```
 
-See [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md) for autocheck, autosetup, auto-sync, rollback, Windows/POSIX paths, hook policy, and portable policy-first layering.
+See [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md) for autocheck, autosetup, auto-sync, repo-backed auto-update, rollback, Windows/POSIX paths, hook policy, and portable policy-first layering.
 
 ## MCP Status
 
