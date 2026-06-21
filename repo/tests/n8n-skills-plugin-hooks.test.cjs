@@ -30,6 +30,18 @@ function runAudit(pluginRoot, ...extraArgs) {
   });
 }
 
+function writeSessionStartShellHookWithNodeFallback(pluginRoot) {
+  fs.writeFileSync(
+    path.join(pluginRoot, 'hooks', 'session-start.sh'),
+    [
+      'if command -v node >/dev/null 2>&1; then',
+      '  node -e "console.log(JSON.stringify({hookSpecificOutput:{hookEventName:\'SessionStart\',additionalContext:\'using-n8n-skills\'}}))"',
+      'fi'
+    ].join('\n'),
+    'utf8'
+  );
+}
+
 test('n8n plugin hook audit rejects Windows direct shell hooks and missing Node JSON fallback', () => {
   const pluginRoot = makePluginRoot();
   writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
@@ -203,6 +215,67 @@ test('n8n plugin hook audit accepts wrapper command shell-script arguments with 
     ].join(' '),
     'utf8'
   );
+
+  const result = runAudit(pluginRoot);
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('n8n plugin hook audit rejects WSL bash launcher commands on Windows', () => {
+  const pluginRoot = makePluginRoot();
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '0.3.1',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup|resume|clear|compact',
+          hooks: [
+            {
+              type: 'command',
+              command: 'C:\\WINDOWS\\system32\\bash.exe "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  writeSessionStartShellHookWithNodeFallback(pluginRoot);
+
+  const result = runAudit(pluginRoot);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unsafe WSL bash launcher/i);
+  assert.match(result.stderr, /C:\\WINDOWS\\system32\\bash\.exe/i);
+  assert.doesNotMatch(result.stderr, /must include a Node JSON fallback/);
+});
+
+test('n8n plugin hook audit accepts explicit Git Bash launcher commands with Node fallback', () => {
+  const pluginRoot = makePluginRoot();
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '0.3.1',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup|resume|clear|compact',
+          hooks: [
+            {
+              type: 'command',
+              command: '"C:\\Program Files\\Git\\bin\\bash.exe" "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  writeSessionStartShellHookWithNodeFallback(pluginRoot);
 
   const result = runAudit(pluginRoot);
 

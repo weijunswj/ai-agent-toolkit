@@ -67,6 +67,21 @@ function directlyInvokesShellScript(command) {
   return /\.sh$/i.test(token);
 }
 
+function unsafeWindowsBashLauncher(command) {
+  const token = stripOuterQuotes(firstCommandToken(command));
+  const normalizedToken = normalizeRelPath(token).toLowerCase();
+
+  if (normalizedToken === 'bash' || normalizedToken === 'bash.exe') {
+    return 'bare bash may resolve to the WSL bash launcher on Windows';
+  }
+
+  if (/^[a-z]:\/windows\/system32\/bash\.exe$/.test(normalizedToken)) {
+    return 'C:\\WINDOWS\\system32\\bash.exe is the WSL bash launcher';
+  }
+
+  return null;
+}
+
 function shellScriptCommandRefs(command) {
   const refs = [];
   const scriptRefPattern = /(?:"([^"]+?\.sh)"|'([^']+?\.sh)'|([^\s"']+?\.sh))(?=$|[\s"'])/gi;
@@ -137,6 +152,13 @@ function auditPluginRoot(pluginRoot, options = {}) {
     if (windowsMode && directlyInvokesShellScript(entry.command)) {
       errors.push(
         `${entry.path} directly invokes a .sh file without an interpreter on Windows: ${entry.command}`
+      );
+    }
+
+    const unsafeBashReason = windowsMode ? unsafeWindowsBashLauncher(entry.command) : null;
+    if (unsafeBashReason) {
+      errors.push(
+        `${entry.path} uses an unsafe WSL bash launcher on Windows: ${entry.command} (${unsafeBashReason})`
       );
     }
   }
@@ -253,6 +275,7 @@ module.exports = {
   auditPluginRoot,
   collectHookCommands,
   directlyInvokesShellScript,
+  unsafeWindowsBashLauncher,
   shellScriptCommandRefs,
   hasNodeJsonFallback,
   shouldRequireNodeJsonFallback
