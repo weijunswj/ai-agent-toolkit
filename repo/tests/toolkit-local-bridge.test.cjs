@@ -9,6 +9,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
+const expectedBridgeVersion = '2.1.0';
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bridge-'));
@@ -36,6 +37,100 @@ function parseLastJson(stdout) {
   const start = stdout.indexOf('{');
   assert.notEqual(start, -1, stdout);
   return JSON.parse(stdout.slice(start));
+}
+
+function git(cwd, args) {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' },
+    timeout: 15000
+  });
+  assert.equal(
+    result.status,
+    0,
+    `git ${args.join(' ')} failed in ${cwd}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
+  );
+  return result.stdout.trim();
+}
+
+function writeFile(filePath, text) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, text, 'utf8');
+}
+
+function configureGitUser(repoPath) {
+  git(repoPath, ['config', 'user.email', 'toolkit-test@example.invalid']);
+  git(repoPath, ['config', 'user.name', 'Toolkit Bridge Test']);
+}
+
+function writeRepoToolkitFixture(repoPath, label) {
+  writeFile(path.join(repoPath, 'VERSION.txt'), `${label}\n`);
+  writeFile(path.join(repoPath, 'repo', 'scripts', 'validate-toolkit.cjs'), [
+    '#!/usr/bin/env node',
+    "'use strict';",
+    "if (process.env.TOOLKIT_BRIDGE_TEST_VALIDATE_FAIL === '1') {",
+    "  console.error('validation failed by fixture');",
+    '  process.exit(7);',
+    '}',
+    ''
+  ].join('\n'));
+  writeFile(path.join(repoPath, 'repo', 'tests', 'toolkit-local-bridge.test.cjs'), [
+    "'use strict';",
+    "const assert = require('node:assert/strict');",
+    "const test = require('node:test');",
+    "test('fixture bridge tests pass', () => assert.equal(true, true));",
+    ''
+  ].join('\n'));
+  writeFile(path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
+    '#!/usr/bin/env node',
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const marker = process.env.TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER;",
+    "if (marker) fs.appendFileSync(marker, `${JSON.stringify(process.argv.slice(2))}\\n`, 'utf8');",
+    "if (!process.argv.includes('--skip-repo-auto-update')) {",
+    "  console.error('missing recursion guard');",
+    '  process.exit(43);',
+    '}',
+    ''
+  ].join('\n'));
+}
+
+function commitAll(repoPath, message) {
+  git(repoPath, ['add', '.']);
+  git(repoPath, ['commit', '-m', message]);
+  return git(repoPath, ['rev-parse', 'HEAD']);
+}
+
+function createRepoAutoUpdateFixture() {
+  const root = tmpRoot();
+  const origin = path.join(root, 'origin.git');
+  const repo = path.join(root, 'repo');
+  const upstream = path.join(root, 'upstream');
+  git(root, ['init', '--bare', origin]);
+  fs.mkdirSync(repo, { recursive: true });
+  git(repo, ['init']);
+  git(repo, ['checkout', '-B', 'main']);
+  configureGitUser(repo);
+  writeRepoToolkitFixture(repo, 'initial');
+  const initialCommit = commitAll(repo, 'initial toolkit fixture');
+  git(repo, ['remote', 'add', 'origin', origin]);
+  git(repo, ['push', '-u', 'origin', 'main']);
+  git(root, ['--git-dir', origin, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
+  git(root, ['clone', origin, upstream]);
+  configureGitUser(upstream);
+  return { root, origin, repo, upstream, initialCommit };
+}
+
+function pushRepoToolkitUpdate(fixture, label) {
+  writeRepoToolkitFixture(fixture.upstream, label);
+  const commit = commitAll(fixture.upstream, `update ${label}`);
+  git(fixture.upstream, ['push', 'origin', 'main']);
+  return commit;
+}
+
+function currentCommit(repoPath) {
+  return git(repoPath, ['rev-parse', 'HEAD']);
 }
 
 test('dry-run audit performs no writes and reports planned targets', () => {
@@ -72,7 +167,7 @@ test('explicit OpenCode setup writes only managed hub and OpenCode target paths'
   const manifest = readJson(path.join(hub, 'manifest.json'));
   const targetSkill = path.join(opencodeConfig, 'skills', 'ai-agent-toolkit', 'SKILL.md');
   assert.equal(state.targets.opencode.enabled, true);
-  assert.equal(state.targets.opencode.synced_version, '2.0.0');
+  assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
   assert.equal(manifest.sync_source, 'codex-plugin');
   assert.ok(fs.existsSync(path.join(hub, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md')));
   assert.ok(fs.existsSync(targetSkill), 'OpenCode target skill is written only after explicit enablement');
@@ -89,7 +184,7 @@ test('explicit AG2 setup writes adapter metadata under the hub without package i
   const metadataPath = path.join(hub, 'adapters', 'ag2', 'ai-agent-toolkit-ag2-adapter.json');
   const metadata = readJson(metadataPath);
   assert.equal(state.targets.ag2.enabled, true);
-  assert.equal(state.targets.ag2.synced_version, '2.0.0');
+  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
   assert.equal(metadata.policy.no_package_install_by_default, true);
 });
 
@@ -154,7 +249,7 @@ test('older bridge refuses to overwrite newer hub state unless forced', () => {
 
   result = run(['--hub', hub, '--write', '--force-downgrade', '--enable-target', 'ag2']);
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(readJson(path.join(hub, 'state.json')).hub_version, '2.0.0');
+  assert.equal(readJson(path.join(hub, 'state.json')).hub_version, expectedBridgeVersion);
 });
 
 test('fresh lock blocks manual writes and stale lock is recovered', () => {
@@ -202,9 +297,255 @@ test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled'
   const result = run(['--hub', hub, '--hook', '--write', '--sync-source', 'claude-plugin']);
   assert.equal(result.status, 0, result.stderr);
   const state = readJson(path.join(hub, 'state.json'));
-  assert.equal(state.hub_version, '2.0.0');
-  assert.equal(state.targets.ag2.synced_version, '2.0.0');
+  assert.equal(state.hub_version, expectedBridgeVersion);
+  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
   assert.equal(state.last_sync_source, 'claude-plugin');
+});
+
+test('enabling repo auto-update records repo path branch and remote in hub state', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+
+  const result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--write'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.repo_auto_update_enabled, true);
+  assert.equal(path.resolve(state.repo_path), path.resolve(fixture.repo));
+  assert.equal(state.repo_branch, 'main');
+  assert.equal(path.resolve(state.repo_remote), path.resolve(fixture.origin));
+  assert.equal(state.last_repo_update_status, 'configured');
+});
+
+test('hook mode does nothing when repo auto-update is disabled', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const marker = path.join(fixture.root, 'delegate.log');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: '2.0.0',
+    auto_sync_enabled: false,
+    repo_auto_update_enabled: false,
+    repo_path: fixture.repo,
+    repo_branch: 'main',
+    repo_remote: fixture.origin,
+    targets: {}
+  });
+
+  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
+    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_status || '', '');
+});
+
+test('hook mode refuses a dirty repo before update and does not sync targets', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const marker = path.join(fixture.root, 'delegate.log');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--write'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  writeFile(path.join(fixture.repo, 'DIRTY.txt'), 'dirty\n');
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
+    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.last_repo_update_status, 'skipped');
+  assert.match(state.last_repo_update_error, /dirty/i);
+});
+
+test('hook mode rejects a repo whose origin remote does not match configured remote', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const marker = path.join(fixture.root, 'delegate.log');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-remote', `${fixture.origin}-other`,
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--write'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
+    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.last_repo_update_status, 'skipped');
+  assert.match(state.last_repo_update_error, /remote/i);
+});
+
+test('hook mode performs a fast-forward repo update before delegating sync', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const marker = path.join(fixture.root, 'delegate.log');
+  const updatedCommit = pushRepoToolkitUpdate(fixture, 'fast-forward');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--write'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(currentCommit(fixture.repo), fixture.initialCommit);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(currentCommit(fixture.repo), updatedCommit);
+
+  const delegateArgs = fs.readFileSync(marker, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(delegateArgs.length, 1);
+  assert.deepEqual(delegateArgs[0], [
+    '--sync-enabled',
+    '--write',
+    '--sync-source',
+    'repo',
+    '--hub',
+    hub,
+    '--skip-repo-auto-update'
+  ]);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.last_repo_update_status, 'updated');
+  assert.equal(state.last_repo_update_from_commit, fixture.initialCommit);
+  assert.equal(state.last_repo_update_to_commit, updatedCommit);
+});
+
+test('repo update failure does not sync targets', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const marker = path.join(fixture.root, 'delegate.log');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--write'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+
+  writeFile(path.join(fixture.repo, 'LOCAL.txt'), 'local\n');
+  const localCommit = commitAll(fixture.repo, 'local divergence');
+  pushRepoToolkitUpdate(fixture, 'remote-divergence');
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
+    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(currentCommit(fixture.repo), localCommit);
+  assert.equal(fs.existsSync(marker), false);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.last_repo_update_status, 'skipped');
+  assert.match(state.last_repo_update_error, /fast-forward/i);
+});
+
+test('validation failure after update does not sync targets', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const marker = path.join(fixture.root, 'delegate.log');
+  const updatedCommit = pushRepoToolkitUpdate(fixture, 'validation-failure');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--write'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
+    env: {
+      TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker,
+      TOOLKIT_BRIDGE_TEST_VALIDATE_FAIL: '1'
+    }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(currentCommit(fixture.repo), updatedCommit);
+  assert.equal(fs.existsSync(marker), false);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.last_repo_update_status, 'validation-failed');
+  assert.equal(state.last_repo_update_from_commit, fixture.initialCommit);
+  assert.equal(state.last_repo_update_to_commit, updatedCommit);
+  assert.match(state.last_repo_update_error, /validate-toolkit/i);
+});
+
+test('skip repo auto-update guard prevents recursive repo update', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const marker = path.join(fixture.root, 'delegate.log');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: '2.0.0',
+    auto_sync_enabled: false,
+    repo_auto_update_enabled: true,
+    repo_path: path.join(fixture.root, 'missing-repo'),
+    repo_branch: 'main',
+    repo_remote: fixture.origin,
+    targets: {}
+  });
+
+  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--skip-repo-auto-update'], {
+    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_status || '', '');
+});
+
+test('audit output reports repo auto-update state and last status', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--write'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--audit']);
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.repo_auto_update.enabled, true);
+  assert.equal(path.resolve(audit.repo_auto_update.repo_path), path.resolve(fixture.repo));
+  assert.equal(audit.repo_auto_update.repo_branch, 'main');
+  assert.equal(path.resolve(audit.repo_auto_update.repo_remote), path.resolve(fixture.origin));
+  assert.equal(audit.repo_auto_update.last_status, 'configured');
 });
 
 test('native plugin manifests and hooks are valid and policy-light', () => {

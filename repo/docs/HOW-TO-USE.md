@@ -261,6 +261,14 @@ Sync already-enabled targets after approval:
 node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 ```
 
+Enable opt-in repo-backed auto-update from a trusted local Toolkit checkout:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "C:\Users\<user>\GitHub Projects\ai-agent-toolkit" --repo-branch main --enable-auto-sync --enable-target opencode --enable-target ag2 --write
+```
+
+After this is enabled, Codex and Claude Code Toolkit plugin SessionStart hooks use the configured local repo as source of truth: they validate the repo, fetch the configured branch, fast-forward only, run hook-light validation, and then sync enabled bridge targets from the updated repo script. The hook path does not run full `npm run validate:all`; run that manually before broad maintenance or release work.
+
 Disable a target without deleting files:
 
 ```powershell
@@ -271,6 +279,12 @@ Disable auto-sync:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --disable-auto-sync --write
+```
+
+Disable repo auto-update:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --disable-repo-auto-update --write
 ```
 
 The bridge is Toolkit setup and maintenance infrastructure with one compact `toolkit-setup` discoverability skill, not a command-per-bridge skill family. It never silently sets up new non-native targets. Enabled targets may auto-sync from whichever native plugin is newer. Disabled and never-enabled targets are not touched.
