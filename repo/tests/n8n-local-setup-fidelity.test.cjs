@@ -209,6 +209,18 @@ function assertCapabilityAwareMcpGuidance(text, label) {
   assert.doesNotMatch(text, overstatedOfficialMcpCapabilityPattern, label);
 }
 
+function assertWindowsHookRecoveryGuidance(text, label) {
+  assert.match(text, /session-start\.sh/, label);
+  assert.match(text, /bare `?\.sh`? hook on Windows/i, label);
+  assert.match(text, /audit-n8n-skills-plugin-hooks\.cjs --plugin-root/, label);
+  assert.match(text, /remove, disable, untrust, or uninstall/i, label);
+  assert.match(text, /Restart (?:Codex|Claude Code|the agent)/, label);
+  assert.match(text, /npx skills add n8n-io\/skills/, label);
+  assert.match(text, /using-n8n-skills/, label);
+  assert.match(text, /Only reinstall or re-trust/i, label);
+  assert.match(text, /installed plugin cache may need (?:manual )?(?:reinstall|update)/i, label);
+}
+
 function applyTextRewrites(text, output) {
   let rewritten = text;
   for (const rewrite of output.text_rewrites || []) {
@@ -1128,6 +1140,28 @@ test('linked n8n Skills and MCP setup surfaces are shipped as secondary AI-codin
     assertCapabilityAwareMcpGuidance(text, page);
   }
 
+  const codexPage = readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md');
+  assert.match(codexPage, /On Windows, use the plain skill install plus the `AGENTS\.md` cue(?: below)? unless the installed official plugin passes these hook checks/);
+  assert.match(codexPage, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assert.match(codexPage, /Hook emitters can output valid JSON with Node when `jq` and `python3` are unavailable/);
+  assertWindowsHookRecoveryGuidance(codexPage, 'codex recovery guidance');
+
+  const claudePage = readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md');
+  assert.match(claudePage, /On Windows, use the plain skill install plus the `AGENTS\.md` or `CLAUDE\.md` cue(?: below)? unless the installed official plugin passes these hook checks/);
+  assert.match(claudePage, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
+  assert.match(claudePage, /Hook emitters can output valid JSON with Node when `jq` and `python3` are unavailable/);
+  assertWindowsHookRecoveryGuidance(claudePage, 'claude recovery guidance');
+
+  for (const page of [
+    'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md',
+    'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md'
+  ]) {
+    const text = readText(repoRoot, page);
+    assert.match(text, /On Windows, do not trust official plugin hooks unless `hooks\/hooks\.json` invokes a Windows-safe command/, page);
+    assert.match(text, /output valid JSON with Node when `jq` and `python3` are unavailable/, page);
+    assertWindowsHookRecoveryGuidance(text, page);
+  }
+
   for (const page of [
     'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md',
     'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md'
@@ -1170,6 +1204,7 @@ test('curated indexes, skill metadata, and packs point to current skills-first s
   assert.match(combined, /skills-first|Skills-First/);
   assert.match(combined, new RegExp(`${escapeRegExp(officialN8nSkillsLink)} plus`, 'i'));
   assert.match(combined, /templates\/mcp-configs\/codex-mcp-config\.md|codex-mcp-config\.md/);
+  assertWindowsHookRecoveryGuidance(combined, 'curated n8n local setup recovery guidance');
 
   for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'mcp/projects/n8n-local-setup.md']) {
     assert.doesNotMatch(combined, new RegExp(escapeRegExp(stale)), stale);
