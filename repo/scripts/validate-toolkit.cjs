@@ -24,6 +24,12 @@ const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT ||
 const registryYamlText = 'reg' + 'istry/*.' + 'yaml';
 const packYamlText = 'pack.' + 'yaml';
 const removedForAiPathPattern = new RegExp('(^|[^A-Za-z0-9_])' + 'for_' + 'ai\\/');
+const generatedOutputLfAttributeRules = [
+  'skills/**/*.yaml text eol=lf',
+  'skills/**/*.yml text eol=lf',
+  'skills/**/*.sh text eol=lf',
+  'skills/**/*.env.example text eol=lf'
+];
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -860,6 +866,18 @@ function validateDesignGeneratorCommandDocs(errors, text, relPath) {
 function validateProjectModules(errors) {
   const result = projectSync.validateAndSync();
   for (const error of result.errors) fail(errors, error);
+}
+
+function validateGeneratedOutputCheckoutAttributes(errors) {
+  const attrsPath = '.gitattributes';
+  if (!existsRel(attrsPath)) return;
+  const attrs = readText(attrsPath);
+  const attrLines = new Set(attrs.split('\n').map((line) => line.trim()).filter(Boolean));
+  for (const rule of generatedOutputLfAttributeRules) {
+    if (!attrLines.has(rule)) {
+      fail(errors, `Missing generated-output LF checkout rule in ${attrsPath}: ${rule}`);
+    }
+  }
 }
 
 function skillEntrypointOutputs(manifest) {
@@ -2421,6 +2439,7 @@ function runValidation() {
   validateAgentInstructionShims(errors);
   validateNativePluginPackages(errors);
   validateReadmeSurface(errors);
+  validateGeneratedOutputCheckoutAttributes(errors);
   validateProjectModules(errors);
   validateSkillCreationCenter(errors);
   validateProjectLandingCards(errors);
