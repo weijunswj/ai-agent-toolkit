@@ -78,6 +78,29 @@ function runShellHook(pluginRoot, relPath, input) {
   });
 }
 
+function runPowerShellWrapperHook(pluginRoot, relPath, input) {
+  return spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      path.join(pluginRoot, 'hooks', 'run-hook.ps1'),
+      relPath
+    ],
+    {
+      cwd: pluginRoot,
+      input: JSON.stringify(input),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_ROOT: pluginRoot.replace(/\\/g, '/')
+      }
+    }
+  );
+}
+
 function writeSessionStartShellHookWithNodeFallback(pluginRoot) {
   fs.writeFileSync(
     path.join(pluginRoot, 'hooks', 'session-start.sh'),
@@ -577,6 +600,41 @@ test('Windows hook repair wraps direct shell hook commands and is idempotent', (
 
   const audit = runAudit(pluginRoot);
   assert.equal(audit.status, 0, audit.stderr);
+});
+
+test('Windows hook repair wrapper executes repaired hook through powershell.exe', () => {
+  const pluginRoot = makePluginRoot();
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'generic-plugin',
+    version: '1.0.0',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup',
+          hooks: [
+            {
+              type: 'command',
+              command: '${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  writeSessionStartShellHookWithNodeFallback(pluginRoot);
+
+  const repair = runRepair(pluginRoot);
+  assert.equal(repair.status, 0, repair.stderr);
+
+  const wrapper = runPowerShellWrapperHook(pluginRoot, 'session-start.sh', {
+    session_id: `wrapper-${process.pid}-${Date.now()}`,
+    source: 'startup'
+  });
+  assert.equal(wrapper.status, 0, wrapper.stderr);
+  assert.equal(JSON.parse(wrapper.stdout).hookSpecificOutput.hookEventName, 'SessionStart');
 });
 
 test('Windows hook repair rejects WSL bash launcher commands', () => {
