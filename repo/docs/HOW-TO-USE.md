@@ -164,13 +164,13 @@ $HOME/.config/opencode/skills/ai-agent-toolkit/
 Run a dry-run audit first:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --audit --enable-target opencode
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode
 ```
 
 After explicit approval:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --write --enable-target opencode
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
 ```
 
 Manual whole-skill-folder install remains a fallback.
@@ -195,13 +195,13 @@ AG2 is an opt-in local adapter target, not a native plugin marketplace.
 Run a dry-run audit first:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --audit --enable-target ag2
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
 ```
 
 After explicit approval:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --write --enable-target ag2
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
 ```
 
 The bridge writes AG2 adapter metadata under the Toolkit Local Bridge Hub only. It does not install Python, AG2, or pip packages.
@@ -252,16 +252,22 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 Sync already-enabled targets after approval:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --write
+node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
+```
+
+Disable a target without deleting files:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 ```
 
 Disable auto-sync:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --write --disable-auto-sync
+node repo/scripts/toolkit-local-bridge.cjs --disable-auto-sync --write
 ```
 
-The bridge never silently sets up new non-native targets. Enabled targets may auto-sync from whichever native plugin is newer. Disabled and never-enabled targets are not touched.
+The bridge is Toolkit setup and maintenance infrastructure, not a routed skill. It never silently sets up new non-native targets. Enabled targets may auto-sync from whichever native plugin is newer. Disabled and never-enabled targets are not touched.
 
 Policy layering stays portable:
 

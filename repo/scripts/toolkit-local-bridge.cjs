@@ -39,6 +39,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     write: false,
     audit: false,
     hook: false,
+    syncEnabled: false,
     forceDowngrade: false,
     enableTargets: [],
     disableTargets: [],
@@ -58,6 +59,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     if (arg === '--write') args.write = true;
     else if (arg === '--audit') args.audit = true;
     else if (arg === '--hook') args.hook = true;
+    else if (arg === '--sync-enabled') args.syncEnabled = true;
     else if (arg === '--force-downgrade') args.forceDowngrade = true;
     else if (arg === '--enable-auto-sync') args.enableAutoSync = true;
     else if (arg === '--disable-auto-sync') args.disableAutoSync = true;
@@ -105,14 +107,17 @@ function printHelp() {
     '',
     'Common commands:',
     '  node repo/scripts/toolkit-local-bridge.cjs --audit',
-    '  node repo/scripts/toolkit-local-bridge.cjs --write --enable-target opencode',
-    '  node repo/scripts/toolkit-local-bridge.cjs --write --enable-target ag2',
-    '  node repo/scripts/toolkit-local-bridge.cjs --write --enable-auto-sync',
-    '  node repo/scripts/toolkit-local-bridge.cjs --write',
+    '  node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode',
+    '  node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write',
+    '  node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2',
+    '  node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write',
+    '  node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write',
+    '  node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write',
     '',
     'Options:',
     '  --enable-target opencode|ag2',
     '  --disable-target opencode|ag2',
+    '  --sync-enabled',
     '  --enable-auto-sync',
     '  --disable-auto-sync',
     '  --audit',
@@ -306,7 +311,7 @@ function adapterPayloads() {
     '',
     '```powershell',
     'node repo/scripts/toolkit-local-bridge.cjs --audit',
-    'node repo/scripts/toolkit-local-bridge.cjs --write',
+    'node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write',
     '```',
     ''
   ].join('\n');
@@ -544,7 +549,7 @@ function run(argv = process.argv.slice(2)) {
 
   if (isHookNoop(args, existingState)) {
     if (existingState?.hub_version && !existingState.auto_sync_enabled) {
-      console.log('Toolkit local bridge: auto-sync disabled; run audit-local-toolkit-bridge for status.');
+      console.log('Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.');
     }
     return { status: 0, audit: null };
   }
@@ -569,6 +574,17 @@ function run(argv = process.argv.slice(2)) {
     console.log(JSON.stringify(audit, null, 2));
   }
   if (!args.write) return { status: 0, audit };
+  if (
+    args.syncEnabled &&
+    !args.enableTargets.length &&
+    !args.disableTargets.length &&
+    !args.enableAutoSync &&
+    !args.disableAutoSync &&
+    !SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum))
+  ) {
+    console.log('Toolkit local bridge: no enabled stale targets to sync.');
+    return { status: 0, audit };
+  }
   if (args.hook && !SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum))) {
     return { status: 0, audit };
   }

@@ -59,7 +59,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Local AI Stack Safety](_projects/development/local-ai-stack-safety/) | Lightweight local AI runtime, model download, local AI web UI, and endpoint exposure safety-review skill source. | [_main/](_projects/development/local-ai-stack-safety/_main/) |
 | [Managed App Foundation Review](_projects/development/managed-app-foundation-review/) | Build-vs-buy planning for low-cost managed or owner-hosted auth, backend, database, workflow automation, CRM, forms, email, storage, analytics, ops, and account-security foundations. | [_main/](_projects/development/managed-app-foundation-review/_main/) |
 | [Project Completion Audit](_projects/development/project-completion-audit/) | Guarded final completion, production-readiness, release-candidate, QA, security-readiness, and remediation audit workflow. | [_main/](_projects/development/project-completion-audit/_main/) |
-| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata plus opt-in local bridge command skills for OpenCode and AG2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
+| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata plus opt-in local bridge setup infrastructure for OpenCode and AG2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
 | [Codex SSH Hostinger Coolify Setup Maintainer](_projects/development/hostinger-coolify-production-guide/) | Codex SSH Hostinger VPS plus Coolify setup, deployment, daily security checks, intrusion-signal review, optional maintenance alerts, and incident response workflow. | [_main/](_projects/development/hostinger-coolify-production-guide/_main/) |
 | [Self-Hosted Service Safety](_projects/development/self-hosted-service-safety/) | Lightweight non-n8n Docker/VPS, public exposure, credential, backup, SSH, traffic-log, and first-run safety-review skill source. | [_main/](_projects/development/self-hosted-service-safety/_main/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
@@ -78,13 +78,6 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
 | [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |
 | [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, templates, manifests, and audits. |
-| [Setup Local Toolkit Bridge](skills/setup-local-toolkit-bridge/) | Set up or trust the user-local Toolkit bridge hub and optional auto-sync after dry-run audit and approval. |
-| [Setup OpenCode Bridge](skills/setup-opencode-bridge/) | Enable the opt-in OpenCode bridge target after showing planned global skill writes. |
-| [Setup AG2 Bridge](skills/setup-ag2-bridge/) | Enable the opt-in AG2 bridge target without installing Python packages. |
-| [Setup All Non-Native Bridges](skills/setup-all-non-native-bridges/) | Preview OpenCode and AG2 setup together, then enable only approved targets. |
-| [Sync Enabled Bridges](skills/sync-enabled-bridges/) | Sync only already-enabled Toolkit bridge targets with lock handling and downgrade refusal. |
-| [Audit Local Toolkit Bridge](skills/audit-local-toolkit-bridge/) | Inspect bridge state, paths, checksums, target detection, and skip reasons without writing by default. |
-| [Disable Local Toolkit Bridge](skills/disable-local-toolkit-bridge/) | Disable bridge auto-sync or targets without deleting user files by default. |
 | [Agent Skill Supply-Chain Audit](skills/agent-skill-supply-chain-audit/) | Audit third-party agent skills for provenance, license, safety, conversion fit, and token-bloat risk. |
 | [Local AI Stack Safety](skills/local-ai-stack-safety/) | Review local AI runtimes, model downloads, local AI web UIs, and endpoint exposure before setup. |
 | [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare low-cost managed or owner-hosted foundations before custom-building auth, backend, database, workflow automation, CRM, forms, email, analytics, ops, and account-security surfaces. |
@@ -160,6 +153,17 @@ For bridge status:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --audit
+```
+
+For opt-in non-native setup:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
+node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 ```
 
 See [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md) for autocheck, autosetup, auto-sync, rollback, Windows/POSIX paths, hook policy, and portable policy-first layering.

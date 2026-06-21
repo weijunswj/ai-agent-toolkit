@@ -6,6 +6,6 @@
   "source_role": "migration_provenance_only",
   "source_update_policy": "none",
   "public_attribution_required": false,
-  "notes": "First-party toolkit-authored source for native plugin packaging and opt-in local bridge command skills. No third-party source, private plugin cache content, marketplace package, credential material, or generated local hub output is copied or adapted.",
+  "notes": "First-party toolkit-authored source for native plugin packaging and opt-in local bridge setup infrastructure. No third-party source, private plugin cache content, marketplace package, credential material, generated local hub output, or dedicated bridge skill surface is copied or adapted.",
   "files": []
 }

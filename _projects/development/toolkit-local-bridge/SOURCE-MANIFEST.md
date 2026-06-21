@@ -10,10 +10,7 @@
 
 ## Reviewed In `curated_output_for_ai/`
 
-- `skills/**/README.md`
-- `skills/**/SKILL.md`
-
-`curated_output_for_ai/skills/**` contains the canonical bridge command skill text. The bridge command skills are intentionally small routers around the canonical updater script and v2 architecture doc.
+- None currently. Bridge setup, sync, audit, and disable operations are deterministic Toolkit maintenance commands, not published agent skills.
 
 ## Repo Script Source
 
@@ -21,15 +18,9 @@
 
 ## AI-Facing Surfaces
 
-- `skills/setup-local-toolkit-bridge/**` is generated from `curated_output_for_ai/skills/setup-local-toolkit-bridge/**`.
-- `skills/setup-opencode-bridge/**` is generated from `curated_output_for_ai/skills/setup-opencode-bridge/**`.
-- `skills/setup-ag2-bridge/**` is generated from `curated_output_for_ai/skills/setup-ag2-bridge/**`.
-- `skills/setup-all-non-native-bridges/**` is generated from `curated_output_for_ai/skills/setup-all-non-native-bridges/**`.
-- `skills/sync-enabled-bridges/**` is generated from `curated_output_for_ai/skills/sync-enabled-bridges/**`.
-- `skills/audit-local-toolkit-bridge/**` is generated from `curated_output_for_ai/skills/audit-local-toolkit-bridge/**`.
-- `skills/disable-local-toolkit-bridge/**` is generated from `curated_output_for_ai/skills/disable-local-toolkit-bridge/**`.
 - `.codex-plugin/plugin.json` and `.codex-plugin/hooks/hooks.json` are generated from `_main/codex-plugin/**`.
 - `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json` are generated from `_main/claude-plugin/**`.
+- No `skills/**` output is published by this module.
 
 ## Excluded
 

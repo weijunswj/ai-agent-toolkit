@@ -82,10 +82,10 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 Write mode requires explicit `--write`:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --write --enable-target opencode
-node repo/scripts/toolkit-local-bridge.cjs --write --enable-target ag2
-node repo/scripts/toolkit-local-bridge.cjs --write --enable-auto-sync
-node repo/scripts/toolkit-local-bridge.cjs --write
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
+node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 ```
 
 Supported flags:
@@ -94,6 +94,7 @@ Supported flags:
 - `--enable-target ag2`.
 - `--disable-target opencode`.
 - `--disable-target ag2`.
+- `--sync-enabled`.
 - `--enable-auto-sync`.
 - `--disable-auto-sync`.
 - `--audit`.
@@ -145,19 +146,54 @@ Autocheck is allowed. Autosetup is forbidden.
 - Auto-sync enabled: native hooks may sync enabled stale targets.
 - Auto-sync disabled: hooks may print a concise reminder or do nothing.
 
-## Plugin Skills
+## Setup Command Surface
 
-The native plugin package exposes bridge command skills from the normal Toolkit `skills/` surface:
+The bridge is Toolkit setup and maintenance infrastructure, not a family of reusable agent skills.
 
-- `setup-local-toolkit-bridge`.
-- `setup-opencode-bridge`.
-- `setup-ag2-bridge`.
-- `setup-all-non-native-bridges`.
-- `sync-enabled-bridges`.
-- `audit-local-toolkit-bridge`.
-- `disable-local-toolkit-bridge`.
+Audit:
 
-These skills explain the planned writes and require explicit approval before enabling targets, enabling auto-sync, or writing user-level files.
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --audit
+```
+
+Dry-run OpenCode setup:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode
+```
+
+Apply OpenCode setup:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
+```
+
+Dry-run AG2 setup:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
+```
+
+Apply AG2 setup:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+```
+
+Sync enabled targets:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
+```
+
+Disable a target:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
+node repo/scripts/toolkit-local-bridge.cjs --disable-target ag2 --write
+```
+
+Do not add one bridge skill per command. Keep setup guidance in this doc, the updater help, validators, and tests.
 
 ## Hook Policy
 
@@ -167,17 +203,17 @@ The v2 hooks only call the shared updater:
 
 - Codex hook source: `.codex-plugin/hooks/hooks.json`.
 - Claude Code hook source: `.claude-plugin/hooks/hooks.json`.
-- Shared policy source: this doc, `AGENTS.md`, Toolkit skills, and validators.
+- Shared policy source: this doc, `AGENTS.md`, Toolkit docs, and validators.
 - Deterministic enforcement: `repo/scripts/toolkit-local-bridge.cjs` and tests.
 
-OpenCode and AG2 do not need Codex or Claude hooks to receive core policy because the policy remains in portable docs and skills.
+OpenCode and AG2 do not need Codex or Claude hooks to receive core policy because the policy remains in portable docs, validators, and generated adapter content.
 
 ## Portable Policy-First Layering
 
 Layering:
 
 1. `AGENTS.md` is compact cross-platform context and routing.
-2. Portable skills and docs contain detailed cross-platform workflows.
+2. Portable skills and docs contain detailed cross-platform workflows; bridge setup specifics stay in docs and the shared updater.
 3. Validators and schema checks enforce deterministic rules where practical.
 4. Hooks provide optional native automation around validators and the shared updater.
 
@@ -197,7 +233,7 @@ Keep in root `AGENTS.md`:
 
 Move or mirror outside root `AGENTS.md`:
 
-- Long bridge setup procedures: this doc and bridge setup skills.
+- Long bridge setup procedures: this doc and the shared updater help.
 - Exact bridge state schema: updater validation and tests.
 - Exact command implementations: [toolkit-local-bridge.cjs](../scripts/toolkit-local-bridge.cjs).
 - Hook behavior details: this doc, plugin hook manifests, and tests.

@@ -108,6 +108,15 @@ test('detected but not enabled OpenCode target receives no writes', () => {
   );
 });
 
+test('sync-enabled command does not create bridge state before setup', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const result = run(['--hub', hub, '--sync-enabled', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /no enabled stale targets to sync/);
+  assert.equal(fs.existsSync(hub), false);
+});
+
 test('disabled target is not overwritten during later sync', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -123,7 +132,7 @@ test('disabled target is not overwritten during later sync', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(marker, 'utf8'), 'keep me\n');
 
-  result = run(['--hub', hub, '--write', '--opencode-config-dir', opencodeConfig]);
+  result = run(['--hub', hub, '--sync-enabled', '--write', '--opencode-config-dir', opencodeConfig]);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(marker, 'utf8'), 'keep me\n', 'disabled target must not be overwritten');
 });
@@ -215,13 +224,15 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   const codexCommand = codexHooks.hooks.SessionStart[0].hooks[0].command;
   const claudeCommand = claudeHooks.hooks.SessionStart[0].hooks[0].command;
   assert.match(codexCommand, /toolkit-local-bridge\.cjs/);
+  assert.match(codexCommand, /--sync-enabled/);
   assert.match(codexCommand, /--sync-source codex-plugin/);
   assert.match(claudeCommand, /toolkit-local-bridge\.cjs/);
+  assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
 });
 
-test('bridge surfaces avoid private plugin caches, package installs, and duplicate skill names', () => {
+test('bridge surfaces avoid private plugin caches, package installs, and dedicated bridge skills', () => {
   const files = [
     'repo/scripts/toolkit-local-bridge.cjs',
     '.codex-plugin/plugin.json',
@@ -233,9 +244,32 @@ test('bridge surfaces avoid private plugin caches, package installs, and duplica
   assert.doesNotMatch(text, /\.codex[\\/]+plugins[\\/]+cache|\.claude[\\/]+plugins/i);
   assert.doesNotMatch(text, /\b(?:npm|pnpm|yarn|pip)\s+install\b/i);
 
+  const removedBridgeSkills = [
+    'setup-local-toolkit-bridge',
+    'setup-opencode-bridge',
+    'setup-ag2-bridge',
+    'setup-all-non-native-bridges',
+    'sync-enabled-bridges',
+    'audit-local-toolkit-bridge',
+    'disable-local-toolkit-bridge'
+  ];
   const skillNames = fs.readdirSync(path.join(repoRoot, 'skills'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
   assert.deepEqual([...new Set(skillNames)].sort(), skillNames.sort());
   assert.equal(skillNames.includes('ai-agent-toolkit'), false, 'OpenCode adapter skill name must not duplicate a root Toolkit skill');
+  for (const skill of removedBridgeSkills) {
+    assert.equal(skillNames.includes(skill), false, `${skill} should be setup infrastructure, not a published skill`);
+    assert.equal(
+      fs.existsSync(path.join(repoRoot, '_projects', 'development', 'toolkit-local-bridge', 'curated_output_for_ai', 'skills', skill)),
+      false,
+      `${skill} should not have curated bridge skill source`
+    );
+  }
+
+  const manifest = readJson(path.join(repoRoot, '_projects', 'development', 'toolkit-local-bridge', 'toolkit.project.json'));
+  assert.equal(manifest.surface.publish_as, 'source_only');
+  assert.equal(manifest.surface.skill.status, 'not_applicable');
+  assert.deepEqual((manifest.outputs || []).filter((output) => String(output.output || '').startsWith('skills/')), []);
+  assert.deepEqual((manifest.writes.allowed || []).filter((output) => String(output || '').startsWith('skills/')), []);
 });

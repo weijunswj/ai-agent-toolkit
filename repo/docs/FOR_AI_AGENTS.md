@@ -48,13 +48,6 @@ Use installed skills only when they clearly match the task and improve correctne
 | `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
 | `secure-cicd-installer` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |
 | `context-preserving-ai-publisher` | Source-traceable AI-facing repo surfaces, generated skills, templates, manifests, source locks, audits, or anti-drift docs. |
-| `setup-local-toolkit-bridge` | Toolkit Local Bridge Hub setup, trust, or auto-sync configuration after dry-run audit and explicit approval. |
-| `setup-opencode-bridge` | Explicit OpenCode bridge enablement, planned OpenCode global skill writes, and approved local bridge state updates. |
-| `setup-ag2-bridge` | Explicit AG2 bridge enablement, planned hub adapter writes, and package-install-free AG2 metadata setup. |
-| `setup-all-non-native-bridges` | Target-by-target setup for all non-native Toolkit bridge targets, currently OpenCode and AG2. |
-| `sync-enabled-bridges` | Syncing only already-enabled local bridge targets with lock handling, atomic writes, and downgrade refusal. |
-| `audit-local-toolkit-bridge` | Local bridge state, target detection, enabled/synced status, paths, checksums, and skip-reason audits. |
-| `disable-local-toolkit-bridge` | Disabling bridge auto-sync or specific targets without deleting user files by default. |
 | `agent-skill-supply-chain-audit` | Reviewing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, toolkit conversion fit, and usefulness/token-bloat risk before import. |
 | `local-ai-stack-safety` | Reviewing local AI runtime, model download, GPU/runtime, local AI web UI, or local AI endpoint exposure risk before setup. |
 | `managed-app-foundation-review` | Revisiting implementation plans to compare low-cost, free, managed, or owner-hosted foundations before custom-building auth, backend APIs, user accounts, databases, workflow automation, CRM/contact pipelines, forms, email, storage, analytics, ops, traffic/security monitoring, or account-security foundations. |
@@ -92,6 +85,8 @@ Prioritize repo safety, device safety, provenance, attribution, validation, and 
 ## Install Safety
 
 For install or template writes, pause before mutating the target repo. Preview the target writes, explain the source files, name the exact target paths, preserve product repo ownership, and ask for explicit current-turn approval.
+
+Toolkit Local Bridge setup is infrastructure, not a skill-routing surface. Use [Toolkit Local Bridge V2](TOOLKIT-LOCAL-BRIDGE-V2.md) and `node repo/scripts/toolkit-local-bridge.cjs` for audit, opt-in OpenCode or AG2 setup, enabled-target sync, and disable operations. Keep bridge setup dry-run by default, never autosetup detected targets, never install npm or pip packages, never mutate project repos by default, and never rely on hooks as the only place where critical policy exists.
 
 Never commit or install:
 

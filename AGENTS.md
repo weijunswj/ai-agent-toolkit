@@ -216,7 +216,7 @@ For day-to-day work, update source or curated material first, do not edit genera
 - Codex and Claude Code update through `.codex-plugin/` and `.claude-plugin/`; neither may install or update the other platform.
 - The Toolkit Local Bridge may manage only explicitly enabled non-native targets: OpenCode global skills and AG2 metadata. Detection is allowed; autosetup is not.
 - Bridge writes require approval unless the exact write was requested. Disabled or never-enabled targets must not be touched.
-- Hooks are optional automation only; shared policy must remain in this file, skills/docs, validators and the [bridge v2 doc](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md).
+- Hooks are optional automation only; shared policy must remain in this file, docs, validators and the [bridge v2 doc](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md).
 
 <!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract

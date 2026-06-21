@@ -7,106 +7,8 @@
   "main_path": "_projects/development/toolkit-local-bridge/_main",
   "version": "2.0.0",
   "version_policy": "semver",
-  "version_notes": "Initial v2 native plugin/update architecture with opt-in OpenCode and AG2 local bridge command skills.",
+  "version_notes": "V2 native plugin/update architecture with opt-in OpenCode and AG2 local bridge setup infrastructure.",
   "outputs": [
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/setup-local-toolkit-bridge/README.md",
-      "output": "skills/setup-local-toolkit-bridge/README.md",
-      "notes": "Bridge setup command skill README generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/setup-local-toolkit-bridge/SKILL.md",
-      "output": "skills/setup-local-toolkit-bridge/SKILL.md",
-      "notes": "Bridge setup command skill entrypoint generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/setup-opencode-bridge/README.md",
-      "output": "skills/setup-opencode-bridge/README.md",
-      "notes": "OpenCode bridge setup command skill README generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/setup-opencode-bridge/SKILL.md",
-      "output": "skills/setup-opencode-bridge/SKILL.md",
-      "notes": "OpenCode bridge setup command skill entrypoint generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/setup-ag2-bridge/README.md",
-      "output": "skills/setup-ag2-bridge/README.md",
-      "notes": "AG2 bridge setup command skill README generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/setup-ag2-bridge/SKILL.md",
-      "output": "skills/setup-ag2-bridge/SKILL.md",
-      "notes": "AG2 bridge setup command skill entrypoint generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/setup-all-non-native-bridges/README.md",
-      "output": "skills/setup-all-non-native-bridges/README.md",
-      "notes": "All non-native bridge setup command skill README generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/setup-all-non-native-bridges/SKILL.md",
-      "output": "skills/setup-all-non-native-bridges/SKILL.md",
-      "notes": "All non-native bridge setup command skill entrypoint generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/sync-enabled-bridges/README.md",
-      "output": "skills/sync-enabled-bridges/README.md",
-      "notes": "Enabled bridge sync command skill README generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/sync-enabled-bridges/SKILL.md",
-      "output": "skills/sync-enabled-bridges/SKILL.md",
-      "notes": "Enabled bridge sync command skill entrypoint generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/audit-local-toolkit-bridge/README.md",
-      "output": "skills/audit-local-toolkit-bridge/README.md",
-      "notes": "Bridge audit command skill README generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/audit-local-toolkit-bridge/SKILL.md",
-      "output": "skills/audit-local-toolkit-bridge/SKILL.md",
-      "notes": "Bridge audit command skill entrypoint generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/disable-local-toolkit-bridge/README.md",
-      "output": "skills/disable-local-toolkit-bridge/README.md",
-      "notes": "Bridge disable command skill README generated from first-party module source.",
-      "fidelity": "exact"
-    },
-    {
-      "kind": "curated",
-      "source": "curated_output_for_ai/skills/disable-local-toolkit-bridge/SKILL.md",
-      "output": "skills/disable-local-toolkit-bridge/SKILL.md",
-      "notes": "Bridge disable command skill entrypoint generated from first-party module source.",
-      "fidelity": "exact"
-    },
     {
       "kind": "json",
       "source": "_main/codex-plugin/plugin.json",
@@ -138,20 +40,6 @@
   ],
   "writes": {
     "allowed": [
-      "skills/setup-local-toolkit-bridge/README.md",
-      "skills/setup-local-toolkit-bridge/SKILL.md",
-      "skills/setup-opencode-bridge/README.md",
-      "skills/setup-opencode-bridge/SKILL.md",
-      "skills/setup-ag2-bridge/README.md",
-      "skills/setup-ag2-bridge/SKILL.md",
-      "skills/setup-all-non-native-bridges/README.md",
-      "skills/setup-all-non-native-bridges/SKILL.md",
-      "skills/sync-enabled-bridges/README.md",
-      "skills/sync-enabled-bridges/SKILL.md",
-      "skills/audit-local-toolkit-bridge/README.md",
-      "skills/audit-local-toolkit-bridge/SKILL.md",
-      "skills/disable-local-toolkit-bridge/README.md",
-      "skills/disable-local-toolkit-bridge/SKILL.md",
       ".codex-plugin/plugin.json",
       ".codex-plugin/hooks/hooks.json",
       ".claude-plugin/plugin.json",
@@ -173,42 +61,26 @@
   "run_commands_by_default": false,
   "live_actions": "explicit_confirmation_only",
   "ci_live_actions": false,
-  "skill_creation_review": {
-    "existing_skill_review": "Reviewed current skill folders, README skill table, Skill Safety Matrix, toolkit routing partial, context-preserving-ai-publisher, ai-coding-agent-rules, windows-localhost-workflows, n8n-agent-rules, and project-completion-audit before adding setup-local-toolkit-bridge, setup-opencode-bridge, setup-ag2-bridge, setup-all-non-native-bridges, sync-enabled-bridges, audit-local-toolkit-bridge, and disable-local-toolkit-bridge. Existing skills cover repo rules, source publishing, n8n, local server startup, and final audits, but none owns a native plugin local bridge command surface with opt-in OpenCode and AG2 target state.",
-    "trigger": "Use these bridge command skills only when the user asks to audit, set up, enable, sync, or disable the Toolkit Local Bridge Hub, OpenCode bridge target, AG2 bridge target, all non-native bridge targets, enabled bridge targets, or bridge auto-sync. Do not invoke them for ordinary feature work, project repo setup, package installation, Codex installation, or Claude Code installation.",
-    "decision": "new_project_skill",
-    "decision_reason": "The bridge command surface has a distinct native-plugin and user-home write boundary. Adding it to existing broad agent rules would either bloat always-loaded context or hide the one-time user approval gates for local hub, OpenCode, and AG2 writes.",
-    "unique_value": "The skills force dry-run audit first, separate OpenCode and AG2 approval, native Codex and Claude update separation, no package installs, no project repo mutation, no private plugin cache source paths, lock usage, atomic writes, and downgrade refusal.",
-    "runtime_footprint": "Each SKILL.md is a concise command router that points to the shared updater and v2 doc. Detailed architecture, target state, hooks, and validation stay in repo docs, scripts, and tests instead of being repeated in every skill body.",
-    "local_assets": "Local assets are the source-owned command skill README/SKILL files, native plugin manifests, hook configs, the direct repo updater script, and tests. No external assets, third-party code, package archives, or generated hub output are bundled.",
-    "output_contract": "The skills produce a dry-run audit, a planned write summary, an explicit approval question before user-level writes, and then the exact approved updater command. Audit reports bridge status. Sync affects only already-enabled targets. Disable changes state without deleting user files.",
-    "anti_bloat_review": "The skills are intentionally command-specific and are not generic coding advice. They keep long procedure in the v2 doc and deterministic updater, so they do not duplicate existing source-publishing, n8n, localhost, or completion-audit skills.",
-    "safety_boundary": "User-level hub writes, OpenCode global skill writes, AG2 adapter writes, auto-sync enablement, and target enablement require explicit approval. The bridge must not install packages, mutate project repos by default, update Codex from Claude, update Claude from Codex, use private plugin caches as source, or downgrade newer state unless forced for manual recovery.",
-    "source_provenance": "first_party",
-    "third_party_audit": "not_applicable_first_party; no third-party plugin source, private plugin cache material, marketplace package, executable dependency, or vendor docs are copied or adapted.",
-    "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic generated skill outputs, deterministic plugin metadata outputs, toolkit routing update, README table update, Skill Safety Matrix update, sync, bridge tests, plugin manifest validation, and generated-output checks.",
-    "routing": "setup-local-toolkit-bridge is routed for bridge hub setup and auto-sync configuration; setup-opencode-bridge is routed for explicit OpenCode bridge enablement; setup-ag2-bridge is routed for explicit AG2 bridge enablement; setup-all-non-native-bridges is routed for target-by-target OpenCode plus AG2 setup; sync-enabled-bridges is routed for syncing already-enabled targets; audit-local-toolkit-bridge is routed for bridge status reports; disable-local-toolkit-bridge is routed for disabling auto-sync or targets. None are omitted.",
-    "validation": [
-      "node repo/scripts/sync-toolkit-projects.cjs --write",
-      "node repo/scripts/sync-toolkit-projects.cjs --check",
-      "node --test repo/tests/toolkit-local-bridge.test.cjs",
-      "node repo/scripts/validate-toolkit.cjs"
-    ]
-  },
   "project": {
     "name": "Toolkit Local Bridge",
     "category": "development",
-    "summary": "Native Codex and Claude Code plugin metadata plus opt-in local bridge command skills for OpenCode and AG2 adapter targets."
+    "summary": "Native Codex and Claude Code plugin metadata plus opt-in local bridge setup infrastructure for OpenCode and AG2 adapter targets."
   },
   "surface": {
-    "publish_as": "skill",
+    "publish_as": "source_only",
     "skill": {
-      "status": "published",
-      "path": "skills/setup-local-toolkit-bridge",
-      "summary": "Bridge command skill family for auditing, setting up, syncing, and disabling the Toolkit Local Bridge Hub and opt-in OpenCode or AG2 targets."
+      "status": "not_applicable"
     },
     "mcp": {
       "status": "not_applicable"
+    },
+    "native_plugin_metadata": {
+      "status": "published",
+      "paths": [
+        ".codex-plugin",
+        ".claude-plugin"
+      ],
+      "summary": "Generated native plugin metadata for Codex and Claude Code plus optional hooks that call the shared local bridge updater."
     }
   }
 }
