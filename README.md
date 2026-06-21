@@ -98,6 +98,8 @@ For toolkit-owned skills, copy the whole `skills/<skill-name>/` folder into **AN
 
 On Windows, do not approve or trust current official plugin hooks unless the installed package's `hooks/hooks.json` invokes a Windows-safe command such as a Node or PowerShell wrapper instead of a bare `.sh` path like `${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh`. The hook emitters must also be able to output valid JSON with Node when `jq` and `python3` are unavailable. WSL `bash.exe` is not enough unless a WSL distro is installed, and Git Bash must be invoked explicitly by the hook command.
 
+If Codex or Claude Code already opens `session-start.sh` on every new chat, the installed plugin is invoking a bare `.sh` hook on Windows. Run `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows`; for Codex this path is commonly `C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>`. If the audit fails, remove, disable, untrust, or uninstall the official plugin hooks or plugin. Restart the agent, use `npx skills add n8n-io/skills`, and keep the target repo cue that loads `using-n8n-skills` before n8n work. Only reinstall or re-trust the official plugin after the installed hook metadata is Windows-safe and hook emitters can output JSON with Node. The installed plugin cache may need manual reinstall or update after upstream fixes.
+
 For macOS/Linux, or for Windows after the installed plugin passes those hook checks, install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin:
 
 ```powershell

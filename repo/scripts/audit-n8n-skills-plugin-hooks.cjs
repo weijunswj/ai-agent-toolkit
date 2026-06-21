@@ -67,9 +67,29 @@ function directlyInvokesShellScript(command) {
   return /\.sh$/i.test(token);
 }
 
-function pluginRootScriptRelFromCommand(command) {
-  const match = command.match(/\$\{CLAUDE_PLUGIN_ROOT\}[\\/]+(.+?\.sh)(?=$|[\s"'])/i);
-  return match ? normalizeRelPath(match[1]) : null;
+function shellScriptCommandRefs(command) {
+  const refs = [];
+  const scriptRefPattern = /(?:"([^"]+?\.sh)"|'([^']+?\.sh)'|([^\s"']+?\.sh))(?=$|[\s"'])/gi;
+  let match;
+
+  while ((match = scriptRefPattern.exec(command)) !== null) {
+    const rawRef = match[1] || match[2] || match[3];
+    const relPath = shellScriptRefToPluginRelPath(rawRef);
+    if (relPath) refs.push(relPath);
+  }
+
+  return refs;
+}
+
+function shellScriptRefToPluginRelPath(rawRef) {
+  let ref = normalizeRelPath(stripOuterQuotes(rawRef).trim()).replace(/^\.\//, '');
+  const pluginRootMatch = ref.match(/^\$\{CLAUDE_PLUGIN_ROOT\}\/+(.+)$/i);
+  if (pluginRootMatch) return normalizeRelPath(pluginRootMatch[1]);
+
+  if (/^[A-Za-z]:\//.test(ref) || ref.startsWith('/')) return null;
+
+  if (!ref.startsWith('hooks/')) ref = `hooks/${ref}`;
+  return normalizeRelPath(ref);
 }
 
 function hasNodeJsonFallback(text) {
@@ -110,8 +130,9 @@ function auditPluginRoot(pluginRoot, options = {}) {
   const referencedShellScripts = new Set();
 
   for (const entry of commands) {
-    const shellScriptRel = pluginRootScriptRelFromCommand(entry.command);
-    if (shellScriptRel) referencedShellScripts.add(shellScriptRel);
+    for (const shellScriptRel of shellScriptCommandRefs(entry.command)) {
+      referencedShellScripts.add(shellScriptRel);
+    }
 
     if (windowsMode && directlyInvokesShellScript(entry.command)) {
       errors.push(
@@ -232,6 +253,7 @@ module.exports = {
   auditPluginRoot,
   collectHookCommands,
   directlyInvokesShellScript,
+  shellScriptCommandRefs,
   hasNodeJsonFallback,
   shouldRequireNodeJsonFallback
 };

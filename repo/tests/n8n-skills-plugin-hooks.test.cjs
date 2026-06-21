@@ -18,6 +18,7 @@ function writeJson(filePath, value) {
 function makePluginRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-plugin-'));
   fs.mkdirSync(path.join(root, 'hooks', 'pre-tool-use'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'hooks', 'post-tool-use'), { recursive: true });
   fs.mkdirSync(path.join(root, '.codex-plugin'), { recursive: true });
   return root;
 }
@@ -131,6 +132,81 @@ test('n8n plugin hook audit accepts Windows-safe Node hook commands and parseabl
       additionalContext: 'line1\n"quoted"'
     }
   });
+});
+
+test('n8n plugin hook audit follows wrapper command shell-script arguments', () => {
+  const pluginRoot = makePluginRoot();
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '0.3.1',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      PostToolUse: [
+        {
+          matcher: '^mcp__.*__validate_workflow$',
+          hooks: [
+            {
+              type: 'command',
+              command: 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.ps1" "post-tool-use/validate-workflow.sh"'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  fs.writeFileSync(
+    path.join(pluginRoot, 'hooks', 'post-tool-use', 'validate-workflow.sh'),
+    'if command -v jq >/dev/null 2>&1; then jq -n "{}"; elif command -v python3 >/dev/null 2>&1; then python3 -c "print({})"; fi\n',
+    'utf8'
+  );
+
+  const result = runAudit(pluginRoot);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /hooks\/post-tool-use\/validate-workflow\.sh must include a Node JSON fallback/
+  );
+});
+
+test('n8n plugin hook audit accepts wrapper command shell-script arguments with Node fallback', () => {
+  const pluginRoot = makePluginRoot();
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '0.3.1',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      PostToolUse: [
+        {
+          matcher: '^mcp__.*__validate_workflow$',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cjs" "post-tool-use/validate-workflow.sh"'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  fs.writeFileSync(
+    path.join(pluginRoot, 'hooks', 'post-tool-use', 'validate-workflow.sh'),
+    [
+      'if command -v jq >/dev/null 2>&1; then jq -n "{}";',
+      'elif command -v python3 >/dev/null 2>&1; then python3 -c "print({})";',
+      'elif command -v node >/dev/null 2>&1; then node -e "console.log(JSON.stringify({hookSpecificOutput:{hookEventName:\'PostToolUse\'}}))";',
+      'fi'
+    ].join(' '),
+    'utf8'
+  );
+
+  const result = runAudit(pluginRoot);
+
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('n8n plugin hook audit rejects malformed plugin metadata JSON', () => {

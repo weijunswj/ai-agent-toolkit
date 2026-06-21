@@ -63,6 +63,14 @@ On Windows, use the plain skill install plus the `AGENTS.md` or `CLAUDE.md` cue 
 - Hook emitters can output valid JSON with Node when `jq` and `python3` are unavailable.
 - The hook command does not rely on `C:\WINDOWS\system32\bash.exe`; that is WSL bash and it fails when no WSL distro is installed. If a package uses Git Bash, the hook command must invoke the real Git Bash path explicitly.
 
+If Claude Code opens an installed plugin `hooks\session-start.sh` file on every new chat, the installed plugin is invoking a bare `.sh` hook on Windows. From this toolkit repo, audit the installed cache, replacing the path with your actual official n8n Skills plugin cache path:
+
+```powershell
+node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows
+```
+
+If the audit fails, remove, disable, untrust, or uninstall the official plugin hooks or plugin. Restart Claude Code, use the upstream "Other platforms" route below, and keep the `AGENTS.md` or `CLAUDE.md` cue that loads `using-n8n-skills` before n8n work. Only reinstall or re-trust the official plugin after the installed `hooks/hooks.json` uses a Windows-safe wrapper and hook emitters can output JSON with Node. The installed plugin cache may need manual reinstall or update after upstream fixes; this toolkit guidance does not repair an already-installed cache.
+
 From the target project folder, use the upstream "Other platforms" route when your runtime supports [skills.sh](https://skills.sh):
 
 ```powershell
