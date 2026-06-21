@@ -27,7 +27,14 @@ Copy the whole `skills/<skill-name>/` folder.
 
 Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
-For upstream [official n8n Skills](https://github.com/n8n-io/skills) on Windows, use the plain skill install plus the target repo `AGENTS.md` or `CLAUDE.md` cue unless the installed plugin hook metadata invokes a Windows-safe wrapper instead of bare `.sh` files and can emit JSON with Node when `jq` and `python3` are unavailable.
+For upstream [official n8n Skills](https://github.com/n8n-io/skills) on Windows, run Toolkit hook repair and audit on the installed plugin cache before trusting hooks:
+
+```powershell
+node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io
+node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows
+```
+
+If plugin hooks are unavailable or cannot be repaired, use the plain skill install plus the target repo `AGENTS.md` or `CLAUDE.md` cue.
 
 ## Local Routes
 

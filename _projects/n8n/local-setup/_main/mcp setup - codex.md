@@ -40,21 +40,23 @@ Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](ht
 
 ## 3. Install [Official n8n Skills](https://github.com/n8n-io/skills) For Codex
 
-On Windows, use the plain skill install plus the `AGENTS.md` cue below unless the installed official plugin passes these hook checks:
-
-- `hooks/hooks.json` invokes a Windows-safe command, such as a Node or PowerShell wrapper, instead of a bare `.sh` path like `${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh`.
-- Hook emitters can output valid JSON with Node when `jq` and `python3` are unavailable.
-- The hook command does not rely on `C:\WINDOWS\system32\bash.exe`; that is WSL bash and it fails when no WSL distro is installed. If a package uses Git Bash, the hook command must invoke the real Git Bash path explicitly.
-
-If Codex opens `C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>\hooks\session-start.sh` on every new chat, the installed plugin is invoking a bare `.sh` hook on Windows. From this toolkit repo, audit the installed cache:
+Install the official plugin from upstream:
 
 ```powershell
+codex plugin marketplace add n8n-io/skills
+codex plugin add n8n-skills@n8n-io
+```
+
+On Windows, repair and audit the installed plugin cache before approving or trusting hooks:
+
+```powershell
+node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --write --plugin-id n8n-skills@n8n-io
 node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows
 ```
 
-If the audit fails, remove, disable, untrust, or uninstall the official plugin hooks or plugin. Restart Codex, use the upstream "Other platforms" route below, and keep the `AGENTS.md` cue that loads `using-n8n-skills` before n8n work. Only reinstall or re-trust the official plugin after the installed `hooks/hooks.json` uses a Windows-safe wrapper and hook emitters can output JSON with Node. The installed plugin cache may need manual reinstall or update after upstream fixes; this toolkit guidance does not repair an already-installed cache.
+The repair step parses `hooks/hooks.json`, rewrites generic `.sh` hook commands through `hooks/run-hook.ps1`, rejects bare `bash`, rejects `C:\WINDOWS\system32\bash.exe`, and patches `n8n-skills@n8n-io` hook emitters with Node JSON fallbacks for Windows Git Bash. If repair fails, do not approve or trust the hooks; fix the reported issue or use the upstream "Other platforms" route plus the `AGENTS.md` cue below.
 
-From the target project folder, use the upstream "Other platforms" route when your runtime supports [skills.sh](https://skills.sh):
+From the target project folder, use the upstream "Other platforms" route when your runtime supports [skills.sh](https://skills.sh) and plugin hooks are not available or cannot be repaired:
 
 ```powershell
 npx skills add n8n-io/skills
@@ -68,14 +70,7 @@ the n8n MCP tools, always start by loading the `using-n8n-skills` meta-skill
 and follow its routing into the matching capability skill before acting.
 ```
 
-On macOS/Linux, or on Windows after the installed plugin passes the hook checks above, run these Codex plugin commands:
-
-```powershell
-codex plugin marketplace add n8n-io/skills
-codex plugin add n8n-skills@n8n-io
-```
-
-Then:
+For plugin installs, then:
 
 1. Restart Codex.
 2. Approve or trust the plugin hooks when Codex prompts you so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.

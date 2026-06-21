@@ -110,6 +110,28 @@ The updater must not:
 - Write outside the current user home or temp directories.
 - Use Codex or Claude private plugin cache paths as source.
 
+## Windows Codex Plugin Hook Repair
+
+Windows hook repair is a separate post-install maintenance utility, not part of the Local Bridge updater. Use [repair-codex-plugin-windows-hooks.cjs](../scripts/repair-codex-plugin-windows-hooks.cjs) after a requested Codex plugin install or update when an installed plugin root contains `hooks/hooks.json`.
+
+The repair utility:
+
+- Parses the installed plugin's `hooks/hooks.json` as JSON.
+- Rewrites generic `.sh` hook commands to `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.ps1" "<relative-hook-script>"`.
+- Writes a Toolkit-managed `hooks/run-hook.ps1` wrapper that invokes explicit Git Bash from `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`.
+- Rejects bare `bash`, `bash.exe`, and `C:\WINDOWS\system32\bash.exe` when the command cannot be safely normalized.
+- Applies the n8n-specific Node JSON fallback patch for `n8n-skills@n8n-io`.
+- Fails with an actionable error when a hook cannot be repaired safely.
+
+Example:
+
+```powershell
+node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io
+node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows
+```
+
+This utility may repair the installed plugin root named by the user or install flow. It must not use private plugin cache paths as source for Toolkit publishing, copy third-party plugin content into this repo, touch `n8n_live` MCP config, or modify unrelated plugins except when the current install/update flow explicitly targets that plugin root for generic Windows hook wrapping.
+
 ## Target Discovery
 
 OpenCode detection signals:

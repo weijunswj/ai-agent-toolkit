@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "version_policy": "semver",
-  "version_notes": "V2 native plugin/update architecture with one compact Toolkit setup discoverability skill plus opt-in OpenCode and AG2 local bridge setup infrastructure.",
+  "version_notes": "Adds Windows-safe Codex plugin hook repair for installed plugin roots while keeping the Local Bridge updater scoped to opt-in OpenCode and AG2 adapter infrastructure.",
   "outputs": [
     {
       "kind": "curated",
@@ -90,8 +90,8 @@
     "trigger": "Use toolkit-setup when the user asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, or bridge setup safety. Do not invoke it for ordinary project coding, unrelated n8n setup, or as permission to run write commands without explicit approval.",
     "decision": "new_project_skill",
     "decision_reason": "A single compact toolkit-setup router skill is safer than a command-per-bridge skill family because it lets agents recognise setup requests while keeping implementation, command details, hooks, and policy in the shared updater, docs, validators, and tests.",
-    "unique_value": "The skill preserves the bridge safety model in the trigger path: dry-run first, OpenCode and AG2 opt-in only, detection without autosetup, sync only enabled targets, no npm or pip installs, no project repo mutation by default, no Codex-to-Claude or Claude-to-Codex cross-update, and downgrade refusal unless explicitly forced.",
-    "runtime_footprint": "SKILL.md stays a short router and safety checklist. It does not embed the updater implementation or repeat command-per-target procedures; detailed behavior stays in repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md, repo/docs/HOW-TO-USE.md, repo/scripts/toolkit-local-bridge.cjs, and tests.",
+    "unique_value": "The skill preserves the bridge and plugin-hook safety model in the trigger path: dry-run first, OpenCode and AG2 opt-in only, detection without autosetup, sync only enabled targets, post-install Windows hook repair before trusting Codex plugin hooks, no npm or pip installs, no project repo mutation by default, no Codex-to-Claude or Claude-to-Codex cross-update, and downgrade refusal unless explicitly forced.",
+    "runtime_footprint": "SKILL.md stays a short router and safety checklist. It does not embed updater or repair implementation details or repeat command-per-target procedures; detailed behavior stays in repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md, repo/docs/HOW-TO-USE.md, repo/scripts/toolkit-local-bridge.cjs, repo/scripts/repair-codex-plugin-windows-hooks.cjs, and tests.",
     "local_assets": "Only the toolkit-setup README, SKILL.md, and OpenAI metadata are published. No scripts, references, templates, package archives, third-party code, or generated bridge hub outputs are bundled in the skill.",
     "output_contract": "When used, the agent routes to the Toolkit setup subsystem, starts with audit or dry-run behavior, uses repo/scripts/toolkit-local-bridge.cjs for any requested operation, preserves explicit approval gates for writes, and runs relevant validators or tests before final reporting.",
     "anti_bloat_review": "The skill intentionally replaces a command-per-bridge skill family with one small discoverability surface. It is not generic setup advice, and it does not duplicate existing source-publishing, n8n, localhost, or safety-review skills.",

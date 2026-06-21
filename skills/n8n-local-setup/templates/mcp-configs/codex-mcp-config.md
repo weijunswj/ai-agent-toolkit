@@ -10,10 +10,10 @@ Use this for the normal Codex + official n8n instance-level MCP setup.
 
 * Do not paste your real n8n token into this file or any repo file.
 * Keep `bearer_token_env_var = "N8N_MCP_TOKEN"` exactly as shown.
-* On Windows, do not trust official plugin hooks unless `hooks/hooks.json` invokes a Windows-safe command, such as a Node or PowerShell wrapper, instead of a bare `.sh` path. Hook emitters must also output valid JSON with Node when `jq` and `python3` are unavailable.
-* If Codex opens `C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>\hooks\session-start.sh` on every new chat, the installed plugin is invoking a bare `.sh` hook on Windows. Run `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows`. If it fails, remove, disable, untrust, or uninstall the official plugin hooks or plugin. Restart Codex, use `npx skills add n8n-io/skills`, and keep the `AGENTS.md` cue that loads `using-n8n-skills` before n8n work. Only reinstall or re-trust the official plugin after hook metadata is Windows-safe and Node JSON fallback exists; the installed plugin cache may need manual reinstall or update after upstream fixes.
-* Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io` only where the hook checks pass. Otherwise use the upstream "Other platforms" route, `npx skills add n8n-io/skills`, plus the target repo `AGENTS.md` cue.
-* Restart Codex and approve or trust the official plugin hooks only after those checks pass so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
+* On Windows, repair official plugin hooks before trusting them: run `node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --write --plugin-id n8n-skills@n8n-io`, then run `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows`.
+* The repair rewrites bare `.sh` hook commands through a PowerShell wrapper, invokes explicit Git Bash from `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`, rejects `C:\WINDOWS\system32\bash.exe`, and adds Node JSON fallbacks for `n8n-skills@n8n-io`.
+* Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`; if Windows repair fails, do not approve the hooks and use the upstream "Other platforms" route, `npx skills add n8n-io/skills`, plus the target repo `AGENTS.md` cue.
+* Restart Codex and approve or trust the official plugin hooks only after repair and audit pass so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
 1. Common Windows path for Codex MCP config:
 
@@ -128,9 +128,9 @@ enabled = true
 
    * Confirm the official plugin was installed with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`.
    * Restart Codex.
-   * If Codex opens `session-start.sh` on every new chat, audit the installed plugin cache with `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows`. If it fails, remove, disable, untrust, or uninstall the official plugin hooks or plugin, then use `npx skills add n8n-io/skills` and the target repo `AGENTS.md` cue until an upstream-safe plugin update is installed.
-   * On Windows, inspect the installed plugin `hooks/hooks.json`. If it directly invokes `.sh` files, or the hook emitters require only `jq` or `python3` with no Node fallback, do not approve those hooks; use `npx skills add n8n-io/skills` and the target repo `AGENTS.md` cue instead.
-   * Approve or trust the official plugin hooks when prompted only after the hook checks pass.
+   * On Windows, repair the installed plugin cache with `node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io`, then audit it with `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows`.
+   * If repair fails, do not approve those hooks; use `npx skills add n8n-io/skills` and the target repo `AGENTS.md` cue until the plugin can be repaired or updated.
+   * Approve or trust the official plugin hooks when prompted only after the repair and audit pass.
 
 2. If `n8n_live` fails:
 

@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-toolkit",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Source-first AI-agent toolkit with native Codex plugin metadata and an opt-in local bridge for OpenCode and AG2 adapters.",
   "author": {
     "name": "weijunswj",
