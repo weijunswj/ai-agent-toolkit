@@ -1010,6 +1010,44 @@ function validateAgentInstructionShims(errors) {
   for (const error of result.errors) fail(errors, error);
 }
 
+function stripOuterCommandQuotes(value) {
+  const trimmed = String(value || '').trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function firstCommandToken(command) {
+  const trimmed = String(command || '').trim();
+  const match = trimmed.match(/^"([^"]+)"|^'([^']+)'|^([^\s]+)/);
+  return match ? (match[1] || match[2] || match[3]) : '';
+}
+
+function normalizeCommandToken(token) {
+  return stripOuterCommandQuotes(token).replace(/\\/g, '/').toLowerCase();
+}
+
+function validateToolkitBridgeHookCommandSafety(errors, hooksPath, command) {
+  const firstToken = normalizeCommandToken(firstCommandToken(command));
+
+  if (firstToken !== 'node') {
+    fail(errors, `${hooksPath} hook must invoke toolkit-local-bridge.cjs with an explicit node command`);
+  }
+  if (/\.sh(?:$|[\s"'])/i.test(command) || /\.sh$/i.test(firstToken)) {
+    fail(errors, `${hooksPath} hook must not invoke bare .sh hook commands`);
+  }
+  if (firstToken === 'bash' || firstToken === 'bash.exe' || /^[a-z]:\/windows\/system32\/bash\.exe$/.test(firstToken)) {
+    fail(errors, `${hooksPath} hook must not use a Windows bash launcher`);
+  }
+  if (/\b(?:jq|python3)\b/i.test(command)) {
+    fail(errors, `${hooksPath} hook must not require jq or python3 to emit hook JSON`);
+  }
+}
+
 function validateNativePluginPackages(errors) {
   const plugins = [
     {
@@ -1068,6 +1106,7 @@ function validateNativePluginPackages(errors) {
     const commandHook = sessionStart[0]?.hooks?.[0];
     const command = String(commandHook?.command || '');
     if (commandHook?.type !== 'command') fail(errors, `${plugin.hooksPath} SessionStart hook must be a command hook`);
+    validateToolkitBridgeHookCommandSafety(errors, plugin.hooksPath, command);
     if (!command.includes('repo/scripts/toolkit-local-bridge.cjs')) {
       fail(errors, `${plugin.hooksPath} hook must call the shared toolkit-local-bridge.cjs updater`);
     }

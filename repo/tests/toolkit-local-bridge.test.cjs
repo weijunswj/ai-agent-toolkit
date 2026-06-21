@@ -223,17 +223,22 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
 
   const codexCommand = codexHooks.hooks.SessionStart[0].hooks[0].command;
   const claudeCommand = claudeHooks.hooks.SessionStart[0].hooks[0].command;
+  assert.match(codexCommand, /^node\s+"/);
   assert.match(codexCommand, /toolkit-local-bridge\.cjs/);
   assert.match(codexCommand, /\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-local-bridge\.cjs/);
   assert.doesNotMatch(codexCommand, /CODEX_PLUGIN_ROOT|CODEX_PLUGIN_DATA|CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA/);
   assert.match(codexCommand, /--sync-enabled/);
   assert.match(codexCommand, /--sync-source codex-plugin/);
+  assert.match(claudeCommand, /^node\s+"/);
   assert.match(claudeCommand, /toolkit-local-bridge\.cjs/);
   assert.match(claudeCommand, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-local-bridge\.cjs/);
   assert.doesNotMatch(claudeCommand, /CODEX_PLUGIN_ROOT|CODEX_PLUGIN_DATA/);
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
+  assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
+  assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /(?:^|\s)(?:bash|bash\.exe)(?:\s|$)|[A-Z]:\\WINDOWS\\system32\\bash\.exe/i);
+  assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\b(?:jq|python3)\b/i);
 });
 
 test('bridge surfaces avoid private plugin caches, package installs, and command-per-bridge skills', () => {
