@@ -7,7 +7,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const baselineRelPath = 'repo/docs/published-surface-audit-baseline.json';
-const publishedRoots = ['skills'];
+const publishedRoots = ['skills', '.codex-plugin', '.claude-plugin'];
 const projectRoot = '_projects';
 const textExtensions = new Set(['.md', '.json', '.ps1', '.cmd', '.cjs', '.js', '.txt', '.yaml', '.yml']);
 const suspiciousPathWords = /\b(prompt|template|reference|guide|setup|policy|agent|rules|readme)\b/i;
@@ -964,7 +964,9 @@ function countBy(items, field) {
 function buildAudit(root) {
   const projects = discoverProjectManifests(root);
   const tracked = trackedOrFilesystemFiles(root, publishedRoots);
-  const publishedFiles = tracked.files.filter((relPath) => relPath.startsWith('skills/')).sort();
+  const publishedFiles = tracked.files.filter((relPath) =>
+    publishedRoots.some((prefix) => relPath === prefix || relPath.startsWith(`${prefix}/`))
+  ).sort();
   const declared = declaredOutputs(root, projects);
   const packInstalled = packInstalledFiles(root, publishedFiles);
 

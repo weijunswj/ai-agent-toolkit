@@ -1,0 +1,42 @@
+{
+  "name": "ai-agent-toolkit",
+  "version": "2.0.0",
+  "description": "Source-first AI-agent toolkit with native Claude Code plugin metadata and an opt-in local bridge for OpenCode and AG2 adapters.",
+  "author": {
+    "name": "weijunswj",
+    "url": "https://github.com/weijunswj"
+  },
+  "homepage": "https://github.com/weijunswj/ai-agent-toolkit",
+  "repository": "https://github.com/weijunswj/ai-agent-toolkit",
+  "license": "UNLICENSED",
+  "keywords": [
+    "ai-agent",
+    "claude-code",
+    "skills",
+    "toolkit",
+    "opencode",
+    "ag2"
+  ],
+  "skills": "./skills",
+  "hooks": "./.claude-plugin/hooks/hooks.json",
+  "interface": {
+    "displayName": "AI Agent Toolkit",
+    "shortDescription": "Source-first reusable agent skills with opt-in local bridge adapters",
+    "longDescription": "Use AI Agent Toolkit for reusable source-traceable skills, repo-local agent rules, validation guidance, and opt-in local OpenCode or AG2 bridge adapters. Claude Code updates this package natively and never installs or updates Codex.",
+    "developerName": "weijunswj",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Audit the local Toolkit bridge state.",
+      "Set up the AG2 bridge after showing me the planned writes."
+    ],
+    "websiteURL": "https://github.com/weijunswj/ai-agent-toolkit",
+    "privacyPolicyURL": "https://github.com/weijunswj/ai-agent-toolkit",
+    "termsOfServiceURL": "https://github.com/weijunswj/ai-agent-toolkit",
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}

@@ -301,11 +301,17 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
 
   assert.match(readme, /^## Install Skills By Platform$/m);
   assert.match(readme, /\[How To Use: Install Toolkit Skills\]\(repo\/docs\/HOW-TO-USE\.md#install-toolkit-skills\)/);
-  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'Antigravity']) {
+  for (const platform of ['Codex', 'Claude Code', 'OpenCode', 'AG2', 'Antigravity']) {
     assert.match(readme, new RegExp(`\\| ${platform.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\|`), platform);
   }
 
-  assert.match(howToUse, /Preferred install for toolkit-owned skills: copy the whole `skills\/<skill-name>\/` folder into one supported location/);
+  assert.match(howToUse, /Preferred v2 install for toolkit-owned skills/);
+  assert.match(howToUse, /\.codex-plugin\/plugin\.json/);
+  assert.match(howToUse, /\.claude-plugin\/plugin\.json/);
+  assert.match(howToUse, /Codex does not install or update Claude Code/);
+  assert.match(howToUse, /Claude Code does not install or update Codex/);
+  assert.match(howToUse, /OpenCode and AG2 are opt-in local bridge targets/);
+  assert.match(howToUse, /Manual fallback: copy the whole `skills\/<skill-name>\/` folder into one supported location/);
   assert.match(howToUse, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
   assert.match(howToUse, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(howToUse, /codex plugin add n8n-skills@n8n-io/);
@@ -316,14 +322,14 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /always start by loading the `using-n8n-skills` meta-skill/);
   assert.match(howToUse, /current \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
   assert.match(howToUse, /If the upstream entry point changes, update this cue from the official README instead of inventing a local alias/);
-  assert.match(howToUse, /OpenCode stays on a short manual whole-skill-folder install note for toolkit-owned skills for now/);
   assert.match(howToUse, /Copy whole skill folders, not just `SKILL\.md`/);
   assert.match(howToUse, /Keep `README\.md`, `references\/`, `templates\/`, `agents\/`, `packs\/`, and other supporting files beside `SKILL\.md` when present/);
   assert.match(howToUse, /Do not paste secrets, tokens, `.env` values, or credentials into repo files/);
-  assert.match(howToUse, /Codex \| Direct whole-skill-folder install/);
-  assert.match(howToUse, /Claude Code \| Direct whole-skill-folder install/);
+  assert.match(howToUse, /Codex \| Native plugin package/);
+  assert.match(howToUse, /Claude Code \| Native plugin package/);
   assert.match(howToUse, /Antigravity \| Plugin-scoped skill-folder install/);
-  assert.match(howToUse, /OpenCode \| Short manual whole-skill-folder note only/);
+  assert.match(howToUse, /OpenCode \| Opt-in local bridge target/);
+  assert.match(howToUse, /AG2 \| Opt-in local bridge target/);
   assert.match(howToUse, /\*\*Choose any one supported Codex skill-folder location:\*\*/);
   assert.match(howToUse, /\*\*Choose any one supported Claude Code skill-folder location:\*\*/);
   assert.match(howToUse, /\*\*Choose any one supported OpenCode skill-folder location:\*\*/);
@@ -336,10 +342,11 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\| Project OpenCode config \| `<repo>\/\.opencode\/skills\/<skill-name>\/SKILL\.md` \|/);
   assert.match(howToUse, /\| Plugin-scoped \| `C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\SKILL\.md` \|/);
 
-  assert.match(readme, /Codex \| Direct whole-skill-folder install/);
-  assert.match(readme, /Claude Code \| Direct whole-skill-folder install/);
+  assert.match(readme, /Codex \| Native plugin package via `\.codex-plugin\/plugin\.json`/);
+  assert.match(readme, /Claude Code \| Native plugin package via `\.claude-plugin\/plugin\.json`/);
   assert.match(readme, /Antigravity \| Plugin-scoped skill-folder install/);
-  assert.match(readme, /OpenCode \| Short manual whole-skill-folder install only/);
+  assert.match(readme, /OpenCode \| Opt-in bridge target only after approval/);
+  assert.match(readme, /AG2 \| Opt-in bridge target only after approval/);
   assert.match(readme, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
   assert.match(readme, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(readme, /codex plugin add n8n-skills@n8n-io/);
@@ -350,15 +357,12 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(readme, /always start by loading the `using-n8n-skills` meta-skill/);
   assert.match(readme, /current \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
   assert.match(readme, /If the upstream entry point changes, update this cue from the official README instead of inventing a local alias/);
-  assert.match(readme, /into \*\*ANY ONE\*\* supported location/);
-  assert.match(readme, /\*\*Choose any one supported Codex skill-folder location:\*\*/);
-  assert.match(readme, /\*\*Choose any one supported Claude Code skill-folder location:\*\*/);
-  assert.match(readme, /\*\*Choose any one supported OpenCode skill-folder location:\*\*/);
+  assert.match(readme, /Manual fallback: copy the whole `skills\/<skill-name>\/` folder into \*\*ANY ONE\*\* supported location/);
   assert.match(readme, /`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\`/);
   assert.match(readme, /\| Platform \| Toolkit-owned skill install \| Active instruction files \| References \|/);
-  assert.match(readme, /\| Codex \| Direct whole-skill-folder install\.<br>\*\*Choose any one supported Codex skill-folder location:\*\*<br>- `<repo>\/\.agents\/skills\/<skill-name>\/`/);
-  assert.match(readme, /\| Claude Code \| Direct whole-skill-folder install\.<br>\*\*Choose any one supported Claude Code skill-folder location:\*\*<br>- `<repo>\/\.claude\/skills\/<skill-name>\/`/);
-  assert.match(readme, /\| OpenCode \| Short manual whole-skill-folder install only\.<br>\*\*Choose any one supported OpenCode skill-folder location:\*\*<br>- `<repo>\/\.opencode\/skills\/<skill-name>\/`/);
+  assert.match(readme, /\| Codex \| Native plugin package via `\.codex-plugin\/plugin\.json`; direct whole-skill-folder install remains a manual fallback\. \|/);
+  assert.match(readme, /\| Claude Code \| Native plugin package via `\.claude-plugin\/plugin\.json`; direct whole-skill-folder install remains a manual fallback\. \|/);
+  assert.match(readme, /\| OpenCode \| Opt-in bridge target only after approval/);
   assert.match(readme, /\| Antigravity \| Plugin-scoped skill-folder install\.<br>`C:/);
   assert.match(readme, /\| Codex \|[^\n]*\| `AGENTS\.md` \|/);
   assert.match(readme, /\| Claude Code \|[^\n]*\| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
@@ -386,8 +390,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.doesNotMatch(howToUse, /\$HOME\/\.gemini\/skills\/<skill-name>\/SKILL\.md/);
   assert.doesNotMatch(howToUse, /<workspace-root>\/\.agent\/skills\/<skill-name>\/SKILL\.md/);
   assert.match(howToUse, /Use `GEMINI\.md` or the configured context file/);
-  assert.match(readme, /`<repo>\/\.claude\/skills\/<skill-name>\/`/);
-  assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`/);
+  assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/ai-agent-toolkit\/`/);
   assert.match(readme, /`AGENTS\.md` is the shared managed instruction file/);
   assert.match(readme, /\[repo-local\/AGENTS\.managed\.template\.md\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
   assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
@@ -432,8 +435,8 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(antigravityRef, /`n8n_live`/);
 
   const installDocs = [howToUse, readme, codexRef, claudeCodeRef, opencodeRef, antigravityRef].join('\n');
-  assert.doesNotMatch(installDocs, /\.codex-plugin\/plugin\.json/);
-  assert.doesNotMatch(installDocs, /\.claude-plugin\/plugin\.json/);
+  assert.match(installDocs, /\.codex-plugin\/plugin\.json/);
+  assert.match(installDocs, /\.claude-plugin\/plugin\.json/);
   assert.doesNotMatch(installDocs, /\.claude-plugin\/marketplace\.json/);
   assert.doesNotMatch(installDocs, /(?:codex|claude) plugin package template/i);
   assert.doesNotMatch(installDocs, /Minimal Codex plugin manifest/i);

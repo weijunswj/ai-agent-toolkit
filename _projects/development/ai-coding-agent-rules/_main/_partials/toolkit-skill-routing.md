@@ -15,6 +15,13 @@ Use the skill name, description, and local files to decide whether a skill appli
 | `n8n-workflow-templates` | Selecting, reviewing, or copying public reusable n8n workflow JSON templates that are generic, inactive, credential-free, and safe for publication. |
 | `secure-cicd-installer` | Reviewing, planning, or applying secure CI/CD installer materials with approval-gated writes, safe status tracking, and no default command execution. |
 | `context-preserving-ai-publisher` | Creating or maintaining source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift docs. |
+| `setup-local-toolkit-bridge` | Setting up, initializing, trusting, or configuring the Toolkit Local Bridge Hub or bridge auto-sync after dry-run audit and explicit approval. |
+| `setup-opencode-bridge` | Explicitly enabling the opt-in OpenCode bridge target, previewing planned OpenCode global skill writes, and writing only after approval. |
+| `setup-ag2-bridge` | Explicitly enabling the opt-in AG2 bridge target, previewing hub adapter writes, and never installing Python packages by default. |
+| `setup-all-non-native-bridges` | Previewing and setting up all non-native bridge targets target-by-target, currently OpenCode and AG2, with separate approval for each target. |
+| `sync-enabled-bridges` | Syncing only already-enabled Toolkit Local Bridge targets with lock handling, atomic writes, and downgrade refusal. |
+| `audit-local-toolkit-bridge` | Auditing Toolkit Local Bridge Hub state, target detection, enabled/synced status, paths, checksums, and skip reasons without writing by default. |
+| `disable-local-toolkit-bridge` | Disabling Toolkit bridge auto-sync or specific bridge targets without deleting user files unless separately requested. |
 | `agent-skill-supply-chain-audit` | Auditing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, toolkit conversion fit, and usefulness/token-bloat review before import. |
 | `local-ai-stack-safety` | Reviewing local AI stack setup risk for local model runners, model servers, model downloads, GPU/runtime changes, local AI web UIs, or local AI endpoint exposure. |
 | `managed-app-foundation-review` | Revisiting implementation plans to compare low-cost, free, managed, or owner-hosted foundations before custom-building auth, backend APIs, user accounts, databases, workflow automation, CRM/contact pipelines, forms, email, storage, analytics, ops, traffic/security monitoring, or account-security foundations. |

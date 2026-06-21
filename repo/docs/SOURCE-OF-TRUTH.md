@@ -31,7 +31,14 @@ Do not move product-owned assets into this toolkit.
 
 ## Published Surfaces
 
-The repo-wide generated surface is skills-first. Humans use `_projects/**` for source review and maintenance, and agents use generated `skills/**` folders after sync. Repo-wide MCP is intentionally not shipped or maintained as a generated surface for now.
+The repo-wide generated surface is skills-first plus native plugin metadata. Humans use `_projects/**` for source review and maintenance, agents use generated `skills/**` folders after sync, and native plugin installers read generated `.codex-plugin/**` or `.claude-plugin/**` metadata. Repo-wide MCP is intentionally not shipped or maintained as a generated surface for now.
+
+Native plugin metadata is not source of truth:
+
+- `.codex-plugin/**` is generated Codex package metadata.
+- `.claude-plugin/**` is generated Claude Code package metadata.
+- Neither native package may install or update the other native platform.
+- OpenCode and AG2 adapter outputs are generated under the user-local Toolkit Local Bridge Hub after explicit target enablement.
 
 ## Documentation Links
 

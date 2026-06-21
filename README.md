@@ -9,6 +9,7 @@ This repo keeps reusable AI-agent material in a source-first layout:
 - [_projects/](_projects/) preserves project source, provenance, and reviewed AI-facing source.
 - [skills/](skills/) contains copyable AI-agent skill folders.
 - [repo/](repo/) contains repo maintenance docs, scripts, tests, and validation policy.
+- [.codex-plugin/](.codex-plugin/) and [.claude-plugin/](.claude-plugin/) contain generated native plugin metadata.
 
 Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain inside [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material.
 
@@ -29,6 +30,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 | Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files. |
 | MCP | Not a repo-wide shipped/generated surface in this repo right now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references live inside the n8n local setup skill as secondary material. |
 | Generated surface | A published file under [skills/](skills/) that is rebuilt from project source by a deterministic sync script. |
+| Native plugin metadata | Generated `.codex-plugin/**` or `.claude-plugin/**` metadata that lets Codex and Claude Code update Toolkit through their own plugin systems. |
 
 ## Project Categories
 
@@ -57,6 +59,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Local AI Stack Safety](_projects/development/local-ai-stack-safety/) | Lightweight local AI runtime, model download, local AI web UI, and endpoint exposure safety-review skill source. | [_main/](_projects/development/local-ai-stack-safety/_main/) |
 | [Managed App Foundation Review](_projects/development/managed-app-foundation-review/) | Build-vs-buy planning for low-cost managed or owner-hosted auth, backend, database, workflow automation, CRM, forms, email, storage, analytics, ops, and account-security foundations. | [_main/](_projects/development/managed-app-foundation-review/_main/) |
 | [Project Completion Audit](_projects/development/project-completion-audit/) | Guarded final completion, production-readiness, release-candidate, QA, security-readiness, and remediation audit workflow. | [_main/](_projects/development/project-completion-audit/_main/) |
+| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata plus opt-in local bridge command skills for OpenCode and AG2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
 | [Codex SSH Hostinger Coolify Setup Maintainer](_projects/development/hostinger-coolify-production-guide/) | Codex SSH Hostinger VPS plus Coolify setup, deployment, daily security checks, intrusion-signal review, optional maintenance alerts, and incident response workflow. | [_main/](_projects/development/hostinger-coolify-production-guide/_main/) |
 | [Self-Hosted Service Safety](_projects/development/self-hosted-service-safety/) | Lightweight non-n8n Docker/VPS, public exposure, credential, backup, SSH, traffic-log, and first-run safety-review skill source. | [_main/](_projects/development/self-hosted-service-safety/_main/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
@@ -75,6 +78,13 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
 | [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |
 | [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, templates, manifests, and audits. |
+| [Setup Local Toolkit Bridge](skills/setup-local-toolkit-bridge/) | Set up or trust the user-local Toolkit bridge hub and optional auto-sync after dry-run audit and approval. |
+| [Setup OpenCode Bridge](skills/setup-opencode-bridge/) | Enable the opt-in OpenCode bridge target after showing planned global skill writes. |
+| [Setup AG2 Bridge](skills/setup-ag2-bridge/) | Enable the opt-in AG2 bridge target without installing Python packages. |
+| [Setup All Non-Native Bridges](skills/setup-all-non-native-bridges/) | Preview OpenCode and AG2 setup together, then enable only approved targets. |
+| [Sync Enabled Bridges](skills/sync-enabled-bridges/) | Sync only already-enabled Toolkit bridge targets with lock handling and downgrade refusal. |
+| [Audit Local Toolkit Bridge](skills/audit-local-toolkit-bridge/) | Inspect bridge state, paths, checksums, target detection, and skip reasons without writing by default. |
+| [Disable Local Toolkit Bridge](skills/disable-local-toolkit-bridge/) | Disable bridge auto-sync or targets without deleting user files by default. |
 | [Agent Skill Supply-Chain Audit](skills/agent-skill-supply-chain-audit/) | Audit third-party agent skills for provenance, license, safety, conversion fit, and token-bloat risk. |
 | [Local AI Stack Safety](skills/local-ai-stack-safety/) | Review local AI runtimes, model downloads, local AI web UIs, and endpoint exposure before setup. |
 | [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare low-cost managed or owner-hosted foundations before custom-building auth, backend, database, workflow automation, CRM, forms, email, analytics, ops, and account-security surfaces. |
@@ -92,7 +102,15 @@ For deeper setup notes, use [How To Use: Install Toolkit Skills](repo/docs/HOW-T
 > [!IMPORTANT]
 > Repo-local agent instruction installs require a selected/open target repo or an explicit target path. Standalone chats without a workspace cannot safely infer where to install `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-For toolkit-owned skills, copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+Preferred v2 route:
+
+- Codex updates Toolkit through the Codex native plugin system using [.codex-plugin/plugin.json](.codex-plugin/plugin.json).
+- Claude Code updates Toolkit through the Claude Code native plugin system using [.claude-plugin/plugin.json](.claude-plugin/plugin.json).
+- Codex does not install or update Claude Code.
+- Claude Code does not install or update Codex.
+- The shared bridge manages only opt-in non-native targets: OpenCode global skills and AG2 adapter metadata.
+
+Manual fallback: copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
 [Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. For n8n work, install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin where the platform supports plugin hooks:
 
@@ -128,14 +146,23 @@ The cue names the current [official n8n Skills](https://github.com/n8n-io/skills
 
 | Platform | Toolkit-owned skill install | Active instruction files | References |
 |---|---|---|---|
-| Codex | Direct whole-skill-folder install.<br>**Choose any one supported Codex skill-folder location:**<br>- `<repo>/.agents/skills/<skill-name>/`.<br>- `$HOME/.agents/skills/<skill-name>/`.<br>- `/etc/codex/skills/<skill-name>/`. | `AGENTS.md` | [Codex reference](skills/n8n-local-setup/references/ai-agent-platforms/codex.md). |
-| Claude Code | Direct whole-skill-folder install.<br>**Choose any one supported Claude Code skill-folder location:**<br>- `<repo>/.claude/skills/<skill-name>/`.<br>- `$HOME/.claude/skills/<skill-name>/`. | `AGENTS.md`, `CLAUDE.md` shim | [Claude Code reference](skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md). |
-| OpenCode | Short manual whole-skill-folder install only.<br>**Choose any one supported OpenCode skill-folder location:**<br>- `<repo>/.opencode/skills/<skill-name>/`.<br>- `$HOME/.config/opencode/skills/<skill-name>/`.<br>- A compatible `.agents/skills/` or `.claude/skills/` location if that is how the target OpenCode runtime is configured. | `AGENTS.md` | [OpenCode reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md). |
+| Codex | Native plugin package via `.codex-plugin/plugin.json`; direct whole-skill-folder install remains a manual fallback. | `AGENTS.md` | [Codex reference](skills/n8n-local-setup/references/ai-agent-platforms/codex.md). |
+| Claude Code | Native plugin package via `.claude-plugin/plugin.json`; direct whole-skill-folder install remains a manual fallback. | `AGENTS.md`, `CLAUDE.md` shim | [Claude Code reference](skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md). |
+| OpenCode | Opt-in bridge target only after approval.<br>Default global output: `$HOME/.config/opencode/skills/ai-agent-toolkit/`. | `AGENTS.md` | [OpenCode reference](skills/n8n-local-setup/references/ai-agent-platforms/opencode.md). |
+| AG2 | Opt-in bridge target only after approval.<br>Adapter output stays under `$HOME/.ai-agent-toolkit/current/adapters/ag2/`. | Portable metadata | [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md). |
 | Antigravity | Plugin-scoped skill-folder install.<br>`C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\`. | `AGENTS.md`, `GEMINI.md`, Antigravity bootstrap | [Antigravity reference](skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md). |
 
 Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and not the beginner local setup path.
 
 Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [skills/n8n-agent-rules/](skills/n8n-agent-rules/). Optional adapters in [skills/n8n-agent-rules/adapters/](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
+
+For bridge status:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --audit
+```
+
+See [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md) for autocheck, autosetup, auto-sync, rollback, Windows/POSIX paths, hook policy, and portable policy-first layering.
 
 ## MCP Status
 
@@ -151,6 +178,8 @@ The supported path is skills-first: humans use `_projects/**`; agents use `skill
 |---|---|
 | [_projects/](_projects/) | You want full preserved project guides/source material. |
 | [skills/](skills/) | You want copyable agent skills. |
+| [.codex-plugin/](.codex-plugin/) | You want generated Codex native plugin metadata. |
+| [.claude-plugin/](.claude-plugin/) | You want generated Claude Code native plugin metadata. |
 | [repo/](repo/) | You are maintaining this toolkit. |
 
 ## For Maintainers
@@ -196,9 +225,10 @@ This repo has a source layer and a published layer.
 - For third-party projects, `toolkit.project.json` version is the toolkit adaptation version only; scheduled source-watch tracking must read upstream repo, source ref, locked commit, `source_update_policy`, attribution requirement, allowlisted files, and exact blob pins from `SOURCE-LOCK.json`.
 - Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.
 - `skills/` contains copyable AI-agent skill folders. The whole skill folder is the install unit.
+- `.codex-plugin/` and `.claude-plugin/` contain generated native plugin metadata for the current Toolkit package. They are not source of truth and must not be used to cross-update the other native platform.
 - Toolkit skill-routing source lives in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`; keep it aligned with current `skills/*/SKILL.md` when skills or skill-publishing project modules change, and document any intentionally omitted skill.
 - This repo intentionally does not ship or maintain a repo-wide MCP generated surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain under `skills/n8n-local-setup/` as secondary n8n setup material.
-- Generated `skills/` files must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
+- Generated published surfaces under `skills/`, `.codex-plugin/`, and `.claude-plugin/` must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
 - `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
 - Publish declared outputs with:
   `node repo/scripts/sync-toolkit-projects.cjs --write`

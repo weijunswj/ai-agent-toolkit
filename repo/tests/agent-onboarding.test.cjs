@@ -39,8 +39,8 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   assert.match(agents, /`_projects\/\*\*\/toolkit\.project\.json` is the routing and toolkit project-version contract\./);
   assert.match(agents, /`skills\/` contains copyable AI-agent skill folders\./);
 
-  assert.match(sourceOfTruth, /The repo-wide generated surface is skills-first\./);
-  assert.match(sourceOfTruth, /Humans use `_projects\/\*\*` for source review and maintenance, and agents use generated `skills\/\*\*` folders after sync\./);
+  assert.match(sourceOfTruth, /The repo-wide generated surface is skills-first plus native plugin metadata\./);
+  assert.match(sourceOfTruth, /Humans use `_projects\/\*\*` for source review and maintenance, agents use generated `skills\/\*\*` folders after sync, and native plugin installers read generated `\.codex-plugin\/\*\*` or `\.claude-plugin\/\*\*` metadata\./);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Persistent status, report, implementation plan, handoff, operations, setup, CI\/CD, deployment, safety, and troubleshooting notes belong under an existing `docs\/` path/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /read the relevant docs and treat them as active context/i);
   assert.match(validation, /For this repo, the canonical full validation command is:/);
