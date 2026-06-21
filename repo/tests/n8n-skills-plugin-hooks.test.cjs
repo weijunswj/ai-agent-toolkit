@@ -101,6 +101,16 @@ function runPowerShellWrapperHook(pluginRoot, relPath, input) {
   );
 }
 
+function hasWindowsPowerShellForTests() {
+  if (process.platform !== 'win32') return false;
+  const result = spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'],
+    { encoding: 'utf8' }
+  );
+  return !result.error && result.status === 0;
+}
+
 function writeSessionStartShellHookWithNodeFallback(pluginRoot) {
   fs.writeFileSync(
     path.join(pluginRoot, 'hooks', 'session-start.sh'),
@@ -602,7 +612,12 @@ test('Windows hook repair wraps direct shell hook commands and is idempotent', (
   assert.equal(audit.status, 0, audit.stderr);
 });
 
-test('Windows hook repair wrapper executes repaired hook through powershell.exe', () => {
+test('Windows hook repair wrapper executes repaired hook through powershell.exe', (t) => {
+  if (!hasWindowsPowerShellForTests()) {
+    t.skip('powershell.exe wrapper execution verification requires Windows PowerShell');
+    return;
+  }
+
   const pluginRoot = makePluginRoot();
   writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
     name: 'generic-plugin',
