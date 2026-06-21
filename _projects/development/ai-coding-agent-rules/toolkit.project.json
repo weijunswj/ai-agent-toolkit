@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "version_policy": "semver",
-  "version_notes": "Clarifies n8n agent routing to prefer official n8n Skills (https://github.com/n8n-io/skills) first, then only the official instance-level n8n MCP tools actually available in the connected instance.",
+  "version_notes": "Adds a portable guarded project completion and production-readiness audit playbook route.",
   "outputs": [
     {
       "kind": "curated",

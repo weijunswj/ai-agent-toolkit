@@ -62,6 +62,14 @@ Read: `repo/docs/agent-playbooks/pr-review-and-ci.md`.
 
 Do not claim CI passed unless checked. Do not do reviews from metadata alone.
 
+## Match: Project Completion Or Production-Readiness Audit Work
+
+Triggers: final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready?", `/goal` readiness remediation, audit against original docs, security-readiness check, or final readiness check.
+
+Read: `skills/project-completion-audit/SKILL.md` when generated/published outputs are present; when editing the source in this toolkit repo, read `_projects/development/project-completion-audit/_main/skill/SKILL.md`.
+
+Only lightweight preflight is allowed before explicit confirmation. Stop before broad validation, full builds, browser sweeps, security scans, deployment checks, external-service checks, or remediation until the user confirms the target and scope.
+
 ## Match: Risky Or Live-System Work
 
 Triggers: credentials, secrets, customer/private data, production behavior, external service writes, destructive commands, deployments, runtime state, live databases, auth/security settings, Docker, n8n live actions, SSH, or firewall changes.

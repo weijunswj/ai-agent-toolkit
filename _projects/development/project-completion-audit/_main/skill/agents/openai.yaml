@@ -1,0 +1,13 @@
+interface:
+  display_name: Project Completion Audit
+  short_description: Guard final readiness audits.
+  primary_color: '#2563EB'
+  default_prompt: Use $project-completion-audit to run a guarded preflight before a full production-readiness audit, security scan, browser verification, or remediation loop.
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: false
+
