@@ -170,7 +170,12 @@ function auditPluginRoot(pluginRoot, options = {}) {
   ]) {
     const normalizedRelPath = normalizeRelPath(relPath);
     const scriptPath = path.join(pluginRoot, ...normalizedRelPath.split('/'));
-    if (!fs.existsSync(scriptPath)) continue;
+    if (!fs.existsSync(scriptPath)) {
+      if (referencedShellScripts.has(normalizedRelPath)) {
+        errors.push(`${normalizedRelPath} is referenced by hooks/hooks.json but does not exist`);
+      }
+      continue;
+    }
     const text = fs.readFileSync(scriptPath, 'utf8');
     if (shouldRequireNodeJsonFallback(normalizedRelPath, text) && !hasNodeJsonFallback(text)) {
       errors.push(

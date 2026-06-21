@@ -9,7 +9,7 @@ Use the skill name, description, and local files to decide whether a skill appli
 | Skill | Use when the task involves |
 |---|---|
 | `ai-coding-agent-rules` | Bootstrapping, checking, or repairing repo-local AI coding agent instruction files and platform shims for Codex, Claude Code, or Antigravity. |
-| `toolkit-setup` | AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, or bridge setup safety. |
+| `toolkit-setup` | AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. |
 | `n8n-agent-rules` | Any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
 | `n8n-local-setup` | Safe local n8n Docker Compose setup, hosted n8n Hostinger Coolify VPS notes, Postgres/ngrok stack templates, MCP config selection, or platform-specific n8n agent-rule setup. |
 | `n8n-workflow-helper-scripts` | Safe n8n workflow helper scripts, sanitizer helpers, import/export sync helpers, validation, comparison, live-import preparation, or repo/live workflow hygiene. |

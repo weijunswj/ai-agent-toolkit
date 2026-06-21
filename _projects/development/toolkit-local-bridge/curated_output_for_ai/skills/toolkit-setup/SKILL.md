@@ -13,7 +13,7 @@ Review rule: Keep this skill as a compact setup router. Do not duplicate the bri
 
 Use this skill as a discoverability router for Toolkit plugin and local bridge setup work.
 
-Bridge setup, repo auto-update, sync, audit, disable, and troubleshooting are Toolkit setup infrastructure. The implementation lives in `repo/scripts/toolkit-local-bridge.cjs`; detailed policy lives in `repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md`, `repo/docs/HOW-TO-USE.md`, `AGENTS.md`, validators, and tests.
+Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair, and troubleshooting are Toolkit setup infrastructure. The bridge implementation lives in `repo/scripts/toolkit-local-bridge.cjs`; Codex plugin hook repair lives in `repo/scripts/repair-codex-plugin-windows-hooks.cjs`; detailed policy lives in `repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md`, `repo/docs/HOW-TO-USE.md`, `AGENTS.md`, validators, and tests.
 
 ## Required Route
 
@@ -24,7 +24,7 @@ Bridge setup, repo auto-update, sync, audit, disable, and troubleshooting are To
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-3. Use `repo/scripts/toolkit-local-bridge.cjs` for setup, repo auto-update enablement, sync, audit, disable, stale-state recovery, and troubleshooting. Do not invent a new command family or duplicate the updater logic in the skill.
+3. Use `repo/scripts/toolkit-local-bridge.cjs` for setup, repo auto-update enablement, sync, audit, disable, stale-state recovery, and troubleshooting. Use `repo/scripts/repair-codex-plugin-windows-hooks.cjs` only for post-install Windows hook audit/repair of an installed Codex plugin root. Do not invent a new command family or duplicate the updater logic in the skill.
 4. Before final response after repo changes, run the relevant validators or tests for the touched surface.
 
 ## Safety Rules
@@ -36,6 +36,7 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 - Disabled or never-enabled targets must not be touched.
 - Repo auto-update is opt-in only and must validate the configured Toolkit repo, expected remote, clean tree, fast-forward update, and hook-light validation before enabled-target sync.
 - Do not run npm, pip, package installs, marketplace installs, or dependency installers from this skill.
+- After a requested Codex plugin install or update on Windows, repair that installed plugin root before approving hooks. If repair cannot make hooks safe, fail with the repair error instead of reporting success.
 - Do not mutate arbitrary project repos by default.
 - Do not use Codex to update Claude Code or Claude Code to update Codex.
 - Refuse downgrade unless the user explicitly requests `--force-downgrade` for recovery.

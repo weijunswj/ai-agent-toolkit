@@ -59,7 +59,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Local AI Stack Safety](_projects/development/local-ai-stack-safety/) | Lightweight local AI runtime, model download, local AI web UI, and endpoint exposure safety-review skill source. | [_main/](_projects/development/local-ai-stack-safety/_main/) |
 | [Managed App Foundation Review](_projects/development/managed-app-foundation-review/) | Build-vs-buy planning for low-cost managed or owner-hosted auth, backend, database, workflow automation, CRM, forms, email, storage, analytics, ops, and account-security foundations. | [_main/](_projects/development/managed-app-foundation-review/_main/) |
 | [Project Completion Audit](_projects/development/project-completion-audit/) | Guarded final completion, production-readiness, release-candidate, QA, security-readiness, and remediation audit workflow. | [_main/](_projects/development/project-completion-audit/_main/) |
-| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata plus one compact setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and AG2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
+| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata, Windows-safe Codex plugin hook repair, one compact setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and AG2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
 | [Codex SSH Hostinger Coolify Setup Maintainer](_projects/development/hostinger-coolify-production-guide/) | Codex SSH Hostinger VPS plus Coolify setup, deployment, daily security checks, intrusion-signal review, optional maintenance alerts, and incident response workflow. | [_main/](_projects/development/hostinger-coolify-production-guide/_main/) |
 | [Self-Hosted Service Safety](_projects/development/self-hosted-service-safety/) | Lightweight non-n8n Docker/VPS, public exposure, credential, backup, SSH, traffic-log, and first-run safety-review skill source. | [_main/](_projects/development/self-hosted-service-safety/_main/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
@@ -72,7 +72,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | Skill | Use |
 |---|---|
 | [AI Coding Agent Rules](skills/ai-coding-agent-rules/) | Install generic execution-first agent rules for supported coding agents. |
-| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, repo-backed auto-update, local bridge setup, OpenCode bridge support, AG2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
+| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, AG2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
 | [n8n Agent Rules](skills/n8n-agent-rules/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
 | [n8n Local Setup](skills/n8n-local-setup/) | Set up local n8n with Docker Compose, Postgres, Compose ngrok, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu use, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. |
 | [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
@@ -106,13 +106,11 @@ Preferred v2 route:
 
 Manual fallback: copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. Use the official plugin only where hooks are known to execute through a real interpreter.
+[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. Install the official plugin from upstream, then run Toolkit's Windows hook repair before trusting hooks on Windows.
 
-On Windows, do not approve or trust current official plugin hooks unless the installed package's `hooks/hooks.json` invokes a Windows-safe command such as a Node or PowerShell wrapper instead of a bare `.sh` path like `${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh`. The hook emitters must also be able to output valid JSON with Node when `jq` and `python3` are unavailable. WSL `bash.exe` is not enough unless a WSL distro is installed, and Git Bash must be invoked explicitly by the hook command.
+On Windows, the installed package's `hooks/hooks.json` must not leave a bare `.sh` path like `${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh`, bare `bash`, or `C:\WINDOWS\system32\bash.exe`. Toolkit repairs generic `.sh` hook commands through a PowerShell wrapper that invokes Git Bash from `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`; for `n8n-skills@n8n-io`, it also patches hook emitters so they can output JSON with Node when `jq` and `python3` are unavailable.
 
-If Codex or Claude Code already opens `session-start.sh` on every new chat, the installed plugin is invoking a bare `.sh` hook on Windows. Run `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows`; for Codex this path is commonly `C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>`. If the audit fails, remove, disable, untrust, or uninstall the official plugin hooks or plugin. Restart the agent, use `npx skills add n8n-io/skills`, and keep the target repo cue that loads `using-n8n-skills` before n8n work. Only reinstall or re-trust the official plugin after the installed hook metadata is Windows-safe and hook emitters can output JSON with Node. The installed plugin cache may need manual reinstall or update after upstream fixes.
-
-For macOS/Linux, or for Windows after the installed plugin passes those hook checks, install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin:
+Install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin:
 
 ```powershell
 codex plugin marketplace add n8n-io/skills
@@ -124,9 +122,18 @@ codex plugin add n8n-skills@n8n-io
 /plugin install n8n-skills@n8n-io
 ```
 
+On Windows, repair and audit the installed plugin cache before approving or trusting hooks:
+
+```powershell
+node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io
+node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows
+```
+
+For Codex this path is commonly `C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>`. If repair fails, do not approve the hooks; use the clear error message to install Git for Windows, update the plugin, or fall back to the upstream "Other platforms" route plus the target repo cue.
+
 Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
-For Windows installs that fail the hook checks, OpenCode, Antigravity, and other platforms without proven official plugin parity, follow the upstream "Other platforms" route from the [official n8n Skills](https://github.com/n8n-io/skills) README. From the target project folder, run:
+For OpenCode, Antigravity, Windows installs that cannot be repaired, and other platforms without proven official plugin parity, follow the upstream "Other platforms" route from the [official n8n Skills](https://github.com/n8n-io/skills) README. From the target project folder, run:
 
 ```powershell
 npx skills add n8n-io/skills

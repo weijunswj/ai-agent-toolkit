@@ -28,7 +28,12 @@ Copy the whole `skills/<skill-name>/` folder.
 
 Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
-Codex plugin/package support exists, but this repo does not make it the primary install path yet. Until Codex plugin installs and Windows hooks are reliably safe, Codex should use direct whole-skill-folder installs.
+Codex plugin/package support exists. For official `n8n-skills@n8n-io` on Windows, run Toolkit hook repair and audit on the installed plugin cache before trusting hooks:
+
+```powershell
+node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io
+node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows
+```
 
 ## Local Routes
 

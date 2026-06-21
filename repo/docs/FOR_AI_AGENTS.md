@@ -42,7 +42,7 @@ Use installed skills only when they clearly match the task and improve correctne
 | Skill | Use when the task involves |
 | --- | --- |
 | `ai-coding-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates. |
-| `toolkit-setup` | AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, or bridge setup safety. |
+| `toolkit-setup` | AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. |
 | `n8n-agent-rules` | Any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
 | `n8n-local-setup` | Safe local n8n Docker Compose setup, hosted n8n Hostinger Coolify VPS notes, Postgres/ngrok stack templates, [official n8n Skills](https://github.com/n8n-io/skills) setup, official instance-level MCP config selection, or platform-specific n8n agent-rule setup. |
 | `n8n-workflow-helper-scripts` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
@@ -87,7 +87,7 @@ Prioritize repo safety, device safety, provenance, attribution, validation, and 
 
 For install or template writes, pause before mutating the target repo. Preview the target writes, explain the source files, name the exact target paths, preserve product repo ownership, and ask for explicit current-turn approval.
 
-Toolkit Local Bridge setup is infrastructure with one compact `toolkit-setup` discoverability skill, not a command-per-bridge skill family. Use [Toolkit Local Bridge V2](TOOLKIT-LOCAL-BRIDGE-V2.md) and `node repo/scripts/toolkit-local-bridge.cjs` for audit, opt-in repo-backed Toolkit auto-update, opt-in OpenCode or AG2 setup, enabled-target sync, and disable operations. Keep bridge setup dry-run by default, never autosetup detected targets, never install npm or pip packages, never mutate arbitrary project repos by default, and never rely on hooks as the only place where critical policy exists.
+Toolkit Local Bridge setup is infrastructure with one compact `toolkit-setup` discoverability skill, not a command-per-bridge skill family. Use [Toolkit Local Bridge V2](TOOLKIT-LOCAL-BRIDGE-V2.md) and `node repo/scripts/toolkit-local-bridge.cjs` for audit, opt-in repo-backed Toolkit auto-update, opt-in OpenCode or AG2 setup, enabled-target sync, and disable operations. Use `node repo/scripts/repair-codex-plugin-windows-hooks.cjs` only for post-install Windows hook repair of a requested installed Codex plugin root. Keep bridge setup dry-run by default, never autosetup detected targets, never install npm or pip packages, never mutate arbitrary project repos by default, and never rely on hooks as the only place where critical policy exists.
 
 Never commit or install:
 
