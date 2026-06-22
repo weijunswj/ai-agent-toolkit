@@ -22,6 +22,7 @@ const CACHE_FINGERPRINT_DIRS = [
   '.codex-plugin/assets',
   'skills'
 ];
+const WINDOWS_USERPROFILE_CLI_HINT = path.join('%USERPROFILE%', '.codex', 'plugins', '.plugin-appserver', 'codex.exe');
 const CODEX_PLUGIN_ICON_SPECS = [
   {
     field: 'composerIcon',
@@ -515,6 +516,29 @@ function commandOutput(result) {
   return `${result.stdout || ''}${result.stderr || ''}${result.error ? result.error.message : ''}`.trim();
 }
 
+function windowsAliasCliCandidate() {
+  return path.join(defaultCodexHome(), 'plugins', '.plugin-appserver', process.platform === 'win32' ? 'codex.exe' : 'codex');
+}
+
+function isWindowsAppsAliasAccessDenied(command, output) {
+  const text = String(output || '');
+  return process.platform === 'win32' &&
+    command === 'codex' &&
+    /(access is denied|eperm|eacces)/i.test(text);
+}
+
+function formatWindowsAliasFailure(command, output) {
+  const detail = String(output || '').trim() || 'failed before startup';
+  if (isWindowsAppsAliasAccessDenied(command, output)) {
+    return [
+      `${command}: ${detail}`,
+      '  Known condition: `codex` likely resolved to a non-runnable WindowsApps alias.',
+      `  Use the app-managed CLI at ${WINDOWS_USERPROFILE_CLI_HINT} or pass --codex-cli "${windowsAliasCliCandidate()}".`
+    ].join('\n');
+  }
+  return `${command}: ${detail}`;
+}
+
 function positiveIntEnv(name, fallback) {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -570,11 +594,7 @@ function commandCandidates(explicitCommand) {
   if (explicitCommand) candidates.push(explicitCommand);
   if (process.env.CODEX_TOOLKIT_CODEX_CLI) candidates.push(process.env.CODEX_TOOLKIT_CODEX_CLI);
   if (process.env.CODEX_CLI_PATH) candidates.push(process.env.CODEX_CLI_PATH);
-  if (process.platform === 'win32') {
-    candidates.push(path.join(defaultCodexHome(), 'plugins', '.plugin-appserver', 'codex.exe'));
-  } else {
-    candidates.push(path.join(defaultCodexHome(), 'plugins', '.plugin-appserver', 'codex'));
-  }
+  candidates.push(windowsAliasCliCandidate());
   candidates.push('codex');
   return [...new Set(candidates.filter(Boolean))];
 }
@@ -589,7 +609,7 @@ function resolveCodexCommand(explicitCommand) {
     if (result.status === 0 && /Manage Codex plugins/.test(`${result.stdout}${result.stderr}`)) {
       return { command, failures };
     }
-    failures.push(`${command}: ${commandOutput(result) || `exit ${result.status}`}`);
+    failures.push(formatWindowsAliasFailure(command, commandOutput(result) || `exit ${result.status}`));
   }
   return { command: '', failures };
 }
@@ -756,6 +776,9 @@ function usage() {
     `  codex plugin marketplace add <local-ai-agent-toolkit-repo> --json`,
     `  codex plugin add ${pluginId()} --json`,
     '',
+    'On Windows, pass the app-managed Codex CLI directly if bare `codex` resolves to WindowsApps:',
+    `  node repo/scripts/setup-codex-toolkit-plugin.cjs --write --codex-cli "${windowsAliasCliCandidate()}"`,
+    '',
     'The local repo must expose .agents/plugins/marketplace.json and .codex-plugin/plugin.json.',
     'This script is Codex-only; it never installs or updates Claude Code.'
   ].join('\n');
@@ -887,5 +910,7 @@ module.exports = {
   validateMarketplaceWrapper,
   validateRepoPluginSource,
   verifyInstalledCacheFreshness,
-  verifySessionStartHook
+  verifySessionStartHook,
+  isWindowsAppsAliasAccessDenied,
+  windowsAliasCliCandidate
 };
