@@ -55,6 +55,7 @@ function installedList(options = {}) {
         version,
         installed: true,
         enabled: options.enabled !== false,
+        authPolicy: 'ON_USE',
         source: {
           source: 'local',
           path: repoRoot
@@ -117,4 +118,86 @@ test('Codex Toolkit plugin setup exposes supported local marketplace install com
     ['plugin', 'add', 'ai-agent-toolkit@ai-agent-toolkit-local', '--json']
   ]);
   assert.equal(commands.flat().some((arg) => /claude/i.test(arg)), false);
+});
+
+test('Codex Toolkit marketplace wrapper avoids install-time auth for headless local installs', () => {
+  assert.deepEqual(setup.validateMarketplaceWrapper({
+    name: 'ai-agent-toolkit-local',
+    plugins: [
+      {
+        name: 'ai-agent-toolkit',
+        source: {
+          source: 'local',
+          path: '.'
+        },
+        policy: {
+          installation: 'AVAILABLE',
+          authentication: 'ON_USE'
+        }
+      }
+    ]
+  }), []);
+
+  for (const policy of [
+    { installation: 'AVAILABLE' },
+    { installation: 'AVAILABLE', authentication: 'ON_INSTALL' }
+  ]) {
+    const errors = setup.validateMarketplaceWrapper({
+      name: 'ai-agent-toolkit-local',
+      plugins: [
+        {
+          name: 'ai-agent-toolkit',
+          source: {
+            source: 'local',
+            path: '.'
+          },
+          policy
+        }
+      ]
+    });
+    assert.match(errors.join('\n'), /must use ON_USE authentication/i);
+  }
+});
+
+test('Codex Toolkit plugin setup verifier rejects install-time auth policy from Codex list output', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome);
+
+  for (const authPolicy of ['ON_INSTALL', undefined]) {
+    const state = setup.evaluateCodexToolkitPluginState({
+      installed: [
+        {
+          pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
+          name: 'ai-agent-toolkit',
+          marketplaceName: 'ai-agent-toolkit-local',
+          version: '2.2.0',
+          installed: true,
+          enabled: true,
+          authPolicy,
+          source: {
+            source: 'local',
+            path: repoRoot
+          }
+        }
+      ],
+      available: []
+    }, {
+      codexHome,
+      repoRoot
+    });
+
+    assert.equal(state.ok, false);
+    assert.match(state.errors.join('\n'), /expected authPolicy ON_USE/i);
+  }
+});
+
+test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
+  const bridgeDoc = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'TOOLKIT-LOCAL-BRIDGE-V2.md'), 'utf8');
+  assert.match(bridgeDoc, /Manual Isolated CODEX_HOME Acceptance/i);
+  assert.match(bridgeDoc, /CODEX_HOME=<temp>/);
+  assert.match(bridgeDoc, /codex plugin marketplace add <repo> --json/);
+  assert.match(bridgeDoc, /codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json/);
+  assert.match(bridgeDoc, /codex plugin list --available --json/);
+  assert.match(bridgeDoc, /plugins\/cache\/ai-agent-toolkit-local\/ai-agent-toolkit\/2\.2\.0/);
+  assert.match(bridgeDoc, /SessionStart/);
 });

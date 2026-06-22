@@ -638,7 +638,7 @@ test('Toolkit exposes a local Codex marketplace wrapper for supported plugin ins
     },
     policy: {
       installation: 'AVAILABLE',
-      authentication: 'ON_INSTALL'
+      authentication: 'ON_USE'
     },
     category: 'Developer Tools'
   });

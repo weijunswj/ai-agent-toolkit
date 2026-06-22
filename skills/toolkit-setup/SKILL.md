@@ -65,7 +65,7 @@ codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-The local marketplace wrapper is `.agents/plugins/marketplace.json`; it exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local` and the package manifest is `.codex-plugin/plugin.json`. `setup-codex-toolkit-plugin.cjs --write` runs the same supported Codex commands and then verifies the result. Verification must confirm the installed plugin cache contains Toolkit version `2.2.0` and `.codex-plugin/hooks/hooks.json` includes the Codex `SessionStart` hook. If Codex local marketplace install is unsupported or the verifier cannot find a usable Codex CLI, fail clearly instead of pretending setup completed. Do not use Codex to install or update Claude Code.
+The local marketplace wrapper is `.agents/plugins/marketplace.json`; it exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`, uses `policy.authentication: "ON_USE"` so install can complete headlessly, and the package manifest is `.codex-plugin/plugin.json`. `setup-codex-toolkit-plugin.cjs --write` runs the same supported Codex commands and then verifies the result. Verification must confirm the installed plugin cache contains Toolkit version `2.2.0` and `.codex-plugin/hooks/hooks.json` includes the Codex `SessionStart` hook. If Codex local marketplace install is unsupported or the verifier cannot find a usable Codex CLI, fail clearly instead of pretending setup completed. Do not use Codex to install or update Claude Code.
 3. Configure repo-backed auto-update from this local repo without enabling OpenCode or AG2 yet:
 
 ```powershell

@@ -126,7 +126,7 @@ codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json
 codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
 ```
 
-The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`.
+The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`. The wrapper must use `policy.authentication: "ON_USE"`, not `ON_INSTALL`, so a no-auth local Toolkit plugin can install headlessly before any hook trust prompt.
 
 Before reporting `setup toolkit` complete, run:
 
@@ -143,6 +143,25 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --write
 The verifier uses only supported Codex plugin commands. If no usable Codex CLI with `plugin marketplace` support is available, or if local marketplace installation fails, setup must fail clearly instead of pretending native plugin activation completed.
 
 Codex setup must never install or update Claude Code. Claude Code uses its own native plugin system and `.claude-plugin/plugin.json`.
+
+### Manual Isolated CODEX_HOME Acceptance
+
+Before merging changes that affect Codex local plugin install, run this smoke test with a fresh isolated Codex home. In the example, `CODEX_HOME=<temp>` means a newly created temporary directory, not the user's normal Codex home.
+
+```powershell
+$env:CODEX_HOME = "<temp>"
+codex plugin marketplace add <repo> --json
+codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
+codex plugin list --available --json
+```
+
+Acceptance criteria:
+
+- `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` exits successfully without an interactive auth step or timeout.
+- `codex plugin list --available --json` shows `ai-agent-toolkit@ai-agent-toolkit-local` installed and enabled with `authPolicy` `ON_USE`.
+- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.0`.
+- The final cache `.codex-plugin/plugin.json` reports version `2.2.0`.
+- The final cache `.codex-plugin/hooks/hooks.json` includes a `SessionStart` hook.
 
 ## Repo-Backed Auto-Update
 

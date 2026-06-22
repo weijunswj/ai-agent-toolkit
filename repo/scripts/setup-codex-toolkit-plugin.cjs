@@ -89,6 +89,9 @@ function validateMarketplaceWrapper(marketplace) {
   if (plugin.policy?.installation !== 'AVAILABLE') {
     errors.push(`${TOOLKIT_PLUGIN_NAME} marketplace installation policy must be AVAILABLE`);
   }
+  if (plugin.policy?.authentication !== 'ON_USE') {
+    errors.push(`${TOOLKIT_PLUGIN_NAME} marketplace policy must use ON_USE authentication`);
+  }
   return errors;
 }
 
@@ -154,6 +157,9 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
   if (!installed.enabled) errors.push(`${pluginId()} is installed but not enabled`);
   if (installed.version !== expectedVersion) {
     errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version || '<missing>'}`);
+  }
+  if (installed.authPolicy !== 'ON_USE') {
+    errors.push(`${pluginId()} expected authPolicy ON_USE for headless local install: ${installed.authPolicy || '<missing>'}`);
   }
   if (installed.source?.path && path.resolve(installed.source.path) !== repoRoot) {
     errors.push(`${pluginId()} source path does not match this local repo: ${installed.source.path}`);

@@ -68,7 +68,7 @@ codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-The local marketplace wrapper is [`.agents/plugins/marketplace.json`](../../.agents/plugins/marketplace.json). `node repo/scripts/setup-codex-toolkit-plugin.cjs --write` runs the same Codex-only install/update path and fails clearly if local marketplace installs are unsupported. It never installs or updates Claude Code.
+The local marketplace wrapper is [`.agents/plugins/marketplace.json`](../../.agents/plugins/marketplace.json) and uses `policy.authentication: "ON_USE"` so the no-auth local Toolkit plugin can install headlessly. `node repo/scripts/setup-codex-toolkit-plugin.cjs --write` runs the same Codex-only install/update path and fails clearly if local marketplace installs are unsupported. It never installs or updates Claude Code.
 
 Manual fallback: copy the whole `skills/<skill-name>/` folder into one supported location.
 
