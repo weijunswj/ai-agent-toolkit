@@ -19,29 +19,42 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+function copyPath(sourcePath, targetPath) {
+  if (!fs.existsSync(sourcePath)) return;
+  const stat = fs.statSync(sourcePath);
+  if (stat.isDirectory()) {
+    fs.cpSync(sourcePath, targetPath, { recursive: true });
+  } else if (stat.isFile()) {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.copyFileSync(sourcePath, targetPath);
+  }
+}
+
+function copyPackageFingerprint(sourceRoot, cacheRoot) {
+  for (const relPath of setup.CACHE_FINGERPRINT_PATHS) {
+    copyPath(path.join(sourceRoot, ...relPath.split('/')), path.join(cacheRoot, ...relPath.split('/')));
+  }
+  for (const relDir of setup.CACHE_FINGERPRINT_DIRS) {
+    copyPath(path.join(sourceRoot, ...relDir.split('/')), path.join(cacheRoot, ...relDir.split('/')));
+  }
+}
+
 function writeInstalledCache(codexHome, options = {}) {
   const version = options.version || '2.2.0';
   const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', version);
-  writeJson(path.join(root, '.codex-plugin', 'plugin.json'), {
-    name: 'ai-agent-toolkit',
-    version,
-    hooks: './.codex-plugin/hooks/hooks.json',
-    skills: './skills'
-  });
-  writeJson(path.join(root, '.codex-plugin', 'hooks', 'hooks.json'), {
-    hooks: options.omitSessionStart ? {} : {
-      SessionStart: [
-        {
-          hooks: [
-            {
-              type: 'command',
-              command: 'node "${PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source codex-plugin'
-            }
-          ]
-        }
-      ]
-    }
-  });
+  copyPackageFingerprint(repoRoot, root);
+  if (version !== '2.2.0') {
+    const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.version = version;
+    writeJson(manifestPath, manifest);
+  }
+  if (options.omitSessionStart) {
+    writeJson(path.join(root, '.codex-plugin', 'hooks', 'hooks.json'), { hooks: {} });
+  }
+  if (options.staleBridgeScript) {
+    fs.writeFileSync(path.join(root, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale cached bridge script\n', 'utf8');
+  }
   return root;
 }
 
@@ -124,28 +137,31 @@ function writeJson(value) {
   process.stdout.write(JSON.stringify(value, null, 2) + '\\n');
 }
 
+function copyPath(sourcePath, targetPath) {
+  if (!fs.existsSync(sourcePath)) return;
+  const stat = fs.statSync(sourcePath);
+  if (stat.isDirectory()) {
+    fs.cpSync(sourcePath, targetPath, { recursive: true });
+  } else if (stat.isFile()) {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.copyFileSync(sourcePath, targetPath);
+  }
+}
+
+function copyPackageFingerprint(repoRoot, cacheRoot) {
+  const files = ${JSON.stringify(setup.CACHE_FINGERPRINT_PATHS)};
+  const dirs = ${JSON.stringify(setup.CACHE_FINGERPRINT_DIRS)};
+  for (const relPath of files) copyPath(path.join(repoRoot, ...relPath.split('/')), path.join(cacheRoot, ...relPath.split('/')));
+  for (const relPath of dirs) copyPath(path.join(repoRoot, ...relPath.split('/')), path.join(cacheRoot, ...relPath.split('/')));
+}
+
 function installCache(repoRoot) {
   const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '2.2.0');
-  fs.mkdirSync(path.join(root, '.codex-plugin', 'hooks'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit',
-    version: '2.2.0',
-    hooks: './.codex-plugin/hooks/hooks.json'
-  }, null, 2) + '\\n');
-  fs.writeFileSync(path.join(root, '.codex-plugin', 'hooks', 'hooks.json'), JSON.stringify({
-    hooks: omitSessionStart ? {} : {
-      SessionStart: [
-        {
-          hooks: [
-            {
-              type: 'command',
-              command: 'node "' + repoRoot.replace(/\\\\/g, '/') + '/repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source codex-plugin'
-            }
-          ]
-        }
-      ]
-    }
-  }, null, 2) + '\\n');
+  fs.rmSync(root, { recursive: true, force: true });
+  copyPackageFingerprint(repoRoot, root);
+  if (omitSessionStart) {
+    fs.writeFileSync(path.join(root, '.codex-plugin', 'hooks', 'hooks.json'), JSON.stringify({ hooks: {} }, null, 2) + '\\n');
+  }
 }
 
 if (args[0] === 'plugin' && args[1] === '--help') {
@@ -187,15 +203,25 @@ if (args[0] === 'plugin' && args[1] === 'list') {
 if (args[0] === 'plugin' && args[1] === 'add') {
   const finishInstall = () => {
     const state = readState();
+    installCache(state.repoRoot);
     state.installed = true;
     writeState(state);
-    installCache(state.repoRoot);
     process.stdout.write(JSON.stringify({ pluginId: args[2], authPolicy: 'ON_USE' }) + '\\n');
     setInterval(() => {}, 1000);
   };
   if (installDelayMs > 0) setTimeout(finishInstall, installDelayMs);
   else finishInstall();
   return;
+}
+
+if (args[0] === 'plugin' && args[1] === 'remove') {
+  const state = readState();
+  state.installed = false;
+  state.removeCount = (state.removeCount || 0) + 1;
+  writeState(state);
+  fs.rmSync(path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit'), { recursive: true, force: true });
+  writeJson({ pluginId: args[2] });
+  process.exit(0);
 }
 
 process.stderr.write('unexpected fake codex args: ' + args.join(' ') + '\\n');
@@ -297,6 +323,19 @@ test('Codex Toolkit plugin setup verifier rejects stale, disabled, or hookless i
   });
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /SessionStart/i);
+});
+
+test('Codex Toolkit plugin setup verifier rejects same-version stale cache content', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome, { staleBridgeScript: true });
+
+  const state = setup.evaluateCodexToolkitPluginState(installedList(), {
+    codexHome,
+    repoRoot
+  });
+
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /cache is stale for repo file: repo\/scripts\/toolkit-local-bridge\.cjs/i);
 });
 
 test('Codex Toolkit plugin setup exposes supported local marketplace install commands only', () => {
@@ -517,6 +556,21 @@ test('Codex Toolkit --write succeeds when plugin add installs then times out', (
     'codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json did not exit cleanly, but installed-state verification passed'
   ]);
   assert.match(result.stderr, /WARN: codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json did not exit cleanly/i);
+});
+
+test('Codex Toolkit --write refreshes same-version stale cache by removing before reinstall', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome, { staleBridgeScript: true });
+  const fakeCodex = writeFakeHangingCodex(codexHome, { initialInstalled: true });
+
+  const result = runSetupWrite(codexHome, fakeCodex);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.ok, true);
+  const state = JSON.parse(fs.readFileSync(path.join(codexHome, 'state.json'), 'utf8'));
+  assert.equal(state.removeCount, 1);
+  assert.deepEqual(setup.verifyInstalledCacheFreshness(summary.cache_root, repoRoot), []);
 });
 
 test('Codex Toolkit --write waits for verification when plugin add installs after timeout window', () => {

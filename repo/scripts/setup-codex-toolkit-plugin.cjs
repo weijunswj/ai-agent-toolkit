@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -10,6 +11,17 @@ const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
 const EXPECTED_TOOLKIT_VERSION = '2.2.0';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
+const CACHE_FINGERPRINT_PATHS = [
+  '.codex-plugin/plugin.json',
+  '.codex-plugin/hooks/hooks.json',
+  'repo/scripts/setup-codex-toolkit-plugin.cjs',
+  'repo/scripts/toolkit-local-bridge.cjs',
+  'repo/tests/toolkit-local-bridge-hook-light.test.cjs'
+];
+const CACHE_FINGERPRINT_DIRS = [
+  '.codex-plugin/assets',
+  'skills'
+];
 const CODEX_PLUGIN_ICON_SPECS = [
   {
     field: 'composerIcon',
@@ -179,6 +191,74 @@ function cacheRootFor(codexHome, version = EXPECTED_TOOLKIT_VERSION) {
   return path.join(codexHome, 'plugins', 'cache', TOOLKIT_MARKETPLACE_NAME, TOOLKIT_PLUGIN_NAME, version);
 }
 
+function listFingerprintFiles(root) {
+  const files = [];
+  for (const relPath of CACHE_FINGERPRINT_PATHS) {
+    files.push(relPath);
+  }
+  for (const relDir of CACHE_FINGERPRINT_DIRS) {
+    const absDir = path.join(root, ...relDir.split('/'));
+    if (!fs.existsSync(absDir)) {
+      files.push(`${relDir}/`);
+      continue;
+    }
+    const stack = [absDir];
+    while (stack.length) {
+      const current = stack.pop();
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const absPath = path.join(current, entry.name);
+        const relPath = slash(path.relative(root, absPath));
+        if (entry.isDirectory()) stack.push(absPath);
+        else if (entry.isFile()) files.push(relPath);
+      }
+    }
+  }
+  return [...new Set(files)].sort((left, right) => left.localeCompare(right));
+}
+
+function fileFingerprint(filePath) {
+  if (!fs.existsSync(filePath)) return { exists: false, size: 0, hash: '' };
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile()) return { exists: false, size: 0, hash: '' };
+  return {
+    exists: true,
+    size: stat.size,
+    hash: crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')
+  };
+}
+
+function verifyInstalledCacheFreshness(cacheRoot, repoRoot) {
+  const errors = [];
+  if (!repoRoot) return errors;
+  const sourceRoot = path.resolve(repoRoot);
+  const installedRoot = path.resolve(cacheRoot);
+  const relFiles = new Set([
+    ...listFingerprintFiles(sourceRoot),
+    ...listFingerprintFiles(installedRoot)
+  ]);
+  for (const relPath of [...relFiles].sort((left, right) => left.localeCompare(right))) {
+    if (relPath.endsWith('/')) {
+      const sourceDir = path.join(sourceRoot, ...relPath.slice(0, -1).split('/'));
+      const cacheDir = path.join(installedRoot, ...relPath.slice(0, -1).split('/'));
+      if (!fs.existsSync(sourceDir)) errors.push(`${pluginId()} cache contains stale directory absent from repo: ${relPath}`);
+      if (!fs.existsSync(cacheDir)) errors.push(`${pluginId()} installed plugin cache is missing directory from repo: ${relPath}`);
+      continue;
+    }
+    const sourceFile = path.join(sourceRoot, ...relPath.split('/'));
+    const cacheFile = path.join(installedRoot, ...relPath.split('/'));
+    const source = fileFingerprint(sourceFile);
+    const cache = fileFingerprint(cacheFile);
+    if (!source.exists) {
+      errors.push(`${pluginId()} cache contains stale file absent from repo: ${relPath}`);
+    } else if (!cache.exists) {
+      errors.push(`${pluginId()} installed plugin cache is missing repo file: ${relPath}`);
+    } else if (source.hash !== cache.hash || source.size !== cache.size) {
+      errors.push(`${pluginId()} installed plugin cache is stale for repo file: ${relPath}`);
+    }
+  }
+  return errors;
+}
+
 function codexConfigPath(codexHome) {
   return path.join(codexHome, 'config.toml');
 }
@@ -302,7 +382,7 @@ function detectHookTrustStatus(codexHome, cacheRoot) {
   };
 }
 
-function verifyInstalledCache(codexHome, expectedVersion = EXPECTED_TOOLKIT_VERSION) {
+function verifyInstalledCache(codexHome, expectedVersion = EXPECTED_TOOLKIT_VERSION, options = {}) {
   const cacheRoot = cacheRootFor(codexHome, expectedVersion);
   const errors = [];
   const cacheManifestPath = path.join(cacheRoot, '.codex-plugin', 'plugin.json');
@@ -323,6 +403,7 @@ function verifyInstalledCache(codexHome, expectedVersion = EXPECTED_TOOLKIT_VERS
   } else {
     errors.push(...verifySessionStartHook(cacheHooksPath).map((error) => `${pluginId()} cache ${error}`));
   }
+  errors.push(...verifyInstalledCacheFreshness(cacheRoot, options.repoRoot || ''));
   return { cacheRoot, errors };
 }
 
@@ -353,7 +434,7 @@ function evaluateConfigCacheFallback(options = {}) {
     errors.push(...verifyLocalMarketplaceConfig(configText, repoRoot).errors);
   }
 
-  const cache = verifyInstalledCache(codexHome, expectedVersion);
+  const cache = verifyInstalledCache(codexHome, expectedVersion, { repoRoot });
   errors.push(...cache.errors);
   const hookTrust = detectHookTrustStatus(codexHome, cache.cacheRoot);
   const installed = errors.length === 0 ? {
@@ -417,7 +498,7 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
     errors.push(`${pluginId()} source path does not match this local repo: ${installed.source.path}`);
   }
 
-  errors.push(...verifyInstalledCache(codexHome, expectedVersion).errors);
+  errors.push(...verifyInstalledCache(codexHome, expectedVersion, { repoRoot }).errors);
 
   return {
     ok: errors.length === 0,
@@ -550,6 +631,10 @@ function formatStateErrors(state, listError) {
   if (state?.errors?.length) return state.errors.join('; ');
   if (listError) return listError.message;
   return 'no installed-state verification was available';
+}
+
+function shouldRemoveBeforeInstall(state) {
+  return Boolean(state?.installed);
 }
 
 function codexHookCommand(repoRoot) {
@@ -731,6 +816,9 @@ async function main(argv = process.argv.slice(2)) {
       });
 
       if (!state.ok) {
+        if (shouldRemoveBeforeInstall(state)) {
+          runCodexJson(resolved.command, ['plugin', 'remove', pluginId(), '--json']);
+        }
         const addArgs = ['plugin', 'add', pluginId(), '--json'];
         const addOutcome = await runCodexAddAndVerify(resolved.command, addArgs, {
           codexHome: options.codexHome,
@@ -792,9 +880,12 @@ module.exports = {
   TOOLKIT_MARKETPLACE_NAME,
   EXPECTED_TOOLKIT_VERSION,
   MARKETPLACE_REL_PATH,
+  CACHE_FINGERPRINT_PATHS,
+  CACHE_FINGERPRINT_DIRS,
   codexToolkitInstallCommands,
   evaluateCodexToolkitPluginState,
   validateMarketplaceWrapper,
   validateRepoPluginSource,
+  verifyInstalledCacheFreshness,
   verifySessionStartHook
 };
