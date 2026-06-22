@@ -60,12 +60,11 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 If verification reports the plugin is missing, disabled, stale, has the wrong source path, or lacks a valid installed plugin cache, install or update it through the supported Codex local marketplace path:
 
 ```powershell
-codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json
-codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
+node repo/scripts/setup-codex-toolkit-plugin.cjs --write
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-The local marketplace wrapper is `.agents/plugins/marketplace.json`; it exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`, uses `policy.authentication: "ON_USE"` so install can complete headlessly, and the package manifest is `.codex-plugin/plugin.json`. `setup-codex-toolkit-plugin.cjs --write` runs the same supported Codex commands and then verifies the result. Verification must confirm the installed plugin cache contains Toolkit version `2.2.0` and `.codex-plugin/hooks/hooks.json` includes the Codex `SessionStart` hook. If Codex local marketplace install is unsupported or the verifier cannot find a usable Codex CLI, fail clearly instead of pretending setup completed. Do not use Codex to install or update Claude Code.
+The local marketplace wrapper is `.agents/plugins/marketplace.json`; it exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`, uses `policy.authentication: "ON_USE"` so install can complete headlessly, and the package manifest is `.codex-plugin/plugin.json`. `setup-codex-toolkit-plugin.cjs --write` runs the supported Codex local marketplace path, checks plugin state after marketplace add before invoking plugin add, and verifies the final result. If `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` times out after installing, the setup helper must rerun `codex plugin list --available --json` and treat setup as successful only when final verification passes, with a warning. Verification must confirm the installed plugin cache contains Toolkit version `2.2.0` and `.codex-plugin/hooks/hooks.json` includes the Codex `SessionStart` hook. If Codex local marketplace install is unsupported or the verifier cannot find a usable Codex CLI, fail clearly instead of pretending setup completed. Do not use Codex to install or update Claude Code.
 3. Configure repo-backed auto-update from this local repo without enabling OpenCode or AG2 yet:
 
 ```powershell

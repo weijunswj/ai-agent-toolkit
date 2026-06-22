@@ -192,6 +192,39 @@ function commandOutput(result) {
   return `${result.stdout || ''}${result.stderr || ''}${result.error ? result.error.message : ''}`.trim();
 }
 
+function positiveIntEnv(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function commandTimeoutMs() {
+  return positiveIntEnv('CODEX_TOOLKIT_CODEX_CLI_TIMEOUT_MS', 120000);
+}
+
+function pluginAddTimeoutMs() {
+  if (process.env.CODEX_TOOLKIT_CODEX_CLI_ADD_TIMEOUT_MS) {
+    return positiveIntEnv('CODEX_TOOLKIT_CODEX_CLI_ADD_TIMEOUT_MS', 15000);
+  }
+  if (process.env.CODEX_TOOLKIT_CODEX_CLI_TIMEOUT_MS) {
+    return positiveIntEnv('CODEX_TOOLKIT_CODEX_CLI_TIMEOUT_MS', 15000);
+  }
+  return 15000;
+}
+
+function spawnCodex(command, args, options = {}) {
+  const isNodeScript = /\.(?:cjs|mjs|js)$/i.test(command);
+  return spawnSync(isNodeScript ? process.execPath : command, isNodeScript ? [command, ...args] : args, {
+    ...options,
+    windowsHide: true
+  });
+}
+
+function commandTimedOut(result) {
+  return result?.error?.code === 'ETIMEDOUT';
+}
+
 function commandCandidates(explicitCommand) {
   const candidates = [];
   if (explicitCommand) candidates.push(explicitCommand);
@@ -209,10 +242,9 @@ function commandCandidates(explicitCommand) {
 function resolveCodexCommand(explicitCommand) {
   const failures = [];
   for (const command of commandCandidates(explicitCommand)) {
-    const result = spawnSync(command, ['plugin', '--help'], {
+    const result = spawnCodex(command, ['plugin', '--help'], {
       encoding: 'utf8',
-      timeout: 10000,
-      windowsHide: true
+      timeout: 10000
     });
     if (result.status === 0 && /Manage Codex plugins/.test(`${result.stdout}${result.stderr}`)) {
       return { command, failures };
@@ -222,18 +254,44 @@ function resolveCodexCommand(explicitCommand) {
   return { command: '', failures };
 }
 
-function runCodexJson(command, args) {
-  const result = spawnSync(command, args, {
+function runCodexJsonResult(command, args, options = {}) {
+  const result = spawnCodex(command, args, {
     encoding: 'utf8',
-    timeout: 120000,
-    windowsHide: true
+    timeout: options.timeoutMs || commandTimeoutMs()
   });
   if (result.status !== 0) {
-    throw new Error(`codex ${args.join(' ')} failed: ${commandOutput(result)}`);
+    return {
+      ok: false,
+      timedOut: commandTimedOut(result),
+      error: `codex ${args.join(' ')} failed: ${commandOutput(result)}`,
+      result
+    };
   }
   const output = (result.stdout || '').trim();
-  if (!output) return {};
-  return JSON.parse(output);
+  try {
+    return {
+      ok: true,
+      json: output ? JSON.parse(output) : {},
+      result
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      timedOut: false,
+      error: `codex ${args.join(' ')} returned invalid JSON: ${error.message}`,
+      result
+    };
+  }
+}
+
+function runCodexJson(command, args) {
+  const outcome = runCodexJsonResult(command, args);
+  if (!outcome.ok) throw new Error(outcome.error);
+  return outcome.json;
+}
+
+function codexAddTimeoutWarning(args) {
+  return `codex ${args.join(' ')} did not exit cleanly, but installed-state verification passed`;
 }
 
 function parseArgs(argv = process.argv.slice(2)) {
@@ -306,19 +364,50 @@ function main(argv = process.argv.slice(2)) {
     return 2;
   }
 
-  let pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
-  let state = evaluateCodexToolkitPluginState(pluginList, {
-    codexHome: options.codexHome,
-    repoRoot: options.repoRoot
-  });
+  const warnings = [];
+  let pluginList;
+  let state;
 
-  if (!state.ok && options.write) {
-    for (const args of codexToolkitInstallCommands(options.repoRoot)) runCodexJson(resolved.command, args);
+  try {
     pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
     state = evaluateCodexToolkitPluginState(pluginList, {
       codexHome: options.codexHome,
       repoRoot: options.repoRoot
     });
+  } catch (error) {
+    console.error(`FAIL: ${error.message}`);
+    return 1;
+  }
+
+  if (!state.ok && options.write) {
+    try {
+      runCodexJson(resolved.command, ['plugin', 'marketplace', 'add', options.repoRoot, '--json']);
+      pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
+      state = evaluateCodexToolkitPluginState(pluginList, {
+        codexHome: options.codexHome,
+        repoRoot: options.repoRoot
+      });
+
+      if (!state.ok) {
+        const addArgs = ['plugin', 'add', pluginId(), '--json'];
+        const addOutcome = runCodexJsonResult(resolved.command, addArgs, { timeoutMs: pluginAddTimeoutMs() });
+        if (!addOutcome.ok && !addOutcome.timedOut) throw new Error(addOutcome.error);
+
+        pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
+        state = evaluateCodexToolkitPluginState(pluginList, {
+          codexHome: options.codexHome,
+          repoRoot: options.repoRoot
+        });
+
+        if (!addOutcome.ok && addOutcome.timedOut) {
+          if (state.ok) warnings.push(codexAddTimeoutWarning(addArgs));
+          else throw new Error(`${addOutcome.error}; installed-state verification failed: ${state.errors.join('; ')}`);
+        }
+      }
+    } catch (error) {
+      console.error(`FAIL: ${error.message}`);
+      return 1;
+    }
   }
 
   if (!state.ok) {
@@ -334,8 +423,10 @@ function main(argv = process.argv.slice(2)) {
     version: EXPECTED_TOOLKIT_VERSION,
     enabled: true,
     cache_root: state.cacheRoot,
-    install_path: codexToolkitInstallCommands(options.repoRoot)
+    install_path: codexToolkitInstallCommands(options.repoRoot),
+    warnings
   };
+  for (const warning of warnings) console.error(`WARN: ${warning}`);
   if (options.json) console.log(JSON.stringify(summary, null, 2));
   else console.log(`OK: ${pluginId()} is installed, enabled, version ${EXPECTED_TOOLKIT_VERSION}, and has a SessionStart hook in ${state.cacheRoot}`);
   return 0;

@@ -142,6 +142,8 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --write
 
 The verifier uses only supported Codex plugin commands. If no usable Codex CLI with `plugin marketplace` support is available, or if local marketplace installation fails, setup must fail clearly instead of pretending native plugin activation completed.
 
+The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. If `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` times out after installing or enabling the plugin, the helper must immediately run `codex plugin list --available --json` and evaluate the installed cache. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.2.0`, `authPolicy` `ON_USE`, and the cached `SessionStart` hook; emit a warning that `codex plugin add` did not exit cleanly. If that verifier fails, report the timeout as a setup failure.
+
 Codex setup must never install or update Claude Code. Claude Code uses its own native plugin system and `.claude-plugin/plugin.json`.
 
 ### Manual Isolated CODEX_HOME Acceptance
@@ -150,14 +152,13 @@ Before merging changes that affect Codex local plugin install, run this smoke te
 
 ```powershell
 $env:CODEX_HOME = "<temp>"
-codex plugin marketplace add <repo> --json
-codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
+node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json
 codex plugin list --available --json
 ```
 
 Acceptance criteria:
 
-- `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` exits successfully without an interactive auth step or timeout.
+- `node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json` exits successfully. If the underlying `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` command times out after installing, setup output includes a warning that the command did not exit cleanly.
 - `codex plugin list --available --json` shows `ai-agent-toolkit@ai-agent-toolkit-local` installed and enabled with `authPolicy` `ON_USE`.
 - The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.0`.
 - The final cache `.codex-plugin/plugin.json` reports version `2.2.0`.
