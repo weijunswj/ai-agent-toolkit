@@ -54,6 +54,22 @@ Preferred v2 install for toolkit-owned skills:
 - Claude Code does not install or update Codex.
 - OpenCode and AG2 are opt-in local bridge targets, not native plugin update targets.
 
+For the English prompt `setup toolkit`, Codex must verify the native plugin install instead of assuming it:
+
+```powershell
+node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
+```
+
+If the plugin is missing, disabled, stale, or lacks Toolkit version `2.2.0` plus the Codex `SessionStart` hook in the installed plugin cache, install or update through the supported local marketplace path:
+
+```powershell
+codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json
+codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
+node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
+```
+
+The local marketplace wrapper is [`.agents/plugins/marketplace.json`](../../.agents/plugins/marketplace.json). `node repo/scripts/setup-codex-toolkit-plugin.cjs --write` runs the same Codex-only install/update path and fails clearly if local marketplace installs are unsupported. It never installs or updates Claude Code.
+
 Manual fallback: copy the whole `skills/<skill-name>/` folder into one supported location.
 
 1. Use the whole `skills/<skill-name>/` folder as the install unit.

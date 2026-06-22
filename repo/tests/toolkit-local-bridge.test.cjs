@@ -601,6 +601,15 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /node --test repo\/tests\/toolkit-local-bridge\.test\.cjs/, relPath);
     assert.match(text, /Codex native plugin/i, relPath);
     assert.match(text, /\.codex-plugin\/plugin\.json/, relPath);
+    assert.match(text, /setup-codex-toolkit-plugin\.cjs --verify/, relPath);
+    assert.match(text, /setup-codex-toolkit-plugin\.cjs --write/, relPath);
+    assert.match(text, /codex plugin marketplace add/, relPath);
+    assert.match(text, /codex plugin add ai-agent-toolkit@ai-agent-toolkit-local/, relPath);
+    assert.match(text, /\.agents\/plugins\/marketplace\.json/, relPath);
+    assert.match(text, /installed plugin cache/i, relPath);
+    assert.match(text, /2\.2\.0/, relPath);
+    assert.match(text, /fail clearly/i, relPath);
+    assert.match(text, /do not use Codex to install or update Claude Code/i, relPath);
     assert.match(text, /--enable-repo-auto-update/, relPath);
     assert.match(text, /--repo-path/, relPath);
     assert.match(text, /--enable-auto-sync/, relPath);
@@ -613,6 +622,26 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /SessionStart/i, relPath);
     assert.match(text, /fast-forward/i, relPath);
   }
+});
+
+test('Toolkit exposes a local Codex marketplace wrapper for supported plugin install', () => {
+  const marketplace = readJson(path.join(repoRoot, '.agents', 'plugins', 'marketplace.json'));
+  assert.equal(marketplace.name, 'ai-agent-toolkit-local');
+  assert.equal(marketplace.interface.displayName, 'AI Agent Toolkit local');
+  assert.equal(Array.isArray(marketplace.plugins), true);
+  assert.equal(marketplace.plugins.length, 1);
+  assert.deepEqual(marketplace.plugins[0], {
+    name: 'ai-agent-toolkit',
+    source: {
+      source: 'local',
+      path: '.'
+    },
+    policy: {
+      installation: 'AVAILABLE',
+      authentication: 'ON_INSTALL'
+    },
+    category: 'Developer Tools'
+  });
 });
 
 test('bridge surfaces avoid private plugin caches, package installs, and command-per-bridge skills', () => {

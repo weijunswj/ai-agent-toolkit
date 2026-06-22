@@ -104,6 +104,22 @@ Preferred v2 route:
 - Claude Code does not install or update Codex.
 - The shared bridge manages only opt-in non-native targets: OpenCode global skills and AG2 adapter metadata.
 
+For the English prompt `setup toolkit`, Codex must verify the native plugin install instead of assuming it. From this repo, run:
+
+```powershell
+node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
+```
+
+If the plugin is missing, disabled, stale, or lacks Toolkit version `2.2.0` plus the Codex `SessionStart` hook in the installed plugin cache, install or update through the supported local marketplace path:
+
+```powershell
+codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json
+codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
+node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
+```
+
+The local marketplace wrapper is [.agents/plugins/marketplace.json](.agents/plugins/marketplace.json). `node repo/scripts/setup-codex-toolkit-plugin.cjs --write` runs the same Codex-only install/update path and fails clearly if local marketplace installs are unsupported.
+
 Manual fallback: copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
 [Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. English prompt: `setup n8n plugin`. Install the official n8n plugin only if hooks can be made Windows-safe. Never touch `n8n_live` during plugin setup; instance-level MCP access is a separate explicitly approved live-action path.

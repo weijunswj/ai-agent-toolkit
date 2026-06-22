@@ -117,6 +117,33 @@ The updater must not:
 - Write outside the current user home or temp directories.
 - Use Codex or Claude private plugin cache paths as source.
 
+## Codex Native Plugin Install And Verification
+
+Codex native plugin installation is Codex-only and separate from the shared bridge updater. The supported local install path uses Codex local marketplaces:
+
+```powershell
+codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json
+codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
+```
+
+The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`.
+
+Before reporting `setup toolkit` complete, run:
+
+```powershell
+node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
+```
+
+If the plugin is missing, disabled, stale, points at another source path, or its installed plugin cache does not contain Toolkit version `2.2.0` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
+
+```powershell
+node repo/scripts/setup-codex-toolkit-plugin.cjs --write
+```
+
+The verifier uses only supported Codex plugin commands. If no usable Codex CLI with `plugin marketplace` support is available, or if local marketplace installation fails, setup must fail clearly instead of pretending native plugin activation completed.
+
+Codex setup must never install or update Claude Code. Claude Code uses its own native plugin system and `.claude-plugin/plugin.json`.
+
 ## Repo-Backed Auto-Update
 
 Repo auto-update is opt-in and uses the configured local Toolkit Git repo as source of truth. Native Codex and Claude Code plugin hooks remain launchers only; they do not become source of truth and do not update each other.

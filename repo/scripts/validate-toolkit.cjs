@@ -41,6 +41,7 @@ const expectedFiles = [
   'CLAUDE.md',
   'GEMINI.md',
   '.agents/rules/00-agent-toolkit-bootstrap.md',
+  '.agents/plugins/marketplace.json',
   'package.json',
   '.gitignore',
   '.gitattributes',
@@ -161,6 +162,7 @@ const expectedFiles = [
   'repo/scripts/run-design-tests.cjs',
   'repo/scripts/safe-source-update.cjs',
   'repo/scripts/toolkit-local-bridge.cjs',
+  'repo/scripts/setup-codex-toolkit-plugin.cjs',
   'repo/scripts/sync-repo-doc-contract.cjs',
   'repo/docs/published-surface-audit-baseline.json',
   '.github/workflows/auto-sync-generated-surfaces.yml',
@@ -228,6 +230,7 @@ const expectedDirs = [
   '.claude-plugin/hooks',
   '.agents',
   '.agents/rules',
+  '.agents/plugins',
   '.github/workflows'
 ];
 
