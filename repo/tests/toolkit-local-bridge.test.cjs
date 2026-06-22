@@ -174,7 +174,7 @@ test('explicit OpenCode setup writes only managed hub and OpenCode target paths'
   assert.doesNotMatch(targetSkill.replace(/\\/g, '/'), /\.agents\/skills/);
 });
 
-test('explicit AG2 setup writes adapter metadata under the hub without package installs', () => {
+test('explicit Antigravity 2 setup writes adapter metadata under the hub without package installs', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin']);
@@ -613,9 +613,9 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /--enable-repo-auto-update/, relPath);
     assert.match(text, /--repo-path/, relPath);
     assert.match(text, /--enable-auto-sync/, relPath);
-    assert.match(text, /OpenCode and AG2/i, relPath);
+    assert.match(text, /OpenCode and Antigravity 2/i, relPath);
     assert.match(text, /ask once/i, relPath);
-    assert.match(text, /Never silently enable OpenCode or AG2/i, relPath);
+    assert.match(text, /Never silently enable OpenCode or Antigravity 2/i, relPath);
     assert.match(text, /--enable-target opencode/, relPath);
     assert.match(text, /--enable-target ag2/, relPath);
     assert.match(text, /--sync-enabled --write/, relPath);
@@ -685,7 +685,7 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     const skillPath = path.join(repoRoot, 'skills', skill, 'SKILL.md');
     if (!fs.existsSync(skillPath)) return false;
     const skillText = fs.readFileSync(skillPath, 'utf8');
-    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|AG2 adapter support|stale bridge state/i.test(skillText);
+    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity 2 adapter support|stale bridge state/i.test(skillText);
   });
   assert.deepEqual(bridgeSkillNames, ['toolkit-setup'], 'exactly one Toolkit setup/bridge discoverability skill should exist');
 
@@ -698,7 +698,7 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     const skillPath = path.join(curatedSkillsDir, skill, 'SKILL.md');
     if (!fs.existsSync(skillPath)) return false;
     const skillText = fs.readFileSync(skillPath, 'utf8');
-    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|AG2 adapter support|stale bridge state/i.test(skillText);
+    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity 2 adapter support|stale bridge state/i.test(skillText);
   });
   assert.deepEqual(curatedBridgeSkillNames, ['toolkit-setup'], 'curated output should contain exactly one Toolkit setup/bridge discoverability skill');
   for (const rel of [

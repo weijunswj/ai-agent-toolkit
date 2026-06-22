@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "AI Agent Toolkit",
     "shortDescription": "Source-first reusable agent skills with opt-in local bridge adapters",
-    "longDescription": "Use AI Agent Toolkit for reusable source-traceable skills, repo-local agent rules, validation guidance, English setup routing, opt-in repo-backed updates, and local OpenCode or AG2 bridge adapters. Claude Code updates this package natively and never installs or updates Codex.",
+    "longDescription": "Use AI Agent Toolkit for reusable source-traceable skills, repo-local agent rules, validation guidance, English setup routing, opt-in repo-backed updates, and local OpenCode or Antigravity 2 bridge adapters. Claude Code updates this package natively and never installs or updates Codex.",
     "developerName": "weijunswj",
     "category": "Developer Tools",
     "capabilities": [
@@ -32,7 +32,7 @@
     "defaultPrompt": [
       "Setup toolkit.",
       "Audit the local Toolkit bridge state.",
-      "Set up the AG2 bridge after showing me the planned writes."
+      "Set up the Antigravity 2 bridge after showing me the planned writes."
     ],
     "websiteURL": "https://github.com/weijunswj/ai-agent-toolkit",
     "privacyPolicyURL": "https://github.com/weijunswj/ai-agent-toolkit",

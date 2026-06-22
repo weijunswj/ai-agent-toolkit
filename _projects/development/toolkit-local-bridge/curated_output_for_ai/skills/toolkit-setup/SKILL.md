@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: Use when the user says "setup toolkit" or asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, or bridge setup safety. Routes agents to the Toolkit setup subsystem and repo/scripts/toolkit-local-bridge.cjs; do not use for ordinary project coding, unrelated n8n setup, or as a command-per-bridge workflow.
+description: Use when the user says "setup toolkit" or asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity 2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, or bridge setup safety. Routes agents to the Toolkit setup subsystem and repo/scripts/toolkit-local-bridge.cjs; do not use for ordinary project coding, unrelated n8n setup, or as a command-per-bridge workflow.
 ---
 
 <!--
@@ -58,20 +58,20 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --write
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-The local marketplace wrapper is `.agents/plugins/marketplace.json`; it exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`, uses `policy.authentication: "ON_USE"` so install can complete headlessly, and the package manifest is `.codex-plugin/plugin.json`. `setup-codex-toolkit-plugin.cjs --write` runs the supported Codex local marketplace path, checks plugin state after marketplace add before invoking plugin add, and verifies the final result. If plugin add is needed, the setup helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json`, polls `codex plugin list --available --json` plus the expected cache until verification passes, then terminates or ignores the lingering add process if it has not exited. Treat setup as successful only when final verification passes, with a warning if plugin add did not exit cleanly. Verification must confirm the installed plugin cache contains Toolkit version `2.2.0` and `.codex-plugin/hooks/hooks.json` includes the Codex `SessionStart` hook. If Codex local marketplace install is unsupported, the verifier cannot find a usable Codex CLI, or verification never passes before the add deadline, fail clearly instead of pretending setup completed. Do not use Codex to install or update Claude Code.
-3. Configure repo-backed auto-update from this local repo without enabling OpenCode or AG2 yet:
+The local marketplace wrapper is `.agents/plugins/marketplace.json`; it exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`, uses `policy.authentication: "ON_USE"` so install can complete headlessly, and the package manifest is `.codex-plugin/plugin.json`. `setup-codex-toolkit-plugin.cjs --write` runs the supported Codex local marketplace path, checks plugin state after marketplace add before invoking plugin add, and verifies the final result. If plugin add is needed, the setup helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json`, polls `codex plugin list --available --json` plus the expected cache until verification passes, then terminates or ignores the lingering add process if it has not exited. Treat setup as successful only when final verification passes, with a warning if plugin add did not exit cleanly. Verification must confirm the installed plugin cache contains Toolkit version `2.2.0` and `.codex-plugin/hooks/hooks.json` includes the Codex `SessionStart` hook. If Codex local marketplace install is unsupported, the verifier cannot find a usable Codex CLI, or verification never passes before the add deadline, fail clearly instead of pretending setup completed. After a fresh install or update, tell the user they must manually approve the startup hook when Codex prompts; setup cannot approve it for them. Do not use Codex to install or update Claude Code.
+3. Configure repo-backed auto-update from this local repo without enabling OpenCode or Antigravity 2 yet:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "<local-ai-agent-toolkit-repo>" --repo-branch main --enable-auto-sync --write
 ```
 
-4. Audit OpenCode and AG2, then explain the detected targets, target paths, and planned writes:
+4. Audit OpenCode and Antigravity 2, then explain the detected targets, target paths, and planned writes:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-5. Ask once before non-native target writes. The approval question must name OpenCode and AG2 and state that enabling them writes only Toolkit-managed user-local bridge output. Never silently enable OpenCode or AG2.
+5. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output. Never silently enable OpenCode or Antigravity 2.
 6. If approved, enable only the approved targets and run a sync test:
 
 ```powershell
@@ -85,7 +85,7 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 ## Safety Rules
 
 - Dry-run first.
-- OpenCode and AG2 are opt-in only.
+- OpenCode and Antigravity 2 are opt-in only.
 - Detection is allowed; autosetup is forbidden.
 - Sync only enabled targets.
 - Disabled or never-enabled targets must not be touched.
