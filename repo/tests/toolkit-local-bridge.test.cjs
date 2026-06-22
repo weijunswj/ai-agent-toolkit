@@ -6,6 +6,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
+const {
+  openUpdateReport,
+  updateReportDir
+} = require('../scripts/toolkit-local-bridge.cjs');
 const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
 const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-skills-plugin-hooks.cjs');
 
@@ -413,6 +417,59 @@ function pushRepoToolkitUpdate(fixture, label) {
 
 function currentCommit(repoPath) {
   return git(repoPath, ['rev-parse', 'HEAD']);
+}
+
+function reportPathFromOutput(stdout) {
+  const match = String(stdout || '').match(/Toolkit updated: (.+)$/m);
+  assert.ok(match, stdout);
+  return match[1].trim();
+}
+
+function readLatestReport(hub) {
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.ok(state.last_update_report_path, 'state should record latest update report path');
+  assert.equal(fs.existsSync(state.last_update_report_path), true, 'latest update report should exist');
+  return {
+    state,
+    reportPath: state.last_update_report_path,
+    text: fs.readFileSync(state.last_update_report_path, 'utf8')
+  };
+}
+
+function createLegacyDelegatedSyncFixture() {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha legacy v1\n' });
+  const fromCommit = currentCommit(sourceRepo);
+  writeFile(path.join(sourceRepo, 'skills', 'alpha', 'SKILL.md'), [
+    '---',
+    'name: alpha',
+    'description: alpha fixture skill for Toolkit bridge tests',
+    '---',
+    '',
+    'alpha legacy v2',
+    ''
+  ].join('\n'));
+  const toCommit = commitAll(sourceRepo, 'legacy delegated update');
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    auto_sync_enabled: true,
+    repo_path: sourceRepo,
+    last_repo_update_status: 'updated',
+    last_repo_update_from_commit: fromCommit,
+    last_repo_update_to_commit: toCommit,
+    targets: {
+      ag2: {
+        enabled: true,
+        explicitly_disabled: false,
+        synced_version: '1.0.0',
+        synced_checksum: 'old'
+      }
+    }
+  });
+  return { root, sourceRepo, hub, fromCommit, toCommit };
 }
 
 test('dry-run audit performs no writes and reports planned targets', () => {
@@ -1109,6 +1166,192 @@ test('hook mode syncs enabled stale targets from the configured repo skill sourc
   );
 });
 
+test('hook report is generated when repo auto-update fast-forwards and lists changed files', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const marker = path.join(fixture.root, 'delegate.log');
+  const updatedCommit = pushRepoToolkitUpdate(fixture, 'report-fast-forward');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--write'
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
+      TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const reportPath = reportPathFromOutput(result.stdout);
+  const report = readLatestReport(hub);
+  assert.equal(path.resolve(report.reportPath), path.resolve(reportPath));
+  assert.match(report.text, /^# AI Agent Toolkit Update/m);
+  assert.match(report.text, new RegExp(`Toolkit updated to commit: \`${updatedCommit}\``));
+  assert.match(report.text, new RegExp(`Previous commit: \`${fixture.initialCommit}\``));
+  assert.match(report.text, /Source: `codex-plugin`/);
+  assert.match(report.text, /- `VERSION\.txt`/);
+  assert.match(report.text, /- `skills\/fixture-skill\/SKILL\.md`/);
+  assert.match(report.text, /repo update status: `updated`/);
+  assert.match(report.text, /hook-light validation: `passed`/);
+  assert.match(report.text, /Skipped n8n\/live systems; not touched\./);
+});
+
+test('hook report is generated when target sync happens without a repo commit change', () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha sync report\n' });
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: '1.0.0',
+    auto_sync_enabled: true,
+    repo_path: sourceRepo,
+    targets: {
+      opencode: {
+        enabled: true,
+        explicitly_disabled: false,
+        synced_version: '1.0.0',
+        synced_checksum: 'old'
+      }
+    }
+  });
+
+  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const reportPath = reportPathFromOutput(result.stdout);
+  const report = readLatestReport(hub);
+  assert.equal(path.resolve(report.reportPath), path.resolve(reportPath));
+  assert.match(report.text, /Previous commit: `none`/);
+  assert.match(report.text, /No repo commit change; local bridge target state was stale\./);
+  assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
+  assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
+  assert.match(report.text, /target sync status: `synced`/);
+  assert.match(report.text, /checksum: `[a-f0-9]{64}`/);
+});
+
+test('hook report records removed stale managed skill folders during target sync', () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n', beta: 'beta v1\n' });
+  const hub = path.join(root, 'hub', 'current');
+  let result = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-target', 'opencode'
+  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  fs.rmSync(path.join(sourceRepo, 'skills', 'beta'), { recursive: true, force: true });
+  git(sourceRepo, ['add', '.']);
+  git(sourceRepo, ['commit', '-m', 'remove beta skill']);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Removed stale managed skill folders:/);
+  assert.match(report.text, /- `beta`/);
+});
+
+test('no-op hook sync does not generate or open an update report', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const existingState = readJson(path.join(hub, 'state.json'));
+  assert.equal(existingState.last_update_report_path || '', '');
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.last_update_report_path || '', '');
+});
+
+test('legacy delegated repo sync writes an update report using stored repo update metadata', () => {
+  const fixture = createLegacyDelegatedSyncFixture();
+  const result = run([
+    '--hub', fixture.hub,
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'repo',
+    '--skip-repo-auto-update'
+  ], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit update report:/);
+
+  const targetSkill = path.join(
+    fixture.root,
+    '.gemini',
+    'config',
+    'plugins',
+    'ai-agent-toolkit',
+    'skills',
+    'alpha',
+    'SKILL.md'
+  );
+  assert.match(fs.readFileSync(targetSkill, 'utf8'), /alpha legacy v2/);
+
+  const report = readLatestReport(fixture.hub);
+  assert.match(report.text, new RegExp(`Toolkit updated to commit: \`${fixture.toCommit}\``));
+  assert.match(report.text, new RegExp(`Previous commit: \`${fixture.fromCommit}\``));
+  assert.match(report.text, /Source: `repo`/);
+  assert.match(report.text, /- `skills\/alpha\/SKILL\.md`/);
+  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
+  assert.match(report.text, /repo update status: `updated`/);
+  assert.match(report.text, /target sync status: `synced`/);
+  assert.match(report.text, /checksum: `[a-f0-9]{64}`/);
+  assert.match(report.text, /Skipped n8n\/live systems; not touched\./);
+});
+
+test('suppressed legacy delegated repo sync does not write an update report', () => {
+  const fixture = createLegacyDelegatedSyncFixture();
+  const result = run([
+    '--hub', fixture.hub,
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'repo',
+    '--skip-repo-auto-update',
+    '--suppress-update-report'
+  ], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /Toolkit update report:/);
+  assert.equal(readJson(path.join(fixture.hub, 'state.json')).last_update_report_path || '', '');
+  assert.match(
+    fs.readFileSync(path.join(
+      fixture.root,
+      '.gemini',
+      'config',
+      'plugins',
+      'ai-agent-toolkit',
+      'skills',
+      'alpha',
+      'SKILL.md'
+    ), 'utf8'),
+    /alpha legacy v2/
+  );
+});
+
 test('enabling repo auto-update records repo path branch and remote in hub state', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
@@ -1182,6 +1425,10 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_repo_update_status, 'skipped');
   assert.match(state.last_repo_update_error, /dirty/i);
+  const report = readLatestReport(hub);
+  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(report.text, /repo update status: `skipped`/);
+  assert.match(report.text, /warning\/error: `dirty working tree`/i);
 });
 
 test('hook mode rejects a repo whose origin remote does not match configured remote', () => {
@@ -1247,7 +1494,8 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
     'repo',
     '--hub',
     hub,
-    '--skip-repo-auto-update'
+    '--skip-repo-auto-update',
+    '--suppress-update-report'
   ]);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_repo_update_status, 'updated');
@@ -1319,6 +1567,11 @@ test('validation failure after update does not sync targets', () => {
   assert.equal(state.last_repo_update_from_commit, fixture.initialCommit);
   assert.equal(state.last_repo_update_to_commit, updatedCommit);
   assert.match(state.last_repo_update_error, /validate-toolkit/i);
+  const report = readLatestReport(hub);
+  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(report.text, /repo update status: `validation-failed`/);
+  assert.match(report.text, /hook-light validation: `failed/);
+  assert.match(report.text, /- `VERSION\.txt`/);
 });
 
 test('skip repo auto-update guard prevents recursive repo update', () => {
@@ -1368,6 +1621,77 @@ test('audit output reports repo auto-update state and last status', () => {
   assert.equal(audit.repo_auto_update.last_status, 'configured');
 });
 
+test('audit output includes latest update report path', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    last_update_report_path: path.join(root, 'reports', 'latest.md'),
+    targets: {}
+  });
+
+  const result = run(['--hub', hub, '--audit'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.last_update_report_path, path.join(root, 'reports', 'latest.md'));
+});
+
+test('update report opening is Windows-only notepad and rejects non-report paths', () => {
+  const calls = [];
+  const reportDir = updateReportDir();
+  const reportPath = path.join(reportDir, 'toolkit-update-20990101-010203.md');
+  fs.mkdirSync(reportDir, { recursive: true });
+  fs.writeFileSync(reportPath, '# report\n', 'utf8');
+  const fakeChild = { unref() { calls.push(['unref']); } };
+  const opened = openUpdateReport(reportPath, {
+    platform: 'win32',
+    spawnImpl(command, args, options) {
+      calls.push([command, args, options]);
+      return fakeChild;
+    }
+  });
+
+  assert.equal(opened.ok, true);
+  assert.equal(calls[0][0], 'notepad.exe');
+  assert.deepEqual(calls[0][1], [reportPath]);
+  assert.equal(calls[0][2].detached, true);
+  assert.equal(calls[0][2].stdio, 'ignore');
+  assert.deepEqual(calls[1], ['unref']);
+
+  assert.equal(openUpdateReport(path.join(os.tmpdir(), 'not-a-toolkit-report.md'), {
+    platform: 'win32',
+    spawnImpl() {
+      throw new Error('must not spawn for unsafe paths');
+    }
+  }).ok, false);
+  assert.equal(openUpdateReport(reportPath, {
+    platform: 'linux',
+    spawnImpl() {
+      throw new Error('must not spawn on non-Windows');
+    }
+  }).ok, false);
+});
+
+test('update report opening is persisted opt-in', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  let result = run(['--hub', hub, '--enable-update-report-open', '--write'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_enabled, true);
+
+  result = run(['--hub', hub, '--disable-update-report-open', '--write'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_enabled, false);
+});
+
 test('native plugin manifests and hooks are valid and policy-light', () => {
   const codexManifest = readJson(path.join(repoRoot, '.codex-plugin', 'plugin.json'));
   const claudeManifest = readJson(path.join(repoRoot, '.claude-plugin', 'plugin.json'));
@@ -1410,6 +1734,12 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.doesNotMatch(claudeCommand, /CODEX_PLUGIN_ROOT|CODEX_PLUGIN_DATA/);
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
+  assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['SessionStart']);
+  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['SessionStart']);
+  assert.equal(codexHooks.hooks.SessionEnd, undefined);
+  assert.equal(claudeHooks.hooks.SessionEnd, undefined);
+  assert.equal(codexHooks.hooks.Stop, undefined);
+  assert.equal(claudeHooks.hooks.Stop, undefined);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /(?:^|\s)(?:bash|bash\.exe)(?:\s|$)|[A-Z]:\\WINDOWS\\system32\\bash\.exe/i);

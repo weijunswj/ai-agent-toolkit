@@ -57,6 +57,7 @@ The hub contains:
 - Sync source: `repo`, `codex-plugin`, or `claude-plugin`.
 - Sync timestamp.
 - Repo auto-update state: `repo_auto_update_enabled`, `repo_path`, `repo_branch`, `repo_remote`, `last_repo_update`, `last_repo_update_status`, `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_error`.
+- Update-report state: `last_update_report_path` and `update_report_open_enabled`.
 - Target paths.
 - Target detected, enabled, disabled, stale, and synced state.
 
@@ -108,6 +109,9 @@ Supported flags:
 - `--repo-remote <url>`, default `https://github.com/weijunswj/ai-agent-toolkit`.
 - `--repo-update-now`.
 - `--audit`.
+- `--open-update-report`.
+- `--enable-update-report-open`.
+- `--disable-update-report-open`.
 - `--force-downgrade`.
 - `--python-command <command>`.
 - `--set-ag2-python-command <command>`.
@@ -226,6 +230,35 @@ npm run validate:all
 ```
 
 Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. If validation, fetch, fast-forward, or delegation fails in hook mode, the hook prints a concise warning, records the last repo update status in hub state when possible, skips target sync, and exits successfully so agent startup is not blocked.
+
+## Update Reports
+
+When a hook run performs meaningful work or safely skips a risky update, the bridge writes a markdown report under the user temp directory:
+
+```text
+%TEMP%\ai-agent-toolkit\update-reports\toolkit-update-YYYYMMDD-HHMMSS.md
+```
+
+Meaningful work means at least one of:
+
+- The configured Toolkit repo fast-forwarded.
+- An enabled OpenCode or Antigravity 2 target was synced.
+- A stale Toolkit-managed skill folder was removed from a managed target.
+- Delegated repo sync failed.
+- Hook-light validation failed after a repo update.
+- Repo auto-update skipped safely because the tree was dirty, the remote did not match, fetch failed, or the fetched commit was not a fast-forward.
+
+Normal no-op hook runs do not write or open a report. In hook mode, the bridge prints only:
+
+```text
+Toolkit updated: <report path>
+```
+
+The report includes the new and previous commits, sync source, timestamp, changed files from the fast-forward range, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit n8n/live-system skip note, repo update status, hook-light validation result, target sync status, checksum, and any warning/error. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
+
+For first-restart compatibility after a bridge update, an older installed native hook may fast-forward the configured local Toolkit repo and then delegate into the newly updated repo script without passing `--hook`. An unsuppressed delegated command with `--sync-enabled --write --sync-source repo --hub <same-hub> --skip-repo-auto-update` is report-eligible. When hub state contains `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_status`, the delegated repo script uses that stored metadata plus a local `git diff --name-only` over `repo_path` to populate the update report. New parent hooks pass `--suppress-update-report` to delegated sync so the parent hook remains the single report writer and duplicate reports are avoided.
+
+Opening reports is opt-in. `--open-update-report` opens only the report created by the current run. `--enable-update-report-open` and `--disable-update-report-open` persist that preference in hub state. On Windows, opening uses only `notepad.exe <reportPath>` and only for files created under the Toolkit temp update-report folder. Opening is best-effort, non-blocking, and never uses OS default file associations, `.sh` files, or VS Code.
 
 ## Windows Codex Plugin Hook Repair
 
@@ -383,6 +416,8 @@ The v2 hooks only call the shared updater:
 - Deterministic enforcement: `repo/scripts/toolkit-local-bridge.cjs` and tests.
 
 OpenCode and Antigravity 2 do not need Codex or Claude hooks to receive core policy because the policy remains in portable docs, validators, and generated adapter content.
+
+The packaged Toolkit hooks remain startup-only. The bridge uses `SessionStart` because update and sync work is most useful before the agent starts relying on local skills. Claude Code documents a `SessionEnd` event, but the Toolkit does not add a Claude-only exit hook because app exit hooks can be skipped or killed and Codex plugin `SessionEnd` support is not validated in this repo. Do not add unsupported hook event names such as `Stop` or `SessionEnd` to the packaged Codex or Claude plugin manifests without a current platform-supported, safe, fast implementation and matching tests.
 
 ## Portable Policy-First Layering
 
