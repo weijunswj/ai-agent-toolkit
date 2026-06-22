@@ -70,6 +70,8 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 
 The local marketplace wrapper is [`.agents/plugins/marketplace.json`](../../.agents/plugins/marketplace.json) and uses `policy.authentication: "ON_USE"` so the no-auth local Toolkit plugin can install headlessly. `node repo/scripts/setup-codex-toolkit-plugin.cjs --write` runs the same Codex-only install/update path and fails clearly if local marketplace installs are unsupported. It never installs or updates Claude Code.
 
+Verification prefers `codex plugin list --available --json`. If that list is empty or unreliable but Codex config and the installed cache prove the Toolkit plugin is enabled, sourced from the local marketplace, current, and has the expected `SessionStart` hook, the helper reports config/cache fallback verification. After every verify, install, or update, follow the helper's `**Next Steps:**` section: restart Codex if anything changed, open Codex hook review when prompted, and trust the Codex `SessionStart` hook only if it runs `node ".../repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source codex-plugin`. This hook approval step is Codex-only; Claude Code does not need Codex hook approval.
+
 Manual fallback: copy the whole `skills/<skill-name>/` folder into one supported location.
 
 1. Use the whole `skills/<skill-name>/` folder as the install unit.
@@ -234,6 +236,14 @@ node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
 ```
 
 The bridge writes AG2 adapter metadata under the Toolkit Local Bridge Hub only. It does not install Python, AG2, or pip packages.
+
+If AG2 is installed under a Python that is not on PATH, persist the reviewed command so future audits and hooks can reuse it:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
+```
+
+Audits list the selected AG2 Python command when detected, or the exact commands tried when AG2 is not detected.
 
 ### Antigravity
 

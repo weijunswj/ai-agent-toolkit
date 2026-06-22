@@ -106,6 +106,8 @@ Supported flags:
 - `--repo-update-now`.
 - `--audit`.
 - `--force-downgrade`.
+- `--python-command <command>`.
+- `--set-ag2-python-command <command>`.
 - `--sync-source repo|codex-plugin|claude-plugin`.
 
 The updater must not:
@@ -142,7 +144,17 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --write
 
 The verifier uses only supported Codex plugin commands. If no usable Codex CLI with `plugin marketplace` support is available, or if local marketplace installation fails, setup must fail clearly instead of pretending native plugin activation completed.
 
-The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.2.0`, `authPolicy` `ON_USE`, and the cached `SessionStart` hook; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If verification never passes before the add deadline, report setup failure.
+The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. CLI list verification remains the preferred path. If the CLI list is empty or unreliable, the helper may use config/cache fallback verification only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.0`, the cache manifest has the expected Toolkit name/version, and the cache hook file contains the Toolkit `SessionStart` hook. Report this as config/cache fallback verification, not normal CLI verification.
+
+If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.2.0`, `authPolicy` `ON_USE` when available from the CLI list, and the cached `SessionStart` hook; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
+
+After install, update, or verify, the helper prints or returns a `**Next Steps:**` section. It tells the user to restart Codex if installation changed anything, open Codex hook review when prompted, and trust the Codex `SessionStart` hook only if it runs:
+
+```powershell
+node ".../repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source codex-plugin
+```
+
+If no hook prompt appears, report whether hook trust is already recorded, still pending, or likely waiting for Codex to refresh plugin hooks. This hook approval step applies to Codex only. Claude Code does not need Codex hook approval. Codex must not install or update Claude Code, and Claude Code must not install or update Codex.
 
 Codex setup must never install or update Claude Code. Claude Code uses its own native plugin system and `.claude-plugin/plugin.json`.
 
@@ -239,6 +251,7 @@ OpenCode detection signals:
 - `~/.config/opencode` or an explicit OpenCode config dir exists.
 - The managed OpenCode target exists.
 - The user explicitly enabled the target.
+- Persisted bridge target state exists.
 
 OpenCode target path:
 
@@ -249,9 +262,20 @@ The bridge intentionally does not use `.agents/skills` for OpenCode output, avoi
 
 AG2 detection signals:
 
-- Python command exists and returns a version.
-- `python -m pip show ag2` succeeds.
+- Saved AG2 Python command, when configured.
+- Explicit `--python-command`, for one run.
+- `python`, `python3`, and `py`.
+- Safe read-only user-local candidates such as Windows user Python locations, `UV_PYTHON`, `VIRTUAL_ENV`, and `CONDA_PREFIX`.
+- A candidate Python command exists, returns a version, and `python -m pip show ag2` succeeds.
 - The user explicitly enabled the target.
+
+Persist a known non-PATH AG2 Python command with:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
+```
+
+Future audit and hook runs reuse the saved command. If AG2 is not detected, audit output must list the exact Python commands tried. Detection must never install Python, AG2, OpenCode, npm packages, or pip packages.
 
 AG2 output stays under the Toolkit Local Bridge Hub. The bridge does not install AG2 or Python packages.
 

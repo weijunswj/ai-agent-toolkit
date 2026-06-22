@@ -134,38 +134,79 @@ function cacheRootFor(codexHome, version = EXPECTED_TOOLKIT_VERSION) {
   return path.join(codexHome, 'plugins', 'cache', TOOLKIT_MARKETPLACE_NAME, TOOLKIT_PLUGIN_NAME, version);
 }
 
-function findInstalledEntry(pluginList) {
-  const installed = Array.isArray(pluginList?.installed) ? pluginList.installed : [];
-  return installed.find((entry) =>
-    entry &&
-    (entry.pluginId === pluginId() ||
-      (entry.name === TOOLKIT_PLUGIN_NAME && entry.marketplaceName === TOOLKIT_MARKETPLACE_NAME))
-  ) || null;
+function codexConfigPath(codexHome) {
+  return path.join(codexHome, 'config.toml');
 }
 
-function evaluateCodexToolkitPluginState(pluginList, options = {}) {
-  const codexHome = path.resolve(options.codexHome || defaultCodexHome());
-  const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
-  const expectedVersion = options.expectedVersion || EXPECTED_TOOLKIT_VERSION;
-  const errors = [];
-  const installed = findInstalledEntry(pluginList);
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
-  if (!installed) {
-    errors.push(`${pluginId()} is not installed`);
-    return { ok: false, installed: null, cacheRoot: cacheRootFor(codexHome, expectedVersion), errors };
+function findTomlSection(text, sectionPattern) {
+  const lines = String(text || '').split(/\r?\n/);
+  let matched = false;
+  const body = [];
+  for (const line of lines) {
+    const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+    if (section) {
+      if (matched) break;
+      matched = sectionPattern.test(section[1].trim());
+      continue;
+    }
+    if (matched) body.push(line);
   }
-  if (!installed.enabled) errors.push(`${pluginId()} is installed but not enabled`);
-  if (installed.version !== expectedVersion) {
-    errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version || '<missing>'}`);
-  }
-  if (installed.authPolicy !== 'ON_USE') {
-    errors.push(`${pluginId()} expected authPolicy ON_USE for headless local install: ${installed.authPolicy || '<missing>'}`);
-  }
-  if (installed.source?.path && path.resolve(installed.source.path) !== repoRoot) {
-    errors.push(`${pluginId()} source path does not match this local repo: ${installed.source.path}`);
-  }
+  return matched ? body.join('\n') : null;
+}
 
+function configHasEnabledPlugin(configText) {
+  const id = escapeRegex(pluginId());
+  const section = findTomlSection(
+    configText,
+    new RegExp(`^plugins\\.(?:"${id}"|'${id}')$`)
+  );
+  return Boolean(section && /^\s*enabled\s*=\s*true\s*(?:#.*)?$/im.test(section));
+}
+
+function configHasLocalMarketplace(configText) {
+  const name = escapeRegex(TOOLKIT_MARKETPLACE_NAME);
+  return findTomlSection(
+    configText,
+    new RegExp(`^marketplaces\\.(?:${name}|"${name}"|'${name}')$`)
+  ) !== null;
+}
+
+function detectHookTrustStatus(codexHome, cacheRoot) {
+  const configPath = codexConfigPath(codexHome);
+  if (!fs.existsSync(configPath)) {
+    return {
+      status: 'pending',
+      message: `Hook trust is still pending because Codex config was not found at ${configPath}.`
+    };
+  }
+  const configText = fs.readFileSync(configPath, 'utf8');
+  const normalized = slash(configText).toLowerCase();
+  const hookNeedles = [
+    '.codex-plugin/hooks/hooks.json',
+    slash(path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json')).toLowerCase()
+  ];
+  const hookLines = normalized
+    .split(/\r?\n/)
+    .filter((line) => hookNeedles.some((needle) => line.includes(needle)));
+  if (hookLines.some((line) => !/\bfalse\b|\bdeny|\breject|\bpending\b/.test(line))) {
+    return {
+      status: 'trusted',
+      message: 'Hook trust is already recorded in Codex config for .codex-plugin/hooks/hooks.json.'
+    };
+  }
+  return {
+    status: 'pending',
+    message: 'Hook trust is still pending; Codex config does not yet record trust for .codex-plugin/hooks/hooks.json.'
+  };
+}
+
+function verifyInstalledCache(codexHome, expectedVersion = EXPECTED_TOOLKIT_VERSION) {
   const cacheRoot = cacheRootFor(codexHome, expectedVersion);
+  const errors = [];
   const cacheManifestPath = path.join(cacheRoot, '.codex-plugin', 'plugin.json');
   const cacheHooksPath = path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json');
   if (!fs.existsSync(cacheManifestPath)) {
@@ -184,8 +225,113 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
   } else {
     errors.push(...verifySessionStartHook(cacheHooksPath).map((error) => `${pluginId()} cache ${error}`));
   }
+  return { cacheRoot, errors };
+}
 
-  return { ok: errors.length === 0, installed, cacheRoot, errors };
+function findInstalledEntry(pluginList) {
+  const installed = Array.isArray(pluginList?.installed) ? pluginList.installed : [];
+  return installed.find((entry) =>
+    entry &&
+    (entry.pluginId === pluginId() ||
+      (entry.name === TOOLKIT_PLUGIN_NAME && entry.marketplaceName === TOOLKIT_MARKETPLACE_NAME))
+  ) || null;
+}
+
+function evaluateConfigCacheFallback(options = {}) {
+  const codexHome = path.resolve(options.codexHome || defaultCodexHome());
+  const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
+  const expectedVersion = options.expectedVersion || EXPECTED_TOOLKIT_VERSION;
+  const errors = [];
+  const configPath = codexConfigPath(codexHome);
+  let configText = '';
+
+  if (!fs.existsSync(configPath)) {
+    errors.push(`Codex config/cache fallback requires Codex config at ${configPath}`);
+  } else {
+    configText = fs.readFileSync(configPath, 'utf8');
+    if (!configHasEnabledPlugin(configText)) {
+      errors.push(`Codex config must enable [plugins."${pluginId()}"]`);
+    }
+    if (!configHasLocalMarketplace(configText)) {
+      errors.push(`Codex config must include [marketplaces.${TOOLKIT_MARKETPLACE_NAME}]`);
+    }
+  }
+
+  const cache = verifyInstalledCache(codexHome, expectedVersion);
+  errors.push(...cache.errors);
+  const hookTrust = detectHookTrustStatus(codexHome, cache.cacheRoot);
+  const installed = errors.length === 0 ? {
+    pluginId: pluginId(),
+    name: TOOLKIT_PLUGIN_NAME,
+    marketplaceName: TOOLKIT_MARKETPLACE_NAME,
+    version: expectedVersion,
+    installed: true,
+    enabled: true,
+    authPolicy: 'ON_USE',
+    source: {
+      source: 'local',
+      path: repoRoot
+    },
+    verificationSource: 'config-cache-fallback'
+  } : null;
+
+  return {
+    ok: errors.length === 0,
+    installed,
+    cacheRoot: cache.cacheRoot,
+    errors,
+    verificationMethod: 'config-cache-fallback',
+    hookTrustStatus: hookTrust.status,
+    hookTrustMessage: hookTrust.message
+  };
+}
+
+function evaluateCodexToolkitPluginState(pluginList, options = {}) {
+  const codexHome = path.resolve(options.codexHome || defaultCodexHome());
+  const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
+  const expectedVersion = options.expectedVersion || EXPECTED_TOOLKIT_VERSION;
+  const errors = [];
+  const installed = findInstalledEntry(pluginList);
+  const cacheRoot = cacheRootFor(codexHome, expectedVersion);
+  const hookTrust = detectHookTrustStatus(codexHome, cacheRoot);
+
+  if (!installed) {
+    if (options.allowConfigCacheFallback) {
+      return evaluateConfigCacheFallback({ codexHome, repoRoot, expectedVersion });
+    }
+    errors.push(`${pluginId()} is not installed`);
+    return {
+      ok: false,
+      installed: null,
+      cacheRoot,
+      errors,
+      verificationMethod: 'codex-cli-list',
+      hookTrustStatus: hookTrust.status,
+      hookTrustMessage: hookTrust.message
+    };
+  }
+  if (!installed.enabled) errors.push(`${pluginId()} is installed but not enabled`);
+  if (installed.version !== expectedVersion) {
+    errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version || '<missing>'}`);
+  }
+  if (installed.authPolicy !== 'ON_USE') {
+    errors.push(`${pluginId()} expected authPolicy ON_USE for headless local install: ${installed.authPolicy || '<missing>'}`);
+  }
+  if (installed.source?.path && path.resolve(installed.source.path) !== repoRoot) {
+    errors.push(`${pluginId()} source path does not match this local repo: ${installed.source.path}`);
+  }
+
+  errors.push(...verifyInstalledCache(codexHome, expectedVersion).errors);
+
+  return {
+    ok: errors.length === 0,
+    installed,
+    cacheRoot,
+    errors,
+    verificationMethod: 'codex-cli-list',
+    hookTrustStatus: hookTrust.status,
+    hookTrustMessage: hookTrust.message
+  };
 }
 
 function commandOutput(result) {
@@ -310,6 +456,27 @@ function formatStateErrors(state, listError) {
   return 'no installed-state verification was available';
 }
 
+function codexHookCommand(repoRoot) {
+  return `node "${path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs')}" --hook --sync-enabled --write --sync-source codex-plugin`;
+}
+
+function nextStepsForState(state, options = {}) {
+  const hookTrustLine = state.hookTrustStatus === 'trusted'
+    ? 'Hook trust is already recorded for the Toolkit `SessionStart` hook.'
+    : 'Hook trust is still pending; Codex may not have refreshed plugin hooks yet, or the hook review has not been approved.';
+  return [
+    '**Next Steps:**',
+    '1. Restart Codex if the plugin install changed anything.',
+    '2. Open Codex hook review when Codex shows it.',
+    '3. Trust the `SessionStart` hook only if it runs:',
+    `   \`${codexHookCommand(options.repoRoot || repoRootFromScript())}\``,
+    `4. If no hook prompt appears, ${hookTrustLine}`,
+    '',
+    'This hook approval step applies to Codex only. Claude Code does not need Codex hook approval.',
+    'Codex must not install or update Claude Code. Claude Code must not install or update Codex.'
+  ];
+}
+
 async function runCodexAddAndVerify(command, addArgs, options) {
   const deadlineMs = pluginAddDeadlineMs();
   const pollMs = pluginAddPollMs();
@@ -339,7 +506,8 @@ async function runCodexAddAndVerify(command, addArgs, options) {
       lastListError = null;
       lastState = evaluateCodexToolkitPluginState(pluginList, {
         codexHome: options.codexHome,
-        repoRoot: options.repoRoot
+        repoRoot: options.repoRoot,
+        allowConfigCacheFallback: true
       });
       if (lastState.ok) {
         const addDidNotExitCleanly = !childExit || childExit.code !== 0;
@@ -448,7 +616,8 @@ async function main(argv = process.argv.slice(2)) {
     pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
     state = evaluateCodexToolkitPluginState(pluginList, {
       codexHome: options.codexHome,
-      repoRoot: options.repoRoot
+      repoRoot: options.repoRoot,
+      allowConfigCacheFallback: true
     });
   } catch (error) {
     console.error(`FAIL: ${error.message}`);
@@ -461,7 +630,8 @@ async function main(argv = process.argv.slice(2)) {
       pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
       state = evaluateCodexToolkitPluginState(pluginList, {
         codexHome: options.codexHome,
-        repoRoot: options.repoRoot
+        repoRoot: options.repoRoot,
+        allowConfigCacheFallback: true
       });
 
       if (!state.ok) {
@@ -492,12 +662,23 @@ async function main(argv = process.argv.slice(2)) {
     version: EXPECTED_TOOLKIT_VERSION,
     enabled: true,
     cache_root: state.cacheRoot,
+    verification_method: state.verificationMethod,
+    hook_trust_status: state.hookTrustStatus,
+    hook_trust_message: state.hookTrustMessage,
     install_path: codexToolkitInstallCommands(options.repoRoot),
+    next_steps: nextStepsForState(state, options),
     warnings
   };
   for (const warning of warnings) console.error(`WARN: ${warning}`);
   if (options.json) console.log(JSON.stringify(summary, null, 2));
-  else console.log(`OK: ${pluginId()} is installed, enabled, version ${EXPECTED_TOOLKIT_VERSION}, and has a SessionStart hook in ${state.cacheRoot}`);
+  else {
+    const method = state.verificationMethod === 'config-cache-fallback'
+      ? 'verified by config/cache fallback because Codex CLI list did not report the plugin'
+      : 'verified by Codex CLI plugin list and cache';
+    console.log(`OK: ${pluginId()} is installed, enabled, version ${EXPECTED_TOOLKIT_VERSION}, and has a SessionStart hook in ${state.cacheRoot} (${method}).`);
+    console.log('');
+    console.log(nextStepsForState(state, options).join('\n'));
+  }
   return 0;
 }
 

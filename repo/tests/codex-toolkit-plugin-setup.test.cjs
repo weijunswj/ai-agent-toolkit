@@ -45,6 +45,23 @@ function writeInstalledCache(codexHome, options = {}) {
   return root;
 }
 
+function writeCodexConfig(codexHome, options = {}) {
+  const trustedHookPath = path.join('.codex-plugin', 'hooks', 'hooks.json').replace(/\\/g, '/');
+  const lines = [
+    '[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]',
+    `enabled = ${options.enabled === false ? 'false' : 'true'}`,
+    '',
+    '[marketplaces.ai-agent-toolkit-local]',
+    `path = ${JSON.stringify(options.marketplacePath || repoRoot.replace(/\\/g, '/'))}`,
+    ''
+  ];
+  if (options.trustedHook !== false) {
+    lines.push('[trusted_hooks]', `${JSON.stringify(trustedHookPath)} = true`, '');
+  }
+  fs.mkdirSync(codexHome, { recursive: true });
+  fs.writeFileSync(path.join(codexHome, 'config.toml'), `${lines.join('\n')}\n`, 'utf8');
+}
+
 function installedList(options = {}) {
   const version = options.version || '2.2.0';
   return {
@@ -71,7 +88,7 @@ function writeFakeHangingCodex(codexHome, options = {}) {
   const fakeCodexScript = path.join(codexHome, 'fake-codex.cjs');
   writeJson(path.join(codexHome, 'state.json'), {
     repoRoot: '',
-    installed: false
+    installed: Boolean(options.initialInstalled)
   });
   fs.writeFileSync(fakeCodexScript, `
 'use strict';
@@ -202,6 +219,28 @@ function runSetupWrite(codexHome, fakeCodexPath) {
   });
 }
 
+function runSetupVerify(codexHome, fakeCodexPath) {
+  return spawnSync(process.execPath, [
+    path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'),
+    '--verify',
+    '--repo-root',
+    repoRoot,
+    '--codex-home',
+    codexHome,
+    '--codex-cli',
+    fakeCodexPath
+  ], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      CODEX_HOME: codexHome
+    },
+    encoding: 'utf8',
+    timeout: 5000,
+    windowsHide: true
+  });
+}
+
 test('Codex Toolkit plugin setup verifier accepts active 2.2.0 install with SessionStart cache', () => {
   const codexHome = tmpRoot();
   const cacheRoot = writeInstalledCache(codexHome);
@@ -325,6 +364,64 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
     assert.equal(state.ok, false);
     assert.match(state.errors.join('\n'), /expected authPolicy ON_USE/i);
   }
+});
+
+test('Codex Toolkit verifier falls back to config and cache when CLI list omits installed plugin', () => {
+  const codexHome = tmpRoot();
+  const cacheRoot = writeInstalledCache(codexHome);
+  writeCodexConfig(codexHome, { trustedHook: true });
+
+  const state = setup.evaluateCodexToolkitPluginState({ installed: [], available: [] }, {
+    codexHome,
+    repoRoot,
+    allowConfigCacheFallback: true
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.verificationMethod, 'config-cache-fallback');
+  assert.equal(state.hookTrustStatus, 'trusted');
+  assert.equal(state.installed.enabled, true);
+  assert.equal(path.resolve(state.cacheRoot), path.resolve(cacheRoot));
+  assert.deepEqual(state.errors, []);
+});
+
+test('Codex Toolkit fallback reports pending hook trust without rejecting the config and cache proof', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome);
+  writeCodexConfig(codexHome, { trustedHook: false });
+
+  const state = setup.evaluateCodexToolkitPluginState({ installed: [], available: [] }, {
+    codexHome,
+    repoRoot,
+    allowConfigCacheFallback: true
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.verificationMethod, 'config-cache-fallback');
+  assert.equal(state.hookTrustStatus, 'pending');
+  assert.match(state.hookTrustMessage, /pending/i);
+});
+
+test('Codex Toolkit setup output includes Codex-only hook approval next steps', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome);
+  writeCodexConfig(codexHome, { trustedHook: false });
+  const fakeCodex = writeFakeHangingCodex(codexHome, { initialInstalled: true });
+  writeJson(path.join(codexHome, 'state.json'), {
+    repoRoot,
+    installed: true
+  });
+
+  const result = runSetupVerify(codexHome, fakeCodex);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /\*\*Next Steps:\*\*/);
+  assert.match(result.stdout, /Trust the `SessionStart` hook only if it runs:/);
+  assert.match(result.stdout, /toolkit-local-bridge\.cjs" --hook --sync-enabled --write --sync-source codex-plugin/);
+  assert.match(result.stdout, /Hook trust is still pending/i);
+  assert.match(result.stdout, /applies to Codex only/i);
+  assert.match(result.stdout, /Claude Code does not need Codex hook approval/i);
+  assert.match(result.stdout, /Codex must not install or update Claude Code/i);
 });
 
 test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {

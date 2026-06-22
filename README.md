@@ -120,6 +120,8 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 
 The local marketplace wrapper is [.agents/plugins/marketplace.json](.agents/plugins/marketplace.json) and uses `policy.authentication: "ON_USE"` so the no-auth local Toolkit plugin can install headlessly. `node repo/scripts/setup-codex-toolkit-plugin.cjs --write` runs the same Codex-only install/update path and fails clearly if local marketplace installs are unsupported.
 
+Verification prefers `codex plugin list --available --json`. If that list is empty or unreliable but Codex config and the installed cache prove the Toolkit plugin is enabled, sourced from the local marketplace, current, and has the expected `SessionStart` hook, the helper reports config/cache fallback verification. After every verify, install, or update, follow the helper's `**Next Steps:**` section: restart Codex if anything changed, open Codex hook review when prompted, and trust the Codex `SessionStart` hook only if it runs `node ".../repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source codex-plugin`. This hook approval step is Codex-only; Claude Code does not need Codex hook approval.
+
 Manual fallback: copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
 [Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. English prompt: `setup n8n plugin`. Install the official n8n plugin only if hooks can be made Windows-safe. Never touch `n8n_live` during plugin setup; instance-level MCP access is a separate explicitly approved live-action path.
@@ -192,6 +194,7 @@ node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
 node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
 node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
 node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write
 ```

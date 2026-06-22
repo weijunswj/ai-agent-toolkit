@@ -59,7 +59,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     opencodeConfigDir: '',
     opencodeTarget: '',
     opencodeCommand: 'opencode',
-    pythonCommand: process.platform === 'win32' ? 'python' : 'python3'
+    pythonCommand: '',
+    setAg2PythonCommand: ''
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -98,6 +99,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--opencode-command=')) args.opencodeCommand = arg.slice('--opencode-command='.length);
     else if (arg === '--python-command') args.pythonCommand = next();
     else if (arg.startsWith('--python-command=')) args.pythonCommand = arg.slice('--python-command='.length);
+    else if (arg === '--set-ag2-python-command') args.setAg2PythonCommand = next();
+    else if (arg.startsWith('--set-ag2-python-command=')) args.setAg2PythonCommand = arg.slice('--set-ag2-python-command='.length);
     else if (arg === '--help' || arg === '-h') {
       printHelp();
       process.exit(0);
@@ -155,7 +158,9 @@ function printHelp() {
     '  --hub <path>                  test override; defaults to ~/.ai-agent-toolkit/current',
     '  --opencode-config-dir <path>  test or explicit setup override',
     '  --opencode-target <path>      test override for the managed OpenCode skill path',
-    '  --python-command <command>    test override for AG2 detection'
+    '  --python-command <command>    one-run AG2 Python detection override',
+    '  --set-ag2-python-command <command>',
+    '                                persist an AG2 Python command for future audit and hook runs'
   ].join('\n'));
 }
 
@@ -191,11 +196,18 @@ function writeJson(filePath, value) {
 function commandProbe(command, commandArgs) {
   if (!command) return { ok: false, output: '', error: 'missing command' };
   try {
-    const result = spawnSync(command, commandArgs, {
-      encoding: 'utf8',
-      timeout: 5000,
-      windowsHide: true
-    });
+    const isWindowsCmd = process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(command);
+    const result = isWindowsCmd
+      ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'call', command, ...commandArgs], {
+        encoding: 'utf8',
+        timeout: 5000,
+        windowsHide: true
+      })
+      : spawnSync(command, commandArgs, {
+        encoding: 'utf8',
+        timeout: 5000,
+        windowsHide: true
+      });
     return {
       ok: result.status === 0,
       output: `${result.stdout || ''}${result.stderr || ''}`.trim(),
@@ -450,6 +462,7 @@ function normalizedState(raw) {
   for (const target of SUPPORTED_TARGETS) {
     state.targets[target] = { ...defaultTargetState(), ...(state.targets[target] || {}) };
   }
+  state.targets.ag2.python_command = state.targets.ag2.python_command || '';
   state.repo_branch = state.repo_branch || DEFAULT_REPO_BRANCH;
   state.repo_remote = state.repo_remote || DEFAULT_REPO_REMOTE;
   state.repo_path = state.repo_path || '';
@@ -478,6 +491,9 @@ function applyRequestedState(state, args) {
     next.last_repo_update_status = 'disabled';
     next.last_repo_update_error = '';
   }
+  if (args.setAg2PythonCommand) {
+    next.targets.ag2.python_command = args.setAg2PythonCommand;
+  }
   for (const target of args.enableTargets) {
     next.targets[target].enabled = true;
     next.targets[target].explicitly_disabled = false;
@@ -494,12 +510,19 @@ function discoverOpenCode(args, targetState) {
   const envConfig = args.opencodeConfigDir || process.env.OPENCODE_CONFIG_DIR || '';
   const homeConfig = path.join(os.homedir(), '.config', 'opencode');
   const configDir = envConfig || homeConfig;
-  const configuredTarget = args.opencodeTarget || path.join(configDir, 'skills', TOOLKIT_NAME);
+  const persistedState = Boolean(
+    targetState.detected ||
+    targetState.target_path ||
+    targetState.synced_version ||
+    targetState.synced_checksum ||
+    targetState.last_sync
+  );
+  const configuredTarget = args.opencodeTarget || targetState.target_path || path.join(configDir, 'skills', TOOLKIT_NAME);
   const command = commandProbe(args.opencodeCommand, ['--version']);
   const configExists = fs.existsSync(configDir);
   const targetExists = fs.existsSync(configuredTarget);
   const explicitlyEnabled = targetState.enabled === true;
-  const detected = command.ok || Boolean(envConfig) || configExists || targetExists || explicitlyEnabled;
+  const detected = command.ok || Boolean(envConfig) || configExists || targetExists || explicitlyEnabled || persistedState;
   return {
     target: 'opencode',
     detected,
@@ -511,25 +534,123 @@ function discoverOpenCode(args, targetState) {
       config_dir: configDir,
       config_dir_exists: configExists,
       target_exists: targetExists,
+      persisted_state: persistedState,
       explicitly_enabled: explicitlyEnabled
     }
   };
 }
 
+function readDirectoryNames(dirPath) {
+  try {
+    return fs.readdirSync(dirPath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+}
+
+function ag2EnvPythonCandidates() {
+  const candidates = [];
+  if (process.env.UV_PYTHON) candidates.push(process.env.UV_PYTHON);
+  if (process.env.VIRTUAL_ENV) {
+    candidates.push(path.join(process.env.VIRTUAL_ENV, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python'));
+  }
+  if (process.env.CONDA_PREFIX) {
+    candidates.push(path.join(process.env.CONDA_PREFIX, process.platform === 'win32' ? 'python.exe' : 'bin/python'));
+  }
+  return candidates;
+}
+
+function windowsUserPythonCandidates() {
+  if (process.platform !== 'win32') return [];
+  const candidates = [];
+  const home = os.homedir();
+  if (home) {
+    candidates.push(path.join(home, '.local', 'bin', 'python.exe'));
+    const pyenvRoot = path.join(home, '.pyenv', 'pyenv-win', 'versions');
+    for (const version of readDirectoryNames(pyenvRoot)) {
+      candidates.push(path.join(pyenvRoot, version, 'python.exe'));
+    }
+  }
+  const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, 'AppData', 'Local') : '');
+  if (localAppData) {
+    const pythonRoot = path.join(localAppData, 'Programs', 'Python');
+    for (const version of readDirectoryNames(pythonRoot)) {
+      candidates.push(path.join(pythonRoot, version, 'python.exe'));
+    }
+  }
+  return candidates.filter((candidate) => fs.existsSync(candidate));
+}
+
+function uniqueCommandCandidates(commands) {
+  const seen = new Set();
+  const result = [];
+  for (const command of commands.map((item) => String(item || '').trim()).filter(Boolean)) {
+    const key = process.platform === 'win32' ? command.toLowerCase() : command;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(command);
+  }
+  return result;
+}
+
+function ag2PythonCandidates(args, targetState) {
+  return uniqueCommandCandidates([
+    targetState.python_command,
+    args.pythonCommand,
+    'python',
+    'python3',
+    'py',
+    ...ag2EnvPythonCandidates(),
+    ...windowsUserPythonCandidates()
+  ]);
+}
+
+function probeAg2Python(command) {
+  const python = commandProbe(command, ['--version']);
+  const ag2Package = python.ok ? commandProbe(command, ['-m', 'pip', 'show', 'ag2']) : {
+    ok: false,
+    output: '',
+    status: null,
+    error: 'python command did not run'
+  };
+  return {
+    command,
+    python_ok: python.ok,
+    python_output: python.output,
+    python_status: python.status,
+    python_error: python.error || '',
+    ag2_package_ok: ag2Package.ok,
+    ag2_package_output: ag2Package.output,
+    ag2_package_status: ag2Package.status,
+    ag2_package_error: ag2Package.error || ''
+  };
+}
+
 function discoverAg2(args, targetState, hubPath) {
-  const python = commandProbe(args.pythonCommand, ['--version']);
-  const ag2Package = python.ok ? commandProbe(args.pythonCommand, ['-m', 'pip', 'show', 'ag2']) : { ok: false, output: '' };
+  const candidates = ag2PythonCandidates(args, targetState);
+  const tried = [];
+  let selected = null;
+  for (const candidate of candidates) {
+    const attempt = probeAg2Python(candidate);
+    tried.push(attempt);
+    if (attempt.python_ok && attempt.ag2_package_ok) {
+      selected = attempt;
+      break;
+    }
+  }
   const targetPath = path.join(hubPath, 'adapters', 'ag2');
   const explicitlyEnabled = targetState.enabled === true;
   return {
     target: 'ag2',
-    detected: python.ok && ag2Package.ok || explicitlyEnabled,
+    detected: Boolean(selected) || explicitlyEnabled,
     target_path: targetPath,
+    python_command: selected?.command || '',
+    ag2_package_detected: Boolean(selected),
     signals: {
-      python_ok: python.ok,
-      python_output: python.output,
-      ag2_package_ok: ag2Package.ok,
-      ag2_package_output: ag2Package.output,
+      selected_python_command: selected?.command || '',
+      tried_python_commands: tried,
       explicitly_enabled: explicitlyEnabled
     }
   };
@@ -774,6 +895,17 @@ function targetWouldSync(targetName, state, checksum) {
   return target.synced_version !== BRIDGE_VERSION || target.synced_checksum !== checksum;
 }
 
+function targetIsSynced(targetState, checksum) {
+  return targetState.synced_version === BRIDGE_VERSION && targetState.synced_checksum === checksum;
+}
+
+function targetStatus(targetState, discovery, checksum) {
+  if (targetState.explicitly_disabled) return 'disabled';
+  if (targetState.enabled) return 'enabled';
+  if (discovery.detected) return 'detected';
+  return 'not detected';
+}
+
 function updateTargetState(state, targetName, discovery, checksum, synced, skipReason) {
   const target = state.targets[targetName];
   target.detected = discovery.detected;
@@ -811,10 +943,15 @@ function buildAudit({ args, hubPath, state, discoveries, checksum }) {
     targets: Object.fromEntries(SUPPORTED_TARGETS.map((target) => {
       const targetState = state.targets[target];
       return [target, {
+        status: targetStatus(targetState, discoveries[target], checksum),
         detected: discoveries[target].detected,
         enabled: targetState.enabled,
         explicitly_disabled: targetState.explicitly_disabled,
         target_path: discoveries[target].target_path,
+        synced: targetIsSynced(targetState, checksum),
+        synced_version: targetState.synced_version,
+        synced_at: targetState.last_sync,
+        python_command: target === 'ag2' ? discoveries[target].python_command || '' : undefined,
         would_write: targetWouldSync(target, state, checksum),
         skip_reason: targetState.enabled ? targetState.skip_reason : 'not enabled',
         signals: discoveries[target].signals
