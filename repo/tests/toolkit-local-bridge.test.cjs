@@ -7,6 +7,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const {
+  runRepoValidation,
+  getRepoValidationLabels,
   openUpdateReport,
   updateReportDir
 } = require('../scripts/toolkit-local-bridge.cjs');
@@ -214,6 +216,16 @@ function configureGitUser(repoPath) {
   git(repoPath, ['config', 'user.name', 'Toolkit Bridge Test']);
 }
 
+function writeHookLightSmokeFixture(repoPath) {
+  writeFile(path.join(repoPath, 'repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs'), [
+    "'use strict';",
+    "const assert = require('node:assert/strict');",
+    "const test = require('node:test');",
+    "test('fixture bridge smoke test passes', () => assert.equal(true, true));",
+    ''
+  ].join('\n'));
+}
+
 function writeRepoToolkitFixture(repoPath, label) {
   writeFile(path.join(repoPath, 'VERSION.txt'), `${label}\n`);
   writeFile(path.join(repoPath, 'skills', 'fixture-skill', 'SKILL.md'), [
@@ -242,6 +254,7 @@ function writeRepoToolkitFixture(repoPath, label) {
     "test('fixture bridge tests pass', () => assert.equal(true, true));",
     ''
   ].join('\n'));
+  writeHookLightSmokeFixture(repoPath);
   writeFile(path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
     '#!/usr/bin/env node',
     "'use strict';",
@@ -1164,6 +1177,80 @@ test('hook mode syncs enabled stale targets from the configured repo skill sourc
     fs.readFileSync(path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'utf8'),
     /AI Agent Toolkit Bridge/
   );
+});
+
+test('hook mode validation uses hook-light smoke validation and skips full bridge test suite', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  writeFile(path.join(fixture.repo, 'repo', 'tests', 'toolkit-local-bridge.test.cjs'), [
+    "'use strict';",
+    "const test = require('node:test');",
+    "test('full suite sanity', () => assert.equal(1 + 1, 2));",
+    ''
+  ].join('\n'));
+  writeFile(path.join(fixture.repo, 'repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs'), [
+    "'use strict';",
+    "const test = require('node:test');",
+    "test('hook-light validation runs', () => {});",
+    ''
+  ].join('\n'));
+
+  const fullSuiteValidation = getRepoValidationLabels();
+  assert.equal(fullSuiteValidation.length, 2);
+  assert.equal(fullSuiteValidation[0], 'node repo/scripts/validate-toolkit.cjs');
+  assert.equal(fullSuiteValidation[1], 'node --test repo/tests/toolkit-local-bridge.test.cjs');
+
+  const validation = runRepoValidation(path.join(fixture.repo), { hookMode: true });
+  assert.equal(validation.status, 'passed');
+  assert.equal(validation.commands.length, 2);
+  assert.equal(validation.commands[0], 'node repo/scripts/validate-toolkit.cjs');
+  assert.equal(
+    validation.commands[1],
+    'node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs'
+  );
+});
+
+test('startup hook mode syncs stale enabled OpenCode and Antigravity 2 targets and does not reuse stale repo status', () => {
+  const root = tmpRoot();
+  createMinimalToolkitSource(root, { alpha: 'alpha startup source\n' });
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    auto_sync_enabled: true,
+    repo_auto_update_enabled: false,
+    last_repo_update_status: 'validation-failed',
+    last_repo_update_from_commit: 'legacy-commit-a',
+    last_repo_update_to_commit: 'legacy-commit-b',
+    targets: {
+      opencode: {
+        enabled: true,
+        explicitly_disabled: false,
+        synced_version: '1.0.0',
+        synced_checksum: 'legacy'
+      },
+      ag2: {
+        enabled: true,
+        explicitly_disabled: false,
+        synced_version: '1.0.0',
+        synced_checksum: 'legacy'
+      }
+    }
+  });
+
+  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Synced Toolkit skills to OpenCode:/);
+  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /repo update status: `not run`/);
+  assert.match(report.text, /hook-light validation: `not run`/);
+  assert.match(report.text, /target sync status: `synced`/);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
+  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
 });
 
 test('hook report is generated when repo auto-update fast-forwards and lists changed files', () => {

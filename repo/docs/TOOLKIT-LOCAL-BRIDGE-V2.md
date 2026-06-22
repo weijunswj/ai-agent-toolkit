@@ -210,7 +210,7 @@ When a native SessionStart hook runs and repo auto-update is enabled, the bridge
 
 ```powershell
 node repo/scripts/validate-toolkit.cjs
-node --test repo/tests/toolkit-local-bridge.test.cjs
+node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
 ```
 
 9. Delegates enabled-target sync to the freshly updated repo script with `--skip-repo-auto-update`.
@@ -227,6 +227,7 @@ The hook validation is intentionally lighter than `npm run validate:all` so Sess
 
 ```powershell
 npm run validate:all
+node --test repo/tests/toolkit-local-bridge.test.cjs
 ```
 
 Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. If validation, fetch, fast-forward, or delegation fails in hook mode, the hook prints a concise warning, records the last repo update status in hub state when possible, skips target sync, and exits successfully so agent startup is not blocked.
@@ -448,7 +449,7 @@ Move or mirror outside root `AGENTS.md`:
 - Exact bridge state schema: updater validation and tests.
 - Exact command implementations: [toolkit-local-bridge.cjs](../scripts/toolkit-local-bridge.cjs).
 - Hook behavior details: this doc, plugin hook manifests, and tests.
-- Mechanical validation logic: `repo/tests/toolkit-local-bridge.test.cjs` and `repo/scripts/validate-toolkit.cjs`.
+- Mechanical validation logic: `repo/tests/toolkit-local-bridge-hook-light.test.cjs` for hook-light startup behavior, `repo/scripts/validate-toolkit.cjs`, and full manual bridge validation in `repo/tests/toolkit-local-bridge.test.cjs`.
 
 Do not move exclusively into hooks:
 
