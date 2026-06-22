@@ -16,6 +16,8 @@ On Windows, run Codex native plugin operations through the app-managed executabl
 
 If same-version Codex plugin cache refresh keeps timing out on the same stale files, stop the long-running add attempt, avoid concurrent `codex plugin add` retries, run one clean write/verify with the app-managed CLI, and inspect Codex config/cache state before touching shared bridge targets.
 
+Routine Codex setup should verify and refresh the native Toolkit plugin cache before validation, bridge setup, or target sync. After the native cache is current, use fast validation such as `validate-toolkit.cjs` and `toolkit-local-bridge-hook-light.test.cjs`. Reserve the full `toolkit-local-bridge.test.cjs` suite for bridge changes, PR review, or release validation.
+
 OpenCode and Antigravity 2 sync are app-facing after explicit target enablement: OpenCode uses the user OpenCode skill folder, and Antigravity 2 uses the Gemini config plugin root. Antigravity 2 detection is separate from optional Python `ag2` package detection.
 
 It intentionally does not create one skill per bridge command.

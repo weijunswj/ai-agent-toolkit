@@ -45,22 +45,39 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 
 ## English Setup Journey
 
-When the user says `setup toolkit` while running inside Codex, complete this Codex native setup flow and then run the shared bridge steps. If running inside Claude Code, do not run the Codex native plugin steps; use Claude Code's native Toolkit plugin flow from this repo, verify `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, and then continue at step 3 for shared bridge configuration, audit, and optional target sync.
+When the user says `setup toolkit` while running inside Codex, complete this Codex native setup flow and then run the shared bridge steps. If running inside Claude Code, do not run the Codex native plugin steps; use Claude Code's native Toolkit plugin flow from this repo, verify `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, and then continue at the shared bridge configuration, audit, and optional target sync steps.
 
-1. Validate the trusted local Toolkit repo on `main` before configuring anything:
+1. Perform only the minimal trusted local Toolkit repo update on `main` before using it as the native plugin source:
 
 ```powershell
 git status --short
 git switch main
 git fetch origin main
 git merge --ff-only origin/main
-node repo/scripts/validate-toolkit.cjs
-node --test repo/tests/toolkit-local-bridge.test.cjs
 ```
 
-Stop if the repo is dirty, not on the expected remote, cannot fast-forward, or validation fails.
+Stop if the repo is dirty, not on the expected remote, or cannot fast-forward.
 
-2. Verify the Toolkit Codex native plugin is already installed, active, current, and sourced from this local repo:
+2. In Codex, verify and refresh the Toolkit native plugin cache before running repo validation, bridge setup, or target sync:
+
+```powershell
+node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
+node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json
+node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
+```
+
+Run `--write --json` only when `--verify` reports the plugin is missing, disabled, stale, points at the wrong source, has same-version stale cache content, or lacks a valid installed cache. Do not run `validate-toolkit.cjs`, bridge tests, repo auto-update enablement, or target sync before this native cache check/refresh has passed or failed clearly.
+
+3. After the native plugin cache is current, run fast setup validation:
+
+```powershell
+node repo/scripts/validate-toolkit.cjs
+node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
+```
+
+Stop if validation fails. Do not run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during ordinary user setup; it is intentionally slower and belongs to bridge code changes, release validation, or PR review.
+
+The Toolkit Codex native plugin must now be installed, active, current, and sourced from this local repo:
 
 ```powershell
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
@@ -83,13 +100,13 @@ After every install, update, or verify, read the helper's `**Next Steps:**` sect
 
 Verification must confirm the installed plugin cache contains Toolkit version `2.2.0`, `.codex-plugin/hooks/hooks.json` includes the Codex `SessionStart` hook, and package-critical cache files match this local repo. If Codex local marketplace install is unsupported, the verifier cannot find a usable Codex CLI, CLI/fallback verification fails, or verification never passes before the add deadline, fail clearly instead of pretending setup completed.
 
-3. Configure repo-backed auto-update from this local repo without enabling OpenCode or Antigravity 2 yet:
+4. Configure repo-backed auto-update from this local repo without enabling OpenCode or Antigravity 2 yet:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "<local-ai-agent-toolkit-repo>" --repo-branch main --enable-auto-sync --write
 ```
 
-4. Audit OpenCode and Antigravity 2, then explain the detected targets, enabled state, app-facing target paths, internal hub adapter paths, app target existence, synced state, planned writes, Antigravity 2 bridge-detection signals, and optional AG2 Python package discovery result:
+5. Audit OpenCode and Antigravity 2, then explain the detected targets, enabled state, app-facing target paths, internal hub adapter paths, app target existence, synced state, planned writes, Antigravity 2 bridge-detection signals, and optional AG2 Python package discovery result:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --audit
@@ -97,8 +114,8 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 
 OpenCode detection should mention useful signals such as the `opencode` command, `OPENCODE_CONFIG_DIR` or `~/.config/opencode`, an existing managed target folder, and persisted bridge target state. Antigravity 2 detection and Python `ag2` package detection are separate: Antigravity 2 may be detected from `%USERPROFILE%\.antigravity`, `%USERPROFILE%\.gemini\config`, `%USERPROFILE%\.gemini\config\plugins`, an existing Toolkit hub adapter, an existing `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit` plugin target, explicit enablement, or persisted bridge state even when the Python package is absent. The audit should report `ag2_package_detected` separately, keep `python_command` empty unless the package is found, and include the exact Python commands tried plus package misses such as `Package(s) not found: ag2`. If the user provides a non-PATH AG2 Python for package-specific workflows, persist it with `--set-ag2-python-command "<python.exe>" --write` so future audits and hooks can reuse it.
 
-5. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output into the app-facing target: OpenCode uses `~/.config/opencode/skills/ai-agent-toolkit`, and Antigravity 2 uses `~/.gemini/config/plugins/ai-agent-toolkit` with `skills/ai-agent-toolkit/SKILL.md` inside that plugin root. If OpenCode or Antigravity 2 is not detected, explain that either can be enabled later with `node repo/scripts/toolkit-local-bridge.cjs --enable-target <target> --write`. Never silently enable OpenCode or Antigravity 2.
-6. If approved, enable only the approved targets and run a sync test. Include `--set-ag2-python-command "<python.exe>"` in the approved write command only when the user supplied or selected that AG2 Python command:
+6. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output into the app-facing target: OpenCode uses `~/.config/opencode/skills/ai-agent-toolkit`, and Antigravity 2 uses `~/.gemini/config/plugins/ai-agent-toolkit` with `skills/ai-agent-toolkit/SKILL.md` inside that plugin root. If OpenCode or Antigravity 2 is not detected, explain that either can be enabled later with `node repo/scripts/toolkit-local-bridge.cjs --enable-target <target> --write`. Never silently enable OpenCode or Antigravity 2.
+7. If approved, enable only the approved targets and run a sync test. Include `--set-ag2-python-command "<python.exe>"` in the approved write command only when the user supplied or selected that AG2 Python command:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --enable-target ag2 --write
@@ -106,7 +123,7 @@ node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-7. Confirm future native `SessionStart` hooks will use the configured repo-backed updater: Codex hooks should use `--sync-source codex-plugin`, Claude Code hooks should use `--sync-source claude-plugin`, and both should validate repo path, branch, remote, clean tree, `git fetch origin main`, `git merge --ff-only FETCH_HEAD`, hook-light validation, and enabled-target sync from the freshly updated repo.
+8. Confirm future native `SessionStart` hooks will use the configured repo-backed updater: Codex hooks should use `--sync-source codex-plugin`, Claude Code hooks should use `--sync-source claude-plugin`, and both should validate repo path, branch, remote, clean tree, `git fetch origin main`, `git merge --ff-only FETCH_HEAD`, hook-light validation, and enabled-target sync from the freshly updated repo.
 
 ## Safety Rules
 
@@ -131,8 +148,8 @@ For bridge or setup-surface changes, prefer targeted checks first:
 
 ```powershell
 node repo/scripts/sync-toolkit-projects.cjs --check
-node --test repo/tests/toolkit-local-bridge.test.cjs
+node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
 node repo/scripts/validate-toolkit.cjs
 ```
 
-Run `npm run validate:all` when the change affects generated outputs, manifests, packaging, workflow policy, or broad validation.
+Run `node --test repo/tests/toolkit-local-bridge.test.cjs` when the change affects bridge behavior, hooks, target sync semantics, repo auto-update behavior, or before PR/release validation. Run `npm run validate:all` when the change affects generated outputs, manifests, packaging, workflow policy, or broad validation.
