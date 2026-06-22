@@ -83,6 +83,7 @@ const codexHome = process.env.CODEX_HOME;
 const statePath = path.join(codexHome, 'state.json');
 const args = process.argv.slice(2);
 const omitSessionStart = ${JSON.stringify(Boolean(options.omitSessionStart))};
+const installDelayMs = ${JSON.stringify(options.installDelayMs || 0)};
 
 function readState() {
   return JSON.parse(fs.readFileSync(statePath, 'utf8'));
@@ -157,12 +158,16 @@ if (args[0] === 'plugin' && args[1] === 'list') {
 }
 
 if (args[0] === 'plugin' && args[1] === 'add') {
-  const state = readState();
-  state.installed = true;
-  writeState(state);
-  installCache(state.repoRoot);
-  process.stdout.write(JSON.stringify({ pluginId: args[2], authPolicy: 'ON_USE' }) + '\\n');
-  setInterval(() => {}, 1000);
+  const finishInstall = () => {
+    const state = readState();
+    state.installed = true;
+    writeState(state);
+    installCache(state.repoRoot);
+    process.stdout.write(JSON.stringify({ pluginId: args[2], authPolicy: 'ON_USE' }) + '\\n');
+    setInterval(() => {}, 1000);
+  };
+  if (installDelayMs > 0) setTimeout(finishInstall, installDelayMs);
+  else finishInstall();
   return;
 }
 
@@ -188,7 +193,8 @@ function runSetupWrite(codexHome, fakeCodexPath) {
     env: {
       ...process.env,
       CODEX_HOME: codexHome,
-      CODEX_TOOLKIT_CODEX_CLI_TIMEOUT_MS: '200'
+      CODEX_TOOLKIT_CODEX_PLUGIN_ADD_DEADLINE_MS: '2000',
+      CODEX_TOOLKIT_CODEX_PLUGIN_ADD_POLL_MS: '50'
     },
     encoding: 'utf8',
     timeout: 5000,
@@ -326,6 +332,7 @@ test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
   assert.match(bridgeDoc, /Manual Isolated CODEX_HOME Acceptance/i);
   assert.match(bridgeDoc, /CODEX_HOME=<temp>/);
   assert.match(bridgeDoc, /setup-codex-toolkit-plugin\.cjs --write --json/);
+  assert.match(bridgeDoc, /polls `codex plugin list --available --json`/);
   assert.match(bridgeDoc, /did not exit cleanly/);
   assert.match(bridgeDoc, /codex plugin list --available --json/);
   assert.match(bridgeDoc, /plugins\/cache\/ai-agent-toolkit-local\/ai-agent-toolkit\/2\.2\.0/);
@@ -346,12 +353,25 @@ test('Codex Toolkit --write succeeds when plugin add installs then times out', (
   assert.match(result.stderr, /WARN: codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json did not exit cleanly/i);
 });
 
+test('Codex Toolkit --write waits for verification when plugin add installs after timeout window', () => {
+  const codexHome = tmpRoot();
+  const result = runSetupWrite(codexHome, writeFakeHangingCodex(codexHome, { installDelayMs: 500 }));
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.ok, true);
+  assert.equal(summary.enabled, true);
+  assert.deepEqual(summary.warnings, [
+    'codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json did not exit cleanly, but installed-state verification passed'
+  ]);
+});
+
 test('Codex Toolkit --write fails when timed-out plugin add leaves invalid cache', () => {
   const codexHome = tmpRoot();
   const result = runSetupWrite(codexHome, writeFakeHangingCodex(codexHome, { omitSessionStart: true }));
 
   assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
-  assert.match(result.stderr, /plugin add ai-agent-toolkit@ai-agent-toolkit-local --json failed/i);
+  assert.match(result.stderr, /plugin add ai-agent-toolkit@ai-agent-toolkit-local --json did not produce a verified install/i);
   assert.match(result.stderr, /installed-state verification failed/i);
   assert.match(result.stderr, /SessionStart/i);
 });

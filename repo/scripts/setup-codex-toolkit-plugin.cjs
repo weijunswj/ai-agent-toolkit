@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
@@ -203,26 +203,43 @@ function commandTimeoutMs() {
   return positiveIntEnv('CODEX_TOOLKIT_CODEX_CLI_TIMEOUT_MS', 120000);
 }
 
-function pluginAddTimeoutMs() {
+function pluginAddDeadlineMs() {
+  if (process.env.CODEX_TOOLKIT_CODEX_PLUGIN_ADD_DEADLINE_MS) {
+    return positiveIntEnv('CODEX_TOOLKIT_CODEX_PLUGIN_ADD_DEADLINE_MS', 120000);
+  }
   if (process.env.CODEX_TOOLKIT_CODEX_CLI_ADD_TIMEOUT_MS) {
-    return positiveIntEnv('CODEX_TOOLKIT_CODEX_CLI_ADD_TIMEOUT_MS', 15000);
+    return positiveIntEnv('CODEX_TOOLKIT_CODEX_CLI_ADD_TIMEOUT_MS', 120000);
   }
-  if (process.env.CODEX_TOOLKIT_CODEX_CLI_TIMEOUT_MS) {
-    return positiveIntEnv('CODEX_TOOLKIT_CODEX_CLI_TIMEOUT_MS', 15000);
-  }
-  return 15000;
+  return 120000;
+}
+
+function pluginAddPollMs() {
+  return positiveIntEnv('CODEX_TOOLKIT_CODEX_PLUGIN_ADD_POLL_MS', 500);
+}
+
+function codexSpawnParts(command, args) {
+  const isNodeScript = /\.(?:cjs|mjs|js)$/i.test(command);
+  return {
+    command: isNodeScript ? process.execPath : command,
+    args: isNodeScript ? [command, ...args] : args
+  };
 }
 
 function spawnCodex(command, args, options = {}) {
-  const isNodeScript = /\.(?:cjs|mjs|js)$/i.test(command);
-  return spawnSync(isNodeScript ? process.execPath : command, isNodeScript ? [command, ...args] : args, {
+  const parts = codexSpawnParts(command, args);
+  return spawnSync(parts.command, parts.args, {
     ...options,
     windowsHide: true
   });
 }
 
-function commandTimedOut(result) {
-  return result?.error?.code === 'ETIMEDOUT';
+function spawnCodexProcess(command, args, options = {}) {
+  const parts = codexSpawnParts(command, args);
+  return spawn(parts.command, parts.args, {
+    stdio: 'ignore',
+    ...options,
+    windowsHide: true
+  });
 }
 
 function commandCandidates(explicitCommand) {
@@ -254,44 +271,103 @@ function resolveCodexCommand(explicitCommand) {
   return { command: '', failures };
 }
 
-function runCodexJsonResult(command, args, options = {}) {
+function runCodexJson(command, args) {
   const result = spawnCodex(command, args, {
     encoding: 'utf8',
-    timeout: options.timeoutMs || commandTimeoutMs()
+    timeout: commandTimeoutMs()
   });
   if (result.status !== 0) {
-    return {
-      ok: false,
-      timedOut: commandTimedOut(result),
-      error: `codex ${args.join(' ')} failed: ${commandOutput(result)}`,
-      result
-    };
+    throw new Error(`codex ${args.join(' ')} failed: ${commandOutput(result)}`);
   }
   const output = (result.stdout || '').trim();
   try {
-    return {
-      ok: true,
-      json: output ? JSON.parse(output) : {},
-      result
-    };
+    return output ? JSON.parse(output) : {};
   } catch (error) {
-    return {
-      ok: false,
-      timedOut: false,
-      error: `codex ${args.join(' ')} returned invalid JSON: ${error.message}`,
-      result
-    };
+    throw new Error(`codex ${args.join(' ')} returned invalid JSON: ${error.message}`);
   }
-}
-
-function runCodexJson(command, args) {
-  const outcome = runCodexJsonResult(command, args);
-  if (!outcome.ok) throw new Error(outcome.error);
-  return outcome.json;
 }
 
 function codexAddTimeoutWarning(args) {
   return `codex ${args.join(' ')} did not exit cleanly, but installed-state verification passed`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function terminateChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null || child.killed) return;
+  try {
+    child.kill();
+  } catch {
+    // The child may already be gone; verification state is the source of truth here.
+  }
+}
+
+function formatStateErrors(state, listError) {
+  if (state?.errors?.length) return state.errors.join('; ');
+  if (listError) return listError.message;
+  return 'no installed-state verification was available';
+}
+
+async function runCodexAddAndVerify(command, addArgs, options) {
+  const deadlineMs = pluginAddDeadlineMs();
+  const pollMs = pluginAddPollMs();
+  const startedAt = Date.now();
+  let child;
+  let childExit = null;
+  let childError = null;
+  let lastState = null;
+  let lastListError = null;
+
+  try {
+    child = spawnCodexProcess(command, addArgs, { env: process.env });
+    child.on('exit', (code, signal) => {
+      childExit = { code, signal };
+    });
+    child.on('error', (error) => {
+      childError = error;
+    });
+    child.unref();
+  } catch (error) {
+    throw new Error(`codex ${addArgs.join(' ')} failed to start: ${error.message}`);
+  }
+
+  while (Date.now() - startedAt <= deadlineMs) {
+    try {
+      const pluginList = runCodexJson(command, ['plugin', 'list', '--json', '--available']);
+      lastListError = null;
+      lastState = evaluateCodexToolkitPluginState(pluginList, {
+        codexHome: options.codexHome,
+        repoRoot: options.repoRoot
+      });
+      if (lastState.ok) {
+        const addDidNotExitCleanly = !childExit || childExit.code !== 0;
+        terminateChild(child);
+        return {
+          state: lastState,
+          warning: addDidNotExitCleanly ? codexAddTimeoutWarning(addArgs) : ''
+        };
+      }
+    } catch (error) {
+      lastListError = error;
+    }
+
+    if (childError) {
+      terminateChild(child);
+      throw new Error(`codex ${addArgs.join(' ')} failed: ${childError.message}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
+    }
+
+    if (childExit && childExit.code !== 0) {
+      terminateChild(child);
+      throw new Error(`codex ${addArgs.join(' ')} exited with ${childExit.code}${childExit.signal ? ` signal ${childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
+    }
+
+    await sleep(pollMs);
+  }
+
+  terminateChild(child);
+  throw new Error(`codex ${addArgs.join(' ')} did not produce a verified install within ${deadlineMs}ms; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`);
 }
 
 function parseArgs(argv = process.argv.slice(2)) {
@@ -336,7 +412,7 @@ function usage() {
   ].join('\n');
 }
 
-function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2)) {
   let options;
   try {
     options = parseArgs(argv);
@@ -390,19 +466,12 @@ function main(argv = process.argv.slice(2)) {
 
       if (!state.ok) {
         const addArgs = ['plugin', 'add', pluginId(), '--json'];
-        const addOutcome = runCodexJsonResult(resolved.command, addArgs, { timeoutMs: pluginAddTimeoutMs() });
-        if (!addOutcome.ok && !addOutcome.timedOut) throw new Error(addOutcome.error);
-
-        pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
-        state = evaluateCodexToolkitPluginState(pluginList, {
+        const addOutcome = await runCodexAddAndVerify(resolved.command, addArgs, {
           codexHome: options.codexHome,
           repoRoot: options.repoRoot
         });
-
-        if (!addOutcome.ok && addOutcome.timedOut) {
-          if (state.ok) warnings.push(codexAddTimeoutWarning(addArgs));
-          else throw new Error(`${addOutcome.error}; installed-state verification failed: ${state.errors.join('; ')}`);
-        }
+        state = addOutcome.state;
+        if (addOutcome.warning) warnings.push(addOutcome.warning);
       }
     } catch (error) {
       console.error(`FAIL: ${error.message}`);
@@ -433,7 +502,12 @@ function main(argv = process.argv.slice(2)) {
 }
 
 if (require.main === module) {
-  process.exitCode = main();
+  main().then((code) => {
+    process.exitCode = code;
+  }, (error) => {
+    console.error(`FAIL: ${error.message}`);
+    process.exitCode = 1;
+  });
 }
 
 module.exports = {
