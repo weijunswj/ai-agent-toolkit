@@ -52,6 +52,7 @@ The hub contains:
 - `adapters/opencode/**`.
 - `adapters/ag2/**`.
 - Version and checksum data.
+- Managed Toolkit skill payload metadata, including the current Toolkit skill names written to non-native targets.
 - Source commit or `unknown` when Git metadata is unavailable.
 - Sync source: `repo`, `codex-plugin`, or `claude-plugin`.
 - Sync timestamp.
@@ -66,8 +67,9 @@ Writes are atomic:
 1. Write a staging directory.
 2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and Antigravity 2 adapter output.
 3. Rename staging into `current`.
-4. For OpenCode target sync, stage the `ai-agent-toolkit` skill folder beside the target and atomically replace only that managed folder.
-5. For Antigravity 2 target sync, stage the local `ai-agent-toolkit` plugin root and atomically replace only that managed plugin folder under the Gemini config plugin root.
+4. For OpenCode target sync, write into the OpenCode `skills/` root and atomically replace only Toolkit-managed skill folders.
+5. For Antigravity 2 target sync, write into the local `ai-agent-toolkit` plugin root and atomically replace only Toolkit-managed skill folders under that plugin's `skills/` directory.
+6. Remove only skill folders listed in the previous Toolkit-managed target manifest when they are no longer part of the current Toolkit skill set. Preserve unrelated user-created skills and unrelated files.
 
 Fresh locks cause a safe skip. Stale locks are removed before retry. Older bridge versions refuse to overwrite newer hub state unless `--force-downgrade` is supplied for explicit manual recovery.
 
@@ -209,6 +211,8 @@ node --test repo/tests/toolkit-local-bridge.test.cjs
 
 9. Delegates enabled-target sync to the freshly updated repo script with `--skip-repo-auto-update`.
 
+The delegated repo script builds the target payload from the updated local Toolkit repo `skills/` tree plus the small `ai-agent-toolkit` adapter skill. It must not use Codex or Claude private plugin caches as the skill payload source.
+
 The delegated command shape is:
 
 ```powershell
@@ -258,8 +262,10 @@ OpenCode detection signals:
 
 OpenCode target path:
 
-- POSIX: `~/.config/opencode/skills/ai-agent-toolkit/`.
-- Windows: `%USERPROFILE%\.config\opencode\skills\ai-agent-toolkit\`.
+- POSIX: `~/.config/opencode/skills/`.
+- Windows: `%USERPROFILE%\.config\opencode\skills\`.
+
+OpenCode loads one folder per skill under that root, for example `~/.config/opencode/skills/toolkit-setup/SKILL.md`. The bridge writes every current Toolkit skill folder plus the `ai-agent-toolkit` adapter skill there after the user explicitly enables OpenCode. Old bridge state that points at `skills/ai-agent-toolkit` is migrated to the parent `skills/` root.
 
 The bridge intentionally does not use `.agents/skills` for OpenCode output, avoiding duplicate Codex skill discovery.
 
@@ -281,7 +287,7 @@ Antigravity 2 target path:
 
 - POSIX: `~/.gemini/config/plugins/ai-agent-toolkit/`.
 - Windows: `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit\`.
-- Required app-facing skill: `skills/ai-agent-toolkit/SKILL.md` inside that plugin root.
+- Required app-facing skills: every current Toolkit skill under `skills/<skill-name>/SKILL.md`, plus the `skills/ai-agent-toolkit/SKILL.md` adapter skill inside that plugin root.
 
 Persist a known non-PATH Antigravity 2/AG2 Python command with:
 
@@ -301,9 +307,9 @@ Audit separates Antigravity 2 app/bridge relevance from the optional Python pack
 Audit also separates internal hub metadata from app-facing target sync:
 
 - `internal_adapter_path` points under the Toolkit Local Bridge Hub.
-- `target_path` points at the app-facing OpenCode skill folder or Antigravity 2 plugin root.
+- `target_path` points at the app-facing OpenCode skills root or Antigravity 2 plugin root.
 - `target_exists` reports whether the app-facing managed output files exist.
-- `synced` is true only when the enabled target state and the real app-facing output match the current Toolkit payload. Hub metadata alone is not enough.
+- `synced` is true only when the enabled target state and the real app-facing output match the current full Toolkit skill payload and no previously managed Toolkit skill folder is stale. Hub metadata alone is not enough.
 
 ## Auto-Check, Auto-Setup, And Auto-Sync
 
