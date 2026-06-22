@@ -3,10 +3,11 @@
 ## Preserved In `_main/`
 
 - `codex-plugin/plugin.json`
+- `codex-plugin/assets/*.png`
 - `codex-plugin/hooks/hooks.json`
 - `claude-plugin/plugin.json`
 - `claude-plugin/hooks/hooks.json`
-- Plugin metadata and hook configuration only.
+- Plugin metadata, Codex icon assets, and hook configuration only.
 
 ## Reviewed In `curated_output_for_ai/`
 
@@ -27,7 +28,7 @@ These files publish one compact discoverability skill. Bridge setup, repo auto-u
 ## AI-Facing Surfaces
 
 - `skills/toolkit-setup/` is generated from curated output as the only Toolkit setup or bridge discoverability skill.
-- `.codex-plugin/plugin.json` and `.codex-plugin/hooks/hooks.json` are generated from `_main/codex-plugin/**`.
+- `.codex-plugin/plugin.json`, `.codex-plugin/assets/*.png`, and `.codex-plugin/hooks/hooks.json` are generated from `_main/codex-plugin/**`.
 - `.agents/plugins/marketplace.json` is the local Codex marketplace wrapper for installing this repo as `ai-agent-toolkit@ai-agent-toolkit-local`.
 - `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json` are generated from `_main/claude-plugin/**`.
 - The seven command-specific bridge skills are not published.

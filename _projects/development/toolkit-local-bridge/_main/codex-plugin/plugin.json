@@ -23,6 +23,8 @@
     "displayName": "AI Agent Toolkit",
     "shortDescription": "Source-first reusable agent skills with opt-in local bridge adapters",
     "longDescription": "Use AI Agent Toolkit for reusable source-traceable skills, repo-local agent rules, validation guidance, English setup routing, opt-in repo-backed updates, and local OpenCode or Antigravity 2 bridge adapters. Codex updates this package natively and never installs or updates Claude Code.",
+    "composerIcon": "./.codex-plugin/assets/composer-icon.png",
+    "logo": "./.codex-plugin/assets/logo.png",
     "developerName": "weijunswj",
     "category": "Developer Tools",
     "capabilities": [

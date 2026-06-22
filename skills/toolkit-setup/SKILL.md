@@ -78,15 +78,15 @@ Verification must confirm the installed plugin cache contains Toolkit version `2
 node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "<local-ai-agent-toolkit-repo>" --repo-branch main --enable-auto-sync --write
 ```
 
-4. Audit OpenCode and Antigravity 2, then explain the detected targets, enabled state, target paths, synced state, planned writes, and AG2 Python discovery result:
+4. Audit OpenCode and Antigravity 2, then explain the detected targets, enabled state, app-facing target paths, internal hub adapter paths, app target existence, synced state, planned writes, Antigravity 2 bridge-detection signals, and optional AG2 Python package discovery result:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-OpenCode detection should mention useful signals such as the `opencode` command, `OPENCODE_CONFIG_DIR` or `~/.config/opencode`, an existing managed target folder, and persisted bridge target state. Antigravity 2/AG2 detection should mention the selected Python command when found, or the exact commands tried when AG2 is not detected. If the user provides a non-PATH AG2 Python, persist it with `--set-ag2-python-command "<python.exe>" --write` so future audits and hooks can reuse it.
+OpenCode detection should mention useful signals such as the `opencode` command, `OPENCODE_CONFIG_DIR` or `~/.config/opencode`, an existing managed target folder, and persisted bridge target state. Antigravity 2 detection and Python `ag2` package detection are separate: Antigravity 2 may be detected from `%USERPROFILE%\.antigravity`, `%USERPROFILE%\.gemini\config`, `%USERPROFILE%\.gemini\config\plugins`, an existing Toolkit hub adapter, an existing `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit` plugin target, explicit enablement, or persisted bridge state even when the Python package is absent. The audit should report `ag2_package_detected` separately, keep `python_command` empty unless the package is found, and include the exact Python commands tried plus package misses such as `Package(s) not found: ag2`. If the user provides a non-PATH AG2 Python for package-specific workflows, persist it with `--set-ag2-python-command "<python.exe>" --write` so future audits and hooks can reuse it.
 
-5. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output. If OpenCode is detected, ask whether to enable Toolkit sync to OpenCode. If OpenCode is not detected, explain that it can be enabled later with `node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write`. Never silently enable OpenCode or Antigravity 2.
+5. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output into the app-facing target: OpenCode uses `~/.config/opencode/skills/ai-agent-toolkit`, and Antigravity 2 uses `~/.gemini/config/plugins/ai-agent-toolkit` with `skills/ai-agent-toolkit/SKILL.md` inside that plugin root. If OpenCode or Antigravity 2 is not detected, explain that either can be enabled later with `node repo/scripts/toolkit-local-bridge.cjs --enable-target <target> --write`. Never silently enable OpenCode or Antigravity 2.
 6. If approved, enable only the approved targets and run a sync test. Include `--set-ag2-python-command "<python.exe>"` in the approved write command only when the user supplied or selected that AG2 Python command:
 
 ```powershell
@@ -104,6 +104,8 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 - Detection is allowed; autosetup is forbidden.
 - Sync only enabled targets.
 - Disabled or never-enabled targets must not be touched.
+- Audit `synced` means the real app-facing target output matches the current Toolkit payload. Internal hub metadata alone is not synced.
+- The Python `ag2` package is optional for package-specific AG2 workflows; it is not required for Toolkit-managed Antigravity 2 bridge metadata or plugin-scoped skill sync.
 - Repo auto-update is opt-in only and must validate the configured Toolkit repo, expected remote, clean tree, fast-forward update, and hook-light validation before enabled-target sync.
 - Do not run npm, pip, package installs, or dependency installers from this skill. The only allowed marketplace operation in this flow is the Codex-only local Toolkit plugin install/update path through `setup-codex-toolkit-plugin.cjs --write` or the equivalent `codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json` plus `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` commands.
 - After a requested Codex plugin install or update on Windows, repair that installed plugin root before approving hooks. If repair cannot make hooks safe, fail with the repair error instead of reporting success.

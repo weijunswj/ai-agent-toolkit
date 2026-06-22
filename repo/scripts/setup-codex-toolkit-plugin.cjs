@@ -10,6 +10,22 @@ const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
 const EXPECTED_TOOLKIT_VERSION = '2.2.0';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
+const CODEX_PLUGIN_ICON_SPECS = [
+  {
+    field: 'composerIcon',
+    manifestPath: './.codex-plugin/assets/composer-icon.png',
+    relPath: '.codex-plugin/assets/composer-icon.png',
+    width: 128,
+    height: 128
+  },
+  {
+    field: 'logo',
+    manifestPath: './.codex-plugin/assets/logo.png',
+    relPath: '.codex-plugin/assets/logo.png',
+    width: 512,
+    height: 512
+  }
+];
 
 function slash(value) {
   return String(value || '').replace(/\\/g, '/');
@@ -17,6 +33,17 @@ function slash(value) {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
+}
+
+function pngSize(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const validSignature = signature.every((byte, index) => buffer[index] === byte);
+  if (!validSignature || buffer.toString('ascii', 12, 16) !== 'IHDR') return null;
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20)
+  };
 }
 
 function repoRootFromScript() {
@@ -49,6 +76,24 @@ function validateRepoPluginSource(repoRoot, expectedVersion = EXPECTED_TOOLKIT_V
     }
     if (manifest.hooks !== './.codex-plugin/hooks/hooks.json') {
       errors.push(`Codex plugin manifest must reference .codex-plugin hooks: ${manifest.hooks || '<missing>'}`);
+    }
+    for (const icon of CODEX_PLUGIN_ICON_SPECS) {
+      const actualPath = manifest.interface?.[icon.field] || '';
+      if (actualPath !== icon.manifestPath) {
+        errors.push(`Codex plugin manifest interface.${icon.field} must be ${icon.manifestPath}: ${actualPath || '<missing>'}`);
+        continue;
+      }
+      const assetPath = path.join(repoRoot, ...icon.relPath.split('/'));
+      if (!fs.existsSync(assetPath)) {
+        errors.push(`Codex plugin manifest interface.${icon.field} references missing asset: ${icon.manifestPath}`);
+        continue;
+      }
+      const size = pngSize(assetPath);
+      if (!size) {
+        errors.push(`Codex plugin icon asset must be a valid PNG: ${icon.relPath}`);
+      } else if (size.width !== icon.width || size.height !== icon.height) {
+        errors.push(`Codex plugin icon asset ${icon.relPath} must be ${icon.width}x${icon.height}, found ${size.width}x${size.height}`);
+      }
     }
   }
 

@@ -46,6 +46,8 @@ const expectedFiles = [
   '.gitignore',
   '.gitattributes',
   '.codex-plugin/plugin.json',
+  '.codex-plugin/assets/composer-icon.png',
+  '.codex-plugin/assets/logo.png',
   '.codex-plugin/hooks/hooks.json',
   '.claude-plugin/plugin.json',
   '.claude-plugin/hooks/hooks.json',
@@ -225,6 +227,7 @@ const expectedDirs = [
   'skills/secure-cicd-installer/packs/secure-cicd',
   'repo/docs/agent-playbooks',
   '.codex-plugin',
+  '.codex-plugin/assets',
   '.codex-plugin/hooks',
   '.claude-plugin',
   '.claude-plugin/hooks',
@@ -350,6 +353,17 @@ function readText(relPath) {
 
 function readJson(relPath) {
   return JSON.parse(readText(relPath));
+}
+
+function pngSize(relPath) {
+  const buffer = fs.readFileSync(resolveRel(relPath));
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const validSignature = signature.every((byte, index) => buffer[index] === byte);
+  if (!validSignature || buffer.toString('ascii', 12, 16) !== 'IHDR') return null;
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20)
+  };
 }
 
 function retiredInternalSourceReposFromLocks() {
@@ -1079,7 +1093,21 @@ function validateNativePluginPackages(errors) {
       syncSource: 'codex-plugin',
       rootEnvVar: 'PLUGIN_ROOT',
       forbiddenEnvVars: ['CODEX_PLUGIN_ROOT', 'CODEX_PLUGIN_DATA', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_PLUGIN_DATA'],
-      requiredNativeBoundary: /never installs or updates Claude Code/i
+      requiredNativeBoundary: /never installs or updates Claude Code/i,
+      icons: [
+        {
+          field: 'composerIcon',
+          manifestPath: './.codex-plugin/assets/composer-icon.png',
+          width: 128,
+          height: 128
+        },
+        {
+          field: 'logo',
+          manifestPath: './.codex-plugin/assets/logo.png',
+          width: 512,
+          height: 512
+        }
+      ]
     },
     {
       label: 'Claude Code',
@@ -1117,6 +1145,24 @@ function validateNativePluginPackages(errors) {
     }
     if (!plugin.requiredNativeBoundary.test(JSON.stringify(manifest))) {
       fail(errors, `${plugin.manifestPath} must state the native cross-update boundary`);
+    }
+    for (const icon of plugin.icons || []) {
+      const actualPath = manifest.interface?.[icon.field] || '';
+      if (actualPath !== icon.manifestPath) {
+        fail(errors, `${plugin.manifestPath} interface.${icon.field} must be ${icon.manifestPath}`);
+        continue;
+      }
+      const relPath = actualPath.replace(/^\.\//, '');
+      if (!existsRel(relPath)) {
+        fail(errors, `${plugin.manifestPath} interface.${icon.field} references missing asset: ${actualPath}`);
+        continue;
+      }
+      const size = pngSize(relPath);
+      if (!size) {
+        fail(errors, `${relPath} must be a valid PNG asset`);
+      } else if (size.width !== icon.width || size.height !== icon.height) {
+        fail(errors, `${relPath} must be ${icon.width}x${icon.height}, found ${size.width}x${size.height}`);
+      }
     }
 
     const sessionStart = hooks.hooks?.SessionStart;

@@ -32,7 +32,7 @@ Codex and Claude Code update Toolkit through their own native plugin systems.
 The shared bridge manages only non-native local adapter targets:
 
 - OpenCode global skills.
-- Antigravity 2 local adapter metadata.
+- Antigravity 2 plugin-scoped local adapter skills under the Gemini config plugin root.
 
 OpenCode and Antigravity 2 are opt-in. The bridge may detect them during audit or hook autocheck, but it must not write target files until the user explicitly enables that target.
 
@@ -67,6 +67,7 @@ Writes are atomic:
 2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and Antigravity 2 adapter output.
 3. Rename staging into `current`.
 4. For OpenCode target sync, stage the `ai-agent-toolkit` skill folder beside the target and atomically replace only that managed folder.
+5. For Antigravity 2 target sync, stage the local `ai-agent-toolkit` plugin root and atomically replace only that managed plugin folder under the Gemini config plugin root.
 
 Fresh locks cause a safe skip. Stale locks are removed before retry. Older bridge versions refuse to overwrite newer hub state unless `--force-downgrade` is supplied for explicit manual recovery.
 
@@ -264,12 +265,23 @@ The bridge intentionally does not use `.agents/skills` for OpenCode output, avoi
 
 Antigravity 2 detection signals:
 
+- Antigravity user config exists, such as `%USERPROFILE%\.antigravity`.
+- Gemini/Antigravity plugin config exists, such as `%USERPROFILE%\.gemini\config` or `%USERPROFILE%\.gemini\config\plugins`.
+- The managed Toolkit AG2 adapter exists under the Toolkit Local Bridge Hub.
+- The managed Antigravity 2 plugin-scoped target exists under `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit`.
+- The user explicitly enabled the target.
+- Persisted bridge target state exists, such as `target_path`, `synced_version`, `synced_checksum`, or `last_sync`.
 - Saved AG2 Python command, when configured.
 - Explicit `--python-command`, for one run.
 - `python`, `python3`, and `py`.
 - Safe read-only user-local candidates such as Windows user Python locations, `UV_PYTHON`, `VIRTUAL_ENV`, and `CONDA_PREFIX`.
-- A candidate Python command exists, returns a version, and `python -m pip show ag2` succeeds.
-- The user explicitly enabled the target.
+- Optional package signal: a candidate Python command exists, returns a version, and `python -m pip show ag2` succeeds.
+
+Antigravity 2 target path:
+
+- POSIX: `~/.gemini/config/plugins/ai-agent-toolkit/`.
+- Windows: `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit\`.
+- Required app-facing skill: `skills/ai-agent-toolkit/SKILL.md` inside that plugin root.
 
 Persist a known non-PATH Antigravity 2/AG2 Python command with:
 
@@ -277,9 +289,21 @@ Persist a known non-PATH Antigravity 2/AG2 Python command with:
 node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
 ```
 
-Future audit and hook runs reuse the saved command. If Antigravity 2/AG2 is not detected, audit output must list the exact Python commands tried. Detection must never install Python, AG2, OpenCode, npm packages, or pip packages.
+Future audit and hook runs reuse the saved command. If the Python `ag2` package is not detected, audit output must list the exact Python commands tried and keep `python_command` empty unless a command actually has the package. Detection must never install Python, AG2, Antigravity 2, OpenCode, npm packages, or pip packages.
 
-Antigravity 2 output stays under the Toolkit Local Bridge Hub. The bridge does not install Antigravity 2 or Python packages.
+Audit separates Antigravity 2 app/bridge relevance from the optional Python package signal:
+
+- `detected` means the Antigravity 2 bridge target is present or relevant.
+- `ag2_package_detected` means the Python package `ag2` was found.
+- `python_command` is set only when `ag2_package_detected` is true.
+- `signals.tried_python_commands` records package misses such as `Package(s) not found: ag2`.
+
+Audit also separates internal hub metadata from app-facing target sync:
+
+- `internal_adapter_path` points under the Toolkit Local Bridge Hub.
+- `target_path` points at the app-facing OpenCode skill folder or Antigravity 2 plugin root.
+- `target_exists` reports whether the app-facing managed output files exist.
+- `synced` is true only when the enabled target state and the real app-facing output match the current Toolkit payload. Hub metadata alone is not enough.
 
 ## Auto-Check, Auto-Setup, And Auto-Sync
 

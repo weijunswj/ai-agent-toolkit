@@ -251,6 +251,10 @@ function runSetupVerify(codexHome, fakeCodexPath) {
   });
 }
 
+test('Codex Toolkit plugin source validates manifest icon assets', () => {
+  assert.deepEqual(setup.validateRepoPluginSource(repoRoot), []);
+});
+
 test('Codex Toolkit plugin setup verifier accepts active 2.2.0 install with SessionStart cache', () => {
   const codexHome = tmpRoot();
   const cacheRoot = writeInstalledCache(codexHome);

@@ -28,8 +28,8 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 15 |
-| publishedFiles | 209 |
-| declaredOutputFiles | 209 |
+| publishedFiles | 211 |
+| declaredOutputFiles | 211 |
 | packInstalledFiles | 74 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 209 |
+| boundaryRecipeOutputs | 211 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 0 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 135 |
+| declared_generated | 137 |
 | pack_installed_declared | 74 |
 
 Current boundary recipe classifications:
@@ -64,13 +64,13 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 154 |
+| main_full_fidelity | 156 |
 
 Known baseline context:
 
 - There are no current curated output boundary findings.
 - There are no current curated directory boundary findings.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by keeping the first-party `toolkit-local-bridge` project and four generated native plugin metadata files, while adding exactly one compact `toolkit-setup` discoverability skill instead of a command-per-bridge skill family.
+- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by keeping the first-party `toolkit-local-bridge` project and generated native plugin metadata files, while adding exactly one compact `toolkit-setup` discoverability skill instead of a command-per-bridge skill family. The Codex plugin now also declares two generated PNG icon assets.
 
 ## Current project modules
 
@@ -113,6 +113,8 @@ Known baseline context:
 ## Current native plugin metadata
 
 - `.codex-plugin/plugin.json`
+- `.codex-plugin/assets/composer-icon.png`
+- `.codex-plugin/assets/logo.png`
 - `.codex-plugin/hooks/hooks.json`
 - `.claude-plugin/plugin.json`
 - `.claude-plugin/hooks/hooks.json`
