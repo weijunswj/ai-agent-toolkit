@@ -78,64 +78,7 @@ Manual fallback: copy the whole `skills/<skill-name>/` folder into one supported
 4. Choose **ANY ONE** supported install location per platform.
 5. Do not paste secrets, tokens, `.env` values, or credentials into repo files.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. English prompt: `setup n8n plugin`. Install the official n8n plugin only if hooks can be made Windows-safe. Never touch `n8n_live` during plugin setup; instance-level MCP access is a separate explicitly approved live-action path.
-
-On Windows, the installed package's `hooks/hooks.json` must not leave a bare `.sh` path like `${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh`, bare `bash`, or `C:\WINDOWS\system32\bash.exe`; a bare `.sh` hook would open `session-start.sh` in VS Code instead of running as a hook. Toolkit repairs generic `.sh` hook commands through a PowerShell 5.1-compatible wrapper that invokes Git Bash from `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`; for `n8n-skills@n8n-io`, it also patches hook emitters so they can output JSON with Node when `jq` and `python3` are unavailable.
-
-Install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin:
-
-```powershell
-codex plugin marketplace add n8n-io/skills
-codex plugin add n8n-skills@n8n-io
-```
-
-```text
-/plugin marketplace add n8n-io/skills
-/plugin install n8n-skills@n8n-io
-```
-
-On Windows, repair and audit the installed plugin cache before approving or trusting hooks:
-
-```powershell
-node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io
-node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --verify-output
-```
-
-For Codex this path is commonly `C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>`. If repair fails, audit fails, or hook JSON output verification fails, do not approve the hooks; use the clear error message to install Git for Windows, update the plugin, or fall back to the upstream "Other platforms" route plus the target repo cue.
-
-Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
-
-For OpenCode, Windows installs that cannot be repaired, and other platforms without proven official plugin parity, follow the upstream "Other platforms" route from the [official n8n Skills](https://github.com/n8n-io/skills) README when the target runtime supports it. From the target project folder, run:
-
-```powershell
-npx skills add n8n-io/skills
-```
-
-Compatibility varies by agent; check `skills.sh` support for the specific platform.
-
-For Antigravity/AG2, use the observed plugin-scoped skill folder for both toolkit-owned skills and locally installed official n8n Skills. Do not stop after `npx skills add n8n-io/skills` if it writes to `$HOME\.agents\skills` or a loose `$HOME\.gemini\antigravity\skills` folder. Use official upstream `n8n-io/skills` content as the source, then place the whole official n8n skill folders under:
-
-```text
-C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\<skill-name>\SKILL.md
-```
-
-Keep `C:\Users\<user>\.gemini\config\plugins\n8n-skills\plugin.json` BOM-less UTF-8, use an `author` object such as `{ "name": "n8n-io" }`, and add `installed_version.json` beside it so the local plugin resembles Antigravity's installed multi-skill plugin shape.
-
-Verify this path exists before relying on Antigravity to load the official entry point:
-
-```text
-C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md
-```
-
-Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks. Local Antigravity plugin-scoped folder installs also do not include the official n8n plugin hooks, so add the current official entry-point cue to the target repo's `AGENTS.md`:
-
-```text
-This project uses n8n. When working with workflows, nodes, expressions, or
-the n8n MCP tools, always start by loading the `using-n8n-skills` meta-skill
-and follow its routing into the matching capability skill before acting.
-```
-
-The cue names the current [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`. If the upstream entry point changes, update this cue from the official README instead of inventing a local alias.
+[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned, not Toolkit-owned. Do not copy, fork, mirror, vendor, or recreate them inside this toolkit repo. For the official n8n plugin install, Windows hook repair, current `using-n8n-skills` entry point, `n8n_live`, and Antigravity/AG2 n8n notes, use [n8n Local Setup](../../skills/n8n-local-setup/) and the [AI agent platform references](../../skills/n8n-local-setup/references/ai-agent-platforms/).
 
 ### Preferred Routes
 
@@ -145,7 +88,7 @@ The cue names the current [official n8n Skills](https://github.com/n8n-io/skills
 | Claude Code | Native plugin package | `.claude-plugin/plugin.json` points to `./skills` and optional hooks. | Claude Code updates natively; it does not update Codex. |
 | OpenCode | Opt-in local bridge target | `$HOME/.config/opencode/skills/ai-agent-toolkit/` after approval. | Autocheck may detect OpenCode; autosetup is forbidden. |
 | AG2 | Opt-in local bridge target | `$HOME/.ai-agent-toolkit/current/adapters/ag2/` after approval. | Adapter metadata only; no Python packages are installed. |
-| Antigravity | Plugin-scoped skill-folder install | See Antigravity path below. | Skill loading stays separate from repo-local bootstrap outputs. |
+| Antigravity | Plugin-scoped skill-folder install | See Antigravity path below. | Toolkit skill loading stays separate from repo-local bootstrap outputs. |
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
