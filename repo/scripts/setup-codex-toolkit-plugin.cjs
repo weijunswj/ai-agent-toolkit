@@ -158,6 +158,26 @@ function findTomlSection(text, sectionPattern) {
   return matched ? body.join('\n') : null;
 }
 
+function parseTomlStringValue(rawValue) {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return '';
+  const jsonString = raw.match(/^"((?:\\.|[^"\\])*)"\s*(?:#.*)?$/);
+  if (jsonString) return JSON.parse(`"${jsonString[1]}"`);
+  const literalString = raw.match(/^'([^']*)'\s*(?:#.*)?$/);
+  if (literalString) return literalString[1];
+  return raw.replace(/\s+#.*$/, '').trim();
+}
+
+function parseTomlSectionValues(sectionText) {
+  const values = {};
+  for (const line of String(sectionText || '').split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$/);
+    if (!match) continue;
+    values[match[1]] = parseTomlStringValue(match[2]);
+  }
+  return values;
+}
+
 function configHasEnabledPlugin(configText) {
   const id = escapeRegex(pluginId());
   const section = findTomlSection(
@@ -167,12 +187,45 @@ function configHasEnabledPlugin(configText) {
   return Boolean(section && /^\s*enabled\s*=\s*true\s*(?:#.*)?$/im.test(section));
 }
 
-function configHasLocalMarketplace(configText) {
+function localMarketplaceSection(configText) {
   const name = escapeRegex(TOOLKIT_MARKETPLACE_NAME);
   return findTomlSection(
     configText,
     new RegExp(`^marketplaces\\.(?:${name}|"${name}"|'${name}')$`)
-  ) !== null;
+  );
+}
+
+function stripWindowsVerbatimPrefix(value) {
+  return String(value || '').replace(/^\\\\\?\\/, '').replace(/^\/\/\?\//, '/');
+}
+
+function comparablePath(value) {
+  const resolved = path.resolve(stripWindowsVerbatimPrefix(value));
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function verifyLocalMarketplaceConfig(configText, repoRoot) {
+  const section = localMarketplaceSection(configText);
+  if (section === null) {
+    return {
+      sourcePath: '',
+      errors: [`Codex config must include [marketplaces.${TOOLKIT_MARKETPLACE_NAME}]`]
+    };
+  }
+
+  const values = parseTomlSectionValues(section);
+  const sourceType = String(values.source_type || values.type || '').trim().toLowerCase();
+  const sourcePath = values.path || values.source || '';
+  const errors = [];
+  if (sourceType && sourceType !== 'local') {
+    errors.push(`Codex config [marketplaces.${TOOLKIT_MARKETPLACE_NAME}] must use local source type: ${sourceType}`);
+  }
+  if (!sourcePath) {
+    errors.push(`Codex config [marketplaces.${TOOLKIT_MARKETPLACE_NAME}] marketplace source path must set path or source to this local repo`);
+  } else if (comparablePath(sourcePath) !== comparablePath(repoRoot)) {
+    errors.push(`Codex config [marketplaces.${TOOLKIT_MARKETPLACE_NAME}] marketplace source path does not match this local repo: ${sourcePath}`);
+  }
+  return { sourcePath, errors };
 }
 
 function detectHookTrustStatus(codexHome, cacheRoot) {
@@ -252,9 +305,7 @@ function evaluateConfigCacheFallback(options = {}) {
     if (!configHasEnabledPlugin(configText)) {
       errors.push(`Codex config must enable [plugins."${pluginId()}"]`);
     }
-    if (!configHasLocalMarketplace(configText)) {
-      errors.push(`Codex config must include [marketplaces.${TOOLKIT_MARKETPLACE_NAME}]`);
-    }
+    errors.push(...verifyLocalMarketplaceConfig(configText, repoRoot).errors);
   }
 
   const cache = verifyInstalledCache(codexHome, expectedVersion);

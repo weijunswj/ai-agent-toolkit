@@ -47,14 +47,24 @@ function writeInstalledCache(codexHome, options = {}) {
 
 function writeCodexConfig(codexHome, options = {}) {
   const trustedHookPath = path.join('.codex-plugin', 'hooks', 'hooks.json').replace(/\\/g, '/');
+  const marketplaceKey = options.marketplaceKey || 'path';
+  const marketplaceValue = options.marketplacePath || repoRoot.replace(/\\/g, '/');
   const lines = [
     '[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]',
     `enabled = ${options.enabled === false ? 'false' : 'true'}`,
     '',
-    '[marketplaces.ai-agent-toolkit-local]',
-    `path = ${JSON.stringify(options.marketplacePath || repoRoot.replace(/\\/g, '/'))}`,
-    ''
+    '[marketplaces.ai-agent-toolkit-local]'
   ];
+  if (!options.omitMarketplaceSource) {
+    lines.push(`  ${marketplaceKey} = ${JSON.stringify(marketplaceValue)}`);
+  }
+  lines.push('');
+  if (options.marketplaceType) {
+    lines.splice(6, 0, `  type = ${JSON.stringify(options.marketplaceType)}`);
+  }
+  if (options.marketplaceSourceType) {
+    lines.splice(6, 0, `  source_type = ${JSON.stringify(options.marketplaceSourceType)}`);
+  }
   if (options.trustedHook !== false) {
     lines.push('[trusted_hooks]', `${JSON.stringify(trustedHookPath)} = true`, '');
   }
@@ -381,7 +391,62 @@ test('Codex Toolkit verifier falls back to config and cache when CLI list omits 
   assert.equal(state.verificationMethod, 'config-cache-fallback');
   assert.equal(state.hookTrustStatus, 'trusted');
   assert.equal(state.installed.enabled, true);
+  assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
   assert.equal(path.resolve(state.cacheRoot), path.resolve(cacheRoot));
+  assert.deepEqual(state.errors, []);
+});
+
+test('Codex Toolkit fallback rejects a local marketplace source outside this repo', () => {
+  const codexHome = tmpRoot();
+  const wrongRepo = path.join(tmpRoot(), 'old-ai-agent-toolkit');
+  writeInstalledCache(codexHome);
+  writeCodexConfig(codexHome, { marketplacePath: wrongRepo });
+
+  const state = setup.evaluateCodexToolkitPluginState({ installed: [], available: [] }, {
+    codexHome,
+    repoRoot,
+    allowConfigCacheFallback: true
+  });
+
+  assert.equal(state.ok, false);
+  assert.equal(state.installed, null);
+  assert.match(state.errors.join('\n'), /marketplace source path does not match this local repo/i);
+  assert.match(state.errors.join('\n'), new RegExp(wrongRepo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('Codex Toolkit fallback rejects local marketplace config without a source path', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome);
+  writeCodexConfig(codexHome, { omitMarketplaceSource: true });
+
+  const state = setup.evaluateCodexToolkitPluginState({ installed: [], available: [] }, {
+    codexHome,
+    repoRoot,
+    allowConfigCacheFallback: true
+  });
+
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /marketplace source path/i);
+});
+
+test('Codex Toolkit fallback accepts a verbatim-prefixed marketplace source for this repo', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome);
+  writeCodexConfig(codexHome, {
+    marketplaceKey: 'source',
+    marketplacePath: `\\\\?\\${repoRoot}`,
+    marketplaceSourceType: 'local'
+  });
+
+  const state = setup.evaluateCodexToolkitPluginState({ installed: [], available: [] }, {
+    codexHome,
+    repoRoot,
+    allowConfigCacheFallback: true
+  });
+
+  assert.equal(state.ok, true);
+  assert.equal(state.verificationMethod, 'config-cache-fallback');
+  assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
   assert.deepEqual(state.errors, []);
 });
 

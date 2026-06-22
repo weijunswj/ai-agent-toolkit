@@ -88,6 +88,51 @@ function writeFakePython(root) {
   return { command, logPath };
 }
 
+function powershellSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function csharpString(value) {
+  return `@"${String(value).replace(/"/g, '""')}"`;
+}
+
+function writeFakePythonExecutable(exePath, logPath) {
+  fs.mkdirSync(path.dirname(exePath), { recursive: true });
+  const sourcePath = path.join(path.dirname(exePath), 'fake-python.cs');
+  writeFile(sourcePath, [
+    'using System;',
+    'using System.IO;',
+    '',
+    'public static class FakePython {',
+    '  public static int Main(string[] args) {',
+    `    File.AppendAllText(${csharpString(logPath)}, string.Join(" ", args) + Environment.NewLine);`,
+    '    if (args.Length == 1 && args[0] == "--version") {',
+    '      Console.WriteLine("Python 3.14.0");',
+    '      return 0;',
+    '    }',
+    '    if (args.Length == 4 && args[0] == "-m" && args[1] == "pip" && args[2] == "show" && args[3] == "ag2") {',
+    '      Console.WriteLine("Name: ag2");',
+    '      return 0;',
+    '    }',
+    '    return 4;',
+    '  }',
+    '}',
+    ''
+  ].join('\n'));
+  const result = spawnSync('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    `$ErrorActionPreference = 'Stop'; Add-Type -Path ${powershellSingleQuote(sourcePath)} -OutputAssembly ${powershellSingleQuote(exePath)} -OutputType ConsoleApplication`
+  ], {
+    encoding: 'utf8',
+    timeout: 30000,
+    windowsHide: true
+  });
+  assert.equal(result.status, 0, `failed to compile fake Python executable\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+}
+
 function configureGitUser(repoPath) {
   git(repoPath, ['config', 'user.email', 'toolkit-test@example.invalid']);
   git(repoPath, ['config', 'user.name', 'Toolkit Bridge Test']);
@@ -361,6 +406,40 @@ test('AG2 Python discovery rejects command shims instead of invoking a shell', (
   assert.equal(first.command, shim);
   assert.equal(first.python_ok, false);
   assert.match(first.python_error, /command shims/);
+});
+
+test('AG2 audit selects Windows user-local python versioned executables', {
+  skip: process.platform !== 'win32' ? 'Windows user-local Python discovery is Windows-only' : false
+}, () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const pythonExe = path.join(root, '.local', 'bin', 'python3.14.exe');
+  const logPath = path.join(root, 'python3.14.log');
+  writeFakePythonExecutable(pythonExe, logPath);
+
+  const result = run(['--hub', hub, '--audit'], {
+    env: {
+      PATH: '',
+      USERPROFILE: root,
+      HOME: root,
+      LOCALAPPDATA: path.join(root, 'local-app-data'),
+      VIRTUAL_ENV: '',
+      CONDA_PREFIX: '',
+      UV_PYTHON: ''
+    }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.targets.ag2.detected, true);
+  assert.equal(path.resolve(audit.targets.ag2.python_command), path.resolve(pythonExe));
+  assert.equal(path.resolve(audit.targets.ag2.signals.selected_python_command), path.resolve(pythonExe));
+  const tried = audit.targets.ag2.signals.tried_python_commands.map((entry) => path.resolve(entry.command));
+  assert.ok(tried.includes(path.resolve(pythonExe)), tried.join('\n'));
+
+  const invocations = fs.readFileSync(logPath, 'utf8');
+  assert.match(invocations, /--version/);
+  assert.match(invocations, /-m pip show ag2/);
+  assert.doesNotMatch(invocations, /\binstall\b/i);
 });
 
 test('sync-enabled command does not create bridge state before setup', () => {

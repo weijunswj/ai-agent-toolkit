@@ -581,6 +581,16 @@ function readDirectoryNames(dirPath) {
   }
 }
 
+function readDirectoryFileNames(dirPath) {
+  try {
+    return fs.readdirSync(dirPath, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+}
+
 function ag2EnvPythonCandidates() {
   const candidates = [];
   if (process.env.UV_PYTHON) candidates.push(process.env.UV_PYTHON);
@@ -598,7 +608,12 @@ function windowsUserPythonCandidates() {
   const candidates = [];
   const home = os.homedir();
   if (home) {
-    candidates.push(path.join(home, '.local', 'bin', 'python.exe'));
+    const localBin = path.join(home, '.local', 'bin');
+    for (const fileName of readDirectoryFileNames(localBin)
+      .filter((name) => /^python.*\.exe$/i.test(name))
+      .sort((left, right) => left.localeCompare(right))) {
+      candidates.push(path.join(localBin, fileName));
+    }
     const pyenvRoot = path.join(home, '.pyenv', 'pyenv-win', 'versions');
     for (const version of readDirectoryNames(pyenvRoot)) {
       candidates.push(path.join(pyenvRoot, version, 'python.exe'));
