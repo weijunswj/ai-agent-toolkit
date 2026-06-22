@@ -118,7 +118,7 @@ class BM25:
 
     def tokenize(self, text):
         cleaned = re.sub(r"[^\w\s]", " ", str(text).lower())
-        return [word for word in cleaned.split() if len(word) > 2]
+        return [word for word in cleaned.split() if len(word) >= 2]
 
     def fit(self, documents):
         self.corpus = [self.tokenize(document) for document in documents]
