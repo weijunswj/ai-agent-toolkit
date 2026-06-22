@@ -46,31 +46,31 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 
 ## Install Toolkit Skills
 
-Preferred v2 install for toolkit-owned skills:
+### Native Toolkit Setup
+
+For normal human setup, keep the journey short:
+
+1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
+2. For Codex, open the repo in Codex and say `setup toolkit`.
+3. Let Codex install or verify the Toolkit native plugin.
+4. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
+5. Restart Codex if setup says the plugin needs a fresh session.
+6. For Claude Code, use Claude Code's native Toolkit plugin flow from this repo; keep Codex and Claude Code plugin setup separate.
+7. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+
+Codex and Claude Code update Toolkit through their own native plugin systems:
 
 - Codex updates Toolkit through the Codex native plugin system using [`.codex-plugin/plugin.json`](../../.codex-plugin/plugin.json).
 - Claude Code updates Toolkit through the Claude Code native plugin system using [`.claude-plugin/plugin.json`](../../.claude-plugin/plugin.json).
 - Codex does not install or update Claude Code.
 - Claude Code does not install or update Codex.
-- OpenCode and AG2 are opt-in local bridge targets, not native plugin update targets.
+- OpenCode and Antigravity 2 are opt-in local bridge targets, not native plugin update targets.
 
-For the English prompt `setup toolkit`, Codex must verify the native plugin install instead of assuming it:
+Detailed Codex plugin verification and bridge command mechanics live in [Toolkit Local Bridge V2](TOOLKIT-LOCAL-BRIDGE-V2.md).
 
-```powershell
-node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
-```
+### Manual Skill-Folder Copying
 
-If the plugin is missing, disabled, stale, or lacks Toolkit version `2.2.0` plus the Codex `SessionStart` hook in the installed plugin cache, install or update through the supported local marketplace path:
-
-```powershell
-codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json
-codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
-node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
-```
-
-The local marketplace wrapper is [`.agents/plugins/marketplace.json`](../../.agents/plugins/marketplace.json) and uses `policy.authentication: "ON_USE"` so the no-auth local Toolkit plugin can install headlessly. `node repo/scripts/setup-codex-toolkit-plugin.cjs --write` runs the same Codex-only install/update path and fails clearly if local marketplace installs are unsupported. It never installs or updates Claude Code.
-
-Manual fallback: copy the whole `skills/<skill-name>/` folder into one supported location.
+Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder into one supported location. It is separate from native plugin setup and bridge target setup.
 
 1. Use the whole `skills/<skill-name>/` folder as the install unit.
 2. Copy whole skill folders, not just `SKILL.md`.
@@ -78,27 +78,22 @@ Manual fallback: copy the whole `skills/<skill-name>/` folder into one supported
 4. Choose **ANY ONE** supported install location per platform.
 5. Do not paste secrets, tokens, `.env` values, or credentials into repo files.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned, not Toolkit-owned. Do not copy, fork, mirror, vendor, or recreate them inside this toolkit repo. For the official n8n plugin install, Windows hook repair, current `using-n8n-skills` entry point, `n8n_live`, and Antigravity/AG2 n8n notes, use [n8n Local Setup](../../skills/n8n-local-setup/) and the [AI agent platform references](../../skills/n8n-local-setup/references/ai-agent-platforms/).
+### Manual Skill Folder Locations
 
-### Preferred Routes
-
-| Platform | Toolkit-owned skill route | Location guidance | Notes |
-|---|---|---|---|
-| Codex | Native plugin package | `.codex-plugin/plugin.json` points to `./skills` and optional hooks. | Codex updates natively; it does not update Claude Code. |
-| Claude Code | Native plugin package | `.claude-plugin/plugin.json` points to `./skills` and optional hooks. | Claude Code updates natively; it does not update Codex. |
-| OpenCode | Opt-in local bridge target | `$HOME/.config/opencode/skills/ai-agent-toolkit/` after approval. | Autocheck may detect OpenCode; autosetup is forbidden. |
-| AG2 | Opt-in local bridge target | `$HOME/.ai-agent-toolkit/current/adapters/ag2/` after approval. | Adapter metadata only; no Python packages are installed. |
-| Antigravity | Plugin-scoped skill-folder install | See Antigravity path below. | Toolkit skill loading stays separate from repo-local bootstrap outputs. |
+| Platform | Manual Toolkit-owned skill folder locations | Notes |
+|---|---|---|
+| Codex | `<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/`<br>`/etc/codex/skills/<skill-name>/` | Direct manual copy for a specific Toolkit skill. |
+| Claude Code | `<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/` | Direct manual copy for a specific Toolkit skill. |
+| OpenCode | `<repo>/.opencode/skills/<skill-name>/`<br>`$HOME/.config/opencode/skills/<skill-name>/`<br>`<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/`<br>`<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/` | Direct manual copy for a specific Toolkit skill. |
+| Antigravity 2 | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\SKILL.md` | Plugin-scoped manual copy for a specific Toolkit skill. |
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and not the beginner local setup path.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync.
 
 ### Codex
 
-For Codex, use the native Toolkit plugin package first. The generated manifest is [`.codex-plugin/plugin.json`](../../.codex-plugin/plugin.json), and it points to the root `skills/` folder.
-
-Direct whole-skill-folder install remains a manual fallback.
+Manual whole-skill-folder copying is for installing a specific Toolkit skill without the native plugin.
 
 **Choose any one supported Codex skill-folder location:**
 
@@ -112,9 +107,7 @@ Codex scans repo skills from `.agents/skills` from the current working directory
 
 ### Claude Code
 
-For Claude Code, use the native Toolkit plugin package first. The generated manifest is [`.claude-plugin/plugin.json`](../../.claude-plugin/plugin.json), and it points to the root `skills/` folder.
-
-Direct whole-skill-folder install remains a manual fallback.
+Manual whole-skill-folder copying is for installing a specific Toolkit skill without the native plugin.
 
 **Choose any one supported Claude Code skill-folder location:**
 
@@ -127,25 +120,7 @@ Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Cod
 
 ### OpenCode
 
-For OpenCode, use the opt-in Toolkit Local Bridge target when the user asks for setup. The bridge writes only the managed global skill folder:
-
-```text
-$HOME/.config/opencode/skills/ai-agent-toolkit/
-```
-
-Run a dry-run audit first:
-
-```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode
-```
-
-After explicit approval:
-
-```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
-```
-
-Manual whole-skill-folder install remains a fallback.
+Manual whole-skill-folder copying is for installing a specific Toolkit skill. For the opt-in OpenCode bridge target, use [Use The Toolkit Local Bridge](#use-the-toolkit-local-bridge).
 
 **Choose any one supported OpenCode skill-folder location:**
 
@@ -160,29 +135,11 @@ Manual whole-skill-folder install remains a fallback.
 
 OpenCode walks upward from the current working directory to the git worktree for project-local skill paths, and it also loads global skill definitions. Use `AGENTS.md`, `AGENTS.override.md`, or the configured OpenCode rules file for always-on OpenCode instructions.
 
-### AG2
+### Antigravity 2
 
-AG2 is an opt-in local adapter target, not a native plugin marketplace.
+For Antigravity 2, use the observed plugin-scoped skill-folder install for Toolkit skills. Its internal bridge target remains `ag2`, but manual skill copying uses the plugin-scoped skill folder below.
 
-Run a dry-run audit first:
-
-```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
-```
-
-After explicit approval:
-
-```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
-```
-
-The bridge writes AG2 adapter metadata under the Toolkit Local Bridge Hub only. It does not install Python, AG2, or pip packages.
-
-### Antigravity
-
-For Antigravity, use the observed plugin-scoped install first.
-
-**Use the Antigravity plugin-scoped skill-folder location for toolkit skills:**
+**Use the Antigravity 2 plugin-scoped skill-folder location for toolkit skills:**
 
 | Location type | Skill folder path |
 |---|---|
@@ -190,13 +147,13 @@ For Antigravity, use the observed plugin-scoped install first.
 
 Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder. This plugin-scoped folder is for loading toolkit skills.
 
-**Put repo-local bootstrap outputs in the target repo, not inside the Antigravity plugin folder:**
+**Put repo-local bootstrap outputs in the target repo, not inside the Antigravity 2 plugin folder:**
 
 1. `AGENTS.md`.
 2. `GEMINI.md`.
 3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-Use `GEMINI.md` or the configured context file for always-on Antigravity instructions.
+Use `GEMINI.md` or the configured context file for always-on Antigravity 2 instructions.
 
 `skills/**/SKILL.md` files are published toolkit surfaces. If a generated notice is present, update the source path named in that notice and run `node repo/scripts/sync-toolkit-projects.cjs --write`. Directly maintained `linked` skills should be rare and justified in the related project manifest.
 
@@ -337,20 +294,20 @@ Use:
 
 OpenCode [official n8n Skills](https://github.com/n8n-io/skills) support is platform-dependent; the official instance-level MCP setup is secondary and not part of the beginner local setup path.
 
-## Antigravity Setup
+## Antigravity 2 Setup
 
 Use:
 
-- [Antigravity reference](../../skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md)
+- [Antigravity 2 reference](../../skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md)
 - [Shared managed agent rules template](../../skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md)
-- [Antigravity GEMINI shim template](../../skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md)
-- [Antigravity bootstrap template](../../skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md)
+- [Antigravity 2 GEMINI shim template](../../skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md)
+- [Antigravity 2 bootstrap template](../../skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md)
 - [n8n agent rules skill](../../skills/n8n-agent-rules/)
-- [optional Antigravity n8n adapter](../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md)
+- [optional Antigravity 2 n8n adapter](../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
 
-Antigravity [official n8n Skills](https://github.com/n8n-io/skills) support is platform-dependent; the official instance-level MCP setup is secondary and not part of the beginner local setup path.
+Antigravity 2 [official n8n Skills](https://github.com/n8n-io/skills) support is platform-dependent; the official instance-level MCP setup is secondary and not part of the beginner local setup path.
 
 ## ChatGPT Web And Claude Web
 

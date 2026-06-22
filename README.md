@@ -28,12 +28,14 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. Open the repo in Codex and say `setup toolkit`.
-3. Let Codex install or verify the Toolkit native plugin and its startup hook.
-4. Restart Codex if setup says the plugin needs a fresh session.
-5. Add OpenCode or AG2 bridge targets only when you ask for that setup and approve the writes.
+2. For Codex, open the repo in Codex and say `setup toolkit`.
+3. Let Codex install or verify the Toolkit native plugin.
+4. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
+5. Restart Codex if setup says the plugin needs a fresh session.
+6. For Claude Code, use Claude Code's native Toolkit plugin flow from this repo; keep Codex and Claude Code plugin setup separate.
+7. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
 
-Detailed Codex plugin mechanics live in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills) and [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md). Official n8n Skills setup is separate: use [n8n Local Setup](skills/n8n-local-setup/) and do not vendor, copy, fork, mirror, or recreate upstream [n8n-io/skills](https://github.com/n8n-io/skills) inside this toolkit repo.
+More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills); detailed Codex plugin and bridge mechanics live in [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md).
 
 ## Terms
 
@@ -72,7 +74,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Local AI Stack Safety](_projects/development/local-ai-stack-safety/) | Lightweight local AI runtime, model download, local AI web UI, and endpoint exposure safety-review skill source. | [_main/](_projects/development/local-ai-stack-safety/_main/) |
 | [Managed App Foundation Review](_projects/development/managed-app-foundation-review/) | Build-vs-buy planning for low-cost managed or owner-hosted auth, backend, database, workflow automation, CRM, forms, email, storage, analytics, ops, and account-security foundations. | [_main/](_projects/development/managed-app-foundation-review/_main/) |
 | [Project Completion Audit](_projects/development/project-completion-audit/) | Guarded final completion, production-readiness, release-candidate, QA, security-readiness, and remediation audit workflow. | [_main/](_projects/development/project-completion-audit/_main/) |
-| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata, Windows-safe Codex plugin hook repair, one compact setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and AG2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
+| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata, Windows-safe Codex plugin hook repair, one compact setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and Antigravity 2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
 | [Codex SSH Hostinger Coolify Setup Maintainer](_projects/development/hostinger-coolify-production-guide/) | Codex SSH Hostinger VPS plus Coolify setup, deployment, daily security checks, intrusion-signal review, optional maintenance alerts, and incident response workflow. | [_main/](_projects/development/hostinger-coolify-production-guide/_main/) |
 | [Self-Hosted Service Safety](_projects/development/self-hosted-service-safety/) | Lightweight non-n8n Docker/VPS, public exposure, credential, backup, SSH, traffic-log, and first-run safety-review skill source. | [_main/](_projects/development/self-hosted-service-safety/_main/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
@@ -85,7 +87,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | Skill | Use |
 |---|---|
 | [AI Coding Agent Rules](skills/ai-coding-agent-rules/) | Install generic execution-first agent rules for supported coding agents. |
-| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, AG2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
+| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, Antigravity 2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
 | [n8n Agent Rules](skills/n8n-agent-rules/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
 | [n8n Local Setup](skills/n8n-local-setup/) | Set up local n8n with Docker Compose, Postgres, Compose ngrok, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu use, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. |
 | [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
@@ -104,28 +106,23 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 
 ## Install Skills By Platform
 
-This section is only for Toolkit-owned skill folders under [skills/](skills/). For detailed Toolkit plugin mechanics, use [How To Use: Install Toolkit Skills](repo/docs/HOW-TO-USE.md#install-toolkit-skills) and [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md).
+This section is only for manually copying Toolkit-owned skill folders under [skills/](skills/). Native Toolkit plugin setup belongs in [Toolkit Setup](#toolkit-setup).
 
 > [!IMPORTANT]
 > Repo-local agent instruction installs require a selected/open target repo or an explicit target path. Standalone chats without a workspace cannot safely infer where to install `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-Preferred route: use the native Toolkit plugin for Codex or Claude Code. Manual fallback: copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned, not Toolkit-owned. For their setup, use [skills/n8n-local-setup/](skills/n8n-local-setup/) and its platform references. Do not copy, fork, mirror, vendor, or recreate official n8n Skills inside this toolkit repo.
+`AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity 2 use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity 2 also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
 
-`AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
-
-| Platform | Toolkit-owned skill install | Active instruction files | References |
+| Platform | Manual Toolkit-owned skill folder locations | Active instruction files | Reference |
 |---|---|---|---|
-| Codex | Native plugin package via [.codex-plugin/plugin.json](.codex-plugin/plugin.json); direct whole-skill-folder install remains a manual fallback. | `AGENTS.md` | [Codex setup](repo/docs/HOW-TO-USE.md#codex). |
-| Claude Code | Native plugin package via [.claude-plugin/plugin.json](.claude-plugin/plugin.json); direct whole-skill-folder install remains a manual fallback. | `AGENTS.md`, `CLAUDE.md` shim | [Claude Code setup](repo/docs/HOW-TO-USE.md#claude-code). |
-| OpenCode | Opt-in bridge target only after approval.<br>Default global output: `$HOME/.config/opencode/skills/ai-agent-toolkit/`. | `AGENTS.md` | [OpenCode setup](repo/docs/HOW-TO-USE.md#opencode). |
-| AG2 | Opt-in bridge target only after approval.<br>Adapter output stays under `$HOME/.ai-agent-toolkit/current/adapters/ag2/`. | Portable metadata | [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md). |
-| Antigravity | Plugin-scoped skill-folder install.<br>`C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\`. | `AGENTS.md`, `GEMINI.md`, Antigravity bootstrap | [Antigravity setup](repo/docs/HOW-TO-USE.md#antigravity). |
+| Codex | `<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/`<br>`/etc/codex/skills/<skill-name>/` | `AGENTS.md` | [Codex](repo/docs/HOW-TO-USE.md#codex). |
+| Claude Code | `<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/` | `AGENTS.md`, `CLAUDE.md` shim | [Claude Code](repo/docs/HOW-TO-USE.md#claude-code). |
+| OpenCode | `<repo>/.opencode/skills/<skill-name>/`<br>`$HOME/.config/opencode/skills/<skill-name>/`<br>`<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/`<br>`<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/` | `AGENTS.md` | [OpenCode](repo/docs/HOW-TO-USE.md#opencode). |
+| Antigravity 2 | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\` | `AGENTS.md`, `GEMINI.md`, Antigravity 2 bootstrap | [Antigravity 2](repo/docs/HOW-TO-USE.md#antigravity-2). |
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and not the beginner local setup path.
-
-Default generic templates stay slim and do not include full n8n rules or full skill-routing tables. For n8n work, install or load [skills/n8n-agent-rules/](skills/n8n-agent-rules/). Optional adapters in [skills/n8n-agent-rules/adapters/](skills/n8n-agent-rules/adapters/) are brief fallback snippets and are not automatically appended. The adapter installer can detect n8n repos and preview changes, but agents must ask before running it with `--write`.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync.
 
 ## MCP Status
 
