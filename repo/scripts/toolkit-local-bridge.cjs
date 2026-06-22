@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const ARCHITECTURE_VERSION = 2;
 const BRIDGE_VERSION = '2.2.0';
@@ -18,6 +18,7 @@ const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const TARGET_MANIFEST_FILE = '.ai-agent-toolkit-managed.json';
 const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -57,6 +58,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoRemote: '',
     repoUpdateNow: false,
     skipRepoAutoUpdate: false,
+    openUpdateReport: false,
+    enableUpdateReportOpen: false,
+    disableUpdateReportOpen: false,
+    suppressUpdateReport: false,
     syncSource: 'repo',
     hub: '',
     opencodeConfigDir: '',
@@ -86,6 +91,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--repo-remote=')) args.repoRemote = arg.slice('--repo-remote='.length);
     else if (arg === '--repo-update-now') args.repoUpdateNow = true;
     else if (arg === '--skip-repo-auto-update') args.skipRepoAutoUpdate = true;
+    else if (arg === '--open-update-report') args.openUpdateReport = true;
+    else if (arg === '--enable-update-report-open') args.enableUpdateReportOpen = true;
+    else if (arg === '--disable-update-report-open') args.disableUpdateReportOpen = true;
+    else if (arg === '--suppress-update-report') args.suppressUpdateReport = true;
     else if (arg === '--enable-target') args.enableTargets.push(...parseListValue(next()));
     else if (arg.startsWith('--enable-target=')) args.enableTargets.push(...parseListValue(arg.slice('--enable-target='.length)));
     else if (arg === '--disable-target') args.disableTargets.push(...parseListValue(next()));
@@ -124,6 +133,9 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.enableRepoAutoUpdate && args.disableRepoAutoUpdate) {
     throw new Error('--enable-repo-auto-update and --disable-repo-auto-update cannot be used together');
   }
+  if (args.enableUpdateReportOpen && args.disableUpdateReportOpen) {
+    throw new Error('--enable-update-report-open and --disable-update-report-open cannot be used together');
+  }
   return args;
 }
 
@@ -155,6 +167,9 @@ function printHelp() {
     '  --repo-remote <url>',
     '  --repo-update-now',
     '  --skip-repo-auto-update     internal recursion guard for delegated repo sync',
+    '  --open-update-report        open the generated update report for this run, when one is created',
+    '  --enable-update-report-open persist opt-in opening of generated update reports',
+    '  --disable-update-report-open',
     '  --audit',
     '  --force-downgrade',
     '  --sync-source repo|codex-plugin|claude-plugin',
@@ -340,16 +355,37 @@ function runRepoValidation(repoPath) {
       args: ['--test', path.join('repo', 'tests', 'toolkit-local-bridge.test.cjs')]
     }
   ];
+  const commands = [];
   for (const validation of validations) {
+    commands.push(validation.label);
     const result = runCommand(process.execPath, validation.args, { cwd: repoPath, timeout: 120000 });
     if (!result.ok) {
       throw repoUpdateError(
         'validation-failed',
         `${validation.label} failed: ${commandOutput(result)}`,
-        { error: validation.label }
+        {
+          error: validation.label,
+          validationStatus: 'failed',
+          validationCommand: validation.label
+        }
       );
     }
   }
+  return {
+    status: 'passed',
+    commands
+  };
+}
+
+function changedFilesBetween(repoPath, fromCommit, toCommit) {
+  if (!fromCommit || !toCommit || fromCommit === toCommit) return [];
+  const result = gitCommand(repoPath, ['diff', '--name-only', fromCommit, toCommit]);
+  if (!result.ok) return [];
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function validateAndUpdateRepo(state) {
@@ -425,19 +461,26 @@ function validateAndUpdateRepo(state) {
     }
   }
   const toCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read updated commit');
+  const changedFiles = changedFilesBetween(repoPath, fromCommit, toCommit);
+  let validation = null;
   try {
-    runRepoValidation(repoPath);
+    validation = runRepoValidation(repoPath);
   } catch (error) {
     throw repoUpdateError(error.repoUpdateStatus || 'validation-failed', error.message, {
       fromCommit,
       toCommit,
-      error: error.repoUpdateDetails?.error || error.message
+      changedFiles,
+      error: error.repoUpdateDetails?.error || error.message,
+      validationStatus: error.repoUpdateDetails?.validationStatus || 'failed',
+      validationCommand: error.repoUpdateDetails?.validationCommand || ''
     });
   }
   return {
     repoPath,
     fromCommit,
     toCommit,
+    changedFiles,
+    validation,
     status: fromCommit === toCommit ? 'up-to-date' : 'updated'
   };
 }
@@ -480,6 +523,8 @@ function defaultState() {
     last_repo_update_from_commit: '',
     last_repo_update_to_commit: '',
     last_repo_update_error: '',
+    last_update_report_path: '',
+    update_report_open_enabled: false,
     created_at: '',
     updated_at: '',
     last_sync_source: '',
@@ -505,6 +550,8 @@ function normalizedState(raw) {
   state.last_repo_update_from_commit = state.last_repo_update_from_commit || '';
   state.last_repo_update_to_commit = state.last_repo_update_to_commit || '';
   state.last_repo_update_error = state.last_repo_update_error || '';
+  state.last_update_report_path = state.last_update_report_path || '';
+  state.update_report_open_enabled = state.update_report_open_enabled === true;
   return state;
 }
 
@@ -525,6 +572,8 @@ function applyRequestedState(state, args) {
     next.last_repo_update_status = 'disabled';
     next.last_repo_update_error = '';
   }
+  if (args.enableUpdateReportOpen) next.update_report_open_enabled = true;
+  if (args.disableUpdateReportOpen) next.update_report_open_enabled = false;
   if (args.setAg2PythonCommand) {
     next.targets.ag2.python_command = args.setAg2PythonCommand;
   }
@@ -1123,6 +1172,197 @@ function sourceCommit() {
   return result.status === 0 ? result.stdout.trim() : 'unknown';
 }
 
+function currentToolkitCommit(state = {}) {
+  const root = state.repo_path ? path.resolve(state.repo_path) : (pluginRootFromCwd() || path.resolve(__dirname, '..', '..'));
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 3000, windowsHide: true });
+  return result.status === 0 ? result.stdout.trim() : 'unknown';
+}
+
+function updateReportDir() {
+  return path.join(os.tmpdir(), ...UPDATE_REPORT_ROOT.split('/'));
+}
+
+function updateReportTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    '-',
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join('');
+}
+
+function nextUpdateReportPath(date = new Date()) {
+  const reportDir = updateReportDir();
+  const baseName = `toolkit-update-${updateReportTimestamp(date)}`;
+  let candidate = path.join(reportDir, `${baseName}.md`);
+  let index = 2;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(reportDir, `${baseName}-${index}.md`);
+    index += 1;
+  }
+  return candidate;
+}
+
+function isUpdateReportPath(reportPath) {
+  const resolved = path.resolve(reportPath || '');
+  const reportDir = path.resolve(updateReportDir());
+  const fileName = path.basename(resolved);
+  return (
+    isInside(reportDir, resolved) &&
+    /^toolkit-update-\d{8}-\d{6}(?:-\d+)?\.md$/.test(fileName) &&
+    fs.existsSync(resolved) &&
+    fs.statSync(resolved).isFile()
+  );
+}
+
+function openUpdateReport(reportPath, options = {}) {
+  const platform = options.platform || process.platform;
+  const spawnImpl = options.spawnImpl || spawn;
+  const resolved = path.resolve(reportPath || '');
+  if (platform !== 'win32') return { ok: false, skipped: 'not-windows' };
+  if (!isUpdateReportPath(resolved)) return { ok: false, skipped: 'unsafe-report-path' };
+  try {
+    const child = spawnImpl('notepad.exe', [resolved], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false
+    });
+    if (child && typeof child.unref === 'function') child.unref();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+function inlineCode(value) {
+  return `\`${String(value || '').replace(/`/g, "'")}\``;
+}
+
+function targetDisplayName(targetName) {
+  if (targetName === 'ag2') return 'Antigravity 2';
+  if (targetName === 'opencode') return 'OpenCode';
+  return targetName;
+}
+
+function targetSyncPlan(targetName, discovery, payloads) {
+  const skillNames = targetSkillNames(targetName, payloads);
+  const previousNames = previousManagedSkillNames(discovery.target_path);
+  const current = new Set(skillNames);
+  return {
+    target: targetName,
+    targetPath: discovery.target_path,
+    skillNames,
+    removedSkillNames: previousNames.filter((name) => !current.has(name)).sort((left, right) => left.localeCompare(right))
+  };
+}
+
+function shouldConsiderUpdateReport(args, state) {
+  return Boolean(
+    !args.suppressUpdateReport &&
+    (args.hook || args.repoUpdateNow || args.openUpdateReport || state.update_report_open_enabled)
+  );
+}
+
+function updateReportIsMeaningful(context) {
+  const repoStatus = context.repo?.status || '';
+  if (repoStatus === 'updated') return true;
+  if (repoStatus === 'validation-failed') return true;
+  if (repoStatus === 'sync-delegation-failed') return true;
+  if (repoStatus === 'skipped' && context.repo?.error) return true;
+  if ((context.targetSyncs || []).length) return true;
+  return (context.targetSyncs || []).some((entry) => (entry.removedSkillNames || []).length);
+}
+
+function buildUpdateReport({ args, state, checksum, context }) {
+  const repo = context.repo || {};
+  const targetSyncs = context.targetSyncs || [];
+  const skippedTargets = context.skippedTargets || [];
+  const warning = repo.error || context.warning || '';
+  const commit = repo.toCommit || currentToolkitCommit(state);
+  const previousCommit = repo.fromCommit || 'none';
+  const validationStatus = repo.validationStatus || repo.validation?.status || (repo.status ? 'not run' : 'not run');
+  const targetSyncStatus = context.targetSyncStatus || (targetSyncs.length ? 'synced' : 'not needed');
+  const lines = [
+    '# AI Agent Toolkit Update',
+    '',
+    `Toolkit updated to commit: ${inlineCode(commit)}`,
+    `Previous commit: ${inlineCode(previousCommit)}`,
+    `Source: ${inlineCode(args.syncSource)}`,
+    `Timestamp: ${inlineCode(context.timestamp || timestamp())}`,
+    '',
+    "## What's Updated",
+    ''
+  ];
+
+  if ((repo.changedFiles || []).length) {
+    for (const file of repo.changedFiles) lines.push(`- ${inlineCode(slash(file))}`);
+  } else if (targetSyncs.length && (!repo.fromCommit || repo.fromCommit === repo.toCommit)) {
+    lines.push('- No repo commit change; local bridge target state was stale.');
+  } else if (repo.status && repo.status !== 'updated') {
+    lines.push('- No repo commit change; repo auto-update skipped safely.');
+  } else {
+    lines.push('- No repo commit change.');
+  }
+
+  lines.push('', '## What Has Been Done', '');
+  for (const sync of targetSyncs) {
+    lines.push(`- Synced Toolkit skills to ${targetDisplayName(sync.target)}:`);
+    lines.push(`  ${inlineCode(sync.targetPath)}`);
+    lines.push(`- Copied/updated ${inlineCode(sync.skillNames.length)} Toolkit skills.`);
+    if ((sync.removedSkillNames || []).length) {
+      lines.push('- Removed stale managed skill folders:');
+      for (const name of sync.removedSkillNames) lines.push(`  - ${inlineCode(name)}`);
+    }
+  }
+  for (const target of skippedTargets) {
+    lines.push(`- Skipped ${targetDisplayName(target)} because target is disabled.`);
+  }
+  if (!targetSyncs.length && !skippedTargets.length && repo.status) {
+    lines.push('- No enabled target sync was completed.');
+  }
+  lines.push('- Skipped n8n/live systems; not touched.');
+
+  lines.push('', '## Validation', '');
+  lines.push(`- repo update status: ${inlineCode(repo.status || 'not run')}`);
+  lines.push(`- hook-light validation: ${inlineCode(validationStatus)}`);
+  lines.push(`- target sync status: ${inlineCode(targetSyncStatus)}`);
+  lines.push(`- checksum: ${inlineCode(checksum)}`);
+  if (warning) lines.push(`- warning/error: ${inlineCode(warning)}`);
+  return `${lines.join('\n')}\n`;
+}
+
+function writeUpdateReportFile(markdown) {
+  const reportPath = nextUpdateReportPath();
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  fs.writeFileSync(reportPath, markdown, 'utf8');
+  return reportPath;
+}
+
+function maybeWriteUpdateReport({ args, hubPath, state, checksum, context }) {
+  if (!shouldConsiderUpdateReport(args, state) || !updateReportIsMeaningful(context)) {
+    return { state, reportPath: '' };
+  }
+  const reportContext = { ...context, timestamp: context.timestamp || timestamp() };
+  const markdown = buildUpdateReport({ args, state, checksum, context: reportContext });
+  const reportPath = writeUpdateReportFile(markdown);
+  state.last_update_report_path = reportPath;
+  writeJson(path.join(hubPath, 'state.json'), state);
+  if (args.openUpdateReport || state.update_report_open_enabled) {
+    openUpdateReport(reportPath);
+  }
+  return { state, reportPath };
+}
+
+function printUpdateReportLine(args, reportPath) {
+  if (!reportPath) return;
+  if (args.hook) console.log(`Toolkit updated: ${reportPath}`);
+  else console.log(`Toolkit update report: ${reportPath}`);
+}
+
 function buildManifest({ state, discoveries, checksum, syncSource, hubPath }) {
   return {
     name: 'ai-agent-toolkit-local-bridge',
@@ -1308,11 +1548,14 @@ function writeSkillPayloadAtomically(targetPath, baseRel, payload) {
 
 function removeStaleManagedSkills(targetName, targetPath, previousNames, currentNames) {
   const current = new Set(currentNames);
+  const removed = [];
   for (const name of previousNames) {
     if (current.has(name)) continue;
     const targetDir = path.join(targetPath, ...slash(skillBaseRel(targetName, name)).split('/'));
     if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+    removed.push(name);
   }
+  return removed.sort((left, right) => left.localeCompare(right));
 }
 
 function syncTargetPayload(targetName, targetPath, payloads) {
@@ -1329,11 +1572,18 @@ function syncTargetPayload(targetName, targetPath, payloads) {
     );
   }
 
-  removeStaleManagedSkills(targetName, targetPath, previousNames, skillNames);
+  const removedSkillNames = removeStaleManagedSkills(targetName, targetPath, previousNames, skillNames);
 
   for (const [rel, content] of Object.entries(rootPayloadForTarget(targetName, payload))) {
     writeFileAtomically(path.join(targetPath, ...slash(rel).split('/')), content);
   }
+
+  return {
+    target: targetName,
+    targetPath,
+    skillNames,
+    removedSkillNames
+  };
 }
 
 function targetWouldSync(targetName, state, checksum, discovery, payloads) {
@@ -1381,6 +1631,8 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     lock_path: path.join(path.dirname(hubPath), 'update.lock'),
     sync_source: args.syncSource,
     auto_sync_enabled: state.auto_sync_enabled,
+    update_report_open_enabled: state.update_report_open_enabled,
+    last_update_report_path: state.last_update_report_path,
     repo_auto_update: {
       enabled: state.repo_auto_update_enabled,
       repo_path: state.repo_path,
@@ -1453,13 +1705,14 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
     'repo',
     '--hub',
     hubPath,
-    '--skip-repo-auto-update'
+    '--skip-repo-auto-update',
+    '--suppress-update-report'
   ];
   const result = runCommand(process.execPath, delegateArgs, {
     cwd: repoPath,
     timeout: 120000
   });
-  if (result.stdout.trim()) console.log(result.stdout.trim());
+  if (result.stdout.trim() && !args.hook) console.log(result.stdout.trim());
   if (result.stderr.trim()) console.error(result.stderr.trim());
   if (!result.ok) {
     throw new Error(`delegated repo sync failed: ${commandOutput(result)}`);
@@ -1476,6 +1729,11 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
 
   let statusState = state;
   let updateResult = null;
+  let updatedDiscoveries = discoveries;
+  let updatedPayloads = payloads;
+  let updatedChecksum = checksum;
+  let plannedTargetSyncs = [];
+  let skippedTargets = [];
   try {
     try {
       updateResult = validateAndUpdateRepo(state);
@@ -1485,12 +1743,32 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       }), args);
       writeHubSnapshot({ hubPath, args, state: statusState, discoveries, checksum, payloads });
     } catch (error) {
+      const details = error.repoUpdateDetails || {};
       statusState = prepareStateForWrite(applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
-        fromCommit: error.repoUpdateDetails?.fromCommit || '',
-        toCommit: error.repoUpdateDetails?.toCommit || '',
-        error: error.repoUpdateDetails?.error || error.message
+        fromCommit: details.fromCommit || '',
+        toCommit: details.toCommit || '',
+        error: details.error || error.message
       }), args);
       writeHubSnapshot({ hubPath, args, state: statusState, discoveries, checksum, payloads });
+      const report = maybeWriteUpdateReport({
+        args,
+        hubPath,
+        state: statusState,
+        checksum,
+        context: {
+          repo: {
+            status: error.repoUpdateStatus || 'skipped',
+            fromCommit: details.fromCommit || '',
+            toCommit: details.toCommit || '',
+            changedFiles: details.changedFiles || [],
+            validationStatus: details.validationStatus || (error.repoUpdateStatus === 'validation-failed' ? 'failed' : 'not run'),
+            error: details.error || error.message
+          },
+          targetSyncStatus: 'skipped'
+        }
+      });
+      statusState = report.state;
+      printUpdateReportLine(args, report.reportPath);
       if (args.hook) {
         hookSafeWarning(args, error.message);
         return { status: 0, audit: buildAudit({ args, hubPath, state: statusState, discoveries, checksum, payloads }) };
@@ -1499,6 +1777,32 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     }
   } finally {
     releaseLock(lock);
+  }
+
+  updatedPayloads = adapterPayloads(statusState);
+  updatedChecksum = payloadChecksum(updatedPayloads);
+  updatedDiscoveries = {
+    opencode: discoverOpenCode(args, statusState.targets.opencode, hubPath),
+    ag2: discoverAg2(args, statusState.targets.ag2, hubPath)
+  };
+  plannedTargetSyncs = SUPPORTED_TARGETS
+    .filter((target) => targetWouldSync(target, statusState, updatedChecksum, updatedDiscoveries[target], updatedPayloads))
+    .map((target) => targetSyncPlan(target, updatedDiscoveries[target], updatedPayloads));
+  skippedTargets = SUPPORTED_TARGETS.filter((target) => !statusState.targets[target].enabled || statusState.targets[target].explicitly_disabled);
+  const refreshLock = acquireLock(path.dirname(hubPath), args);
+  try {
+    if (refreshLock.acquired) {
+      writeHubSnapshot({
+        hubPath,
+        args,
+        state: statusState,
+        discoveries: updatedDiscoveries,
+        checksum: updatedChecksum,
+        payloads: updatedPayloads
+      });
+    }
+  } finally {
+    releaseLock(refreshLock);
   }
 
   try {
@@ -1512,19 +1816,63 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     const relock = acquireLock(path.dirname(hubPath), args);
     try {
       if (relock.acquired) {
-        writeHubSnapshot({ hubPath, args, state: failedState, discoveries, checksum, payloads });
+        writeHubSnapshot({ hubPath, args, state: failedState, discoveries: updatedDiscoveries, checksum: updatedChecksum, payloads: updatedPayloads });
       }
     } finally {
       releaseLock(relock);
     }
+    const report = maybeWriteUpdateReport({
+      args,
+      hubPath,
+      state: failedState,
+      checksum: updatedChecksum,
+      context: {
+        repo: {
+          status: 'sync-delegation-failed',
+          fromCommit: updateResult.fromCommit,
+          toCommit: updateResult.toCommit,
+          changedFiles: updateResult.changedFiles || [],
+          validationStatus: updateResult.validation?.status || 'passed',
+          error: error.message
+        },
+        skippedTargets,
+        targetSyncStatus: 'failed'
+      }
+    });
+    printUpdateReportLine(args, report.reportPath);
     if (args.hook) {
       hookSafeWarning(args, error.message);
-      return { status: 0, audit: buildAudit({ args, hubPath, state: failedState, discoveries, checksum, payloads }) };
+      return { status: 0, audit: buildAudit({ args, hubPath, state: report.state, discoveries: updatedDiscoveries, checksum: updatedChecksum, payloads: updatedPayloads }) };
     }
     throw error;
   }
 
-  const finalAudit = buildAudit({ args, hubPath, state: statusState, discoveries, checksum, payloads });
+  const finalState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
+  const completedTargetSyncs = plannedTargetSyncs.filter((sync) => (
+    targetIsSynced(sync.target, finalState.targets[sync.target], updatedChecksum, updatedDiscoveries[sync.target], updatedPayloads)
+  ));
+  const report = maybeWriteUpdateReport({
+    args,
+    hubPath,
+    state: finalState,
+    checksum: updatedChecksum,
+    context: {
+      repo: {
+        status: updateResult.status,
+        fromCommit: updateResult.fromCommit,
+        toCommit: updateResult.toCommit,
+        changedFiles: updateResult.changedFiles || [],
+        validationStatus: updateResult.validation?.status || 'passed'
+      },
+      targetSyncs: completedTargetSyncs,
+      skippedTargets,
+      targetSyncStatus: plannedTargetSyncs.length
+        ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
+        : 'not needed'
+    }
+  });
+  printUpdateReportLine(args, report.reportPath);
+  const finalAudit = buildAudit({ args, hubPath, state: report.state, discoveries: updatedDiscoveries, checksum: updatedChecksum, payloads: updatedPayloads });
   if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
   return { status: 0, audit: finalAudit };
 }
@@ -1577,7 +1925,7 @@ function run(argv = process.argv.slice(2)) {
     !args.disableRepoAutoUpdate &&
     !SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))
   ) {
-    console.log('Toolkit local bridge: no enabled stale targets to sync.');
+    if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
     return { status: 0, audit };
   }
   if (args.hook && !SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))) {
@@ -1597,14 +1945,15 @@ function run(argv = process.argv.slice(2)) {
     nextState = prepareStateForWrite(nextState, args);
     writeHubSnapshot({ hubPath, args, state: nextState, discoveries, checksum, payloads });
 
+    const targetSyncs = [];
     if (targetWouldSync('opencode', nextState, checksum, discoveries.opencode, payloads)) {
       const targetPath = assertSafeWritePath(discoveries.opencode.target_path, 'OpenCode target path');
-      syncTargetPayload('opencode', targetPath, payloads);
+      targetSyncs.push(syncTargetPayload('opencode', targetPath, payloads));
       updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, true, '');
     }
     if (targetWouldSync('ag2', nextState, checksum, discoveries.ag2, payloads)) {
       const targetPath = assertSafeWritePath(discoveries.ag2.target_path, 'Antigravity 2 target path');
-      syncTargetPayload('ag2', targetPath, payloads);
+      targetSyncs.push(syncTargetPayload('ag2', targetPath, payloads));
       updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, true, '');
     }
 
@@ -1618,9 +1967,24 @@ function run(argv = process.argv.slice(2)) {
       hubPath
     }));
 
+    const report = maybeWriteUpdateReport({
+      args,
+      hubPath,
+      state: nextState,
+      checksum,
+      context: {
+        repo: {},
+        targetSyncs,
+        skippedTargets: SUPPORTED_TARGETS.filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled),
+        targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
+      }
+    });
+    nextState = report.state;
+
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
     if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
-    else console.log(`Toolkit local bridge sync complete: ${hubPath}`);
+    else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
+    else if (!args.hook) console.log(`Toolkit local bridge sync complete: ${hubPath}`);
     return { status: 0, audit: finalAudit };
   } finally {
     releaseLock(lock);
@@ -1649,5 +2013,7 @@ module.exports = {
   run,
   adapterPayloads,
   payloadChecksum,
-  compareSemver
+  compareSemver,
+  updateReportDir,
+  openUpdateReport
 };
