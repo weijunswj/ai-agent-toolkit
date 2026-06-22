@@ -78,9 +78,16 @@ function runShellHook(pluginRoot, relPath, input) {
   });
 }
 
-function runPowerShellWrapperHook(pluginRoot, relPath, input) {
+function powershellForTests() {
+  if (process.platform === 'win32') {
+    return 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+  }
+  return 'powershell.exe';
+}
+
+function runPowerShellWrapperHook(pluginRoot, relPath, input, envOverrides = {}) {
   return spawnSync(
-    'powershell.exe',
+    powershellForTests(),
     [
       '-NoProfile',
       '-ExecutionPolicy',
@@ -95,7 +102,8 @@ function runPowerShellWrapperHook(pluginRoot, relPath, input) {
       encoding: 'utf8',
       env: {
         ...process.env,
-        CLAUDE_PLUGIN_ROOT: pluginRoot.replace(/\\/g, '/')
+        CLAUDE_PLUGIN_ROOT: pluginRoot.replace(/\\/g, '/'),
+        ...envOverrides
       }
     }
   );
@@ -104,7 +112,7 @@ function runPowerShellWrapperHook(pluginRoot, relPath, input) {
 function hasWindowsPowerShellForTests() {
   if (process.platform !== 'win32') return false;
   const result = spawnSync(
-    'powershell.exe',
+    powershellForTests(),
     ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'],
     { encoding: 'utf8' }
   );
@@ -487,6 +495,91 @@ test('n8n plugin hook audit rejects invalid runtime hook JSON output when verifi
   assert.match(audit.stderr, /did not emit valid hook JSON/i);
 });
 
+test('n8n plugin hook audit rejects empty SessionStart context during output verification', () => {
+  const pluginRoot = makePluginRoot();
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '0.3.1',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup|resume|clear|compact',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.cjs"'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  fs.writeFileSync(
+    path.join(pluginRoot, 'hooks', 'session-start.cjs'),
+    [
+      "'use strict';",
+      'process.stdout.write(JSON.stringify({',
+      '  hookSpecificOutput: {',
+      '    hookEventName: "SessionStart",',
+      '    additionalContext: ""',
+      '  }',
+      '}));'
+    ].join('\n'),
+    'utf8'
+  );
+
+  const audit = runAudit(pluginRoot, '--verify-output');
+
+  assert.notEqual(audit.status, 0);
+  assert.match(audit.stderr, /SessionStart.*additionalContext.*using-n8n-skills/i);
+});
+
+test('n8n plugin hook audit rejects command-not-found stderr during output verification', () => {
+  const pluginRoot = makePluginRoot();
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '0.3.1',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: '^mcp__.*__validate_workflow$',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.cjs"'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  fs.writeFileSync(
+    path.join(pluginRoot, 'hooks', 'pre-tool-use.cjs'),
+    [
+      "'use strict';",
+      'console.error("dirname: command not found");',
+      'process.stdout.write(JSON.stringify({',
+      '  hookSpecificOutput: {',
+      '    hookEventName: "PreToolUse",',
+      '    additionalContext: "Before validating, load n8n-workflow-lifecycle."',
+      '  }',
+      '}));'
+    ].join('\n'),
+    'utf8'
+  );
+
+  const audit = runAudit(pluginRoot, '--verify-output');
+
+  assert.notEqual(audit.status, 0);
+  assert.match(audit.stderr, /command-not-found stderr/i);
+});
+
 test('n8n plugin hook audit follows wrapper command shell-script arguments', () => {
   const pluginRoot = makePluginRoot();
   writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
@@ -832,6 +925,23 @@ test('n8n-skills Windows hook repair wraps hooks, adds Node fallbacks, and verif
     });
     assert.equal(wrapperSessionStart.status, 0, wrapperSessionStart.stderr);
     assert.equal(JSON.parse(wrapperSessionStart.stdout).hookSpecificOutput.hookEventName, 'SessionStart');
+
+    const nodeOnlyPath = [path.dirname(process.execPath), os.tmpdir()].join(path.delimiter);
+    const wrapperWithHostilePath = runPowerShellWrapperHook(
+      pluginRoot,
+      'pre-tool-use/validate-workflow.sh',
+      {
+        session_id: `wrapper-path-${unique}`,
+        tool_input: {}
+      },
+      {
+        PATH: nodeOnlyPath,
+        Path: nodeOnlyPath
+      }
+    );
+    assert.equal(wrapperWithHostilePath.status, 0, wrapperWithHostilePath.stderr);
+    assert.doesNotMatch(wrapperWithHostilePath.stderr, /command not found/i);
+    assert.equal(JSON.parse(wrapperWithHostilePath.stdout).hookSpecificOutput.hookEventName, 'PreToolUse');
   }
 
   const preToolUse = runShellHook(pluginRoot, 'pre-tool-use/validate-workflow.sh', {
