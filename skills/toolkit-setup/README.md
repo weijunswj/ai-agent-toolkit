@@ -16,7 +16,11 @@ Copy the whole [toolkit-setup](./) skill folder when an agent needs to recognise
 
 This skill is a compact router only. Bridge setup remains Toolkit setup infrastructure implemented by `repo/scripts/toolkit-local-bridge.cjs` and documented in `repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md`. Windows-safe post-install hook repair for installed Codex plugin roots lives in `repo/scripts/repair-codex-plugin-windows-hooks.cjs`.
 
+Native plugin setup is platform-specific: Codex uses the Codex-only `repo/scripts/setup-codex-toolkit-plugin.cjs` helper and `.codex-plugin/plugin.json`; Claude Code uses Claude Code's native Toolkit plugin flow and `.claude-plugin/plugin.json`. Both platforms share `repo/scripts/toolkit-local-bridge.cjs` for repo auto-update, OpenCode sync, and Antigravity 2 sync after native plugin setup.
+
 On Windows, run Codex native plugin operations through the app-managed executable under `%USERPROFILE%\.codex\plugins\.plugin-appserver\codex.exe` (or pass `--codex-cli` explicitly) rather than the bare `codex` command.
+
+If same-version Codex plugin cache refresh keeps timing out on the same stale files, stop the long-running add attempt, avoid concurrent `codex plugin add` retries, run one clean write/verify with the app-managed CLI, and inspect Codex config/cache state before touching shared bridge targets.
 
 OpenCode and Antigravity 2 sync are app-facing after explicit target enablement: OpenCode uses the user OpenCode skill folder, and Antigravity 2 uses the Gemini config plugin root. Antigravity 2 detection is separate from optional Python `ag2` package detection.
 
