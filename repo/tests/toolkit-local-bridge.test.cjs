@@ -6,6 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
+const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
+const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-skills-plugin-hooks.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
@@ -39,6 +41,25 @@ function isolatedHomeEnv(root, extra = {}) {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function repoSkillNames(root = repoRoot) {
+  return fs.readdirSync(path.join(root, 'skills'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => fs.existsSync(path.join(root, 'skills', name, 'SKILL.md')))
+    .sort();
+}
+
+function expectedManagedSkillNames(root = repoRoot) {
+  return ['ai-agent-toolkit', ...repoSkillNames(root)].sort();
+}
+
+function targetSkillDirs(skillsRoot) {
+  return fs.readdirSync(skillsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(skillsRoot, entry.name, 'SKILL.md')))
+    .map((entry) => entry.name)
+    .sort();
 }
 
 function readPngSize(filePath) {
@@ -191,6 +212,16 @@ function configureGitUser(repoPath) {
 
 function writeRepoToolkitFixture(repoPath, label) {
   writeFile(path.join(repoPath, 'VERSION.txt'), `${label}\n`);
+  writeFile(path.join(repoPath, 'skills', 'fixture-skill', 'SKILL.md'), [
+    '---',
+    'name: fixture-skill',
+    `description: Fixture Toolkit skill for bridge repo source tests ${label}`,
+    '---',
+    '',
+    `# Fixture Skill ${label}`,
+    ''
+  ].join('\n'));
+  writeFile(path.join(repoPath, 'skills', 'fixture-skill', 'README.md'), `fixture ${label}\n`);
   writeFile(path.join(repoPath, 'repo', 'scripts', 'validate-toolkit.cjs'), [
     '#!/usr/bin/env node',
     "'use strict';",
@@ -247,6 +278,132 @@ function createRepoAutoUpdateFixture() {
   return { root, origin, repo, upstream, initialCommit };
 }
 
+function createMinimalToolkitSource(root, skills = { alpha: 'alpha v1\n', beta: 'beta v1\n' }) {
+  const repo = path.join(root, 'source-repo');
+  fs.mkdirSync(repo, { recursive: true });
+  git(repo, ['init']);
+  git(repo, ['checkout', '-B', 'main']);
+  configureGitUser(repo);
+  for (const [name, body] of Object.entries(skills)) {
+    writeFile(path.join(repo, 'skills', name, 'SKILL.md'), [
+      '---',
+      `name: ${name}`,
+      `description: ${name} fixture skill for Toolkit bridge tests`,
+      '---',
+      '',
+      body.trimEnd(),
+      ''
+    ].join('\n'));
+    writeFile(path.join(repo, 'skills', name, 'README.md'), `${name} readme\n`);
+  }
+  commitAll(repo, 'minimal toolkit skills');
+  return repo;
+}
+
+function writeN8nPluginHookFixture(pluginRoot) {
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '0.0.0-test',
+    repository: 'https://github.com/n8n-io/skills'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup',
+          hooks: [
+            {
+              type: 'command',
+              command: 'hooks/session-start.sh'
+            }
+          ]
+        }
+      ],
+      PreToolUse: [
+        {
+          matcher: 'mcp__n8n__get_node',
+          hooks: [
+            {
+              type: 'command',
+              command: 'bash hooks/pre-tool-use/_emit.sh'
+            }
+          ]
+        }
+      ],
+      PostToolUse: [
+        {
+          matcher: 'mcp__n8n__validate_workflow',
+          hooks: [
+            {
+              type: 'command',
+              command: 'hooks/post-tool-use/validate-workflow.sh'
+            }
+          ]
+        }
+      ]
+    }
+  });
+
+  writeFile(path.join(pluginRoot, 'hooks', 'session-start.sh'), [
+    '#!/usr/bin/env bash',
+    'INPUT="$(cat)"',
+    'ADDITIONAL_CONTEXT="Load using-n8n-skills before n8n work."',
+    'if command -v jq >/dev/null 2>&1; then',
+    '  jq -n --arg ctx "${ADDITIONAL_CONTEXT}" \'{ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: $ctx } }\'',
+    'fi',
+    ''
+  ].join('\n'));
+  writeFile(path.join(pluginRoot, 'hooks', 'pre-tool-use', '_emit.sh'), [
+    '#!/usr/bin/env bash',
+    'INPUT="$(cat)"',
+    'REMINDER="Load using-n8n-skills before n8n tool use."',
+    'if command -v jq >/dev/null 2>&1; then',
+    '  SESSION_ID="$(echo "${INPUT}" | jq -r \'.session_id // empty\' 2>/dev/null)"',
+    'elif command -v python3 >/dev/null 2>&1; then',
+    '  SESSION_ID="$(echo "${INPUT}" | python3 -c \'import json,sys; d=json.load(sys.stdin); print(d.get("session_id",""))\' 2>/dev/null)"',
+    'else',
+    '  exit 0',
+    'fi',
+    'if command -v jq >/dev/null 2>&1; then',
+    '  jq -n --arg ctx "${REMINDER}" \'{ hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: $ctx } }\'',
+    'fi',
+    ''
+  ].join('\n'));
+  writeFile(path.join(pluginRoot, 'hooks', 'post-tool-use', 'validate-workflow.sh'), [
+    '#!/usr/bin/env bash',
+    'if ! command -v jq >/dev/null 2>&1; then',
+    '  exit 0',
+    'fi',
+    '',
+    'INPUT="$(cat)"',
+    'CODE="$(echo "$INPUT" | jq -r \'.tool_input.code // empty\' 2>/dev/null)"',
+    'if [ -z "$CODE" ]; then',
+    '  echo "No workflow code returned" >/dev/null',
+    '  exit 0',
+    'fi',
+    'WARNINGS="Load using-n8n-skills before publishing workflows."',
+    'jq -n --arg ctx "$WARNINGS" \'{',
+    '  hookSpecificOutput: {',
+    '    hookEventName: "PostToolUse",',
+    '    additionalContext: $ctx',
+    '  }',
+    '}\'',
+    ''
+  ].join('\n'));
+
+  for (const rel of [
+    'hooks/session-start.sh',
+    'hooks/pre-tool-use/_emit.sh',
+    'hooks/post-tool-use/validate-workflow.sh'
+  ]) {
+    try {
+      fs.chmodSync(path.join(pluginRoot, ...rel.split('/')), 0o755);
+    } catch {
+      // Windows Git Bash can usually run these, and chmod can be unavailable in restricted filesystems.
+    }
+  }
+}
+
 function pushRepoToolkitUpdate(fixture, label) {
   writeRepoToolkitFixture(fixture.upstream, label);
   const commit = commitAll(fixture.upstream, `update ${label}`);
@@ -272,7 +429,7 @@ test('dry-run audit performs no writes and reports planned targets', () => {
   assert.equal(audit.dry_run, true);
   assert.equal(audit.targets.opencode.enabled, true);
   assert.equal(audit.targets.opencode.would_write, true);
-  assert.match(audit.targets.opencode.target_path, /opencode[\\/]skills[\\/]ai-agent-toolkit$/);
+  assert.match(audit.targets.opencode.target_path, /opencode[\\/]skills$/);
 });
 
 test('explicit OpenCode setup writes only managed hub and OpenCode target paths', () => {
@@ -290,12 +447,19 @@ test('explicit OpenCode setup writes only managed hub and OpenCode target paths'
 
   const state = readJson(path.join(hub, 'state.json'));
   const manifest = readJson(path.join(hub, 'manifest.json'));
+  const opencodeSkillsRoot = path.join(opencodeConfig, 'skills');
   const targetSkill = path.join(opencodeConfig, 'skills', 'ai-agent-toolkit', 'SKILL.md');
   assert.equal(state.targets.opencode.enabled, true);
   assert.equal(state.targets.opencode.synced_version, expectedBridgeVersion);
   assert.equal(manifest.sync_source, 'codex-plugin');
   assert.ok(fs.existsSync(path.join(hub, 'adapters', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md')));
   assert.ok(fs.existsSync(targetSkill), 'OpenCode target skill is written only after explicit enablement');
+  assert.equal(path.resolve(state.targets.opencode.target_path), path.resolve(path.join(opencodeConfig, 'skills')));
+  assert.deepEqual(targetSkillDirs(opencodeSkillsRoot), expectedManagedSkillNames());
+  assert.deepEqual(
+    readJson(path.join(opencodeSkillsRoot, '.ai-agent-toolkit-managed.json')).managed_skill_names,
+    expectedManagedSkillNames()
+  );
   assert.doesNotMatch(targetSkill.replace(/\\/g, '/'), /\.agents\/skills/);
 });
 
@@ -311,7 +475,7 @@ test('explicit OpenCode setup infers the user OpenCode skill location', () => {
   const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
   assert.ok(fs.existsSync(targetSkill), 'OpenCode target skill should be installed into the user OpenCode config');
   assert.match(fs.readFileSync(targetSkill, 'utf8'), /AI Agent Toolkit Bridge/);
-  assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(path.dirname(targetSkill)));
+  assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(path.dirname(path.dirname(targetSkill))));
   assert.equal(audit.targets.opencode.target_exists, true);
   assert.equal(audit.targets.opencode.synced, true);
 });
@@ -337,6 +501,11 @@ test('explicit Antigravity 2 setup writes a plugin-scoped skill under Gemini con
   assert.equal(versionMarker.version, expectedBridgeVersion);
   assert.ok(fs.existsSync(targetSkill), 'Antigravity target skill should be installed into the plugin-scoped skills folder');
   assert.match(fs.readFileSync(targetSkill, 'utf8'), /AI Agent Toolkit AG2 Adapter/);
+  assert.deepEqual(targetSkillDirs(path.join(pluginRoot, 'skills')), expectedManagedSkillNames());
+  assert.deepEqual(
+    readJson(path.join(pluginRoot, '.ai-agent-toolkit-managed.json')).managed_skill_names,
+    expectedManagedSkillNames()
+  );
   assert.equal(path.resolve(audit.targets.ag2.target_path), path.resolve(pluginRoot));
   assert.equal(audit.targets.ag2.target_exists, true);
   assert.equal(audit.targets.ag2.synced, true);
@@ -384,8 +553,9 @@ test('OpenCode audit detects persisted bridge target state without enabling writ
   assert.equal(audit.targets.opencode.enabled, false);
   assert.equal(audit.targets.opencode.status, 'detected');
   assert.equal(audit.targets.opencode.synced, false);
-  assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(persistedTarget));
+  assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(path.dirname(persistedTarget)));
   assert.equal(audit.targets.opencode.signals.persisted_state, true);
+  assert.equal(audit.targets.opencode.signals.migrated_target_path, true);
 });
 
 test('AG2 Python command can be persisted and reused without installing packages', () => {
@@ -635,6 +805,143 @@ test('sync-enabled updates enabled OpenCode and Antigravity app outputs after To
   assert.equal(audit.targets.ag2.would_write, false);
 });
 
+test('skill payload checksum includes Toolkit repo skill files and marks enabled targets stale', () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root);
+  const hub = path.join(root, 'hub', 'current');
+  let result = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-target', 'ag2'
+  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  let audit = parseLastJson(run(['--hub', hub, '--audit'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  }).stdout);
+  assert.equal(audit.targets.ag2.synced, true);
+  assert.equal(audit.targets.ag2.would_write, false);
+  const beforeChecksum = audit.checksum;
+
+  writeFile(path.join(sourceRepo, 'skills', 'alpha', 'README.md'), 'alpha changed\n');
+  audit = parseLastJson(run(['--hub', hub, '--audit'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  }).stdout);
+  assert.notEqual(audit.checksum, beforeChecksum);
+  assert.equal(audit.targets.ag2.synced, false);
+  assert.equal(audit.targets.ag2.would_write, true);
+});
+
+test('sync-enabled updates changed Toolkit skill contents from the configured repo source', () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root);
+  const hub = path.join(root, 'hub', 'current');
+  let result = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-target', 'opencode',
+    '--enable-target', 'ag2'
+  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  writeFile(path.join(sourceRepo, 'skills', 'alpha', 'SKILL.md'), [
+    '---',
+    'name: alpha',
+    'description: alpha fixture skill for Toolkit bridge tests',
+    '---',
+    '',
+    'alpha v2 from source repo',
+    ''
+  ].join('\n'));
+
+  result = run(['--hub', hub, '--sync-enabled', '--write'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  assert.match(
+    fs.readFileSync(path.join(root, '.config', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
+    /alpha v2 from source repo/
+  );
+  assert.match(
+    fs.readFileSync(path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
+    /alpha v2 from source repo/
+  );
+});
+
+test('removed managed Toolkit skills are cleaned up without deleting unrelated user skills or files', () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n', beta: 'beta v1\n' });
+  const hub = path.join(root, 'hub', 'current');
+  let result = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-target', 'opencode',
+    '--enable-target', 'ag2'
+  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  const opencodeSkillsRoot = path.join(root, '.config', 'opencode', 'skills');
+  const ag2PluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
+  writeFile(path.join(opencodeSkillsRoot, 'user-skill', 'SKILL.md'), 'user opencode skill\n');
+  writeFile(path.join(ag2PluginRoot, 'skills', 'user-skill', 'SKILL.md'), 'user ag2 skill\n');
+  writeFile(path.join(ag2PluginRoot, 'USER-NOTES.txt'), 'keep this note\n');
+
+  fs.rmSync(path.join(sourceRepo, 'skills', 'beta'), { recursive: true, force: true });
+  git(sourceRepo, ['add', '.']);
+  git(sourceRepo, ['commit', '-m', 'remove beta skill']);
+
+  result = run(['--hub', hub, '--sync-enabled', '--write'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  assert.equal(fs.existsSync(path.join(opencodeSkillsRoot, 'beta')), false);
+  assert.equal(fs.existsSync(path.join(ag2PluginRoot, 'skills', 'beta')), false);
+  assert.equal(fs.existsSync(path.join(opencodeSkillsRoot, 'user-skill', 'SKILL.md')), true);
+  assert.equal(fs.existsSync(path.join(ag2PluginRoot, 'skills', 'user-skill', 'SKILL.md')), true);
+  assert.equal(fs.readFileSync(path.join(ag2PluginRoot, 'USER-NOTES.txt'), 'utf8'), 'keep this note\n');
+});
+
+test('old single-adapter AG2 target migrates to the full managed Toolkit skill set', () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n' });
+  const hub = path.join(root, 'hub', 'current');
+  const pluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
+  writeFile(path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'old adapter only\n');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: '2.1.0',
+    auto_sync_enabled: true,
+    repo_path: sourceRepo,
+    targets: {
+      ag2: {
+        enabled: true,
+        target_path: pluginRoot,
+        synced_version: '2.1.0',
+        synced_checksum: 'old'
+      }
+    }
+  });
+
+  const result = run(['--hub', hub, '--sync-enabled', '--write'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(fs.readFileSync(path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'utf8'), /AI Agent Toolkit AG2 Adapter/);
+  assert.match(fs.readFileSync(path.join(pluginRoot, 'skills', 'alpha', 'SKILL.md'), 'utf8'), /alpha v1/);
+
+  const audit = parseLastJson(run(['--hub', hub, '--audit'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  }).stdout);
+  assert.equal(audit.targets.ag2.synced, true);
+  assert.equal(audit.targets.ag2.would_write, false);
+});
+
 test('audit separates hub adapter metadata from app-facing target sync', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -643,7 +950,7 @@ test('audit separates hub adapter metadata from app-facing target sync', () => {
   });
   assert.equal(result.status, 0, result.stderr);
 
-  const opencodeTarget = path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit');
+  const opencodeTarget = path.join(root, '.config', 'opencode', 'skills');
   const ag2Target = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
   fs.rmSync(opencodeTarget, { recursive: true, force: true });
   fs.rmSync(ag2Target, { recursive: true, force: true });
@@ -674,7 +981,7 @@ test('disabled target is not overwritten during later sync', () => {
   });
   assert.equal(result.status, 0, result.stderr);
 
-  const opencodeTargetDir = path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit');
+  const opencodeTargetDir = path.join(root, '.config', 'opencode', 'skills');
   const ag2TargetDir = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
   const opencodeMarker = path.join(opencodeTargetDir, 'USER-MARKER.txt');
   const ag2Marker = path.join(ag2TargetDir, 'USER-MARKER.txt');
@@ -766,6 +1073,40 @@ test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled'
   assert.equal(state.hub_version, expectedBridgeVersion);
   assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
   assert.equal(state.last_sync_source, 'claude-plugin');
+});
+
+test('hook mode syncs enabled stale targets from the configured repo skill source', () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha hook source\n' });
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: '1.0.0',
+    auto_sync_enabled: true,
+    repo_path: sourceRepo,
+    targets: {
+      opencode: {
+        enabled: true,
+        explicitly_disabled: false,
+        synced_version: '1.0.0',
+        synced_checksum: 'old'
+      }
+    }
+  });
+
+  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    fs.readFileSync(path.join(root, '.config', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'),
+    /alpha hook source/
+  );
+  assert.match(
+    fs.readFileSync(path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md'), 'utf8'),
+    /AI Agent Toolkit Bridge/
+  );
 });
 
 test('enabling repo auto-update records repo path branch and remote in hub state', () => {
@@ -1247,4 +1588,35 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
       '.codex-plugin/plugin.json'
     ].sort()
   );
+});
+
+test('Windows n8n plugin hook repair removes bare shell hooks and verifies hook JSON output', {
+  skip: process.platform !== 'win32' ? 'Windows PowerShell/Git Bash hook verification is Windows-only' : false
+}, () => {
+  const root = tmpRoot();
+  const pluginRoot = path.join(root, 'n8n-skills-plugin');
+  writeN8nPluginHookFixture(pluginRoot);
+
+  assert.ok(
+    auditPluginRoot(pluginRoot, { windows: true }).some((error) => /directly invokes|bare bash/i.test(error)),
+    'fixture should start with Windows-unsafe shell hooks'
+  );
+
+  const repair = repairPluginRoot(pluginRoot, {
+    windows: true,
+    write: true,
+    n8n: true
+  });
+  assert.ok(repair.repaired, 'repair should update the fixture');
+
+  const hooksJson = readJson(path.join(pluginRoot, 'hooks', 'hooks.json'));
+  for (const entry of collectHookCommands(hooksJson)) {
+    assert.match(entry.command, /^powershell(?:\.exe)?\s/i, entry.command);
+    assert.match(entry.command, /hooks\/run-hook\.ps1/, entry.command);
+    assert.doesNotMatch(entry.command, /^(?:\.\/)?hooks\/.+\.sh(?:$|\s)/i, entry.command);
+    assert.doesNotMatch(entry.command, /^(?:bash|bash\.exe)(?:\s|$)/i, entry.command);
+  }
+
+  const errors = auditPluginRoot(pluginRoot, { windows: true, verifyOutput: true });
+  assert.deepEqual(errors, []);
 });

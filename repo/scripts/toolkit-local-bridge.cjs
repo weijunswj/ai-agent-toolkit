@@ -15,6 +15,9 @@ const SUPPORTED_TARGETS = ['opencode', 'ag2'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
+const TARGET_MANIFEST_FILE = '.ai-agent-toolkit-managed.json';
+const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
+const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -157,7 +160,7 @@ function printHelp() {
     '  --sync-source repo|codex-plugin|claude-plugin',
     '  --hub <path>                  test override; defaults to ~/.ai-agent-toolkit/current',
     '  --opencode-config-dir <path>  test or explicit setup override',
-    '  --opencode-target <path>      test override for the managed OpenCode skill path',
+    '  --opencode-target <path>      test override for the managed OpenCode skills root',
     '  --python-command <command>    one-run AG2 Python detection override',
     '  --set-ag2-python-command <command>',
     '                                persist an AG2 Python command for future audit and hook runs'
@@ -549,10 +552,13 @@ function discoverOpenCode(args, targetState, hubPath) {
     targetState.synced_checksum ||
     targetState.last_sync
   );
-  const configuredTarget = args.opencodeTarget || targetState.target_path || path.join(configDir, 'skills', TOOLKIT_NAME);
+  const defaultTarget = path.join(configDir, 'skills');
+  const requestedTarget = args.opencodeTarget || targetState.target_path || defaultTarget;
+  const configuredTarget = normalizeOpenCodeTargetPath(requestedTarget, defaultTarget);
   const command = commandProbe(args.opencodeCommand, ['--version']);
   const configExists = fs.existsSync(configDir);
   const targetExists = fs.existsSync(configuredTarget);
+  const migratedTargetPath = path.resolve(configuredTarget) !== path.resolve(requestedTarget);
   const explicitlyEnabled = targetState.enabled === true;
   const detected = command.ok || Boolean(envConfig) || configExists || targetExists || explicitlyEnabled || persistedState;
   return {
@@ -567,10 +573,25 @@ function discoverOpenCode(args, targetState, hubPath) {
       config_dir: configDir,
       config_dir_exists: configExists,
       target_exists: targetExists,
+      migrated_target_path: migratedTargetPath,
+      requested_target_path: requestedTarget,
       persisted_state: persistedState,
       explicitly_enabled: explicitlyEnabled
     }
   };
+}
+
+function normalizeOpenCodeTargetPath(targetPath, defaultTarget) {
+  const raw = String(targetPath || '').trim();
+  if (!raw) return defaultTarget;
+  const resolved = path.resolve(raw);
+  if (
+    path.basename(resolved) === TOOLKIT_NAME &&
+    path.basename(path.dirname(resolved)) === 'skills'
+  ) {
+    return path.dirname(resolved);
+  }
+  return raw;
 }
 
 function readDirectoryNames(dirPath) {
@@ -591,6 +612,10 @@ function readDirectoryFileNames(dirPath) {
   } catch {
     return [];
   }
+}
+
+function isValidSkillName(name) {
+  return SKILL_NAME_PATTERN.test(String(name || ''));
 }
 
 function ag2EnvPythonCandidates() {
@@ -746,7 +771,106 @@ function discoverAg2(args, targetState, hubPath) {
   };
 }
 
-function adapterPayloads() {
+function hasToolkitSkillSource(sourceRoot) {
+  const skillsRoot = path.join(sourceRoot, 'skills');
+  return fs.existsSync(skillsRoot) && fs.statSync(skillsRoot).isDirectory();
+}
+
+function hasGitMetadata(sourceRoot) {
+  return fs.existsSync(path.join(sourceRoot, '.git'));
+}
+
+function isTrustedGitWorktree(sourceRoot) {
+  if (hasGitMetadata(sourceRoot)) return true;
+  const result = gitCommand(sourceRoot, ['rev-parse', '--is-inside-work-tree'], { timeout: 5000 });
+  return result.ok && result.stdout.trim() === 'true';
+}
+
+function resolveToolkitSourceRoot(state = {}) {
+  if (state.repo_path) {
+    const repoPath = path.resolve(state.repo_path);
+    if (!hasToolkitSkillSource(repoPath)) {
+      throw new Error(`configured Toolkit repo_path does not contain skills/: ${repoPath}`);
+    }
+    if (!isTrustedGitWorktree(repoPath)) {
+      throw new Error(`configured Toolkit repo_path is not a git worktree: ${repoPath}`);
+    }
+    return repoPath;
+  }
+
+  const scriptRoot = pluginRootFromCwd() || path.resolve(__dirname, '..', '..');
+  if (hasToolkitSkillSource(scriptRoot) && isTrustedGitWorktree(scriptRoot)) return scriptRoot;
+
+  throw new Error(
+    'Toolkit full skill sync requires a trusted local Toolkit git repo source; run the bridge from the repo or configure repo auto-update with --repo-path.'
+  );
+}
+
+function collectFilesRecursively(rootDir) {
+  const files = {};
+
+  function walk(currentDir) {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const relPath = slash(path.relative(rootDir, fullPath));
+      files[relPath] = fs.readFileSync(fullPath);
+    }
+  }
+
+  walk(rootDir);
+  return files;
+}
+
+function collectToolkitSkills(sourceRoot) {
+  const skillsRoot = path.join(sourceRoot, 'skills');
+  const skills = {};
+  for (const entry of fs.readdirSync(skillsRoot, { withFileTypes: true })
+    .filter((item) => item.isDirectory())
+    .sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!isValidSkillName(entry.name)) continue;
+    const skillRoot = path.join(skillsRoot, entry.name);
+    if (!fs.existsSync(path.join(skillRoot, 'SKILL.md'))) continue;
+    if (entry.name === TOOLKIT_NAME) {
+      throw new Error(`Toolkit repo skills/ contains reserved bridge adapter skill name: ${TOOLKIT_NAME}`);
+    }
+    skills[entry.name] = collectFilesRecursively(skillRoot);
+  }
+  return skills;
+}
+
+function textPayload(text) {
+  return Buffer.from(text, 'utf8');
+}
+
+function targetManifestPayload(targetName, skillNames) {
+  return textPayload(`${JSON.stringify({
+    managed_by: TARGET_MANIFEST_MARKER,
+    schema_version: 1,
+    target: targetName,
+    architecture_version: ARCHITECTURE_VERSION,
+    bridge_version: BRIDGE_VERSION,
+    managed_skill_names: [...skillNames].sort()
+  }, null, 2)}\n`);
+}
+
+function addSkillToPayload(payload, skillName, files, prefix = 'skills') {
+  for (const [relPath, content] of Object.entries(files)) {
+    payload[`${prefix}/${skillName}/${relPath}`] = Buffer.isBuffer(content) ? content : textPayload(String(content));
+  }
+}
+
+function adapterPayloads(state = {}) {
+  const sourceRoot = resolveToolkitSourceRoot(state);
+  const toolkitSkills = collectToolkitSkills(sourceRoot);
+  const toolkitSkillNames = Object.keys(toolkitSkills).sort();
   const opencodeSkill = [
     '---',
     'name: ai-agent-toolkit',
@@ -846,20 +970,41 @@ function adapterPayloads() {
     }
   };
 
-  return {
-    opencode: {
-      'skills/ai-agent-toolkit/SKILL.md': opencodeSkill,
-      'skills/ai-agent-toolkit/README.md': opencodeReadme
-    },
-    ag2: {
-      'plugin.json': `${JSON.stringify(ag2Plugin, null, 2)}\n`,
-      'installed_version.json': `${JSON.stringify({ version: BRIDGE_VERSION }, null, 2)}\n`,
-      'README.md': ag2Readme,
-      'skills/ai-agent-toolkit/SKILL.md': ag2Skill,
-      'skills/ai-agent-toolkit/README.md': ag2Readme,
-      'ai-agent-toolkit-ag2-adapter.json': `${JSON.stringify(ag2Metadata, null, 2)}\n`
-    }
+  const adapterFiles = {
+    'SKILL.md': textPayload(opencodeSkill),
+    'README.md': textPayload(opencodeReadme)
   };
+  const ag2AdapterFiles = {
+    'SKILL.md': textPayload(ag2Skill),
+    'README.md': textPayload(ag2Readme)
+  };
+  const managedSkillNames = [TOOLKIT_NAME, ...toolkitSkillNames].sort();
+  const opencodePayload = {
+    [TARGET_MANIFEST_FILE]: targetManifestPayload('opencode', managedSkillNames)
+  };
+  const ag2Payload = {
+    'plugin.json': textPayload(`${JSON.stringify(ag2Plugin, null, 2)}\n`),
+    'installed_version.json': textPayload(`${JSON.stringify({ version: BRIDGE_VERSION }, null, 2)}\n`),
+    'README.md': textPayload(ag2Readme),
+    'ai-agent-toolkit-ag2-adapter.json': textPayload(`${JSON.stringify(ag2Metadata, null, 2)}\n`),
+    [TARGET_MANIFEST_FILE]: targetManifestPayload('ag2', managedSkillNames)
+  };
+
+  for (const [skillName, files] of Object.entries(toolkitSkills)) {
+    addSkillToPayload(opencodePayload, skillName, files);
+    addSkillToPayload(ag2Payload, skillName, files);
+  }
+  addSkillToPayload(opencodePayload, TOOLKIT_NAME, adapterFiles);
+  addSkillToPayload(ag2Payload, TOOLKIT_NAME, ag2AdapterFiles);
+
+  return {
+    opencode: opencodePayload,
+    ag2: ag2Payload
+  };
+}
+
+function payloadBytes(value) {
+  return Buffer.isBuffer(value) ? value : Buffer.from(String(value), 'utf8');
 }
 
 function payloadChecksum(payloads) {
@@ -870,7 +1015,7 @@ function payloadChecksum(payloads) {
       hash.update('\0');
       hash.update(rel);
       hash.update('\0');
-      hash.update(payloads[target][rel]);
+      hash.update(payloadBytes(payloads[target][rel]));
       hash.update('\0');
     }
   }
@@ -882,7 +1027,7 @@ function filePayloadChecksum(payload) {
   for (const rel of Object.keys(payload).sort()) {
     hash.update(rel);
     hash.update('\0');
-    hash.update(payload[rel]);
+    hash.update(payloadBytes(payload[rel]));
     hash.update('\0');
   }
   return hash.digest('hex');
@@ -890,13 +1035,51 @@ function filePayloadChecksum(payload) {
 
 function appTargetPayload(targetName, payloads) {
   if (targetName === 'opencode') {
-    const prefix = `skills/${TOOLKIT_NAME}/`;
+    const prefix = 'skills/';
     return Object.fromEntries(Object.entries(payloads.opencode)
-      .filter(([rel]) => rel.startsWith(prefix))
-      .map(([rel, text]) => [rel.slice(prefix.length), text]));
+      .map(([rel, text]) => [rel.startsWith(prefix) ? rel.slice(prefix.length) : rel, text]));
   }
   if (targetName === 'ag2') return payloads.ag2;
   throw new Error(`Unsupported target: ${targetName}`);
+}
+
+function targetSkillNames(targetName, payloads) {
+  const names = new Set();
+  const payload = appTargetPayload(targetName, payloads);
+  for (const rel of Object.keys(payload)) {
+    const normalized = slash(rel);
+    if (targetName === 'ag2') {
+      const match = normalized.match(/^skills\/([^/]+)\//);
+      if (match && isValidSkillName(match[1])) names.add(match[1]);
+      continue;
+    }
+    const first = normalized.split('/')[0];
+    if (first && isValidSkillName(first)) names.add(first);
+  }
+  return [...names].sort();
+}
+
+function readManagedTargetManifest(targetPath) {
+  const manifest = readJsonIfExists(path.join(targetPath, TARGET_MANIFEST_FILE));
+  if (!manifest || manifest.managed_by !== TARGET_MANIFEST_MARKER) return null;
+  return manifest;
+}
+
+function previousManagedSkillNames(targetPath) {
+  const manifest = readManagedTargetManifest(targetPath);
+  if (!manifest || !Array.isArray(manifest.managed_skill_names)) return [];
+  return manifest.managed_skill_names
+    .map((name) => String(name || '').trim())
+    .filter(isValidSkillName)
+    .sort();
+}
+
+function targetHasNoStaleManagedSkills(targetName, targetPath, payloads) {
+  if (!targetPath) return false;
+  const previous = previousManagedSkillNames(targetPath);
+  if (!previous.length) return true;
+  const current = new Set(targetSkillNames(targetName, payloads));
+  return previous.every((name) => current.has(name));
 }
 
 function targetOutputChecksum(targetPath, payload) {
@@ -905,14 +1088,17 @@ function targetOutputChecksum(targetPath, payload) {
   for (const rel of Object.keys(payload)) {
     const filePath = path.join(targetPath, rel);
     if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return '';
-    actual[rel] = fs.readFileSync(filePath, 'utf8');
+    actual[rel] = fs.readFileSync(filePath);
   }
   return filePayloadChecksum(actual);
 }
 
 function targetOutputIsCurrent(targetName, discovery, payloads) {
   const payload = appTargetPayload(targetName, payloads);
-  return targetOutputChecksum(discovery.target_path, payload) === filePayloadChecksum(payload);
+  return (
+    targetOutputChecksum(discovery.target_path, payload) === filePayloadChecksum(payload) &&
+    targetHasNoStaleManagedSkills(targetName, discovery.target_path, payloads)
+  );
 }
 
 function targetOutputExists(targetName, discovery, payloads) {
@@ -979,7 +1165,7 @@ function writePayloadTree(rootDir, payload) {
   for (const [rel, text] of Object.entries(payload)) {
     const target = path.join(rootDir, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, text, 'utf8');
+    fs.writeFileSync(target, payloadBytes(text));
   }
 }
 
@@ -1068,6 +1254,86 @@ function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.
     throw new Error(`staged target missing ${requiredRelPath}: ${staging}`);
   }
   replaceDirectoryAtomically(staging, targetDir);
+}
+
+function writeFileAtomically(filePath, content) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`);
+  fs.writeFileSync(tempPath, payloadBytes(content));
+  fs.renameSync(tempPath, filePath);
+}
+
+function skillBaseRel(targetName, skillName) {
+  if (targetName === 'opencode') return skillName;
+  if (targetName === 'ag2') return path.join('skills', skillName);
+  throw new Error(`Unsupported target: ${targetName}`);
+}
+
+function skillPayloadForTarget(targetName, payload, skillName) {
+  const prefix = slash(skillBaseRel(targetName, skillName));
+  const skillPayload = {};
+  for (const [rel, content] of Object.entries(payload)) {
+    const normalized = slash(rel);
+    if (normalized === prefix) continue;
+    if (!normalized.startsWith(`${prefix}/`)) continue;
+    skillPayload[normalized.slice(prefix.length + 1)] = content;
+  }
+  return skillPayload;
+}
+
+function rootPayloadForTarget(targetName, payload) {
+  const rootPayload = {};
+  for (const [rel, content] of Object.entries(payload)) {
+    const normalized = slash(rel);
+    if (targetName === 'ag2' && normalized.startsWith('skills/')) continue;
+    if (targetName === 'opencode' && isValidSkillName(normalized.split('/')[0]) && normalized.includes('/')) continue;
+    rootPayload[normalized] = content;
+  }
+  return rootPayload;
+}
+
+function writeSkillPayloadAtomically(targetPath, baseRel, payload) {
+  const targetDir = path.join(targetPath, ...slash(baseRel).split('/'));
+  const parent = path.dirname(targetDir);
+  fs.mkdirSync(parent, { recursive: true });
+  const staging = path.join(parent, `.${path.basename(targetDir)}.staging-${process.pid}-${Date.now()}`);
+  if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
+  fs.mkdirSync(staging, { recursive: true });
+  writePayloadTree(staging, payload);
+  if (!fs.existsSync(path.join(staging, 'SKILL.md'))) {
+    throw new Error(`staged target skill missing SKILL.md: ${staging}`);
+  }
+  replaceDirectoryAtomically(staging, targetDir);
+}
+
+function removeStaleManagedSkills(targetName, targetPath, previousNames, currentNames) {
+  const current = new Set(currentNames);
+  for (const name of previousNames) {
+    if (current.has(name)) continue;
+    const targetDir = path.join(targetPath, ...slash(skillBaseRel(targetName, name)).split('/'));
+    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+  }
+}
+
+function syncTargetPayload(targetName, targetPath, payloads) {
+  const payload = appTargetPayload(targetName, payloads);
+  const skillNames = targetSkillNames(targetName, payloads);
+  const previousNames = previousManagedSkillNames(targetPath);
+  fs.mkdirSync(targetPath, { recursive: true });
+
+  for (const skillName of skillNames) {
+    writeSkillPayloadAtomically(
+      targetPath,
+      skillBaseRel(targetName, skillName),
+      skillPayloadForTarget(targetName, payload, skillName)
+    );
+  }
+
+  removeStaleManagedSkills(targetName, targetPath, previousNames, skillNames);
+
+  for (const [rel, content] of Object.entries(rootPayloadForTarget(targetName, payload))) {
+    writeFileAtomically(path.join(targetPath, ...slash(rel).split('/')), content);
+  }
 }
 
 function targetWouldSync(targetName, state, checksum, discovery, payloads) {
@@ -1287,7 +1553,7 @@ function run(argv = process.argv.slice(2)) {
     opencode: discoverOpenCode(args, nextState.targets.opencode, hubPath),
     ag2: discoverAg2(args, nextState.targets.ag2, hubPath)
   };
-  const payloads = adapterPayloads();
+  const payloads = adapterPayloads(nextState);
   const checksum = payloadChecksum(payloads);
 
   updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
@@ -1333,14 +1599,12 @@ function run(argv = process.argv.slice(2)) {
 
     if (targetWouldSync('opencode', nextState, checksum, discoveries.opencode, payloads)) {
       const targetPath = assertSafeWritePath(discoveries.opencode.target_path, 'OpenCode target path');
-      const sourceDir = path.join(hubPath, 'adapters', 'opencode', 'skills', TOOLKIT_NAME);
-      copyDirectoryAtomically(sourceDir, targetPath);
+      syncTargetPayload('opencode', targetPath, payloads);
       updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, true, '');
     }
     if (targetWouldSync('ag2', nextState, checksum, discoveries.ag2, payloads)) {
       const targetPath = assertSafeWritePath(discoveries.ag2.target_path, 'Antigravity 2 target path');
-      const sourceDir = path.join(hubPath, 'adapters', 'ag2');
-      copyDirectoryAtomically(sourceDir, targetPath, path.join('skills', TOOLKIT_NAME, 'SKILL.md'));
+      syncTargetPayload('ag2', targetPath, payloads);
       updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, true, '');
     }
 
