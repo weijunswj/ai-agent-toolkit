@@ -117,6 +117,53 @@ The updater must not:
 - Write outside the current user home or temp directories.
 - Use Codex or Claude private plugin cache paths as source.
 
+## Codex Native Plugin Install And Verification
+
+Codex native plugin installation is Codex-only and separate from the shared bridge updater. The supported local install path uses Codex local marketplaces:
+
+```powershell
+codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json
+codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
+```
+
+The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`. The wrapper must use `policy.authentication: "ON_USE"`, not `ON_INSTALL`, so a no-auth local Toolkit plugin can install headlessly before any hook trust prompt.
+
+Before reporting `setup toolkit` complete, run:
+
+```powershell
+node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
+```
+
+If the plugin is missing, disabled, stale, points at another source path, or its installed plugin cache does not contain Toolkit version `2.2.0` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
+
+```powershell
+node repo/scripts/setup-codex-toolkit-plugin.cjs --write
+```
+
+The verifier uses only supported Codex plugin commands. If no usable Codex CLI with `plugin marketplace` support is available, or if local marketplace installation fails, setup must fail clearly instead of pretending native plugin activation completed.
+
+The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.2.0`, `authPolicy` `ON_USE`, and the cached `SessionStart` hook; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If verification never passes before the add deadline, report setup failure.
+
+Codex setup must never install or update Claude Code. Claude Code uses its own native plugin system and `.claude-plugin/plugin.json`.
+
+### Manual Isolated CODEX_HOME Acceptance
+
+Before merging changes that affect Codex local plugin install, run this smoke test with a fresh isolated Codex home. In the example, `CODEX_HOME=<temp>` means a newly created temporary directory, not the user's normal Codex home.
+
+```powershell
+$env:CODEX_HOME = "<temp>"
+node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json
+codex plugin list --available --json
+```
+
+Acceptance criteria:
+
+- `node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json` exits successfully. If the underlying `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` process keeps running after verification passes, setup output includes a warning that the command did not exit cleanly.
+- `codex plugin list --available --json` shows `ai-agent-toolkit@ai-agent-toolkit-local` installed and enabled with `authPolicy` `ON_USE`.
+- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.0`.
+- The final cache `.codex-plugin/plugin.json` reports version `2.2.0`.
+- The final cache `.codex-plugin/hooks/hooks.json` includes a `SessionStart` hook.
+
 ## Repo-Backed Auto-Update
 
 Repo auto-update is opt-in and uses the configured local Toolkit Git repo as source of truth. Native Codex and Claude Code plugin hooks remain launchers only; they do not become source of truth and do not update each other.
@@ -178,10 +225,10 @@ Example:
 
 ```powershell
 node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io
-node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows
+node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --verify-output
 ```
 
-This utility may repair the installed plugin root named by the user or install flow. It must not use private plugin cache paths as source for Toolkit publishing, copy third-party plugin content into this repo, touch `n8n_live` MCP config, or modify unrelated plugins except when the current install/update flow explicitly targets that plugin root for generic Windows hook wrapping.
+This utility may repair the installed plugin root named by the user or install flow. The audit command verifies repaired hook JSON output before hook approval. It must not use private plugin cache paths as source for Toolkit publishing, copy third-party plugin content into this repo, touch `n8n_live` MCP config, or modify unrelated plugins except when the current install/update flow explicitly targets that plugin root for generic Windows hook wrapping.
 
 ## Target Discovery
 

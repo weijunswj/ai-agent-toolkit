@@ -415,6 +415,78 @@ test('n8n plugin hook audit accepts Windows-safe Node hook commands and parseabl
   });
 });
 
+test('n8n plugin hook audit verifies runtime hook JSON output when requested', () => {
+  const pluginRoot = makePluginRoot();
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '0.3.1',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup|resume|clear|compact',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.cjs"'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  fs.writeFileSync(
+    path.join(pluginRoot, 'hooks', 'session-start.cjs'),
+    [
+      "'use strict';",
+      'process.stdout.write(JSON.stringify({',
+      '  hookSpecificOutput: {',
+      '    hookEventName: "SessionStart",',
+      '    additionalContext: "using-n8n-skills"',
+      '  }',
+      '}));'
+    ].join('\n'),
+    'utf8'
+  );
+
+  const audit = runAudit(pluginRoot, '--verify-output');
+
+  assert.equal(audit.status, 0, audit.stderr);
+  assert.match(audit.stdout, /verified hook JSON output/i);
+});
+
+test('n8n plugin hook audit rejects invalid runtime hook JSON output when verification is requested', () => {
+  const pluginRoot = makePluginRoot();
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '0.3.1',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup|resume|clear|compact',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.cjs"'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  fs.writeFileSync(path.join(pluginRoot, 'hooks', 'session-start.cjs'), 'process.stdout.write("not json");\n', 'utf8');
+
+  const audit = runAudit(pluginRoot, '--verify-output');
+
+  assert.notEqual(audit.status, 0);
+  assert.match(audit.stderr, /did not emit valid hook JSON/i);
+});
+
 test('n8n plugin hook audit follows wrapper command shell-script arguments', () => {
   const pluginRoot = makePluginRoot();
   writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
@@ -752,6 +824,15 @@ test('n8n-skills Windows hook repair wraps hooks, adds Node fallbacks, and verif
   });
   assert.equal(sessionStart.status, 0, sessionStart.stderr);
   assert.equal(JSON.parse(sessionStart.stdout).hookSpecificOutput.hookEventName, 'SessionStart');
+
+  if (hasWindowsPowerShellForTests()) {
+    const wrapperSessionStart = runPowerShellWrapperHook(pluginRoot, 'session-start.sh', {
+      session_id: `wrapper-session-start-${unique}`,
+      source: 'startup'
+    });
+    assert.equal(wrapperSessionStart.status, 0, wrapperSessionStart.stderr);
+    assert.equal(JSON.parse(wrapperSessionStart.stdout).hookSpecificOutput.hookEventName, 'SessionStart');
+  }
 
   const preToolUse = runShellHook(pluginRoot, 'pre-tool-use/validate-workflow.sh', {
     session_id: `pre-tool-use-${unique}`,

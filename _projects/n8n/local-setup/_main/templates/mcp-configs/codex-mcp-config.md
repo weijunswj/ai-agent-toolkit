@@ -4,10 +4,11 @@ Use this for the normal Codex + official n8n instance-level MCP setup.
 
 * Do not paste your real n8n token into this file or any repo file.
 * Keep `bearer_token_env_var = "N8N_MCP_TOKEN"` exactly as shown.
-* On Windows, repair official plugin hooks before trusting them: run `node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --write --plugin-id n8n-skills@n8n-io`, then run `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows`.
-* The repair rewrites bare `.sh` hook commands through a PowerShell wrapper, invokes explicit Git Bash from `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`, rejects `C:\WINDOWS\system32\bash.exe`, and adds Node JSON fallbacks for `n8n-skills@n8n-io`.
-* Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`; if Windows repair fails, do not approve the hooks and use the upstream "Other platforms" route, `npx skills add n8n-io/skills`, plus the target repo `AGENTS.md` cue.
-* Restart Codex and approve or trust the official plugin hooks only after repair and audit pass so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
+* English prompt: `setup n8n plugin`. Install the official n8n plugin only if hooks can be made Windows-safe. Never touch `n8n_live` during plugin setup; this MCP config is separate live-access setup.
+* On Windows, repair official plugin hooks before trusting them: run `node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --write --plugin-id n8n-skills@n8n-io`, then run `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --verify-output`.
+* The repair rewrites bare `.sh` hook commands through a PowerShell wrapper, invokes explicit Git Bash from `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`, rejects `C:\WINDOWS\system32\bash.exe`, and adds Node JSON fallbacks for `n8n-skills@n8n-io`; a bare `.sh` hook would open `session-start.sh` in VS Code instead of running as a hook.
+* Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`; if Windows repair fails, audit fails, or hook JSON output verification fails, do not approve the hooks and use the upstream "Other platforms" route, `npx skills add n8n-io/skills`, plus the target repo `AGENTS.md` cue.
+* Restart Codex and approve or trust the official plugin hooks only after repair, audit, and hook JSON output verification pass so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
 1. Common Windows path for Codex MCP config:
 

@@ -4,6 +4,8 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
+const { spawnSync } = require('node:child_process');
 
 function normalizeRelPath(relPath) {
   return relPath.replace(/\\/g, '/');
@@ -43,6 +45,49 @@ function collectHookCommands(hooksJson) {
 
   visit(hooksJson, ['hooks.json']);
   return commands;
+}
+
+function tokenizeCommand(command) {
+  const tokens = [];
+  let current = '';
+  let quote = null;
+  let escaping = false;
+
+  const text = String(command);
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+    if (char === '\\' && quote !== "'" && ['\\', '"', "'"].includes(text[index + 1] || '')) {
+      escaping = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (escaping) current += '\\';
+  if (quote) throw new Error(`unclosed quote in hook command: ${command}`);
+  if (current) tokens.push(current);
+  return tokens;
 }
 
 function stripOuterQuotes(value) {
@@ -123,9 +168,122 @@ function shouldRequireNodeJsonFallback(relPath, text) {
   );
 }
 
+function pluginRootForEnv(pluginRoot) {
+  return path.resolve(pluginRoot).replace(/\\/g, '/');
+}
+
+function expandPluginRootVars(value, pluginRoot) {
+  const root = pluginRootForEnv(pluginRoot);
+  return String(value)
+    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, root)
+    .replace(/\$\{PLUGIN_ROOT\}/g, root);
+}
+
+function hookEventNameFromPath(entryPath) {
+  const match = String(entryPath).match(/hooks\.json\.hooks\.([^.]+)/);
+  return match ? match[1] : '';
+}
+
+function sampleHookInput(eventName) {
+  const sessionId = `toolkit-audit-${process.pid}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+  const base = {
+    session_id: sessionId,
+    tool_name: 'mcp__n8n__validate_workflow',
+    tool_input: {
+      code: '',
+      ids: [{ name: 'Test n8n node' }]
+    }
+  };
+
+  if (eventName === 'SessionStart') {
+    return {
+      session_id: sessionId,
+      source: 'startup'
+    };
+  }
+  if (eventName === 'PostToolUse') {
+    return {
+      ...base,
+      tool_response: {}
+    };
+  }
+  return base;
+}
+
+function commandOutput(result) {
+  return `${result.stdout || ''}${result.stderr || ''}${result.error ? result.error.message : ''}`.trim();
+}
+
+function verifyHookCommandJsonOutput(pluginRoot, entry) {
+  let tokens;
+  try {
+    tokens = tokenizeCommand(entry.command);
+  } catch (error) {
+    return `${entry.path} could not be tokenized for hook JSON verification: ${error.message}`;
+  }
+  if (tokens.length === 0) return `${entry.path} has an empty hook command`;
+
+  const command = expandPluginRootVars(tokens[0], pluginRoot);
+  const commandArgs = tokens.slice(1).map((token) => expandPluginRootVars(token, pluginRoot));
+  const eventName = hookEventNameFromPath(entry.path);
+  const result = spawnSync(command, commandArgs, {
+    cwd: pluginRoot,
+    input: JSON.stringify(sampleHookInput(eventName)),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      CLAUDE_PLUGIN_ROOT: pluginRootForEnv(pluginRoot),
+      PLUGIN_ROOT: pluginRootForEnv(pluginRoot)
+    },
+    timeout: 10000,
+    windowsHide: true
+  });
+
+  if (result.error) {
+    return `${entry.path} could not execute hook JSON verification command: ${result.error.message}`;
+  }
+  if (result.status !== 0) {
+    return `${entry.path} hook JSON verification command exited ${result.status}: ${commandOutput(result)}`;
+  }
+
+  const stdout = String(result.stdout || '').trim();
+  if (!stdout) {
+    return `${entry.path} did not emit hook JSON output during verification`;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (error) {
+    return `${entry.path} did not emit valid hook JSON output during verification: ${error.message}`;
+  }
+
+  const hookOutput = parsed && parsed.hookSpecificOutput;
+  if (!hookOutput || typeof hookOutput !== 'object') {
+    return `${entry.path} hook JSON output is missing hookSpecificOutput`;
+  }
+  if (eventName && hookOutput.hookEventName !== eventName) {
+    return `${entry.path} hook JSON output event ${hookOutput.hookEventName || '<missing>'} did not match ${eventName}`;
+  }
+  if (typeof hookOutput.additionalContext !== 'string') {
+    return `${entry.path} hook JSON output must include string hookSpecificOutput.additionalContext`;
+  }
+  return null;
+}
+
+function verifyHookJsonOutputs(pluginRoot, hooksJson) {
+  const errors = [];
+  for (const entry of collectHookCommands(hooksJson)) {
+    const error = verifyHookCommandJsonOutput(pluginRoot, entry);
+    if (error) errors.push(error);
+  }
+  return errors;
+}
+
 function auditPluginRoot(pluginRoot, options = {}) {
   const errors = [];
   const windowsMode = Boolean(options.windows);
+  const verifyOutput = Boolean(options.verifyOutput);
   const pluginJsonPath = path.join(pluginRoot, '.codex-plugin', 'plugin.json');
   const hooksJsonPath = path.join(pluginRoot, 'hooks', 'hooks.json');
 
@@ -184,6 +342,10 @@ function auditPluginRoot(pluginRoot, options = {}) {
     }
   }
 
+  if (verifyOutput && errors.length === 0) {
+    errors.push(...verifyHookJsonOutputs(pluginRoot, hooksJson));
+  }
+
   return [...new Set(errors)];
 }
 
@@ -204,7 +366,8 @@ function defaultCodexPluginRoot() {
 function parseArgs(argv) {
   const options = {
     pluginRoot: process.env.N8N_SKILLS_PLUGIN_ROOT || null,
-    windows: process.platform === 'win32'
+    windows: process.platform === 'win32',
+    verifyOutput: false
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -216,6 +379,8 @@ function parseArgs(argv) {
       options.windows = true;
     } else if (arg === '--no-windows') {
       options.windows = false;
+    } else if (arg === '--verify-output') {
+      options.verifyOutput = true;
     } else if (arg === '--help' || arg === '-h') {
       options.help = true;
     } else if (!options.pluginRoot) {
@@ -233,6 +398,7 @@ function usage() {
     'Usage: node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root <path> [--windows]',
     '',
     'Audits an installed official n8n Skills plugin folder for hook portability.',
+    'Add --verify-output after repair to execute hooks with sample input and require valid hook JSON output.',
     'Without --plugin-root, the script tries the latest Codex n8n-skills cache under the current user profile.'
   ].join('\n');
 }
@@ -262,13 +428,18 @@ function main(argv = process.argv.slice(2)) {
     return 2;
   }
 
-  const errors = auditPluginRoot(pluginRoot, { windows: options.windows });
+  const errors = auditPluginRoot(pluginRoot, {
+    windows: options.windows,
+    verifyOutput: options.verifyOutput
+  });
   if (errors.length > 0) {
     for (const error of errors) console.error(`FAIL: ${error}`);
     return 1;
   }
 
-  console.log(`OK: n8n Skills plugin hook metadata is portable for ${options.windows ? 'Windows' : 'this platform'}: ${pluginRoot}`);
+  console.log(
+    `OK: n8n Skills plugin hook metadata is portable for ${options.windows ? 'Windows' : 'this platform'}${options.verifyOutput ? ' and verified hook JSON output' : ''}: ${pluginRoot}`
+  );
   return 0;
 }
 
@@ -283,5 +454,6 @@ module.exports = {
   unsafeWindowsBashLauncher,
   shellScriptCommandRefs,
   hasNodeJsonFallback,
-  shouldRequireNodeJsonFallback
+  shouldRequireNodeJsonFallback,
+  verifyHookJsonOutputs
 };

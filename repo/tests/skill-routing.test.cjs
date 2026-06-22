@@ -476,3 +476,27 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
     'install docs must not tell users to copy only SKILL.md'
   );
 });
+
+test('English n8n plugin setup flow stays Windows-safe before hook approval', () => {
+  const paths = [
+    'README.md',
+    'repo/docs/HOW-TO-USE.md',
+    '_projects/n8n/local-setup/_main/mcp setup - codex.md',
+    'skills/n8n-local-setup/references/ai-agent-platforms/codex.md',
+    '_projects/n8n/local-setup/_main/templates/mcp-configs/codex-mcp-config.md',
+    'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'
+  ];
+
+  for (const relPath of paths) {
+    const text = readText(path.join(repoRoot, relPath));
+    assert.match(text, /setup n8n plugin/i, relPath);
+    assert.match(text, /Install the official n8n plugin only if hooks can be made Windows-safe/i, relPath);
+    assert.match(text, /bare `?\.sh`? hooks?/i, relPath);
+    assert.match(text, /open in VS Code|would open `session-start\.sh` in VS Code/i, relPath);
+    assert.match(text, /repair-codex-plugin-windows-hooks\.cjs --plugin-root/, relPath);
+    assert.match(text, /--verify-output/, relPath);
+    assert.match(text, /audit-n8n-skills-plugin-hooks\.cjs --plugin-root/, relPath);
+    assert.match(text, /do not approve (?:or trust )?(?:(?:the|those) )?hooks/i, relPath);
+    assert.match(text, /Never touch `n8n_live`/i, relPath);
+  }
+});
