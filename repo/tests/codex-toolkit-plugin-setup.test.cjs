@@ -255,26 +255,37 @@ function runSetupWrite(codexHome, fakeCodexPath) {
   });
 }
 
-function runSetupVerify(codexHome, fakeCodexPath) {
-  return spawnSync(process.execPath, [
+function runSetupVerify(codexHome, fakeCodexPath, extraEnv = {}) {
+  const args = [
     path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'),
     '--verify',
     '--repo-root',
     repoRoot,
     '--codex-home',
-    codexHome,
-    '--codex-cli',
-    fakeCodexPath
-  ], {
+    codexHome
+  ];
+
+  if (fakeCodexPath) {
+    args.push('--codex-cli', fakeCodexPath);
+  }
+
+  return spawnSync(process.execPath, args, {
     cwd: repoRoot,
     env: {
       ...process.env,
-      CODEX_HOME: codexHome
+      CODEX_HOME: codexHome,
+      ...extraEnv
     },
     encoding: 'utf8',
     timeout: 5000,
     windowsHide: true
   });
+}
+
+function writeWindowsAliasFailureCodex(dir) {
+  const scriptPath = path.join(dir, 'codex.cmd');
+  fs.writeFileSync(scriptPath, '@echo Access is denied\r\nexit /b 5\r\n', 'utf8');
+  return scriptPath;
 }
 
 test('Codex Toolkit plugin source validates manifest icon assets', () => {
@@ -508,6 +519,26 @@ test('Codex Toolkit fallback reports pending hook trust without rejecting the co
   assert.equal(state.verificationMethod, 'config-cache-fallback');
   assert.equal(state.hookTrustStatus, 'pending');
   assert.match(state.hookTrustMessage, /pending/i);
+});
+
+test('Codex Toolkit setup reports bare Windows codex access denied as a known WindowsApps fallback', { skip: process.platform !== 'win32' }, () => {
+  const codexHome = tmpRoot();
+  const aliasHome = tmpRoot();
+  const aliasPath = writeWindowsAliasFailureCodex(aliasHome);
+  const pathEnv = `${aliasHome}${path.delimiter}${process.env.PATH || ''}`;
+  const result = runSetupVerify(codexHome, '', { PATH: pathEnv });
+
+  assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /WindowsApps alias|Known condition/i);
+  assert.match(result.stderr, /--codex-cli/i);
+  assert.match(result.stderr, /codex\.exe/i);
+  assert.equal(fs.existsSync(aliasPath), true);
+});
+
+test('Codex Toolkit Windows alias detection helper recognizes Access denied fallback conditions', { skip: process.platform !== 'win32' }, () => {
+  const candidate = 'codex';
+  assert.equal(setup.isWindowsAppsAliasAccessDenied(candidate, 'Access is denied'), true);
+  assert.equal(setup.isWindowsAppsAliasAccessDenied(candidate, 'some other error'), false);
 });
 
 test('Codex Toolkit setup output includes Codex-only hook approval next steps', () => {
