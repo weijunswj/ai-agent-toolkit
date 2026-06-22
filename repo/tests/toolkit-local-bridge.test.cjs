@@ -24,6 +24,19 @@ function run(args, options = {}) {
   });
 }
 
+function isolatedHomeEnv(root, extra = {}) {
+  return {
+    PATH: '',
+    USERPROFILE: root,
+    HOME: root,
+    LOCALAPPDATA: path.join(root, 'local-app-data'),
+    VIRTUAL_ENV: '',
+    CONDA_PREFIX: '',
+    UV_PYTHON: '',
+    ...extra
+  };
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
@@ -80,6 +93,30 @@ function writeFakePython(root) {
     "if (args[0] === '-m' && args[1] === 'pip' && args[2] === 'show' && args[3] === 'ag2') {",
     "  console.log('Name: ag2');",
     '  process.exit(0);',
+    '}',
+    'process.exit(4);',
+    ''
+  ].join('\n'), 'utf8');
+  const command = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(scriptPath)}`;
+  return { command, logPath };
+}
+
+function writeFakePythonWithoutAg2(root) {
+  const logPath = path.join(root, 'fake-python-without-ag2.log');
+  const scriptPath = path.join(root, 'fake-python-without-ag2.cjs');
+  writeFile(scriptPath, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    `const logPath = ${JSON.stringify(logPath)};`,
+    'const args = process.argv.slice(2);',
+    "fs.appendFileSync(logPath, `${args.join(' ')}\\n`, 'utf8');",
+    "if (args[0] === '--version') {",
+    "  console.log('Python 3.11.0');",
+    '  process.exit(0);',
+    '}',
+    "if (args[0] === '-m' && args[1] === 'pip' && args[2] === 'show' && args[3] === 'ag2') {",
+    "  console.error('Package(s) not found: ag2');",
+    '  process.exit(1);',
     '}',
     'process.exit(4);',
     ''
@@ -248,18 +285,48 @@ test('explicit OpenCode setup writes only managed hub and OpenCode target paths'
   assert.doesNotMatch(targetSkill.replace(/\\/g, '/'), /\.agents\/skills/);
 });
 
-test('explicit Antigravity 2 setup writes adapter metadata under the hub without package installs', () => {
+test('explicit OpenCode setup infers the user OpenCode skill location', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  const result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin']);
+  const result = run(['--hub', hub, '--write', '--enable-target', 'opencode'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const targetSkill = path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md');
+  const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
+  assert.ok(fs.existsSync(targetSkill), 'OpenCode target skill should be installed into the user OpenCode config');
+  assert.match(fs.readFileSync(targetSkill, 'utf8'), /AI Agent Toolkit Bridge/);
+  assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(path.dirname(targetSkill)));
+  assert.equal(audit.targets.opencode.target_exists, true);
+  assert.equal(audit.targets.opencode.synced, true);
+});
+
+test('explicit Antigravity 2 setup writes a plugin-scoped skill under Gemini config without package installs', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
   assert.equal(result.status, 0, result.stderr);
 
   const state = readJson(path.join(hub, 'state.json'));
-  const metadataPath = path.join(hub, 'adapters', 'ag2', 'ai-agent-toolkit-ag2-adapter.json');
-  const metadata = readJson(metadataPath);
+  const pluginRoot = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
+  const pluginJson = readJson(path.join(pluginRoot, 'plugin.json'));
+  const versionMarker = readJson(path.join(pluginRoot, 'installed_version.json'));
+  const targetSkill = path.join(pluginRoot, 'skills', 'ai-agent-toolkit', 'SKILL.md');
+  const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
+
   assert.equal(state.targets.ag2.enabled, true);
   assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
-  assert.equal(metadata.policy.no_package_install_by_default, true);
+  assert.equal(pluginJson.name, 'ai-agent-toolkit');
+  assert.equal(versionMarker.version, expectedBridgeVersion);
+  assert.ok(fs.existsSync(targetSkill), 'Antigravity target skill should be installed into the plugin-scoped skills folder');
+  assert.match(fs.readFileSync(targetSkill, 'utf8'), /AI Agent Toolkit AG2 Adapter/);
+  assert.equal(path.resolve(audit.targets.ag2.target_path), path.resolve(pluginRoot));
+  assert.equal(audit.targets.ag2.target_exists, true);
+  assert.equal(audit.targets.ag2.synced, true);
+  assert.ok(fs.existsSync(path.join(hub, 'adapters', 'ag2', 'plugin.json')), 'hub should keep internal AG2 adapter metadata');
 });
 
 test('detected but not enabled OpenCode target receives no writes', () => {
@@ -317,7 +384,7 @@ test('AG2 Python command can be persisted and reused without installing packages
     '--write',
     '--set-ag2-python-command', fakePython.command,
     '--enable-target', 'ag2'
-  ]);
+  ], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
 
   let state = readJson(path.join(hub, 'state.json'));
@@ -331,16 +398,86 @@ test('AG2 Python command can be persisted and reused without installing packages
   assert.match(invocations, /-m pip show ag2/);
   assert.doesNotMatch(invocations, /\binstall\b/i);
 
-  result = run(['--hub', hub, '--audit']);
+  result = run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
   const audit = parseLastJson(result.stdout);
   assert.equal(audit.targets.ag2.detected, true);
   assert.equal(audit.targets.ag2.status, 'enabled');
   assert.equal(audit.targets.ag2.python_command, fakePython.command);
+  assert.equal(audit.targets.ag2.ag2_package_detected, true);
   assert.equal(audit.targets.ag2.signals.selected_python_command, fakePython.command);
 
   state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.targets.ag2.python_command, fakePython.command);
+});
+
+test('AG2 audit detects Antigravity config without requiring the Python ag2 package', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const antigravityConfig = path.join(root, '.antigravity');
+  const fakePython = writeFakePythonWithoutAg2(root);
+  fs.mkdirSync(antigravityConfig, { recursive: true });
+
+  const result = run(['--hub', hub, '--audit', '--python-command', fakePython.command], {
+    env: {
+      PATH: '',
+      USERPROFILE: root,
+      HOME: root,
+      LOCALAPPDATA: path.join(root, 'local-app-data'),
+      VIRTUAL_ENV: '',
+      CONDA_PREFIX: '',
+      UV_PYTHON: ''
+    }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(hub), false, 'dry-run audit must not create the hub');
+
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.targets.ag2.detected, true);
+  assert.equal(audit.targets.ag2.status, 'detected');
+  assert.equal(audit.targets.ag2.ag2_package_detected, false);
+  assert.equal(audit.targets.ag2.python_command, '');
+  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(path.resolve(audit.targets.ag2.signals.antigravity_config_dir), path.resolve(antigravityConfig));
+  assert.equal(audit.targets.ag2.signals.antigravity_config_exists, true);
+  assert.equal(audit.targets.ag2.signals.selected_python_command, '');
+  assert.match(audit.targets.ag2.signals.tried_python_commands[0].ag2_package_output, /Package\(s\) not found: ag2/);
+});
+
+test('AG2 audit detects Gemini plugin config without requiring the Python ag2 package', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const geminiConfig = path.join(root, '.gemini', 'config');
+  const geminiPlugins = path.join(geminiConfig, 'plugins');
+  const fakePython = writeFakePythonWithoutAg2(root);
+  fs.mkdirSync(geminiPlugins, { recursive: true });
+
+  const result = run(['--hub', hub, '--audit', '--python-command', fakePython.command], {
+    env: {
+      PATH: '',
+      USERPROFILE: root,
+      HOME: root,
+      LOCALAPPDATA: path.join(root, 'local-app-data'),
+      VIRTUAL_ENV: '',
+      CONDA_PREFIX: '',
+      UV_PYTHON: ''
+    }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(hub), false, 'dry-run audit must not create the hub');
+
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.targets.ag2.detected, true);
+  assert.equal(audit.targets.ag2.status, 'detected');
+  assert.equal(audit.targets.ag2.ag2_package_detected, false);
+  assert.equal(audit.targets.ag2.python_command, '');
+  assert.equal(audit.targets.ag2.would_write, false);
+  assert.equal(path.resolve(audit.targets.ag2.signals.gemini_config_dir), path.resolve(geminiConfig));
+  assert.equal(audit.targets.ag2.signals.gemini_config_exists, true);
+  assert.equal(path.resolve(audit.targets.ag2.signals.gemini_plugins_dir), path.resolve(geminiPlugins));
+  assert.equal(audit.targets.ag2.signals.gemini_plugins_dir_exists, true);
+  assert.equal(audit.targets.ag2.signals.selected_python_command, '');
+  assert.match(audit.targets.ag2.signals.tried_python_commands[0].ag2_package_output, /Package\(s\) not found: ag2/);
 });
 
 test('AG2 audit records exactly which Python commands were tried when not detected', () => {
@@ -451,24 +588,96 @@ test('sync-enabled command does not create bridge state before setup', () => {
   assert.equal(fs.existsSync(hub), false);
 });
 
+test('sync-enabled updates enabled OpenCode and Antigravity app outputs after Toolkit changes', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const opencodeSkill = path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit', 'SKILL.md');
+  const ag2Skill = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit', 'skills', 'ai-agent-toolkit', 'SKILL.md');
+  writeFile(opencodeSkill, 'stale opencode skill\n');
+  writeFile(ag2Skill, 'stale ag2 skill\n');
+
+  const statePath = path.join(hub, 'state.json');
+  const state = readJson(statePath);
+  state.targets.opencode.synced_version = '1.0.0';
+  state.targets.opencode.synced_checksum = 'old';
+  state.targets.ag2.synced_version = '1.0.0';
+  state.targets.ag2.synced_checksum = 'old';
+  writeJson(statePath, state);
+
+  result = run(['--hub', hub, '--sync-enabled', '--write'], { env: isolatedHomeEnv(root) });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(fs.readFileSync(opencodeSkill, 'utf8'), /AI Agent Toolkit Bridge/);
+  assert.match(fs.readFileSync(ag2Skill, 'utf8'), /AI Agent Toolkit AG2 Adapter/);
+
+  const audit = parseLastJson(run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) }).stdout);
+  assert.equal(audit.targets.opencode.synced, true);
+  assert.equal(audit.targets.ag2.synced, true);
+  assert.equal(audit.targets.opencode.would_write, false);
+  assert.equal(audit.targets.ag2.would_write, false);
+});
+
+test('audit separates hub adapter metadata from app-facing target sync', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const opencodeTarget = path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit');
+  const ag2Target = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
+  fs.rmSync(opencodeTarget, { recursive: true, force: true });
+  fs.rmSync(ag2Target, { recursive: true, force: true });
+
+  result = run(['--hub', hub, '--audit'], { env: isolatedHomeEnv(root) });
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.targets.opencode.internal_adapter_exists, true);
+  assert.equal(audit.targets.opencode.target_exists, false);
+  assert.equal(audit.targets.opencode.synced, false);
+  assert.equal(audit.targets.opencode.would_write, true);
+  assert.equal(path.resolve(audit.targets.opencode.internal_adapter_path), path.resolve(path.join(hub, 'adapters', 'opencode')));
+  assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(opencodeTarget));
+
+  assert.equal(audit.targets.ag2.internal_adapter_exists, true);
+  assert.equal(audit.targets.ag2.target_exists, false);
+  assert.equal(audit.targets.ag2.synced, false);
+  assert.equal(audit.targets.ag2.would_write, true);
+  assert.equal(path.resolve(audit.targets.ag2.internal_adapter_path), path.resolve(path.join(hub, 'adapters', 'ag2')));
+  assert.equal(path.resolve(audit.targets.ag2.target_path), path.resolve(ag2Target));
+});
+
 test('disabled target is not overwritten during later sync', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  const opencodeConfig = path.join(root, 'opencode');
-  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--opencode-config-dir', opencodeConfig]);
+  let result = run(['--hub', hub, '--write', '--enable-target', 'opencode', '--enable-target', 'ag2'], {
+    env: isolatedHomeEnv(root)
+  });
   assert.equal(result.status, 0, result.stderr);
 
-  const targetDir = path.join(opencodeConfig, 'skills', 'ai-agent-toolkit');
-  const marker = path.join(targetDir, 'USER-MARKER.txt');
-  fs.writeFileSync(marker, 'keep me\n', 'utf8');
+  const opencodeTargetDir = path.join(root, '.config', 'opencode', 'skills', 'ai-agent-toolkit');
+  const ag2TargetDir = path.join(root, '.gemini', 'config', 'plugins', 'ai-agent-toolkit');
+  const opencodeMarker = path.join(opencodeTargetDir, 'USER-MARKER.txt');
+  const ag2Marker = path.join(ag2TargetDir, 'USER-MARKER.txt');
+  fs.writeFileSync(opencodeMarker, 'keep opencode\n', 'utf8');
+  fs.writeFileSync(ag2Marker, 'keep ag2\n', 'utf8');
 
-  result = run(['--hub', hub, '--write', '--disable-target', 'opencode', '--opencode-config-dir', opencodeConfig]);
+  result = run(['--hub', hub, '--write', '--disable-target', 'opencode', '--disable-target', 'ag2'], {
+    env: isolatedHomeEnv(root)
+  });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(marker, 'utf8'), 'keep me\n');
+  assert.equal(fs.readFileSync(opencodeMarker, 'utf8'), 'keep opencode\n');
+  assert.equal(fs.readFileSync(ag2Marker, 'utf8'), 'keep ag2\n');
 
-  result = run(['--hub', hub, '--sync-enabled', '--write', '--opencode-config-dir', opencodeConfig]);
+  result = run(['--hub', hub, '--sync-enabled', '--write'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(marker, 'utf8'), 'keep me\n', 'disabled target must not be overwritten');
+  assert.equal(fs.readFileSync(opencodeMarker, 'utf8'), 'keep opencode\n', 'disabled OpenCode target must not be overwritten');
+  assert.equal(fs.readFileSync(ag2Marker, 'utf8'), 'keep ag2\n', 'disabled Antigravity target must not be overwritten');
 });
 
 test('older bridge refuses to overwrite newer hub state unless forced', () => {
@@ -482,11 +691,13 @@ test('older bridge refuses to overwrite newer hub state unless forced', () => {
     targets: {}
   });
 
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2']);
+  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Refusing downgrade/);
 
-  result = run(['--hub', hub, '--write', '--force-downgrade', '--enable-target', 'ag2']);
+  result = run(['--hub', hub, '--write', '--force-downgrade', '--enable-target', 'ag2'], {
+    env: isolatedHomeEnv(root)
+  });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readJson(path.join(hub, 'state.json')).hub_version, expectedBridgeVersion);
 });
@@ -497,12 +708,12 @@ test('fresh lock blocks manual writes and stale lock is recovered', () => {
   const lockPath = path.join(root, 'hub', 'update.lock');
   writeJson(lockPath, { created_at: new Date().toISOString(), pid: 123 });
 
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2']);
+  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /fresh Toolkit bridge lock/);
 
   writeJson(lockPath, { created_at: '2000-01-01T00:00:00.000Z', pid: 123 });
-  result = run(['--hub', hub, '--write', '--enable-target', 'ag2']);
+  result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(lockPath), false, 'lock is released after successful sync');
 });
@@ -533,7 +744,9 @@ test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled'
     }
   });
 
-  const result = run(['--hub', hub, '--hook', '--write', '--sync-source', 'claude-plugin']);
+  const result = run(['--hub', hub, '--hook', '--write', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
   assert.equal(result.status, 0, result.stderr);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.hub_version, expectedBridgeVersion);
@@ -599,12 +812,15 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
     '--enable-auto-sync',
     '--enable-target', 'ag2',
     '--write'
-  ]);
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
   writeFile(path.join(fixture.repo, 'DIRTY.txt'), 'dirty\n');
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
-    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
+      TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker
+    })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(marker), false);
@@ -625,11 +841,14 @@ test('hook mode rejects a repo whose origin remote does not match configured rem
     '--enable-auto-sync',
     '--enable-target', 'ag2',
     '--write'
-  ]);
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
-    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
+      TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker
+    })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(marker), false);
@@ -651,12 +870,15 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
     '--enable-auto-sync',
     '--enable-target', 'ag2',
     '--write'
-  ]);
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(currentCommit(fixture.repo), fixture.initialCommit);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
+      TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker
+    })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(currentCommit(fixture.repo), updatedCommit);
@@ -690,7 +912,7 @@ test('repo update failure does not sync targets', () => {
     '--enable-auto-sync',
     '--enable-target', 'ag2',
     '--write'
-  ]);
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
   writeFile(path.join(fixture.repo, 'LOCAL.txt'), 'local\n');
@@ -698,7 +920,10 @@ test('repo update failure does not sync targets', () => {
   pushRepoToolkitUpdate(fixture, 'remote-divergence');
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
-    env: { TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker }
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
+      TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker
+    })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(currentCommit(fixture.repo), localCommit);
@@ -721,14 +946,15 @@ test('validation failure after update does not sync targets', () => {
     '--enable-auto-sync',
     '--enable-target', 'ag2',
     '--write'
-  ]);
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
-    env: {
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
       TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker,
       TOOLKIT_BRIDGE_TEST_VALIDATE_FAIL: '1'
-    }
+    })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(currentCommit(fixture.repo), updatedCommit);
