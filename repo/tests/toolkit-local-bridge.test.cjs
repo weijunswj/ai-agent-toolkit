@@ -1854,6 +1854,10 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /codex plugin add ai-agent-toolkit@ai-agent-toolkit-local/, relPath);
     assert.match(text, /\.agents\/plugins\/marketplace\.json/, relPath);
     assert.match(text, /installed plugin cache/i, relPath);
+    assert.match(text, /same-version stale-cache troubleshooting/i, relPath);
+    assert.match(text, /do not keep extending the timeout/i, relPath);
+    assert.match(text, /%USERPROFILE%\\\\\.codex\\\\plugins\\\\\.plugin-appserver\\\\codex\.exe/, relPath);
+    assert.match(text, /diagnose the Codex plugin config\/cache state/i, relPath);
     assert.match(text, /2\.2\.0/, relPath);
     assert.match(text, /fail clearly/i, relPath);
     assert.match(text, /do not use Codex to install or update Claude Code/i, relPath);

@@ -13,7 +13,14 @@ Review rule: Keep this skill as a compact setup router. Do not duplicate the bri
 
 Use this skill as a discoverability router for Toolkit plugin and local bridge setup work.
 
-Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair, and troubleshooting are Toolkit setup infrastructure. The bridge implementation lives in `repo/scripts/toolkit-local-bridge.cjs`; Codex native plugin verification/install lives in `repo/scripts/setup-codex-toolkit-plugin.cjs`; Codex plugin hook repair lives in `repo/scripts/repair-codex-plugin-windows-hooks.cjs`; detailed policy lives in `repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md`, `repo/docs/HOW-TO-USE.md`, `AGENTS.md`, validators, and tests.
+Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair, and troubleshooting are Toolkit setup infrastructure. The bridge implementation lives in `repo/scripts/toolkit-local-bridge.cjs`; Codex native plugin verification/install lives in `repo/scripts/setup-codex-toolkit-plugin.cjs`; Codex plugin hook repair lives in `repo/scripts/repair-codex-plugin-windows-hooks.cjs`; Claude Code native plugin metadata lives under `.claude-plugin/`; detailed policy lives in `repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md`, `repo/docs/HOW-TO-USE.md`, `AGENTS.md`, validators, and tests.
+
+## Platform Split
+
+- Codex native plugin install/update is Codex-only. Use `repo/scripts/setup-codex-toolkit-plugin.cjs` or the equivalent Codex local marketplace commands only from Codex.
+- Claude Code native plugin install/update is Claude Code-only. Use Claude Code's native Toolkit plugin flow from this repo and `.claude-plugin/plugin.json`; do not run the Codex setup helper for Claude Code.
+- The shared bridge is platform-neutral. After the native Toolkit package is installed in Codex or Claude Code, use `repo/scripts/toolkit-local-bridge.cjs` for repo auto-update, audit, OpenCode sync, and Antigravity 2 sync.
+- Hook approval differs by host. Codex setup must explain Codex hook trust; Claude Code setup must follow Claude Code's own native plugin/hook review behavior and should confirm the hook uses `--sync-source claude-plugin`.
 
 ## Required Route
 
@@ -25,14 +32,14 @@ Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-4. Use `repo/scripts/setup-codex-toolkit-plugin.cjs` only for Codex native plugin install/update verification. Use `repo/scripts/toolkit-local-bridge.cjs` for bridge setup, repo auto-update enablement, sync, audit, disable, stale-state recovery, and troubleshooting. Use `repo/scripts/repair-codex-plugin-windows-hooks.cjs` only for post-install Windows hook audit/repair of an installed Codex plugin root. Do not invent a new command family or duplicate the updater logic in the skill.
+4. Use `repo/scripts/setup-codex-toolkit-plugin.cjs` only for Codex native plugin install/update verification. Use Claude Code's native Toolkit plugin flow for Claude Code native plugin setup. Use `repo/scripts/toolkit-local-bridge.cjs` for shared bridge setup, repo auto-update enablement, sync, audit, disable, stale-state recovery, and troubleshooting. Use `repo/scripts/repair-codex-plugin-windows-hooks.cjs` only for post-install Windows hook audit/repair of an installed Codex plugin root. Do not invent a new command family or duplicate the updater logic in the skill.
 
    On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable WindowsApps alias. Use `setup-codex-toolkit-plugin.cjs --codex-cli "%USERPROFILE%\\.codex\\plugins\\.plugin-appserver\\codex.exe"` when an explicit CLI path is needed.
 5. Before final response after repo changes, run the relevant validators or tests for the touched surface.
 
 ## English Setup Journey
 
-When the user says `setup toolkit`, complete this Codex-focused flow:
+When the user says `setup toolkit` while running inside Codex, complete this Codex native setup flow and then run the shared bridge steps. If running inside Claude Code, do not run the Codex native plugin steps; use Claude Code's native Toolkit plugin flow from this repo, verify `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, and then continue at step 3 for shared bridge configuration, audit, and optional target sync.
 
 1. Validate the trusted local Toolkit repo on `main` before configuring anything:
 
@@ -61,6 +68,8 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
 The local marketplace wrapper is `.agents/plugins/marketplace.json`; it exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`, uses `policy.authentication: "ON_USE"` so install can complete headlessly, and the package manifest is `.codex-plugin/plugin.json`. `setup-codex-toolkit-plugin.cjs --write` runs the supported Codex local marketplace path, checks plugin state after marketplace add before invoking plugin add, and verifies the final result. If an installed same-version cache is stale, the setup helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the setup helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json`, polls `codex plugin list --available --json` plus the expected cache until verification passes, then terminates or ignores the lingering add process if it has not exited. Treat setup as successful only when final verification passes, with a warning if plugin add did not exit cleanly.
+
+Same-version stale-cache troubleshooting: on Windows, if `--verify` keeps reporting the same stale installed plugin cache files and `--write` or `codex plugin add` runs past the normal setup deadline, do not keep extending the timeout. Stop the long-running add attempt, make sure no other Toolkit plugin add/update command is still running, use the app-managed Codex CLI explicitly with `--codex-cli "%USERPROFILE%\\.codex\\plugins\\.plugin-appserver\\codex.exe"`, then run one clean `--write --json` followed by `--verify` with the same `--codex-cli`. If the cache is still stale, diagnose the Codex plugin config/cache state, marketplace source path, enabled plugin entry, and installed cache root instead of touching the shared bridge, OpenCode, Antigravity 2, n8n plugins, or `n8n_live`.
 
 Normal verification prefers `codex plugin list --available --json`. If that CLI list is empty or unreliable, the setup helper may use the conservative config/cache fallback only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.0`, the cache manifest has the expected name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report fallback success as config/cache fallback verification, not normal CLI verification.
 
@@ -91,7 +100,7 @@ node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-7. Confirm future Codex `SessionStart` hooks will use the configured repo-backed updater: validate repo path, branch, remote, clean tree, `git fetch origin main`, `git merge --ff-only FETCH_HEAD`, hook-light validation, and enabled-target sync from the freshly updated repo.
+7. Confirm future native `SessionStart` hooks will use the configured repo-backed updater: Codex hooks should use `--sync-source codex-plugin`, Claude Code hooks should use `--sync-source claude-plugin`, and both should validate repo path, branch, remote, clean tree, `git fetch origin main`, `git merge --ff-only FETCH_HEAD`, hook-light validation, and enabled-target sync from the freshly updated repo.
 
 ## Safety Rules
 
@@ -103,7 +112,7 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 - Audit `synced` means the real app-facing target output matches the current Toolkit payload. Internal hub metadata alone is not synced.
 - The Python `ag2` package is optional for package-specific AG2 workflows; it is not required for Toolkit-managed Antigravity 2 bridge metadata or plugin-scoped skill sync.
 - Repo auto-update is opt-in only and must validate the configured Toolkit repo, expected remote, clean tree, fast-forward update, and hook-light validation before enabled-target sync.
-- Do not run npm, pip, package installs, or dependency installers from this skill. The only allowed marketplace operation in this flow is the Codex-only local Toolkit plugin install/update path through `setup-codex-toolkit-plugin.cjs --write` or the equivalent `codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json` plus `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` commands.
+- Do not run npm, pip, package installs, or dependency installers from this skill. In Codex, the only allowed marketplace operation in this flow is the Codex-only local Toolkit plugin install/update path through `setup-codex-toolkit-plugin.cjs --write` or the equivalent `codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json` plus `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` commands. In Claude Code, use Claude Code's native Toolkit plugin flow and do not call Codex marketplace commands.
 - After a requested Codex plugin install or update on Windows, repair that installed plugin root before approving hooks. If repair cannot make hooks safe, fail with the repair error instead of reporting success.
 - Do not mutate arbitrary project repos by default.
 - Do not use Codex to update Claude Code or Claude Code to update Codex.
