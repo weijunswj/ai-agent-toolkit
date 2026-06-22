@@ -1,7 +1,7 @@
 {
   "source_repo": "nextlevelbuilder/ui-ux-pro-max-skill",
   "source_ref": "main",
-  "source_commit": "b7e3af80f6e331f6fb456667b82b12cade7c9d35",
+  "source_commit": "10d6ca310541d3ffeee6dceda0a29e373796f321",
   "source_lifecycle": "active",
   "source_role": "third_party_attribution_source",
   "source_update_policy": "manual_review_required",
@@ -166,7 +166,7 @@
       "mode": "exact",
       "source_path": "src/ui-ux-pro-max/data/typography.csv",
       "project_path": "_projects/design/ui-ux-pro-max/_main/src/ui-ux-pro-max/data/typography.csv",
-      "source_blob_sha": "39c85cb9a788e6d1b23747c572796f7abadfec30"
+      "source_blob_sha": "7a1893794804be2d4a9b1347ebd2a8df3e79c66e"
     },
     {
       "mode": "exact",
@@ -184,7 +184,7 @@
       "mode": "adapted",
       "source_path": "src/ui-ux-pro-max/scripts/core.py",
       "project_path": "_projects/design/ui-ux-pro-max/_main/src/ui-ux-pro-max/scripts/core.py",
-      "source_blob_sha": "b613844e8461aaaeb6b8efaca69f33f4a0757e1c",
+      "source_blob_sha": "2480a8bc8a98665dc39da3022db843320ba86201",
       "notes": "Adapted for toolkit local-only safety boundaries and AI-facing tool data layout."
     },
     {
@@ -198,7 +198,7 @@
       "mode": "adapted",
       "source_path": "src/ui-ux-pro-max/scripts/core.py",
       "root_surface_path": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py",
-      "source_blob_sha": "b613844e8461aaaeb6b8efaca69f33f4a0757e1c",
+      "source_blob_sha": "2480a8bc8a98665dc39da3022db843320ba86201",
       "notes": "AI-facing tool uses the toolkit-adapted local-only script from _main."
     },
     {
