@@ -32,7 +32,7 @@ This page is an optional Codex AI-coding-agent setup reference, not a required l
    6. The official n8n MCP server URL copied from n8n.
    7. An official n8n MCP token copied from n8n.
 
-Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](https://github.com/n8n-io/skills) content inside this toolkit. Install the official plugin from its upstream source.
+Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](https://github.com/n8n-io/skills) content inside this toolkit. English prompt: `setup n8n plugin`. Install the official n8n plugin only if hooks can be made Windows-safe. Never touch `n8n_live` during plugin setup; instance-level MCP access is a separate explicitly approved live-action path.
 
 ## 2. Install Codex
 
@@ -46,21 +46,21 @@ Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](ht
 
 ## 3. Install [Official n8n Skills](https://github.com/n8n-io/skills) For Codex
 
-Install the official plugin from upstream:
+Install the official plugin from upstream only after confirming you can repair and verify Windows hooks:
 
 ```powershell
 codex plugin marketplace add n8n-io/skills
 codex plugin add n8n-skills@n8n-io
 ```
 
-On Windows, repair and audit the installed plugin cache before approving or trusting hooks:
+On Windows, repair and audit the installed plugin cache before approving or trusting hooks. A bare `.sh` hook would open `session-start.sh` in VS Code instead of running as a hook:
 
 ```powershell
 node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --write --plugin-id n8n-skills@n8n-io
-node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows
+node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --verify-output
 ```
 
-The repair step parses `hooks/hooks.json`, rewrites generic `.sh` hook commands through `hooks/run-hook.ps1`, rejects bare `bash`, rejects `C:\WINDOWS\system32\bash.exe`, and patches `n8n-skills@n8n-io` hook emitters with Node JSON fallbacks for Windows Git Bash. If repair fails, do not approve or trust the hooks; fix the reported issue or use the upstream "Other platforms" route plus the `AGENTS.md` cue below.
+The repair step parses `hooks/hooks.json`, rewrites generic `.sh` hook commands through `hooks/run-hook.ps1`, rejects bare `bash`, rejects `C:\WINDOWS\system32\bash.exe`, and patches `n8n-skills@n8n-io` hook emitters with Node JSON fallbacks for Windows Git Bash. If repair fails, audit fails, or hook JSON output verification fails, do not approve or trust the hooks; fix the reported issue or use the upstream "Other platforms" route plus the `AGENTS.md` cue below.
 
 From the target project folder, use the upstream "Other platforms" route when your runtime supports [skills.sh](https://skills.sh) and plugin hooks are not available or cannot be repaired:
 

@@ -8,7 +8,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.1.0';
+const BRIDGE_VERSION = '2.2.0';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];

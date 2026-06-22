@@ -178,10 +178,10 @@ Example:
 
 ```powershell
 node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io
-node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows
+node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --verify-output
 ```
 
-This utility may repair the installed plugin root named by the user or install flow. It must not use private plugin cache paths as source for Toolkit publishing, copy third-party plugin content into this repo, touch `n8n_live` MCP config, or modify unrelated plugins except when the current install/update flow explicitly targets that plugin root for generic Windows hook wrapping.
+This utility may repair the installed plugin root named by the user or install flow. The audit command verifies repaired hook JSON output before hook approval. It must not use private plugin cache paths as source for Toolkit publishing, copy third-party plugin content into this repo, touch `n8n_live` MCP config, or modify unrelated plugins except when the current install/update flow explicitly targets that plugin root for generic Windows hook wrapping.
 
 ## Target Discovery
 

@@ -106,9 +106,9 @@ Preferred v2 route:
 
 Manual fallback: copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. Install the official plugin from upstream, then run Toolkit's Windows hook repair before trusting hooks on Windows.
+[Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit. English prompt: `setup n8n plugin`. Install the official n8n plugin only if hooks can be made Windows-safe. Never touch `n8n_live` during plugin setup; instance-level MCP access is a separate explicitly approved live-action path.
 
-On Windows, the installed package's `hooks/hooks.json` must not leave a bare `.sh` path like `${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh`, bare `bash`, or `C:\WINDOWS\system32\bash.exe`. Toolkit repairs generic `.sh` hook commands through a PowerShell wrapper that invokes Git Bash from `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`; for `n8n-skills@n8n-io`, it also patches hook emitters so they can output JSON with Node when `jq` and `python3` are unavailable.
+On Windows, the installed package's `hooks/hooks.json` must not leave a bare `.sh` path like `${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh`, bare `bash`, or `C:\WINDOWS\system32\bash.exe`; a bare `.sh` hook would open `session-start.sh` in VS Code instead of running as a hook. Toolkit repairs generic `.sh` hook commands through a PowerShell 5.1-compatible wrapper that invokes Git Bash from `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`; for `n8n-skills@n8n-io`, it also patches hook emitters so they can output JSON with Node when `jq` and `python3` are unavailable.
 
 Install the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin:
 
@@ -126,10 +126,10 @@ On Windows, repair and audit the installed plugin cache before approving or trus
 
 ```powershell
 node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io
-node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows
+node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --verify-output
 ```
 
-For Codex this path is commonly `C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>`. If repair fails, do not approve the hooks; use the clear error message to install Git for Windows, update the plugin, or fall back to the upstream "Other platforms" route plus the target repo cue.
+For Codex this path is commonly `C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>`. If repair fails, audit fails, or hook JSON output verification fails, do not approve the hooks; use the clear error message to install Git for Windows, update the plugin, or fall back to the upstream "Other platforms" route plus the target repo cue.
 
 Restart the agent and approve or trust plugin hooks when prompted so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 

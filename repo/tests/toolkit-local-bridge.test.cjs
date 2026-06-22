@@ -9,7 +9,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.1.0';
+const expectedBridgeVersion = '2.2.0';
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bridge-'));
@@ -570,6 +570,10 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.doesNotMatch(codexCommand, /CODEX_PLUGIN_ROOT|CODEX_PLUGIN_DATA|CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA/);
   assert.match(codexCommand, /--sync-enabled/);
   assert.match(codexCommand, /--sync-source codex-plugin/);
+  assert.ok(
+    codexManifest.interface.defaultPrompt.some((prompt) => /setup toolkit/i.test(prompt)),
+    'Codex plugin should expose the English setup toolkit journey'
+  );
   assert.match(claudeCommand, /^node\s+"/);
   assert.match(claudeCommand, /toolkit-local-bridge\.cjs/);
   assert.match(claudeCommand, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-local-bridge\.cjs/);
@@ -580,6 +584,35 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /(?:^|\s)(?:bash|bash\.exe)(?:\s|$)|[A-Z]:\\WINDOWS\\system32\\bash\.exe/i);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\b(?:jq|python3)\b/i);
+});
+
+test('toolkit setup skill documents the end-to-end English setup journey', () => {
+  const paths = [
+    'skills/toolkit-setup/SKILL.md',
+    '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md'
+  ];
+
+  for (const relPath of paths) {
+    const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
+    assert.match(text, /setup toolkit/i, relPath);
+    assert.match(text, /git fetch origin main/, relPath);
+    assert.match(text, /git merge --ff-only origin\/main/, relPath);
+    assert.match(text, /node repo\/scripts\/validate-toolkit\.cjs/, relPath);
+    assert.match(text, /node --test repo\/tests\/toolkit-local-bridge\.test\.cjs/, relPath);
+    assert.match(text, /Codex native plugin/i, relPath);
+    assert.match(text, /\.codex-plugin\/plugin\.json/, relPath);
+    assert.match(text, /--enable-repo-auto-update/, relPath);
+    assert.match(text, /--repo-path/, relPath);
+    assert.match(text, /--enable-auto-sync/, relPath);
+    assert.match(text, /OpenCode and AG2/i, relPath);
+    assert.match(text, /ask once/i, relPath);
+    assert.match(text, /Never silently enable OpenCode or AG2/i, relPath);
+    assert.match(text, /--enable-target opencode/, relPath);
+    assert.match(text, /--enable-target ag2/, relPath);
+    assert.match(text, /--sync-enabled --write/, relPath);
+    assert.match(text, /SessionStart/i, relPath);
+    assert.match(text, /fast-forward/i, relPath);
+  }
 });
 
 test('bridge surfaces avoid private plugin caches, package installs, and command-per-bridge skills', () => {

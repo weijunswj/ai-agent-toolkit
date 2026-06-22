@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "version_policy": "semver",
-  "version_notes": "V2 native plugin/update architecture with Windows-safe Codex plugin hook repair, opt-in repo-backed auto-update mode, one compact Toolkit setup discoverability skill, and OpenCode/AG2 local bridge setup infrastructure.",
+  "version_notes": "Adds end-to-end English setup routing for Toolkit repo validation, native Codex plugin activation, repo-backed auto-update, one-time OpenCode/AG2 write approval, enabled-target sync testing, and n8n hook JSON output verification.",
   "outputs": [
     {
       "kind": "curated",
@@ -111,14 +111,14 @@
   "project": {
     "name": "Toolkit Local Bridge",
     "category": "development",
-    "summary": "Native Codex and Claude Code plugin metadata plus one compact setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and AG2 adapter targets."
+    "summary": "Native Codex and Claude Code plugin metadata plus one compact English setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and AG2 adapter targets."
   },
   "surface": {
     "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/toolkit-setup",
-      "summary": "Compact discoverability skill that routes Toolkit plugin, repo auto-update, local bridge, OpenCode, and AG2 setup requests to the shared setup subsystem."
+      "summary": "Compact discoverability skill that routes English Toolkit plugin, repo auto-update, local bridge, OpenCode, and AG2 setup requests to the shared setup subsystem."
     },
     "mcp": {
       "status": "not_applicable"
