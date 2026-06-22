@@ -256,6 +256,8 @@ Toolkit updated: <report path>
 
 The report includes the new and previous commits, sync source, timestamp, changed files from the fast-forward range, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit n8n/live-system skip note, repo update status, hook-light validation result, target sync status, checksum, and any warning/error. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
 
+For first-restart compatibility after a bridge update, an older installed native hook may fast-forward the configured local Toolkit repo and then delegate into the newly updated repo script without passing `--hook`. An unsuppressed delegated command with `--sync-enabled --write --sync-source repo --hub <same-hub> --skip-repo-auto-update` is report-eligible. When hub state contains `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_status`, the delegated repo script uses that stored metadata plus a local `git diff --name-only` over `repo_path` to populate the update report. New parent hooks pass `--suppress-update-report` to delegated sync so the parent hook remains the single report writer and duplicate reports are avoided.
+
 Opening reports is opt-in. `--open-update-report` opens only the report created by the current run. `--enable-update-report-open` and `--disable-update-report-open` persist that preference in hub state. On Windows, opening uses only `notepad.exe <reportPath>` and only for files created under the Toolkit temp update-report folder. Opening is best-effort, non-blocking, and never uses OS default file associations, `.sh` files, or VS Code.
 
 ## Windows Codex Plugin Hook Repair

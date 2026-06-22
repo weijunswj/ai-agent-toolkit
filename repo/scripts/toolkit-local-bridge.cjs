@@ -1260,10 +1260,48 @@ function targetSyncPlan(targetName, discovery, payloads) {
   };
 }
 
+function isLegacyDelegatedRepoSync(args) {
+  return Boolean(
+    args.skipRepoAutoUpdate &&
+    args.syncSource === 'repo' &&
+    args.syncEnabled &&
+    args.write &&
+    !args.hook &&
+    !args.repoUpdateNow
+  );
+}
+
+function repoReportContextFromState(state, args) {
+  if (!isLegacyDelegatedRepoSync(args)) return {};
+  const status = state.last_repo_update_status || '';
+  const fromCommit = state.last_repo_update_from_commit || '';
+  const toCommit = state.last_repo_update_to_commit || '';
+  const changedFiles = state.repo_path && fromCommit && toCommit
+    ? changedFilesBetween(state.repo_path, fromCommit, toCommit)
+    : [];
+  const validationStatus = status === 'validation-failed'
+    ? 'failed'
+    : (status && !state.last_repo_update_error ? 'passed' : 'not run');
+  return {
+    status,
+    fromCommit,
+    toCommit,
+    changedFiles,
+    validationStatus,
+    error: state.last_repo_update_error || ''
+  };
+}
+
 function shouldConsiderUpdateReport(args, state) {
   return Boolean(
     !args.suppressUpdateReport &&
-    (args.hook || args.repoUpdateNow || args.openUpdateReport || state.update_report_open_enabled)
+    (
+      args.hook ||
+      args.repoUpdateNow ||
+      args.openUpdateReport ||
+      state.update_report_open_enabled ||
+      isLegacyDelegatedRepoSync(args)
+    )
   );
 }
 
@@ -1973,7 +2011,7 @@ function run(argv = process.argv.slice(2)) {
       state: nextState,
       checksum,
       context: {
-        repo: {},
+        repo: repoReportContextFromState(nextState, args),
         targetSyncs,
         skippedTargets: SUPPORTED_TARGETS.filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled),
         targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'

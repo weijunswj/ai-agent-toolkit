@@ -436,6 +436,42 @@ function readLatestReport(hub) {
   };
 }
 
+function createLegacyDelegatedSyncFixture() {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha legacy v1\n' });
+  const fromCommit = currentCommit(sourceRepo);
+  writeFile(path.join(sourceRepo, 'skills', 'alpha', 'SKILL.md'), [
+    '---',
+    'name: alpha',
+    'description: alpha fixture skill for Toolkit bridge tests',
+    '---',
+    '',
+    'alpha legacy v2',
+    ''
+  ].join('\n'));
+  const toCommit = commitAll(sourceRepo, 'legacy delegated update');
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    auto_sync_enabled: true,
+    repo_path: sourceRepo,
+    last_repo_update_status: 'updated',
+    last_repo_update_from_commit: fromCommit,
+    last_repo_update_to_commit: toCommit,
+    targets: {
+      ag2: {
+        enabled: true,
+        explicitly_disabled: false,
+        synced_version: '1.0.0',
+        synced_checksum: 'old'
+      }
+    }
+  });
+  return { root, sourceRepo, hub, fromCommit, toCommit };
+}
+
 test('dry-run audit performs no writes and reports planned targets', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -1245,6 +1281,75 @@ test('no-op hook sync does not generate or open an update report', () => {
   assert.doesNotMatch(result.stdout, /Toolkit updated:/);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_update_report_path || '', '');
+});
+
+test('legacy delegated repo sync writes an update report using stored repo update metadata', () => {
+  const fixture = createLegacyDelegatedSyncFixture();
+  const result = run([
+    '--hub', fixture.hub,
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'repo',
+    '--skip-repo-auto-update'
+  ], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit update report:/);
+
+  const targetSkill = path.join(
+    fixture.root,
+    '.gemini',
+    'config',
+    'plugins',
+    'ai-agent-toolkit',
+    'skills',
+    'alpha',
+    'SKILL.md'
+  );
+  assert.match(fs.readFileSync(targetSkill, 'utf8'), /alpha legacy v2/);
+
+  const report = readLatestReport(fixture.hub);
+  assert.match(report.text, new RegExp(`Toolkit updated to commit: \`${fixture.toCommit}\``));
+  assert.match(report.text, new RegExp(`Previous commit: \`${fixture.fromCommit}\``));
+  assert.match(report.text, /Source: `repo`/);
+  assert.match(report.text, /- `skills\/alpha\/SKILL\.md`/);
+  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
+  assert.match(report.text, /repo update status: `updated`/);
+  assert.match(report.text, /target sync status: `synced`/);
+  assert.match(report.text, /checksum: `[a-f0-9]{64}`/);
+  assert.match(report.text, /Skipped n8n\/live systems; not touched\./);
+});
+
+test('suppressed legacy delegated repo sync does not write an update report', () => {
+  const fixture = createLegacyDelegatedSyncFixture();
+  const result = run([
+    '--hub', fixture.hub,
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'repo',
+    '--skip-repo-auto-update',
+    '--suppress-update-report'
+  ], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /Toolkit update report:/);
+  assert.equal(readJson(path.join(fixture.hub, 'state.json')).last_update_report_path || '', '');
+  assert.match(
+    fs.readFileSync(path.join(
+      fixture.root,
+      '.gemini',
+      'config',
+      'plugins',
+      'ai-agent-toolkit',
+      'skills',
+      'alpha',
+      'SKILL.md'
+    ), 'utf8'),
+    /alpha legacy v2/
+  );
 });
 
 test('enabling repo auto-update records repo path branch and remote in hub state', () => {
