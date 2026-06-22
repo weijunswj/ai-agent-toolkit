@@ -64,21 +64,30 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --write
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-The local marketplace wrapper is `.agents/plugins/marketplace.json`; it exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`, uses `policy.authentication: "ON_USE"` so install can complete headlessly, and the package manifest is `.codex-plugin/plugin.json`. `setup-codex-toolkit-plugin.cjs --write` runs the supported Codex local marketplace path, checks plugin state after marketplace add before invoking plugin add, and verifies the final result. If plugin add is needed, the setup helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json`, polls `codex plugin list --available --json` plus the expected cache until verification passes, then terminates or ignores the lingering add process if it has not exited. Treat setup as successful only when final verification passes, with a warning if plugin add did not exit cleanly. Verification must confirm the installed plugin cache contains Toolkit version `2.2.0` and `.codex-plugin/hooks/hooks.json` includes the Codex `SessionStart` hook. If Codex local marketplace install is unsupported, the verifier cannot find a usable Codex CLI, or verification never passes before the add deadline, fail clearly instead of pretending setup completed. After a fresh install or update, tell the user they must manually approve the startup hook when Codex prompts; setup cannot approve it for them. Do not use Codex to install or update Claude Code.
+The local marketplace wrapper is `.agents/plugins/marketplace.json`; it exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`, uses `policy.authentication: "ON_USE"` so install can complete headlessly, and the package manifest is `.codex-plugin/plugin.json`. `setup-codex-toolkit-plugin.cjs --write` runs the supported Codex local marketplace path, checks plugin state after marketplace add before invoking plugin add, and verifies the final result. If plugin add is needed, the setup helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json`, polls `codex plugin list --available --json` plus the expected cache until verification passes, then terminates or ignores the lingering add process if it has not exited. Treat setup as successful only when final verification passes, with a warning if plugin add did not exit cleanly.
+
+Normal verification prefers `codex plugin list --available --json`. If that CLI list is empty or unreliable, the setup helper may use the conservative config/cache fallback only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.0`, the cache manifest has the expected name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report fallback success as config/cache fallback verification, not normal CLI verification.
+
+After every install, update, or verify, read the helper's `**Next Steps:**` section. It tells the user to restart Codex if anything changed, open Codex hook review when prompted, and trust the Codex `SessionStart` hook only if it runs `node ".../repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source codex-plugin`. If no hook prompt appears, report whether hook trust is already recorded, still pending, or likely waiting for Codex to refresh plugin hooks. After a fresh install or update, tell the user they must manually approve the startup hook when Codex prompts; setup cannot approve it for them. This hook approval step applies to Codex only; Claude Code does not need Codex hook approval. Do not use Codex to install or update Claude Code. Codex must not install or update Claude Code, and Claude Code must not install or update Codex.
+
+Verification must confirm the installed plugin cache contains Toolkit version `2.2.0` and `.codex-plugin/hooks/hooks.json` includes the Codex `SessionStart` hook. If Codex local marketplace install is unsupported, the verifier cannot find a usable Codex CLI, CLI/fallback verification fails, or verification never passes before the add deadline, fail clearly instead of pretending setup completed.
+
 3. Configure repo-backed auto-update from this local repo without enabling OpenCode or Antigravity 2 yet:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "<local-ai-agent-toolkit-repo>" --repo-branch main --enable-auto-sync --write
 ```
 
-4. Audit OpenCode and Antigravity 2, then explain the detected targets, target paths, and planned writes:
+4. Audit OpenCode and Antigravity 2, then explain the detected targets, enabled state, target paths, synced state, planned writes, and AG2 Python discovery result:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-5. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output. Never silently enable OpenCode or Antigravity 2.
-6. If approved, enable only the approved targets and run a sync test:
+OpenCode detection should mention useful signals such as the `opencode` command, `OPENCODE_CONFIG_DIR` or `~/.config/opencode`, an existing managed target folder, and persisted bridge target state. Antigravity 2/AG2 detection should mention the selected Python command when found, or the exact commands tried when AG2 is not detected. If the user provides a non-PATH AG2 Python, persist it with `--set-ag2-python-command "<python.exe>" --write` so future audits and hooks can reuse it.
+
+5. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output. If OpenCode is detected, ask whether to enable Toolkit sync to OpenCode. If OpenCode is not detected, explain that it can be enabled later with `node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write`. Never silently enable OpenCode or Antigravity 2.
+6. If approved, enable only the approved targets and run a sync test. Include `--set-ag2-python-command "<python.exe>"` in the approved write command only when the user supplied or selected that AG2 Python command:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --enable-target ag2 --write

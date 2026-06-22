@@ -59,6 +59,80 @@ function writeFile(filePath, text) {
   fs.writeFileSync(filePath, text, 'utf8');
 }
 
+function quoteCommandPart(value) {
+  assert.doesNotMatch(value, /"/, 'test command parts must not contain quotes');
+  return `"${value}"`;
+}
+
+function writeFakePython(root) {
+  const logPath = path.join(root, 'fake-python.log');
+  const scriptPath = path.join(root, 'fake-python.cjs');
+  writeFile(scriptPath, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    `const logPath = ${JSON.stringify(logPath)};`,
+    'const args = process.argv.slice(2);',
+    "fs.appendFileSync(logPath, `${args.join(' ')}\\n`, 'utf8');",
+    "if (args[0] === '--version') {",
+    "  console.log('Python 3.11.0');",
+    '  process.exit(0);',
+    '}',
+    "if (args[0] === '-m' && args[1] === 'pip' && args[2] === 'show' && args[3] === 'ag2') {",
+    "  console.log('Name: ag2');",
+    '  process.exit(0);',
+    '}',
+    'process.exit(4);',
+    ''
+  ].join('\n'), 'utf8');
+  const command = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(scriptPath)}`;
+  return { command, logPath };
+}
+
+function powershellSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function csharpString(value) {
+  return `@"${String(value).replace(/"/g, '""')}"`;
+}
+
+function writeFakePythonExecutable(exePath, logPath) {
+  fs.mkdirSync(path.dirname(exePath), { recursive: true });
+  const sourcePath = path.join(path.dirname(exePath), 'fake-python.cs');
+  writeFile(sourcePath, [
+    'using System;',
+    'using System.IO;',
+    '',
+    'public static class FakePython {',
+    '  public static int Main(string[] args) {',
+    `    File.AppendAllText(${csharpString(logPath)}, string.Join(" ", args) + Environment.NewLine);`,
+    '    if (args.Length == 1 && args[0] == "--version") {',
+    '      Console.WriteLine("Python 3.14.0");',
+    '      return 0;',
+    '    }',
+    '    if (args.Length == 4 && args[0] == "-m" && args[1] == "pip" && args[2] == "show" && args[3] == "ag2") {',
+    '      Console.WriteLine("Name: ag2");',
+    '      return 0;',
+    '    }',
+    '    return 4;',
+    '  }',
+    '}',
+    ''
+  ].join('\n'));
+  const result = spawnSync('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    `$ErrorActionPreference = 'Stop'; Add-Type -Path ${powershellSingleQuote(sourcePath)} -OutputAssembly ${powershellSingleQuote(exePath)} -OutputType ConsoleApplication`
+  ], {
+    encoding: 'utf8',
+    timeout: 30000,
+    windowsHide: true
+  });
+  assert.equal(result.status, 0, `failed to compile fake Python executable\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+}
+
 function configureGitUser(repoPath) {
   git(repoPath, ['config', 'user.email', 'toolkit-test@example.invalid']);
   git(repoPath, ['config', 'user.name', 'Toolkit Bridge Test']);
@@ -201,6 +275,171 @@ test('detected but not enabled OpenCode target receives no writes', () => {
     false,
     'OpenCode target must not be written without explicit enablement'
   );
+});
+
+test('OpenCode audit detects persisted bridge target state without enabling writes', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const persistedTarget = path.join(root, 'opencode-persisted', 'skills', 'ai-agent-toolkit');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    targets: {
+      opencode: {
+        enabled: false,
+        detected: true,
+        target_path: persistedTarget,
+        synced_version: expectedBridgeVersion,
+        synced_checksum: 'older'
+      }
+    }
+  });
+
+  const result = run(['--hub', hub, '--audit', '--opencode-command', 'missing-opencode-command']);
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.targets.opencode.detected, true);
+  assert.equal(audit.targets.opencode.enabled, false);
+  assert.equal(audit.targets.opencode.status, 'detected');
+  assert.equal(audit.targets.opencode.synced, false);
+  assert.equal(path.resolve(audit.targets.opencode.target_path), path.resolve(persistedTarget));
+  assert.equal(audit.targets.opencode.signals.persisted_state, true);
+});
+
+test('AG2 Python command can be persisted and reused without installing packages', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const fakePython = writeFakePython(root);
+
+  let result = run([
+    '--hub', hub,
+    '--write',
+    '--set-ag2-python-command', fakePython.command,
+    '--enable-target', 'ag2'
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+
+  let state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.targets.ag2.enabled, true);
+  assert.equal(state.targets.ag2.detected, true);
+  assert.equal(state.targets.ag2.python_command, fakePython.command);
+  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+
+  let invocations = fs.readFileSync(fakePython.logPath, 'utf8');
+  assert.match(invocations, /--version/);
+  assert.match(invocations, /-m pip show ag2/);
+  assert.doesNotMatch(invocations, /\binstall\b/i);
+
+  result = run(['--hub', hub, '--audit']);
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.targets.ag2.detected, true);
+  assert.equal(audit.targets.ag2.status, 'enabled');
+  assert.equal(audit.targets.ag2.python_command, fakePython.command);
+  assert.equal(audit.targets.ag2.signals.selected_python_command, fakePython.command);
+
+  state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.targets.ag2.python_command, fakePython.command);
+});
+
+test('AG2 audit records exactly which Python commands were tried when not detected', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    targets: {
+      ag2: {
+        enabled: false,
+        python_command: 'missing-saved-python'
+      }
+    }
+  });
+
+  const result = run(['--hub', hub, '--audit', '--python-command', 'missing-explicit-python'], {
+    env: {
+      PATH: '',
+      USERPROFILE: root,
+      HOME: root,
+      LOCALAPPDATA: path.join(root, 'local-app-data'),
+      VIRTUAL_ENV: '',
+      CONDA_PREFIX: '',
+      UV_PYTHON: ''
+    }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.targets.ag2.detected, false);
+  assert.equal(audit.targets.ag2.status, 'not detected');
+  assert.equal(audit.targets.ag2.python_command, '');
+  const tried = audit.targets.ag2.signals.tried_python_commands.map((entry) => entry.command);
+  assert.deepEqual(tried.slice(0, 2), ['missing-saved-python', 'missing-explicit-python']);
+  assert.ok(tried.includes('python'), tried.join('\n'));
+  assert.ok(tried.includes('python3'), tried.join('\n'));
+  assert.ok(tried.includes('py'), tried.join('\n'));
+});
+
+test('AG2 Python discovery rejects command shims instead of invoking a shell', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const shim = path.join(root, 'fake-python.cmd');
+  const marker = path.join(root, 'shim-ran.txt');
+  writeFile(shim, `echo shim ran > "${marker}"\n`);
+
+  const result = run(['--hub', hub, '--audit', '--python-command', shim], {
+    env: {
+      PATH: '',
+      USERPROFILE: root,
+      HOME: root,
+      LOCALAPPDATA: path.join(root, 'local-app-data'),
+      VIRTUAL_ENV: '',
+      CONDA_PREFIX: '',
+      UV_PYTHON: ''
+    }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false, 'command shim must not be invoked');
+  const audit = parseLastJson(result.stdout);
+  const first = audit.targets.ag2.signals.tried_python_commands[0];
+  assert.equal(first.command, shim);
+  assert.equal(first.python_ok, false);
+  assert.match(first.python_error, /command shims/);
+});
+
+test('AG2 audit selects Windows user-local python versioned executables', {
+  skip: process.platform !== 'win32' ? 'Windows user-local Python discovery is Windows-only' : false
+}, () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const pythonExe = path.join(root, '.local', 'bin', 'python3.14.exe');
+  const logPath = path.join(root, 'python3.14.log');
+  writeFakePythonExecutable(pythonExe, logPath);
+
+  const result = run(['--hub', hub, '--audit'], {
+    env: {
+      PATH: '',
+      USERPROFILE: root,
+      HOME: root,
+      LOCALAPPDATA: path.join(root, 'local-app-data'),
+      VIRTUAL_ENV: '',
+      CONDA_PREFIX: '',
+      UV_PYTHON: ''
+    }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.targets.ag2.detected, true);
+  assert.equal(path.resolve(audit.targets.ag2.python_command), path.resolve(pythonExe));
+  assert.equal(path.resolve(audit.targets.ag2.signals.selected_python_command), path.resolve(pythonExe));
+  const tried = audit.targets.ag2.signals.tried_python_commands.map((entry) => path.resolve(entry.command));
+  assert.ok(tried.includes(path.resolve(pythonExe)), tried.join('\n'));
+
+  const invocations = fs.readFileSync(logPath, 'utf8');
+  assert.match(invocations, /--version/);
+  assert.match(invocations, /-m pip show ag2/);
+  assert.doesNotMatch(invocations, /\binstall\b/i);
 });
 
 test('sync-enabled command does not create bridge state before setup', () => {

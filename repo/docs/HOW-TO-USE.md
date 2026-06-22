@@ -139,6 +139,28 @@ OpenCode walks upward from the current working directory to the git worktree for
 
 For Antigravity 2, use the observed plugin-scoped skill-folder install for Toolkit skills. Its internal bridge target remains `ag2`, but manual skill copying uses the plugin-scoped skill folder below.
 
+Run a dry-run bridge setup preview first:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
+```
+
+After explicit approval:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
+```
+
+The bridge writes Antigravity 2 adapter metadata under the Toolkit Local Bridge Hub only. It does not install Python, Antigravity 2, AG2, or pip packages.
+
+If the AG2 package is installed under a Python that is not on PATH, persist the reviewed command so future audits and hooks can reuse it:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
+```
+
+Audits list the selected AG2 Python command when detected, or the exact commands tried when Antigravity 2/AG2 is not detected.
+
 **Use the Antigravity 2 plugin-scoped skill-folder location for toolkit skills:**
 
 | Location type | Skill folder path |
