@@ -19,6 +19,10 @@ const TARGET_MANIFEST_FILE = '.ai-agent-toolkit-managed.json';
 const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
+const FULL_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge.test.cjs');
+const HOOK_LIGHT_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs');
+const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
+const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -344,21 +348,40 @@ function applyRepoUpdateStatus(state, status, details = {}) {
   return next;
 }
 
-function runRepoValidation(repoPath) {
-  const validations = [
+function buildValidationSuite({ hookMode = false } = {}) {
+  return [
     {
       label: 'node repo/scripts/validate-toolkit.cjs',
-      args: [path.join('repo', 'scripts', 'validate-toolkit.cjs')]
+      args: [path.join('repo', 'scripts', 'validate-toolkit.cjs')],
+      timeout: VALIDATE_TOOLKIT_TIMEOUT_MS
     },
-    {
-      label: 'node --test repo/tests/toolkit-local-bridge.test.cjs',
-      args: ['--test', path.join('repo', 'tests', 'toolkit-local-bridge.test.cjs')]
-    }
+    hookMode
+      ? {
+          label: 'node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs',
+          args: ['--test', HOOK_LIGHT_VALIDATION_TEST],
+          timeout: HOOK_LIGHT_VALIDATION_TIMEOUT_MS
+        }
+      : {
+          label: 'node --test repo/tests/toolkit-local-bridge.test.cjs',
+          args: ['--test', FULL_VALIDATION_TEST],
+          timeout: VALIDATE_TOOLKIT_TIMEOUT_MS
+        }
   ];
+}
+
+function getRepoValidationLabels(options = {}) {
+  return buildValidationSuite(options).map((entry) => entry.label);
+}
+
+function runRepoValidation(repoPath, options = {}) {
+  const validations = buildValidationSuite(options);
   const commands = [];
   for (const validation of validations) {
     commands.push(validation.label);
-    const result = runCommand(process.execPath, validation.args, { cwd: repoPath, timeout: 120000 });
+    const result = runCommand(process.execPath, validation.args, {
+      cwd: repoPath,
+      timeout: validation.timeout
+    });
     if (!result.ok) {
       throw repoUpdateError(
         'validation-failed',
@@ -388,7 +411,7 @@ function changedFilesBetween(repoPath, fromCommit, toCommit) {
     .sort((left, right) => left.localeCompare(right));
 }
 
-function validateAndUpdateRepo(state) {
+function validateAndUpdateRepo(state, args = {}) {
   const repoPath = path.resolve(state.repo_path || '');
   const branch = state.repo_branch || DEFAULT_REPO_BRANCH;
   const expectedRemote = state.repo_remote || DEFAULT_REPO_REMOTE;
@@ -464,7 +487,7 @@ function validateAndUpdateRepo(state) {
   const changedFiles = changedFilesBetween(repoPath, fromCommit, toCommit);
   let validation = null;
   try {
-    validation = runRepoValidation(repoPath);
+    validation = runRepoValidation(repoPath, { hookMode: args.hook === true });
   } catch (error) {
     throw repoUpdateError(error.repoUpdateStatus || 'validation-failed', error.message, {
       fromCommit,
@@ -1272,7 +1295,16 @@ function isLegacyDelegatedRepoSync(args) {
 }
 
 function repoReportContextFromState(state, args) {
-  if (!isLegacyDelegatedRepoSync(args)) return {};
+  if (!isLegacyDelegatedRepoSync(args)) {
+    return {
+      status: '',
+      fromCommit: '',
+      toCommit: '',
+      changedFiles: [],
+      validationStatus: 'not run',
+      error: ''
+    };
+  }
   const status = state.last_repo_update_status || '';
   const fromCommit = state.last_repo_update_from_commit || '';
   const toCommit = state.last_repo_update_to_commit || '';
@@ -1774,7 +1806,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   let skippedTargets = [];
   try {
     try {
-      updateResult = validateAndUpdateRepo(state);
+      updateResult = validateAndUpdateRepo(state, args);
       statusState = prepareStateForWrite(applyRepoUpdateStatus(state, updateResult.status, {
         fromCommit: updateResult.fromCommit,
         toCommit: updateResult.toCommit
@@ -2052,6 +2084,8 @@ module.exports = {
   adapterPayloads,
   payloadChecksum,
   compareSemver,
+  getRepoValidationLabels,
+  runRepoValidation,
   updateReportDir,
   openUpdateReport
 };

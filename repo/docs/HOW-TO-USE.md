@@ -212,7 +212,12 @@ Enable opt-in repo-backed auto-update from a trusted local Toolkit checkout:
 node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "C:\Users\<user>\GitHub Projects\ai-agent-toolkit" --repo-branch main --enable-auto-sync --enable-target opencode --enable-target ag2 --write
 ```
 
-After this is enabled, Codex and Claude Code Toolkit plugin SessionStart hooks use the configured local repo as source of truth: they validate the repo, fetch the configured branch, fast-forward only, run hook-light validation, and then sync enabled bridge targets from the updated repo script. The hook path does not run full `npm run validate:all`; run that manually before broad maintenance or release work.
+After this is enabled, Codex and Claude Code Toolkit plugin SessionStart hooks use the configured local repo as source of truth: they validate the repo, fetch the configured branch, fast-forward only, run hook-light validation (`node repo/scripts/validate-toolkit.cjs` + `node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs`), and then sync enabled bridge targets from the updated repo script. The hook path does not run full suite validation; run full validation manually when needed:
+
+```powershell
+npm run validate:all
+node --test repo/tests/toolkit-local-bridge.test.cjs
+```
 
 Disable a target without deleting files:
 
