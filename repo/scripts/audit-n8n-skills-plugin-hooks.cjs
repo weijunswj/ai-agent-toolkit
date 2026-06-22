@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
 function normalizeRelPath(relPath) {
@@ -184,7 +185,7 @@ function hookEventNameFromPath(entryPath) {
 }
 
 function sampleHookInput(eventName) {
-  const sessionId = `toolkit-audit-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const sessionId = `toolkit-audit-${process.pid}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
   const base = {
     session_id: sessionId,
     tool_name: 'mcp__n8n__validate_workflow',
