@@ -38,6 +38,20 @@
       "fidelity": "generated_metadata"
     },
     {
+      "kind": "copy",
+      "source": "_main/codex-plugin/assets/composer-icon.png",
+      "output": ".codex-plugin/assets/composer-icon.png",
+      "notes": "Codex composer icon PNG generated from first-party plugin package asset source.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/codex-plugin/assets/logo.png",
+      "output": ".codex-plugin/assets/logo.png",
+      "notes": "Codex plugin logo PNG generated from first-party plugin package asset source.",
+      "fidelity": "generated_metadata"
+    },
+    {
       "kind": "json",
       "source": "_main/codex-plugin/hooks/hooks.json",
       "output": ".codex-plugin/hooks/hooks.json",
@@ -65,6 +79,8 @@
       "skills/toolkit-setup/SKILL.md",
       "skills/toolkit-setup/agents/openai.yaml",
       ".codex-plugin/plugin.json",
+      ".codex-plugin/assets/composer-icon.png",
+      ".codex-plugin/assets/logo.png",
       ".codex-plugin/hooks/hooks.json",
       ".claude-plugin/plugin.json",
       ".claude-plugin/hooks/hooks.json"

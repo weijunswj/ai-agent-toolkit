@@ -500,6 +500,8 @@ test('repo-wide MCP generated surface is absent', () => {
 test('native Codex and Claude plugin manifests are generated package metadata', () => {
   for (const relPath of [
     '.codex-plugin/plugin.json',
+    '.codex-plugin/assets/composer-icon.png',
+    '.codex-plugin/assets/logo.png',
     '.codex-plugin/hooks/hooks.json',
     '.claude-plugin/plugin.json',
     '.claude-plugin/hooks/hooks.json'

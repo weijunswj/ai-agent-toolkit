@@ -6,6 +6,7 @@ Source files live in [_main/](_main/). Generated outputs publish into:
 
 - `skills/toolkit-setup/`
 - `.codex-plugin/plugin.json`
+- `.codex-plugin/assets/*.png`
 - `.codex-plugin/hooks/hooks.json`
 - `.claude-plugin/plugin.json`
 - `.claude-plugin/hooks/hooks.json`

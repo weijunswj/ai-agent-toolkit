@@ -41,6 +41,20 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+function readPngSize(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  assert.deepEqual(
+    [...buffer.subarray(0, 8)],
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+    `${filePath} must be a PNG file`
+  );
+  assert.equal(buffer.toString('ascii', 12, 16), 'IHDR', `${filePath} must include a PNG IHDR chunk`);
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20)
+  };
+}
+
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -1039,6 +1053,16 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
     codexManifest.interface.defaultPrompt.some((prompt) => /setup toolkit/i.test(prompt)),
     'Codex plugin should expose the English setup toolkit journey'
   );
+  assert.equal(codexManifest.interface.composerIcon, './.codex-plugin/assets/composer-icon.png');
+  assert.equal(codexManifest.interface.logo, './.codex-plugin/assets/logo.png');
+  assert.deepEqual(
+    readPngSize(path.join(repoRoot, '.codex-plugin', 'assets', 'composer-icon.png')),
+    { width: 128, height: 128 }
+  );
+  assert.deepEqual(
+    readPngSize(path.join(repoRoot, '.codex-plugin', 'assets', 'logo.png')),
+    { width: 512, height: 512 }
+  );
   assert.match(claudeCommand, /^node\s+"/);
   assert.match(claudeCommand, /toolkit-local-bridge\.cjs/);
   assert.match(claudeCommand, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-local-bridge\.cjs/);
@@ -1191,6 +1215,18 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     ].sort()
   );
   assert.deepEqual(
+    (manifest.outputs || [])
+      .map((output) => String(output.output || ''))
+      .filter((output) => output.startsWith('.codex-plugin/'))
+      .sort(),
+    [
+      '.codex-plugin/assets/composer-icon.png',
+      '.codex-plugin/assets/logo.png',
+      '.codex-plugin/hooks/hooks.json',
+      '.codex-plugin/plugin.json'
+    ].sort()
+  );
+  assert.deepEqual(
     (manifest.writes.allowed || [])
       .filter((output) => String(output || '').startsWith('skills/'))
       .sort(),
@@ -1198,6 +1234,17 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
       'skills/toolkit-setup/README.md',
       'skills/toolkit-setup/SKILL.md',
       'skills/toolkit-setup/agents/openai.yaml'
+    ].sort()
+  );
+  assert.deepEqual(
+    (manifest.writes.allowed || [])
+      .filter((output) => String(output || '').startsWith('.codex-plugin/'))
+      .sort(),
+    [
+      '.codex-plugin/assets/composer-icon.png',
+      '.codex-plugin/assets/logo.png',
+      '.codex-plugin/hooks/hooks.json',
+      '.codex-plugin/plugin.json'
     ].sort()
   );
 });
