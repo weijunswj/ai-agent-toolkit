@@ -1216,6 +1216,8 @@ test('repo README and usage docs route to n8n skills-first local setup surfaces'
   const readme = readText(repoRoot, 'README.md');
   const howToUse = readText(repoRoot, 'repo/docs/HOW-TO-USE.md');
   const combined = `${readme}\n${howToUse}`;
+  const readmeInstallSection = readme.split('\n## Install Skills By Platform\n')[1].split('\n## MCP Status\n')[0];
+  const howToUseInstallSection = howToUse.split('\n## Install Toolkit Skills\n')[1].split('\n## Documentation Links\n')[0];
 
   for (const expected of [
     'skills/n8n-local-setup/references/n8n/local-setup.md',
@@ -1231,7 +1233,10 @@ test('repo README and usage docs route to n8n skills-first local setup surfaces'
   assert.match(combined, /Humans use `_projects\/\*\*`/);
   assert.match(combined, /Agents use (generated )?`skills\/\*\*`/);
   assert.match(combined, /Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now\./);
-  assert.match(combined, new RegExp(`${escapeRegExp(officialN8nSkillsTitleLink)} plus instance-level MCP references are secondary and not the beginner local setup path\\.`));
+  assert.match(combined, new RegExp(`${escapeRegExp(officialN8nSkillsTitleLink)} plus instance-level MCP references (?:remain inside|remain under|live inside|are packaged under)`));
+  assert.match(combined, /They are not a repo-wide MCP surface\./);
+  assert.doesNotMatch(readmeInstallSection, /\[Official n8n Skills\]|setup n8n plugin|using-n8n-skills|n8n_live|repair-codex-plugin-windows-hooks/i);
+  assert.doesNotMatch(howToUseInstallSection, /\[Official n8n Skills\]|setup n8n plugin|using-n8n-skills|n8n_live|repair-codex-plugin-windows-hooks/i);
 
   for (const forbidden of [
     'mcp setup - codex',

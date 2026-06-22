@@ -15,7 +15,7 @@ Current inspected chain:
 7. `skills/**` is the generated copyable skill surface.
 8. `repo/scripts/validate-toolkit.cjs`, `repo/tests/*.test.cjs`, package checks, source-lock audit, and published-surface audit enforce drift and safety rules.
 9. `.codex-plugin/**` and `.claude-plugin/**` are v2 native plugin package metadata generated from the Toolkit project module. They are not source of truth.
-10. The Toolkit Local Bridge Hub under the user profile stores generated OpenCode and AG2 adapter state. It is not source of truth.
+10. The Toolkit Local Bridge Hub under the user profile stores generated OpenCode and Antigravity 2 adapter state. It is not source of truth.
 
 ## V2 Architecture
 
@@ -32,9 +32,9 @@ Codex and Claude Code update Toolkit through their own native plugin systems.
 The shared bridge manages only non-native local adapter targets:
 
 - OpenCode global skills.
-- AG2-style local adapter metadata.
+- Antigravity 2 local adapter metadata.
 
-OpenCode and AG2 are opt-in. The bridge may detect them during audit or hook autocheck, but it must not write target files until the user explicitly enables that target.
+OpenCode and Antigravity 2 are opt-in. The bridge may detect them during audit or hook autocheck, but it must not write target files until the user explicitly enables that target.
 
 ## Local Bridge Hub
 
@@ -64,7 +64,7 @@ The lock file lives beside the hub at `%USERPROFILE%\.ai-agent-toolkit\update.lo
 Writes are atomic:
 
 1. Write a staging directory.
-2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and AG2 adapter output.
+2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and Antigravity 2 adapter output.
 3. Rename staging into `current`.
 4. For OpenCode target sync, stage the `ai-agent-toolkit` skill folder beside the target and atomically replace only that managed folder.
 
@@ -112,7 +112,7 @@ Supported flags:
 
 The updater must not:
 
-- Install npm, pip, Python, AG2, OpenCode, Codex, or Claude Code.
+- Install npm, pip, Python, Antigravity 2, OpenCode, Codex, or Claude Code.
 - Manage Codex plugin installation or update.
 - Manage Claude Code plugin installation or update.
 - Mutate project repositories by default.
@@ -155,6 +155,8 @@ node ".../repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write -
 ```
 
 If no hook prompt appears, report whether hook trust is already recorded, still pending, or likely waiting for Codex to refresh plugin hooks. This hook approval step applies to Codex only. Claude Code does not need Codex hook approval. Codex must not install or update Claude Code, and Claude Code must not install or update Codex.
+
+After a fresh Codex plugin install or update, the user must manually approve or trust the startup hook when Codex prompts. Verification can confirm the installed cache contains a `SessionStart` hook, but it cannot approve that hook on the user's behalf.
 
 Codex setup must never install or update Claude Code. Claude Code uses its own native plugin system and `.claude-plugin/plugin.json`.
 
@@ -260,7 +262,7 @@ OpenCode target path:
 
 The bridge intentionally does not use `.agents/skills` for OpenCode output, avoiding duplicate Codex skill discovery.
 
-AG2 detection signals:
+Antigravity 2 detection signals:
 
 - Saved AG2 Python command, when configured.
 - Explicit `--python-command`, for one run.
@@ -269,15 +271,15 @@ AG2 detection signals:
 - A candidate Python command exists, returns a version, and `python -m pip show ag2` succeeds.
 - The user explicitly enabled the target.
 
-Persist a known non-PATH AG2 Python command with:
+Persist a known non-PATH Antigravity 2/AG2 Python command with:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --set-ag2-python-command "<python.exe>" --write
 ```
 
-Future audit and hook runs reuse the saved command. If AG2 is not detected, audit output must list the exact Python commands tried. Detection must never install Python, AG2, OpenCode, npm packages, or pip packages.
+Future audit and hook runs reuse the saved command. If Antigravity 2/AG2 is not detected, audit output must list the exact Python commands tried. Detection must never install Python, AG2, OpenCode, npm packages, or pip packages.
 
-AG2 output stays under the Toolkit Local Bridge Hub. The bridge does not install AG2 or Python packages.
+Antigravity 2 output stays under the Toolkit Local Bridge Hub. The bridge does not install Antigravity 2 or Python packages.
 
 ## Auto-Check, Auto-Setup, And Auto-Sync
 
@@ -312,13 +314,13 @@ Apply OpenCode setup:
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --write
 ```
 
-Dry-run AG2 setup:
+Dry-run Antigravity 2 setup:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2
 ```
 
-Apply AG2 setup:
+Apply Antigravity 2 setup:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write
@@ -350,7 +352,7 @@ The v2 hooks only call the shared updater:
 - Shared policy source: this doc, `AGENTS.md`, Toolkit docs, and validators.
 - Deterministic enforcement: `repo/scripts/toolkit-local-bridge.cjs` and tests.
 
-OpenCode and AG2 do not need Codex or Claude hooks to receive core policy because the policy remains in portable docs, validators, and generated adapter content.
+OpenCode and Antigravity 2 do not need Codex or Claude hooks to receive core policy because the policy remains in portable docs, validators, and generated adapter content.
 
 ## Portable Policy-First Layering
 
@@ -388,7 +390,7 @@ Do not move exclusively into hooks:
 - Source-of-truth policy.
 - Approval gates.
 - Generated-output ownership.
-- OpenCode and AG2 opt-in requirement.
+- OpenCode and Antigravity 2 opt-in requirement.
 - Native plugin cross-update prohibition.
 - No package installs by default.
 - No project repo mutation by default.

@@ -59,42 +59,32 @@ function writeFile(filePath, text) {
   fs.writeFileSync(filePath, text, 'utf8');
 }
 
+function quoteCommandPart(value) {
+  assert.doesNotMatch(value, /"/, 'test command parts must not contain quotes');
+  return `"${value}"`;
+}
+
 function writeFakePython(root) {
   const logPath = path.join(root, 'fake-python.log');
-  if (process.platform === 'win32') {
-    const command = path.join(root, 'fake-python.cmd');
-    fs.writeFileSync(command, [
-      '@echo off',
-      `>>"${logPath}" echo %*`,
-      'if "%~1"=="--version" (',
-      '  echo Python 3.11.0',
-      '  exit /b 0',
-      ')',
-      'if "%~1"=="-m" if "%~2"=="pip" if "%~3"=="show" if "%~4"=="ag2" (',
-      '  echo Name: ag2',
-      '  exit /b 0',
-      ')',
-      'exit /b 4',
-      ''
-    ].join('\r\n'), 'utf8');
-    return { command, logPath };
-  }
-  const command = path.join(root, 'fake-python');
-  fs.writeFileSync(command, [
-    '#!/bin/sh',
-    `printf '%s\\n' "$*" >> ${JSON.stringify(logPath)}`,
-    'if [ "$1" = "--version" ]; then',
-    '  echo Python 3.11.0',
-    '  exit 0',
-    'fi',
-    'if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "show" ] && [ "$4" = "ag2" ]; then',
-    '  echo Name: ag2',
-    '  exit 0',
-    'fi',
-    'exit 4',
+  const scriptPath = path.join(root, 'fake-python.cjs');
+  writeFile(scriptPath, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    `const logPath = ${JSON.stringify(logPath)};`,
+    'const args = process.argv.slice(2);',
+    "fs.appendFileSync(logPath, `${args.join(' ')}\\n`, 'utf8');",
+    "if (args[0] === '--version') {",
+    "  console.log('Python 3.11.0');",
+    '  process.exit(0);',
+    '}',
+    "if (args[0] === '-m' && args[1] === 'pip' && args[2] === 'show' && args[3] === 'ag2') {",
+    "  console.log('Name: ag2');",
+    '  process.exit(0);',
+    '}',
+    'process.exit(4);',
     ''
   ].join('\n'), 'utf8');
-  fs.chmodSync(command, 0o755);
+  const command = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(scriptPath)}`;
   return { command, logPath };
 }
 
@@ -213,7 +203,7 @@ test('explicit OpenCode setup writes only managed hub and OpenCode target paths'
   assert.doesNotMatch(targetSkill.replace(/\\/g, '/'), /\.agents\/skills/);
 });
 
-test('explicit AG2 setup writes adapter metadata under the hub without package installs', () => {
+test('explicit Antigravity 2 setup writes adapter metadata under the hub without package installs', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin']);
@@ -344,6 +334,33 @@ test('AG2 audit records exactly which Python commands were tried when not detect
   assert.ok(tried.includes('python'), tried.join('\n'));
   assert.ok(tried.includes('python3'), tried.join('\n'));
   assert.ok(tried.includes('py'), tried.join('\n'));
+});
+
+test('AG2 Python discovery rejects command shims instead of invoking a shell', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const shim = path.join(root, 'fake-python.cmd');
+  const marker = path.join(root, 'shim-ran.txt');
+  writeFile(shim, `echo shim ran > "${marker}"\n`);
+
+  const result = run(['--hub', hub, '--audit', '--python-command', shim], {
+    env: {
+      PATH: '',
+      USERPROFILE: root,
+      HOME: root,
+      LOCALAPPDATA: path.join(root, 'local-app-data'),
+      VIRTUAL_ENV: '',
+      CONDA_PREFIX: '',
+      UV_PYTHON: ''
+    }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false, 'command shim must not be invoked');
+  const audit = parseLastJson(result.stdout);
+  const first = audit.targets.ag2.signals.tried_python_commands[0];
+  assert.equal(first.command, shim);
+  assert.equal(first.python_ok, false);
+  assert.match(first.python_error, /command shims/);
 });
 
 test('sync-enabled command does not create bridge state before setup', () => {
@@ -756,9 +773,9 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /--enable-repo-auto-update/, relPath);
     assert.match(text, /--repo-path/, relPath);
     assert.match(text, /--enable-auto-sync/, relPath);
-    assert.match(text, /OpenCode and AG2/i, relPath);
+    assert.match(text, /OpenCode and Antigravity 2/i, relPath);
     assert.match(text, /ask once/i, relPath);
-    assert.match(text, /Never silently enable OpenCode or AG2/i, relPath);
+    assert.match(text, /Never silently enable OpenCode or Antigravity 2/i, relPath);
     assert.match(text, /--enable-target opencode/, relPath);
     assert.match(text, /--enable-target ag2/, relPath);
     assert.match(text, /--sync-enabled --write/, relPath);
@@ -828,7 +845,7 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     const skillPath = path.join(repoRoot, 'skills', skill, 'SKILL.md');
     if (!fs.existsSync(skillPath)) return false;
     const skillText = fs.readFileSync(skillPath, 'utf8');
-    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|AG2 adapter support|stale bridge state/i.test(skillText);
+    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity 2 adapter support|stale bridge state/i.test(skillText);
   });
   assert.deepEqual(bridgeSkillNames, ['toolkit-setup'], 'exactly one Toolkit setup/bridge discoverability skill should exist');
 
@@ -841,7 +858,7 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
     const skillPath = path.join(curatedSkillsDir, skill, 'SKILL.md');
     if (!fs.existsSync(skillPath)) return false;
     const skillText = fs.readFileSync(skillPath, 'utf8');
-    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|AG2 adapter support|stale bridge state/i.test(skillText);
+    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity 2 adapter support|stale bridge state/i.test(skillText);
   });
   assert.deepEqual(curatedBridgeSkillNames, ['toolkit-setup'], 'curated output should contain exactly one Toolkit setup/bridge discoverability skill');
   for (const rel of [

@@ -193,21 +193,52 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+function parseCommandSpec(commandSpec) {
+  const raw = String(commandSpec || '').trim();
+  if (!raw) return { command: '', args: [] };
+  if (fs.existsSync(raw)) return { command: raw, args: [] };
+
+  const parts = [];
+  let current = '';
+  let quote = '';
+  for (const char of raw) {
+    if (quote) {
+      if (char === quote) quote = '';
+      else current += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (/\s/.test(char)) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+    } else {
+      current += char;
+    }
+  }
+  if (quote) throw new Error(`unterminated quote in command: ${raw}`);
+  if (current) parts.push(current);
+  return { command: parts[0] || '', args: parts.slice(1) };
+}
+
 function commandProbe(command, commandArgs) {
   if (!command) return { ok: false, output: '', error: 'missing command' };
   try {
-    const isWindowsCmd = process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(command);
-    const result = isWindowsCmd
-      ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'call', command, ...commandArgs], {
-        encoding: 'utf8',
-        timeout: 5000,
-        windowsHide: true
-      })
-      : spawnSync(command, commandArgs, {
-        encoding: 'utf8',
-        timeout: 5000,
-        windowsHide: true
-      });
+    const parsed = parseCommandSpec(command);
+    if (!parsed.command) return { ok: false, output: '', status: null, error: 'missing command' };
+    if (/\.(?:cmd|bat)$/i.test(parsed.command)) {
+      return {
+        ok: false,
+        output: '',
+        status: null,
+        error: 'shell command shims (.cmd/.bat) are not supported; use a direct executable path such as python.exe'
+      };
+    }
+    const result = spawnSync(parsed.command, [...parsed.args, ...commandArgs], {
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true
+    });
     return {
       ok: result.status === 0,
       output: `${result.stdout || ''}${result.stderr || ''}`.trim(),

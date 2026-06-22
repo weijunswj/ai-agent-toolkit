@@ -7,7 +7,7 @@
   "main_path": "_projects/development/toolkit-local-bridge/_main",
   "version": "2.2.0",
   "version_policy": "semver",
-  "version_notes": "Adds end-to-end English setup routing for Toolkit repo validation, native Codex plugin activation, repo-backed auto-update, one-time OpenCode/AG2 write approval, enabled-target sync testing, and n8n hook JSON output verification.",
+  "version_notes": "Adds end-to-end English setup routing for Toolkit repo validation, native Codex plugin activation, repo-backed auto-update, one-time OpenCode/Antigravity 2 write approval, enabled-target sync testing, and n8n hook JSON output verification.",
   "outputs": [
     {
       "kind": "curated",
@@ -86,16 +86,16 @@
   "live_actions": "explicit_confirmation_only",
   "ci_live_actions": false,
   "skill_creation_review": {
-    "existing_skill_review": "Reviewed current skills, README skill table, Skill Safety Matrix, toolkit skill-routing source, context-preserving-ai-publisher, ai-coding-agent-rules, n8n-local-setup, windows-localhost-workflows, and the removed bridge command skills before adding toolkit-setup. Existing skills cover repo rules, source publishing, n8n setup, localhost startup, and safety reviews, but no existing single skill routes Toolkit native plugin setup, Windows hook repair, repo-backed Toolkit auto-update, plus OpenCode and AG2 local bridge troubleshooting without becoming a command-per-bridge family.",
-    "trigger": "Use toolkit-setup when the user asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. Do not invoke it for ordinary project coding, unrelated n8n setup, or as permission to run write commands without explicit approval.",
+    "existing_skill_review": "Reviewed current skills, README skill table, Skill Safety Matrix, toolkit skill-routing source, context-preserving-ai-publisher, ai-coding-agent-rules, n8n-local-setup, windows-localhost-workflows, and the removed bridge command skills before adding toolkit-setup. Existing skills cover repo rules, source publishing, n8n setup, localhost startup, and safety reviews, but no existing single skill routes Toolkit native plugin setup, Windows hook repair, repo-backed Toolkit auto-update, plus OpenCode and Antigravity 2 local bridge troubleshooting without becoming a command-per-bridge family.",
+    "trigger": "Use toolkit-setup when the user asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity 2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. Do not invoke it for ordinary project coding, unrelated n8n setup, or as permission to run write commands without explicit approval.",
     "decision": "new_project_skill",
     "decision_reason": "A single compact toolkit-setup router skill is safer than a command-per-bridge skill family because it lets agents recognise setup requests while keeping implementation, command details, hooks, and policy in the shared updater, docs, validators, and tests.",
-    "unique_value": "The skill preserves the bridge and plugin-hook safety model in the trigger path: dry-run first, repo auto-update opt-in only, OpenCode and AG2 opt-in only, detection without autosetup, sync only enabled targets, post-install Windows hook repair before trusting Codex plugin hooks, no npm or pip installs, no arbitrary project repo mutation by default, no Codex-to-Claude or Claude-to-Codex cross-update, and downgrade refusal unless explicitly forced.",
+    "unique_value": "The skill preserves the bridge and plugin-hook safety model in the trigger path: dry-run first, repo auto-update opt-in only, OpenCode and Antigravity 2 opt-in only, detection without autosetup, sync only enabled targets, post-install Windows hook repair before trusting Codex plugin hooks, no npm or pip installs, no arbitrary project repo mutation by default, no Codex-to-Claude or Claude-to-Codex cross-update, and downgrade refusal unless explicitly forced.",
     "runtime_footprint": "SKILL.md stays a short router and safety checklist. It does not embed updater or repair implementation details or repeat command-per-target procedures; detailed behavior stays in repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md, repo/docs/HOW-TO-USE.md, repo/scripts/toolkit-local-bridge.cjs, repo/scripts/repair-codex-plugin-windows-hooks.cjs, and tests.",
     "local_assets": "Only the toolkit-setup README, SKILL.md, and OpenAI metadata are published. No scripts, references, templates, package archives, third-party code, or generated bridge hub outputs are bundled in the skill.",
     "output_contract": "When used, the agent routes to the Toolkit setup subsystem, starts with audit or dry-run behavior, uses repo/scripts/toolkit-local-bridge.cjs for any requested operation, preserves explicit approval gates for writes, validates configured repo auto-updates before enabled-target sync, and runs relevant validators or tests before final reporting.",
     "anti_bloat_review": "The skill intentionally replaces a command-per-bridge skill family with one small discoverability surface. It is not generic setup advice, and it does not duplicate existing source-publishing, n8n, localhost, or safety-review skills.",
-    "safety_boundary": "User-level hub writes, configured Toolkit repo fast-forward updates, OpenCode global skill writes, AG2 adapter writes, auto-sync enablement, target enablement, repo auto-update enablement, downgrade forcing, package installation, arbitrary project-repo mutation, live-system actions, credentials, and destructive operations require explicit current-turn approval when applicable. Hooks remain optional policy-light automation.",
+    "safety_boundary": "User-level hub writes, configured Toolkit repo fast-forward updates, OpenCode global skill writes, Antigravity 2 adapter writes, auto-sync enablement, target enablement, repo auto-update enablement, downgrade forcing, package installation, arbitrary project-repo mutation, live-system actions, credentials, and destructive operations require explicit current-turn approval when applicable. Hooks remain optional policy-light automation.",
     "source_provenance": "first_party",
     "third_party_audit": "not_applicable_first_party; no third-party plugin source, private plugin cache material, marketplace package, executable dependency, or vendor docs are copied or adapted.",
     "publisher_workflow": "context-preserving-ai-publisher maintenance workflow: create reviewed curated output for the compact toolkit-setup router, declare exact generated skill and native plugin metadata outputs, run deterministic sync, update routing/docs/safety matrix/audit baseline, and validate source-to-surface freshness.",
@@ -111,14 +111,14 @@
   "project": {
     "name": "Toolkit Local Bridge",
     "category": "development",
-    "summary": "Native Codex and Claude Code plugin metadata plus one compact English setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and AG2 adapter targets."
+    "summary": "Native Codex and Claude Code plugin metadata plus one compact English setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and Antigravity 2 adapter targets."
   },
   "surface": {
     "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/toolkit-setup",
-      "summary": "Compact discoverability skill that routes English Toolkit plugin, repo auto-update, local bridge, OpenCode, and AG2 setup requests to the shared setup subsystem."
+      "summary": "Compact discoverability skill that routes English Toolkit plugin, repo auto-update, local bridge, OpenCode, and Antigravity 2 setup requests to the shared setup subsystem."
     },
     "mcp": {
       "status": "not_applicable"
