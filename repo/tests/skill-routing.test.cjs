@@ -325,20 +325,11 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /Claude Code does not install or update Codex/);
   assert.match(howToUse, /OpenCode and AG2 are opt-in local bridge targets/);
   assert.match(howToUse, /Manual fallback: copy the whole `skills\/<skill-name>\/` folder into one supported location/);
-  assert.match(howToUse, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
-  assert.match(howToUse, /On Windows, the installed package's `hooks\/hooks\.json` must not leave a bare `\.sh` path/);
-  assert.match(howToUse, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
-  assert.match(howToUse, /(?:valid|output) JSON with Node when `jq` and `python3` are unavailable/);
-  assertWindowsHookRecoveryGuidance(howToUse, 'HOW-TO-USE recovery guidance');
-  assert.match(howToUse, /codex plugin marketplace add n8n-io\/skills/);
-  assert.match(howToUse, /codex plugin add n8n-skills@n8n-io/);
-  assert.match(howToUse, /\/plugin marketplace add n8n-io\/skills/);
-  assert.match(howToUse, /\/plugin install n8n-skills@n8n-io/);
-  assert.match(howToUse, /npx skills add n8n-io\/skills/);
-  assert.match(howToUse, /Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks/);
-  assert.match(howToUse, /always start by loading the `using-n8n-skills` meta-skill/);
-  assert.match(howToUse, /current \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
-  assert.match(howToUse, /If the upstream entry point changes, update this cue from the official README instead of inventing a local alias/);
+  assert.match(howToUse, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned, not Toolkit-owned/);
+  assert.match(howToUse, /Do not copy, fork, mirror, vendor, or recreate them inside this toolkit repo/);
+  assert.match(howToUse, /For the official n8n plugin install, Windows hook repair, current `using-n8n-skills` entry point, `n8n_live`, and Antigravity\/AG2 n8n notes, use \[n8n Local Setup\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/\)/);
+  assert.doesNotMatch(howToUse, /codex plugin marketplace add n8n-io\/skills/);
+  assert.doesNotMatch(howToUse, /node repo\/scripts\/repair-codex-plugin-windows-hooks\.cjs --plugin-root/);
   assert.match(howToUse, /Copy whole skill folders, not just `SKILL\.md`/);
   assert.match(howToUse, /Keep `README\.md`, `references\/`, `templates\/`, `agents\/`, `packs\/`, and other supporting files beside `SKILL\.md` when present/);
   assert.match(howToUse, /Do not paste secrets, tokens, `.env` values, or credentials into repo files/);
@@ -359,30 +350,21 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\| Project OpenCode config \| `<repo>\/\.opencode\/skills\/<skill-name>\/SKILL\.md` \|/);
   assert.match(howToUse, /\| Plugin-scoped \| `C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\SKILL\.md` \|/);
 
-  assert.match(readme, /Codex \| Native plugin package via `\.codex-plugin\/plugin\.json`/);
-  assert.match(readme, /Claude Code \| Native plugin package via `\.claude-plugin\/plugin\.json`/);
+  assert.match(readme, /Codex \| Native plugin package via \[\.codex-plugin\/plugin\.json\]\(\.codex-plugin\/plugin\.json\)/);
+  assert.match(readme, /Claude Code \| Native plugin package via \[\.claude-plugin\/plugin\.json\]\(\.claude-plugin\/plugin\.json\)/);
   assert.match(readme, /Antigravity \| Plugin-scoped skill-folder install/);
   assert.match(readme, /OpenCode \| Opt-in bridge target only after approval/);
   assert.match(readme, /AG2 \| Opt-in bridge target only after approval/);
-  assert.match(readme, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned and must not be copied, forked, mirrored, vendored, or recreated inside this toolkit/);
-  assert.match(readme, /On Windows, the installed package's `hooks\/hooks\.json` must not leave a bare `\.sh` path/);
-  assert.match(readme, /bare `\.sh` path like `\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/session-start\.sh`/);
-  assert.match(readme, /(?:valid|output) JSON with Node when `jq` and `python3` are unavailable/);
-  assertWindowsHookRecoveryGuidance(readme, 'README recovery guidance');
-  assert.match(readme, /codex plugin marketplace add n8n-io\/skills/);
-  assert.match(readme, /codex plugin add n8n-skills@n8n-io/);
-  assert.match(readme, /\/plugin marketplace add n8n-io\/skills/);
-  assert.match(readme, /\/plugin install n8n-skills@n8n-io/);
-  assert.match(readme, /npx skills add n8n-io\/skills/);
-  assert.match(readme, /Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks/);
-  assert.match(readme, /always start by loading the `using-n8n-skills` meta-skill/);
-  assert.match(readme, /current \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
-  assert.match(readme, /If the upstream entry point changes, update this cue from the official README instead of inventing a local alias/);
+  assert.match(readme, /\[Official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) are upstream-owned, not Toolkit-owned/);
+  assert.match(readme, /For their setup, use \[skills\/n8n-local-setup\/\]\(skills\/n8n-local-setup\/\) and its platform references/);
+  assert.match(readme, /Do not copy, fork, mirror, vendor, or recreate official n8n Skills inside this toolkit repo/);
+  assert.doesNotMatch(readme, /codex plugin marketplace add n8n-io\/skills/);
+  assert.doesNotMatch(readme, /node repo\/scripts\/repair-codex-plugin-windows-hooks\.cjs --plugin-root/);
   assert.match(readme, /Manual fallback: copy the whole `skills\/<skill-name>\/` folder into \*\*ANY ONE\*\* supported location/);
   assert.match(readme, /`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\`/);
   assert.match(readme, /\| Platform \| Toolkit-owned skill install \| Active instruction files \| References \|/);
-  assert.match(readme, /\| Codex \| Native plugin package via `\.codex-plugin\/plugin\.json`; direct whole-skill-folder install remains a manual fallback\. \|/);
-  assert.match(readme, /\| Claude Code \| Native plugin package via `\.claude-plugin\/plugin\.json`; direct whole-skill-folder install remains a manual fallback\. \|/);
+  assert.match(readme, /\| Codex \| Native plugin package via \[\.codex-plugin\/plugin\.json\]\(\.codex-plugin\/plugin\.json\); direct whole-skill-folder install remains a manual fallback\. \|/);
+  assert.match(readme, /\| Claude Code \| Native plugin package via \[\.claude-plugin\/plugin\.json\]\(\.claude-plugin\/plugin\.json\); direct whole-skill-folder install remains a manual fallback\. \|/);
   assert.match(readme, /\| OpenCode \| Opt-in bridge target only after approval/);
   assert.match(readme, /\| Antigravity \| Plugin-scoped skill-folder install\.<br>`C:/);
   assert.match(readme, /\| Codex \|[^\n]*\| `AGENTS\.md` \|/);
@@ -477,10 +459,20 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   );
 });
 
-test('English n8n plugin setup flow stays Windows-safe before hook approval', () => {
-  const paths = [
+test('n8n-local-setup plugin flow stays Windows-safe before hook approval', () => {
+  const rootDocs = [
     'README.md',
-    'repo/docs/HOW-TO-USE.md',
+    'repo/docs/HOW-TO-USE.md'
+  ];
+
+  for (const relPath of rootDocs) {
+    const text = readText(path.join(repoRoot, relPath));
+    assert.match(text, /n8n Local Setup|skills\/n8n-local-setup/i, relPath);
+    assert.doesNotMatch(text, /codex plugin marketplace add n8n-io\/skills/, relPath);
+    assert.doesNotMatch(text, /repair-codex-plugin-windows-hooks\.cjs --plugin-root/, relPath);
+  }
+
+  const paths = [
     '_projects/n8n/local-setup/_main/mcp setup - codex.md',
     'skills/n8n-local-setup/references/ai-agent-platforms/codex.md',
     '_projects/n8n/local-setup/_main/templates/mcp-configs/codex-mcp-config.md',

@@ -486,9 +486,9 @@ test('root README platform guidance requires AGENTS before platform shims', () =
   assert.match(section, /\| OpenCode \|[^\n]*Opt-in bridge target only after approval/);
   assert.match(section, /\| Claude Code \|[^\n]*Native plugin package/);
   assert.match(section, /\| Platform \| Toolkit-owned skill install \| Active instruction files \| References \|/);
-  assert.match(section, /\| Codex \|[^\n]*`\.codex-plugin\/plugin\.json`[^\n]*\| `AGENTS\.md` \|/);
+  assert.match(section, /\| Codex \|[^\n]*\.codex-plugin\/plugin\.json[^\n]*\| `AGENTS\.md` \|/);
   assert.match(section, /\| OpenCode \|[^\n]*`\$HOME\/\.config\/opencode\/skills\/ai-agent-toolkit\/`[^\n]*\| `AGENTS\.md` \|/);
-  assert.match(section, /\| Claude Code \|[^\n]*`\.claude-plugin\/plugin\.json`[^\n]*\| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
+  assert.match(section, /\| Claude Code \|[^\n]*\.claude-plugin\/plugin\.json[^\n]*\| `AGENTS\.md`, `CLAUDE\.md` shim \|/);
   assert.doesNotMatch(section, /\| Gemini\s+CLI \|/);
   assert.doesNotMatch(section, /\.gemini\/extensions\/ai-agent-toolkit/);
   assert.match(section, /\| Antigravity \|[^\n]*Plugin-scoped skill-folder install/);
