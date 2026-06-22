@@ -245,6 +245,10 @@ function verifyHookCommandJsonOutput(pluginRoot, entry) {
   if (result.status !== 0) {
     return `${entry.path} hook JSON verification command exited ${result.status}: ${commandOutput(result)}`;
   }
+  const stderr = String(result.stderr || '').trim();
+  if (/(?:command not found|No such file or directory)/i.test(stderr)) {
+    return `${entry.path} hook JSON verification command emitted command-not-found stderr: ${stderr}`;
+  }
 
   const stdout = String(result.stdout || '').trim();
   if (!stdout) {
@@ -267,6 +271,15 @@ function verifyHookCommandJsonOutput(pluginRoot, entry) {
   }
   if (typeof hookOutput.additionalContext !== 'string') {
     return `${entry.path} hook JSON output must include string hookSpecificOutput.additionalContext`;
+  }
+  if (!hookOutput.additionalContext.trim()) {
+    if (eventName === 'SessionStart') {
+      return `${entry.path} SessionStart hook JSON output must include non-empty hookSpecificOutput.additionalContext containing using-n8n-skills`;
+    }
+    return `${entry.path} hook JSON output must include non-empty hookSpecificOutput.additionalContext`;
+  }
+  if (eventName === 'SessionStart' && !/using-n8n-skills/i.test(hookOutput.additionalContext)) {
+    return `${entry.path} SessionStart hook JSON output additionalContext must contain using-n8n-skills`;
   }
   return null;
 }
