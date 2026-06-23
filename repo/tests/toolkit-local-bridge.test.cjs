@@ -37,7 +37,7 @@ function run(args, options = {}) {
     cwd: repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },
-    timeout: 15000
+    timeout: 30000
   });
 }
 
@@ -274,6 +274,25 @@ function writeRepoToolkitFixture(repoPath, label) {
     "  console.error('missing recursion guard');",
     '  process.exit(43);',
     '}',
+    ''
+  ].join('\n'));
+}
+
+function writeRealBridgeDelegator(repoPath) {
+  writeFile(path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
+    '#!/usr/bin/env node',
+    "'use strict';",
+    "const { spawnSync } = require('node:child_process');",
+    `const script = ${JSON.stringify(script)};`,
+    "const result = spawnSync(process.execPath, [script, ...process.argv.slice(2)], {",
+    "  cwd: process.cwd(),",
+    "  encoding: 'utf8',",
+    "  env: process.env,",
+    "  timeout: 15000",
+    "});",
+    "if (result.stdout) process.stdout.write(result.stdout);",
+    "if (result.stderr) process.stderr.write(result.stderr);",
+    "process.exit(result.status || 0);",
     ''
   ].join('\n'));
 }
@@ -1303,6 +1322,128 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
   assert.match(report.text, /repo update status: `updated`/);
   assert.match(report.text, /hook-light validation: `passed`/);
   assert.match(report.text, /Skipped n8n\/live systems; not touched\./);
+});
+
+test('no-op repo auto-update hook with unchanged observed commit does not create a report', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--write'
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  let state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.last_update_report_path || '', '');
+  assert.equal(state.last_repo_update_status, 'up-to-date');
+  assert.equal(state.last_repo_update_to_commit, fixture.initialCommit);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.last_update_report_path || '', '');
+});
+
+test('hook report is generated when repo was already advanced before the hook run', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--write'
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_to_commit, fixture.initialCommit);
+
+  const updatedCommit = pushRepoToolkitUpdate(fixture, 'already-advanced');
+  git(fixture.repo, ['fetch', 'origin', 'main']);
+  git(fixture.repo, ['merge', '--ff-only', 'FETCH_HEAD']);
+  assert.equal(currentCommit(fixture.repo), updatedCommit);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const report = readLatestReport(hub);
+  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(report.text, /Local repo was already advanced before this hook run\./);
+  assert.match(report.text, /Likely from a manual pull or another local Git update\./);
+  assert.match(report.text, /Configured branch: `main`/);
+  assert.match(report.text, new RegExp(`Configured remote: \`${fixture.origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``));
+  assert.match(report.text, new RegExp(`Previous observed commit: \`${fixture.initialCommit}\``));
+  assert.match(report.text, new RegExp(`Current commit: \`${updatedCommit}\``));
+  assert.match(report.text, /repo update status: `up-to-date`/);
+  assert.match(report.text, /target sync status: `not needed`/);
+});
+
+test('hook report includes both external repo advance and Antigravity 2 target sync', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  writeRealBridgeDelegator(fixture.repo);
+  commitAll(fixture.repo, 'delegate to real bridge for target sync');
+  git(fixture.repo, ['push', 'origin', 'main']);
+  fixture.initialCommit = currentCommit(fixture.repo);
+  git(fixture.upstream, ['fetch', 'origin', 'main']);
+  git(fixture.upstream, ['reset', '--hard', 'origin/main']);
+
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--write'
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readJson(path.join(hub, 'state.json')).last_repo_update_to_commit, fixture.initialCommit);
+
+  pushRepoToolkitUpdate(fixture, 'already-advanced-ag2-sync');
+  writeRealBridgeDelegator(fixture.upstream);
+  const updatedCommit = commitAll(fixture.upstream, 'delegate updated bridge target sync');
+  git(fixture.upstream, ['push', 'origin', 'main']);
+  git(fixture.repo, ['fetch', 'origin', 'main']);
+  git(fixture.repo, ['merge', '--ff-only', 'FETCH_HEAD']);
+  assert.equal(currentCommit(fixture.repo), updatedCommit);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Local repo was already advanced before this hook run\./);
+  assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
+  assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
+  assert.match(report.text, /repo update status: `up-to-date`/);
+  assert.match(report.text, /target sync status: `synced`/);
 });
 
 test('hook report is generated when target sync happens without a repo commit change', () => {

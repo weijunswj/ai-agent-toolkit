@@ -255,6 +255,7 @@ When a hook run performs meaningful work or safely skips a risky update, the bri
 Meaningful work means at least one of:
 
 - The configured Toolkit repo fast-forwarded.
+- The configured Toolkit repo was already advanced before the hook run compared with the last recorded bridge update state. This is reported as an inference, likely from a manual pull or another local Git update, not as proof of a manual action.
 - An enabled OpenCode or Antigravity 2 target was synced.
 - A stale Toolkit-managed skill folder was removed from a managed target.
 - Delegated repo sync failed.
@@ -262,13 +263,13 @@ Meaningful work means at least one of:
 - Repo auto-update skipped safely because the tree was dirty, the remote did not match, fetch failed, or the fetched commit was not a fast-forward.
 - The Codex native plugin cache is stale relative to the configured repo source, requiring an explicit `setup toolkit` run.
 
-Normal no-op hook runs do not write or open a report. In hook mode, the bridge prints only:
+Normal no-op hook runs with the same observed repo commit and no target sync, stale plugin cache, skip, or validation issue do not write or open a report. In hook mode, the bridge prints only:
 
 ```text
 Toolkit updated: <report path>
 ```
 
-The report includes the new and previous commits, sync source, timestamp, changed files from the fast-forward range, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit n8n/live-system skip note, repo update status, hook-light validation result, target sync status, Codex native plugin cache status when checked, checksum, and any warning/error. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
+The report includes the new and previous observed commits, sync source, timestamp, a Repo Update section with configured branch and configured remote, changed files from the fast-forward or already-advanced observed range when available, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit n8n/live-system skip note, repo update status, hook-light validation result, target sync status, Codex native plugin cache status when checked, checksum, and any warning/error. For the default production configuration, this shows configured branch `main` and configured remote `https://github.com/weijunswj/ai-agent-toolkit` so users can see whether updates are coming from GitHub `main`. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
 
 For first-restart compatibility after a bridge update, an older installed native hook may fast-forward the configured local Toolkit repo and then delegate into the newly updated repo script without passing `--hook`. An unsuppressed delegated command with `--sync-enabled --write --sync-source repo --hub <same-hub> --skip-repo-auto-update` is report-eligible. When hub state contains `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_status`, the delegated repo script uses that stored metadata plus a local `git diff --name-only` over `repo_path` to populate the update report. New parent hooks pass `--suppress-update-report` to delegated sync so the parent hook remains the single report writer and duplicate reports are avoided.
 

@@ -1326,6 +1326,33 @@ function repoReportContextFromState(state, args) {
   };
 }
 
+function repoReportContextFromUpdate(state, updateResult, previousObservedCommit = '') {
+  const branch = state.repo_branch || DEFAULT_REPO_BRANCH;
+  const remote = state.repo_remote || DEFAULT_REPO_REMOTE;
+  const toCommit = updateResult.toCommit || '';
+  const externalAdvanceDetected = Boolean(
+    updateResult.status === 'up-to-date' &&
+    previousObservedCommit &&
+    toCommit &&
+    previousObservedCommit !== toCommit
+  );
+  const externalChangedFiles = externalAdvanceDetected
+    ? changedFilesBetween(updateResult.repoPath, previousObservedCommit, toCommit)
+    : [];
+  return {
+    status: updateResult.status,
+    fromCommit: updateResult.fromCommit,
+    toCommit,
+    changedFiles: externalAdvanceDetected ? externalChangedFiles : (updateResult.changedFiles || []),
+    validationStatus: updateResult.validation?.status || 'passed',
+    branch,
+    remote,
+    externalAdvanceDetected,
+    externalAdvanceFromCommit: externalAdvanceDetected ? previousObservedCommit : '',
+    externalAdvanceToCommit: externalAdvanceDetected ? toCommit : ''
+  };
+}
+
 function shouldConsiderUpdateReport(args, state) {
   return Boolean(
     !args.suppressUpdateReport &&
@@ -1342,6 +1369,7 @@ function shouldConsiderUpdateReport(args, state) {
 function updateReportIsMeaningful(context) {
   const repoStatus = context.repo?.status || '';
   if (repoStatus === 'updated') return true;
+  if (context.repo?.externalAdvanceDetected) return true;
   if (repoStatus === 'validation-failed') return true;
   if (repoStatus === 'sync-delegation-failed') return true;
   if (repoStatus === 'skipped' && context.repo?.error) return true;
@@ -1356,8 +1384,8 @@ function buildUpdateReport({ args, state, checksum, context }) {
   const skippedTargets = context.skippedTargets || [];
   const nativePluginCache = context.nativePluginCache || {};
   const warning = repo.error || context.warning || '';
-  const commit = repo.toCommit || currentToolkitCommit(state);
-  const previousCommit = repo.fromCommit || 'none';
+  const commit = repo.externalAdvanceToCommit || repo.toCommit || currentToolkitCommit(state);
+  const previousCommit = repo.externalAdvanceFromCommit || repo.fromCommit || 'none';
   const validationStatus = repo.validationStatus || repo.validation?.status || (repo.status ? 'not run' : 'not run');
   const targetSyncStatus = context.targetSyncStatus || (targetSyncs.length ? 'synced' : 'not needed');
   const lines = [
@@ -1374,12 +1402,32 @@ function buildUpdateReport({ args, state, checksum, context }) {
 
   if ((repo.changedFiles || []).length) {
     for (const file of repo.changedFiles) lines.push(`- ${inlineCode(slash(file))}`);
+  } else if (repo.externalAdvanceDetected) {
+    lines.push('- Local repo was already advanced before this hook run.');
   } else if (targetSyncs.length && (!repo.fromCommit || repo.fromCommit === repo.toCommit)) {
     lines.push('- No repo commit change; local bridge target state was stale.');
   } else if (repo.status && repo.status !== 'updated') {
     lines.push('- No repo commit change; repo auto-update skipped safely.');
   } else {
     lines.push('- No repo commit change.');
+  }
+
+  lines.push('', '## Repo Update', '');
+  if (repo.branch) lines.push(`- Configured branch: ${inlineCode(repo.branch)}`);
+  if (repo.remote) lines.push(`- Configured remote: ${inlineCode(repo.remote)}`);
+  lines.push(`- Previous observed commit: ${inlineCode(previousCommit)}`);
+  lines.push(`- Current commit: ${inlineCode(commit)}`);
+  if (repo.status === 'updated') {
+    lines.push('- Bridge action: fast-forwarded the configured local repo during this hook run.');
+  } else if (repo.externalAdvanceDetected) {
+    lines.push('- Bridge action: Local repo was already advanced before this hook run.');
+    lines.push('- Inference: Likely from a manual pull or another local Git update.');
+  } else if (repo.status === 'up-to-date') {
+    lines.push('- Bridge action: local repo stayed on the same commit during this hook run.');
+  } else if (repo.status) {
+    lines.push(`- Bridge action: ${inlineCode(repo.status)}.`);
+  } else {
+    lines.push('- Bridge action: repo update was not run.');
   }
 
   lines.push('', '## What Has Been Done', '');
@@ -1834,6 +1882,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   let updatedChecksum = checksum;
   let plannedTargetSyncs = [];
   let skippedTargets = [];
+  const previousObservedRepoCommit = state.last_repo_update_to_commit || '';
   try {
     try {
       updateResult = validateAndUpdateRepo(state, args);
@@ -1959,13 +2008,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     state: finalState,
     checksum: updatedChecksum,
     context: {
-      repo: {
-        status: updateResult.status,
-        fromCommit: updateResult.fromCommit,
-        toCommit: updateResult.toCommit,
-        changedFiles: updateResult.changedFiles || [],
-        validationStatus: updateResult.validation?.status || 'passed'
-      },
+      repo: repoReportContextFromUpdate(statusState, updateResult, previousObservedRepoCommit),
       targetSyncs: completedTargetSyncs,
       skippedTargets,
       nativePluginCache: codexNativePluginCacheStatus(args, finalState),
