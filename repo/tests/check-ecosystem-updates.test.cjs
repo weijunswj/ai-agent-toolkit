@@ -15,6 +15,7 @@ const lockedSha = '1111111111111111111111111111111111111111';
 const latestSha = '2222222222222222222222222222222222222222';
 const advisoryBaselineSha = '3333333333333333333333333333333333333333';
 const advisoryLatestSha = '4444444444444444444444444444444444444444';
+const bidiControlPattern = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -153,6 +154,60 @@ test('weekly radar exits cleanly without a report when source pins and advisory 
   });
 });
 
+test('weekly radar requires a PR report when source-lock drift exists without advisory drift', async () => {
+  const workspace = tempWorkspace();
+  const configRel = 'repo/ecosystem-radar.json';
+  const reportRel = 'repo/source-watch/reviews/weekly-ecosystem-radar.md';
+  writeJson(path.join(workspace, '_projects', 'example', 'SOURCE-LOCK.json'), activeLock(lockedSha));
+  writeJson(path.join(workspace, configRel), radarConfig([githubPathTarget()]));
+
+  await withMockGitHub([
+    { match: /\/repos\/example-owner\/example-repo\/commits\/main$/, body: { sha: latestSha } },
+    { match: /\/repos\/example-org\/knowledge-catalog\/commits\?/, body: [{ sha: advisoryBaselineSha }] }
+  ], async (apiBaseUrl) => {
+    const result = await runScript(workspace, configRel, reportRel, apiBaseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /PR needed: yes \(1 source update, 0 advisory findings\)/);
+  });
+
+  const report = fs.readFileSync(path.join(workspace, reportRel), 'utf8');
+  assert.match(report, /Upstream drift detected\. Manual review required\./);
+  assert.match(report, /This PR exists because actionable ecosystem drift was detected\./);
+  assert.doesNotMatch(report, /weekly ecosystem radar report only/i);
+  assert.match(report, /## Source-Lock Drift Requiring Manual Review/);
+  assert.match(report, /Source repo: `example-owner\/example-repo`/);
+  assert.match(report, /## Advisory Baseline Candidates Requiring Human Approval/);
+  assert.match(report, /No advisory baseline candidates require human approval\./);
+  assert.match(report, /## Non-Actionable Informational Notes/);
+  assert.match(report, /Keep source-pin\/source-file update PRs separate from advisory-baseline PRs\./);
+});
+
+test('weekly radar requires a PR report when advisory drift exists without source-lock drift', async () => {
+  const workspace = tempWorkspace();
+  const configRel = 'repo/ecosystem-radar.json';
+  const reportRel = 'repo/source-watch/reviews/weekly-ecosystem-radar.md';
+  writeJson(path.join(workspace, '_projects', 'example', 'SOURCE-LOCK.json'), activeLock(lockedSha));
+  writeJson(path.join(workspace, configRel), radarConfig([githubRepoTarget()]));
+
+  await withMockGitHub([
+    { match: /\/repos\/example-owner\/example-repo\/commits\/main$/, body: { sha: lockedSha } },
+    { match: /\/repos\/decision-tools\/ponytail\/commits\/main$/, body: { sha: advisoryLatestSha } }
+  ], async (apiBaseUrl) => {
+    const result = await runScript(workspace, configRel, reportRel, apiBaseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /PR needed: yes \(0 source updates, 1 advisory finding\)/);
+  });
+
+  const report = fs.readFileSync(path.join(workspace, reportRel), 'utf8');
+  assert.match(report, /Upstream drift detected\. Manual review required\./);
+  assert.match(report, /## Source-Lock Drift Requiring Manual Review/);
+  assert.match(report, /No source-lock drift requiring manual review was detected\./);
+  assert.match(report, /## Advisory Baseline Candidates Requiring Human Approval/);
+  assert.match(report, /Ponytail decision ladder/);
+  assert.match(report, /Advisory update detected/);
+  assert.match(report, /## Non-Actionable Informational Notes/);
+  assert.match(report, /Advisory baseline advancement requires a separate human-approved PR\./);
+});
 test('weekly radar reports existing source-lock drift and advisory target drift without mutating source files', async () => {
   const workspace = tempWorkspace();
   const configRel = 'repo/ecosystem-radar.json';
@@ -188,7 +243,9 @@ test('weekly radar reports existing source-lock drift and advisory target drift 
 
   const report = fs.readFileSync(path.join(workspace, reportRel), 'utf8');
   assert.match(report, /# Weekly Ecosystem Radar/);
-  assert.match(report, /Existing source-watch behavior is preserved/);
+  assert.match(report, /Upstream drift detected\. Manual review required\./);
+  assert.match(report, /This PR exists because actionable ecosystem drift was detected\./);
+  assert.doesNotMatch(report, /weekly ecosystem radar report only/i);
   assert.match(report, /Source repo: `example-owner\/example-repo`/);
   assert.match(report, new RegExp(`Locked commit: \`${lockedSha}\``));
   assert.match(report, new RegExp(`Latest commit: \`${latestSha}\``));
@@ -200,6 +257,35 @@ test('weekly radar reports existing source-lock drift and advisory target drift 
   assert.match(report, /No live deployment actions, provider calls, notification tests, or production mutations were run/);
 });
 
+test('weekly radar report removes hidden bidirectional controls from generated markdown', async () => {
+  const workspace = tempWorkspace();
+  const configRel = 'repo/ecosystem-radar.json';
+  const reportRel = 'repo/source-watch/reviews/weekly-ecosystem-radar.md';
+  writeJson(path.join(workspace, '_projects', 'example', 'SOURCE-LOCK.json'), activeLock(lockedSha));
+  writeJson(path.join(workspace, configRel), radarConfig([
+    githubRepoTarget({
+      id: 'bidi-target',
+      name: 'Ponytail\u202e decision ladder',
+      baseline_sha: null,
+      baseline_note: 'Initial baseline\u2066 requires human approval.',
+      recommended_action: 'Review advisory concepts\u200f only.'
+    })
+  ]));
+
+  await withMockGitHub([
+    { match: /\/repos\/example-owner\/example-repo\/commits\/main$/, body: { sha: lockedSha } }
+  ], async (apiBaseUrl) => {
+    const result = await runScript(workspace, configRel, reportRel, apiBaseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /PR needed: yes/);
+  });
+
+  const report = fs.readFileSync(path.join(workspace, reportRel), 'utf8');
+  assert.doesNotMatch(report, bidiControlPattern);
+  assert.match(report, /Ponytail decision ladder/);
+  assert.match(report, /Initial baseline requires human approval\./);
+  assert.match(report, /Review advisory concepts only\./);
+});
 test('advisory targets without human baselines require review without calling GitHub for that target', async () => {
   const workspace = tempWorkspace();
   const configRel = 'repo/ecosystem-radar.json';

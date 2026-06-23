@@ -16,9 +16,14 @@ const defaultConfigPath = 'repo/ecosystem-radar.json';
 const defaultReportPath = 'repo/source-watch/reviews/weekly-ecosystem-radar.md';
 const githubApiBaseUrl = 'https://api.github.com';
 const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
+const hiddenUnicodeControlPattern = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 
 function slash(value) {
   return value.split(path.sep).join('/');
+}
+
+function sanitizeGeneratedMarkdown(value) {
+  return String(value).replace(hiddenUnicodeControlPattern, '');
 }
 
 function parseArgs(argv) {
@@ -253,14 +258,14 @@ function listValue(values) {
 function renderSourceLockSection(findings) {
   if (findings.length === 0) {
     return [
-      '## Active Third-Party Source Pins',
+      '## Source-Lock Drift Requiring Manual Review',
       '',
-      'No active third-party source pin drift was detected.',
+      'No source-lock drift requiring manual review was detected.',
       ''
     ];
   }
   return [
-    '## Active Third-Party Source Pins',
+    '## Source-Lock Drift Requiring Manual Review',
     '',
     ...findings.flatMap((finding) => [
       `### ${finding.project_path}`,
@@ -311,25 +316,38 @@ function renderAdvisoryFinding(finding) {
 function renderAdvisorySection(findings) {
   if (findings.length === 0) {
     return [
-      '## Advisory Targets',
+      '## Advisory Baseline Candidates Requiring Human Approval',
       '',
-      'No advisory target drift was detected.',
+      'No advisory baseline candidates require human approval.',
       ''
     ];
   }
   return [
-    '## Advisory Targets',
+    '## Advisory Baseline Candidates Requiring Human Approval',
     '',
     ...findings.flatMap(renderAdvisoryFinding)
   ];
 }
 
+function renderInformationalNotesSection() {
+  return [
+    '## Non-Actionable Informational Notes',
+    '',
+    '- Existing daily source-watch behavior is preserved; this radar reuses the same active SOURCE-LOCK discovery and latest-commit comparison helpers.',
+    '- The generated report is a review notification only and is not approval to update sources, pins, generated skills, or advisory baselines.',
+    '- Keep source-pin/source-file update PRs separate from advisory-baseline PRs.',
+    ''
+  ];
+}
+
 function renderReviewReport({ sourceFindings, advisoryTargetFindings }) {
   const safetyNotes = [
-    'This PR is a weekly ecosystem radar report only.',
+    'Upstream drift detected. Manual review required.',
+    'This PR exists because actionable ecosystem drift was detected.',
     'The scheduled workflow stages only `repo/source-watch/reviews/weekly-ecosystem-radar.md`.',
     'No `_projects/**`, `SOURCE-LOCK.json`, generated `skills/**`, advisory baselines, provider or deployment config, secrets, or application code were staged by the workflow.',
     'No issues are created and no `issues: write` permission is requested.',
+    'No source pins or advisory baselines were changed.',
     'No source pins were changed.',
     'No SOURCE-LOCK pins were changed.',
     'No advisory baselines were changed.',
@@ -337,12 +355,13 @@ function renderReviewReport({ sourceFindings, advisoryTargetFindings }) {
     'No upstream packages were installed.',
     'No live deployment actions, provider calls, notification tests, or production mutations were run.',
     'No auto-merge is allowed.',
-    'Advisory baseline advancement requires a separate human-approved PR.'
+    'Advisory baseline advancement requires a separate human-approved PR.',
+    'Keep source-pin/source-file update PRs separate from advisory-baseline PRs.'
   ];
   const checklist = [
-    '- [ ] Review source-lock drift manually before opening any source update PR.',
+    '- [ ] Review source-lock drift manually before opening any source-pin/source-file update PR.',
     '- [ ] Confirm advisory target relevance before changing baselines.',
-    '- [ ] Keep source-pin and advisory-baseline changes in separate human-approved PRs.',
+    '- [ ] Keep source-pin/source-file update PRs separate from advisory-baseline PRs.',
     '- [ ] Confirm no upstream code or package installation was run.',
     '- [ ] Confirm no live deployment, provider, notification, or production mutation occurred.'
   ];
@@ -354,21 +373,21 @@ function renderReviewReport({ sourceFindings, advisoryTargetFindings }) {
     '',
     ...safetyNotes,
     '',
-    'Existing source-watch behavior is preserved; this radar reuses the same active SOURCE-LOCK discovery and latest-commit comparison helpers, and the legacy daily source-watch workflow remains unchanged.',
-    '',
     '## Manual Review Checklist',
     '',
     ...checklist,
     '',
     ...renderSourceLockSection(sourceFindings),
-    ...renderAdvisorySection(advisoryTargetFindings)
+    ...renderAdvisorySection(advisoryTargetFindings),
+    ...renderInformationalNotesSection()
   ].join('\n');
 }
 
 function writeReport(workspace, reportPath, markdown) {
   const outPath = resolveWorkspacePath(workspace, reportPath);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, markdown.endsWith('\n') ? markdown : `${markdown}\n`, 'utf8');
+  const cleanMarkdown = sanitizeGeneratedMarkdown(markdown);
+  fs.writeFileSync(outPath, cleanMarkdown.endsWith('\n') ? cleanMarkdown : `${cleanMarkdown}\n`, 'utf8');
   return outPath;
 }
 

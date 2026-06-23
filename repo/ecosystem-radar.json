@@ -6,7 +6,7 @@
       "repo/source-watch/reviews/weekly-ecosystem-radar.md"
     ],
     "advisory_baselines": "human_advanced_only",
-    "notes": "The scheduled radar may open or update a report-only PR. It must not advance source pins, advisory baselines, generated skills, provider/deployment config, secrets, or application code."
+    "notes": "The scheduled radar opens or updates a review PR when source-lock drift or advisory baseline candidates are detected. It must not advance source pins, advisory baselines, generated skills, provider/deployment config, secrets, or application code."
   },
   "targets": [
     {
