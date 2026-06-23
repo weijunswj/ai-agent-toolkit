@@ -1340,6 +1340,38 @@ test('hook report is generated when target sync happens without a repo commit ch
   assert.match(report.text, /checksum: `[a-f0-9]{64}`/);
 });
 
+test('hook report tells user to run setup toolkit when Codex native plugin cache is stale', () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha codex cache source\n' });
+  const stalePluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
+  const hub = path.join(root, 'hub', 'current');
+
+  writeFile(path.join(stalePluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
+  let result = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--sync-source', 'codex-plugin'
+  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      PLUGIN_ROOT: stalePluginRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit updated:/);
+
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Codex native plugin cache: `stale`/);
+  assert.match(report.text, /Run `setup toolkit`/);
+  assert.match(report.text, /target sync status: `not needed`/);
+  assert.equal(report.state.targets.ag2.synced_version, expectedBridgeVersion);
+});
 test('hook report records removed stale managed skill folders during target sync', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n', beta: 'beta v1\n' });

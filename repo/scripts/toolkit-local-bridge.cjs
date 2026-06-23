@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.cjs');
 
 const ARCHITECTURE_VERSION = 2;
 const BRIDGE_VERSION = '2.2.0';
@@ -23,6 +24,7 @@ const FULL_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge.te
 const HOOK_LIGHT_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs');
 const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
 const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
+const NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT = 5;
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -1343,6 +1345,7 @@ function updateReportIsMeaningful(context) {
   if (repoStatus === 'validation-failed') return true;
   if (repoStatus === 'sync-delegation-failed') return true;
   if (repoStatus === 'skipped' && context.repo?.error) return true;
+  if (context.nativePluginCache?.status === 'stale') return true;
   if ((context.targetSyncs || []).length) return true;
   return (context.targetSyncs || []).some((entry) => (entry.removedSkillNames || []).length);
 }
@@ -1351,6 +1354,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   const repo = context.repo || {};
   const targetSyncs = context.targetSyncs || [];
   const skippedTargets = context.skippedTargets || [];
+  const nativePluginCache = context.nativePluginCache || {};
   const warning = repo.error || context.warning || '';
   const commit = repo.toCommit || currentToolkitCommit(state);
   const previousCommit = repo.fromCommit || 'none';
@@ -1394,12 +1398,19 @@ function buildUpdateReport({ args, state, checksum, context }) {
   if (!targetSyncs.length && !skippedTargets.length && repo.status) {
     lines.push('- No enabled target sync was completed.');
   }
+  if (nativePluginCache.status === 'stale') {
+    lines.push('- Codex native plugin cache is stale. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata.');
+  }
   lines.push('- Skipped n8n/live systems; not touched.');
 
   lines.push('', '## Validation', '');
   lines.push(`- repo update status: ${inlineCode(repo.status || 'not run')}`);
   lines.push(`- hook-light validation: ${inlineCode(validationStatus)}`);
   lines.push(`- target sync status: ${inlineCode(targetSyncStatus)}`);
+  if (nativePluginCache.status) {
+    lines.push(`- Codex native plugin cache: ${inlineCode(nativePluginCache.status)}`);
+    for (const error of nativePluginCache.errors || []) lines.push(`  - ${inlineCode(error)}`);
+  }
   lines.push(`- checksum: ${inlineCode(checksum)}`);
   if (warning) lines.push(`- warning/error: ${inlineCode(warning)}`);
   return `${lines.join('\n')}\n`;
@@ -1762,6 +1773,25 @@ function hookSafeWarning(args, message) {
   }
 }
 
+function runtimeCodexPluginRoot() {
+  return path.resolve(process.env.PLUGIN_ROOT || path.resolve(__dirname, '..', '..'));
+}
+
+function codexNativePluginCacheStatus(args, state) {
+  if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
+  if (!state.repo_path) return { status: '' };
+  const repoPath = path.resolve(state.repo_path);
+  if (!fs.existsSync(repoPath)) return { status: '' };
+  const pluginRoot = runtimeCodexPluginRoot();
+  const errors = verifyInstalledCacheFreshness(pluginRoot, repoPath);
+  return {
+    status: errors.length ? 'stale' : 'fresh',
+    plugin_root: pluginRoot,
+    repo_path: repoPath,
+    errors: errors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+  };
+}
+
 function runDelegatedRepoSync({ args, hubPath, repoPath }) {
   const scriptPath = path.join(repoPath, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   if (!fs.existsSync(scriptPath)) {
@@ -1834,6 +1864,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
             validationStatus: details.validationStatus || (error.repoUpdateStatus === 'validation-failed' ? 'failed' : 'not run'),
             error: details.error || error.message
           },
+          nativePluginCache: codexNativePluginCacheStatus(args, statusState),
           targetSyncStatus: 'skipped'
         }
       });
@@ -1906,6 +1937,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
           error: error.message
         },
         skippedTargets,
+        nativePluginCache: codexNativePluginCacheStatus(args, failedState),
         targetSyncStatus: 'failed'
       }
     });
@@ -1936,6 +1968,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       },
       targetSyncs: completedTargetSyncs,
       skippedTargets,
+      nativePluginCache: codexNativePluginCacheStatus(args, finalState),
       targetSyncStatus: plannedTargetSyncs.length
         ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
         : 'not needed'
@@ -1985,6 +2018,7 @@ function run(argv = process.argv.slice(2)) {
   if (shouldRunRepoAutoUpdate(args, nextState)) {
     return runRepoAutoUpdate({ args, hubPath, state: nextState, discoveries, checksum, payloads });
   }
+  const hasTargetSync = SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads));
   if (
     args.syncEnabled &&
     !args.enableTargets.length &&
@@ -1993,13 +2027,41 @@ function run(argv = process.argv.slice(2)) {
     !args.disableAutoSync &&
     !args.enableRepoAutoUpdate &&
     !args.disableRepoAutoUpdate &&
-    !SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))
+    !hasTargetSync
   ) {
-    if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
-    return { status: 0, audit };
+    const report = maybeWriteUpdateReport({
+      args,
+      hubPath,
+      state: nextState,
+      checksum,
+      context: {
+        repo: repoReportContextFromState(nextState, args),
+        nativePluginCache: codexNativePluginCacheStatus(args, nextState),
+        targetSyncStatus: 'not needed'
+      }
+    });
+    nextState = report.state;
+    const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
+    if (report.reportPath) printUpdateReportLine(args, report.reportPath);
+    else if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
+    return { status: 0, audit: finalAudit };
   }
-  if (args.hook && !SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))) {
-    return { status: 0, audit };
+  if (args.hook && !hasTargetSync) {
+    const report = maybeWriteUpdateReport({
+      args,
+      hubPath,
+      state: nextState,
+      checksum,
+      context: {
+        repo: repoReportContextFromState(nextState, args),
+        nativePluginCache: codexNativePluginCacheStatus(args, nextState),
+        targetSyncStatus: 'not needed'
+      }
+    });
+    nextState = report.state;
+    const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
+    if (report.reportPath) printUpdateReportLine(args, report.reportPath);
+    return { status: 0, audit: finalAudit };
   }
 
   const lock = acquireLock(path.dirname(hubPath), args);
@@ -2046,6 +2108,7 @@ function run(argv = process.argv.slice(2)) {
         repo: repoReportContextFromState(nextState, args),
         targetSyncs,
         skippedTargets: SUPPORTED_TARGETS.filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled),
+        nativePluginCache: codexNativePluginCacheStatus(args, nextState),
         targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
       }
     });

@@ -224,7 +224,8 @@ node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
 ```
 
-9. Delegates enabled-target sync to the freshly updated repo script with `--skip-repo-auto-update`.
+9. Checks whether the running Codex native plugin cache is stale against the configured repo source and records a report-only reminder when `setup toolkit` should be run. It does not refresh, reinstall, remove, or upgrade the Codex native plugin cache from the hook.
+10. Delegates enabled-target sync to the freshly updated repo script with `--skip-repo-auto-update`.
 
 The delegated repo script builds the target payload from the updated local Toolkit repo `skills/` tree plus the small `ai-agent-toolkit` adapter skill. It must not use Codex or Claude private plugin caches as the skill payload source.
 
@@ -241,7 +242,7 @@ npm run validate:all
 node --test repo/tests/toolkit-local-bridge.test.cjs
 ```
 
-Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. If validation, fetch, fast-forward, or delegation fails in hook mode, the hook prints a concise warning, records the last repo update status in hub state when possible, skips target sync, and exits successfully so agent startup is not blocked.
+Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, Codex native plugin refresh/reinstall, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. If validation, fetch, fast-forward, or delegation fails in hook mode, the hook prints a concise warning, records the last repo update status in hub state when possible, skips target sync, and exits successfully so agent startup is not blocked.
 
 ## Update Reports
 
@@ -259,6 +260,7 @@ Meaningful work means at least one of:
 - Delegated repo sync failed.
 - Hook-light validation failed after a repo update.
 - Repo auto-update skipped safely because the tree was dirty, the remote did not match, fetch failed, or the fetched commit was not a fast-forward.
+- The Codex native plugin cache is stale relative to the configured repo source, requiring an explicit `setup toolkit` run.
 
 Normal no-op hook runs do not write or open a report. In hook mode, the bridge prints only:
 
@@ -266,7 +268,7 @@ Normal no-op hook runs do not write or open a report. In hook mode, the bridge p
 Toolkit updated: <report path>
 ```
 
-The report includes the new and previous commits, sync source, timestamp, changed files from the fast-forward range, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit n8n/live-system skip note, repo update status, hook-light validation result, target sync status, checksum, and any warning/error. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
+The report includes the new and previous commits, sync source, timestamp, changed files from the fast-forward range, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit n8n/live-system skip note, repo update status, hook-light validation result, target sync status, Codex native plugin cache status when checked, checksum, and any warning/error. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
 
 For first-restart compatibility after a bridge update, an older installed native hook may fast-forward the configured local Toolkit repo and then delegate into the newly updated repo script without passing `--hook`. An unsuppressed delegated command with `--sync-enabled --write --sync-source repo --hub <same-hub> --skip-repo-auto-update` is report-eligible. When hub state contains `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_status`, the delegated repo script uses that stored metadata plus a local `git diff --name-only` over `repo_path` to populate the update report. New parent hooks pass `--suppress-update-report` to delegated sync so the parent hook remains the single report writer and duplicate reports are avoided.
 
