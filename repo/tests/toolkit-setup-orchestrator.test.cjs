@@ -60,6 +60,19 @@ function createMinimalSetupRepo(root) {
   ].join('\n'));
 }
 
+function createMinimalSetupRepoWithBridgeLog(root) {
+  createMinimalSetupRepo(root);
+  writeFile(path.join(root, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), "'use strict';\nprocess.exit(0);\n");
+  writeFile(path.join(root, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "fs.appendFileSync(path.join(process.cwd(), 'BRIDGE_ARGS.log'), `${process.argv.slice(2).join(' ')}\\n`);",
+    'process.exit(0);',
+    ''
+  ].join('\n'));
+}
+
 function runTestGit(cwd, args) {
   const result = spawnSync('git', args, {
     cwd,
@@ -89,6 +102,7 @@ test('setup toolkit plan is full journey rather than plugin verify only', () => 
     'lite_validation',
     'repo_backed_auto_update',
     'bridge_audit',
+    'update_report_open_preference',
     'non_native_target_approval',
     'approved_target_sync'
   ]);
@@ -109,12 +123,13 @@ test('setup toolkit plan is full journey rather than plugin verify only', () => 
   assert.ok(commands.includes('node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs'));
   assert.ok(commands.includes(`node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path ${JSON.stringify(repoRoot)} --repo-branch main --enable-auto-sync --write`));
   assert.ok(commands.includes('node repo/scripts/toolkit-local-bridge.cjs --audit'));
+  assert.ok(commands.includes('node repo/scripts/toolkit-local-bridge.cjs --enable-update-report-open --write'));
   assert.ok(commands.includes('node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write'));
 
   const text = JSON.stringify(plan);
   assert.doesNotMatch(text, /repo\/tests\/toolkit-local-bridge\.test\.cjs/);
   assert.doesNotMatch(text, /npm\s+run\s+validate:all/);
-  assert.doesNotMatch(text, /--open-update-report|--enable-update-report-open/);
+  assert.doesNotMatch(text, /--open-update-report/);
   assert.doesNotMatch(text, /\b(?:npm|pip|docker|n8n)\s+(?:install|run|compose|import|export)\b/i);
   assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit')), false, 'plan mode must not write user-local bridge state');
 });
@@ -161,6 +176,14 @@ test('setup toolkit plan keeps repo auto-update and target writes approval-gated
   assert.match(repoStep.approval_question, /main/i);
   assert.doesNotMatch(repoStep.commands.join('\n'), /--enable-target/);
 
+  const reportStep = plan.steps.find((step) => step.id === 'update_report_open_preference');
+  assert.equal(reportStep.approval_required, true);
+  assert.equal(reportStep.write_flag, '--enable-update-report-open');
+  assert.equal(reportStep.decline_flag, '--skip-update-report-open');
+  assert.match(reportStep.approval_question, /^\*\*.+\?\*\*$/);
+  assert.match(reportStep.approval_question, /open Toolkit update reports automatically/i);
+  assert.match(reportStep.commands.join('\n'), /--enable-update-report-open --write/);
+
   const targetStep = plan.steps.find((step) => step.id === 'non_native_target_approval');
   assert.equal(targetStep.approval_required, true);
   assert.match(targetStep.approval_question, /OpenCode/);
@@ -173,6 +196,77 @@ test('setup toolkit plan keeps repo auto-update and target writes approval-gated
   assert.equal(syncStep.write_flag, '--enable-target <opencode|ag2>');
   assert.match(syncStep.commands.join('\n'), /--enable-target opencode --enable-target ag2 --write/);
   assert.match(syncStep.commands.join('\n'), /--sync-enabled --write/);
+});
+
+test('setup execute pauses for update report open preference until explicitly answered', () => {
+  const root = tmpRoot();
+  const origin = path.join(root, 'origin.git');
+  const setupRepo = path.join(root, 'repo');
+  fs.mkdirSync(setupRepo, { recursive: true });
+  runTestGit(root, ['init', '--bare', origin]);
+  runTestGit(setupRepo, ['init']);
+  runTestGit(setupRepo, ['checkout', '-b', 'main']);
+  runTestGit(setupRepo, ['config', 'user.email', 'setup-test@example.invalid']);
+  runTestGit(setupRepo, ['config', 'user.name', 'Setup Test']);
+  createMinimalSetupRepoWithBridgeLog(setupRepo);
+  runTestGit(setupRepo, ['add', '.']);
+  runTestGit(setupRepo, ['commit', '-m', 'base']);
+  runTestGit(setupRepo, ['remote', 'add', 'origin', origin]);
+  runTestGit(setupRepo, ['push', '-u', 'origin', 'main']);
+
+  let result = run([
+    '--execute',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--write-repo-auto-update',
+    '--enable-target', 'ag2'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 21, result.stderr || result.stdout);
+  assert.match(result.stdout, /SETUP PAUSED: update report auto-open is approval-gated\./);
+  assert.match(result.stdout, /\*\*Do you want Codex to open Toolkit update reports automatically after meaningful hook activity\?\*\*/);
+  assert.match(result.stdout, /--enable-update-report-open/);
+  assert.match(result.stdout, /--skip-update-report-open/);
+  let bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
+  assert.match(bridgeLog, /--enable-repo-auto-update/);
+  assert.doesNotMatch(bridgeLog, /--enable-update-report-open/);
+  assert.doesNotMatch(bridgeLog, /--enable-target ag2/);
+
+  fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'));
+  result = run([
+    '--execute',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--write-repo-auto-update',
+    '--enable-update-report-open',
+    '--enable-target', 'ag2'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
+  assert.match(bridgeLog, /--enable-update-report-open --write/);
+  assert.match(bridgeLog, /--enable-target ag2 --write/);
+
+  fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'));
+  result = run([
+    '--execute',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--write-repo-auto-update',
+    '--skip-update-report-open',
+    '--enable-target', 'ag2'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
+  assert.doesNotMatch(bridgeLog, /--enable-update-report-open/);
+  assert.match(bridgeLog, /--enable-target ag2 --write/);
 });
 
 test('setup docs route literal setup toolkit to the orchestrator', () => {

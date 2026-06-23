@@ -9,6 +9,7 @@ const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
 const SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL = 20;
+const SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL = 21;
 
 function repoRootFromScript() {
   return path.resolve(__dirname, '..', '..');
@@ -51,6 +52,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     codexCli: '',
     hub: '',
     writeRepoAutoUpdate: false,
+    enableUpdateReportOpen: false,
+    skipUpdateReportOpen: false,
     enableTargets: []
   };
 
@@ -71,6 +74,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--write-repo-auto-update') args.writeRepoAutoUpdate = true;
+    else if (arg === '--enable-update-report-open') args.enableUpdateReportOpen = true;
+    else if (arg === '--skip-update-report-open') args.skipUpdateReportOpen = true;
     else if (arg === '--enable-target') args.enableTargets.push(...parseTargetList(next()));
     else if (arg.startsWith('--enable-target=')) args.enableTargets.push(...parseTargetList(arg.slice('--enable-target='.length)));
     else if (arg === '--help' || arg === '-h') args.help = true;
@@ -78,6 +83,9 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
 
   if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
+  if (args.enableUpdateReportOpen && args.skipUpdateReportOpen) {
+    throw new Error('--enable-update-report-open and --skip-update-report-open cannot be used together');
+  }
   if (!args.plan && !args.execute && !args.help) args.plan = true;
   args.repoRoot = path.resolve(args.repoRoot);
   args.repoBranch = args.repoBranch || DEFAULT_REPO_BRANCH;
@@ -106,6 +114,11 @@ function setupPlan(options = {}) {
     '--repo-branch',
     repoBranch,
     '--enable-auto-sync',
+    '--write',
+    ...hubArgs
+  ]);
+  const updateReportOpenCommand = relNodeCommand(bridgeBase[0], [
+    '--enable-update-report-open',
     '--write',
     ...hubArgs
   ]);
@@ -165,6 +178,15 @@ function setupPlan(options = {}) {
         write: false
       },
       {
+        id: 'update_report_open_preference',
+        title: 'Ask whether Toolkit update reports should open automatically',
+        approval_required: true,
+        write_flag: '--enable-update-report-open',
+        decline_flag: '--skip-update-report-open',
+        approval_question: '**Do you want Codex to open Toolkit update reports automatically after meaningful hook activity?**',
+        commands: [updateReportOpenCommand]
+      },
+      {
         id: 'non_native_target_approval',
         title: 'Ask before non-native target writes',
         approval_required: true,
@@ -197,6 +219,8 @@ function printHelp() {
     '  node repo/scripts/setup-toolkit.cjs --plan --json',
     '  node repo/scripts/setup-toolkit.cjs --execute',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update',
+    '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-update-report-open',
+    '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --skip-update-report-open',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-target opencode',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-target opencode --enable-target ag2',
     '',
@@ -207,6 +231,8 @@ function printHelp() {
     '  --codex-cli <path>           explicit Codex CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --write-repo-auto-update    enable repo-backed auto-update and auto-sync in bridge hub state',
+    '  --enable-update-report-open persist opt-in opening of generated update reports',
+    '  --skip-update-report-open   explicitly leave generated update reports closed by default',
     '  --enable-target opencode|ag2 enable approved non-native bridge target after audit'
   ].join('\n'));
 }
@@ -354,6 +380,15 @@ function runBridgeAudit(args) {
   });
 }
 
+function runUpdateReportOpenWrite(args) {
+  runCommand(
+    'node repo/scripts/toolkit-local-bridge.cjs --enable-update-report-open --write',
+    process.execPath,
+    bridgeArgs(args, ['--enable-update-report-open', '--write']),
+    { cwd: args.repoRoot, timeout: 120000 }
+  );
+}
+
 function runApprovedTargetSync(args) {
   if (!args.enableTargets.length) return;
   const enableArgs = [];
@@ -391,6 +426,17 @@ function printTargetApproval(plan) {
   console.log('node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-target opencode --enable-target ag2');
 }
 
+function printUpdateReportOpenApproval(plan) {
+  const reportStep = plan.steps.find((step) => step.id === 'update_report_open_preference');
+  console.log('');
+  console.log('SETUP PAUSED: update report auto-open is approval-gated.');
+  console.log(reportStep.approval_question);
+  console.log('Approve only if you want meaningful Toolkit hook reports to open automatically in Notepad on Windows.');
+  console.log('After approval, rerun with: --enable-update-report-open');
+  console.log('To continue without auto-opening reports, rerun with: --skip-update-report-open');
+  console.log('Do not report setup toolkit complete until this gate is resolved.');
+}
+
 function printPlan(plan, asJson) {
   if (asJson) {
     console.log(JSON.stringify(plan, null, 2));
@@ -419,6 +465,11 @@ function execute(args) {
 
   runRepoAutoUpdateWrite(args);
   runBridgeAudit(args);
+  if (!args.enableUpdateReportOpen && !args.skipUpdateReportOpen) {
+    printUpdateReportOpenApproval(plan);
+    return SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL;
+  }
+  if (args.enableUpdateReportOpen) runUpdateReportOpenWrite(args);
   runApprovedTargetSync(args);
   if (!args.enableTargets.length) printTargetApproval(plan);
   console.log('');
@@ -453,6 +504,7 @@ module.exports = {
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,
   SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL,
+  SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL,
   parseArgs,
   setupPlan,
   normalizeRemote,
