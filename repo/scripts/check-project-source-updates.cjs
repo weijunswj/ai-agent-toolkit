@@ -9,6 +9,12 @@ const {
   isActiveThirdPartyAttributionLock,
   isRetiredMigrationLock
 } = require('./audit-project-source-locks.cjs');
+const {
+  advisoryFindings,
+  defaultAdvisoryDocPath,
+  renderAdvisorySection,
+  sanitizeGeneratedMarkdown
+} = require('./source-watch-advisory-targets.cjs');
 
 const defaultReportPath = 'repo/source-watch/reviews/active-third-party-updates.md';
 const githubApiBaseUrl = 'https://api.github.com';
@@ -20,12 +26,14 @@ function slash(value) {
 function parseArgs(argv) {
   const args = {
     workspace: process.cwd(),
-    report: defaultReportPath
+    report: defaultReportPath,
+    advisoryDoc: defaultAdvisoryDocPath
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--workspace') args.workspace = argv[++index] || args.workspace;
     else if (arg === '--report') args.report = argv[++index] || args.report;
+    else if (arg === '--advisory-doc') args.advisoryDoc = argv[++index] || args.advisoryDoc;
     else if (arg === '--help' || arg === '-h') args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -35,10 +43,10 @@ function parseArgs(argv) {
 
 function usage() {
   return [
-    'Usage: node repo/scripts/check-project-source-updates.cjs [--workspace <dir>] [--report <path>]',
+    'Usage: node repo/scripts/check-project-source-updates.cjs [--workspace <dir>] [--report <path>] [--advisory-doc <path>]',
     '',
-    'Checks active third-party SOURCE-LOCK.json entries against the latest GitHub commit for their source_ref.',
-    'When a locked commit is behind, writes a review-notification report only. It never copies upstream files or updates SOURCE-LOCK.json.'
+    'Checks active third-party SOURCE-LOCK.json entries and actionable advisory targets against GitHub.',
+    'When review is needed, writes a review-notification report only. It never copies upstream files or updates SOURCE-LOCK.json or advisory target documents.'
   ].join('\n');
 }
 
@@ -150,35 +158,16 @@ function trackedFileLine(file) {
   return `- \`${file.mode || 'exact'}\` \`${file.source_path || '(missing source_path)'}\` -> \`${target}\`${blob}${notes}`;
 }
 
-function renderReviewReport(updates) {
-  const notificationText = [
-    'This PR is a review notification only.',
-    'No source files were updated.',
-    'No SOURCE-LOCK pins were changed.',
-    'No upstream code was executed.',
-    'No auto-merge is allowed.',
-    'A human must review upstream changes, attribution/licence impact, allowlist scope, and then ask an AI agent to inspect before any real edits happen.'
-  ];
-  const checklist = [
-    '- [ ] Review upstream diff manually.',
-    '- [ ] Confirm changed files are within allowlist.',
-    '- [ ] Confirm attribution/licence notes still apply.',
-    '- [ ] Confirm no upstream code was executed.',
-    '- [ ] Decide whether a separate update PR should copy/adapt files.',
-    '- [ ] Run npm run validate:all before any real source update merge.'
-  ];
-
+function renderSourceUpdatesSection(updates) {
+  if (updates.length === 0) {
+    return [
+      '## Active Third-Party Updates',
+      '',
+      'No active third-party source updates were detected.',
+      ''
+    ];
+  }
   return [
-    '# Active Third-Party Source Update Review',
-    '',
-    'PR needed: yes',
-    '',
-    ...notificationText,
-    '',
-    '## Manual Review Checklist',
-    '',
-    ...checklist,
-    '',
     '## Active Third-Party Updates',
     '',
     ...updates.flatMap((update) => [
@@ -195,7 +184,47 @@ function renderReviewReport(updates) {
       ...update.tracked_files.map(trackedFileLine),
       ''
     ])
-  ].join('\n');
+  ];
+}
+
+function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
+  const notificationText = [
+    'This PR is a review notification only.',
+    'No source files or advisory tracking documents were updated.',
+    'No SOURCE-LOCK pins or advisory baselines were changed.',
+    'No SOURCE-LOCK pins were changed.',
+    'No upstream code was executed.',
+    'No auto-merge is allowed.',
+    'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and then ask an AI agent to inspect before any real edits happen.'
+  ];
+  const checklist = [
+    '- [ ] Review upstream diff manually.',
+    '- [ ] Confirm changed files are within allowlist.',
+    '- [ ] Confirm attribution/licence notes still apply.',
+    '- [ ] Confirm no upstream code was executed.',
+    '- [ ] Decide whether a separate update PR should copy/adapt files.',
+    '- [ ] If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
+    '- [ ] Run npm run validate:all before any real source update merge.'
+  ];
+
+  return sanitizeGeneratedMarkdown([
+    '# Active Source Watch Review',
+    '',
+    'PR needed: yes',
+    '',
+    ...notificationText,
+    '',
+    `Advisory actions, when present, are read from \`${advisoryDocPath}\`.`,
+    'No advisory tracking document was changed by this workflow.',
+    'If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
+    '',
+    '## Manual Review Checklist',
+    '',
+    ...checklist,
+    '',
+    ...renderSourceUpdatesSection(updates),
+    ...renderAdvisorySection(advisoryUpdates, advisoryDocPath)
+  ].join('\n'));
 }
 
 function resolveReportPath(workspace, reportPath) {
@@ -214,17 +243,9 @@ function removeReportIfPresent(workspace, reportPath) {
   if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
 }
 
-async function checkProjectSourceUpdates({ workspace, report }, env = process.env) {
+async function checkProjectSourceUpdates({ workspace, report, advisoryDoc = defaultAdvisoryDocPath }, env = process.env) {
   const locks = discoverSourceLocks(workspace);
   const activeLocks = activeThirdPartyLocks(locks);
-  if (activeLocks.length === 0) {
-    removeReportIfPresent(workspace, report);
-    return {
-      report_written: false,
-      updates: [],
-      summary: 'No active third-party source update candidates found.'
-    };
-  }
 
   const updates = [];
   for (const lockFile of activeLocks) {
@@ -242,22 +263,42 @@ async function checkProjectSourceUpdates({ workspace, report }, env = process.en
       tracked_files: Array.isArray(lock.files) ? lock.files : []
     });
   }
+  const advisoryResult = await advisoryFindings({ workspace, advisoryDocPath: advisoryDoc }, env);
+  const advisoryUpdates = advisoryResult.findings;
 
-  if (updates.length === 0) {
+  if (updates.length === 0 && advisoryUpdates.length === 0) {
     removeReportIfPresent(workspace, report);
+    if (activeLocks.length === 0 && advisoryResult.target_count === 0) {
+      return {
+        report_written: false,
+        updates: [],
+        advisory_updates: [],
+        summary: 'No active third-party source update candidates found.'
+      };
+    }
     return {
       report_written: false,
       updates,
-      summary: `Checked ${activeLocks.length} active third-party source lock(s); all pinned commits are current.`
+      advisory_updates: advisoryUpdates,
+      summary: advisoryResult.target_count > 0
+        ? `Checked ${activeLocks.length} active third-party source lock(s) and ${advisoryResult.target_count} advisory target(s); no actionable updates found.`
+        : `Checked ${activeLocks.length} active third-party source lock(s); all pinned commits are current.`
     };
   }
 
-  const reportPath = writeReport(workspace, report, renderReviewReport(updates));
+  const reportPath = writeReport(workspace, report, renderReviewReport({
+    updates,
+    advisoryUpdates,
+    advisoryDocPath: advisoryDoc
+  }));
   return {
     report_written: true,
     report_path: reportPath,
     updates,
-    summary: `PR needed: yes (${updates.length} active third-party source update${updates.length === 1 ? '' : 's'} detected).`
+    advisory_updates: advisoryUpdates,
+    summary: advisoryUpdates.length > 0
+      ? `PR needed: yes (${updates.length} source update${updates.length === 1 ? '' : 's'}, ${advisoryUpdates.length} advisory action${advisoryUpdates.length === 1 ? '' : 's'}).`
+      : `PR needed: yes (${updates.length} active third-party source update${updates.length === 1 ? '' : 's'} detected).`
   };
 }
 
@@ -287,5 +328,6 @@ module.exports = {
   latestCommitForLock,
   parseArgs,
   parseGitHubRepo,
-  renderReviewReport
+  renderReviewReport,
+  renderSourceUpdatesSection
 };

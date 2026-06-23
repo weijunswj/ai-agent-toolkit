@@ -21,7 +21,7 @@ const sourceWatcher = require(path.join(repoRoot, 'repo', 'scripts', 'watch-proj
 const contractPartialPath = '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md';
 const contractBegin = `<!-- AI-AGENT-TOOLKIT:${contractPartialPath}:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->`;
 const contractEnd = `<!-- AI-AGENT-TOOLKIT:${contractPartialPath}:END SOURCE-OF-TRUTH-CONTRACT -->`;
-const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.';
+const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.';
 
 function tempCopy() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-validate-'));
@@ -986,22 +986,27 @@ test('source-watch PR notifier uses the stable review-notification PR contract',
   assert.doesNotMatch(workflow, /^  issues: write$/m);
   assert.match(workflow, /repo\/scripts\/check-project-source-updates\.cjs/);
   assert.match(workflow, /source-watch\/review-active-third-party-updates/);
-  assert.match(workflow, /\[source-watch\] Review active third-party source updates/);
+  assert.match(workflow, /\[source-watch\] Review active source-watch updates/);
   assert.match(workflow, /This PR is a review notification only\./);
   assert.match(workflow, /No auto-merge is allowed\./);
   assert.equal(sourceWatchPrBodyText(workflow), [
     'This PR is a review notification only.',
-    'No source files were updated.',
+    'No source files or advisory tracking documents were updated.',
+    'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
     'No upstream code was executed.',
     'No auto-merge is allowed.',
-    'A human must review upstream changes, attribution/licence impact, allowlist scope, and then ask an AI agent to inspect before any real edits happen.',
+    'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and then ask an AI agent to inspect before any real edits happen.',
+    'Advisory actions, when present, are read from `repo/source-watch/advisory-targets.json`.',
+    'No advisory tracking document was changed by this workflow.',
+    'If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
     '',
     '- [ ] Review upstream diff manually.',
     '- [ ] Confirm changed files are within allowlist.',
     '- [ ] Confirm attribution/licence notes still apply.',
     '- [ ] Confirm no upstream code was executed.',
     '- [ ] Decide whether a separate update PR should copy/adapt files.',
+    '- [ ] If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
     '- [ ] Run npm run validate:all before any real source update merge.'
   ].join('\n'));
   assert.match(workflow, /persist-credentials:\s*false/);
@@ -1075,96 +1080,46 @@ test('source-watch PR notifier is the only scheduled source-watch workflow', () 
     .map((name) => `.github/workflows/${name}`);
   const scheduledSourceWatch = workflowFiles.filter((relPath) => {
     const text = readTextFile(path.join(repoRoot, relPath));
-    return relPath !== '.github/workflows/weekly-ecosystem-radar.yml' &&
-      /source[- ]watch/i.test(`${relPath}\n${text}`) &&
-      /^\s{2}schedule:\s*$/m.test(text);
-  });
-  const scheduledWeeklyRadar = workflowFiles.filter((relPath) => {
-    const text = readTextFile(path.join(repoRoot, relPath));
-    return relPath === '.github/workflows/weekly-ecosystem-radar.yml' &&
-      /^name:\s*Weekly Ecosystem Radar\s*$/m.test(text) &&
+    return /source[- ]watch/i.test(`${relPath}\n${text}`) &&
       /^\s{2}schedule:\s*$/m.test(text);
   });
 
   assert.deepEqual(scheduledSourceWatch, ['.github/workflows/source-watch-pr.yml']);
-  assert.deepEqual(scheduledWeeklyRadar, ['.github/workflows/weekly-ecosystem-radar.yml']);
   assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'safe-source-update.yml')), false);
 });
 
-test('weekly ecosystem radar workflow uses the stable actionable-drift PR contract', () => {
-  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'weekly-ecosystem-radar.yml'));
-  assert.match(workflow, /^name:\s*Weekly Ecosystem Radar\s*$/m);
-  assert.match(workflow, /cron: "37 6 \* \* 2"/);
-  assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/m);
-  assert.match(workflow, /^  contents: write$/m);
-  assert.match(workflow, /^  pull-requests: write$/m);
-  assert.doesNotMatch(workflow, /^  issues: write$/m);
-  assert.match(workflow, /repo\/scripts\/check-ecosystem-updates\.cjs --report "\$REPORT_TEMP"/);
-  assert.match(workflow, /BRANCH: codex\/weekly-ecosystem-radar/);
-  assert.match(workflow, /PR_TITLE: "\[radar\] Weekly ecosystem update review"/);
-  assert.match(workflow, /REPORT_PATH: repo\/source-watch\/reviews\/weekly-ecosystem-radar\.md/);
-  assert.match(workflow, /git add -- "\$REPORT_PATH"/);
-  assert.match(workflow, /if \[ "\$staged_files" != "\$REPORT_PATH" \]; then/);
-  assert.match(workflow, /git commit --allow-empty -m "Record weekly ecosystem radar review"/);
-  assert.match(workflow, /if: steps\.radar\.outputs\.pr_needed == 'true' && steps\.update_branch\.outputs\.pushed == 'true'/);
-  assert.match(workflow, /Write weekly radar job summary/);
-  assert.match(workflow, /Upstream drift detected\. Manual review required\./);
-  assert.doesNotMatch(workflow, /Find existing weekly radar PR|Skip weekly radar PR without diff/);
-  assert.doesNotMatch(workflow, /weekly ecosystem radar report only/i);
-  assert.match(workflow, /\[radar\] Weekly ecosystem update review/);
-  assert.match(workflow, /No issues are created and no `issues: write` permission is requested\./);
-  assert.match(workflow, /This PR exists because actionable ecosystem drift was detected\./);
-  assert.match(workflow, /Source-lock drift requiring manual review is listed in the generated report\./);
-  assert.match(workflow, /Advisory baseline candidates requiring human approval are listed separately in the generated report\./);
-  assert.match(workflow, /Non-actionable informational notes are listed separately in the generated report\./);
-  assert.match(workflow, /No source pins or advisory baselines were changed\./);
-  assert.match(workflow, /No SOURCE-LOCK pins were changed\./);
-  assert.match(workflow, /Advisory baseline advancement requires a separate human-approved PR\./);
-  assert.match(workflow, /Keep source-pin\/source-file update PRs separate from advisory-baseline PRs\./);
-  assert.doesNotMatch(workflow, /gh issue create|safe-source-update\.cjs|gh pr merge|--auto/i);
-  assert.doesNotMatch(workflow, /git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json|skills\/|repo\/ecosystem-radar\.json)/i);
+test('weekly ecosystem radar codebase is fully removed', () => {
+  for (const relPath of [
+    '.github/workflows/weekly-ecosystem-radar.yml',
+    'repo/scripts/check-ecosystem-updates.cjs',
+    'repo/ecosystem-radar.json',
+    'repo/tests/check-ecosystem-updates.test.cjs',
+    'repo/tests/weekly-ecosystem-radar-workflow.test.cjs'
+  ]) {
+    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, `${relPath} should be removed`);
+  }
 });
-test('validator rejects weekly ecosystem radar issue permission', () => {
+
+test('validator rejects weekly ecosystem radar resurrection', () => {
   const cwd = tempCopy();
   const workflowPath = path.join(cwd, '.github', 'workflows', 'weekly-ecosystem-radar.yml');
-  const workflow = readTextFile(workflowPath);
-  fs.writeFileSync(workflowPath, workflow.replace('  pull-requests: write\n', '  pull-requests: write\n  issues: write\n'));
+  fs.writeFileSync(workflowPath, [
+    'name: Weekly Ecosystem Radar',
+    'on:',
+    '  schedule:',
+    '    - cron: "37 6 * * 2"',
+    'permissions:',
+    '  contents: write'
+  ].join('\n'));
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /weekly-ecosystem-radar\.yml must not request issues: write/);
+  assert.match(result.stderr, /weekly ecosystem radar has been removed/);
 });
 
-test('validator rejects weekly ecosystem radar staging outside the report path', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'weekly-ecosystem-radar.yml');
-  const workflow = readTextFile(workflowPath);
-  fs.writeFileSync(workflowPath, workflow.replace('git add -- "$REPORT_PATH"', 'git add -- "$REPORT_PATH" repo/ecosystem-radar.json'));
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /weekly-ecosystem-radar\.yml must stage only the weekly radar report path/);
-});
-
-test('validator rejects weekly ecosystem radar PR creation without pushed review branch gate', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'weekly-ecosystem-radar.yml');
-  const workflow = readTextFile(workflowPath);
-  fs.writeFileSync(
-    workflowPath,
-    workflow.replace(
-      "if: steps.radar.outputs.pr_needed == 'true' && steps.update_branch.outputs.pushed == 'true'",
-      "if: steps.radar.outputs.pr_needed == 'true'"
-    )
-  );
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /weekly-ecosystem-radar\.yml must create or update the weekly radar PR only after pushing the review branch/);
-});
-test('validator accepts the weekly ecosystem radar workflow allowance only for its reviewed path', () => {
+test('validator accepts the daily source-watch advisory document', () => {
   const errors = validator.runValidation();
-  assert.equal(errors.filter((error) => /weekly-ecosystem-radar\.yml/.test(error)).length, 0, errors.join('\n'));
+  assert.equal(errors.filter((error) => /advisory-targets\.json/.test(error)).length, 0, errors.join('\n'));
 });
 
 test('auto-sync workflow owns agent instruction shim freshness', () => {
