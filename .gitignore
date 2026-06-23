@@ -5,6 +5,7 @@
 .n8n-local/backups/
 .n8n-local/import/
 .tmp/
+.agent-toolkit-backups/
 /n8n-workflows/
 .to-sanitise/
 .sanitised/

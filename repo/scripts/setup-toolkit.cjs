@@ -15,7 +15,7 @@ function repoRootFromScript() {
 }
 
 function quote(value) {
-  return `"${String(value).replace(/"/g, '\\"')}"`;
+  return JSON.stringify(String(value));
 }
 
 function slash(value) {

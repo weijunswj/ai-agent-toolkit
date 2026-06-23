@@ -71,7 +71,7 @@ test('setup toolkit plan is full journey rather than plugin verify only', () => 
   assert.ok(commands.includes('node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json'));
   assert.ok(commands.includes('node repo/scripts/validate-toolkit.cjs'));
   assert.ok(commands.includes('node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs'));
-  assert.ok(commands.includes(`node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "${repoRoot}" --repo-branch main --enable-auto-sync --write`));
+  assert.ok(commands.includes(`node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path ${JSON.stringify(repoRoot)} --repo-branch main --enable-auto-sync --write`));
   assert.ok(commands.includes('node repo/scripts/toolkit-local-bridge.cjs --audit'));
   assert.ok(commands.includes('node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write'));
 
