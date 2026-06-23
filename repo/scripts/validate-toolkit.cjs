@@ -165,6 +165,7 @@ const expectedFiles = [
   'repo/scripts/safe-source-update.cjs',
   'repo/scripts/toolkit-local-bridge.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
+  'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/sync-repo-doc-contract.cjs',
   'repo/docs/published-surface-audit-baseline.json',
   '.github/workflows/auto-sync-generated-surfaces.yml',

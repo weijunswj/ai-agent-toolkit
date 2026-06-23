@@ -51,12 +51,13 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. For Codex, open the repo in Codex and say `setup toolkit`.
-3. Let Codex install or verify the Toolkit native plugin.
+2. For Codex, open the repo in Codex and say `setup toolkit`; agents must run `node repo/scripts/setup-toolkit.cjs --execute` from this repo instead of stopping after plugin verification.
+3. Let Codex install or verify the Toolkit native plugin, then run the lite setup validation.
 4. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 5. Restart Codex if setup says the plugin needs a fresh session.
-6. For Claude Code, use Claude Code's native Toolkit plugin flow from this repo; keep Codex and Claude Code plugin setup separate.
-7. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+6. Approve repo-backed auto-update only if you want the Toolkit bridge hub configured from this local repo on `main` with auto-sync.
+7. For Claude Code, use Claude Code's native Toolkit plugin flow from this repo; keep Codex and Claude Code plugin setup separate.
+8. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
 
 Codex and Claude Code update Toolkit through their own native plugin systems:
 
@@ -209,7 +210,7 @@ node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 Enable opt-in repo-backed auto-update from a trusted local Toolkit checkout:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "C:\Users\<user>\GitHub Projects\ai-agent-toolkit" --repo-branch main --enable-auto-sync --enable-target opencode --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "C:\Users\<user>\GitHub Projects\ai-agent-toolkit" --repo-branch main --enable-auto-sync --write
 ```
 
 After this is enabled, Codex and Claude Code Toolkit plugin SessionStart hooks use the configured local repo as source of truth: they validate the repo, fetch the configured branch, fast-forward only, run hook-light validation (`node repo/scripts/validate-toolkit.cjs` + `node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs`), and then sync enabled bridge targets from the updated repo script. The hook path does not run full suite validation; run full validation manually when needed:

@@ -23,6 +23,8 @@ These files publish one compact discoverability skill. Bridge setup, repo auto-u
 
 [repo/scripts/setup-codex-toolkit-plugin.cjs](../../../repo/scripts/setup-codex-toolkit-plugin.cjs) is the Codex-only native plugin install verifier and local marketplace wrapper runner. It validates `.agents/plugins/marketplace.json`, the headless-safe `ON_USE` auth policy, `.codex-plugin/plugin.json`, installed Codex plugin state, Toolkit version `2.2.0`, the installed cache `SessionStart` hook, and package-critical cache freshness against this repo before setup reports success. The user must still approve the startup hook manually when Codex prompts after installation. The helper uses supported Codex plugin commands instead of editing Codex config by hand and does not install or update Claude Code.
 
+[repo/scripts/setup-toolkit.cjs](../../../repo/scripts/setup-toolkit.cjs) is the script-backed English `setup toolkit` orchestrator. Plan mode is read-only; execute mode verifies the trusted repo state on `main`, refreshes the Codex native plugin cache only when verification requires it, runs lite setup validation, audits bridge targets, and pauses before approval-gated repo-backed auto-update or OpenCode/Antigravity 2 target writes.
+
 [repo/scripts/repair-codex-plugin-windows-hooks.cjs](../../../repo/scripts/repair-codex-plugin-windows-hooks.cjs) is the canonical Windows post-install hook repair utility for installed Codex plugin roots. It parses `hooks/hooks.json`, writes only the Toolkit-managed hook wrapper when needed, and applies the n8n-specific Node fallback patch for `n8n-skills@n8n-io`. The paired audit script can run `--verify-output` to execute repaired hooks with sample input and verify hook JSON output before approval. It is first-party Toolkit setup infrastructure, not copied third-party plugin source.
 
 ## AI-Facing Surfaces
@@ -44,4 +46,4 @@ These files publish one compact discoverability skill. Bridge setup, repo auto-u
 
 ## Validation
 
-Targeted validation lives in [repo/tests/toolkit-local-bridge.test.cjs](../../../repo/tests/toolkit-local-bridge.test.cjs) and [repo/scripts/validate-toolkit.cjs](../../../repo/scripts/validate-toolkit.cjs).
+Targeted validation lives in [repo/tests/toolkit-local-bridge.test.cjs](../../../repo/tests/toolkit-local-bridge.test.cjs), [repo/tests/toolkit-setup-orchestrator.test.cjs](../../../repo/tests/toolkit-setup-orchestrator.test.cjs), and [repo/scripts/validate-toolkit.cjs](../../../repo/scripts/validate-toolkit.cjs).

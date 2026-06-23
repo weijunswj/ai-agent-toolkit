@@ -19,8 +19,17 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
 const expectedBridgeVersion = '2.2.0';
 
+function tmpBaseDir() {
+  if (process.platform === 'win32' && process.env.USERPROFILE) {
+    const userTemp = path.join(process.env.USERPROFILE, 'AppData', 'Local', 'Temp');
+    fs.mkdirSync(userTemp, { recursive: true });
+    return userTemp;
+  }
+  return os.tmpdir();
+}
+
 function tmpRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bridge-'));
+  return fs.mkdtempSync(path.join(tmpBaseDir(), 'toolkit-bridge-'));
 }
 
 function run(args, options = {}) {
@@ -801,12 +810,18 @@ test('AG2 Python discovery rejects command shims instead of invoking a shell', (
 
 test('AG2 audit selects Windows user-local python versioned executables', {
   skip: process.platform !== 'win32' ? 'Windows user-local Python discovery is Windows-only' : false
-}, () => {
+}, (t) => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const pythonExe = path.join(root, '.local', 'bin', 'python3.14.exe');
   const logPath = path.join(root, 'python3.14.log');
   writeFakePythonExecutable(pythonExe, logPath);
+  const probe = spawnSync(pythonExe, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+  if (probe.error && /\bUNKNOWN\b/.test(probe.error.message || '')) {
+    t.skip(`freshly compiled fake Python executable cannot be spawned in this environment: ${probe.error.message}`);
+    return;
+  }
+  assert.equal(probe.status, 0, `fake Python executable must run before discovery\nstdout:\n${probe.stdout}\nstderr:\n${probe.stderr}\nerror:\n${probe.error?.message || ''}`);
 
   const result = run(['--hub', hub, '--audit'], {
     env: {

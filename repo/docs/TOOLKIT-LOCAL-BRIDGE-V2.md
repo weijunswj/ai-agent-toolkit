@@ -137,7 +137,13 @@ codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
 
 The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`. The wrapper must use `policy.authentication: "ON_USE"`, not `ON_INSTALL`, so a no-auth local Toolkit plugin can install headlessly before any hook trust prompt.
 
-For `setup toolkit` in Codex, agents must perform only the minimal repo update check first, then verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
+For `setup toolkit` in Codex, agents must run the script-backed journey:
+
+```powershell
+node repo/scripts/setup-toolkit.cjs --execute
+```
+
+The orchestrator performs only the minimal repo update check first, then runs the required steps to verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync. If it pauses before repo-backed auto-update, ask the user before rerunning with `--write-repo-auto-update`; ask separately before adding any `--enable-target opencode` or `--enable-target ag2` target writes. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
 
 Before reporting `setup toolkit` complete, run:
 
@@ -195,7 +201,7 @@ Repo auto-update is opt-in and uses the configured local Toolkit Git repo as sou
 Enable once from a trusted local Toolkit checkout:
 
 ```powershell
-node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "C:\Users\<user>\GitHub Projects\ai-agent-toolkit" --repo-branch main --enable-auto-sync --enable-target opencode --enable-target ag2 --write
+node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "C:\Users\<user>\GitHub Projects\ai-agent-toolkit" --repo-branch main --enable-auto-sync --write
 ```
 
 Use `--repo-remote <url>` only when intentionally testing or maintaining a non-default remote. The expected production remote is `https://github.com/weijunswj/ai-agent-toolkit`.
