@@ -1585,9 +1585,15 @@ test('legacy delegated repo sync writes an update report using stored repo updat
   assert.match(fs.readFileSync(targetSkill, 'utf8'), /alpha legacy v2/);
 
   const report = readLatestReport(fixture.hub);
+  assert.match(report.text, /## TL;DR/);
   assert.match(report.text, new RegExp(`Toolkit updated to commit: \`${fixture.toCommit}\``));
   assert.match(report.text, new RegExp(`Previous commit: \`${fixture.fromCommit}\``));
   assert.match(report.text, /Source: `repo`/);
+  assert.match(report.text, /Time \(SGT\): `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} SGT`/);
+  assert.doesNotMatch(report.text, /Timestamp: `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`/);
+  assert.match(report.text, /Repo: updated from [0-9a-f]{8} to [0-9a-f]{8}\./);
+  assert.match(report.text, /Targets: synced Antigravity 2 \(2 skills\)\./);
+  assert.match(report.text, /Action needed: none\./);
   assert.match(report.text, /- `skills\/alpha\/SKILL\.md`/);
   assert.match(report.text, /Synced Toolkit skills to Antigravity 2:/);
   assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
@@ -1704,6 +1710,42 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
   assert.match(result.stdout, /Toolkit updated:/);
   assert.match(report.text, /repo update status: `skipped`/);
   assert.match(report.text, /warning\/error: `dirty working tree`/i);
+});
+
+test('hook mode branch mismatch report tells user to switch back to main', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const marker = path.join(fixture.root, 'delegate.log');
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--write'
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  git(fixture.repo, ['checkout', '-b', 'feature-work']);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
+      TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: marker
+    })
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.last_repo_update_status, 'skipped');
+  assert.match(state.last_repo_update_error, /branch mismatch/i);
+  const report = readLatestReport(hub);
+  assert.match(report.text, /## TL;DR/);
+  assert.match(report.text, /Action needed: switch the Toolkit repo back to `main`, then restart Codex or rerun setup\/sync\./);
+  assert.match(report.text, /Suggested fix: switch the Toolkit repo back to `main`, then restart Codex or rerun setup\/sync\./);
 });
 
 test('hook mode rejects a repo whose origin remote does not match configured remote', () => {
