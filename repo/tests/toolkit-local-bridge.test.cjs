@@ -1844,7 +1844,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /setup toolkit/i, relPath);
     assert.match(text, /git fetch origin main/, relPath);
     assert.match(text, /git merge --ff-only origin\/main/, relPath);
-    const minimalRepoBlock = text.match(/Perform only the minimal trusted local Toolkit repo update on `main`[\s\S]*?```powershell\n([\s\S]*?)\n```/i);
+    const minimalRepoBlock = text.match(/Perform only the minimal trusted local Toolkit repo update on `main`[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n```/i);
     assert.ok(minimalRepoBlock, relPath);
     assert.doesNotMatch(minimalRepoBlock[1], /validate-toolkit|toolkit-local-bridge.*test/, relPath);
     const cacheRefreshIndex = text.indexOf('verify and refresh the Toolkit native plugin cache before running repo validation');
@@ -1852,8 +1852,9 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.notEqual(cacheRefreshIndex, -1, relPath);
     assert.notEqual(fastValidationIndex, -1, relPath);
     assert.ok(cacheRefreshIndex < fastValidationIndex, relPath);
+    assert.match(text, /If an older installed `toolkit-setup` skill says to run the full bridge suite first, treat that instruction as stale/i, relPath);
     assert.match(text, /node repo\/scripts\/validate-toolkit\.cjs/, relPath);
-    const setupValidationBlock = text.match(/After the native plugin cache is current, run fast setup validation:[\s\S]*?```powershell\n([\s\S]*?)\n```/i);
+    const setupValidationBlock = text.match(/After the native plugin cache is current, run fast setup validation:[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n```/i);
     assert.ok(setupValidationBlock, relPath);
     assert.match(setupValidationBlock[1], /node --test repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs/, relPath);
     assert.doesNotMatch(setupValidationBlock[1], /node --test repo\/tests\/toolkit-local-bridge\.test\.cjs/, relPath);
@@ -1885,6 +1886,16 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /SessionStart/i, relPath);
     assert.match(text, /fast-forward/i, relPath);
   }
+});
+
+test('bridge docs document cache-first setup and release branch auto-update bounds', () => {
+  const text = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'TOOLKIT-LOCAL-BRIDGE-V2.md'), 'utf8');
+  assert.match(text, /verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync/i);
+  assert.match(text, /Routine setup uses `repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs`/);
+  assert.match(text, /Release-branch auto-update consideration/i);
+  assert.match(text, /configure `--repo-branch release` only after that branch exists and has a clear CI\/merge policy/i);
+  assert.match(text, /pull-on-session-start/i);
+  assert.match(text, /does not run a GitHub webhook listener or background push daemon/i);
 });
 
 test('Toolkit exposes a local Codex marketplace wrapper for supported plugin install', () => {

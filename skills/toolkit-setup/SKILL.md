@@ -66,7 +66,7 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-Run `--write --json` only when `--verify` reports the plugin is missing, disabled, stale, points at the wrong source, has same-version stale cache content, or lacks a valid installed cache. Do not run `validate-toolkit.cjs`, bridge tests, repo auto-update enablement, or target sync before this native cache check/refresh has passed or failed clearly.
+Run `--write --json` only when `--verify` reports the plugin is missing, disabled, stale, points at the wrong source, has same-version stale cache content, or lacks a valid installed cache. Do not run `validate-toolkit.cjs`, bridge tests, repo auto-update enablement, or target sync before this native cache check/refresh has passed or failed clearly. If an older installed `toolkit-setup` skill says to run the full bridge suite first, treat that instruction as stale after reading root `AGENTS.md` or this repo copy of the skill.
 
 3. After the native plugin cache is current, run fast setup validation:
 
