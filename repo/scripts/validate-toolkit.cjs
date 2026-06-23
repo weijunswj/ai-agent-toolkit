@@ -156,8 +156,8 @@ const expectedFiles = [
   'repo/scripts/audit-published-surfaces.cjs',
   'repo/scripts/watch-project-sources.cjs',
   'repo/scripts/check-project-source-updates.cjs',
-  'repo/scripts/check-ecosystem-updates.cjs',
-  'repo/ecosystem-radar.json',
+  'repo/scripts/source-watch-advisory-targets.cjs',
+  'repo/source-watch/advisory-targets.json',
   'repo/scripts/package-skills.cjs',
   'repo/scripts/package-packs.cjs',
   'repo/scripts/audit-skill-portability.cjs',
@@ -171,7 +171,6 @@ const expectedFiles = [
   '.github/workflows/auto-sync-generated-surfaces.yml',
   '.github/workflows/source-watch-plan.yml',
   '.github/workflows/source-watch-pr.yml',
-  '.github/workflows/weekly-ecosystem-radar.yml',
   '.github/workflows/validate.yml'
 ];
 
@@ -413,8 +412,8 @@ function fail(errors, message) {
 
 const autoSyncGeneratedSurfacesWorkflowPath = '.github/workflows/auto-sync-generated-surfaces.yml';
 const sourceWatchPrWorkflowPath = '.github/workflows/source-watch-pr.yml';
-const weeklyEcosystemRadarWorkflowPath = '.github/workflows/weekly-ecosystem-radar.yml';
-const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active third-party SOURCE-LOCK pins with upstream GitHub commits and open or update a stable review PR. It must not copy upstream files, update SOURCE-LOCK pins, execute upstream code, auto-merge, push to main, run live n8n actions, or treat the notification PR as approval to change source. Real source updates require a separate human-approved PR after review.';
+const advisoryTargetsPath = 'repo/source-watch/advisory-targets.json';
+const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.';
 const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
   '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
@@ -2042,22 +2041,20 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
 function validateWorkflows(errors) {
   const workflowFiles = listFiles().filter((entry) => entry.relPath.startsWith('.github/workflows/') && /\.ya?ml$/i.test(entry.relPath));
   const scheduledSourceWatchWorkflows = [];
-  const scheduledWeeklyRadarWorkflows = [];
   for (const entry of workflowFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
     const isAutoSyncGeneratedSurfacesWorkflow = entry.relPath === autoSyncGeneratedSurfacesWorkflowPath;
     const isSourceWatchPlanWorkflow = entry.relPath === '.github/workflows/source-watch-plan.yml';
     const isSourceWatchPrWorkflow = entry.relPath === sourceWatchPrWorkflowPath;
-    const isWeeklyEcosystemRadarWorkflow = entry.relPath === weeklyEcosystemRadarWorkflowPath;
     const isReadOnlyValidationWorkflow = entry.relPath === '.github/workflows/validate.yml';
     if (!/^permissions:\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
     if (/^\s*issues:\s*write\b/im.test(text)) fail(errors, `${entry.relPath} must not request issues: write`);
-    if (/contents:\s*write/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow && !isSourceWatchPrWorkflow && !isWeeklyEcosystemRadarWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
-    if (/pull-requests:\s*write/i.test(text) && !isSourceWatchPrWorkflow && !isWeeklyEcosystemRadarWorkflow) fail(errors, `${entry.relPath} uses pull-requests: write`);
+    if (/contents:\s*write/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
+    if (/pull-requests:\s*write/i.test(text) && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} uses pull-requests: write`);
     if (/gh\s+pr\s+merge/i.test(text) || (/auto-merge/i.test(text) && !/No auto-merge is allowed\./.test(text))) {
       fail(errors, `${entry.relPath} contains forbidden merge behavior`);
     }
-    if (/git\s+commit|git\s+push/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow && !isSourceWatchPrWorkflow && !isWeeklyEcosystemRadarWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
+    if (/git\s+commit|git\s+push/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} contains forbidden commit/push behavior`);
     if (isSourceWatchPlanWorkflow && !/^name:\s*Source Watch Advisory Plan\s*$/m.test(text)) {
       fail(errors, `${entry.relPath} workflow name must be advisory/read-only`);
     }
@@ -2065,165 +2062,20 @@ function validateWorkflows(errors) {
       fail(errors, `${entry.relPath} must stay manual-only; scheduled source-watch notifications belong in ${sourceWatchPrWorkflowPath}`);
     }
     if (isSourceWatchPrWorkflow) validateSourceWatchPrWorkflow(entry, text, errors);
-    if (isWeeklyEcosystemRadarWorkflow) validateWeeklyEcosystemRadarWorkflow(entry, text, errors);
     if (isAutoSyncGeneratedSurfacesWorkflow) validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors);
     if (isReadOnlyValidationWorkflow) validateReadOnlyValidationWorkflow(entry, text, errors);
     if (entry.relPath.endsWith('safe-source-update.yml')) {
       fail(errors, `${entry.relPath} has been retired; source update notifications must use PRs, not issues`);
     }
-    if (isWeeklyEcosystemRadarWorkflow && /^\s{2}schedule:\s*$/m.test(text)) {
-      scheduledWeeklyRadarWorkflows.push(entry.relPath);
-    } else if (/\bsource[- ]watch\b/i.test(`${entry.relPath}\n${text}`) && /^\s{2}schedule:\s*$/m.test(text)) {
+    if (entry.relPath === '.github/workflows/weekly-ecosystem-radar.yml' || /weekly ecosystem radar|check-ecosystem-updates|ecosystem-radar/i.test(text)) {
+      fail(errors, `${entry.relPath} weekly ecosystem radar has been removed; use ${sourceWatchPrWorkflowPath} with ${advisoryTargetsPath}`);
+    }
+    if (/\bsource[- ]watch\b/i.test(`${entry.relPath}\n${text}`) && /^\s{2}schedule:\s*$/m.test(text)) {
       scheduledSourceWatchWorkflows.push(entry.relPath);
     }
   }
   if (scheduledSourceWatchWorkflows.length !== 1 || scheduledSourceWatchWorkflows[0] !== sourceWatchPrWorkflowPath) {
     fail(errors, `${sourceWatchPrWorkflowPath} must be the only scheduled source-watch workflow`);
-  }
-  if (scheduledWeeklyRadarWorkflows.length !== 1 || scheduledWeeklyRadarWorkflows[0] !== weeklyEcosystemRadarWorkflowPath) {
-    fail(errors, `${weeklyEcosystemRadarWorkflowPath} must be the only scheduled weekly ecosystem radar workflow`);
-  }
-}
-
-function validateWeeklyEcosystemRadarWorkflow(entry, text, errors) {
-  if (!/^name:\s*Weekly Ecosystem Radar\s*$/m.test(text)) {
-    fail(errors, `${entry.relPath} workflow name must be Weekly Ecosystem Radar`);
-  }
-  if (!text.includes('cron: "37 6 * * 2"')) {
-    fail(errors, `${entry.relPath} missing weekly cron 37 6 * * 2`);
-  }
-  if (!/^\s{2}workflow_dispatch:\s*$/m.test(text)) {
-    fail(errors, `${entry.relPath} must allow safe manual workflow_dispatch`);
-  }
-  for (const forbiddenEvent of ['repository_dispatch', 'pull_request', 'pull_request_target', 'workflow_call']) {
-    if (new RegExp(`^\\s{2}${forbiddenEvent}:\\s*$`, 'm').test(text)) {
-      fail(errors, `${entry.relPath} must trigger only on schedule or workflow_dispatch, not ${forbiddenEvent}`);
-    }
-  }
-  const permissions = workflowPermissionLines(text) || [];
-  const expectedPermissions = ['contents: write', 'pull-requests: write'];
-  if (permissions.length !== expectedPermissions.length || expectedPermissions.some((permission) => !permissions.includes(permission))) {
-    fail(errors, `${entry.relPath} must grant only contents: write and pull-requests: write`);
-  }
-  if (!/repo\/scripts\/check-ecosystem-updates\.cjs --report "\$REPORT_TEMP"/.test(text)) {
-    fail(errors, `${entry.relPath} must run check-ecosystem-updates.cjs with the temp report path`);
-  }
-  if (!/repo\/scripts\/audit-project-source-locks\.cjs/.test(text)) {
-    fail(errors, `${entry.relPath} must validate source locks before checking the radar`);
-  }
-  if (!/persist-credentials:\s*false/.test(text)) {
-    fail(errors, `${entry.relPath} checkout must set persist-credentials false`);
-  }
-  if (!/GH_TOKEN:\s*\$\{\{ github\.token \}\}/.test(text)) {
-    fail(errors, `${entry.relPath} must scope GH_TOKEN to write/PR steps`);
-  }
-  if (!/git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/.test(text)) {
-    fail(errors, `${entry.relPath} must set authenticated remote immediately before push`);
-  }
-  if (/git\s+push[^\n]*(?:--force(?!-with-lease)|-f\b)/i.test(text)) {
-    fail(errors, `${entry.relPath} must not force-push without a lease`);
-  }
-  if (/git\s+push[^\n]*(?:HEAD:)?main\b/i.test(text)) {
-    fail(errors, `${entry.relPath} must not push to main`);
-  }
-  if (/repo\/scripts\/safe-source-update\.cjs|gh\s+issue\s+create/i.test(text)) {
-    fail(errors, `${entry.relPath} must not create issues or run source update scripts`);
-  }
-  if (/repo\/scripts\/watch-project-sources\.cjs/i.test(text)) {
-    fail(errors, `${entry.relPath} must not replace the existing source-watch advisory workflow`);
-  }
-  if (/\bn8n\s+(?:import|export)\b|(?:import|export)-n8n-workflows-live|docker\s+exec[^\n]*\bn8n\b/i.test(text)) {
-    fail(errors, `${entry.relPath} must not run live n8n import/export`);
-  }
-  if (!/codex\/weekly-ecosystem-radar/.test(text)) {
-    fail(errors, `${entry.relPath} must use the stable weekly radar review branch`);
-  }
-  if (!/\[radar\] Weekly ecosystem update review/.test(text)) {
-    fail(errors, `${entry.relPath} must use the stable weekly radar PR title`);
-  }
-  if (!/REPORT_PATH:\s*repo\/source-watch\/reviews\/weekly-ecosystem-radar\.md/.test(text)) {
-    fail(errors, `${entry.relPath} must write only the weekly ecosystem radar report path`);
-  }
-
-  const steps = workflowStepBlocks(text);
-  const updateStep = workflowStepText(steps, 'Update weekly radar branch');
-  if (!updateStep) {
-    fail(errors, `${entry.relPath} missing Update weekly radar branch step`);
-    return;
-  }
-  if (!/git switch -C "\$BRANCH" origin\/main/.test(updateStep)) {
-    fail(errors, `${entry.relPath} must rebuild the weekly radar branch from origin/main`);
-  }
-  if (/origin\/\$BRANCH|origin\/"\$BRANCH"|refs\/remotes\/origin\/\$BRANCH/.test(updateStep)) {
-    fail(errors, `${entry.relPath} must not base the weekly radar branch on the previous report branch`);
-  }
-  const afterSwitch = updateStep.slice(updateStep.indexOf('git switch -C "$BRANCH" origin/main'));
-  if (/node repo\/scripts\//.test(afterSwitch)) {
-    fail(errors, `${entry.relPath} must not run maintenance scripts after switching to the write branch`);
-  }
-  const gitAddLines = (updateStep.match(/^\s*git\s+add .+$/gm) || []).map((line) => line.trim());
-  if (gitAddLines.length !== 1 || gitAddLines[0] !== 'git add -- "$REPORT_PATH"') {
-    fail(errors, `${entry.relPath} must stage only the weekly radar report path`);
-  }
-  if (!/staged_files="\$\(git diff --cached --name-only\)"/.test(updateStep) ||
-      !/if \[ "\$staged_files" != "\$REPORT_PATH" \]; then/.test(updateStep)) {
-    fail(errors, `${entry.relPath} must reject staged paths outside the weekly radar report`);
-  }
-  if (/git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json|skills\/|repo\/ecosystem-radar\.json|package\.json|AGENTS\.md|CLAUDE\.md|GEMINI\.md)/i.test(updateStep)) {
-    fail(errors, `${entry.relPath} must not stage source, lock, generated, config, package, app, or agent-instruction paths`);
-  }
-  if (!/if \[ -L "\$REPORT_PATH" \]; then/.test(updateStep) ||
-      !/install -m 0644 "\$REPORT_TEMP" "\$REPORT_PATH"/.test(updateStep) ||
-      !/if \[ ! -f "\$REPORT_PATH" \] \|\| \[ -L "\$REPORT_PATH" \]; then/.test(updateStep)) {
-    fail(errors, `${entry.relPath} must reject symlink report writes`);
-  }
-  if (!/git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/.test(updateStep)) {
-    fail(errors, `${entry.relPath} must push with force-with-lease when updating the stable branch`);
-  }
-
-  const openPrStep = workflowStepText(steps, 'Open or update weekly radar PR');
-  const summaryStep = workflowStepText(steps, 'Write weekly radar job summary');
-  if (workflowStepText(steps, 'Find existing weekly radar PR') || workflowStepText(steps, 'Skip weekly radar PR without diff')) {
-    fail(errors, `${entry.relPath} must not fall back to a summary-only no-diff path when actionable drift exists`);
-  }
-  if (!/git commit --allow-empty -m "Record weekly ecosystem radar review"/.test(updateStep) ||
-      /echo "pushed=false" >> "\$GITHUB_OUTPUT"/.test(updateStep)) {
-    fail(errors, `${entry.relPath} must push a weekly radar review branch even when report content is unchanged`);
-  }
-  if (!openPrStep ||
-      !openPrStep.includes("if: steps.radar.outputs.pr_needed == 'true' && steps.update_branch.outputs.pushed == 'true'")) {
-    fail(errors, `${entry.relPath} must create or update the weekly radar PR only after pushing the review branch`);
-  }
-  if (!summaryStep ||
-      !summaryStep.includes('$GITHUB_STEP_SUMMARY') ||
-      !summaryStep.includes('Upstream drift detected. Manual review required.') ||
-      !summaryStep.includes('No upstream source drift or advisory changes were detected.')) {
-    fail(errors, `${entry.relPath} must keep a job summary for drift and no-drift outcomes`);
-  }
-  if (/gh\s+pr\s+(?:create|edit)|git\s+(?:add|commit|push)/i.test(summaryStep)) {
-    fail(errors, `${entry.relPath} job summary step must not create PRs or mutate git state`);
-  }
-  if (/weekly ecosystem radar report only/i.test(text)) {
-    fail(errors, `${entry.relPath} must state why actionable drift PRs require manual review`);
-  }
-  for (const required of [
-    'Upstream drift detected. Manual review required.',
-    'This PR exists because actionable ecosystem drift was detected.',
-    'Source-lock drift requiring manual review is listed in the generated report.',
-    'Advisory baseline candidates requiring human approval are listed separately in the generated report.',
-    'Non-actionable informational notes are listed separately in the generated report.',
-    'The workflow stages only `repo/source-watch/reviews/weekly-ecosystem-radar.md`.',
-    'No `_projects/**`, `SOURCE-LOCK.json`, generated `skills/**`, advisory baselines, provider or deployment config, secrets, or application code were staged by the workflow.',
-    'No issues are created and no `issues: write` permission is requested.',
-    'No source pins or advisory baselines were changed.',
-    'No SOURCE-LOCK pins were changed.',
-    'No upstream code was executed and no upstream packages were installed.',
-    'No live deployment actions, provider calls, notification tests, or production mutations are allowed.',
-    'No auto-merge is allowed.',
-    'Advisory baseline advancement requires a separate human-approved PR.',
-    'Keep source-pin/source-file update PRs separate from advisory-baseline PRs.'
-  ]) {
-    if (!text.includes(required)) fail(errors, `${entry.relPath} missing PR safety body text: ${required}`);
   }
 }
 
@@ -2266,15 +2118,19 @@ function validateSourceWatchPrWorkflow(entry, text, errors) {
   if (!/source-watch\/review-active-third-party-updates/.test(text)) {
     fail(errors, `${entry.relPath} must use the stable source-watch review branch`);
   }
-  if (!/\[source-watch\] Review active third-party source updates/.test(text)) {
+  if (!/\[source-watch\] Review active source-watch updates/.test(text)) {
     fail(errors, `${entry.relPath} must use the stable source-watch review PR title`);
   }
   for (const required of [
     'This PR is a review notification only.',
-    'No source files were updated.',
+    'No source files or advisory tracking documents were updated.',
+    'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
     'No upstream code was executed.',
-    'No auto-merge is allowed.'
+    'No auto-merge is allowed.',
+    'Advisory actions, when present, are read from `repo/source-watch/advisory-targets.json`.',
+    'No advisory tracking document was changed by this workflow.',
+    'If advisory action is taken, update the advisory document in a separate human-reviewed PR.'
   ]) {
     if (!text.includes(required)) fail(errors, `${entry.relPath} missing PR safety body text: ${required}`);
   }
@@ -2410,6 +2266,8 @@ function validateSourceWatchTruthfulness(errors) {
     if (rel.startsWith('repo/docs/')) return true;
     if (rel === 'repo/scripts/watch-project-sources.cjs') return true;
     if (rel === 'repo/scripts/check-project-source-updates.cjs') return true;
+    if (rel === 'repo/scripts/source-watch-advisory-targets.cjs') return true;
+    if (rel === advisoryTargetsPath) return true;
     if (rel.startsWith('skills/') && /\.(md|json|ya?ml)$/i.test(rel)) return true;
     return false;
   });
@@ -2449,6 +2307,55 @@ function validateSourceWatchTruthfulness(errors) {
         fail(errors, `${entry.relPath} source-watch wording must stay notification-only and source-safe`);
         break;
       }
+    }
+  }
+}
+
+function validateAdvisoryTargets(errors) {
+  let document;
+  try {
+    document = readJson(advisoryTargetsPath);
+  } catch (error) {
+    fail(errors, `${advisoryTargetsPath} must be valid JSON: ${error.message}`);
+    return;
+  }
+  if (document.schema_version !== 1) fail(errors, `${advisoryTargetsPath} schema_version must be 1`);
+  if (!document.policy || document.policy.report_only_when_actionable !== true) {
+    fail(errors, `${advisoryTargetsPath} must be report-only and actionable-gated`);
+  }
+  if (!Array.isArray(document.targets)) {
+    fail(errors, `${advisoryTargetsPath} targets must be an array`);
+    return;
+  }
+  for (const [index, target] of document.targets.entries()) {
+    const label = target && target.id ? `${advisoryTargetsPath} target ${target.id}` : `${advisoryTargetsPath} target at index ${index}`;
+    for (const field of ['id', 'name', 'kind', 'state', 'recommendation', 'action_taken', 'remaining_work', 'removal_condition']) {
+      if (!target || typeof target[field] !== 'string' || !target[field].trim()) fail(errors, `${label} must include ${field}`);
+    }
+    if (target && !['github_repo', 'github_path', 'manual'].includes(target.kind)) fail(errors, `${label} kind must be github_repo, github_path, or manual`);
+    if (target && !['watching', 'pending_action'].includes(target.state)) fail(errors, `${label} state must be watching or pending_action`);
+    if (target && target.kind !== 'manual') {
+      for (const field of ['repo', 'ref']) {
+        if (typeof target[field] !== 'string' || !target[field].trim()) fail(errors, `${label} must include ${field}`);
+      }
+      if (target.kind === 'github_path' && (typeof target.path !== 'string' || !target.path.trim())) fail(errors, `${label} must include path`);
+      if (target.baseline_sha && !/^[0-9a-f]{40}$/i.test(target.baseline_sha)) fail(errors, `${label} baseline_sha must be a 40-character SHA when set`);
+    }
+    const lifecycleText = `${target?.remaining_work || ''}\n${target?.removal_condition || ''}`;
+    if (!/SOURCE-LOCK|no longer relevant|remove/i.test(lifecycleText)) {
+      fail(errors, `${label} must explain when the advisory target should be removed or moved to SOURCE-LOCK`);
+    }
+  }
+}
+
+function validateRemovedWeeklyRadar(errors) {
+  for (const relPath of [
+    '.github/workflows/weekly-ecosystem-radar.yml',
+    'repo/scripts/check-ecosystem-updates.cjs',
+    'repo/ecosystem-radar.json'
+  ]) {
+    if (existsRel(relPath)) {
+      fail(errors, `${relPath} weekly ecosystem radar has been removed; use ${sourceWatchPrWorkflowPath} with ${advisoryTargetsPath}`);
     }
   }
 }
@@ -2507,8 +2414,10 @@ function runValidation() {
   validateNoOldForAiReferences(errors);
   validateStaleReferences(errors);
   validateSecretStrings(errors);
+  validateRemovedWeeklyRadar(errors);
   validateWorkflows(errors);
   validateMarkdownLinks(errors);
+  validateAdvisoryTargets(errors);
   validateSourceWatchTruthfulness(errors);
   validateNoRepoWideMcpSurface(errors);
   return errors;

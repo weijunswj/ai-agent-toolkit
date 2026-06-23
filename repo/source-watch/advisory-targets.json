@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "report_only_when_actionable": true,
+    "maintenance_note": "Daily source-watch reads this document after checking active SOURCE-LOCK pins. If a source-watch PR recommends action, update recommendation, action_taken, and remaining_work in a separate human-reviewed PR. Remove a target once it is fully implemented and normal SOURCE-LOCK daily source-watch owns future upstream tracking, or once it is no longer relevant."
+  },
+  "targets": [
+    {
+      "id": "okf-spec",
+      "name": "Open Knowledge Format draft spec",
+      "kind": "github_path",
+      "enabled": true,
+      "state": "watching",
+      "repo": "GoogleCloudPlatform/knowledge-catalog",
+      "ref": "main",
+      "path": "okf/SPEC.md",
+      "baseline_sha": null,
+      "baseline_policy": "human_advanced_only",
+      "recommendation": "Review draft spec changes only; do not copy spec text or change toolkit docs from the daily source-watch PR.",
+      "action_taken": "No toolkit implementation has been accepted yet.",
+      "remaining_work": "Decide whether any reviewed concept should become first-party toolkit documentation. If accepted, open a separate implementation PR and then either move future upstream tracking into SOURCE-LOCK or remove this advisory target.",
+      "removal_condition": "Remove after accepted OKF-derived toolkit work is implemented and any ongoing upstream dependency is represented by SOURCE-LOCK daily source-watch, or after deciding no action is needed."
+    },
+    {
+      "id": "ponytail-decision-ladder",
+      "name": "Ponytail decision ladder patterns",
+      "kind": "github_repo",
+      "enabled": true,
+      "state": "watching",
+      "repo": "DietrichGebert/ponytail",
+      "ref": "main",
+      "baseline_sha": null,
+      "baseline_policy": "human_advanced_only",
+      "recommendation": "Review concepts only; do not vendor hooks, plugins, dependencies, or upstream code from the daily source-watch PR.",
+      "action_taken": "No toolkit implementation has been accepted yet.",
+      "remaining_work": "Decide whether any reviewed decision-ladder concept belongs in toolkit planning or review guidance. If accepted, open a separate implementation PR and then either move future upstream tracking into SOURCE-LOCK or remove this advisory target.",
+      "removal_condition": "Remove after accepted Ponytail-inspired toolkit work is implemented and any ongoing upstream dependency is represented by SOURCE-LOCK daily source-watch, or after deciding no action is needed."
+    }
+  ]
+}

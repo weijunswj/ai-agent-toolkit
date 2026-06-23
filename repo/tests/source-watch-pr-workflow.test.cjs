@@ -83,3 +83,10 @@ test('source-watch PR notifier does not become a source updater', () => {
   assert.doesNotMatch(workflow, /cp .*_projects|install .*_projects/i);
   assert.doesNotMatch(workflow, /git push[^\n]*(?:HEAD:)?main\b/i);
 });
+
+test('source-watch PR notifier documents advisory actions as report-only', () => {
+  assert.match(workflow, /\[source-watch\] Review active source-watch updates/);
+  assert.match(workflow, /Advisory actions, when present, are read from `repo\/source-watch\/advisory-targets\.json`\./);
+  assert.match(workflow, /No advisory tracking document was changed by this workflow\./);
+  assert.match(workflow, /If advisory action is taken, update the advisory document in a separate human-reviewed PR\./);
+});
