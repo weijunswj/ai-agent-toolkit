@@ -71,44 +71,42 @@ test('weekly ecosystem radar rejects symlink report writes and pushes with a lea
   assert.doesNotMatch(script, /git push origin "HEAD:main"/i);
 });
 
-test('weekly ecosystem radar handles no-diff runs without creating useless PRs', () => {
+test('weekly ecosystem radar keeps job summary but creates a PR notification whenever drift exists', () => {
   const updateScript = stepScript('Update weekly radar branch');
   assert.match(updateScript, /if git diff --cached --quiet; then/);
-  assert.match(updateScript, /echo "pushed=false" >> "\$GITHUB_OUTPUT"/);
+  assert.match(updateScript, /git commit --allow-empty -m "Record weekly ecosystem radar review"/);
+  assert.doesNotMatch(updateScript, /echo "pushed=false" >> "\$GITHUB_OUTPUT"/);
   assert.match(updateScript, /echo "pushed=true" >> "\$GITHUB_OUTPUT"/);
 
-  const existingPrScript = stepScript('Find existing weekly radar PR');
-  assert.match(existingPrScript, /BRANCH: codex\/weekly-ecosystem-radar/);
-  assert.match(existingPrScript, /if: steps\.radar\.outputs\.pr_needed == 'true' && steps\.update_branch\.outputs\.pushed != 'true'/);
-  assert.match(existingPrScript, /gh pr view "\$BRANCH" --repo "\$GITHUB_REPOSITORY" >/);
-  assert.match(existingPrScript, /echo "exists=true" >> "\$GITHUB_OUTPUT"/);
-  assert.match(existingPrScript, /echo "exists=false" >> "\$GITHUB_OUTPUT"/);
-  assert.doesNotMatch(existingPrScript, /gh pr create|gh pr edit/i);
+  assert.doesNotMatch(workflow, /Find existing weekly radar PR/);
+  assert.doesNotMatch(workflow, /Skip weekly radar PR without diff/);
+  assert.doesNotMatch(workflow, /No report commit was pushed and no existing open radar PR was found, so no PR was created\./);
 
   const openScript = stepScript('Open or update weekly radar PR');
   assert.match(openScript, /BRANCH: codex\/weekly-ecosystem-radar/);
   assert.match(openScript, /PR_TITLE: "\[radar\] Weekly ecosystem update review"/);
   assert.match(
     openScript,
-    /if: steps\.radar\.outputs\.pr_needed == 'true' && \(steps\.update_branch\.outputs\.pushed == 'true' \|\| steps\.existing_pr\.outputs\.exists == 'true'\)/
+    /if: steps\.radar\.outputs\.pr_needed == 'true' && steps\.update_branch\.outputs\.pushed == 'true'/
   );
   assert.match(openScript, /gh pr edit "\$BRANCH"/);
   assert.match(openScript, /gh pr create --repo "\$GITHUB_REPOSITORY"/);
 
-  const skipScript = stepScript('Skip weekly radar PR without diff');
-  assert.match(
-    skipScript,
-    /if: steps\.radar\.outputs\.pr_needed == 'true' && steps\.update_branch\.outputs\.pushed != 'true' && steps\.existing_pr\.outputs\.exists != 'true'/
-  );
-  assert.match(skipScript, /No report commit was pushed and no existing open radar PR was found, so no PR was created\./);
-  assert.match(skipScript, />> "\$GITHUB_STEP_SUMMARY"/);
-  assert.doesNotMatch(skipScript, /gh pr create|gh pr edit|git add|git commit|git push/i);
+  const summaryScript = stepScript('Write weekly radar job summary');
+  assert.match(summaryScript, />> "\$GITHUB_STEP_SUMMARY"/);
+  assert.match(summaryScript, /Upstream drift detected\. Manual review required\./);
+  assert.match(summaryScript, /No upstream source drift or advisory changes were detected\./);
+  assert.doesNotMatch(summaryScript, /gh pr create|gh pr edit|git add|git commit|git push/i);
 });
-
 test('weekly ecosystem radar PR body documents the non-mutating safety contract', () => {
   assert.match(workflow, /\[radar\] Weekly ecosystem update review/);
+  assert.doesNotMatch(workflow, /weekly ecosystem radar report only/i);
   for (const required of [
-    'This PR is a weekly ecosystem radar report only.',
+    'Upstream drift detected. Manual review required.',
+    'This PR exists because actionable ecosystem drift was detected.',
+    'Source-lock drift requiring manual review is listed in the generated report.',
+    'Advisory baseline candidates requiring human approval are listed separately in the generated report.',
+    'Non-actionable informational notes are listed separately in the generated report.',
     'The workflow stages only `repo/source-watch/reviews/weekly-ecosystem-radar.md`.',
     'No `_projects/**`, `SOURCE-LOCK.json`, generated `skills/**`, advisory baselines, provider or deployment config, secrets, or application code were staged by the workflow.',
     'No issues are created and no `issues: write` permission is requested.',
@@ -116,7 +114,8 @@ test('weekly ecosystem radar PR body documents the non-mutating safety contract'
     'No upstream code was executed and no upstream packages were installed.',
     'No live deployment actions, provider calls, notification tests, or production mutations are allowed.',
     'No auto-merge is allowed.',
-    'Advisory baseline advancement requires a separate human-approved PR.'
+    'Advisory baseline advancement requires a separate human-approved PR.',
+    'Keep source-pin/source-file update PRs separate from advisory-baseline PRs.'
   ]) {
     assert.match(workflow, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), required);
   }

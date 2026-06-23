@@ -2181,35 +2181,37 @@ function validateWeeklyEcosystemRadarWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} must push with force-with-lease when updating the stable branch`);
   }
 
-  const existingPrStep = workflowStepText(steps, 'Find existing weekly radar PR');
   const openPrStep = workflowStepText(steps, 'Open or update weekly radar PR');
-  const skipNoDiffStep = workflowStepText(steps, 'Skip weekly radar PR without diff');
-  if (!existingPrStep ||
-      !existingPrStep.includes("if: steps.radar.outputs.pr_needed == 'true' && steps.update_branch.outputs.pushed != 'true'") ||
-      !existingPrStep.includes('gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1') ||
-      !existingPrStep.includes('echo "exists=true" >> "$GITHUB_OUTPUT"') ||
-      !existingPrStep.includes('echo "exists=false" >> "$GITHUB_OUTPUT"')) {
-    fail(errors, `${entry.relPath} must check whether an open weekly radar PR already exists when no report commit was pushed`);
+  const summaryStep = workflowStepText(steps, 'Write weekly radar job summary');
+  if (workflowStepText(steps, 'Find existing weekly radar PR') || workflowStepText(steps, 'Skip weekly radar PR without diff')) {
+    fail(errors, `${entry.relPath} must not fall back to a summary-only no-diff path when actionable drift exists`);
   }
-  if (/gh\s+pr\s+(?:create|edit)/i.test(existingPrStep)) {
-    fail(errors, `${entry.relPath} existing-PR check must not create or edit PRs`);
+  if (!/git commit --allow-empty -m "Record weekly ecosystem radar review"/.test(updateStep) ||
+      /echo "pushed=false" >> "\$GITHUB_OUTPUT"/.test(updateStep)) {
+    fail(errors, `${entry.relPath} must push a weekly radar review branch even when report content is unchanged`);
   }
   if (!openPrStep ||
-      !openPrStep.includes("if: steps.radar.outputs.pr_needed == 'true' && (steps.update_branch.outputs.pushed == 'true' || steps.existing_pr.outputs.exists == 'true')")) {
-    fail(errors, `${entry.relPath} must create or update the weekly radar PR only after a pushed report commit or existing open PR`);
+      !openPrStep.includes("if: steps.radar.outputs.pr_needed == 'true' && steps.update_branch.outputs.pushed == 'true'")) {
+    fail(errors, `${entry.relPath} must create or update the weekly radar PR only after pushing the review branch`);
   }
-  if (!skipNoDiffStep ||
-      !skipNoDiffStep.includes("if: steps.radar.outputs.pr_needed == 'true' && steps.update_branch.outputs.pushed != 'true' && steps.existing_pr.outputs.exists != 'true'") ||
-      !skipNoDiffStep.includes('No report commit was pushed and no existing open radar PR was found, so no PR was created.') ||
-      !skipNoDiffStep.includes('$GITHUB_STEP_SUMMARY')) {
-    fail(errors, `${entry.relPath} must summarize and exit successfully when a report is generated but no diff or existing PR exists`);
+  if (!summaryStep ||
+      !summaryStep.includes('$GITHUB_STEP_SUMMARY') ||
+      !summaryStep.includes('Upstream drift detected. Manual review required.') ||
+      !summaryStep.includes('No upstream source drift or advisory changes were detected.')) {
+    fail(errors, `${entry.relPath} must keep a job summary for drift and no-drift outcomes`);
   }
-  if (/gh\s+pr\s+(?:create|edit)|git\s+(?:add|commit|push)/i.test(skipNoDiffStep)) {
-    fail(errors, `${entry.relPath} no-diff/no-PR summary step must not create PRs or mutate git state`);
+  if (/gh\s+pr\s+(?:create|edit)|git\s+(?:add|commit|push)/i.test(summaryStep)) {
+    fail(errors, `${entry.relPath} job summary step must not create PRs or mutate git state`);
   }
-
+  if (/weekly ecosystem radar report only/i.test(text)) {
+    fail(errors, `${entry.relPath} must state why actionable drift PRs require manual review`);
+  }
   for (const required of [
-    'This PR is a weekly ecosystem radar report only.',
+    'Upstream drift detected. Manual review required.',
+    'This PR exists because actionable ecosystem drift was detected.',
+    'Source-lock drift requiring manual review is listed in the generated report.',
+    'Advisory baseline candidates requiring human approval are listed separately in the generated report.',
+    'Non-actionable informational notes are listed separately in the generated report.',
     'The workflow stages only `repo/source-watch/reviews/weekly-ecosystem-radar.md`.',
     'No `_projects/**`, `SOURCE-LOCK.json`, generated `skills/**`, advisory baselines, provider or deployment config, secrets, or application code were staged by the workflow.',
     'No issues are created and no `issues: write` permission is requested.',
@@ -2218,7 +2220,8 @@ function validateWeeklyEcosystemRadarWorkflow(entry, text, errors) {
     'No upstream code was executed and no upstream packages were installed.',
     'No live deployment actions, provider calls, notification tests, or production mutations are allowed.',
     'No auto-merge is allowed.',
-    'Advisory baseline advancement requires a separate human-approved PR.'
+    'Advisory baseline advancement requires a separate human-approved PR.',
+    'Keep source-pin/source-file update PRs separate from advisory-baseline PRs.'
   ]) {
     if (!text.includes(required)) fail(errors, `${entry.relPath} missing PR safety body text: ${required}`);
   }
