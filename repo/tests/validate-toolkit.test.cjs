@@ -1900,6 +1900,18 @@ test('changing published agent-rule template copies makes skill copies stale', (
   assert.match(result.stderr, /Stale generated output: skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md/);
 });
 
+test('sync check treats generated YAML outputs as normalized text', () => {
+  const cwd = tempCopy();
+  createNewSkillProjectFixture(cwd);
+  const outputPath = path.join(cwd, 'skills', 'new-safe-skill', 'agents', 'openai.yaml');
+  const lfSource = readTextFile(outputPath);
+  fs.writeFileSync(outputPath, lfSource.replace(/\n/g, '\r\n'), 'utf8');
+
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('changing declared agent-rule source partials makes source-side templates stale', () => {
   const cases = [
     path.join('_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md')

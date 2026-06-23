@@ -10,4 +10,3 @@ policy:
     - api
     - atlas
   allow_implicit_invocation: false
-

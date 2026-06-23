@@ -37,7 +37,7 @@ const forbiddenNames = new Set([
 ]);
 const forbiddenDeniedPolicy = ['.env*', '**/*credential*', '**/*.key', '**/*.pem'];
 const supportedKinds = new Set(['copy', 'concat', 'curated', 'extract', 'json', 'linked']);
-const textOutputExtensions = new Set(['.md', '.json', '.ps1']);
+const textOutputExtensions = new Set(['.md', '.json', '.ps1', '.yaml', '.yml']);
 const supportedPublishSurfaces = new Set(['skill', 'source_only']);
 const supportedSurfaceStatuses = new Set(['published', 'candidate', 'not_applicable']);
 const supportedFidelityValues = new Set(['exact', 'reviewed_entrypoint', 'catalogue_summary', 'generated_metadata']);
