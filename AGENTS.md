@@ -303,7 +303,7 @@ Prioritize repo safety, device safety, provenance, attribution, validation, and 
 ## Validation And PR Updates
 
 - Run the smallest relevant local validation before pushing. Use targeted tests/checks for touched scripts, docs, generated surfaces, or managed instruction files.
-- Do not run local `npm run validate:all` by default when CI runs the full gate. Use local full validation for broad, risky, workflow, sync, generator, package, or security-sensitive changes, or to reproduce CI failures.
+- Never run local `npm run validate:all` in this toolkit repo. CI owns the full validation gate; use targeted local checks for touched scripts, docs, generated surfaces, or managed instruction files.
 - If a generated-output or contract check fails on unrelated stale files, report the blocker and do not broaden the PR without user direction.
 - Before creating or updating PRs or issues, use local `gh` from the shell and verify the active account with:
 

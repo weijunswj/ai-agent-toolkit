@@ -31,7 +31,13 @@ Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair
 ## Required Route
 
 1. Inspect the local repo context and read `repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md` before changing bridge behavior or running write commands.
-2. For the English prompt `setup toolkit`, run the end-to-end setup journey below instead of stopping at a generic audit.
+2. For the English prompt `setup toolkit`, use the script-backed setup journey instead of stopping at Codex plugin verification:
+
+```powershell
+node repo/scripts/setup-toolkit.cjs --execute
+```
+
+Treat `SETUP PAUSED` output as an action-blocking approval question, not as completion. After the user approves repo-backed auto-update, rerun with `--write-repo-auto-update`; after the user approves OpenCode or Antigravity 2 writes, rerun with the matching `--enable-target` flag. Do not stop after `setup-codex-toolkit-plugin.cjs --verify` or `--write`.
 3. Start other bridge requests with a dry-run or audit command, usually:
 
 ```powershell
@@ -45,7 +51,7 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 
 ## English Setup Journey
 
-When the user says `setup toolkit` while running inside Codex, complete this Codex native setup flow and then run the shared bridge steps. If running inside Claude Code, do not run the Codex native plugin steps; use Claude Code's native Toolkit plugin flow from this repo, verify `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, and then continue at the shared bridge configuration, audit, and optional target sync steps.
+When the user says `setup toolkit` while running inside Codex, run `node repo/scripts/setup-toolkit.cjs --execute` from this repo. The orchestrator performs the Codex native setup flow, lite validation, bridge audit, and approval-gated shared bridge steps in the required order. If running inside Claude Code, do not run the Codex native plugin steps; use Claude Code's native Toolkit plugin flow from this repo, verify `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, and then continue at the shared bridge configuration, audit, and optional target sync steps.
 
 1. Perform only the minimal trusted local Toolkit repo update on `main` before using it as the native plugin source:
 

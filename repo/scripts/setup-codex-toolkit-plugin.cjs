@@ -14,6 +14,7 @@ const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
   '.codex-plugin/hooks/hooks.json',
+  'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
   'repo/scripts/toolkit-local-bridge.cjs',
   'repo/tests/toolkit-local-bridge-hook-light.test.cjs'
