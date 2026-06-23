@@ -27,6 +27,8 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   assert.match(agents, /This root `AGENTS\.md` is toolkit-repo-specific\./);
   assert.match(agents, /Toolkit-specific root rules are maintained directly in this file after the managed execution blocks\./);
   assert.match(agents, /Portable repo installs must use \[`skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
+  assert.match(agents, /Setup cache-first\/light-validation: \[For AI Agents\]\(repo\/docs\/FOR_AI_AGENTS\.md\)/);
+  assert.match(agents, /follow over stale installed skills/);
 });
 
 test('agent onboarding path keeps source-of-truth and validation anchors visible', () => {
@@ -43,6 +45,8 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   assert.match(sourceOfTruth, /Humans use `_projects\/\*\*` for source review and maintenance, agents use generated `skills\/\*\*` folders after sync, and native plugin installers read generated `\.codex-plugin\/\*\*` or `\.claude-plugin\/\*\*` metadata\./);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Persistent status, report, implementation plan, handoff, operations, setup, CI\/CD, deployment, safety, and troubleshooting notes belong under an existing `docs\/` path/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /read the relevant docs and treat them as active context/i);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /For `setup toolkit` in Codex, perform only the minimal repo update check first, then verify and refresh the Codex native Toolkit plugin cache/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /routine setup uses `repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs`/);
   assert.match(validation, /For this repo, the canonical full validation command is:/);
   assert.match(validation, /npm run validate:all/);
 });

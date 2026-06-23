@@ -137,6 +137,8 @@ codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
 
 The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`. The wrapper must use `policy.authentication: "ON_USE"`, not `ON_INSTALL`, so a no-auth local Toolkit plugin can install headlessly before any hook trust prompt.
 
+For `setup toolkit` in Codex, agents must perform only the minimal repo update check first, then verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
+
 Before reporting `setup toolkit` complete, run:
 
 ```powershell
@@ -197,6 +199,8 @@ node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path
 ```
 
 Use `--repo-remote <url>` only when intentionally testing or maintaining a non-default remote. The expected production remote is `https://github.com/weijunswj/ai-agent-toolkit`.
+
+Release-branch auto-update consideration: the current default setup uses `main`. If the repo later adopts a stable `release` branch for user-facing Toolkit updates, configure `--repo-branch release` only after that branch exists and has a clear CI/merge policy. The bridge remains pull-on-session-start: GitHub pushes to the configured branch are picked up by the next native hook run or explicit `--repo-update-now`; the Toolkit does not run a GitHub webhook listener or background push daemon.
 
 When a native SessionStart hook runs and repo auto-update is enabled, the bridge:
 
