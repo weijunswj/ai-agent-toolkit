@@ -125,9 +125,11 @@ function setupPlan(options = {}) {
           'git status --short',
           'git switch main',
           'git fetch origin main',
-          'git merge --ff-only origin/main'
+          'git rev-parse FETCH_HEAD',
+          'git merge --ff-only origin/main',
+          'git rev-parse HEAD'
         ],
-        stop_if: 'the worktree is dirty, the origin remote is unexpected, the branch is not main after switch, or the update cannot fast-forward'
+        stop_if: 'the worktree is dirty, the origin remote is unexpected, the branch is not main after switch, the update cannot fast-forward, or local HEAD does not exactly match fetched origin/main'
       },
       {
         id: 'codex_native_plugin_cache',
@@ -261,8 +263,15 @@ function verifyAndUpdateTrustedRepo(args) {
   const branch = runGitCapture(args.repoRoot, ['branch', '--show-current'], 'git branch --show-current');
   if (branch !== args.repoBranch) throw new Error(`Expected branch ${args.repoBranch}, found ${branch || '<detached>'}`);
 
-  runCommand('git fetch origin main', 'git', ['fetch', 'origin', args.repoBranch], { cwd: args.repoRoot, timeout: 120000 });
-  runCommand('git merge --ff-only origin/main', 'git', ['merge', '--ff-only', `origin/${args.repoBranch}`], { cwd: args.repoRoot, timeout: 120000 });
+  runCommand(`git fetch origin ${args.repoBranch}`, 'git', ['fetch', 'origin', args.repoBranch], { cwd: args.repoRoot, timeout: 120000 });
+  const fetchedCommit = runGitCapture(args.repoRoot, ['rev-parse', 'FETCH_HEAD'], 'git rev-parse FETCH_HEAD');
+  runCommand(`git merge --ff-only origin/${args.repoBranch}`, 'git', ['merge', '--ff-only', `origin/${args.repoBranch}`], { cwd: args.repoRoot, timeout: 120000 });
+  const headCommit = runGitCapture(args.repoRoot, ['rev-parse', 'HEAD'], 'git rev-parse HEAD');
+  if (headCommit !== fetchedCommit) {
+    throw new Error(
+      `setup toolkit requires local ${args.repoBranch} to match origin/${args.repoBranch}; local branch has commits not present on GitHub. Push/merge them through GitHub or restore ${args.repoBranch} before running setup.`
+    );
+  }
 }
 
 function nodeScriptArgs(relScript, extraArgs = []) {

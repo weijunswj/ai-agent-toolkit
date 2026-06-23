@@ -26,6 +26,12 @@ function isolatedHomeEnv(root) {
   };
 }
 
+function writeFile(filePath, text) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, text);
+}
+
+
 function run(args, options = {}) {
   return spawnSync(process.execPath, [script, ...args], {
     cwd: repoRoot,
@@ -36,6 +42,34 @@ function run(args, options = {}) {
   });
 }
 
+function createMinimalSetupRepo(root) {
+  writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
+  writeFile(path.join(root, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), [
+    "'use strict';",
+    "require('node:fs').writeFileSync(require('node:path').join(process.cwd(), 'PLUGIN_SETUP_RAN'), 'yes');",
+    'process.exit(0);',
+    ''
+  ].join('\n'));
+  writeFile(path.join(root, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), "'use strict';\nprocess.exit(0);\n");
+  writeFile(path.join(root, 'repo', 'scripts', 'validate-toolkit.cjs'), "'use strict';\nprocess.exit(0);\n");
+  writeFile(path.join(root, 'repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs'), [
+    "'use strict';",
+    "const test = require('node:test');",
+    "test('fake hook light', () => {});",
+    ''
+  ].join('\n'));
+}
+
+function runTestGit(cwd, args) {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    timeout: 30000,
+    windowsHide: true
+  });
+  assert.equal(result.status, 0, `git ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
+  return (result.stdout || '').trim();
+}
 function flattenCommands(plan) {
   return plan.steps.flatMap((step) => step.commands || []);
 }
@@ -60,11 +94,13 @@ test('setup toolkit plan is full journey rather than plugin verify only', () => 
   ]);
 
   const commands = flattenCommands(plan);
-  assert.deepEqual(commands.slice(0, 4), [
+  assert.deepEqual(commands.slice(0, 6), [
     'git status --short',
     'git switch main',
     'git fetch origin main',
-    'git merge --ff-only origin/main'
+    'git rev-parse FETCH_HEAD',
+    'git merge --ff-only origin/main',
+    'git rev-parse HEAD'
   ]);
   assert.ok(commands.includes('node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json'));
   assert.ok(commands.includes('node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json'));
@@ -83,6 +119,33 @@ test('setup toolkit plan is full journey rather than plugin verify only', () => 
   assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit')), false, 'plan mode must not write user-local bridge state');
 });
 
+test('setup execute rejects local main ahead of fetched origin before plugin setup', () => {
+  const root = tmpRoot();
+  const origin = path.join(root, 'origin.git');
+  const setupRepo = path.join(root, 'repo');
+  fs.mkdirSync(setupRepo, { recursive: true });
+  runTestGit(root, ['init', '--bare', origin]);
+  runTestGit(setupRepo, ['init']);
+  runTestGit(setupRepo, ['checkout', '-b', 'main']);
+  runTestGit(setupRepo, ['config', 'user.email', 'setup-test@example.invalid']);
+  runTestGit(setupRepo, ['config', 'user.name', 'Setup Test']);
+  createMinimalSetupRepo(setupRepo);
+  runTestGit(setupRepo, ['add', '.']);
+  runTestGit(setupRepo, ['commit', '-m', 'base']);
+  runTestGit(setupRepo, ['remote', 'add', 'origin', origin]);
+  runTestGit(setupRepo, ['push', '-u', 'origin', 'main']);
+  writeFile(path.join(setupRepo, 'LOCAL_ONLY.md'), 'local-only\n');
+  runTestGit(setupRepo, ['add', 'LOCAL_ONLY.md']);
+  runTestGit(setupRepo, ['commit', '-m', 'local only']);
+
+  const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /requires local main to match origin\/main/i);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP_RAN')), false, 'plugin setup must not run from local-only commits');
+});
 test('setup toolkit plan keeps repo auto-update and target writes approval-gated', () => {
   const root = tmpRoot();
   const result = run(['--plan', '--json', '--repo-root', repoRoot], {
