@@ -10,8 +10,6 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const beginMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
 const endMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
-const legacyBeginMarker = '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->';
-const legacyEndMarker = '<!-- END N8N-AGENT-RULES-ADAPTER -->';
 
 function readText(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -35,7 +33,7 @@ const officialN8nSkillsLink = '[official n8n Skills](https://github.com/n8n-io/s
 
 function stripGeneratedNotices(text) {
   let remaining = text.trimStart();
-  while (remaining.startsWith('<!--') && !remaining.startsWith(beginMarker) && !remaining.startsWith(legacyBeginMarker)) {
+  while (remaining.startsWith('<!--') && !remaining.startsWith(beginMarker)) {
     const end = remaining.indexOf('-->');
     assert.notEqual(end, -1, 'generated notice close marker');
     remaining = remaining.slice(end + '-->'.length).trimStart();
@@ -302,8 +300,6 @@ test('platform n8n adapters remain optional snippets and are not installer targe
   ]) {
     const text = stripGeneratedNotices(readText(relPath));
     assert.ok(text.length <= 2200, `${relPath} should stay brief`);
-    assert.equal(markerCount(text, legacyBeginMarker), 1, relPath);
-    assert.equal(markerCount(text, legacyEndMarker), 1, relPath);
     assert.match(text, /\bn8n-agent-rules\b/, relPath);
     assert.match(text, /stop and ask the user to install or provide it/i, relPath);
     assert.match(text, /Do not run live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, archive\/delete, or credential actions without explicit current-turn approval/i, relPath);
@@ -312,6 +308,17 @@ test('platform n8n adapters remain optional snippets and are not installer targe
     }
     assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);
     assert.doesNotMatch(text, /Workflow builder order[\s\S]{0,200}Workflow build preferences/, relPath);
+  }
+});
+test('adapter installer source has no standalone marker migration path', () => {
+  for (const relPath of [
+    '_projects/development/ai-coding-agent-rules/_main/scripts/install-n8n-agent-adapter.cjs',
+    'skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs'
+  ]) {
+    const text = readText(relPath);
+    const removedCompatibilityTerm = 'leg' + 'acy';
+    assert.doesNotMatch(text, new RegExp('(^|[^A-Za-z])' + removedCompatibilityTerm + '([^A-Za-z]|$)', 'i'), relPath);
+    assert.doesNotMatch(text, /hasLegacy|activeEndMarker/, relPath);
   }
 });
 test('adapter installer dry-run reports changes and write mode is idempotent', () => {
@@ -462,6 +469,17 @@ test('adapter installer appends managed adapter block when no markers exist', ()
   assert.equal(markerCount(installed, endMarker), 1);
 });
 
+test('adapter installer rejects standalone non-managed adapter markers without modifying the file', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-standalone-markers-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  const existing = '# Existing AGENTS\n\n<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->\nold adapter block\n<!-- END N8N-AGENT-RULES-ADAPTER -->\n';
+  fs.writeFileSync(activePath, existing);
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unsupported standalone n8n adapter markers in AGENTS\.md/);
+  assert.equal(fs.readFileSync(activePath, 'utf8'), existing);
+});
 test('adapter installer rejects duplicate complete managed adapter blocks without modifying the file', () => {
   const workspace = makeN8nWorkspace('n8n-agent-adapter-duplicate-');
   const activePath = path.join(workspace, 'AGENTS.md');

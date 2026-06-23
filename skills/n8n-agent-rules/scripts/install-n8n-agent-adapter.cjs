@@ -6,8 +6,8 @@ const path = require('node:path');
 
 const beginMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
 const endMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
-const legacyBeginMarker = '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->';
-const legacyEndMarker = '<!-- END N8N-AGENT-RULES-ADAPTER -->';
+const standaloneBeginMarker = '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->';
+const standaloneEndMarker = '<!-- END N8N-AGENT-RULES-ADAPTER -->';
 
 const targetDefinitions = {
   agents: {
@@ -194,23 +194,17 @@ function markerIndexes(text, marker) {
 
 function replaceManagedBlock(existing, block, activeFile = 'active instruction file') {
   const normalized = normalizeNewlines(existing);
-  const canonicalStarts = markerIndexes(normalized, beginMarker);
-  const canonicalFinishes = markerIndexes(normalized, endMarker);
-  const legacyStarts = markerIndexes(normalized, legacyBeginMarker);
-  const legacyFinishes = markerIndexes(normalized, legacyEndMarker);
-  const hasCanonical = canonicalStarts.length > 0 || canonicalFinishes.length > 0;
-  const hasLegacy = legacyStarts.length > 0 || legacyFinishes.length > 0;
+  const starts = markerIndexes(normalized, beginMarker);
+  const finishes = markerIndexes(normalized, endMarker);
+  const standaloneStarts = markerIndexes(normalized, standaloneBeginMarker);
+  const standaloneFinishes = markerIndexes(normalized, standaloneEndMarker);
 
-  if (!hasCanonical && !hasLegacy) {
+  if (standaloneStarts.length > 0 || standaloneFinishes.length > 0) {
+    throw new Error(`Unsupported standalone n8n adapter markers in ${activeFile}. Use the canonical AI-AGENT-TOOLKIT managed adapter block.`);
+  }
+  if (starts.length === 0 && finishes.length === 0) {
     return `${normalized.trimEnd()}\n\n${block}\n`;
   }
-  if (hasCanonical && hasLegacy) {
-    throw new Error(`Malformed managed adapter markers in ${activeFile}`);
-  }
-
-  const starts = hasCanonical ? canonicalStarts : legacyStarts;
-  const finishes = hasCanonical ? canonicalFinishes : legacyFinishes;
-  const activeEndMarker = hasCanonical ? endMarker : legacyEndMarker;
   if (starts.length !== 1 || finishes.length !== 1) {
     throw new Error(`Malformed managed adapter markers in ${activeFile}`);
   }
@@ -220,7 +214,7 @@ function replaceManagedBlock(existing, block, activeFile = 'active instruction f
     throw new Error(`Malformed managed adapter markers in ${activeFile}`);
   }
   const before = normalized.slice(0, start).trimEnd();
-  const after = normalized.slice(finish + activeEndMarker.length).trimStart();
+  const after = normalized.slice(finish + endMarker.length).trimStart();
   return `${before}\n\n${block}\n${after ? `\n${after.trimEnd()}\n` : ''}`;
 }
 
