@@ -34,6 +34,27 @@ function timestamp() {
   return new Date().toISOString();
 }
 
+function reportTimestampSgt(value) {
+  const date = new Date(value || timestamp());
+  if (Number.isNaN(date.getTime())) return `${value} (SGT unavailable)`;
+  const sgt = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+  const pad = (number) => String(number).padStart(2, '0');
+  return [
+    sgt.getUTCFullYear(),
+    '-',
+    pad(sgt.getUTCMonth() + 1),
+    '-',
+    pad(sgt.getUTCDate()),
+    ' ',
+    pad(sgt.getUTCHours()),
+    ':',
+    pad(sgt.getUTCMinutes()),
+    ':',
+    pad(sgt.getUTCSeconds()),
+    ' SGT'
+  ].join('');
+}
+
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -1378,12 +1399,56 @@ function updateReportIsMeaningful(context) {
   return (context.targetSyncs || []).some((entry) => (entry.removedSkillNames || []).length);
 }
 
+function shortCommit(value) {
+  const text = String(value || '');
+  if (!text || text === 'none') return 'none';
+  return text.slice(0, 8);
+}
+
+function repoTldr(repo, previousCommit, commit, warning) {
+  if (repo.status === 'updated') return `updated from ${shortCommit(previousCommit)} to ${shortCommit(commit)}`;
+  if (repo.externalAdvanceDetected) return 'already updated before this hook run';
+  if (repo.status === 'validation-failed') return `updated to ${shortCommit(commit)}, but validation failed`;
+  if (repo.status === 'sync-delegation-failed') return 'updated, but target sync failed';
+  if (repo.status === 'skipped') return warning ? `skipped (${warning})` : 'skipped safely';
+  if (repo.status === 'up-to-date') return 'already up to date';
+  return 'not updated in this run';
+}
+
+function targetsTldr(targetSyncs, targetSyncStatus) {
+  if (targetSyncs.length) {
+    return targetSyncs
+      .map((sync) => `${targetDisplayName(sync.target)} (${sync.skillNames.length} skills)`)
+      .join(', ')
+      .replace(/^/, 'synced ');
+  }
+  if (targetSyncStatus === 'skipped') return 'sync skipped';
+  return 'nothing to sync';
+}
+
+function branchMismatchSuggestion(warning) {
+  return /branch mismatch/i.test(String(warning || ''))
+    ? 'switch the Toolkit repo back to `main`, then restart Codex or rerun setup/sync'
+    : '';
+}
+
+function actionTldr({ repo, nativePluginCache, warning }) {
+  if (nativePluginCache.status === 'stale') return 'run `setup toolkit` to refresh the Codex plugin cache';
+  if (repo.status === 'validation-failed') return 'check hook-light validation';
+  if (repo.status === 'sync-delegation-failed') return 'check target sync';
+  const branchAction = branchMismatchSuggestion(warning);
+  if (branchAction) return branchAction;
+  if (warning) return `check: ${warning}`;
+  return 'none';
+}
+
 function buildUpdateReport({ args, state, checksum, context }) {
   const repo = context.repo || {};
   const targetSyncs = context.targetSyncs || [];
   const skippedTargets = context.skippedTargets || [];
   const nativePluginCache = context.nativePluginCache || {};
   const warning = repo.error || context.warning || '';
+  const branchAction = branchMismatchSuggestion(warning);
   const commit = repo.externalAdvanceToCommit || repo.toCommit || currentToolkitCommit(state);
   const previousCommit = repo.externalAdvanceFromCommit || repo.fromCommit || 'none';
   const validationStatus = repo.validationStatus || repo.validation?.status || (repo.status ? 'not run' : 'not run');
@@ -1391,13 +1456,20 @@ function buildUpdateReport({ args, state, checksum, context }) {
   const lines = [
     '# AI Agent Toolkit Update',
     '',
-    `Toolkit updated to commit: ${inlineCode(commit)}`,
-    `Previous commit: ${inlineCode(previousCommit)}`,
-    `Source: ${inlineCode(args.syncSource)}`,
-    `Timestamp: ${inlineCode(context.timestamp || timestamp())}`,
+    '## TL;DR',
     '',
-    "## What's Updated",
-    ''
+    `- Repo: ${repoTldr(repo, previousCommit, commit, warning)}.`,
+    `- Targets: ${targetsTldr(targetSyncs, targetSyncStatus)}.`,
+    `- Action needed: ${actionTldr({ repo, nativePluginCache, warning })}.`,
+    '',
+    '## Details',
+    '',
+    `- Time (SGT): ${inlineCode(reportTimestampSgt(context.timestamp || timestamp()))}`,
+    `- Source: ${inlineCode(args.syncSource)}`,
+    `- Toolkit updated to commit: ${inlineCode(commit)}`,
+    `- Previous commit: ${inlineCode(previousCommit)}`,
+    '',
+    'Changed files:'
   ];
 
   if ((repo.changedFiles || []).length) {
@@ -1460,7 +1532,10 @@ function buildUpdateReport({ args, state, checksum, context }) {
     for (const error of nativePluginCache.errors || []) lines.push(`  - ${inlineCode(error)}`);
   }
   lines.push(`- checksum: ${inlineCode(checksum)}`);
-  if (warning) lines.push(`- warning/error: ${inlineCode(warning)}`);
+  if (warning) {
+    lines.push(`- warning/error: ${inlineCode(warning)}`);
+    if (branchAction) lines.push(`- Suggested fix: ${branchAction}.`);
+  }
   return `${lines.join('\n')}\n`;
 }
 
