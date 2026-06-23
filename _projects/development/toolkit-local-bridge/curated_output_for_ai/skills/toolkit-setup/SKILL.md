@@ -31,7 +31,7 @@ Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair
 node repo/scripts/setup-toolkit.cjs --execute
 ```
 
-Treat `SETUP PAUSED` output as an action-blocking approval question, not as completion. After the user approves repo-backed auto-update, rerun with `--write-repo-auto-update`; after the user approves OpenCode or Antigravity 2 writes, rerun with the matching `--enable-target` flag. Do not stop after `setup-codex-toolkit-plugin.cjs --verify` or `--write`.
+Treat `SETUP PAUSED` output as an action-blocking approval question, not as completion. After the user approves repo-backed auto-update, rerun with `--write-repo-auto-update`; after the user answers the update-report auto-open question, rerun with either `--enable-update-report-open` or `--skip-update-report-open`; after the user approves OpenCode or Antigravity 2 writes, rerun with the matching `--enable-target` flag. The update-report auto-open question must be asked during setup and must be bolded in user-facing text. Do not stop after `setup-codex-toolkit-plugin.cjs --verify` or `--write`.
 3. Start other bridge requests with a dry-run or audit command, usually:
 
 ```powershell
@@ -114,8 +114,10 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 
 OpenCode detection should mention useful signals such as the `opencode` command, `OPENCODE_CONFIG_DIR` or `~/.config/opencode`, an existing managed target folder, and persisted bridge target state. Antigravity 2 detection and Python `ag2` package detection are separate: Antigravity 2 may be detected from `%USERPROFILE%\.antigravity`, `%USERPROFILE%\.gemini\config`, `%USERPROFILE%\.gemini\config\plugins`, an existing Toolkit hub adapter, an existing `%USERPROFILE%\.gemini\config\plugins\ai-agent-toolkit` plugin target, explicit enablement, or persisted bridge state even when the Python package is absent. The audit should report `ag2_package_detected` separately, keep `python_command` empty unless the package is found, and include the exact Python commands tried plus package misses such as `Package(s) not found: ag2`. If the user provides a non-PATH AG2 Python for package-specific workflows, persist it with `--set-ag2-python-command "<python.exe>" --write` so future audits and hooks can reuse it.
 
-6. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output into the app-facing target: OpenCode uses `~/.config/opencode/skills/ai-agent-toolkit`, and Antigravity 2 uses `~/.gemini/config/plugins/ai-agent-toolkit` with `skills/ai-agent-toolkit/SKILL.md` inside that plugin root. If OpenCode or Antigravity 2 is not detected, explain that either can be enabled later with `node repo/scripts/toolkit-local-bridge.cjs --enable-target <target> --write`. Never silently enable OpenCode or Antigravity 2.
-7. If approved, enable only the approved targets and run a sync test. Include `--set-ag2-python-command "<python.exe>"` in the approved write command only when the user supplied or selected that AG2 Python command:
+6. Ask the update-report auto-open preference before non-native target writes. The user-facing question must be exactly bolded as `**Do you want Codex to open Toolkit update reports automatically after meaningful hook activity?**`. If approved, rerun setup with `--enable-update-report-open`; if declined, rerun with `--skip-update-report-open`. This persisted preference writes only Toolkit bridge hub state and affects whether meaningful future hook reports open automatically, using the bridge's guarded report-opening path.
+
+7. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output into the app-facing target: OpenCode uses `~/.config/opencode/skills/ai-agent-toolkit`, and Antigravity 2 uses `~/.gemini/config/plugins/ai-agent-toolkit` with `skills/ai-agent-toolkit/SKILL.md` inside that plugin root. If OpenCode or Antigravity 2 is not detected, explain that either can be enabled later with `node repo/scripts/toolkit-local-bridge.cjs --enable-target <target> --write`. Never silently enable OpenCode or Antigravity 2.
+8. If approved, enable only the approved targets and run a sync test. Include `--set-ag2-python-command "<python.exe>"` in the approved write command only when the user supplied or selected that AG2 Python command:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --enable-target ag2 --write
@@ -123,7 +125,7 @@ node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-8. Confirm future native `SessionStart` hooks will use the configured repo-backed updater: Codex hooks should use `--sync-source codex-plugin`, Claude Code hooks should use `--sync-source claude-plugin`, and both should validate repo path, branch, remote, clean tree, `git fetch origin main`, `git merge --ff-only FETCH_HEAD`, hook-light validation, and enabled-target sync from the freshly updated repo.
+9. Confirm future native `SessionStart` hooks will use the configured repo-backed updater: Codex hooks should use `--sync-source codex-plugin`, Claude Code hooks should use `--sync-source claude-plugin`, and both should validate repo path, branch, remote, clean tree, `git fetch origin main`, `git merge --ff-only FETCH_HEAD`, hook-light validation, and enabled-target sync from the freshly updated repo.
 
 ## Safety Rules
 

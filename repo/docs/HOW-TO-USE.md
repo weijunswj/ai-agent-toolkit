@@ -56,8 +56,9 @@ For normal human setup, keep the journey short:
 4. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 5. Restart Codex if setup says the plugin needs a fresh session.
 6. Approve repo-backed auto-update only if you want the Toolkit bridge hub configured from this local repo on `main` with auto-sync.
-7. For Claude Code, use Claude Code's native Toolkit plugin flow from this repo; keep Codex and Claude Code plugin setup separate.
-8. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+7. Answer the required update-report auto-open preference: approve `--enable-update-report-open` if you want meaningful Toolkit hook reports to open automatically, or choose `--skip-update-report-open` to keep reports closed by default.
+8. For Claude Code, use Claude Code's native Toolkit plugin flow from this repo; keep Codex and Claude Code plugin setup separate.
+9. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
 
 Codex and Claude Code update Toolkit through their own native plugin systems:
 
