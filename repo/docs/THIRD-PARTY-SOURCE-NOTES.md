@@ -20,7 +20,7 @@ The toolkit vendors/adapts only the local-search subset:
 
 ## Update Rules
 
-Scheduled source-watch checks are advisory/manual-review only and must read active third-party tracking from `SOURCE-LOCK.json`. Active third-party locks require `source_update_policy: "manual_review_required"`, `public_attribution_required: true`, a full 40-character `source_commit`, and `source_blob_sha` pins for exact and adapted copied files. Updates require attribution review, allowlist review, local-only script checks, and full repo validation.
+Scheduled source-watch checks are advisory/manual-review only. Normal third-party source tracking must read active third-party tracking from `SOURCE-LOCK.json`; temporary advisory targets that are not yet source dependencies live in `repo/source-watch/advisory-targets.json` and are reported only when actionable. Active third-party locks require `source_update_policy: "manual_review_required"`, `public_attribution_required: true`, a full 40-character `source_commit`, and `source_blob_sha` pins for exact and adapted copied files. Updates require attribution review, allowlist review, local-only script checks, and full repo validation.
 
 ## What Was Not Used
 
