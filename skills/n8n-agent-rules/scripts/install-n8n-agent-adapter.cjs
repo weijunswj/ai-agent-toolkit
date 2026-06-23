@@ -4,29 +4,23 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const beginMarker = '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->';
-const endMarker = '<!-- END N8N-AGENT-RULES-ADAPTER -->';
+const beginMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
+const endMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
+const standaloneBeginMarker = '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->';
+const standaloneEndMarker = '<!-- END N8N-AGENT-RULES-ADAPTER -->';
 
 const targetDefinitions = {
   agents: {
     activeFile: 'AGENTS.md',
     adapter: 'AGENTS.n8n-brief.template.md'
-  },
-  claude: {
-    activeFile: 'CLAUDE.md',
-    adapter: 'CLAUDE.n8n-brief.template.md'
-  },
-  gemini: {
-    activeFile: 'GEMINI.md',
-    adapter: 'GEMINI.n8n-brief.template.md'
   }
 };
 
 function usage() {
   return [
-    'Usage: node install-n8n-agent-adapter.cjs --dry-run|--write [--target auto|all|agents|claude|gemini] [--workspace <path>]',
+    'Usage: node install-n8n-agent-adapter.cjs --dry-run|--write [--target auto|agents] [--workspace <path>]',
     '',
-    'Use --dry-run to preview changes. Use --write only after explicit approval to patch active instruction files.'
+    'Use --dry-run to preview changes. Use --write only after explicit approval to patch AGENTS.md.'
   ].join('\n');
 }
 
@@ -56,8 +50,8 @@ function parseArgs(argv) {
   if (args.dryRun === args.write) {
     throw new Error('Choose exactly one of --dry-run or --write.');
   }
-  if (!['auto', 'all', 'agents', 'claude', 'gemini'].includes(args.target)) {
-    throw new Error(`Unsupported --target value: ${args.target}`);
+  if (!['auto', 'agents'].includes(args.target)) {
+    throw new Error(`Unsupported --target value: ${args.target}. n8n adapters are installed only in AGENTS.md; CLAUDE.md and GEMINI.md should remain shims to AGENTS.md.`);
   }
   if (!args.workspace) {
     throw new Error('--workspace must not be empty.');
@@ -202,6 +196,12 @@ function replaceManagedBlock(existing, block, activeFile = 'active instruction f
   const normalized = normalizeNewlines(existing);
   const starts = markerIndexes(normalized, beginMarker);
   const finishes = markerIndexes(normalized, endMarker);
+  const standaloneStarts = markerIndexes(normalized, standaloneBeginMarker);
+  const standaloneFinishes = markerIndexes(normalized, standaloneEndMarker);
+
+  if (standaloneStarts.length > 0 || standaloneFinishes.length > 0) {
+    throw new Error(`Unsupported standalone n8n adapter markers in ${activeFile}. Use the canonical AI-AGENT-TOOLKIT managed adapter block.`);
+  }
   if (starts.length === 0 && finishes.length === 0) {
     return `${normalized.trimEnd()}\n\n${block}\n`;
   }
@@ -219,9 +219,9 @@ function replaceManagedBlock(existing, block, activeFile = 'active instruction f
 }
 
 function targetList(root, target) {
-  if (target === 'all') return Object.values(targetDefinitions);
   if (target !== 'auto') return [targetDefinitions[target]];
-  return Object.values(targetDefinitions).filter((definition) => fs.existsSync(path.join(root, definition.activeFile)));
+  const agents = targetDefinitions.agents;
+  return fs.existsSync(path.join(root, agents.activeFile)) ? [agents] : [];
 }
 
 function main() {
@@ -248,9 +248,9 @@ function main() {
   }
 
   if (!targets.length) {
-    console.log('No existing active instruction files found for --target auto. No files would be created automatically.');
-    console.log('Required next step: Ask the user which adapter target to create or propose: AGENTS.md, CLAUDE.md, GEMINI.md, all, or none.');
-    console.log('Do this even during read-only or no-modify tasks. Do not run --write without explicit current-turn approval.');
+    console.log('No AGENTS.md found for --target auto. No files would be created automatically.');
+    console.log('Required next step: Ask whether to install or repair repo-local AGENTS.md with ai-coding-agent-rules, create/update only AGENTS.md with this adapter, or choose none.');
+    console.log('Do this even during read-only or no-modify tasks. Do not run --write without explicit current-turn approval naming AGENTS.md.');
     return;
   }
 
