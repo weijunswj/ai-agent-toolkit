@@ -28,7 +28,7 @@ Copy the whole `skills/<skill-name>/` folder.
 
 Do not copy only `SKILL.md`. Keep supporting files beside it when present.
 
-Codex plugin/package support exists. For official `n8n-skills@n8n-io` on Windows, run Toolkit hook repair and audit on the installed plugin cache before trusting hooks:
+Codex plugin/package support exists. For official `n8n-skills@n8n-io`, marketplace registration is not enough: before reporting setup complete, confirm Codex lists `n8n-skills@n8n-io` as installed and enabled, not merely available. On Windows, run Toolkit hook repair and audit on the installed plugin cache before trusting hooks; do not repair only the `.tmp\marketplaces\n8n-io\plugins\n8n-skills` checkout and call setup complete:
 
 ```powershell
 node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io

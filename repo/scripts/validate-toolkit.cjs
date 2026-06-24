@@ -54,7 +54,7 @@ const expectedFiles = [
   'skills/toolkit-setup/README.md',
   'skills/toolkit-setup/SKILL.md',
   'skills/toolkit-setup/agents/openai.yaml',
-  'repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md',
+  'repo/docs/TOOLKIT-LOCAL-BRIDGE.md',
   'repo/docs/HOW-TO-USE.md',
   'repo/docs/SKILL-PORTABILITY-AND-FIDELITY.md',
   '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md',
@@ -1199,7 +1199,7 @@ function validateNativePluginPackages(errors) {
     '.claude-plugin/plugin.json',
     '.claude-plugin/hooks/hooks.json',
     'repo/scripts/toolkit-local-bridge.cjs',
-    'repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md'
+    'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'
   ].filter(existsRel).map((relPath) => ({ relPath, text: readText(relPath) }));
 
   for (const { relPath, text } of checkedTexts) {

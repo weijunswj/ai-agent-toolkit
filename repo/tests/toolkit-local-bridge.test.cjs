@@ -2223,7 +2223,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
 });
 
 test('bridge docs document cache-first setup and release branch auto-update bounds', () => {
-  const text = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'TOOLKIT-LOCAL-BRIDGE-V2.md'), 'utf8');
+  const text = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');
   assert.match(text, /verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync/i);
   assert.match(text, /Routine setup uses `repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs`/);
   assert.match(text, /Release-branch auto-update consideration/i);

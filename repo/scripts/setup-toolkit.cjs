@@ -8,6 +8,7 @@ const { spawnSync } = require('node:child_process');
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
+const SUPPORTED_HOSTS = ['codex', 'claude-code'];
 const SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL = 20;
 const SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL = 21;
 const SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL = 22;
@@ -50,8 +51,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoRoot: repoRootFromScript(),
     repoBranch: DEFAULT_REPO_BRANCH,
     repoRemote: DEFAULT_REPO_REMOTE,
+    host: 'codex',
     codexCli: '',
     hub: '',
+    verifyClaudePlugin: false,
     writeRepoAutoUpdate: false,
     enableUpdateReportOpen: false,
     skipUpdateReportOpen: false,
@@ -72,10 +75,13 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--repo-branch=')) args.repoBranch = arg.slice('--repo-branch='.length);
     else if (arg === '--repo-remote') args.repoRemote = next();
     else if (arg.startsWith('--repo-remote=')) args.repoRemote = arg.slice('--repo-remote='.length);
+    else if (arg === '--host') args.host = next();
+    else if (arg.startsWith('--host=')) args.host = arg.slice('--host='.length);
     else if (arg === '--codex-cli') args.codexCli = next();
     else if (arg.startsWith('--codex-cli=')) args.codexCli = arg.slice('--codex-cli='.length);
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
+    else if (arg === '--verify-claude-plugin') args.verifyClaudePlugin = true;
     else if (arg === '--write-repo-auto-update') args.writeRepoAutoUpdate = true;
     else if (arg === '--enable-update-report-open') args.enableUpdateReportOpen = true;
     else if (arg === '--skip-update-report-open') args.skipUpdateReportOpen = true;
@@ -94,10 +100,11 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.enableCodexPluginAutoRefresh && args.skipCodexPluginAutoRefresh) {
     throw new Error('--enable-codex-plugin-auto-refresh and --skip-codex-plugin-auto-refresh cannot be used together');
   }
-  if (!args.plan && !args.execute && !args.help) args.plan = true;
+  if (!args.plan && !args.execute && !args.help && !args.verifyClaudePlugin) args.plan = true;
   args.repoRoot = path.resolve(args.repoRoot);
   args.repoBranch = args.repoBranch || DEFAULT_REPO_BRANCH;
   args.repoRemote = args.repoRemote || DEFAULT_REPO_REMOTE;
+  if (!SUPPORTED_HOSTS.includes(args.host)) throw new Error(`Unsupported host: ${args.host}`);
   for (const target of args.enableTargets) {
     if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
   }
@@ -112,6 +119,8 @@ function relNodeCommand(relScript, extraArgs = []) {
 function setupPlan(options = {}) {
   const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
   const repoBranch = options.repoBranch || DEFAULT_REPO_BRANCH;
+  const host = options.host || 'codex';
+  if (!SUPPORTED_HOSTS.includes(host)) throw new Error(`Unsupported host: ${host}`);
   const bridgeBase = ['repo/scripts/toolkit-local-bridge.cjs'];
   const hubArgs = options.hub ? ['--hub', quote(path.resolve(options.hub))] : [];
   const codexCliArgs = options.codexCli ? ['--codex-cli', quote(options.codexCli)] : [];
@@ -136,9 +145,38 @@ function setupPlan(options = {}) {
     ...hubArgs
   ]);
   const targetArgs = ['--enable-target', 'opencode', '--enable-target', 'ag2', '--write', ...hubArgs];
+  const codexNativeStep = {
+    id: 'codex_native_plugin_cache',
+    title: 'Verify, write only if needed, then verify the Codex native plugin cache',
+    commands: [
+      relNodeCommand('repo/scripts/setup-codex-toolkit-plugin.cjs', ['--verify', '--json', ...codexCliArgs]),
+      relNodeCommand('repo/scripts/setup-codex-toolkit-plugin.cjs', ['--write', '--json', ...codexCliArgs]),
+      relNodeCommand('repo/scripts/setup-codex-toolkit-plugin.cjs', ['--verify', '--json', ...codexCliArgs])
+    ],
+    conditional_write: 'run --write --json only when --verify reports missing, disabled, stale, wrong-source, or invalid installed cache state'
+  };
+  const claudeNativeStep = {
+    id: 'claude_native_plugin_metadata',
+    title: 'Verify Claude Code native plugin metadata before shared bridge setup',
+    commands: [relNodeCommand('repo/scripts/setup-toolkit.cjs', ['--verify-claude-plugin', '--host', 'claude-code'])],
+    manual_step: 'install or update this repo through Claude Code native plugin UI/flow when Claude Code reports the package is missing, stale, disabled, or untrusted'
+  };
+  const updateReportQuestion = host === 'claude-code'
+    ? '**Do you want Claude Code to open Toolkit update reports automatically after meaningful hook activity?**'
+    : '**Do you want Codex to open Toolkit update reports automatically after meaningful hook activity?**';
+  const codexPluginAutoRefreshStep = {
+    id: 'codex_plugin_auto_refresh_preference',
+    title: 'Ask whether stale Codex plugin cache should auto-refresh from trusted main hooks',
+    approval_required: true,
+    write_flag: '--enable-codex-plugin-auto-refresh',
+    decline_flag: '--skip-codex-plugin-auto-refresh',
+    approval_question: '**Do you want Codex to auto-refresh the Toolkit native plugin cache from this trusted main checkout when a startup hook detects it is stale?**',
+    commands: [codexPluginAutoRefreshCommand]
+  };
 
   return {
     name: 'setup toolkit',
+    host,
     default_mode: 'plan-only; use --execute to run local setup commands',
     repo_root: repoRoot,
     repo_branch: repoBranch,
@@ -157,16 +195,7 @@ function setupPlan(options = {}) {
         ],
         stop_if: 'the worktree is dirty, the origin remote is unexpected, the branch is not main after switch, the update cannot fast-forward, or local HEAD does not exactly match fetched origin/main'
       },
-      {
-        id: 'codex_native_plugin_cache',
-        title: 'Verify, write only if needed, then verify the Codex native plugin cache',
-        commands: [
-          relNodeCommand('repo/scripts/setup-codex-toolkit-plugin.cjs', ['--verify', '--json', ...codexCliArgs]),
-          relNodeCommand('repo/scripts/setup-codex-toolkit-plugin.cjs', ['--write', '--json', ...codexCliArgs]),
-          relNodeCommand('repo/scripts/setup-codex-toolkit-plugin.cjs', ['--verify', '--json', ...codexCliArgs])
-        ],
-        conditional_write: 'run --write --json only when --verify reports missing, disabled, stale, wrong-source, or invalid installed cache state'
-      },
+      host === 'claude-code' ? claudeNativeStep : codexNativeStep,
       {
         id: 'lite_validation',
         title: 'Run routine setup lite validation',
@@ -196,18 +225,10 @@ function setupPlan(options = {}) {
         approval_required: true,
         write_flag: '--enable-update-report-open',
         decline_flag: '--skip-update-report-open',
-        approval_question: '**Do you want Codex to open Toolkit update reports automatically after meaningful hook activity?**',
+        approval_question: updateReportQuestion,
         commands: [updateReportOpenCommand]
       },
-      {
-        id: 'codex_plugin_auto_refresh_preference',
-        title: 'Ask whether stale Codex plugin cache should auto-refresh from trusted main hooks',
-        approval_required: true,
-        write_flag: '--enable-codex-plugin-auto-refresh',
-        decline_flag: '--skip-codex-plugin-auto-refresh',
-        approval_question: '**Do you want Codex to auto-refresh the Toolkit native plugin cache from this trusted main checkout when a startup hook detects it is stale?**',
-        commands: [codexPluginAutoRefreshCommand]
-      },
+      ...(host === 'codex' ? [codexPluginAutoRefreshStep] : []),
       {
         id: 'non_native_target_approval',
         title: 'Ask before non-native target writes',
@@ -240,6 +261,7 @@ function printHelp() {
     '  node repo/scripts/setup-toolkit.cjs --plan',
     '  node repo/scripts/setup-toolkit.cjs --plan --json',
     '  node repo/scripts/setup-toolkit.cjs --execute',
+    '  node repo/scripts/setup-toolkit.cjs --execute --host claude-code',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-update-report-open',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --skip-update-report-open',
@@ -252,6 +274,7 @@ function printHelp() {
     '  --repo-root <path>           trusted local ai-agent-toolkit checkout',
     '  --repo-branch <branch>       default: main',
     '  --repo-remote <url>          default: https://github.com/weijunswj/ai-agent-toolkit',
+    '  --host codex|claude-code     default: codex',
     '  --codex-cli <path>           explicit Codex CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --write-repo-auto-update    enable repo-backed auto-update and auto-sync in bridge hub state',
@@ -363,6 +386,47 @@ function runCodexNativePluginSetup(args) {
     setupCodexArgs(args, '--verify'),
     { cwd: args.repoRoot, timeout: 120000 }
   );
+}
+
+function readJsonFile(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Failed to read JSON ${filePath}: ${error.message}`);
+  }
+}
+
+function verifyClaudeNativePluginMetadata(args) {
+  const pluginPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
+  const hooksPath = path.join(args.repoRoot, '.claude-plugin', 'hooks', 'hooks.json');
+  if (!fs.existsSync(pluginPath)) throw new Error(`Missing Claude Code native plugin manifest: ${pluginPath}`);
+  if (!fs.existsSync(hooksPath)) throw new Error(`Missing Claude Code native plugin hooks: ${hooksPath}`);
+
+  const plugin = readJsonFile(pluginPath);
+  const hooks = readJsonFile(hooksPath);
+  if (plugin.name !== 'ai-agent-toolkit') throw new Error(`Unexpected Claude Code plugin name: ${plugin.name || '<missing>'}`);
+  if (plugin.skills !== './skills') throw new Error('Claude Code plugin manifest must load Toolkit skills from ./skills');
+  if (plugin.hooks !== './.claude-plugin/hooks/hooks.json') {
+    throw new Error('Claude Code plugin manifest must point hooks to ./.claude-plugin/hooks/hooks.json');
+  }
+
+  const sessionStart = hooks?.hooks?.SessionStart;
+  if (!Array.isArray(sessionStart) || !sessionStart.length) {
+    throw new Error('Claude Code plugin hooks must include a SessionStart hook');
+  }
+  const commands = sessionStart
+    .flatMap((entry) => Array.isArray(entry.hooks) ? entry.hooks : [])
+    .map((entry) => String(entry.command || ''));
+  const command = commands.find((value) => value.includes('toolkit-local-bridge.cjs')) || '';
+  if (!command) throw new Error('Claude Code SessionStart hook must call toolkit-local-bridge.cjs');
+  for (const required of ['${CLAUDE_PLUGIN_ROOT}', '--hook', '--sync-enabled', '--write', '--sync-source claude-plugin']) {
+    if (!command.includes(required)) throw new Error(`Claude Code SessionStart hook command is missing ${required}`);
+  }
+  if (/--enable-target|--disable-target|--force-downgrade/.test(command)) {
+    throw new Error('Claude Code SessionStart hook must not enable, disable, or force-downgrade targets');
+  }
+  console.log('Claude Code native plugin metadata verified.');
+  console.log('Install or update this repo through Claude Code native plugin flow when Claude Code reports the package is missing, stale, disabled, or untrusted.');
 }
 
 function bridgeArgs(args, extraArgs = []) {
@@ -502,7 +566,8 @@ function printPlan(plan, asJson) {
 function execute(args) {
   const plan = setupPlan(args);
   verifyAndUpdateTrustedRepo(args);
-  runCodexNativePluginSetup(args);
+  if (args.host === 'claude-code') verifyClaudeNativePluginMetadata(args);
+  else runCodexNativePluginSetup(args);
   runLiteValidation(args);
 
   if (!args.writeRepoAutoUpdate) {
@@ -518,11 +583,11 @@ function execute(args) {
     return SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL;
   }
   if (args.enableUpdateReportOpen) runUpdateReportOpenWrite(args);
-  if (!args.enableCodexPluginAutoRefresh && !args.skipCodexPluginAutoRefresh) {
+  if (args.host === 'codex' && !args.enableCodexPluginAutoRefresh && !args.skipCodexPluginAutoRefresh) {
     printCodexPluginAutoRefreshApproval(plan);
     return SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL;
   }
-  if (args.enableCodexPluginAutoRefresh) runCodexPluginAutoRefreshWrite(args);
+  if (args.host === 'codex' && args.enableCodexPluginAutoRefresh) runCodexPluginAutoRefreshWrite(args);
   runApprovedTargetSync(args);
   if (!args.enableTargets.length) printTargetApproval(plan);
   console.log('');
@@ -534,6 +599,10 @@ function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) {
     printHelp();
+    return 0;
+  }
+  if (args.verifyClaudePlugin) {
+    verifyClaudeNativePluginMetadata(args);
     return 0;
   }
   const plan = setupPlan(args);

@@ -33,6 +33,7 @@
     ],
     "defaultPrompt": [
       "Setup toolkit.",
+      "Refresh toolkit.",
       "Audit the local Toolkit bridge state.",
       "Set up the OpenCode bridge after showing me the planned writes."
     ],

@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-21 (Toolkit Local Bridge v2 native plugin metadata and one setup discoverability skill)
+Latest update: 2026-06-21 (Toolkit Local Bridge native plugin metadata and one setup discoverability skill)
 
 ## Current state
 

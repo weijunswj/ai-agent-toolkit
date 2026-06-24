@@ -44,6 +44,27 @@ function run(args, options = {}) {
 
 function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
+  writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
+    name: 'ai-agent-toolkit',
+    version: '2.2.0',
+    skills: './skills',
+    hooks: './.claude-plugin/hooks/hooks.json'
+  }, null, 2));
+  writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
+    hooks: {
+      SessionStart: [
+        {
+          matcher: '*',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source claude-plugin'
+            }
+          ]
+        }
+      ]
+    }
+  }, null, 2));
   writeFile(path.join(root, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), [
     "'use strict';",
     "require('node:fs').writeFileSync(require('node:path').join(process.cwd(), 'PLUGIN_SETUP_RAN'), 'yes');",
@@ -134,6 +155,34 @@ test('setup toolkit plan is full journey rather than plugin verify only', () => 
   assert.doesNotMatch(text, /--open-update-report/);
   assert.doesNotMatch(text, /\b(?:npm|pip|docker|n8n)\s+(?:install|run|compose|import|export)\b/i);
   assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit')), false, 'plan mode must not write user-local bridge state');
+});
+
+test('claude-code setup plan uses the same journey without Codex native plugin commands', () => {
+  const root = tmpRoot();
+  const result = run(['--plan', '--json', '--repo-root', repoRoot, '--host', 'claude-code'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const plan = JSON.parse(result.stdout);
+  assert.equal(plan.host, 'claude-code');
+  assert.deepEqual(plan.steps.map((step) => step.id), [
+    'trusted_repo_state',
+    'claude_native_plugin_metadata',
+    'lite_validation',
+    'repo_backed_auto_update',
+    'bridge_audit',
+    'update_report_open_preference',
+    'non_native_target_approval',
+    'approved_target_sync'
+  ]);
+
+  const commands = flattenCommands(plan);
+  assert.ok(commands.includes('node repo/scripts/setup-toolkit.cjs --verify-claude-plugin --host claude-code'));
+  assert.ok(commands.includes('node repo/scripts/validate-toolkit.cjs'));
+  assert.ok(commands.includes('node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs'));
+  assert.doesNotMatch(commands.join('\n'), /setup-codex-toolkit-plugin\.cjs/);
+  assert.doesNotMatch(JSON.stringify(plan), /codex_plugin_auto_refresh_preference/);
 });
 
 test('setup execute rejects local main ahead of fetched origin before plugin setup', () => {
@@ -305,12 +354,49 @@ test('setup execute pauses for update report open preference until explicitly an
   assert.match(bridgeLog, /--enable-target ag2 --write/);
 });
 
+test('claude-code setup execute verifies Claude plugin metadata and skips Codex helper', () => {
+  const root = tmpRoot();
+  const origin = path.join(root, 'origin.git');
+  const setupRepo = path.join(root, 'repo');
+  fs.mkdirSync(setupRepo, { recursive: true });
+  runTestGit(root, ['init', '--bare', origin]);
+  runTestGit(setupRepo, ['init']);
+  runTestGit(setupRepo, ['checkout', '-b', 'main']);
+  runTestGit(setupRepo, ['config', 'user.email', 'setup-test@example.invalid']);
+  runTestGit(setupRepo, ['config', 'user.name', 'Setup Test']);
+  createMinimalSetupRepoWithBridgeLog(setupRepo);
+  runTestGit(setupRepo, ['add', '.']);
+  runTestGit(setupRepo, ['commit', '-m', 'base']);
+  runTestGit(setupRepo, ['remote', 'add', 'origin', origin]);
+  runTestGit(setupRepo, ['push', '-u', 'origin', 'main']);
+
+  const result = run([
+    '--execute',
+    '--host', 'claude-code',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--write-repo-auto-update',
+    '--skip-update-report-open',
+    '--enable-target', 'ag2'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Claude Code native plugin metadata verified/);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP_RAN')), false, 'Claude setup must not call the Codex helper');
+  const bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
+  assert.match(bridgeLog, /--enable-repo-auto-update/);
+  assert.doesNotMatch(bridgeLog, /--enable-codex-plugin-auto-refresh/);
+  assert.match(bridgeLog, /--enable-target ag2 --write/);
+});
+
 test('setup docs route setup and refresh prompts to the orchestrator', () => {
   const relPaths = [
     '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md',
     'skills/toolkit-setup/SKILL.md',
     'repo/docs/FOR_AI_AGENTS.md',
-    'repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md',
+    'repo/docs/TOOLKIT-LOCAL-BRIDGE.md',
     'repo/docs/HOW-TO-USE.md'
   ];
 

@@ -47,7 +47,9 @@ codex plugin marketplace add n8n-io/skills
 codex plugin add n8n-skills@n8n-io
 ```
 
-On Windows, repair and audit the installed plugin cache before approving or trusting hooks. A bare `.sh` hook would open `session-start.sh` in VS Code instead of running as a hook:
+Marketplace registration is not a complete install. Before reporting setup complete, verify `codex plugin list --available --json` shows `n8n-skills@n8n-io` under installed plugins with `installed: true` and `enabled: true`, or confirm `~/.codex/config.toml` contains `[plugins."n8n-skills@n8n-io"]` with `enabled = true`. If it appears only under available plugins or the UI still shows **Add**, run the plugin-add step instead of stopping after marketplace setup or hook repair.
+
+On Windows, repair and audit the installed plugin cache before approving or trusting hooks. Do not repair only the temporary marketplace checkout, such as `C:\Users\<user>\.codex\.tmp\marketplaces\n8n-io\plugins\n8n-skills`, and call setup complete. A bare `.sh` hook would open `session-start.sh` in VS Code instead of running as a hook:
 
 ```powershell
 node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --write --plugin-id n8n-skills@n8n-io
@@ -73,8 +75,9 @@ and follow its routing into the matching capability skill before acting.
 For plugin installs, then:
 
 1. Restart Codex.
-2. Approve or trust the plugin hooks when Codex prompts you so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
-3. Start n8n work by loading the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`.
+2. Confirm the plugin is installed/enabled, not just available.
+3. Approve or trust the plugin hooks when Codex prompts you so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
+4. Start n8n work by loading the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`.
 
 ## 4. Install Toolkit Safety Rules For Codex
 

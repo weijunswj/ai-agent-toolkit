@@ -31,6 +31,7 @@
     ],
     "defaultPrompt": [
       "Setup toolkit.",
+      "Refresh toolkit.",
       "Audit the local Toolkit bridge state.",
       "Set up the Antigravity 2 bridge after showing me the planned writes."
     ],

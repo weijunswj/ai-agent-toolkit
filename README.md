@@ -18,7 +18,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 | What you want | Start here |
 |---|---|
 | Full guide or source context | Open a project under [_projects/](_projects/), then its `_main/` folder. |
-| Set up Toolkit itself | Use [Toolkit Setup](#toolkit-setup), then ask Codex: `setup toolkit`. |
+| Set up Toolkit itself | Use [Toolkit Setup](#toolkit-setup), then ask Codex or Claude Code: `setup toolkit` or `refresh toolkit`. |
 | Install a skill | Copy the whole skill folder using [Install Skills By Platform](#install-skills-by-platform). |
 | Review skill safety | Use the [Skill Safety Matrix](repo/docs/SKILL-SAFETY-MATRIX.md) before creating, extending, or importing skills. |
 | Maintenance work | Start with [repo/docs/](repo/docs/) and the validation commands below. |
@@ -28,14 +28,15 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. For Codex, open the repo in Codex and say `setup toolkit`.
-3. Let Codex install or verify the Toolkit native plugin.
-4. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
-5. Restart Codex if setup says the plugin needs a fresh session.
-6. For Claude Code, use Claude Code's native Toolkit plugin flow from this repo; keep Codex and Claude Code plugin setup separate.
-7. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state.
+3. The agent must run the host-aware setup orchestrator, not just `node repo/scripts/sync-toolkit-projects.cjs --write`: Codex uses `node repo/scripts/setup-toolkit.cjs --execute`; Claude Code uses `node repo/scripts/setup-toolkit.cjs --execute --host claude-code`.
+4. Let the host install, verify, or refresh its own Toolkit native plugin path, then answer the required setup gates.
+5. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
+6. Restart the host if setup says the plugin needs a fresh session.
+7. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
+8. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
 
-More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills); detailed Codex plugin and bridge mechanics live in [Toolkit Local Bridge V2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md).
+More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills); detailed plugin and bridge mechanics live in [Toolkit Local Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 
 ## Terms
 
