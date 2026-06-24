@@ -173,7 +173,7 @@ Do not run live n8n, Docker, import/export, sync, activation, execution, publish
 
 This root `AGENTS.md` is toolkit-repo-specific. Portable repo installs must use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
 
-Toolkit-specific root rules live directly after the managed execution blocks. Do not move root-only toolkit context into `_projects/development/ai-coding-agent-rules/`; that project owns portable templates and shims only.
+Toolkit-specific root rules are maintained directly in this file after the managed execution blocks. Do not move root-only toolkit context into `_projects/development/ai-coding-agent-rules/`; that project owns portable templates and shims only.
 
 This repo is the canonical reusable AI Agent Toolkit.
 

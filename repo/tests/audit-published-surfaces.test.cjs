@@ -258,11 +258,12 @@ test('audit-published-surfaces inspects curated directory contents', () => {
   assert.equal(findings.some((entry) => entry.includes('/curated_output_for_ai/playbooks/')), false);
   for (const platformOverview of [
     '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md'
+    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md'
   ]) {
     assert.equal(findings.includes(platformOverview), false, platformOverview);
   }
+  const codexOverview = '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md';
+  assert.equal(findings.includes(codexOverview), true, codexOverview);
 });
 
 test('n8n local setup platform overviews declare their curated boundary', () => {

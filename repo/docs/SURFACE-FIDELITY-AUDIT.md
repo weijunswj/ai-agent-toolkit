@@ -40,7 +40,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | duplicateProjectContentGroups | 0 |
 | boundaryRecipeOutputs | 211 |
 | boundaryRecipeFindings | 0 |
-| curatedDirectoryFindings | 0 |
+| curatedDirectoryFindings | 1 |
 
 Current published-file classifications:
 
@@ -69,7 +69,7 @@ Current boundary recipe classifications:
 Known baseline context:
 
 - There are no current curated output boundary findings.
-- There are no current curated directory boundary findings.
+- Current curated directory boundary finding: `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md` is a reviewed large Markdown platform reference retained in the audit baseline.
 - The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by keeping the first-party `toolkit-local-bridge` project and generated native plugin metadata files, while adding exactly one compact `toolkit-setup` discoverability skill instead of a command-per-bridge skill family. The Codex plugin now also declares two generated PNG icon assets.
 
 ## Current project modules
