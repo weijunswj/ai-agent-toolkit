@@ -266,7 +266,7 @@ Meaningful work means at least one of:
 - Repo auto-update skipped safely because the branch did not match, the tree was dirty, the remote did not match, fetch failed, or the fetched commit was not a fast-forward.
 - The Codex native plugin cache is stale relative to the configured repo source, was auto-refreshed, or failed auto-refresh.
 
-Normal no-op hook runs with the same observed repo commit and no target sync, stale plugin cache, skip, or validation issue do not write or open a report. In hook mode, the bridge prints only:
+Normal no-op hook runs with the same observed repo commit and no target sync, stale plugin cache, skip, or validation issue do not write or open a report. Meaningful reports are also deduplicated by event signature: if a later hook sees the same repo status, target-sync result, native plugin cache status, and checksum, it does not create or open another timestamped report. In hook mode, the bridge prints only:
 
 ```text
 Toolkit updated: <report path>

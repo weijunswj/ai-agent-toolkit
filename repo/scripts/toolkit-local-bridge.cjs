@@ -580,6 +580,7 @@ function defaultState() {
     last_repo_update_to_commit: '',
     last_repo_update_error: '',
     last_update_report_path: '',
+    last_update_report_signature: '',
     update_report_open_enabled: false,
     codex_plugin_auto_refresh_enabled: false,
     created_at: '',
@@ -608,6 +609,7 @@ function normalizedState(raw) {
   state.last_repo_update_to_commit = state.last_repo_update_to_commit || '';
   state.last_repo_update_error = state.last_repo_update_error || '';
   state.last_update_report_path = state.last_update_report_path || '';
+  state.last_update_report_signature = state.last_update_report_signature || '';
   state.update_report_open_enabled = state.update_report_open_enabled === true;
   state.codex_plugin_auto_refresh_enabled = state.codex_plugin_auto_refresh_enabled === true;
   return state;
@@ -1565,14 +1567,56 @@ function writeUpdateReportFile(markdown) {
   return reportPath;
 }
 
+function updateReportSignature({ args, checksum, context }) {
+  const repo = context.repo || {};
+  const nativePluginCache = context.nativePluginCache || {};
+  const targetSyncs = context.targetSyncs || [];
+  const skippedTargets = context.skippedTargets || [];
+  const payload = {
+    syncSource: args.syncSource,
+    checksum,
+    repo: {
+      status: repo.status || '',
+      error: repo.error || '',
+      branch: repo.branch || '',
+      remote: repo.remote || '',
+      fromCommit: repo.fromCommit || '',
+      toCommit: repo.toCommit || '',
+      externalAdvanceDetected: repo.externalAdvanceDetected === true,
+      externalAdvanceFromCommit: repo.externalAdvanceFromCommit || '',
+      externalAdvanceToCommit: repo.externalAdvanceToCommit || '',
+      changedFiles: repo.changedFiles || [],
+      validationStatus: repo.validationStatus || repo.validation?.status || ''
+    },
+    nativePluginCache: {
+      status: nativePluginCache.status || '',
+      errors: nativePluginCache.errors || []
+    },
+    targetSyncStatus: context.targetSyncStatus || '',
+    targetSyncs: targetSyncs.map((sync) => ({
+      target: sync.target || '',
+      targetPath: sync.targetPath || '',
+      skillNames: sync.skillNames || [],
+      removedSkillNames: sync.removedSkillNames || []
+    })),
+    skippedTargets
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
 function maybeWriteUpdateReport({ args, hubPath, state, checksum, context }) {
   if (!shouldConsiderUpdateReport(args, state) || !updateReportIsMeaningful(context)) {
     return { state, reportPath: '' };
   }
   const reportContext = { ...context, timestamp: context.timestamp || timestamp() };
+  const signature = updateReportSignature({ args, checksum, context: reportContext });
+  if (!args.openUpdateReport && state.last_update_report_signature === signature) {
+    return { state, reportPath: '' };
+  }
   const markdown = buildUpdateReport({ args, state, checksum, context: reportContext });
   const reportPath = writeUpdateReportFile(markdown);
   state.last_update_report_path = reportPath;
+  state.last_update_report_signature = signature;
   writeJson(path.join(hubPath, 'state.json'), state);
   if (args.openUpdateReport || state.update_report_open_enabled) {
     openUpdateReport(reportPath);

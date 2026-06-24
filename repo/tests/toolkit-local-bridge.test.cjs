@@ -1559,6 +1559,19 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
   assert.match(report.text, /Enable Codex plugin auto-refresh|run `setup toolkit`/);
   assert.match(report.text, /target sync status: `not needed`/);
   assert.equal(report.state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.match(report.state.last_update_report_signature, /^[a-f0-9]{64}$/);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      PLUGIN_ROOT: stalePluginRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  const repeatedState = readJson(path.join(hub, 'state.json'));
+  assert.equal(repeatedState.last_update_report_path, report.reportPath);
+  assert.equal(repeatedState.last_update_report_signature, report.state.last_update_report_signature);
 });
 
 test('hook auto-refreshes stale Codex native plugin cache only after setup opt-in', () => {
