@@ -25,6 +25,7 @@ const HOOK_LIGHT_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bri
 const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
 const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
 const NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT = 5;
+const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -330,6 +331,38 @@ function commandOutput(result) {
   return `${result.stdout || ''}${result.stderr || ''}${result.error || ''}`.trim();
 }
 
+function isCredentialError(message = '') {
+  return /SEC_E_NO_CREDENTIALS|could not read Username|Authentication failed|Authentication|permission denied|terminal prompts disabled/i.test(
+    String(message)
+  );
+}
+
+function fetchWithCredentialFallback(repoPath, branch) {
+  const defaultFetch = gitCommand(repoPath, ['fetch', 'origin', branch], { timeout: 120000 });
+  if (defaultFetch.ok) return defaultFetch;
+
+  let lastError = commandOutput(defaultFetch);
+  if (!isCredentialError(lastError)) return defaultFetch;
+
+  for (const helper of GIT_CREDENTIAL_HELPERS) {
+    const fallback = gitCommand(
+      repoPath,
+      ['-c', `credential.helper=${helper}`, 'fetch', 'origin', branch],
+      { timeout: 120000 }
+    );
+    if (fallback.ok) return fallback;
+    const fallbackOutput = commandOutput(fallback);
+    if (fallbackOutput) lastError = `${lastError}\n${fallbackOutput}`;
+  }
+  return {
+    ok: false,
+    status: defaultFetch.status,
+    stdout: '',
+    stderr: lastError,
+    error: ''
+  };
+}
+
 function gitCommand(repoPath, args, options = {}) {
   return runCommand('git', args, { cwd: repoPath, timeout: options.timeout || 30000 });
 }
@@ -495,9 +528,13 @@ function validateAndUpdateRepo(state, args = {}) {
     branchSwitchedFrom = currentBranch;
   }
   const fromCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read current commit');
-  const fetchResult = gitCommand(repoPath, ['fetch', 'origin', branch], { timeout: 120000 });
+  const fetchResult = fetchWithCredentialFallback(repoPath, branch);
   if (!fetchResult.ok) {
-    throw repoUpdateError('skipped', `git fetch origin ${branch} failed: ${commandOutput(fetchResult)}`, {
+    const fetchError = commandOutput(fetchResult) || 'fetch failed';
+    const credentialHint = isCredentialError(fetchError)
+      ? `\nCredential hint: fetch failed in this environment. Run this command from the same shell/profile that already works for git pull/fetch, or run \`gh auth login\` in this context, then rerun setup/refresh.`
+      : '';
+    throw repoUpdateError('skipped', `git fetch origin ${branch} failed: ${fetchError}${credentialHint}`, {
       fromCommit,
       branchSwitchedFrom,
       error: 'fetch failed'
