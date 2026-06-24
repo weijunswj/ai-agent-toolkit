@@ -58,6 +58,7 @@ The hub contains:
 - Sync timestamp.
 - Repo auto-update state: `repo_auto_update_enabled`, `repo_path`, `repo_branch`, `repo_remote`, `last_repo_update`, `last_repo_update_status`, `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_error`.
 - Update-report state: `last_update_report_path` and `update_report_open_enabled`.
+- Codex plugin cache auto-refresh preference: `codex_plugin_auto_refresh_enabled`.
 - Target paths.
 - Target detected, enabled, disabled, stale, and synced state.
 
@@ -112,6 +113,8 @@ Supported flags:
 - `--open-update-report`.
 - `--enable-update-report-open`.
 - `--disable-update-report-open`.
+- `--enable-codex-plugin-auto-refresh`.
+- `--disable-codex-plugin-auto-refresh`.
 - `--force-downgrade`.
 - `--python-command <command>`.
 - `--set-ag2-python-command <command>`.
@@ -137,13 +140,13 @@ codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
 
 The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`. The wrapper must use `policy.authentication: "ON_USE"`, not `ON_INSTALL`, so a no-auth local Toolkit plugin can install headlessly before any hook trust prompt.
 
-For `setup toolkit` in Codex, agents must run the script-backed journey:
+For `setup toolkit` or `refresh toolkit` in Codex, agents must run the full script-backed journey even when Toolkit is already installed:
 
 ```powershell
 node repo/scripts/setup-toolkit.cjs --execute
 ```
 
-The orchestrator performs only the minimal repo update check first, then runs the required steps to verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync. If it pauses before repo-backed auto-update, ask the user before rerunning with `--write-repo-auto-update`; then ask the bolded update-report auto-open preference before target writes, rerunning with either `--enable-update-report-open` or `--skip-update-report-open`; ask separately before adding any `--enable-target opencode` or `--enable-target ag2` target writes. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
+The orchestrator performs only the minimal repo update check first, then runs the required steps to verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync. Do not shortcut already-installed Toolkit refreshes to plugin verification only; the full journey is required so stale repo, plugin-cache, bridge-state, report, and target-sync pieces are detected and patched in order. If it pauses before repo-backed auto-update, ask the user before rerunning with `--write-repo-auto-update`; then ask the bolded update-report auto-open preference before target writes, rerunning with either `--enable-update-report-open` or `--skip-update-report-open`; then ask the bolded Codex plugin auto-refresh preference, rerunning with either `--enable-codex-plugin-auto-refresh` or `--skip-codex-plugin-auto-refresh`; ask separately before adding any `--enable-target opencode` or `--enable-target ag2` target writes. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
 
 Before reporting `setup toolkit` complete, run:
 
@@ -224,7 +227,7 @@ node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
 ```
 
-9. Checks whether the running Codex native plugin cache is stale against the configured repo source and records a report-only reminder when `setup toolkit` should be run. It does not refresh, reinstall, remove, or upgrade the Codex native plugin cache from the hook.
+9. Checks whether the running Codex native plugin cache is stale against the configured repo source. When `codex_plugin_auto_refresh_enabled` is true, the trusted `main` hook refreshes the Codex Toolkit plugin cache through `repo/scripts/setup-codex-toolkit-plugin.cjs --write --json --repo-root <repo_path>` after repo validation and delegated target sync succeed. When the preference is false, it records a report reminder to enable auto-refresh in setup or run `setup toolkit` manually.
 10. Delegates enabled-target sync to the freshly updated repo script with `--skip-repo-auto-update`.
 
 The delegated repo script builds the target payload from the updated local Toolkit repo `skills/` tree plus the small `ai-agent-toolkit` adapter skill. It must not use Codex or Claude private plugin caches as the skill payload source.
@@ -261,7 +264,7 @@ Meaningful work means at least one of:
 - Delegated repo sync failed.
 - Hook-light validation failed after a repo update.
 - Repo auto-update skipped safely because the branch did not match, the tree was dirty, the remote did not match, fetch failed, or the fetched commit was not a fast-forward.
-- The Codex native plugin cache is stale relative to the configured repo source, requiring an explicit `setup toolkit` run.
+- The Codex native plugin cache is stale relative to the configured repo source, was auto-refreshed, or failed auto-refresh.
 
 Normal no-op hook runs with the same observed repo commit and no target sync, stale plugin cache, skip, or validation issue do not write or open a report. In hook mode, the bridge prints only:
 
@@ -276,6 +279,8 @@ For first-restart compatibility after a bridge update, an older installed native
 Opening reports is opt-in. `--open-update-report` opens only the report created by the current run. `--enable-update-report-open` and `--disable-update-report-open` persist that preference in hub state. On Windows, opening uses only `notepad.exe <reportPath>` and only for files created under the Toolkit temp update-report folder. Opening is best-effort, non-blocking, and never uses OS default file associations, `.sh` files, or VS Code.
 
 During `setup toolkit`, this preference is a required approval gate after repo-backed auto-update is configured and audited, and before OpenCode or Antigravity 2 target writes. The user-facing setup question must be bolded as `**Do you want Codex to open Toolkit update reports automatically after meaningful hook activity?**`. Rerun with `--enable-update-report-open` to opt in, or `--skip-update-report-open` to explicitly continue with reports left closed by default.
+
+Codex plugin cache auto-refresh is also opt-in during setup. The user-facing setup question must be bolded as `**Do you want Codex to auto-refresh the Toolkit native plugin cache from this trusted main checkout when a startup hook detects it is stale?**`. Rerun with `--enable-codex-plugin-auto-refresh` to opt in, or `--skip-codex-plugin-auto-refresh` to keep stale Codex plugin cache refresh manual.
 
 ## Windows Codex Plugin Hook Repair
 

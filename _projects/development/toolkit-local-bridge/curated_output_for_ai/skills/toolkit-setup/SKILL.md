@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: Use when the user says "setup toolkit" or asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity 2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, or bridge setup safety. Routes agents to the Toolkit setup subsystem and repo/scripts/toolkit-local-bridge.cjs; do not use for ordinary project coding, unrelated n8n setup, or as a command-per-bridge workflow.
+description: Use when the user says "setup toolkit", "refresh toolkit", or asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity 2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, or bridge setup safety. Routes agents to the Toolkit setup subsystem and repo/scripts/toolkit-local-bridge.cjs; do not use for ordinary project coding, unrelated n8n setup, or as a command-per-bridge workflow.
 ---
 
 <!--
@@ -25,13 +25,13 @@ Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair
 ## Required Route
 
 1. Inspect the local repo context and read `repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md` before changing bridge behavior or running write commands.
-2. For the English prompt `setup toolkit`, use the script-backed setup journey instead of stopping at Codex plugin verification:
+2. For English prompts such as `setup toolkit` or `refresh toolkit`, use the full script-backed setup journey instead of stopping at Codex plugin verification:
 
 ```powershell
 node repo/scripts/setup-toolkit.cjs --execute
 ```
 
-Treat `SETUP PAUSED` output as an action-blocking approval question, not as completion. After the user approves repo-backed auto-update, rerun with `--write-repo-auto-update`; after the user answers the update-report auto-open question, rerun with either `--enable-update-report-open` or `--skip-update-report-open`; after the user approves OpenCode or Antigravity 2 writes, rerun with the matching `--enable-target` flag. The update-report auto-open question must be asked during setup and must be bolded in user-facing text. Do not stop after `setup-codex-toolkit-plugin.cjs --verify` or `--write`.
+Treat `SETUP PAUSED` output as an action-blocking approval question, not as completion. After the user approves repo-backed auto-update, rerun with `--write-repo-auto-update`; after the user answers the update-report auto-open question, rerun with either `--enable-update-report-open` or `--skip-update-report-open`; after the user answers the Codex plugin cache auto-refresh question, rerun with either `--enable-codex-plugin-auto-refresh` or `--skip-codex-plugin-auto-refresh`; after the user approves OpenCode or Antigravity 2 writes, rerun with the matching `--enable-target` flag. The update-report auto-open and Codex plugin cache auto-refresh questions must be asked during setup and must be bolded in user-facing text. Do not stop after `setup-codex-toolkit-plugin.cjs --verify` or `--write`; even an already-installed Toolkit must complete the full journey so stale pieces are detected and patched in order.
 3. Start other bridge requests with a dry-run or audit command, usually:
 
 ```powershell
@@ -45,7 +45,7 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 
 ## English Setup Journey
 
-When the user says `setup toolkit` while running inside Codex, run `node repo/scripts/setup-toolkit.cjs --execute` from this repo. The orchestrator performs the Codex native setup flow, lite validation, bridge audit, and approval-gated shared bridge steps in the required order. If running inside Claude Code, do not run the Codex native plugin steps; use Claude Code's native Toolkit plugin flow from this repo, verify `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, and then continue at the shared bridge configuration, audit, and optional target sync steps.
+When the user says `setup toolkit` or `refresh toolkit` while running inside Codex, run `node repo/scripts/setup-toolkit.cjs --execute` from this repo. The orchestrator performs the Codex native setup flow, lite validation, bridge audit, and approval-gated shared bridge steps in the required order, even when Toolkit is already installed. If running inside Claude Code, do not run the Codex native plugin steps; use Claude Code's native Toolkit plugin flow from this repo, verify `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, and then continue at the shared bridge configuration, audit, and optional target sync steps.
 
 1. Perform only the minimal trusted local Toolkit repo update on `main` before using it as the native plugin source:
 
@@ -116,8 +116,10 @@ OpenCode detection should mention useful signals such as the `opencode` command,
 
 6. Ask the update-report auto-open preference before non-native target writes. The user-facing question must be exactly bolded as `**Do you want Codex to open Toolkit update reports automatically after meaningful hook activity?**`. If approved, rerun setup with `--enable-update-report-open`; if declined, rerun with `--skip-update-report-open`. This persisted preference writes only Toolkit bridge hub state and affects whether meaningful future hook reports open automatically, using the bridge's guarded report-opening path.
 
-7. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output into the app-facing target: OpenCode uses `~/.config/opencode/skills/ai-agent-toolkit`, and Antigravity 2 uses `~/.gemini/config/plugins/ai-agent-toolkit` with `skills/ai-agent-toolkit/SKILL.md` inside that plugin root. If OpenCode or Antigravity 2 is not detected, explain that either can be enabled later with `node repo/scripts/toolkit-local-bridge.cjs --enable-target <target> --write`. Never silently enable OpenCode or Antigravity 2.
-8. If approved, enable only the approved targets and run a sync test. Include `--set-ag2-python-command "<python.exe>"` in the approved write command only when the user supplied or selected that AG2 Python command:
+7. Ask the Codex plugin cache auto-refresh preference before non-native target writes. The user-facing question must be exactly bolded as `**Do you want Codex to auto-refresh the Toolkit native plugin cache from this trusted main checkout when a startup hook detects it is stale?**`. If approved, rerun setup with `--enable-codex-plugin-auto-refresh`; if declined, rerun with `--skip-codex-plugin-auto-refresh`. This persisted preference writes only Toolkit bridge hub state; future startup hooks may use it to refresh stale Codex Toolkit plugin cache content only from the configured trusted `main` repo after repo validation and delegated target sync succeed.
+
+8. Ask once before non-native target writes. The approval question must name OpenCode and Antigravity 2 and state that enabling them writes only Toolkit-managed user-local bridge output into the app-facing target: OpenCode uses `~/.config/opencode/skills/ai-agent-toolkit`, and Antigravity 2 uses `~/.gemini/config/plugins/ai-agent-toolkit` with `skills/ai-agent-toolkit/SKILL.md` inside that plugin root. If OpenCode or Antigravity 2 is not detected, explain that either can be enabled later with `node repo/scripts/toolkit-local-bridge.cjs --enable-target <target> --write`. Never silently enable OpenCode or Antigravity 2.
+9. If approved, enable only the approved targets and run a sync test. Include `--set-ag2-python-command "<python.exe>"` in the approved write command only when the user supplied or selected that AG2 Python command:
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-target opencode --enable-target ag2 --write
@@ -125,7 +127,7 @@ node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-9. Confirm future native `SessionStart` hooks will use the configured repo-backed updater: Codex hooks should use `--sync-source codex-plugin`, Claude Code hooks should use `--sync-source claude-plugin`, and both should validate repo path, branch, remote, clean tree, `git fetch origin main`, `git merge --ff-only FETCH_HEAD`, hook-light validation, and enabled-target sync from the freshly updated repo.
+10. Confirm future native `SessionStart` hooks will use the configured repo-backed updater: Codex hooks should use `--sync-source codex-plugin`, Claude Code hooks should use `--sync-source claude-plugin`, and both should validate repo path, branch, remote, clean tree, `git fetch origin main`, `git merge --ff-only FETCH_HEAD`, hook-light validation, and enabled-target sync from the freshly updated repo.
 
 ## Safety Rules
 
@@ -137,6 +139,7 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 - Audit `synced` means the real app-facing target output matches the current Toolkit payload. Internal hub metadata alone is not synced.
 - The Python `ag2` package is optional for package-specific AG2 workflows; it is not required for Toolkit-managed Antigravity 2 bridge metadata or plugin-scoped skill sync.
 - Repo auto-update is opt-in only and must validate the configured Toolkit repo, expected remote, clean tree, fast-forward update, and hook-light validation before enabled-target sync.
+- Codex plugin cache auto-refresh is opt-in only. When enabled, startup hooks may refresh stale Codex Toolkit plugin cache content only from the configured trusted `main` repo after repo validation and delegated target sync succeed.
 - Do not run npm, pip, package installs, or dependency installers from this skill. In Codex, the only allowed marketplace operation in this flow is the Codex-only local Toolkit plugin install/update path through `setup-codex-toolkit-plugin.cjs --write` or the equivalent `codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json` plus `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` commands. In Claude Code, use Claude Code's native Toolkit plugin flow and do not call Codex marketplace commands.
 - After a requested Codex plugin install or update on Windows, repair that installed plugin root before approving hooks. If repair cannot make hooks safe, fail with the repair error instead of reporting success.
 - Do not mutate arbitrary project repos by default.

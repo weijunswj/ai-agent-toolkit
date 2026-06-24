@@ -88,6 +88,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     openUpdateReport: false,
     enableUpdateReportOpen: false,
     disableUpdateReportOpen: false,
+    enableCodexPluginAutoRefresh: false,
+    disableCodexPluginAutoRefresh: false,
     suppressUpdateReport: false,
     syncSource: 'repo',
     hub: '',
@@ -121,6 +123,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--open-update-report') args.openUpdateReport = true;
     else if (arg === '--enable-update-report-open') args.enableUpdateReportOpen = true;
     else if (arg === '--disable-update-report-open') args.disableUpdateReportOpen = true;
+    else if (arg === '--enable-codex-plugin-auto-refresh') args.enableCodexPluginAutoRefresh = true;
+    else if (arg === '--disable-codex-plugin-auto-refresh') args.disableCodexPluginAutoRefresh = true;
     else if (arg === '--suppress-update-report') args.suppressUpdateReport = true;
     else if (arg === '--enable-target') args.enableTargets.push(...parseListValue(next()));
     else if (arg.startsWith('--enable-target=')) args.enableTargets.push(...parseListValue(arg.slice('--enable-target='.length)));
@@ -163,6 +167,9 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.enableUpdateReportOpen && args.disableUpdateReportOpen) {
     throw new Error('--enable-update-report-open and --disable-update-report-open cannot be used together');
   }
+  if (args.enableCodexPluginAutoRefresh && args.disableCodexPluginAutoRefresh) {
+    throw new Error('--enable-codex-plugin-auto-refresh and --disable-codex-plugin-auto-refresh cannot be used together');
+  }
   return args;
 }
 
@@ -197,6 +204,9 @@ function printHelp() {
     '  --open-update-report        open the generated update report for this run, when one is created',
     '  --enable-update-report-open persist opt-in opening of generated update reports',
     '  --disable-update-report-open',
+    '  --enable-codex-plugin-auto-refresh',
+    '                                persist opt-in native Codex plugin cache auto-refresh from trusted repo hooks',
+    '  --disable-codex-plugin-auto-refresh',
     '  --audit',
     '  --force-downgrade',
     '  --sync-source repo|codex-plugin|claude-plugin',
@@ -571,6 +581,7 @@ function defaultState() {
     last_repo_update_error: '',
     last_update_report_path: '',
     update_report_open_enabled: false,
+    codex_plugin_auto_refresh_enabled: false,
     created_at: '',
     updated_at: '',
     last_sync_source: '',
@@ -598,6 +609,7 @@ function normalizedState(raw) {
   state.last_repo_update_error = state.last_repo_update_error || '';
   state.last_update_report_path = state.last_update_report_path || '';
   state.update_report_open_enabled = state.update_report_open_enabled === true;
+  state.codex_plugin_auto_refresh_enabled = state.codex_plugin_auto_refresh_enabled === true;
   return state;
 }
 
@@ -620,6 +632,8 @@ function applyRequestedState(state, args) {
   }
   if (args.enableUpdateReportOpen) next.update_report_open_enabled = true;
   if (args.disableUpdateReportOpen) next.update_report_open_enabled = false;
+  if (args.enableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = true;
+  if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
   if (args.setAg2PythonCommand) {
     next.targets.ag2.python_command = args.setAg2PythonCommand;
   }
@@ -1394,7 +1408,7 @@ function updateReportIsMeaningful(context) {
   if (repoStatus === 'validation-failed') return true;
   if (repoStatus === 'sync-delegation-failed') return true;
   if (repoStatus === 'skipped' && context.repo?.error) return true;
-  if (context.nativePluginCache?.status === 'stale') return true;
+  if (['stale', 'refreshed', 'refresh-failed'].includes(context.nativePluginCache?.status)) return true;
   if ((context.targetSyncs || []).length) return true;
   return (context.targetSyncs || []).some((entry) => (entry.removedSkillNames || []).length);
 }
@@ -1433,7 +1447,8 @@ function branchMismatchSuggestion(warning) {
 }
 
 function actionTldr({ repo, nativePluginCache, warning }) {
-  if (nativePluginCache.status === 'stale') return 'run `setup toolkit` to refresh the Codex plugin cache';
+  if (nativePluginCache.status === 'stale') return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
+  if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
   if (repo.status === 'sync-delegation-failed') return 'check target sync';
   const branchAction = branchMismatchSuggestion(warning);
@@ -1518,8 +1533,12 @@ function buildUpdateReport({ args, state, checksum, context }) {
   if (!targetSyncs.length && !skippedTargets.length && repo.status) {
     lines.push('- No enabled target sync was completed.');
   }
-  if (nativePluginCache.status === 'stale') {
-    lines.push('- Codex native plugin cache is stale. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata.');
+  if (nativePluginCache.status === 'refreshed') {
+    lines.push('- Codex native plugin cache was auto-refreshed from the trusted local Toolkit repo.');
+  } else if (nativePluginCache.status === 'refresh-failed') {
+    lines.push('- Codex native plugin cache auto-refresh failed. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata manually.');
+  } else if (nativePluginCache.status === 'stale') {
+    lines.push('- Codex native plugin cache is stale. Enable Codex plugin auto-refresh during setup or run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata.');
   }
   lines.push('- Skipped n8n/live systems; not touched.');
 
@@ -1836,6 +1855,7 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     sync_source: args.syncSource,
     auto_sync_enabled: state.auto_sync_enabled,
     update_report_open_enabled: state.update_report_open_enabled,
+    codex_plugin_auto_refresh_enabled: state.codex_plugin_auto_refresh_enabled,
     last_update_report_path: state.last_update_report_path,
     repo_auto_update: {
       enabled: state.repo_auto_update_enabled,
@@ -1912,6 +1932,52 @@ function codexNativePluginCacheStatus(args, state) {
     plugin_root: pluginRoot,
     repo_path: repoPath,
     errors: errors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+  };
+}
+
+function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath }) {
+  const before = codexNativePluginCacheStatus(args, state);
+  if (before.status !== 'stale') return before;
+  if (!state.codex_plugin_auto_refresh_enabled) return before;
+  const setupScript = path.join(repoPath, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs');
+  if (!fs.existsSync(setupScript)) {
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: [`Codex plugin setup helper not found in trusted repo: ${setupScript}`]
+    };
+  }
+
+  const result = runCommand(process.execPath, [
+    setupScript,
+    '--write',
+    '--json',
+    '--repo-root',
+    repoPath
+  ], {
+    cwd: repoPath,
+    timeout: 180000
+  });
+  if (!result.ok) {
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: [`Codex plugin cache auto-refresh failed: ${commandOutput(result)}`]
+    };
+  }
+
+  const afterErrors = verifyInstalledCacheFreshness(before.plugin_root, repoPath);
+  if (afterErrors.length) {
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: afterErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
+    };
+  }
+  return {
+    ...before,
+    status: 'refreshed',
+    errors: []
   };
 }
 
@@ -2077,6 +2143,11 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   const completedTargetSyncs = plannedTargetSyncs.filter((sync) => (
     targetIsSynced(sync.target, finalState.targets[sync.target], updatedChecksum, updatedDiscoveries[sync.target], updatedPayloads)
   ));
+  const nativePluginCache = refreshCodexNativePluginCacheFromRepo({
+    args,
+    state: finalState,
+    repoPath: updateResult.repoPath
+  });
   const report = maybeWriteUpdateReport({
     args,
     hubPath,
@@ -2086,7 +2157,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       repo: repoReportContextFromUpdate(statusState, updateResult, previousObservedRepoCommit),
       targetSyncs: completedTargetSyncs,
       skippedTargets,
-      nativePluginCache: codexNativePluginCacheStatus(args, finalState),
+      nativePluginCache,
       targetSyncStatus: plannedTargetSyncs.length
         ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
         : 'not needed'

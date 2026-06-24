@@ -51,14 +51,15 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. For Codex, open the repo in Codex and say `setup toolkit`; agents must run `node repo/scripts/setup-toolkit.cjs --execute` from this repo instead of stopping after plugin verification.
+2. For Codex, open the repo in Codex and say `setup toolkit` or `refresh toolkit`; agents must run the full setup journey with `node repo/scripts/setup-toolkit.cjs --execute` from this repo instead of stopping after plugin verification, even when Toolkit is already installed.
 3. Let Codex install or verify the Toolkit native plugin, then run the lite setup validation.
 4. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 5. Restart Codex if setup says the plugin needs a fresh session.
 6. Approve repo-backed auto-update only if you want the Toolkit bridge hub configured from this local repo on `main` with auto-sync.
 7. Answer the required update-report auto-open preference: approve `--enable-update-report-open` if you want meaningful Toolkit hook reports to open automatically, or choose `--skip-update-report-open` to keep reports closed by default.
-8. For Claude Code, use Claude Code's native Toolkit plugin flow from this repo; keep Codex and Claude Code plugin setup separate.
-9. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+8. Answer the required Codex plugin cache auto-refresh preference: approve `--enable-codex-plugin-auto-refresh` if you want trusted `main` startup hooks to refresh stale Codex Toolkit plugin cache content automatically, or choose `--skip-codex-plugin-auto-refresh` to keep that refresh manual.
+9. For Claude Code, use Claude Code's native Toolkit plugin flow from this repo; keep Codex and Claude Code plugin setup separate.
+10. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
 
 Codex and Claude Code update Toolkit through their own native plugin systems:
 

@@ -103,6 +103,7 @@ test('setup toolkit plan is full journey rather than plugin verify only', () => 
     'repo_backed_auto_update',
     'bridge_audit',
     'update_report_open_preference',
+    'codex_plugin_auto_refresh_preference',
     'non_native_target_approval',
     'approved_target_sync'
   ]);
@@ -124,6 +125,7 @@ test('setup toolkit plan is full journey rather than plugin verify only', () => 
   assert.ok(commands.includes(`node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path ${JSON.stringify(repoRoot)} --repo-branch main --enable-auto-sync --write`));
   assert.ok(commands.includes('node repo/scripts/toolkit-local-bridge.cjs --audit'));
   assert.ok(commands.includes('node repo/scripts/toolkit-local-bridge.cjs --enable-update-report-open --write'));
+  assert.ok(commands.includes('node repo/scripts/toolkit-local-bridge.cjs --enable-codex-plugin-auto-refresh --write'));
   assert.ok(commands.includes('node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write'));
 
   const text = JSON.stringify(plan);
@@ -183,6 +185,14 @@ test('setup toolkit plan keeps repo auto-update and target writes approval-gated
   assert.match(reportStep.approval_question, /^\*\*.+\?\*\*$/);
   assert.match(reportStep.approval_question, /open Toolkit update reports automatically/i);
   assert.match(reportStep.commands.join('\n'), /--enable-update-report-open --write/);
+
+  const refreshStep = plan.steps.find((step) => step.id === 'codex_plugin_auto_refresh_preference');
+  assert.equal(refreshStep.approval_required, true);
+  assert.equal(refreshStep.write_flag, '--enable-codex-plugin-auto-refresh');
+  assert.equal(refreshStep.decline_flag, '--skip-codex-plugin-auto-refresh');
+  assert.match(refreshStep.approval_question, /^\*\*.+\?\*\*$/);
+  assert.match(refreshStep.approval_question, /auto-refresh the Toolkit native plugin cache/i);
+  assert.match(refreshStep.commands.join('\n'), /--enable-codex-plugin-auto-refresh --write/);
 
   const targetStep = plan.steps.find((step) => step.id === 'non_native_target_approval');
   assert.equal(targetStep.approval_required, true);
@@ -246,9 +256,33 @@ test('setup execute pauses for update report open preference until explicitly an
     env: isolatedHomeEnv(root)
   });
 
+  assert.equal(result.status, 22, result.stderr || result.stdout);
+  assert.match(result.stdout, /SETUP PAUSED: Codex plugin auto-refresh is approval-gated\./);
+  assert.match(result.stdout, /\*\*Do you want Codex to auto-refresh the Toolkit native plugin cache from this trusted main checkout when a startup hook detects it is stale\?\*\*/);
+  assert.match(result.stdout, /--enable-codex-plugin-auto-refresh/);
+  assert.match(result.stdout, /--skip-codex-plugin-auto-refresh/);
+  bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
+  assert.match(bridgeLog, /--enable-update-report-open --write/);
+  assert.doesNotMatch(bridgeLog, /--enable-codex-plugin-auto-refresh/);
+  assert.doesNotMatch(bridgeLog, /--enable-target ag2/);
+
+  fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'));
+  result = run([
+    '--execute',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--write-repo-auto-update',
+    '--enable-update-report-open',
+    '--enable-codex-plugin-auto-refresh',
+    '--enable-target', 'ag2'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
   assert.equal(result.status, 0, result.stderr || result.stdout);
   bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeLog, /--enable-update-report-open --write/);
+  assert.match(bridgeLog, /--enable-codex-plugin-auto-refresh --write/);
   assert.match(bridgeLog, /--enable-target ag2 --write/);
 
   fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'));
@@ -258,6 +292,7 @@ test('setup execute pauses for update report open preference until explicitly an
     '--repo-remote', origin,
     '--write-repo-auto-update',
     '--skip-update-report-open',
+    '--skip-codex-plugin-auto-refresh',
     '--enable-target', 'ag2'
   ], {
     env: isolatedHomeEnv(root)
@@ -266,6 +301,7 @@ test('setup execute pauses for update report open preference until explicitly an
   assert.equal(result.status, 0, result.stderr || result.stdout);
   bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.doesNotMatch(bridgeLog, /--enable-update-report-open/);
+  assert.doesNotMatch(bridgeLog, /--enable-codex-plugin-auto-refresh/);
   assert.match(bridgeLog, /--enable-target ag2 --write/);
 });
 
@@ -281,6 +317,8 @@ test('setup docs route literal setup toolkit to the orchestrator', () => {
   for (const relPath of relPaths) {
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
+    assert.match(text, /refresh toolkit/i, relPath);
+    assert.match(text, /full (?:script-backed )?(?:setup )?journey/i, relPath);
     assert.match(text, /node repo\/scripts\/setup-toolkit\.cjs --execute/i, relPath);
   }
 });
