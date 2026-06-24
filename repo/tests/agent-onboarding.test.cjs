@@ -45,7 +45,8 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   assert.match(sourceOfTruth, /Humans use `_projects\/\*\*` for source review and maintenance, agents use generated `skills\/\*\*` folders after sync, and native plugin installers read generated `\.codex-plugin\/\*\*` or `\.claude-plugin\/\*\*` metadata\./);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Persistent status, report, implementation plan, handoff, operations, setup, CI\/CD, deployment, safety, and troubleshooting notes belong under an existing `docs\/` path/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /read the relevant docs and treat them as active context/i);
-  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /For `setup toolkit` in Codex, perform only the minimal repo update check first, then verify and refresh the Codex native Toolkit plugin cache/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /For `setup toolkit` or `refresh toolkit` in Codex, run `node repo\/scripts\/setup-toolkit\.cjs --execute` from a clean trusted checkout\. Script invariant: perform only the minimal repo update check first, then verify and refresh the Codex native Toolkit plugin cache/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Even when Toolkit is already installed, complete the full setup journey so stale pieces are detected and patched in order/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /routine setup uses `repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs`/);
   assert.match(validation, /For this repo, the canonical full validation command is:/);
   assert.match(validation, /npm run validate:all/);

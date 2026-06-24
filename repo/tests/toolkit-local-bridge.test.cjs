@@ -12,6 +12,7 @@ const {
   openUpdateReport,
   updateReportDir
 } = require('../scripts/toolkit-local-bridge.cjs');
+const { verifyInstalledCacheFreshness } = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
 const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-skills-plugin-hooks.cjs');
 
@@ -274,6 +275,52 @@ function writeRepoToolkitFixture(repoPath, label) {
     "  console.error('missing recursion guard');",
     '  process.exit(43);',
     '}',
+    ''
+  ].join('\n'));
+}
+
+function writeCodexPluginRefreshFixture(repoPath) {
+  writeFile(path.join(repoPath, '.codex-plugin', 'plugin.json'), JSON.stringify({
+    name: 'ai-agent-toolkit',
+    version: expectedBridgeVersion,
+    hooks: './.codex-plugin/hooks/hooks.json'
+  }, null, 2));
+  writeFile(path.join(repoPath, '.codex-plugin', 'assets', 'fixture.txt'), 'fixture asset\n');
+  writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), JSON.stringify({
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup',
+          hooks: [
+            {
+              type: 'command',
+              command: 'node repo/scripts/toolkit-local-bridge.cjs --hook --sync-enabled --write --sync-source codex-plugin'
+            }
+          ]
+        }
+      ]
+    }
+  }, null, 2));
+  writeFile(path.join(repoPath, 'repo', 'scripts', 'setup-toolkit.cjs'), [
+    '#!/usr/bin/env node',
+    "'use strict';",
+    ''
+  ].join('\n'));
+  writeFile(path.join(repoPath, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), [
+    '#!/usr/bin/env node',
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const source = process.cwd();",
+    "const target = process.env.PLUGIN_ROOT;",
+    "if (!target) { console.error('missing PLUGIN_ROOT'); process.exit(9); }",
+    "fs.rmSync(target, { recursive: true, force: true });",
+    "fs.mkdirSync(path.dirname(target), { recursive: true });",
+    "fs.cpSync(source, target, {",
+    "  recursive: true,",
+    "  filter: (src) => !src.split(path.sep).includes('.git')",
+    "});",
+    "process.stdout.write(JSON.stringify({ ok: true }));",
     ''
   ].join('\n'));
 }
@@ -1509,10 +1556,67 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Codex native plugin cache: `stale`/);
-  assert.match(report.text, /Run `setup toolkit`/);
+  assert.match(report.text, /Enable Codex plugin auto-refresh|run `setup toolkit`/);
   assert.match(report.text, /target sync status: `not needed`/);
   assert.equal(report.state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.match(report.state.last_update_report_signature, /^[a-f0-9]{64}$/);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      PLUGIN_ROOT: stalePluginRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  const repeatedState = readJson(path.join(hub, 'state.json'));
+  assert.equal(repeatedState.last_update_report_path, report.reportPath);
+  assert.equal(repeatedState.last_update_report_signature, report.state.last_update_report_signature);
 });
+
+test('hook auto-refreshes stale Codex native plugin cache only after setup opt-in', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const stalePluginRoot = path.join(fixture.root, 'codex-cache', 'ai-agent-toolkit');
+  writeCodexPluginRefreshFixture(fixture.repo);
+  const refreshedCommit = commitAll(fixture.repo, 'add codex plugin refresh fixture');
+  git(fixture.repo, ['push', 'origin', 'main']);
+  writeFile(path.join(stalePluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
+
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-codex-plugin-auto-refresh',
+    '--write'
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
+      PLUGIN_ROOT: stalePluginRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit updated:/);
+  assert.equal(currentCommit(fixture.repo), refreshedCommit);
+  assert.deepEqual(
+    verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
+    [],
+    'auto-refresh should leave the installed plugin cache matching the trusted repo'
+  );
+
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.codex_plugin_auto_refresh_enabled, true);
+});
+
 test('hook report records removed stale managed skill folders during target sync', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n', beta: 'beta v1\n' });

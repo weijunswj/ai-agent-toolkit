@@ -10,6 +10,7 @@ const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
 const SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL = 20;
 const SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL = 21;
+const SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL = 22;
 
 function repoRootFromScript() {
   return path.resolve(__dirname, '..', '..');
@@ -54,6 +55,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     writeRepoAutoUpdate: false,
     enableUpdateReportOpen: false,
     skipUpdateReportOpen: false,
+    enableCodexPluginAutoRefresh: false,
+    skipCodexPluginAutoRefresh: false,
     enableTargets: []
   };
 
@@ -76,6 +79,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--write-repo-auto-update') args.writeRepoAutoUpdate = true;
     else if (arg === '--enable-update-report-open') args.enableUpdateReportOpen = true;
     else if (arg === '--skip-update-report-open') args.skipUpdateReportOpen = true;
+    else if (arg === '--enable-codex-plugin-auto-refresh') args.enableCodexPluginAutoRefresh = true;
+    else if (arg === '--skip-codex-plugin-auto-refresh') args.skipCodexPluginAutoRefresh = true;
     else if (arg === '--enable-target') args.enableTargets.push(...parseTargetList(next()));
     else if (arg.startsWith('--enable-target=')) args.enableTargets.push(...parseTargetList(arg.slice('--enable-target='.length)));
     else if (arg === '--help' || arg === '-h') args.help = true;
@@ -85,6 +90,9 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
   if (args.enableUpdateReportOpen && args.skipUpdateReportOpen) {
     throw new Error('--enable-update-report-open and --skip-update-report-open cannot be used together');
+  }
+  if (args.enableCodexPluginAutoRefresh && args.skipCodexPluginAutoRefresh) {
+    throw new Error('--enable-codex-plugin-auto-refresh and --skip-codex-plugin-auto-refresh cannot be used together');
   }
   if (!args.plan && !args.execute && !args.help) args.plan = true;
   args.repoRoot = path.resolve(args.repoRoot);
@@ -119,6 +127,11 @@ function setupPlan(options = {}) {
   ]);
   const updateReportOpenCommand = relNodeCommand(bridgeBase[0], [
     '--enable-update-report-open',
+    '--write',
+    ...hubArgs
+  ]);
+  const codexPluginAutoRefreshCommand = relNodeCommand(bridgeBase[0], [
+    '--enable-codex-plugin-auto-refresh',
     '--write',
     ...hubArgs
   ]);
@@ -187,6 +200,15 @@ function setupPlan(options = {}) {
         commands: [updateReportOpenCommand]
       },
       {
+        id: 'codex_plugin_auto_refresh_preference',
+        title: 'Ask whether stale Codex plugin cache should auto-refresh from trusted main hooks',
+        approval_required: true,
+        write_flag: '--enable-codex-plugin-auto-refresh',
+        decline_flag: '--skip-codex-plugin-auto-refresh',
+        approval_question: '**Do you want Codex to auto-refresh the Toolkit native plugin cache from this trusted main checkout when a startup hook detects it is stale?**',
+        commands: [codexPluginAutoRefreshCommand]
+      },
+      {
         id: 'non_native_target_approval',
         title: 'Ask before non-native target writes',
         approval_required: true,
@@ -221,6 +243,8 @@ function printHelp() {
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-update-report-open',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --skip-update-report-open',
+    '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-update-report-open --enable-codex-plugin-auto-refresh',
+    '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-update-report-open --skip-codex-plugin-auto-refresh',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-target opencode',
     '  node repo/scripts/setup-toolkit.cjs --execute --write-repo-auto-update --enable-target opencode --enable-target ag2',
     '',
@@ -233,6 +257,10 @@ function printHelp() {
     '  --write-repo-auto-update    enable repo-backed auto-update and auto-sync in bridge hub state',
     '  --enable-update-report-open persist opt-in opening of generated update reports',
     '  --skip-update-report-open   explicitly leave generated update reports closed by default',
+    '  --enable-codex-plugin-auto-refresh',
+    '                               persist opt-in refreshing stale Codex plugin cache from trusted repo hooks',
+    '  --skip-codex-plugin-auto-refresh',
+    '                               explicitly leave stale Codex plugin cache refresh manual',
     '  --enable-target opencode|ag2 enable approved non-native bridge target after audit'
   ].join('\n'));
 }
@@ -389,6 +417,15 @@ function runUpdateReportOpenWrite(args) {
   );
 }
 
+function runCodexPluginAutoRefreshWrite(args) {
+  runCommand(
+    'node repo/scripts/toolkit-local-bridge.cjs --enable-codex-plugin-auto-refresh --write',
+    process.execPath,
+    bridgeArgs(args, ['--enable-codex-plugin-auto-refresh', '--write']),
+    { cwd: args.repoRoot, timeout: 120000 }
+  );
+}
+
 function runApprovedTargetSync(args) {
   if (!args.enableTargets.length) return;
   const enableArgs = [];
@@ -437,6 +474,17 @@ function printUpdateReportOpenApproval(plan) {
   console.log('Do not report setup toolkit complete until this gate is resolved.');
 }
 
+function printCodexPluginAutoRefreshApproval(plan) {
+  const refreshStep = plan.steps.find((step) => step.id === 'codex_plugin_auto_refresh_preference');
+  console.log('');
+  console.log('SETUP PAUSED: Codex plugin auto-refresh is approval-gated.');
+  console.log(refreshStep.approval_question);
+  console.log('Approve only if you want startup hooks on the trusted main Toolkit repo to refresh stale Codex plugin cache content automatically.');
+  console.log('After approval, rerun with: --enable-codex-plugin-auto-refresh');
+  console.log('To continue with manual plugin-cache refresh only, rerun with: --skip-codex-plugin-auto-refresh');
+  console.log('Do not report setup toolkit complete until this gate is resolved.');
+}
+
 function printPlan(plan, asJson) {
   if (asJson) {
     console.log(JSON.stringify(plan, null, 2));
@@ -470,6 +518,11 @@ function execute(args) {
     return SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL;
   }
   if (args.enableUpdateReportOpen) runUpdateReportOpenWrite(args);
+  if (!args.enableCodexPluginAutoRefresh && !args.skipCodexPluginAutoRefresh) {
+    printCodexPluginAutoRefreshApproval(plan);
+    return SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL;
+  }
+  if (args.enableCodexPluginAutoRefresh) runCodexPluginAutoRefreshWrite(args);
   runApprovedTargetSync(args);
   if (!args.enableTargets.length) printTargetApproval(plan);
   console.log('');
@@ -505,6 +558,7 @@ module.exports = {
   DEFAULT_REPO_REMOTE,
   SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL,
   SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL,
+  SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL,
   parseArgs,
   setupPlan,
   normalizeRemote,
