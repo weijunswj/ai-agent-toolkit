@@ -51,7 +51,7 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. For Codex, open the repo in Codex and say `setup toolkit` or `refresh toolkit`; agents must run the full setup journey with `node repo/scripts/setup-toolkit.cjs --execute` from this repo instead of stopping after plugin verification, even when Toolkit is already installed.
+2. For Codex, open the repo in Codex and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state; agents must run the full setup journey with `node repo/scripts/setup-toolkit.cjs --execute` from this repo instead of stopping after plugin verification, even when Toolkit is already installed.
 3. Let Codex install or verify the Toolkit native plugin, then run the lite setup validation.
 4. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 5. Restart Codex if setup says the plugin needs a fresh session.

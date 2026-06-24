@@ -305,7 +305,7 @@ test('setup execute pauses for update report open preference until explicitly an
   assert.match(bridgeLog, /--enable-target ag2 --write/);
 });
 
-test('setup docs route literal setup toolkit to the orchestrator', () => {
+test('setup docs route setup and refresh prompts to the orchestrator', () => {
   const relPaths = [
     '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md',
     'skills/toolkit-setup/SKILL.md',
@@ -318,6 +318,7 @@ test('setup docs route literal setup toolkit to the orchestrator', () => {
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
     assert.match(text, /refresh toolkit/i, relPath);
+    assert.match(text, /plain `refresh`/i, relPath);
     assert.match(text, /full (?:script-backed )?(?:setup )?journey/i, relPath);
     assert.match(text, /node repo\/scripts\/setup-toolkit\.cjs --execute/i, relPath);
   }
