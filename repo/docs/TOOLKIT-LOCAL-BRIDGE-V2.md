@@ -140,7 +140,7 @@ codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
 
 The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`. The wrapper must use `policy.authentication: "ON_USE"`, not `ON_INSTALL`, so a no-auth local Toolkit plugin can install headlessly before any hook trust prompt.
 
-For `setup toolkit` or `refresh toolkit` in Codex, agents must run the full script-backed journey even when Toolkit is already installed:
+For `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context in Codex, agents must run the full script-backed journey even when Toolkit is already installed:
 
 ```powershell
 node repo/scripts/setup-toolkit.cjs --execute
