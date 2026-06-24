@@ -3,8 +3,8 @@
   "description": "Known published-surface audit findings allowed until follow-up PRs classify or generate them.",
   "summary": {
     "projects": 15,
-    "publishedFiles": 209,
-    "declaredOutputFiles": 209,
+    "publishedFiles": 211,
+    "declaredOutputFiles": 211,
     "packInstalledFiles": 74,
     "undeclaredPublishedFiles": 0,
     "packInstalledUndeclared": 0,
@@ -13,9 +13,9 @@
     "sharedSurfaceMetadataFindings": 0,
     "suspiciousPublishedSurfaces": 0,
     "duplicateProjectContentGroups": 0,
-    "boundaryRecipeOutputs": 209,
+    "boundaryRecipeOutputs": 211,
     "boundaryRecipeFindings": 0,
-    "curatedDirectoryFindings": 0
+    "curatedDirectoryFindings": 1
   },
   "issueKeys": {
     "undeclaredPublishedFiles": [],
@@ -30,6 +30,8 @@
     "suspiciousPublishedSurfaces": [],
     "duplicateProjectContentGroups": [],
     "boundaryRecipeFindings": [],
-    "curatedDirectoryFindings": []
+    "curatedDirectoryFindings": [
+      "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md: large Markdown file; path looks like guide, setup, workflow, prompt, template, reference, or playbook"
+    ]
   }
 }
