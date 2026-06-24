@@ -320,6 +320,40 @@ function runCommand(label, command, args, options = {}) {
   return result;
 }
 
+function isCredentialError(message = '') {
+  return /SEC_E_NO_CREDENTIALS|Authentication failed|could not read Username|Authentication|permission denied|terminal prompts disabled/i.test(message);
+}
+
+function fetchWithCredentialFallback(repoRoot, branch) {
+  const fetchLabel = `git fetch origin ${branch}`;
+  const fetchArgs = ['fetch', 'origin', branch];
+  let lastError = '';
+  let fetchResult = runCommand(fetchLabel, 'git', fetchArgs, { cwd: repoRoot, capture: true, timeout: 120000, allowFailure: true });
+  if (fetchResult.status === 0) return;
+  lastError = fetchResult.stderr || fetchResult.stdout || '';
+  if (isCredentialError(lastError)) {
+    const helpers = ['manager', 'manager-core'];
+    for (const helper of helpers) {
+      const fallbackResult = runCommand(
+        `git -c credential.helper=${helper} fetch origin ${branch}`,
+        'git',
+        ['-c', `credential.helper=${helper}`, 'fetch', 'origin', branch],
+        {
+          cwd: repoRoot,
+          capture: true,
+          timeout: 120000,
+          allowFailure: true
+        }
+      );
+      if (fallbackResult.status === 0) return;
+      if (fallbackResult.stderr || fallbackResult.stdout) {
+        lastError = `${lastError}\n${fallbackResult.stderr || fallbackResult.stdout}`;
+      }
+    }
+  }
+  throw new Error(`${fetchLabel} failed with exit code ${fetchResult.status}: ${String(lastError || '').trim()}`);
+}
+
 function runGitCapture(repoRoot, args, label) {
   const result = runCommand(label, 'git', args, { cwd: repoRoot, capture: true, timeout: 60000, allowFailure: true });
   if (result.status !== 0) throw new Error(`${label} failed with exit code ${result.status}: ${(result.stderr || '').trim()}`);
@@ -340,7 +374,19 @@ function verifyAndUpdateTrustedRepo(args) {
   const branch = runGitCapture(args.repoRoot, ['branch', '--show-current'], 'git branch --show-current');
   if (branch !== args.repoBranch) throw new Error(`Expected branch ${args.repoBranch}, found ${branch || '<detached>'}`);
 
-  runCommand(`git fetch origin ${args.repoBranch}`, 'git', ['fetch', 'origin', args.repoBranch], { cwd: args.repoRoot, timeout: 120000 });
+  try {
+    fetchWithCredentialFallback(args.repoRoot, args.repoBranch);
+  } catch (error) {
+    if (isCredentialError(error.message)) {
+      throw new Error(
+        `${error.message}\n` +
+        `Credential hint: this process could not authenticate to ${args.repoRemote}.\n` +
+        'Run this command from the same shell/profile that already works for git pull/fetch,\n' +
+        'or run `gh auth login` in this context, then rerun setup toolkit.'
+      );
+    }
+    throw error;
+  }
   const fetchedCommit = runGitCapture(args.repoRoot, ['rev-parse', 'FETCH_HEAD'], 'git rev-parse FETCH_HEAD');
   runCommand(`git merge --ff-only origin/${args.repoBranch}`, 'git', ['merge', '--ff-only', `origin/${args.repoBranch}`], { cwd: args.repoRoot, timeout: 120000 });
   const headCommit = runGitCapture(args.repoRoot, ['rev-parse', 'HEAD'], 'git rev-parse HEAD');
