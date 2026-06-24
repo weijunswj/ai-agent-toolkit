@@ -171,17 +171,15 @@ If that skill or its full rules are unavailable, stop and report the limitation 
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
 
-This root `AGENTS.md` is toolkit-repo-specific. Do not use it as the portable install template for other repositories. Portable repo installs must use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
+This root `AGENTS.md` is toolkit-repo-specific. Portable repo installs must use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
 
-Toolkit-specific root rules are maintained directly in this file after the managed execution blocks. Do not move root-only toolkit context into `_projects/development/ai-coding-agent-rules/`; that project owns portable repo-local templates and shims only.
+Toolkit-specific root rules live directly after the managed execution blocks. Toolkit-specific root rules are maintained directly in this file after the managed execution blocks. Do not move root-only toolkit context into `_projects/development/ai-coding-agent-rules/`; that project owns portable templates and shims only.
 
 This repo is the canonical reusable AI Agent Toolkit.
 
 ## Toolkit Repo Routing
 
-Before planning or editing, read [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (`repo/docs/agent-playbooks/INDEX.md`).
-
-For this toolkit repo, [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (`repo/docs/agent-playbooks/INDEX.md`) is the applicable repo-specific playbook index. The portable default `docs/agent-playbooks/INDEX.md` is for installed consumer repos using the portable `ai-coding-agent-rules` repo-local surface.
+Before planning or editing, read [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (`repo/docs/agent-playbooks/INDEX.md`). It replaces the portable default index here.
 
 Use this order:
 
@@ -211,12 +209,12 @@ The full source-of-truth contract appears below in this file and is maintained f
 
 For day-to-day work, update source or curated material first, do not edit generated `skills/**` directly unless declared `linked`, run the matching sync/check command, and preserve this boundary: Source-watch is PR-notification-only.
 
-## Toolkit Plugin And Bridge V2
+## Toolkit Plugin And Bridge
 
-- Native plugin updates are host-local: Codex uses `.codex-plugin/`, Claude Code uses `.claude-plugin/`; neither updates the other.
-- Bridge writes only approved enabled OpenCode/AG2 targets; detection is allowed, autosetup is not.
-- Hooks are optional; shared policy stays in docs, validators, and [bridge v2](repo/docs/TOOLKIT-LOCAL-BRIDGE-V2.md).
-- Setup cache-first/light-validation: [For AI Agents](repo/docs/FOR_AI_AGENTS.md); follow over stale installed skills.
+- Native plugin updates are host-local: Codex uses `.codex-plugin/`, Claude Code uses `.claude-plugin/`.
+- Bridge writes only approved enabled OpenCode/AG2 targets; detection is dry-run only.
+- Hooks are optional; policy stays in docs, validators, and [Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
+- Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run `setup-toolkit.cjs --execute`.
 
 <!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract

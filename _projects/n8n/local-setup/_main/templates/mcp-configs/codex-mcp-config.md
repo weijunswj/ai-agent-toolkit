@@ -8,6 +8,7 @@ Use this for the normal Codex + official n8n instance-level MCP setup.
 * On Windows, repair official plugin hooks before trusting them: run `node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --write --plugin-id n8n-skills@n8n-io`, then run `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "C:\Users\<user>\.codex\plugins\cache\n8n-io\n8n-skills\<version>" --windows --verify-output`.
 * The repair rewrites bare `.sh` hook commands through a PowerShell wrapper, invokes explicit Git Bash from `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`, rejects `C:\WINDOWS\system32\bash.exe`, and adds Node JSON fallbacks for `n8n-skills@n8n-io`; a bare `.sh` hook would open `session-start.sh` in VS Code instead of running as a hook.
 * Install the [official n8n Skills](https://github.com/n8n-io/skills) plugin separately with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`; if Windows repair fails, audit fails, or hook JSON output verification fails, do not approve the hooks and use the upstream "Other platforms" route, `npx skills add n8n-io/skills`, plus the target repo `AGENTS.md` cue.
+* Do not report setup complete while `n8n-skills@n8n-io` is only marketplace-available. Verify it is installed and enabled in `codex plugin list --available --json` or `~/.codex/config.toml`; if the UI still shows **Add**, run the plugin-add step. Repair the installed plugin cache under `.codex\plugins\cache\...`, not only `.codex\.tmp\marketplaces\...`.
 * Restart Codex and approve or trust the official plugin hooks only after repair, audit, and hook JSON output verification pass so `SessionStart`, `PreToolUse`, and `PostToolUse` reminders can fire.
 
 1. Common Windows path for Codex MCP config:
@@ -122,6 +123,7 @@ enabled = true
 1. If the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, is unavailable:
 
    * Confirm the official plugin was installed with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`.
+   * Confirm `n8n-skills@n8n-io` is installed and enabled, not just listed as available.
    * Restart Codex.
    * On Windows, repair the installed plugin cache with `node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io`, then audit it with `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<plugin-cache-path>" --windows`.
    * If repair fails, do not approve those hooks; use `npx skills add n8n-io/skills` and the target repo `AGENTS.md` cue until the plugin can be repaired or updated.

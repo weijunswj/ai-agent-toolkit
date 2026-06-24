@@ -322,9 +322,9 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
 
   assert.match(howToUse, /### Native Toolkit Setup/);
   assert.match(howToUse, /For normal human setup, keep the journey short/);
-  assert.match(howToUse, /For Codex, open the repo in Codex and say `setup toolkit`/);
+  assert.match(howToUse, /In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh`/);
   assert.match(howToUse, /manually approve the startup hook when Codex prompts/);
-  assert.match(howToUse, /For Claude Code, use Claude Code's native Toolkit plugin flow from this repo/);
+  assert.match(howToUse, /Claude Code uses `node repo\/scripts\/setup-toolkit\.cjs --execute --host claude-code`/);
   assert.match(howToUse, /\.codex-plugin\/plugin\.json/);
   assert.match(howToUse, /\.claude-plugin\/plugin\.json/);
   assert.match(howToUse, /Codex does not install or update Claude Code/);
@@ -356,9 +356,10 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\| Project OpenCode config \| `<repo>\/\.opencode\/skills\/<skill-name>\/SKILL\.md` \|/);
   assert.match(howToUse, /\| Plugin-scoped \| `C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\SKILL\.md` \|/);
 
-  assert.match(readme, /For Codex, open the repo in Codex and say `setup toolkit`/);
+  assert.match(readme, /In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh`/);
+  assert.match(readme, /Codex uses `node repo\/scripts\/setup-toolkit\.cjs --execute`; Claude Code uses `node repo\/scripts\/setup-toolkit\.cjs --execute --host claude-code`/);
   assert.match(readme, /manually approve the startup hook when Codex prompts/);
-  assert.match(readme, /For Claude Code, use Claude Code's native Toolkit plugin flow from this repo/);
+  assert.match(readme, /Keep native plugin installs host-local: Codex must not install\/update Claude Code, and Claude Code must not install\/update Codex/);
   assert.match(readmeInstallSection, /Copy the whole `skills\/<skill-name>\/` folder into \*\*ANY ONE\*\* supported location/);
   assert.match(readme, /`C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\`/);
   assert.match(readme, /\| Platform \| Manual Toolkit-owned skill folder locations \| Active instruction files \| Reference \|/);
@@ -422,6 +423,8 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assertWindowsHookRecoveryGuidance(codexRef, 'generated codex ref recovery guidance');
   assert.match(codexRef, /codex plugin marketplace add n8n-io\/skills/);
   assert.match(codexRef, /codex plugin add n8n-skills@n8n-io/);
+  assert.match(codexRef, /marketplace registration is not (?:enough|a complete install)/i);
+  assert.match(codexRef, /installed.*enabled/i);
   assert.match(codexRef, /Start n8n work by loading the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`/);
   assert.match(codexRef, /`n8n_live`/);
   assert.match(claudeCodeRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);

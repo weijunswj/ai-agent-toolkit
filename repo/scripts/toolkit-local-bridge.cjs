@@ -465,11 +465,6 @@ function validateAndUpdateRepo(state, args = {}) {
     });
   }
   const currentBranch = requireGit(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'], 'read current branch');
-  if (currentBranch !== branch) {
-    throw repoUpdateError('skipped', `configured repo branch mismatch: expected ${branch}, got ${currentBranch}`, {
-      error: 'branch mismatch'
-    });
-  }
   const remoteResult = gitCommand(repoPath, ['remote', 'get-url', '--all', 'origin']);
   if (!remoteResult.ok) {
     throw repoUpdateError('skipped', `could not read origin remote: ${commandOutput(remoteResult)}`, {
@@ -489,11 +484,22 @@ function validateAndUpdateRepo(state, args = {}) {
       error: 'dirty working tree'
     });
   }
+  let branchSwitchedFrom = '';
+  if (currentBranch !== branch) {
+    const switchResult = gitCommand(repoPath, ['switch', branch], { timeout: 120000 });
+    if (!switchResult.ok) {
+      throw repoUpdateError('skipped', `git switch ${branch} failed: ${commandOutput(switchResult)}`, {
+        error: 'branch switch failed'
+      });
+    }
+    branchSwitchedFrom = currentBranch;
+  }
   const fromCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read current commit');
   const fetchResult = gitCommand(repoPath, ['fetch', 'origin', branch], { timeout: 120000 });
   if (!fetchResult.ok) {
     throw repoUpdateError('skipped', `git fetch origin ${branch} failed: ${commandOutput(fetchResult)}`, {
       fromCommit,
+      branchSwitchedFrom,
       error: 'fetch failed'
     });
   }
@@ -503,6 +509,7 @@ function validateAndUpdateRepo(state, args = {}) {
     throw repoUpdateError('skipped', 'fetched update is not a fast-forward from the current repo commit', {
       fromCommit,
       toCommit: fetchedCommit,
+      branchSwitchedFrom,
       error: 'not fast-forward'
     });
   }
@@ -512,6 +519,7 @@ function validateAndUpdateRepo(state, args = {}) {
       throw repoUpdateError('skipped', `git merge --ff-only FETCH_HEAD failed: ${commandOutput(merge)}`, {
         fromCommit,
         toCommit: fetchedCommit,
+        branchSwitchedFrom,
         error: 'fast-forward failed'
       });
     }
@@ -526,6 +534,7 @@ function validateAndUpdateRepo(state, args = {}) {
       fromCommit,
       toCommit,
       changedFiles,
+      branchSwitchedFrom,
       error: error.repoUpdateDetails?.error || error.message,
       validationStatus: error.repoUpdateDetails?.validationStatus || 'failed',
       validationCommand: error.repoUpdateDetails?.validationCommand || ''
@@ -536,6 +545,7 @@ function validateAndUpdateRepo(state, args = {}) {
     fromCommit,
     toCommit,
     changedFiles,
+    branchSwitchedFrom,
     validation,
     status: fromCommit === toCommit ? 'up-to-date' : 'updated'
   };
@@ -1383,6 +1393,7 @@ function repoReportContextFromUpdate(state, updateResult, previousObservedCommit
     changedFiles: externalAdvanceDetected ? externalChangedFiles : (updateResult.changedFiles || []),
     validationStatus: updateResult.validation?.status || 'passed',
     branch,
+    branchSwitchedFrom: updateResult.branchSwitchedFrom || '',
     remote,
     externalAdvanceDetected,
     externalAdvanceFromCommit: externalAdvanceDetected ? previousObservedCommit : '',
@@ -1405,6 +1416,7 @@ function shouldConsiderUpdateReport(args, state) {
 
 function updateReportIsMeaningful(context) {
   const repoStatus = context.repo?.status || '';
+  if (context.repo?.branchSwitchedFrom) return true;
   if (repoStatus === 'updated') return true;
   if (context.repo?.externalAdvanceDetected) return true;
   if (repoStatus === 'validation-failed') return true;
@@ -1422,6 +1434,8 @@ function shortCommit(value) {
 }
 
 function repoTldr(repo, previousCommit, commit, warning) {
+  if (repo.branchSwitchedFrom && repo.status === 'up-to-date') return `auto-switched to ${inlineCode(repo.branch || 'configured branch')}; already up to date`;
+  if (repo.branchSwitchedFrom && repo.status === 'updated') return `auto-switched to ${inlineCode(repo.branch || 'configured branch')}; updated from ${shortCommit(previousCommit)} to ${shortCommit(commit)}`;
   if (repo.status === 'updated') return `updated from ${shortCommit(previousCommit)} to ${shortCommit(commit)}`;
   if (repo.externalAdvanceDetected) return 'already updated before this hook run';
   if (repo.status === 'validation-failed') return `updated to ${shortCommit(commit)}, but validation failed`;
@@ -1430,7 +1444,6 @@ function repoTldr(repo, previousCommit, commit, warning) {
   if (repo.status === 'up-to-date') return 'already up to date';
   return 'not updated in this run';
 }
-
 function targetsTldr(targetSyncs, targetSyncStatus) {
   if (targetSyncs.length) {
     return targetSyncs
@@ -1495,6 +1508,8 @@ function buildUpdateReport({ args, state, checksum, context }) {
     lines.push('- Local repo was already advanced before this hook run.');
   } else if (targetSyncs.length && (!repo.fromCommit || repo.fromCommit === repo.toCommit)) {
     lines.push('- No repo commit change; local bridge target state was stale.');
+  } else if (repo.branchSwitchedFrom) {
+    lines.push('- No repo commit change; clean branch auto-switch completed.');
   } else if (repo.status && repo.status !== 'updated') {
     lines.push('- No repo commit change; repo auto-update skipped safely.');
   } else {
@@ -1506,6 +1521,9 @@ function buildUpdateReport({ args, state, checksum, context }) {
   if (repo.remote) lines.push(`- Configured remote: ${inlineCode(repo.remote)}`);
   lines.push(`- Previous observed commit: ${inlineCode(previousCommit)}`);
   lines.push(`- Current commit: ${inlineCode(commit)}`);
+  if (repo.branchSwitchedFrom) {
+    lines.push(`- Bridge action: auto-switched clean Toolkit repo from ${inlineCode(repo.branchSwitchedFrom)} to ${inlineCode(repo.branch || 'configured branch')}.`);
+  }
   if (repo.status === 'updated') {
     lines.push('- Bridge action: fast-forwarded the configured local repo during this hook run.');
   } else if (repo.externalAdvanceDetected) {
@@ -1579,6 +1597,7 @@ function updateReportSignature({ args, checksum, context }) {
       status: repo.status || '',
       error: repo.error || '',
       branch: repo.branch || '',
+      branchSwitchedFrom: repo.branchSwitchedFrom || '',
       remote: repo.remote || '',
       fromCommit: repo.fromCommit || '',
       toCommit: repo.toCommit || '',
@@ -2096,6 +2115,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
             toCommit: details.toCommit || '',
             changedFiles: details.changedFiles || [],
             validationStatus: details.validationStatus || (error.repoUpdateStatus === 'validation-failed' ? 'failed' : 'not run'),
+            branchSwitchedFrom: details.branchSwitchedFrom || '',
             error: details.error || error.message
           },
           nativePluginCache: codexNativePluginCacheStatus(args, statusState),

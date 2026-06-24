@@ -1142,6 +1142,11 @@ test('linked n8n Skills and MCP setup surfaces are shipped as secondary AI-codin
   }
 
   const codexPage = readText(repoRoot, 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md');
+  assert.match(codexPage, /marketplace registration is not (?:enough|a complete install)/i);
+  assert.match(codexPage, /installed.*enabled/i);
+  assert.match(codexPage, /not (?:merely|just) available/i);
+  assert.match(codexPage, /temporary marketplace checkout/i);
+  assert.match(codexPage, /\\\.codex\\\.tmp\\marketplaces\\n8n-io\\plugins\\n8n-skills/i);
   assert.match(codexPage, /On Windows, repair and audit the installed plugin cache before approving or trusting hooks/);
   assert.match(codexPage, /rewrites generic `\.sh` hook commands through `hooks\/run-hook\.ps1`/);
   assert.match(codexPage, /patches `n8n-skills@n8n-io` hook emitters with Node JSON fallbacks/);
@@ -1160,6 +1165,10 @@ test('linked n8n Skills and MCP setup surfaces are shipped as secondary AI-codin
     const text = readText(repoRoot, page);
     assert.match(text, /On Windows, repair official plugin hooks before trusting them/, page);
     assert.match(text, /adds Node JSON fallbacks for `n8n-skills@n8n-io`/, page);
+    if (page.includes('codex-mcp-config')) {
+      assert.match(text, /Do not report setup complete while `n8n-skills@n8n-io` is only marketplace-available/, page);
+      assert.match(text, /if the UI still shows \*\*Add\*\*, run the plugin-add step/, page);
+    }
     assertWindowsHookRecoveryGuidance(text, page);
   }
 

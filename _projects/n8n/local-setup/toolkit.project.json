@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.4.3",
+  "version": "3.4.4",
   "version_policy": "semver",
-  "version_notes": "Adds Windows recovery guidance for already-approved official n8n Skills hook installs and keeps official instance-level n8n MCP templates capability-aware.",
+  "version_notes": "Clarifies that Codex n8n Skills setup is incomplete until n8n-skills@n8n-io is installed/enabled and Windows repair targets the installed plugin cache, not only the marketplace checkout.",
   "outputs": [
     {
       "kind": "curated",

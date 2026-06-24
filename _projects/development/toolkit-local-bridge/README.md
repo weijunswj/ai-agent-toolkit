@@ -1,6 +1,6 @@
 # Toolkit Local Bridge
 
-First-party project module for the v2 native plugin/update architecture, opt-in repo-backed auto-update, and local bridge setup subsystem.
+First-party project module for the native plugin/update architecture, opt-in repo-backed auto-update, and local bridge setup subsystem.
 
 Source files live in [_main/](_main/). Generated outputs publish into:
 

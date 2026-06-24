@@ -1,6 +1,6 @@
-# Toolkit Local Bridge V2
+# Toolkit Local Bridge
 
-This document defines the v2 plugin/update architecture for `weijunswj/ai-agent-toolkit`.
+This document defines the plugin/update architecture for `weijunswj/ai-agent-toolkit`.
 
 ## Current Source-Of-Truth Chain
 
@@ -14,10 +14,10 @@ Current inspected chain:
 6. `repo/scripts/sync-toolkit-projects.cjs` publishes declared generated outputs.
 7. `skills/**` is the generated copyable skill surface.
 8. `repo/scripts/validate-toolkit.cjs`, `repo/tests/*.test.cjs`, package checks, source-lock audit, and published-surface audit enforce drift and safety rules.
-9. `.codex-plugin/**` and `.claude-plugin/**` are v2 native plugin package metadata generated from the Toolkit project module. They are not source of truth.
+9. `.codex-plugin/**` and `.claude-plugin/**` are native plugin package metadata generated from the Toolkit project module. They are not source of truth.
 10. The Toolkit Local Bridge Hub under the user profile stores generated OpenCode and Antigravity 2 adapter state. It is not source of truth.
 
-## V2 Architecture
+## Architecture
 
 Codex and Claude Code update Toolkit through their own native plugin systems.
 
@@ -140,13 +140,15 @@ codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
 
 The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`. The wrapper must use `policy.authentication: "ON_USE"`, not `ON_INSTALL`, so a no-auth local Toolkit plugin can install headlessly before any hook trust prompt.
 
-For `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context in Codex, agents must run the full script-backed journey even when Toolkit is already installed:
+For `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context, agents must run the full script-backed journey even when Toolkit is already installed:
 
 ```powershell
 node repo/scripts/setup-toolkit.cjs --execute
+# In Claude Code:
+node repo/scripts/setup-toolkit.cjs --execute --host claude-code
 ```
 
-The orchestrator performs only the minimal repo update check first, then runs the required steps to verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync. Do not shortcut already-installed Toolkit refreshes to plugin verification only; the full journey is required so stale repo, plugin-cache, bridge-state, report, and target-sync pieces are detected and patched in order. If it pauses before repo-backed auto-update, ask the user before rerunning with `--write-repo-auto-update`; then ask the bolded update-report auto-open preference before target writes, rerunning with either `--enable-update-report-open` or `--skip-update-report-open`; then ask the bolded Codex plugin auto-refresh preference, rerunning with either `--enable-codex-plugin-auto-refresh` or `--skip-codex-plugin-auto-refresh`; ask separately before adding any `--enable-target opencode` or `--enable-target ag2` target writes. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
+The orchestrator performs only the minimal repo update check first, then runs the required host-native plugin step before repo validation, bridge setup, repo auto-update enablement, or target sync. Codex agents verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync. Claude Code verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, then relies on Claude Code's own native plugin install/trust flow when the host reports the package is missing, stale, disabled, or untrusted. Do not shortcut already-installed Toolkit refreshes to plugin verification only; the full journey is required so stale repo, plugin-cache, bridge-state, report, and target-sync pieces are detected and patched in order. If it pauses before repo-backed auto-update, ask the user before rerunning with `--write-repo-auto-update`; then ask the bolded update-report auto-open preference before target writes, rerunning with either `--enable-update-report-open` or `--skip-update-report-open`; in Codex, then ask the bolded Codex plugin auto-refresh preference, rerunning with either `--enable-codex-plugin-auto-refresh` or `--skip-codex-plugin-auto-refresh`; ask separately before adding any `--enable-target opencode` or `--enable-target ag2` target writes. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
 
 Before reporting `setup toolkit` complete, run:
 
@@ -176,7 +178,7 @@ If no hook prompt appears, report whether hook trust is already recorded, still 
 
 After a fresh Codex plugin install or update, the user must manually approve or trust the startup hook when Codex prompts. Verification can confirm the installed cache contains a `SessionStart` hook, but it cannot approve that hook on the user's behalf.
 
-Codex setup must never install or update Claude Code. Claude Code uses its own native plugin system and `.claude-plugin/plugin.json`.
+Codex setup must never install or update Claude Code. Claude Code setup must never install or update Codex. The shared `setup-toolkit.cjs` orchestrator selects the correct native step with `--host`.
 
 ### Manual Isolated CODEX_HOME Acceptance
 
@@ -215,9 +217,9 @@ When a native SessionStart hook runs and repo auto-update is enabled, the bridge
 
 1. Acquires the Toolkit bridge lock.
 2. Validates `repo_path` exists and is a Git worktree.
-3. Validates the current branch matches `repo_branch`.
-4. Validates `origin` matches `repo_remote`.
-5. Refuses to continue when the working tree is dirty.
+3. Reads the current branch and validates `origin` matches `repo_remote`.
+4. Refuses to continue when the working tree is dirty, leaving the current branch and local changes untouched.
+5. If the clean worktree is on a different branch, switches to `repo_branch` with `git switch <repo_branch>` and records that auto-switch in the update report.
 6. Fetches `origin <repo_branch>`.
 7. Updates only with `git merge --ff-only FETCH_HEAD`.
 8. Runs hook-light validation:
@@ -263,7 +265,8 @@ Meaningful work means at least one of:
 - A stale Toolkit-managed skill folder was removed from a managed target.
 - Delegated repo sync failed.
 - Hook-light validation failed after a repo update.
-- Repo auto-update skipped safely because the branch did not match, the tree was dirty, the remote did not match, fetch failed, or the fetched commit was not a fast-forward.
+- Repo auto-update auto-switched a clean non-configured branch back to the configured branch.
+- Repo auto-update skipped safely because the tree was dirty, the remote did not match, branch switching failed, fetch failed, or the fetched commit was not a fast-forward.
 - The Codex native plugin cache is stale relative to the configured repo source, was auto-refreshed, or failed auto-refresh.
 
 Normal no-op hook runs with the same observed repo commit and no target sync, stale plugin cache, skip, or validation issue do not write or open a report. Meaningful reports are also deduplicated by event signature: if a later hook sees the same repo status, target-sync result, native plugin cache status, and checksum, it does not create or open another timestamped report. In hook mode, the bridge prints only:
@@ -272,13 +275,13 @@ Normal no-op hook runs with the same observed repo commit and no target sync, st
 Toolkit updated: <report path>
 ```
 
-The report starts with a short `TL;DR` section for repo status, target sync status, and any action needed. Details include the new and previous observed commits, sync source, Singapore time (`SGT`), a Repo Update section with configured branch and configured remote, changed files from the fast-forward or already-advanced observed range when available, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit n8n/live-system skip note, repo update status, hook-light validation result, target sync status, Codex native plugin cache status when checked, checksum, and any warning/error. If auto-update skips because the local Toolkit repo is on the wrong branch, the report tells the user to switch the Toolkit repo back to `main`, then restart Codex or rerun setup/sync. For the default production configuration, this shows configured branch `main` and configured remote `https://github.com/weijunswj/ai-agent-toolkit` so users can see whether updates are coming from GitHub `main`. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
+The report starts with a short `TL;DR` section for repo status, target sync status, and any action needed. Details include the new and previous observed commits, sync source, Singapore time (`SGT`), a Repo Update section with configured branch and configured remote, changed files from the fast-forward or already-advanced observed range when available, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit n8n/live-system skip note, repo update status, hook-light validation result, target sync status, Codex native plugin cache status when checked, checksum, and any warning/error. If auto-update finds a clean local Toolkit repo on the wrong branch, the report says it auto-switched back to the configured branch. If the repo is dirty, the report explains that dirty local changes prevent auto-update and the hook leaves the current branch and changes untouched. For the default production configuration, this shows configured branch `main` and configured remote `https://github.com/weijunswj/ai-agent-toolkit` so users can see whether updates are coming from GitHub `main`. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
 
 For first-restart compatibility after a bridge update, an older installed native hook may fast-forward the configured local Toolkit repo and then delegate into the newly updated repo script without passing `--hook`. An unsuppressed delegated command with `--sync-enabled --write --sync-source repo --hub <same-hub> --skip-repo-auto-update` is report-eligible. When hub state contains `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_status`, the delegated repo script uses that stored metadata plus a local `git diff --name-only` over `repo_path` to populate the update report. New parent hooks pass `--suppress-update-report` to delegated sync so the parent hook remains the single report writer and duplicate reports are avoided.
 
 Opening reports is opt-in. `--open-update-report` opens only the report created by the current run. `--enable-update-report-open` and `--disable-update-report-open` persist that preference in hub state. On Windows, opening uses only `notepad.exe <reportPath>` and only for files created under the Toolkit temp update-report folder. Opening is best-effort, non-blocking, and never uses OS default file associations, `.sh` files, or VS Code.
 
-During `setup toolkit`, this preference is a required approval gate after repo-backed auto-update is configured and audited, and before OpenCode or Antigravity 2 target writes. The user-facing setup question must be bolded as `**Do you want Codex to open Toolkit update reports automatically after meaningful hook activity?**`. Rerun with `--enable-update-report-open` to opt in, or `--skip-update-report-open` to explicitly continue with reports left closed by default.
+During `setup toolkit`, this preference is a required approval gate after repo-backed auto-update is configured and audited, and before OpenCode or Antigravity 2 target writes. The user-facing setup question must be bolded and name the active host, such as `**Do you want Codex to open Toolkit update reports automatically after meaningful hook activity?**` or `**Do you want Claude Code to open Toolkit update reports automatically after meaningful hook activity?**`. Rerun with `--enable-update-report-open` to opt in, or `--skip-update-report-open` to explicitly continue with reports left closed by default.
 
 Codex plugin cache auto-refresh is also opt-in during setup. The user-facing setup question must be bolded as `**Do you want Codex to auto-refresh the Toolkit native plugin cache from this trusted main checkout when a startup hook detects it is stale?**`. Rerun with `--enable-codex-plugin-auto-refresh` to opt in, or `--skip-codex-plugin-auto-refresh` to keep stale Codex plugin cache refresh manual.
 
@@ -430,7 +433,7 @@ Do not add one bridge skill per command. Keep `toolkit-setup` as the only bridge
 
 Hooks are optional automation. They must not contain unique critical policy.
 
-The v2 hooks only call the shared updater:
+The packaged hooks only call the shared updater:
 
 - Codex hook source: `.codex-plugin/hooks/hooks.json`.
 - Claude Code hook source: `.claude-plugin/hooks/hooks.json`.
@@ -482,7 +485,7 @@ Do not move exclusively into hooks:
 - No package installs by default.
 - No project repo mutation by default.
 
-Root `AGENTS.md` changed in this PR only to add compact v2 architecture context and synced source-of-truth wording. No critical shared policy exists only in hooks.
+Root `AGENTS.md` changed in this PR only to add compact Architecture context and synced source-of-truth wording. No critical shared policy exists only in hooks.
 
 ## Disable And Rollback
 

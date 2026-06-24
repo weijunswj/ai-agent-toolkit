@@ -564,7 +564,7 @@ test('Codex Toolkit setup output includes Codex-only hook approval next steps', 
 });
 
 test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
-  const bridgeDoc = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'TOOLKIT-LOCAL-BRIDGE-V2.md'), 'utf8');
+  const bridgeDoc = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');
   assert.match(bridgeDoc, /Manual Isolated CODEX_HOME Acceptance/i);
   assert.match(bridgeDoc, /CODEX_HOME=<temp>/);
   assert.match(bridgeDoc, /setup-codex-toolkit-plugin\.cjs --write --json/);
