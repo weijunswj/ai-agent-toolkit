@@ -118,6 +118,10 @@ function git(cwd, args) {
   return result.stdout.trim();
 }
 
+function currentBranch(repoPath) {
+  return git(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
+}
+
 function writeFile(filePath, text) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, text, 'utf8');
@@ -1797,6 +1801,7 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
     '--write'
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
+  git(fixture.repo, ['checkout', '-b', 'feature-work']);
   writeFile(path.join(fixture.repo, 'DIRTY.txt'), 'dirty\n');
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
@@ -1807,6 +1812,7 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(marker), false);
+  assert.equal(currentBranch(fixture.repo), 'feature-work');
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_repo_update_status, 'skipped');
   assert.match(state.last_repo_update_error, /dirty/i);
@@ -1816,7 +1822,7 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
   assert.match(report.text, /warning\/error: `dirty working tree`/i);
 });
 
-test('hook mode branch mismatch report tells user to switch back to main', () => {
+test('hook mode auto-switches a clean repo back to main before update and sync', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
   const marker = path.join(fixture.root, 'delegate.log');
@@ -1833,6 +1839,7 @@ test('hook mode branch mismatch report tells user to switch back to main', () =>
   assert.equal(result.status, 0, result.stderr);
 
   git(fixture.repo, ['checkout', '-b', 'feature-work']);
+  assert.equal(currentBranch(fixture.repo), 'feature-work');
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
     env: isolatedHomeEnv(fixture.root, {
@@ -1842,14 +1849,16 @@ test('hook mode branch mismatch report tells user to switch back to main', () =>
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.existsSync(marker), false);
+  assert.equal(currentBranch(fixture.repo), 'main');
+  assert.equal(fs.existsSync(marker), true);
   const state = readJson(path.join(hub, 'state.json'));
-  assert.equal(state.last_repo_update_status, 'skipped');
-  assert.match(state.last_repo_update_error, /branch mismatch/i);
+  assert.equal(state.last_repo_update_status, 'up-to-date');
+  assert.equal(state.last_repo_update_error || '', '');
   const report = readLatestReport(hub);
+  assert.match(result.stdout, /Toolkit updated:/);
   assert.match(report.text, /## TL;DR/);
-  assert.match(report.text, /Action needed: switch the Toolkit repo back to `main`, then restart Codex or rerun setup\/sync\./);
-  assert.match(report.text, /Suggested fix: switch the Toolkit repo back to `main`, then restart Codex or rerun setup\/sync\./);
+  assert.match(report.text, /Repo: auto-switched to `main`; already up to date\./);
+  assert.match(report.text, /Bridge action: auto-switched clean Toolkit repo from `feature-work` to `main`\./);
 });
 
 test('hook mode rejects a repo whose origin remote does not match configured remote', () => {

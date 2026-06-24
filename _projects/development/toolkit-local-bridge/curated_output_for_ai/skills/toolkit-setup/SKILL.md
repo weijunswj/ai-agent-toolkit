@@ -60,7 +60,7 @@ git merge --ff-only origin/main
 
 Stop if the repo is dirty, not on the expected remote, or cannot fast-forward.
 
-2. Run the host-native plugin step before running repo validation, bridge setup, or target sync. In Codex, verify and refresh the Toolkit native plugin cache:
+2. Run the host-native plugin step before running repo validation, bridge setup, or target sync. In Codex, verify and refresh the Toolkit native plugin cache before running repo validation, bridge setup, or target sync:
 
 ```powershell
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
@@ -129,7 +129,7 @@ node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-10. Confirm future native `SessionStart` hooks will use the configured repo-backed updater: Codex hooks should use `--sync-source codex-plugin`, Claude Code hooks should use `--sync-source claude-plugin`, and both should validate repo path, branch, remote, clean tree, `git fetch origin main`, `git merge --ff-only FETCH_HEAD`, hook-light validation, and enabled-target sync from the freshly updated repo.
+10. Confirm future native `SessionStart` hooks will use the configured repo-backed updater: Codex hooks should use `--sync-source codex-plugin`, Claude Code hooks should use `--sync-source claude-plugin`, and both should validate repo path and remote, refuse dirty worktrees without stashing or switching, auto-switch a clean non-configured branch back to the configured branch, run `git fetch origin main`, run `git merge --ff-only FETCH_HEAD`, run hook-light validation, and sync enabled targets from the freshly updated repo.
 
 ## Safety Rules
 
@@ -140,7 +140,7 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 - Disabled or never-enabled targets must not be touched.
 - Audit `synced` means the real app-facing target output matches the current Toolkit payload. Internal hub metadata alone is not synced.
 - The Python `ag2` package is optional for package-specific AG2 workflows; it is not required for Toolkit-managed Antigravity 2 bridge metadata or plugin-scoped skill sync.
-- Repo auto-update is opt-in only and must validate the configured Toolkit repo, expected remote, clean tree, fast-forward update, and hook-light validation before enabled-target sync.
+- Repo auto-update is opt-in only and must validate the configured Toolkit repo and expected remote, refuse dirty worktrees without stashing or switching, auto-switch a clean non-configured branch back to the configured branch, fast-forward update, and run hook-light validation before enabled-target sync.
 - Codex plugin cache auto-refresh is opt-in only. When enabled, startup hooks may refresh stale Codex Toolkit plugin cache content only from the configured trusted `main` repo after repo validation and delegated target sync succeed.
 - Do not run npm, pip, package installs, or dependency installers from this skill. In Codex, the only allowed marketplace operation in this flow is the Codex-only local Toolkit plugin install/update path through `setup-codex-toolkit-plugin.cjs --write` or the equivalent `codex plugin marketplace add "<local-ai-agent-toolkit-repo>" --json` plus `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` commands. In Claude Code, use Claude Code's native Toolkit plugin flow and do not call Codex marketplace commands.
 - After a requested Codex plugin install or update on Windows, repair that installed plugin root before approving hooks. If repair cannot make hooks safe, fail with the repair error instead of reporting success.
