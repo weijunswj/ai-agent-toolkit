@@ -2269,55 +2269,49 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
   for (const relPath of paths) {
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
-    assert.match(text, /git fetch origin main/, relPath);
-    assert.match(text, /git merge --ff-only origin\/main/, relPath);
-    const minimalRepoBlock = text.match(/Perform only the minimal trusted local Toolkit repo update on `main`[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n```/i);
-    assert.ok(minimalRepoBlock, relPath);
-    assert.doesNotMatch(minimalRepoBlock[1], /validate-toolkit|toolkit-local-bridge.*test/, relPath);
-    const cacheRefreshIndex = text.indexOf('verify and refresh the Toolkit native plugin cache before running repo validation');
-    const fastValidationIndex = text.indexOf('After the native plugin cache is current, run fast setup validation');
-    assert.notEqual(cacheRefreshIndex, -1, relPath);
-    assert.notEqual(fastValidationIndex, -1, relPath);
-    assert.ok(cacheRefreshIndex < fastValidationIndex, relPath);
-    assert.match(text, /If an older installed `toolkit-setup` skill says to run the full bridge suite first, treat that instruction as stale/i, relPath);
+    assert.match(text, /node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main/, relPath);
+    assert.match(text, /node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main --host claude-code/, relPath);
+    assert.match(text, /dedicated clean `main` checkout as the single update source/, relPath);
+    assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit/, relPath);
+    assert.match(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
+    assert.match(text, /separate from the active Codex or Claude Code worktree, plugin caches, `\.tmp` directories, and temporary marketplace checkouts/i, relPath);
+    assert.match(text, /one upfront checklist/i, relPath);
+    assert.match(text, /Allowed later blockers include dirty managed checkout, unexpected remote, fetch\/auth failure, non-fast-forward update, validation failure/i, relPath);
     assert.match(text, /node repo\/scripts\/validate-toolkit\.cjs/, relPath);
-    const setupValidationBlock = text.match(/After the native plugin cache is current, run fast setup validation:[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n```/i);
+    const setupValidationBlock = text.match(/For bridge or setup-surface changes, prefer targeted checks first:[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n```/i);
     assert.ok(setupValidationBlock, relPath);
     assert.match(setupValidationBlock[1], /node --test repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs/, relPath);
     assert.doesNotMatch(setupValidationBlock[1], /node --test repo\/tests\/toolkit-local-bridge\.test\.cjs/, relPath);
     assert.match(text, /Run `node --test repo\/tests\/toolkit-local-bridge\.test\.cjs` when the change affects bridge behavior/i, relPath);
     assert.match(text, /Codex native plugin/i, relPath);
-    assert.match(text, /\.codex-plugin\/plugin\.json/, relPath);
-    assert.match(text, /setup-codex-toolkit-plugin\.cjs --verify/, relPath);
-    assert.match(text, /setup-codex-toolkit-plugin\.cjs --write/, relPath);
-    assert.match(text, /codex plugin marketplace add/, relPath);
-    assert.match(text, /codex plugin add ai-agent-toolkit@ai-agent-toolkit-local/, relPath);
-    assert.match(text, /\.agents\/plugins\/marketplace\.json/, relPath);
+    assert.match(text, /setup-codex-toolkit-plugin\.cjs/, relPath);
+    assert.match(text, /\.claude-plugin\/plugin\.json/, relPath);
+    assert.match(text, /repair-codex-plugin-windows-hooks\.cjs/, relPath);
     assert.match(text, /installed plugin cache/i, relPath);
-    assert.match(text, /same-version stale-cache troubleshooting/i, relPath);
-    assert.match(text, /do not keep extending the timeout/i, relPath);
     assert.match(text, /%USERPROFILE%\\\\\.codex\\\\plugins\\\\\.plugin-appserver\\\\codex\.exe/, relPath);
-    assert.match(text, /diagnose the Codex plugin config\/cache state/i, relPath);
-    assert.match(text, /2\.2\.0/, relPath);
-    assert.match(text, /fail clearly/i, relPath);
-    assert.match(text, /do not use Codex to install or update Claude Code/i, relPath);
-    assert.match(text, /--enable-repo-auto-update/, relPath);
-    assert.match(text, /--repo-path/, relPath);
-    assert.match(text, /--enable-auto-sync/, relPath);
+    assert.match(text, /fail with the repair error/i, relPath);
+    assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
+    assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2/i, relPath);
-    assert.match(text, /ask once/i, relPath);
-    assert.match(text, /Never silently enable OpenCode or Antigravity 2/i, relPath);
-    assert.match(text, /--enable-target opencode/, relPath);
-    assert.match(text, /--enable-target ag2/, relPath);
-    assert.match(text, /--sync-enabled --write/, relPath);
-    assert.match(text, /SessionStart/i, relPath);
+    assert.match(text, /one setup checklist collects all preferences up front/i, relPath);
+    assert.match(text, /Enable OpenCode target sync only when explicitly selected/i, relPath);
+    assert.match(text, /Enable AG2\/Antigravity target sync only when explicitly selected/i, relPath);
+    assert.match(text, /OpenCode and Antigravity 2 are opt-in only/i, relPath);
+    assert.match(text, /Sync only enabled targets/i, relPath);
     assert.match(text, /fast-forward/i, relPath);
+    assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
+    assert.match(text, /official `n8n-io\/skills` plugin setup/i, relPath);
+    assert.match(text, /Do not repair or audit temporary marketplace checkout paths/i, relPath);
   }
 });
 
 test('bridge docs document cache-first setup and release branch auto-update bounds', () => {
   const text = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');
-  assert.match(text, /verify and refresh the Codex native Toolkit plugin cache before repo validation, bridge setup, repo auto-update enablement, or target sync/i);
+  assert.match(text, /managed clean `main` checkout as the default source/i);
+  assert.match(text, /dedicated clean `main` checkout as the single update source/i);
+  assert.match(text, /creates or verifies that checkout, validates the expected remote, refuses dirty worktrees, fetches `origin main`, updates only by fast-forward, runs hook-light validation/i);
+  assert.match(text, /Codex agents verify and refresh only the Codex native Toolkit plugin cache/i);
+  assert.match(text, /Claude Code verifies `\.claude-plugin\/plugin\.json` and `\.claude-plugin\/hooks\/hooks\.json`/i);
   assert.match(text, /Routine setup uses `repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs`/);
   assert.match(text, /Release-branch auto-update consideration/i);
   assert.match(text, /configure `--repo-branch release` only after that branch exists and has a clear CI\/merge policy/i);
@@ -2346,16 +2340,26 @@ test('Toolkit exposes a local Codex marketplace wrapper for supported plugin ins
 });
 
 test('bridge surfaces avoid private plugin caches, package installs, and command-per-bridge skills', () => {
+  const privateCacheFreeFiles = [
+    '.codex-plugin/plugin.json',
+    '.codex-plugin/hooks/hooks.json',
+    '.claude-plugin/plugin.json',
+    '.claude-plugin/hooks/hooks.json'
+  ];
+  const privateCacheFreeText = privateCacheFreeFiles.map((rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8')).join('\n');
+  assert.doesNotMatch(privateCacheFreeText, /\.codex[\\/]+plugins[\\/]+cache|\.claude[\\/]+plugins/i);
+
   const files = [
     'repo/scripts/toolkit-local-bridge.cjs',
     'skills/toolkit-setup/SKILL.md',
+    'repo/docs/TOOLKIT-LOCAL-BRIDGE.md',
     '.codex-plugin/plugin.json',
     '.codex-plugin/hooks/hooks.json',
     '.claude-plugin/plugin.json',
     '.claude-plugin/hooks/hooks.json'
   ];
   const text = files.map((rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8')).join('\n');
-  assert.doesNotMatch(text, /\.codex[\\/]+plugins[\\/]+cache|\.claude[\\/]+plugins/i);
+  assert.match(text, /must not use Codex or Claude private plugin caches as the skill payload source/i);
   assert.doesNotMatch(text, /\b(?:npm|pnpm|yarn|pip)\s+install\b/i);
 
   const removedBridgeSkills = [
