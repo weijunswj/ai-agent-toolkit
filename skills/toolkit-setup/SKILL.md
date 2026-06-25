@@ -39,7 +39,7 @@ node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
 node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code
 ```
 
-The orchestrator shows one upfront checklist, then runs to completion unless a real safety blocker appears.
+The orchestrator discovers current state, shows one consolidated upfront setup question bank, pauses before preference or target writes, then runs to completion unless a real safety blocker appears.
 
 It must show this explanation:
 
@@ -52,17 +52,19 @@ Default managed source checkout:
 
 The managed checkout is separate from the active Codex or Claude Code worktree, plugin caches, `.tmp` directories, and temporary marketplace checkouts. If the active Toolkit worktree is on a PR branch, setup should warn that this is okay and continue using the managed clean `main` checkout.
 
-3. The one setup checklist collects all preferences up front:
+3. The one setup question bank must show current state, recommended default, and choices for every setup decision before writes:
 
-- Enable repo-backed auto-update from the managed `main` checkout, default yes.
-- Enable this host's native plugin cache auto-refresh where supported, default yes for Codex and manual/check-only for Claude Code.
-- Write meaningful update reports, default yes.
-- Open update reports automatically, default closed unless selected.
-- Keep Toolkit-managed update reports/logs for 7 days by default.
-- Enable OpenCode target sync only when explicitly selected.
-- Enable AG2/Antigravity target sync only when explicitly selected.
+- Managed checkout: detected/current path, default path, and keep current / use default managed main checkout / explicit custom path.
+- Repo-backed auto-update: current enabled/disabled state and keep current / enable / disable.
+- Update report writes: current enabled/disabled state and keep current / enable / disable.
+- Update report auto-open: current enabled/disabled state and keep current / enable / disable. Do not write `update_report_open_enabled=false` unless the user explicitly chooses disable or passes an explicit disable flag.
+- Update report/log retention: current days, default 7, and keep current / use default 7 / custom positive integer.
+- Codex plugin cache auto-refresh on Codex only: current enabled/disabled state and keep current / enable / disable.
+- Claude Code plugin behavior on Claude Code only: verify/report only, no Codex mutation, and keep manual/check-only behavior / show native refresh instructions if stale.
+- OpenCode target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
+- AG2/Antigravity target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
 
-After the checklist is confirmed by flags or the selected setup profile, do not pause again for preference questions.
+After the question bank is answered by interactive input, explicit flags, or `--yes-recommended`, do not pause again for preference questions.
 
 Allowed later blockers include dirty managed checkout, unexpected remote, fetch/auth failure, non-fast-forward update, validation failure, plugin cache verification failure, host hook trust required, unsupported/missing host CLI, or unsafe OpenCode/AG2 target writes.
 

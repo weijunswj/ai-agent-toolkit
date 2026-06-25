@@ -7,9 +7,9 @@ const {
 
 test('hook-light validation confirms bridge helpers remain loadable', () => {
   assert.equal(typeof compareSemver, 'function');
-  assert.equal(compareSemver('2.2.0', '2.2.0'), 0);
-  assert.equal(compareSemver('2.2.1', '2.2.0'), 1);
-  assert.equal(compareSemver('2.1.9', '2.2.0'), -1);
+  assert.equal(compareSemver('2.2.1', '2.2.1'), 0);
+  assert.equal(compareSemver('2.2.2', '2.2.1'), 1);
+  assert.equal(compareSemver('2.2.0', '2.2.1'), -1);
 });
 
 test('hook-light validation uses dedicated smoke command path', () => {

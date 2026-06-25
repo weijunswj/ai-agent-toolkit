@@ -51,7 +51,7 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state. Agents must run the one-checklist setup journey instead of stopping after plugin verification, even when Toolkit is already installed: Codex uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main`; Claude Code uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code`.
+2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state. Agents must run the one-question-bank setup journey instead of stopping after plugin verification, even when Toolkit is already installed: Codex uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main`; Claude Code uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code`.
 3. Setup shows the managed checkout path and all preferences up front, then runs to completion unless a real safety blocker appears.
 4. **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 5. Default managed checkout paths are `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit` on Windows and `~/.ai-agent-toolkit/source/ai-agent-toolkit` on POSIX.
@@ -59,8 +59,9 @@ For normal human setup, keep the journey short:
 7. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 8. Restart the host if setup says the plugin needs a fresh session.
 9. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
-10. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and select those target writes.
-11. Meaningful update reports stay enabled by default, auto-open only when selected, and Toolkit-managed reports/logs older than 7 days are cleaned up best-effort from the Toolkit report/log directory.
+10. Answer the consolidated setup question bank before setup writes preferences or bridge targets. Use explicit flags or `--yes-recommended` for non-interactive runs.
+11. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and select those target writes. Existing enabled targets are shown so you can keep, refresh/sync, disable, or skip them.
+12. Meaningful update reports stay enabled by default, existing auto-open is preserved unless explicitly disabled, first-time auto-open is selected only when you choose it, and Toolkit-managed reports/logs older than 7 days are cleaned up best-effort from the Toolkit report/log directory.
 
 Codex and Claude Code update Toolkit through their own native plugin systems:
 

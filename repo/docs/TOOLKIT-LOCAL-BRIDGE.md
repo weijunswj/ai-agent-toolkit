@@ -151,7 +151,7 @@ node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
 node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code
 ```
 
-The orchestrator shows one upfront checklist, then runs to completion unless a real safety blocker appears. It uses a managed clean `main` checkout as the default source, not the active Codex or Claude Code conversation worktree.
+The orchestrator discovers current state, shows one consolidated upfront setup question bank, pauses before preference or target writes, then runs to completion unless a real safety blocker appears. It uses a managed clean `main` checkout as the default source, not the active Codex or Claude Code conversation worktree.
 
 **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 
@@ -162,7 +162,7 @@ Default managed source path:
 
 Setup creates or verifies that checkout, validates the expected remote, refuses dirty worktrees, fetches `origin main`, updates only by fast-forward, runs hook-light validation, and makes it the default `repo_path` for repo-backed auto-update. If the active Toolkit worktree is on a PR branch, setup warns that the active session may remain there and continues with the managed clean `main` source.
 
-The checklist collects repo-backed auto-update, current host native cache behavior, meaningful update report writes, report auto-open, seven-day report/log cleanup, and OpenCode or Antigravity 2 target sync preferences up front. Do not reintroduce later preference pauses. Codex agents verify and refresh only the Codex native Toolkit plugin cache. Claude Code verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, then relies on Claude Code's own native plugin install/trust flow when the host reports the package is missing, stale, disabled, or untrusted. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
+The question bank collects the managed checkout path, repo-backed auto-update, current host native cache behavior, meaningful update report writes, report auto-open, report/log retention days, and OpenCode or Antigravity 2 target decisions up front. It must show current state and a recommended default for each question. Keep current, refresh/sync, disable, and skip are distinct target answers; skip must not mean disable. Do not reintroduce later preference pauses. Codex agents verify and refresh only the Codex native Toolkit plugin cache. Claude Code verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, then relies on Claude Code's own native plugin install/trust flow when the host reports the package is missing, stale, disabled, or untrusted. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
 
 Before reporting `setup toolkit` complete, run:
 
@@ -170,7 +170,7 @@ Before reporting `setup toolkit` complete, run:
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-If the plugin is missing, disabled, stale, points at another source path, has same-version cache content that does not match this repo, or its installed plugin cache does not contain Toolkit version `2.2.0` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
+If the plugin is missing, disabled, stale, points at another source path, has same-version cache content that does not match this repo, or its installed plugin cache does not contain Toolkit version `2.2.1` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
 
 ```powershell
 node repo/scripts/setup-codex-toolkit-plugin.cjs --write
@@ -178,9 +178,9 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --write
 
 The verifier uses only supported Codex plugin commands. If no usable Codex CLI with `plugin marketplace` support is available, or if local marketplace installation fails, setup must fail clearly instead of pretending native plugin activation completed.
 
-The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. CLI list verification remains the preferred path. If the CLI list is empty or unreliable, the helper may use config/cache fallback verification only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.0`, the cache manifest has the expected Toolkit name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report this as config/cache fallback verification, not normal CLI verification.
+The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. CLI list verification remains the preferred path. If the CLI list is empty or unreliable, the helper may use config/cache fallback verification only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.1`, the cache manifest has the expected Toolkit name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report this as config/cache fallback verification, not normal CLI verification.
 
-If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.2.0`, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
+If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.2.1`, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
 
 After install, update, or verify, the helper prints or returns a `**Next Steps:**` section. It tells the user to restart Codex if installation changed anything, open Codex hook review when prompted, and trust the Codex `SessionStart` hook only if it runs:
 
@@ -208,8 +208,8 @@ Acceptance criteria:
 
 - `node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json` exits successfully. If the underlying `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` process keeps running after verification passes, setup output includes a warning that the command did not exit cleanly.
 - `codex plugin list --available --json` shows `ai-agent-toolkit@ai-agent-toolkit-local` installed and enabled with `authPolicy` `ON_USE`.
-- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.0`.
-- The final cache `.codex-plugin/plugin.json` reports version `2.2.0`.
+- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.1`.
+- The final cache `.codex-plugin/plugin.json` reports version `2.2.1`.
 - The final cache `.codex-plugin/hooks/hooks.json` includes a `SessionStart` hook.
 - Package-critical cache files match the local repo, including Codex plugin metadata, Toolkit bridge/setup scripts, hook-light validation test, assets, and `skills/`.
 
@@ -301,7 +301,7 @@ For first-restart compatibility after a bridge update, an older installed native
 
 Meaningful update reports are enabled by default and can be persisted with `--enable-update-reports` or disabled with `--disable-update-reports`. Opening reports is opt-in. `--open-update-report` opens only the report created by the current run. `--enable-update-report-open` and `--disable-update-report-open` persist that preference in hub state. On Windows, opening uses only `notepad.exe <reportPath>` and only for files created under the Toolkit temp update-report folder. Opening is best-effort, non-blocking, and never uses OS default file associations, `.sh` files, or VS Code.
 
-During `setup toolkit`, report write, report auto-open, and retention preferences are included in the one upfront checklist rather than asked as later preference pauses. Auto-open remains off unless selected.
+During `setup toolkit`, report write, report auto-open, and retention preferences are included in the one upfront question bank rather than asked as later preference pauses. Existing `update_report_open_enabled=true` is preserved unless explicitly disabled. Auto-open remains off for first-time setup unless selected.
 
 Toolkit-managed update reports/logs older than the configured retention window are cleaned up best-effort on setup and hook/update runs. Default retention is 7 days and can be configured with `--update-report-retention-days <positive-integer>`. Cleanup only considers Toolkit report filenames under the Toolkit-managed update report/log directory, never arbitrary user files, and never treats cleanup failure as a setup or startup blocker. Setup and audit summaries include retention days, deleted count, skipped/error count, and the report/log directory path.
 

@@ -1212,6 +1212,39 @@ function validateNativePluginPackages(errors) {
   }
 }
 
+function extractSingleQuotedConst(text, name) {
+  const pattern = new RegExp(`const\\s+${escapeRegExp(name)}\\s*=\\s*'([^']+)'`);
+  return text.match(pattern)?.[1] || '';
+}
+
+function validateToolkitPluginVersionAlignment(errors) {
+  const projectVersion = readJson('_projects/development/toolkit-local-bridge/toolkit.project.json').version;
+  const versionSources = [
+    ['.codex-plugin/plugin.json', readJson('.codex-plugin/plugin.json').version],
+    ['.claude-plugin/plugin.json', readJson('.claude-plugin/plugin.json').version],
+    ['_projects/development/toolkit-local-bridge/_main/codex-plugin/plugin.json', readJson('_projects/development/toolkit-local-bridge/_main/codex-plugin/plugin.json').version],
+    ['_projects/development/toolkit-local-bridge/_main/claude-plugin/plugin.json', readJson('_projects/development/toolkit-local-bridge/_main/claude-plugin/plugin.json').version],
+    ['repo/scripts/toolkit-local-bridge.cjs BRIDGE_VERSION', extractSingleQuotedConst(readText('repo/scripts/toolkit-local-bridge.cjs'), 'BRIDGE_VERSION')],
+    ['repo/scripts/setup-codex-toolkit-plugin.cjs EXPECTED_TOOLKIT_VERSION', extractSingleQuotedConst(readText('repo/scripts/setup-codex-toolkit-plugin.cjs'), 'EXPECTED_TOOLKIT_VERSION')]
+  ];
+  for (const [label, version] of versionSources) {
+    if (version !== projectVersion) {
+      fail(errors, `${label} must match Toolkit Local Bridge project version ${projectVersion}: ${version || '<missing>'}`);
+    }
+  }
+
+  const bridgeScript = readText('repo/scripts/toolkit-local-bridge.cjs');
+  if (!/const\s+ag2Plugin\s*=\s*\{[\s\S]*?version:\s*BRIDGE_VERSION[\s\S]*?\};/.test(bridgeScript)) {
+    fail(errors, 'repo/scripts/toolkit-local-bridge.cjs AG2 plugin.json payload must use BRIDGE_VERSION');
+  }
+  if (!/installed_version\.json':\s*textPayload\(`\$\{JSON\.stringify\(\{\s*version:\s*BRIDGE_VERSION\s*\}/.test(bridgeScript)) {
+    fail(errors, 'repo/scripts/toolkit-local-bridge.cjs AG2 installed_version.json payload must use BRIDGE_VERSION');
+  }
+  if (!/toolkit_bridge_version:\s*BRIDGE_VERSION/.test(bridgeScript)) {
+    fail(errors, 'repo/scripts/toolkit-local-bridge.cjs AG2 adapter metadata must use BRIDGE_VERSION');
+  }
+}
+
 function validateReadmeSurface(errors) {
   const text = readText('README.md');
   const requiredSections = [
@@ -2398,6 +2431,7 @@ function runValidation() {
   validateDocContract(errors);
   validateAgentInstructionShims(errors);
   validateNativePluginPackages(errors);
+  validateToolkitPluginVersionAlignment(errors);
   validateReadmeSurface(errors);
   validateGeneratedOutputCheckoutAttributes(errors);
   validateProjectModules(errors);

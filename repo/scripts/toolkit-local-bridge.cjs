@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.2.0';
+const BRIDGE_VERSION = '2.2.1';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -90,7 +90,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     openUpdateReport: false,
     enableUpdateReports: false,
     disableUpdateReports: false,
-    updateReportRetentionDays: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+    updateReportRetentionDays: 0,
+    updateReportRetentionDaysExplicit: false,
     enableUpdateReportOpen: false,
     disableUpdateReportOpen: false,
     enableCodexPluginAutoRefresh: false,
@@ -128,8 +129,14 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--open-update-report') args.openUpdateReport = true;
     else if (arg === '--enable-update-reports') args.enableUpdateReports = true;
     else if (arg === '--disable-update-reports') args.disableUpdateReports = true;
-    else if (arg === '--update-report-retention-days') args.updateReportRetentionDays = Number(next());
-    else if (arg.startsWith('--update-report-retention-days=')) args.updateReportRetentionDays = Number(arg.slice('--update-report-retention-days='.length));
+    else if (arg === '--update-report-retention-days') {
+      args.updateReportRetentionDays = Number(next());
+      args.updateReportRetentionDaysExplicit = true;
+    }
+    else if (arg.startsWith('--update-report-retention-days=')) {
+      args.updateReportRetentionDays = Number(arg.slice('--update-report-retention-days='.length));
+      args.updateReportRetentionDaysExplicit = true;
+    }
     else if (arg === '--enable-update-report-open') args.enableUpdateReportOpen = true;
     else if (arg === '--disable-update-report-open') args.disableUpdateReportOpen = true;
     else if (arg === '--enable-codex-plugin-auto-refresh') args.enableCodexPluginAutoRefresh = true;
@@ -179,7 +186,8 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.enableUpdateReports && args.disableUpdateReports) {
     throw new Error('--enable-update-reports and --disable-update-reports cannot be used together');
   }
-  if (!Number.isInteger(args.updateReportRetentionDays) || args.updateReportRetentionDays <= 0) {
+  if (args.updateReportRetentionDays && !args.updateReportRetentionDaysExplicit) args.updateReportRetentionDaysExplicit = true;
+  if (args.updateReportRetentionDaysExplicit && (!Number.isInteger(args.updateReportRetentionDays) || args.updateReportRetentionDays <= 0)) {
     throw new Error('--update-report-retention-days requires a positive integer');
   }
   if (args.enableCodexPluginAutoRefresh && args.disableCodexPluginAutoRefresh) {
@@ -711,7 +719,7 @@ function applyRequestedState(state, args) {
   if (args.disableUpdateReportOpen) next.update_report_open_enabled = false;
   if (args.enableUpdateReports) next.update_report_enabled = true;
   if (args.disableUpdateReports) next.update_report_enabled = false;
-  if (args.updateReportRetentionDays) next.update_report_retention_days = args.updateReportRetentionDays;
+  if (args.updateReportRetentionDaysExplicit) next.update_report_retention_days = args.updateReportRetentionDays;
   if (args.enableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = true;
   if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
   if (args.setAg2PythonCommand) {
