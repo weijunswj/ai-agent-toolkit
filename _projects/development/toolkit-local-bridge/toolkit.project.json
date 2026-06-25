@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "version_policy": "semver",
-  "version_notes": "Adds end-to-end English setup routing for Toolkit repo validation, native Codex plugin activation, repo-backed auto-update, one-time OpenCode/Antigravity 2 write approval, enabled-target sync testing, and n8n hook JSON output verification.",
+  "version_notes": "Fixes setup UX so auto-main discovers current state, asks one consolidated upfront question bank before preference or target writes, preserves update report auto-open unless explicitly changed, and keeps OpenCode/AG2 enablement opt-in.",
   "outputs": [
     {
       "kind": "curated",

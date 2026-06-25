@@ -19,7 +19,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.2.0';
+const expectedBridgeVersion = '2.2.1';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -2156,6 +2156,34 @@ test('update report opening is persisted opt-in', () => {
   assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_enabled, false);
 });
 
+test('update report opening and retention are preserved when flags are omitted', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  let result = run(['--hub', hub, '--enable-update-report-open', '--update-report-retention-days', '14', '--write'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  let state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.update_report_open_enabled, true);
+  assert.equal(state.update_report_retention_days, 14);
+
+  result = run(['--hub', hub, '--enable-update-reports', '--write'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.update_report_open_enabled, true);
+  assert.equal(state.update_report_retention_days, 14);
+
+  result = run(['--hub', hub, '--audit'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.update_report_open_enabled, true);
+  assert.equal(audit.update_report_retention_days, 14);
+});
+
 test('update report cleanup deletes only old Toolkit-managed reports inside the report root', () => {
   const root = tmpRoot();
   const reportDir = path.join(root, 'reports');
@@ -2275,7 +2303,10 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit/, relPath);
     assert.match(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
     assert.match(text, /separate from the active Codex or Claude Code worktree, plugin caches, `\.tmp` directories, and temporary marketplace checkouts/i, relPath);
-    assert.match(text, /one upfront checklist/i, relPath);
+    assert.match(text, /one consolidated upfront setup question bank/i, relPath);
+    assert.match(text, /Update report auto-open/i, relPath);
+    assert.match(text, /OpenCode target: detected state, enabled state, synced state\/version/i, relPath);
+    assert.match(text, /AG2\/Antigravity target: detected state, enabled state, synced state\/version/i, relPath);
     assert.match(text, /Allowed later blockers include dirty managed checkout, unexpected remote, fetch\/auth failure, non-fast-forward update, validation failure/i, relPath);
     assert.match(text, /node repo\/scripts\/validate-toolkit\.cjs/, relPath);
     const setupValidationBlock = text.match(/For bridge or setup-surface changes, prefer targeted checks first:[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n```/i);
@@ -2293,9 +2324,9 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2/i, relPath);
-    assert.match(text, /one setup checklist collects all preferences up front/i, relPath);
-    assert.match(text, /Enable OpenCode target sync only when explicitly selected/i, relPath);
-    assert.match(text, /Enable AG2\/Antigravity target sync only when explicitly selected/i, relPath);
+    assert.match(text, /setup question bank must show current state, recommended default, and choices/i, relPath);
+    assert.match(text, /OpenCode target: detected state, enabled state, synced state\/version/i, relPath);
+    assert.match(text, /AG2\/Antigravity target: detected state, enabled state, synced state\/version/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2 are opt-in only/i, relPath);
     assert.match(text, /Sync only enabled targets/i, relPath);
     assert.match(text, /fast-forward/i, relPath);
