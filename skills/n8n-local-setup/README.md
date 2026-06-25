@@ -12,7 +12,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup Skill
 
-Instruction-only skill for safe local n8n, hosted n8n references, local stack templates, [official n8n Skills](https://github.com/n8n-io/skills) routing, and official instance-level MCP references.
+Instruction-only skill for safe n8n environment setup: localhost/ngrok dev, production Cloudflare Tunnel self-hosting for local/CGNAT machines, hosted n8n references, stack templates, [official n8n Skills](https://github.com/n8n-io/skills), and official instance-level MCP references.
 
 ## Start Here
 
@@ -20,31 +20,28 @@ Instruction-only skill for safe local n8n, hosted n8n references, local stack te
 | --- | --- |
 | Beginner local setup guide | [references/n8n/local-setup.md](references/n8n/local-setup.md) |
 | Hostinger Coolify VPS n8n guide | [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md) |
+| Production Cloudflare Tunnel self-hosting guide | [references/n8n/production-cloudflare-tunnel.md](references/n8n/production-cloudflare-tunnel.md) |
 | n8n reference index | [references/n8n/](references/n8n/) |
 | [Official n8n Skills](https://github.com/n8n-io/skills) and agent routing | [references/ai-agent-platforms/](references/ai-agent-platforms/) |
 | Local stack templates | [templates/local-stack/](templates/local-stack/) |
+| Production Cloudflare stack templates | [templates/production-cloudflare-stack/](templates/production-cloudflare-stack/) |
 | Official MCP config templates | [templates/mcp-configs/](templates/mcp-configs/) |
 
-Normal use of this skill does not require `_projects/`.
-
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and not part of the beginner local setup path.
+Normal skill use does not require `_projects/`. Dev webhook testing stays on the local ngrok permanent/reserved URL path. Local/CGNAT production self-hosting uses the separate Cloudflare Tunnel guide and stack.
 
 ## Skill Note
 
-Copy whole toolkit-owned skill folders, not just `SKILL.md`. [Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned; use the platform references for the supported upstream route.
+Copy whole toolkit-owned skill folders, not just `SKILL.md`. [Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned; use the platform references for that route.
 
 ## Agent Rules And Adapters
 
-**If the [AI Coding Agent Rules](../ai-coding-agent-rules/) skill is installed, repo-local templates are automatically checked, bootstrapped, repaired, and merged/appended into `AGENTS.md` and equivalent agent instruction files before repo edits.**
+Before repo file edits, automatically check repo-local agent instructions. If they are missing, unmanaged, stale, or structurally broken, bootstrap/repair them first.
 
-**Before repo file edits, automatically check repo-local agent instructions. If they are missing, unmanaged, stale, or structurally broken, bootstrap/repair them first.**
-
-Install or load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, import/export, credential, execution, repo/live sync, or live-instance work.
-
-A generated cross-skill copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for portability.
+Install or load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, import/export, credential, execution, repo/live sync, or live-instance work. A generated cross-skill copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md).
 
 ## Safety Notes
 
-- Keep tokens, API keys, webhook secrets, and `.env` values out of repo files.
+- Keep tokens, API keys, webhook secrets, tunnel tokens, real domains, DNS values, backups, and `.env` values out of repo files.
 - Do not run live n8n import/export, workflow activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
-- For live n8n work, require explicit current-turn confirmation and identify the target instance first.
+- Do not run live Cloudflare, DNS, tunnel, Docker, credential, workflow activation, import/export, or production actions without explicit current-turn confirmation naming the target and operation.
+- For live n8n or production work, require explicit current-turn confirmation and identify the target instance first.

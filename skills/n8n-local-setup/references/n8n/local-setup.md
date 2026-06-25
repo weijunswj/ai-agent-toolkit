@@ -9,9 +9,11 @@ Update the project source and run sync.
 This is the beginner path for running n8n locally on Windows with Docker Desktop, Postgres, the guided `_n8n-local.cmd` menu, and optional ngrok public access.
 
 Use [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md) instead when you want an always-on hosted server.
+Use [Page 3 - Production Self-Hosting With Cloudflare Tunnel](production-cloudflare-tunnel.md) instead when you want production self-hosting from a local/CGNAT machine through Cloudflare Tunnel.
 
 * Start local n8n first.
 * Add ngrok only when something outside your computer must reach n8n.
+* Keep production Cloudflare Tunnel hosting in the separate Page 3 production stack.
 * Keep this toolkit skills-first: humans use `_projects/**`; agents use `skills/**`.
 * [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary. Do not start there.
 * Do not paste real tokens, credentials, `.env` values, backups, or live exports into repo files.
@@ -361,7 +363,7 @@ Examples:
 - OAuth callbacks.
 - An AI agent running somewhere that cannot reach `http://localhost:5678`.
 
-Local Traefik, Caddy, or Nginx can provide local reverse-proxy behavior, but it is not a tunnel by itself. A local reverse proxy can route local hostnames to local services; it does not make your local PC reachable from the public internet by itself. For local external webhook tests, the Compose ngrok path remains the simpler option. For hosted production, use [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md) instead of adapting the local launcher.
+Local Traefik, Caddy, or Nginx can provide local reverse-proxy behavior, but it is not a tunnel by itself. A local reverse proxy can route local hostnames to local services; it does not make your local PC reachable from the public internet by itself. For local external webhook tests, the Compose ngrok path remains the supported dev option. For production self-hosting from a local/CGNAT machine, use [Page 3 - Production Self-Hosting With Cloudflare Tunnel](production-cloudflare-tunnel.md). For VPS production, use [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md) instead of adapting the local launcher.
 
 ### Compose ngrok Service
 
@@ -752,12 +754,14 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 - Create the owner account locally before starting any public endpoint.
 - Treat an ngrok URL as public access to local n8n UI, API, and webhooks.
 - Do not treat ngrok as production hosting.
+- Do not mix Cloudflare production hosting controls into `_n8n-local.cmd`.
 - Do not expose the n8n container directly to the LAN or internet.
 - Do not run live n8n import/export, activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
 - Do not paste real API tokens, webhook secrets, passwords, or encryption keys into repo files.
 - Do not save `.env`, `.n8n-local/`, `.tmp/`, backups, credentials, runtime payloads, or live n8n imports/exports into GitHub.
 - Before removing `n8n_data` or `postgres_data`, pause, explain that local runtime data may be deleted, name the exact volume, and ask for explicit current-turn approval.
 - Use [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md) for always-on hosted setup.
+- Use [Page 3 - Production Self-Hosting With Cloudflare Tunnel](production-cloudflare-tunnel.md) for production self-hosting from a local/CGNAT machine.
 
 ---
 
@@ -766,5 +770,6 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 | Reference | Use when |
 | --- | --- |
 | [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md) | You need always-on public n8n hosting on Hostinger with Coolify already set up. |
+| [Page 3 - Production Self-Hosting With Cloudflare Tunnel](production-cloudflare-tunnel.md) | You need production self-hosting from a local/CGNAT machine through Cloudflare Tunnel. |
 | [Local stack templates](../../templates/local-stack/) | You need the Docker Compose, environment template, launcher, and menu script. |
 | [n8n Agent Rules](../../../n8n-agent-rules/) | You need the full n8n operating rules before workflow/live n8n work. |

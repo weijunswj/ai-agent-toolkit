@@ -8,7 +8,7 @@ const {
 test('hook-light validation confirms bridge helpers remain loadable', () => {
   assert.equal(typeof compareSemver, 'function');
   assert.equal(compareSemver('2.2.1', '2.2.1'), 0);
-  assert.equal(compareSemver('2.2.3', '2.2.1'), 1);
+  assert.equal(compareSemver('2.2.4', '2.2.1'), 1);
   assert.equal(compareSemver('2.2.0', '2.2.1'), -1);
 });
 

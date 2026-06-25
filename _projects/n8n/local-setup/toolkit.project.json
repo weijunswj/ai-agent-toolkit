@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.4.4",
+  "version": "3.5.0",
   "version_policy": "semver",
-  "version_notes": "Clarifies that Codex n8n Skills setup is incomplete until n8n-skills@n8n-io is installed/enabled and Windows repair targets the installed plugin cache, not only the marketplace checkout.",
+  "version_notes": "Adds a separate production Cloudflare Tunnel self-hosting guide and stack for local/CGNAT machines while keeping the existing localhost/ngrok dev stack unchanged.",
   "outputs": [
     {
       "kind": "curated",
@@ -59,6 +59,10 @@
           "to": "hostinger-vps.md"
         },
         {
+          "from": "./Page%203%20-%20Production%20Self-Hosting%20With%20Cloudflare%20Tunnel.md",
+          "to": "production-cloudflare-tunnel.md"
+        },
+        {
           "from": "../../../../skills/n8n-agent-rules/",
           "to": "../../../n8n-agent-rules/"
         }
@@ -74,6 +78,47 @@
         {
           "from": "./Page%201%20-%20Local%20Setup.md",
           "to": "local-setup.md"
+        },
+        {
+          "from": "./Page%203%20-%20Production%20Self-Hosting%20With%20Cloudflare%20Tunnel.md",
+          "to": "production-cloudflare-tunnel.md"
+        }
+      ]
+    },
+    {
+      "kind": "copy",
+      "source": "_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md",
+      "output": "skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md",
+      "notes": "Production Cloudflare Tunnel self-hosting guide copied from preserved source into the copyable skill folder.",
+      "fidelity": "exact",
+      "text_rewrites": [
+        {
+          "from": "./Page%201%20-%20Local%20Setup.md",
+          "to": "local-setup.md"
+        },
+        {
+          "from": "./Page%202%20-%20Hostinger%20VPS.md",
+          "to": "hostinger-vps.md"
+        },
+        {
+          "from": "./templates/production-cloudflare-stack/docker-compose.yml",
+          "to": "../../templates/production-cloudflare-stack/docker-compose.yml"
+        },
+        {
+          "from": "./templates/production-cloudflare-stack/.env.example",
+          "to": "../../templates/production-cloudflare-stack/.env.example"
+        },
+        {
+          "from": "./templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
+          "to": "../../templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd"
+        },
+        {
+          "from": "./templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
+          "to": "../../templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1"
+        },
+        {
+          "from": "](./templates/production-cloudflare-stack/)",
+          "to": "](../../templates/production-cloudflare-stack/)"
         }
       ]
     },
@@ -210,6 +255,34 @@
     },
     {
       "kind": "copy",
+      "source": "_main/templates/production-cloudflare-stack/docker-compose.yml",
+      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml",
+      "notes": "Copy-ready production Cloudflare Tunnel Docker Compose stack for n8n, Postgres, and cloudflared.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/production-cloudflare-stack/.env.example",
+      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
+      "notes": "Placeholder-only production Cloudflare Tunnel stack environment template.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
+      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
+      "notes": "Windows launcher for the guided production Cloudflare Tunnel stack menu.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
+      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
+      "notes": "PowerShell menu for production Cloudflare Tunnel preflight, start/stop, restart, status, logs, Postgres backup, image updates, and production URL display.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
       "source": "_main/templates/mcp-configs/antigravity-mcp-config.md",
       "output": "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "notes": "Antigravity official instance-level MCP config copied from preserved source.",
@@ -278,6 +351,7 @@
       "skills/n8n-local-setup/README.md",
       "skills/n8n-local-setup/references/n8n/local-setup.md",
       "skills/n8n-local-setup/references/n8n/hostinger-vps.md",
+      "skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/codex.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/opencode.md",
@@ -291,6 +365,10 @@
       "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
       "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
+      "skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml",
+      "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
+      "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
+      "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",
@@ -322,14 +400,14 @@
   "project": {
     "name": "Local n8n Setup",
     "category": "n8n",
-    "summary": "Preserved local n8n setup guides, Hostinger Coolify VPS n8n guidance, Docker Compose local templates, skills-first agent routing, official n8n Skills (https://github.com/n8n-io/skills) plus instance-level MCP references, and the underscore-prefixed guided launcher."
+    "summary": "Preserved n8n setup guides, localhost/ngrok dev templates, production Cloudflare Tunnel self-hosting templates for local/CGNAT machines, Hostinger Coolify VPS n8n guidance, skills-first agent routing, official n8n Skills (https://github.com/n8n-io/skills) plus instance-level MCP references, and guided launchers."
   },
   "surface": {
     "publish_as": "skill",
     "skill": {
       "status": "published",
       "path": "skills/n8n-local-setup",
-      "summary": "Helps an agent use the safe local n8n Docker Compose stack, guided launcher, Hostinger Coolify VPS n8n reference, local stack templates, skills-first agent guidance, and official n8n Skills (https://github.com/n8n-io/skills) plus instance-level MCP references while depending on n8n-agent-rules for workflow/live n8n rules."
+      "summary": "Helps an agent use the safe local n8n Docker Compose dev stack, separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, Hostinger Coolify VPS n8n reference, stack templates, skills-first agent guidance, and official n8n Skills (https://github.com/n8n-io/skills) plus instance-level MCP references while depending on n8n-agent-rules for workflow/live n8n rules."
     },
     "mcp": {
       "status": "not_applicable"

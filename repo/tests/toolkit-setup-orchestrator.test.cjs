@@ -46,7 +46,7 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.2.3',
+    version: '2.2.4',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
@@ -139,7 +139,7 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createFakeManagedSetupScript(root, version = '2.2.3', options = {}) {
+function createFakeManagedSetupScript(root, version = '2.2.4', options = {}) {
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
   const emitQuestionBank = options.emitQuestionBank !== false;
@@ -378,7 +378,7 @@ test('setup execute creates missing managed checkout by cloning the expected rem
 
 test('active setup command delegates to managed checkout script when it exists', () => {
   const root = tmpRoot();
-  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.2.3');
+  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.2.4');
   const beforeStatus = runTestGit(repoRoot, ['status', '--short']);
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -393,13 +393,13 @@ test('active setup command delegates to managed checkout script when it exists',
   assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.match(result.stdout, /Managed checkout commit: [0-9a-f]{40}/);
   assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
-  assert.match(result.stdout, /managed setup script version 2\.2\.3/);
+  assert.match(result.stdout, /managed setup script version 2\.2\.4/);
   assert.match(result.stdout, /# setup toolkit question bank/);
 });
 
 test('managed question-bank pause is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.2.3');
+  createFakeManagedSetupScript(root, '2.2.4');
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
   });
@@ -413,7 +413,7 @@ test('managed question-bank pause is not bypassed with active fallback', () => {
 
 test('managed safety blocker is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.2.3', {
+  createFakeManagedSetupScript(root, '2.2.4', {
     emitQuestionBank: false,
     exitCode: 1,
     extraLines: ["console.error('managed safety blocker');"]

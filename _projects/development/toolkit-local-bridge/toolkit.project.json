@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "version_policy": "semver",
-  "version_notes": "Makes setup question-bank pause a hard stop for user answers instead of allowing silent --yes-recommended recovery, prevents active worktree fallback when managed setup pauses or blocks, and allows the managed setup script to run from its own standard managed checkout path.",
+  "version_notes": "Bumps the native Toolkit package version for packaged n8n-local-setup skill content that adds a separate production Cloudflare Tunnel self-hosting guide and stack; bridge behavior is unchanged.",
   "outputs": [
     {
       "kind": "curated",

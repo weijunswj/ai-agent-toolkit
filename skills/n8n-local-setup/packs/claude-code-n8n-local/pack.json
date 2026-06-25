@@ -1,17 +1,19 @@
 {
   "id": "claude-code-n8n-local",
   "title": "Claude Code n8n Local",
-  "description": "Generic Claude Code rules, n8n-agent-rules, optional n8n adapter, official n8n Skills (https://github.com/n8n-io/skills) plus MCP setup references, and n8n local/Hostinger Coolify setup materials.",
+  "description": "Generic Claude Code rules, n8n-agent-rules, optional n8n adapter, official n8n Skills (https://github.com/n8n-io/skills) plus MCP setup references, and n8n local dev, production Cloudflare Tunnel, and Hostinger Coolify setup materials.",
   "status": "ready",
   "risk_level": "medium",
   "source_refs": [
     "_projects/n8n/local-setup/_main/Page 1 - Local Setup.md",
     "_projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md",
+    "_projects/n8n/local-setup/_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md",
     "_projects/n8n/local-setup/_main/mcp setup - claude code.md",
     "_projects/n8n/local-setup/_main/templates/mcp-configs/claude-mcp-config.md",
     "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
     "skills/n8n-local-setup/references/n8n/local-setup.md",
     "skills/n8n-local-setup/references/n8n/hostinger-vps.md",
+    "skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md",
     "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
     "skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
     "skills/n8n-agent-rules/",
@@ -23,6 +25,10 @@
     "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
     "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
     "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
     "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md"
   ],
   "suitable_for": [
@@ -33,11 +39,16 @@
     "skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md",
     "skills/n8n-local-setup/references/n8n/local-setup.md",
     "skills/n8n-local-setup/references/n8n/hostinger-vps.md",
+    "skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md",
     "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
     "skills/n8n-local-setup/templates/local-stack/.env.example",
     "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
     "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
     "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
     "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
     "skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
     "skills/n8n-agent-rules/SKILL.md",
@@ -72,8 +83,9 @@
   "run_commands": false,
   "notes": [
     "Copy .env.example to .env locally and do not commit .env.",
+    "Production Cloudflare Tunnel self-hosting uses the separate production stack and guide, not the local dev menu.",
     "Local backup packages may include SECRET-DO-NOT-COMMIT.env with the restore-critical N8N_ENCRYPTION_KEY. Keep it local and private.",
     "Claude Code official n8n Skills (https://github.com/n8n-io/skills) plus MCP setup is secondary and not part of the beginner local setup path.",
-    "Live n8n actions require separate explicit confirmation."
+    "Live n8n, Cloudflare, DNS, tunnel, Docker, credential, workflow activation, import/export, and production actions require separate explicit confirmation."
   ]
 }
