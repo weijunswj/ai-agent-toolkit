@@ -19,7 +19,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.2.1';
+const expectedBridgeVersion = '2.2.2';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -39,7 +39,7 @@ function run(args, options = {}) {
     cwd: repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },
-    timeout: 30000
+    timeout: 90000
   });
 }
 

@@ -46,7 +46,7 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.2.1',
+    version: '2.2.2',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
@@ -139,7 +139,7 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createFakeManagedSetupScript(root, version = '2.2.1') {
+function createFakeManagedSetupScript(root, version = '2.2.2') {
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
   writeFile(scriptPath, [
@@ -355,7 +355,7 @@ test('setup execute creates missing managed checkout by cloning the expected rem
 
 test('active setup command delegates to managed checkout script when it exists', () => {
   const root = tmpRoot();
-  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.2.1');
+  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.2.2');
   const beforeStatus = runTestGit(repoRoot, ['status', '--short']);
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -370,7 +370,7 @@ test('active setup command delegates to managed checkout script when it exists',
   assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.match(result.stdout, /Managed checkout commit: [0-9a-f]{40}/);
   assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
-  assert.match(result.stdout, /managed setup script version 2\.2\.1/);
+  assert.match(result.stdout, /managed setup script version 2\.2\.2/);
   assert.match(result.stdout, /# setup toolkit question bank/);
 });
 
