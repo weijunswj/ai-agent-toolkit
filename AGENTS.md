@@ -214,7 +214,7 @@ For day-to-day work, update source or curated material first, do not edit genera
 - Native plugin updates are host-local: Codex uses `.codex-plugin/`, Claude Code uses `.claude-plugin/`.
 - Bridge writes only approved enabled OpenCode/AG2 targets; detection is dry-run only.
 - Hooks are optional; policy stays in docs, validators, and [Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
-- Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run `setup-toolkit.cjs --execute`.
+- Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run `setup-toolkit.cjs --execute --profile auto-main`.
 
 <!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract

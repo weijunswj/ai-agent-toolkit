@@ -727,6 +727,32 @@ test('n8n plugin hook audit rejects malformed plugin metadata JSON', () => {
   assert.match(result.stderr, /\.codex-plugin\/plugin\.json is not valid JSON/);
 });
 
+test('n8n plugin hook audit rejects temporary Codex marketplace checkout paths', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-marketplace-temp-'));
+  const pluginRoot = path.join(root, '.codex', '.tmp', 'marketplaces', 'n8n-io', 'plugins', 'n8n-skills');
+  fs.mkdirSync(path.join(pluginRoot, 'hooks'), { recursive: true });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), { hooks: {} });
+
+  const result = runAudit(pluginRoot);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /temporary marketplace checkout/i);
+  assert.match(result.stderr, /installed n8n-skills cache/i);
+});
+
+test('n8n-skills Windows hook repair rejects temporary Codex marketplace checkout paths', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-marketplace-temp-'));
+  const pluginRoot = path.join(root, '.codex', '.tmp', 'marketplaces', 'n8n-io', 'plugins', 'n8n-skills');
+  fs.mkdirSync(path.join(pluginRoot, 'hooks'), { recursive: true });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), { hooks: {} });
+
+  const result = runRepair(pluginRoot, '--plugin-id', 'n8n-skills@n8n-io');
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Refusing to repair temporary marketplace checkout/i);
+  assert.match(result.stderr, /plugins\/cache\/n8n-io\/n8n-skills\/<version>/i);
+});
+
 test('Windows hook repair wraps direct shell hook commands and is idempotent', () => {
   const pluginRoot = makePluginRoot();
   writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
