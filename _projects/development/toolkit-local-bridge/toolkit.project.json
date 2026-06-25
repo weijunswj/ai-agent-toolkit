@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "version_policy": "semver",
-  "version_notes": "Fixes setup UX so auto-main routes through the managed checkout setup script when available, treats the active worktree setup command as bootstrap/fallback only, discovers current state, asks one consolidated upfront question bank before preference or target writes, preserves update report auto-open unless explicitly changed, and keeps OpenCode/AG2 enablement opt-in.",
+  "version_notes": "Makes setup question-bank pause a hard stop for user answers instead of allowing silent --yes-recommended recovery, prevents active worktree fallback when managed setup pauses or blocks, and allows the managed setup script to run from its own standard managed checkout path.",
   "outputs": [
     {
       "kind": "curated",
