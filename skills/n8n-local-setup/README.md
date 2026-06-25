@@ -35,7 +35,9 @@ Copy whole toolkit-owned skill folders, not just `SKILL.md`. [Official n8n Skill
 
 ## Agent Rules And Adapters
 
-Check repo-local agent instructions before repo edits. Install or load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, import/export, credential, execution, repo/live sync, or live-instance work. A generated cross-skill copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md).
+Before repo file edits, automatically check repo-local agent instructions. If they are missing, unmanaged, stale, or structurally broken, bootstrap/repair them first.
+
+Install or load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, import/export, credential, execution, repo/live sync, or live-instance work. A generated cross-skill copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md).
 
 ## Safety Notes
 
