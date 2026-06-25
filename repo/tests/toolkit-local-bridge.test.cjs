@@ -10,7 +10,8 @@ const {
   runRepoValidation,
   getRepoValidationLabels,
   openUpdateReport,
-  updateReportDir
+  updateReportDir,
+  cleanupUpdateReports
 } = require('../scripts/toolkit-local-bridge.cjs');
 const { verifyInstalledCacheFreshness } = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
@@ -1578,6 +1579,39 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
   assert.equal(repeatedState.last_update_report_signature, report.state.last_update_report_signature);
 });
 
+test('Claude hook reports host-local manual native cache action and never runs Codex refresh', () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha claude cache source\n' });
+  const claudePluginRoot = path.join(root, 'claude-cache', 'ai-agent-toolkit');
+  const hub = path.join(root, 'hub', 'current');
+
+  let result = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--sync-source', 'claude-plugin'
+  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+  const statePath = path.join(hub, 'state.json');
+  const state = readJson(statePath);
+  state.targets.ag2.synced_checksum = 'old';
+  writeJson(statePath, state);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      CLAUDE_PLUGIN_ROOT: claudePluginRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Claude Code native plugin cache: `check-only`/);
+  assert.match(report.text, /refresh it through Claude Code native plugin flow/);
+  assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
+});
+
 test('hook auto-refreshes stale Codex native plugin cache only after setup opt-in', () => {
   const fixture = createRepoAutoUpdateFixture();
   const hub = path.join(fixture.root, 'hub', 'current');
@@ -2120,6 +2154,56 @@ test('update report opening is persisted opt-in', () => {
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_enabled, false);
+});
+
+test('update report cleanup deletes only old Toolkit-managed reports inside the report root', () => {
+  const root = tmpRoot();
+  const reportDir = path.join(root, 'reports');
+  fs.mkdirSync(reportDir, { recursive: true });
+  const oldReport = path.join(reportDir, 'toolkit-update-20200101-010101.md');
+  const newReport = path.join(reportDir, 'toolkit-update-20990101-010101.md');
+  const unrelated = path.join(reportDir, 'user-note.md');
+  writeFile(oldReport, '# old\n');
+  writeFile(newReport, '# new\n');
+  writeFile(unrelated, '# user\n');
+  const oldDate = new Date('2020-01-01T00:00:00Z');
+  const newDate = new Date('2099-01-01T00:00:00Z');
+  fs.utimesSync(oldReport, oldDate, oldDate);
+  fs.utimesSync(newReport, newDate, newDate);
+
+  const result = cleanupUpdateReports({
+    reportDir,
+    expectedDir: reportDir,
+    retentionDays: 7,
+    nowMs: new Date('2020-01-20T00:00:00Z').getTime()
+  });
+
+  assert.equal(result.deleted_count, 1);
+  assert.equal(result.error_count, 0);
+  assert.equal(fs.existsSync(oldReport), false);
+  assert.equal(fs.existsSync(newReport), true);
+  assert.equal(fs.existsSync(unrelated), true);
+});
+
+test('update report cleanup refuses paths outside the Toolkit-managed report root', () => {
+  const root = tmpRoot();
+  const expectedDir = path.join(root, 'reports');
+  const outsideDir = path.join(root, 'outside');
+  fs.mkdirSync(outsideDir, { recursive: true });
+  const outsideReport = path.join(outsideDir, 'toolkit-update-20200101-010101.md');
+  writeFile(outsideReport, '# outside\n');
+
+  const result = cleanupUpdateReports({
+    reportDir: outsideDir,
+    expectedDir,
+    retentionDays: 7,
+    nowMs: new Date('2020-01-20T00:00:00Z').getTime()
+  });
+
+  assert.equal(result.deleted_count, 0);
+  assert.equal(result.error_count, 1);
+  assert.match(result.errors.join('\n'), /refusing cleanup outside Toolkit report directory/);
+  assert.equal(fs.existsSync(outsideReport), true);
 });
 
 test('native plugin manifests and hooks are valid and policy-light', () => {

@@ -27,7 +27,7 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   assert.match(agents, /This root `AGENTS\.md` is toolkit-repo-specific\./);
   assert.match(agents, /Toolkit-specific root rules live directly after the managed execution blocks\./);
   assert.match(agents, /Portable repo installs must use \[`skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
-  assert.match(agents, /Setup\/refresh: use \[For AI Agents\]\(repo\/docs\/FOR_AI_AGENTS\.md\); run `setup-toolkit\.cjs --execute`/);
+  assert.match(agents, /Setup\/refresh: use \[For AI Agents\]\(repo\/docs\/FOR_AI_AGENTS\.md\); run `setup-toolkit\.cjs --execute --profile auto-main`/);
 });
 
 test('agent onboarding path keeps source-of-truth and validation anchors visible', () => {
@@ -44,8 +44,8 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   assert.match(sourceOfTruth, /Humans use `_projects\/\*\*` for source review and maintenance, agents use generated `skills\/\*\*` folders after sync, and native plugin installers read generated `\.codex-plugin\/\*\*` or `\.claude-plugin\/\*\*` metadata\./);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Persistent status, report, implementation plan, handoff, operations, setup, CI\/CD, deployment, safety, and troubleshooting notes belong under an existing `docs\/` path/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /read the relevant docs and treat them as active context/i);
-  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /For `setup toolkit`, `refresh toolkit`, or plain `refresh` when the current task is clearly about Toolkit setup\/update state, run the host-aware orchestrator from a clean trusted checkout/);
-  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Claude Code uses `node repo\/scripts\/setup-toolkit\.cjs --execute --host claude-code`/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /For `setup toolkit`, `refresh toolkit`, or plain `refresh` when the current task is clearly about Toolkit setup\/update state, run the host-aware orchestrator with the managed-main profile/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Claude Code uses `node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main --host claude-code`/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Even when Toolkit is already installed, complete the full setup journey so stale pieces are detected and patched in order/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /routine setup uses `repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs`/);
   assert.match(validation, /For this repo, the canonical full validation command is:/);

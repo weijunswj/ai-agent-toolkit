@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { auditPluginRoot } = require('./audit-n8n-skills-plugin-hooks.cjs');
+const { auditPluginRoot, isTemporaryMarketplacePluginRoot } = require('./audit-n8n-skills-plugin-hooks.cjs');
 
 const WRAPPER_MARKER = 'AI-AGENT-TOOLKIT-WINDOWS-HOOK-WRAPPER v1';
 const N8N_NODE_FALLBACK_MARKER = 'AI-AGENT-TOOLKIT:N8N-NODE-FALLBACK v1';
@@ -591,6 +591,9 @@ function repairPluginRoot(pluginRoot, options = {}) {
 
   if (!fs.existsSync(pluginRoot)) throw new Error(`Plugin root does not exist: ${pluginRoot}`);
   if (!fs.existsSync(hooksJsonPath)) throw new Error(`hooks/hooks.json is missing under plugin root: ${pluginRoot}`);
+  if (effectiveOptions.n8n && isTemporaryMarketplacePluginRoot(pluginRoot)) {
+    throw new Error(`Refusing to repair temporary marketplace checkout for n8n-skills@n8n-io. Use the installed plugin cache under .codex/plugins/cache/n8n-io/n8n-skills/<version>: ${pluginRoot}`);
+  }
 
   const hooksJson = readJsonFile(hooksJsonPath, 'hooks/hooks.json');
   const entries = collectHookCommandEntries(hooksJson);

@@ -11,6 +11,11 @@ function normalizeRelPath(relPath) {
   return relPath.replace(/\\/g, '/');
 }
 
+function isTemporaryMarketplacePluginRoot(pluginRoot) {
+  const normalized = normalizeRelPath(path.resolve(pluginRoot)).toLowerCase();
+  return /\/\.codex\/\.tmp\/marketplaces\/n8n-io\/plugins\/n8n-skills(?:\/|$)/.test(normalized);
+}
+
 function readJsonFile(filePath, errors, relPath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
@@ -300,6 +305,11 @@ function auditPluginRoot(pluginRoot, options = {}) {
   const pluginJsonPath = path.join(pluginRoot, '.codex-plugin', 'plugin.json');
   const hooksJsonPath = path.join(pluginRoot, 'hooks', 'hooks.json');
 
+  if (isTemporaryMarketplacePluginRoot(pluginRoot)) {
+    errors.push(`plugin root is a temporary marketplace checkout, not an installed n8n-skills cache: ${pluginRoot}`);
+    return errors;
+  }
+
   if (fs.existsSync(pluginJsonPath)) {
     readJsonFile(pluginJsonPath, errors, '.codex-plugin/plugin.json');
   }
@@ -464,6 +474,7 @@ module.exports = {
   auditPluginRoot,
   collectHookCommands,
   directlyInvokesShellScript,
+  isTemporaryMarketplacePluginRoot,
   unsafeWindowsBashLauncher,
   shellScriptCommandRefs,
   hasNodeJsonFallback,

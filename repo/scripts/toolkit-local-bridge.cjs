@@ -20,6 +20,7 @@ const TARGET_MANIFEST_FILE = '.ai-agent-toolkit-managed.json';
 const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
+const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
 const FULL_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge.test.cjs');
 const HOOK_LIGHT_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs');
 const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
@@ -87,6 +88,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoUpdateNow: false,
     skipRepoAutoUpdate: false,
     openUpdateReport: false,
+    enableUpdateReports: false,
+    disableUpdateReports: false,
+    updateReportRetentionDays: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
     enableUpdateReportOpen: false,
     disableUpdateReportOpen: false,
     enableCodexPluginAutoRefresh: false,
@@ -122,6 +126,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--repo-update-now') args.repoUpdateNow = true;
     else if (arg === '--skip-repo-auto-update') args.skipRepoAutoUpdate = true;
     else if (arg === '--open-update-report') args.openUpdateReport = true;
+    else if (arg === '--enable-update-reports') args.enableUpdateReports = true;
+    else if (arg === '--disable-update-reports') args.disableUpdateReports = true;
+    else if (arg === '--update-report-retention-days') args.updateReportRetentionDays = Number(next());
+    else if (arg.startsWith('--update-report-retention-days=')) args.updateReportRetentionDays = Number(arg.slice('--update-report-retention-days='.length));
     else if (arg === '--enable-update-report-open') args.enableUpdateReportOpen = true;
     else if (arg === '--disable-update-report-open') args.disableUpdateReportOpen = true;
     else if (arg === '--enable-codex-plugin-auto-refresh') args.enableCodexPluginAutoRefresh = true;
@@ -168,6 +176,12 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.enableUpdateReportOpen && args.disableUpdateReportOpen) {
     throw new Error('--enable-update-report-open and --disable-update-report-open cannot be used together');
   }
+  if (args.enableUpdateReports && args.disableUpdateReports) {
+    throw new Error('--enable-update-reports and --disable-update-reports cannot be used together');
+  }
+  if (!Number.isInteger(args.updateReportRetentionDays) || args.updateReportRetentionDays <= 0) {
+    throw new Error('--update-report-retention-days requires a positive integer');
+  }
   if (args.enableCodexPluginAutoRefresh && args.disableCodexPluginAutoRefresh) {
     throw new Error('--enable-codex-plugin-auto-refresh and --disable-codex-plugin-auto-refresh cannot be used together');
   }
@@ -203,6 +217,10 @@ function printHelp() {
     '  --repo-update-now',
     '  --skip-repo-auto-update     internal recursion guard for delegated repo sync',
     '  --open-update-report        open the generated update report for this run, when one is created',
+    '  --enable-update-reports     persist meaningful update report writes',
+    '  --disable-update-reports',
+    '  --update-report-retention-days <days>',
+    '                                positive integer, default: 7',
     '  --enable-update-report-open persist opt-in opening of generated update reports',
     '  --disable-update-report-open',
     '  --enable-codex-plugin-auto-refresh',
@@ -628,7 +646,10 @@ function defaultState() {
     last_repo_update_error: '',
     last_update_report_path: '',
     last_update_report_signature: '',
+    update_report_enabled: true,
     update_report_open_enabled: false,
+    update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+    last_update_report_cleanup: null,
     codex_plugin_auto_refresh_enabled: false,
     created_at: '',
     updated_at: '',
@@ -657,7 +678,14 @@ function normalizedState(raw) {
   state.last_repo_update_error = state.last_repo_update_error || '';
   state.last_update_report_path = state.last_update_report_path || '';
   state.last_update_report_signature = state.last_update_report_signature || '';
+  state.update_report_enabled = state.update_report_enabled !== false;
   state.update_report_open_enabled = state.update_report_open_enabled === true;
+  state.update_report_retention_days = Number.isInteger(state.update_report_retention_days) && state.update_report_retention_days > 0
+    ? state.update_report_retention_days
+    : DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
+  state.last_update_report_cleanup = state.last_update_report_cleanup && typeof state.last_update_report_cleanup === 'object'
+    ? state.last_update_report_cleanup
+    : null;
   state.codex_plugin_auto_refresh_enabled = state.codex_plugin_auto_refresh_enabled === true;
   return state;
 }
@@ -681,6 +709,9 @@ function applyRequestedState(state, args) {
   }
   if (args.enableUpdateReportOpen) next.update_report_open_enabled = true;
   if (args.disableUpdateReportOpen) next.update_report_open_enabled = false;
+  if (args.enableUpdateReports) next.update_report_enabled = true;
+  if (args.disableUpdateReports) next.update_report_enabled = false;
+  if (args.updateReportRetentionDays) next.update_report_retention_days = args.updateReportRetentionDays;
   if (args.enableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = true;
   if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
   if (args.setAg2PythonCommand) {
@@ -1291,6 +1322,67 @@ function updateReportDir() {
   return path.join(os.tmpdir(), ...UPDATE_REPORT_ROOT.split('/'));
 }
 
+function cleanupUpdateReports(options = {}) {
+  const reportDir = path.resolve(options.reportDir || updateReportDir());
+  const expectedDir = path.resolve(options.expectedDir || updateReportDir());
+  const retentionDays = Number.isInteger(options.retentionDays) && options.retentionDays > 0
+    ? options.retentionDays
+    : DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
+  const nowMs = options.nowMs || Date.now();
+  const cutoffMs = nowMs - (retentionDays * 24 * 60 * 60 * 1000);
+  const currentRunPath = options.currentRunPath ? path.resolve(options.currentRunPath) : '';
+  const result = {
+    retention_days: retentionDays,
+    report_log_directory: reportDir,
+    deleted_count: 0,
+    skipped_count: 0,
+    error_count: 0,
+    errors: []
+  };
+
+  if (reportDir !== expectedDir || !isInside(expectedDir, reportDir)) {
+    result.error_count += 1;
+    result.errors.push(`refusing cleanup outside Toolkit report directory: ${reportDir}`);
+    return result;
+  }
+  if (!fs.existsSync(reportDir)) return result;
+
+  let entries = [];
+  try {
+    entries = fs.readdirSync(reportDir, { withFileTypes: true });
+  } catch (error) {
+    result.error_count += 1;
+    result.errors.push(error.message);
+    return result;
+  }
+
+  for (const entry of entries) {
+    const filePath = path.join(reportDir, entry.name);
+    if (!entry.isFile() || !/^toolkit-update-\d{8}-\d{6}(?:-\d+)?\.md$/.test(entry.name)) {
+      result.skipped_count += 1;
+      continue;
+    }
+    if (currentRunPath && path.resolve(filePath) === currentRunPath) {
+      result.skipped_count += 1;
+      continue;
+    }
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.mtimeMs >= cutoffMs) {
+        result.skipped_count += 1;
+        continue;
+      }
+      fs.rmSync(filePath);
+      result.deleted_count += 1;
+    } catch (error) {
+      result.error_count += 1;
+      result.errors.push(`${filePath}: ${error.message}`);
+    }
+  }
+
+  return result;
+}
+
 function updateReportTimestamp(date = new Date()) {
   const pad = (value) => String(value).padStart(2, '0');
   return [
@@ -1440,6 +1532,7 @@ function repoReportContextFromUpdate(state, updateResult, previousObservedCommit
 
 function shouldConsiderUpdateReport(args, state) {
   return Boolean(
+    state.update_report_enabled !== false &&
     !args.suppressUpdateReport &&
     (
       args.hook ||
@@ -1514,6 +1607,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   const targetSyncs = context.targetSyncs || [];
   const skippedTargets = context.skippedTargets || [];
   const nativePluginCache = context.nativePluginCache || {};
+  const cleanup = context.cleanup || state.last_update_report_cleanup || {};
   const warning = repo.error || context.warning || '';
   const branchAction = branchMismatchSuggestion(warning);
   const commit = repo.externalAdvanceToCommit || repo.toCommit || currentToolkitCommit(state);
@@ -1535,6 +1629,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
     `- Source: ${inlineCode(args.syncSource)}`,
     `- Toolkit updated to commit: ${inlineCode(commit)}`,
     `- Previous commit: ${inlineCode(previousCommit)}`,
+    `- Report/log retention days: ${inlineCode(cleanup.retention_days || state.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS)}`,
     '',
     'Changed files:'
   ];
@@ -1596,15 +1691,26 @@ function buildUpdateReport({ args, state, checksum, context }) {
     lines.push('- Codex native plugin cache auto-refresh failed. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata manually.');
   } else if (nativePluginCache.status === 'stale') {
     lines.push('- Codex native plugin cache is stale. Enable Codex plugin auto-refresh during setup or run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata.');
+  } else if (nativePluginCache.status === 'check-only' && nativePluginCache.manual_action) {
+    lines.push(`- Claude Code native plugin cache: ${nativePluginCache.manual_action}`);
   }
   lines.push('- Skipped n8n/live systems; not touched.');
+
+  lines.push('', '## Update Report And Log Cleanup', '');
+  lines.push(`- directory: ${inlineCode(cleanup.report_log_directory || updateReportDir())}`);
+  lines.push(`- retention days: ${inlineCode(cleanup.retention_days || state.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS)}`);
+  lines.push(`- deleted: ${inlineCode(cleanup.deleted_count || 0)}`);
+  lines.push(`- skipped: ${inlineCode(cleanup.skipped_count || 0)}`);
+  lines.push(`- errors: ${inlineCode(cleanup.error_count || 0)}`);
+  for (const error of cleanup.errors || []) lines.push(`  - ${inlineCode(error)}`);
 
   lines.push('', '## Validation', '');
   lines.push(`- repo update status: ${inlineCode(repo.status || 'not run')}`);
   lines.push(`- hook-light validation: ${inlineCode(validationStatus)}`);
   lines.push(`- target sync status: ${inlineCode(targetSyncStatus)}`);
   if (nativePluginCache.status) {
-    lines.push(`- Codex native plugin cache: ${inlineCode(nativePluginCache.status)}`);
+    const cacheLabel = nativePluginCache.host === 'claude-code' ? 'Claude Code native plugin cache' : 'Codex native plugin cache';
+    lines.push(`- ${cacheLabel}: ${inlineCode(nativePluginCache.status)}`);
     for (const error of nativePluginCache.errors || []) lines.push(`  - ${inlineCode(error)}`);
   }
   lines.push(`- checksum: ${inlineCode(checksum)}`);
@@ -1625,6 +1731,7 @@ function writeUpdateReportFile(markdown) {
 function updateReportSignature({ args, checksum, context }) {
   const repo = context.repo || {};
   const nativePluginCache = context.nativePluginCache || {};
+  const cleanup = context.cleanup || {};
   const targetSyncs = context.targetSyncs || [];
   const skippedTargets = context.skippedTargets || [];
   const payload = {
@@ -1648,6 +1755,11 @@ function updateReportSignature({ args, checksum, context }) {
       status: nativePluginCache.status || '',
       errors: nativePluginCache.errors || []
     },
+    cleanup: {
+      retentionDays: cleanup.retention_days || '',
+      deletedCount: cleanup.deleted_count || 0,
+      errorCount: cleanup.error_count || 0
+    },
     targetSyncStatus: context.targetSyncStatus || '',
     targetSyncs: targetSyncs.map((sync) => ({
       target: sync.target || '',
@@ -1664,7 +1776,11 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context }) {
   if (!shouldConsiderUpdateReport(args, state) || !updateReportIsMeaningful(context)) {
     return { state, reportPath: '' };
   }
-  const reportContext = { ...context, timestamp: context.timestamp || timestamp() };
+  const reportContext = {
+    cleanup: state.last_update_report_cleanup || {},
+    ...context,
+    timestamp: context.timestamp || timestamp()
+  };
   const signature = updateReportSignature({ args, checksum, context: reportContext });
   if (!args.openUpdateReport && state.last_update_report_signature === signature) {
     return { state, reportPath: '' };
@@ -1954,7 +2070,17 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     lock_path: path.join(path.dirname(hubPath), 'update.lock'),
     sync_source: args.syncSource,
     auto_sync_enabled: state.auto_sync_enabled,
+    update_report_enabled: state.update_report_enabled,
     update_report_open_enabled: state.update_report_open_enabled,
+    update_report_retention_days: state.update_report_retention_days,
+    update_report_cleanup: state.last_update_report_cleanup || {
+      retention_days: state.update_report_retention_days,
+      report_log_directory: updateReportDir(),
+      deleted_count: 0,
+      skipped_count: 0,
+      error_count: 0,
+      errors: []
+    },
     codex_plugin_auto_refresh_enabled: state.codex_plugin_auto_refresh_enabled,
     last_update_report_path: state.last_update_report_path,
     repo_auto_update: {
@@ -2020,6 +2146,10 @@ function runtimeCodexPluginRoot() {
   return path.resolve(process.env.PLUGIN_ROOT || path.resolve(__dirname, '..', '..'));
 }
 
+function runtimeClaudePluginRoot() {
+  return path.resolve(process.env.CLAUDE_PLUGIN_ROOT || process.env.PLUGIN_ROOT || path.resolve(__dirname, '..', '..'));
+}
+
 function codexNativePluginCacheStatus(args, state) {
   if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
   if (!state.repo_path) return { status: '' };
@@ -2033,6 +2163,23 @@ function codexNativePluginCacheStatus(args, state) {
     repo_path: repoPath,
     errors: errors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
   };
+}
+
+function claudeNativePluginCacheStatus(args, state) {
+  if (!args.hook || args.syncSource !== 'claude-plugin') return { status: '' };
+  return {
+    status: 'check-only',
+    host: 'claude-code',
+    plugin_root: runtimeClaudePluginRoot(),
+    repo_path: state.repo_path ? path.resolve(state.repo_path) : '',
+    manual_action: 'If Claude Code reports the Toolkit plugin is stale, missing, disabled, or untrusted, refresh it through Claude Code native plugin flow. Codex does not mutate Claude Code cache.'
+  };
+}
+
+function nativePluginCacheStatus(args, state) {
+  if (args.syncSource === 'codex-plugin') return codexNativePluginCacheStatus(args, state);
+  if (args.syncSource === 'claude-plugin') return claudeNativePluginCacheStatus(args, state);
+  return { status: '' };
 }
 
 function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath }) {
@@ -2155,7 +2302,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
             branchSwitchedFrom: details.branchSwitchedFrom || '',
             error: details.error || error.message
           },
-          nativePluginCache: codexNativePluginCacheStatus(args, statusState),
+          nativePluginCache: nativePluginCacheStatus(args, statusState),
           targetSyncStatus: 'skipped'
         }
       });
@@ -2228,7 +2375,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
           error: error.message
         },
         skippedTargets,
-        nativePluginCache: codexNativePluginCacheStatus(args, failedState),
+        nativePluginCache: nativePluginCacheStatus(args, failedState),
         targetSyncStatus: 'failed'
       }
     });
@@ -2265,6 +2412,9 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     }
   });
   printUpdateReportLine(args, report.reportPath);
+  if (!report.reportPath && !args.hook && updateResult.status === 'up-to-date' && !completedTargetSyncs.length) {
+    console.log('Toolkit already up to date.');
+  }
   const finalAudit = buildAudit({ args, hubPath, state: report.state, discoveries: updatedDiscoveries, checksum: updatedChecksum, payloads: updatedPayloads });
   if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
   return { status: 0, audit: finalAudit };
@@ -2287,6 +2437,20 @@ function run(argv = process.argv.slice(2)) {
   }
 
   let nextState = applyRequestedState(existingState, args);
+  const cleanupResult = args.write
+    ? cleanupUpdateReports({ retentionDays: nextState.update_report_retention_days })
+    : (nextState.last_update_report_cleanup || {
+        retention_days: nextState.update_report_retention_days,
+        report_log_directory: updateReportDir(),
+        deleted_count: 0,
+        skipped_count: 0,
+        error_count: 0,
+        errors: []
+      });
+  nextState.last_update_report_cleanup = cleanupResult;
+  if (args.write && cleanupResult.error_count && !args.hook) {
+    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.join('; ')}`);
+  }
   if (args.enableRepoAutoUpdate && !nextState.repo_path) {
     throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
   }
@@ -2326,7 +2490,7 @@ function run(argv = process.argv.slice(2)) {
       checksum,
       context: {
         repo: repoReportContextFromState(nextState, args),
-        nativePluginCache: codexNativePluginCacheStatus(args, nextState),
+        nativePluginCache: nativePluginCacheStatus(args, nextState),
         targetSyncStatus: 'not needed'
       }
     });
@@ -2344,7 +2508,7 @@ function run(argv = process.argv.slice(2)) {
       checksum,
       context: {
         repo: repoReportContextFromState(nextState, args),
-        nativePluginCache: codexNativePluginCacheStatus(args, nextState),
+        nativePluginCache: nativePluginCacheStatus(args, nextState),
         targetSyncStatus: 'not needed'
       }
     });
@@ -2362,6 +2526,7 @@ function run(argv = process.argv.slice(2)) {
 
   try {
     nextState = applyRequestedState(existingState, args);
+    nextState.last_update_report_cleanup = cleanupResult;
     updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
     updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, false, nextState.targets.ag2.enabled ? '' : 'not enabled');
     nextState = prepareStateForWrite(nextState, args);
@@ -2398,7 +2563,7 @@ function run(argv = process.argv.slice(2)) {
         repo: repoReportContextFromState(nextState, args),
         targetSyncs,
         skippedTargets: SUPPORTED_TARGETS.filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled),
-        nativePluginCache: codexNativePluginCacheStatus(args, nextState),
+        nativePluginCache: nativePluginCacheStatus(args, nextState),
         targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
       }
     });
@@ -2440,5 +2605,6 @@ module.exports = {
   getRepoValidationLabels,
   runRepoValidation,
   updateReportDir,
+  cleanupUpdateReports,
   openUpdateReport
 };

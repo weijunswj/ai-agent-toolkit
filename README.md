@@ -29,7 +29,7 @@ For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
 2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state.
-3. The agent must run the host-aware setup orchestrator, not just `node repo/scripts/sync-toolkit-projects.cjs --write`: Codex uses `node repo/scripts/setup-toolkit.cjs --execute`; Claude Code uses `node repo/scripts/setup-toolkit.cjs --execute --host claude-code`.
+3. The agent must run the host-aware setup orchestrator, not just `node repo/scripts/sync-toolkit-projects.cjs --write`: Codex uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main`; Claude Code uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code`.
 4. Let the host install, verify, or refresh its own Toolkit native plugin path, then answer the required setup gates.
 5. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 6. Restart the host if setup says the plugin needs a fresh session.

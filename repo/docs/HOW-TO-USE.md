@@ -51,15 +51,16 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state. Agents must run the full setup journey from this repo instead of stopping after plugin verification, even when Toolkit is already installed: Codex uses `node repo/scripts/setup-toolkit.cjs --execute`; Claude Code uses `node repo/scripts/setup-toolkit.cjs --execute --host claude-code`.
-3. Let the host install, verify, or refresh its own Toolkit native plugin path, then run the lite setup validation.
-4. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
-5. Restart the host if setup says the plugin needs a fresh session.
-6. Approve repo-backed auto-update only if you want the Toolkit bridge hub configured from this local repo on `main` with auto-sync.
-7. Answer the required update-report auto-open preference: approve `--enable-update-report-open` if you want meaningful Toolkit hook reports to open automatically, or choose `--skip-update-report-open` to keep reports closed by default.
-8. Answer the required Codex plugin cache auto-refresh preference: approve `--enable-codex-plugin-auto-refresh` if you want trusted `main` startup hooks to refresh stale Codex Toolkit plugin cache content automatically, or choose `--skip-codex-plugin-auto-refresh` to keep that refresh manual.
+2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state. Agents must run the one-checklist setup journey instead of stopping after plugin verification, even when Toolkit is already installed: Codex uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main`; Claude Code uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code`.
+3. Setup shows the managed checkout path and all preferences up front, then runs to completion unless a real safety blocker appears.
+4. **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
+5. Default managed checkout paths are `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit` on Windows and `~/.ai-agent-toolkit/source/ai-agent-toolkit` on POSIX.
+6. Let the host install, verify, or refresh its own Toolkit native plugin path, then run the lite setup validation.
+7. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
+8. Restart the host if setup says the plugin needs a fresh session.
 9. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
-10. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+10. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and select those target writes.
+11. Meaningful update reports stay enabled by default, auto-open only when selected, and Toolkit-managed reports/logs older than 7 days are cleaned up best-effort from the Toolkit report/log directory.
 
 Codex and Claude Code update Toolkit through their own native plugin systems:
 
