@@ -36,6 +36,7 @@ function run(args, options = {}) {
     cwd: repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },
+    input: options.input,
     timeout: 15000,
     windowsHide: true
   });
@@ -45,7 +46,7 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.2.0',
+    version: '2.2.1',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
@@ -68,7 +69,7 @@ function createMinimalSetupRepo(root) {
     "'use strict';",
     "const fs = require('node:fs');",
     "const path = require('node:path');",
-    "fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
+    "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "process.stdout.write(JSON.stringify({ ok: true }));",
     'process.exit(0);',
     ''
@@ -78,13 +79,21 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "const args = process.argv.slice(2);",
-    "fs.appendFileSync(path.join(process.cwd(), 'BRIDGE_ARGS.log'), `${args.join(' ')}\\n`);",
+    "if (args.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'BRIDGE_ARGS.log'), `${args.join(' ')}\\n`);",
     "if (args.includes('--audit')) {",
-    "  process.stdout.write(JSON.stringify({",
-    "    repo_auto_update: { last_status: 'configured' },",
+    "  const fallback = {",
+    "    update_report_enabled: true,",
+    "    update_report_open_enabled: false,",
+    "    update_report_retention_days: 7,",
+    "    codex_plugin_auto_refresh_enabled: false,",
+    "    repo_auto_update: { enabled: false, last_status: 'configured', repo_path: '' },",
     "    update_report_cleanup: { retention_days: 7, deleted_count: 0, error_count: 0, report_log_directory: path.join(process.cwd(), 'tmp-reports') },",
-    "    targets: { opencode: { enabled: args.includes('opencode'), status: 'synced' }, ag2: { enabled: args.includes('ag2'), status: 'synced' } }",
-    "  }));",
+    "    targets: {",
+    "      opencode: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' },",
+    "      ag2: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' }",
+    "    }",
+    "  };",
+    "  process.stdout.write(JSON.stringify(process.env.SETUP_FAKE_AUDIT_JSON ? JSON.parse(process.env.SETUP_FAKE_AUDIT_JSON) : fallback));",
     "}",
     'process.exit(0);',
     ''
@@ -154,21 +163,21 @@ test('setup toolkit plan shows one upfront checklist and managed main checkout d
     'final_summary'
   ]);
   assert.deepEqual(plan.preferences, {
-    repo_backed_auto_update: true,
-    host_native_plugin_cache_auto_refresh: true,
-    write_meaningful_update_reports: true,
-    open_update_reports_automatically: false,
-    update_report_retention_days: 7,
-    opencode_sync: 'disabled',
-    ag2_antigravity_sync: 'disabled'
+    repo_backed_auto_update: 'question-required',
+    host_native_plugin_cache_auto_refresh: 'question-required',
+    write_meaningful_update_reports: 'question-required',
+    open_update_reports_automatically: 'question-required',
+    update_report_retention_days: 'question-required',
+    opencode_sync: 'question-required',
+    ag2_antigravity_sync: 'question-required'
   });
 
   const commands = flattenCommands(plan).join('\n');
   assert.match(commands, /git clone --branch main/);
   assert.match(commands, /git merge --ff-only FETCH_HEAD/);
-  assert.match(commands, /--enable-repo-auto-update/);
-  assert.match(commands, /--enable-update-reports --update-report-retention-days 7 --disable-update-report-open --write/);
-  assert.match(commands, /--enable-codex-plugin-auto-refresh --write/);
+  assert.doesNotMatch(commands, /--enable-repo-auto-update/);
+  assert.doesNotMatch(commands, /--disable-update-report-open/);
+  assert.doesNotMatch(commands, /--enable-codex-plugin-auto-refresh --write/);
   assert.doesNotMatch(commands, /repo\/tests\/toolkit-local-bridge\.test\.cjs/);
   assert.doesNotMatch(commands, /npm\s+run\s+validate:all/);
   assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit')), false, 'plan mode must not write user-local source or bridge state');
@@ -203,6 +212,8 @@ test('setup execute persists all selected preferences in one run and prints fina
     '--execute',
     '--repo-root', setupRepo,
     '--repo-remote', origin,
+    '--yes-recommended',
+    '--default-update-report-retention-days',
     '--enable-update-report-open',
     '--enable-target', 'ag2'
   ], {
@@ -225,6 +236,76 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.doesNotMatch(bridgeLog, /--enable-target opencode/);
 });
 
+test('setup execute without explicit choices pauses before preference or target writes', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const result = run([
+    '--execute',
+    '--profile', 'auto-main',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.match(result.stdout, /# setup toolkit question bank/);
+  assert.match(result.stdout, /Update report auto-open/);
+  assert.match(result.stdout, /OpenCode bridge target/);
+  assert.match(result.stdout, /AG2\/Antigravity bridge target/);
+  assert.match(result.stdout, /Repo-backed auto-update/);
+  assert.match(result.stdout, /Managed checkout/);
+  assert.match(result.stdout, /Codex plugin cache auto-refresh/);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false, 'plugin setup must not run before all answers');
+  const bridgeLog = fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log'))
+    ? fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8')
+    : '';
+  assert.doesNotMatch(bridgeLog, /--write/, 'bridge preference and target writes must not happen before all answers');
+});
+
+test('setup execute accepts one consolidated answer bank and preserves report auto-open on keep', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const audit = {
+    update_report_enabled: true,
+    update_report_open_enabled: true,
+    update_report_retention_days: 14,
+    codex_plugin_auto_refresh_enabled: true,
+    repo_auto_update: { enabled: true, last_status: 'configured', repo_path: setupRepo },
+    update_report_cleanup: { retention_days: 14, deleted_count: 0, error_count: 0, report_log_directory: path.join(setupRepo, 'tmp-reports') },
+    targets: {
+      opencode: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' },
+      ag2: { detected: true, enabled: true, synced: false, status: 'enabled', synced_version: '2.1.0' }
+    }
+  };
+  const result = run([
+    '--execute',
+    '--profile', 'auto-main',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin
+  ], {
+    env: { ...isolatedHomeEnv(root), SETUP_FAKE_AUDIT_JSON: JSON.stringify(audit) },
+    input: [
+      'keep',
+      'keep',
+      'keep',
+      'keep',
+      'keep',
+      'keep',
+      'enable-sync',
+      ''
+    ].join('\n')
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /AG2\/Antigravity bridge target:[\s\S]*enabled=yes[\s\S]*version=2\.1\.0/);
+  const bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
+  assert.doesNotMatch(bridgeLog, /--disable-update-report-open/);
+  assert.doesNotMatch(bridgeLog, /--enable-update-report-open/);
+  assert.match(bridgeLog, /--enable-target ag2 --write/);
+  assert.match(bridgeLog, /--sync-enabled --write/);
+});
+
 test('setup execute creates missing managed checkout by cloning the expected remote', () => {
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
@@ -233,6 +314,7 @@ test('setup execute creates missing managed checkout by cloning the expected rem
     '--execute',
     '--repo-root', managedPath,
     '--repo-remote', origin,
+    '--yes-recommended',
     '--skip-codex-plugin-auto-refresh'
   ], {
     env: isolatedHomeEnv(root)
@@ -251,7 +333,7 @@ test('setup execute refuses local managed checkout divergence before plugin setu
   runTestGit(setupRepo, ['add', 'LOCAL_ONLY.md']);
   runTestGit(setupRepo, ['commit', '-m', 'local only']);
 
-  const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin], {
+  const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended'], {
     env: isolatedHomeEnv(root)
   });
 
@@ -268,6 +350,7 @@ test('claude-code setup execute verifies Claude plugin metadata and skips Codex 
     '--host', 'claude-code',
     '--repo-root', setupRepo,
     '--repo-remote', origin,
+    '--yes-recommended',
     '--skip-update-report-open',
     '--enable-target', 'ag2'
   ], {

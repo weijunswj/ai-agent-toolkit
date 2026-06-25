@@ -205,14 +205,13 @@ Final reports must include `Instruction sources used` and `MEMORY.md changed: Ye
 
 ## Source Of Truth
 
-The full source-of-truth contract appears below in this file and is maintained from `_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md`. Treat that managed block as the detailed active contract for `_projects/**`, generated `skills/**`, source locks, source-watch, and guarded generated-output writeback.
-
-For day-to-day work, update source or curated material first, do not edit generated `skills/**` directly unless declared `linked`, run the matching sync/check command, and preserve this boundary: Source-watch is PR-notification-only.
+The managed Source-of-Truth Contract below is the detailed active contract. Source-watch is PR-notification-only. It is maintained from `_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md`; keep its markers intact and edit the source when that managed block needs changes.
 
 ## Toolkit Plugin And Bridge
 
 - Native plugin updates are host-local: Codex uses `.codex-plugin/`, Claude Code uses `.claude-plugin/`.
 - Bridge writes only approved enabled OpenCode/AG2 targets; detection is dry-run only.
+- Every commit that changes plugin-packaged content, setup behavior, bridge behavior, skills, adapters, or native plugin metadata must include the matching Toolkit plugin/module version bump in the same commit. Keep `_projects/development/toolkit-local-bridge/toolkit.project.json`, native plugin manifest sources, generated plugin manifests, `BRIDGE_VERSION`, the Codex setup expected version, and AG2 adapter/plugin version output aligned.
 - Hooks are optional; policy stays in docs, validators, and [Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 - Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run `setup-toolkit.cjs --execute --profile auto-main`.
 
