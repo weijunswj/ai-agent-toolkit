@@ -29,12 +29,13 @@ For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
 2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state.
-3. The agent must run the host-aware setup orchestrator, not just `node repo/scripts/sync-toolkit-projects.cjs --write`: Codex uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main`; Claude Code uses `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code`.
-4. Let the host install, verify, or refresh its own Toolkit native plugin path, then answer the required setup gates.
-5. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
-6. Restart the host if setup says the plugin needs a fresh session.
-7. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
-8. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+3. The agent must run the managed checkout setup script when it exists, not just `node repo/scripts/sync-toolkit-projects.cjs --write`: Windows Codex uses `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`; POSIX Codex uses `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`; Claude Code appends `--host claude-code`.
+4. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing, then hand off to the managed checkout script after it exists.
+5. Let the host install, verify, or refresh its own Toolkit native plugin path, then answer the required setup gates.
+6. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
+7. Restart the host if setup says the plugin needs a fresh session.
+8. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
+9. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
 
 More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills); detailed plugin and bridge mechanics live in [Toolkit Local Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 

@@ -16,10 +16,13 @@ Copy the whole [toolkit-setup](./) skill folder when an agent needs to recognise
 
 This README is only an install/identity note. Runtime guidance lives in `SKILL.md`, `repo/scripts/setup-toolkit.cjs`, `repo/scripts/toolkit-local-bridge.cjs`, and `repo/docs/TOOLKIT-LOCAL-BRIDGE.md`.
 
-Routine setup routes through the host-aware orchestrator:
+Routine setup routes through the host-aware orchestrator in the managed checkout when it exists:
 
-- Codex: `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main`
-- Claude Code: `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code`
+- Windows Codex: `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`
+- POSIX Codex: `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`
+- Claude Code: append `--host claude-code` to the managed checkout command.
+
+Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing. After bootstrap creates the managed checkout, hand off to the managed checkout script.
 
 **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 

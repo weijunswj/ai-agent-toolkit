@@ -213,7 +213,7 @@ The managed Source-of-Truth Contract below is the detailed active contract. Sour
 - Bridge writes only approved enabled OpenCode/AG2 targets; detection is dry-run only.
 - Every commit that changes plugin-packaged content, setup behavior, bridge behavior, skills, adapters, or native plugin metadata must include the matching Toolkit plugin/module version bump in the same commit. Keep `_projects/development/toolkit-local-bridge/toolkit.project.json`, native plugin manifest sources, generated plugin manifests, `BRIDGE_VERSION`, the Codex setup expected version, and AG2 adapter/plugin version output aligned.
 - Hooks are optional; policy stays in docs, validators, and [Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
-- Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run `setup-toolkit.cjs --execute --profile auto-main`.
+- Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run the managed checkout setup script when it exists, with active `repo/scripts/setup-toolkit.cjs --execute --profile auto-main` only as bootstrap/fallback.
 
 <!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract

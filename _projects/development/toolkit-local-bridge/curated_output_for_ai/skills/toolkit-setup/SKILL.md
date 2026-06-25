@@ -25,12 +25,14 @@ Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair
 ## Required Route
 
 1. Inspect the local repo context and read `repo/docs/TOOLKIT-LOCAL-BRIDGE.md` before changing bridge behavior or running write commands.
-2. For English prompts such as `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context, use the host-aware setup orchestrator:
+2. For English prompts such as `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context, use the host-aware setup orchestrator from the managed checkout whenever it exists. Do not use the active repo worktree command as the canonical route.
 
 ```powershell
-node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
-# In Claude Code:
-node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code
+node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
+```
+
+```sh
+node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main
 ```
 
 The orchestrator discovers current state, shows one consolidated upfront setup question bank, pauses before preference or target writes, then runs to completion unless a real safety blocker appears.
@@ -45,6 +47,14 @@ Default managed source checkout:
 - POSIX: `~/.ai-agent-toolkit/source/ai-agent-toolkit`
 
 The managed checkout is separate from the active Codex or Claude Code worktree, plugin caches, `.tmp` directories, and temporary marketplace checkouts. If the active Toolkit worktree is on a PR branch, setup should warn that this is okay and continue using the managed clean `main` checkout.
+
+If the managed checkout path does not yet exist or does not contain `repo/scripts/setup-toolkit.cjs`, the active repo command is bootstrap/fallback only:
+
+```powershell
+node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
+```
+
+When fallback/bootstrap is used, say that it is bootstrap-only. After the managed checkout exists, hand off to the managed checkout script above and use that script for the question bank, setup writes, and verification. In Claude Code, append `--host claude-code` to the managed or fallback setup command. Do not run an active stale verifier after managed setup; verify from the same managed checkout script/repo that performed setup.
 
 3. The one setup question bank must show current state, recommended default, and choices for every setup decision before writes:
 
@@ -68,11 +78,11 @@ Allowed later blockers include dirty managed checkout, unexpected remote, fetch/
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
-5. Use `repo/scripts/setup-codex-toolkit-plugin.cjs` only for Codex native plugin install/update verification. Use `repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code` for Claude Code setup prompts, while keeping Claude Code's native plugin install/trust flow host-local. Use `repo/scripts/toolkit-local-bridge.cjs` for shared bridge setup, repo auto-update enablement, sync, audit, disable, stale-state recovery, and troubleshooting. Use `repo/scripts/repair-codex-plugin-windows-hooks.cjs` only for post-install Windows hook audit/repair of an installed Codex plugin root.
+5. Use `repo/scripts/setup-codex-toolkit-plugin.cjs` only through the managed checkout setup flow for Codex native plugin install/update verification. For Claude Code setup prompts, run the managed checkout setup command with `--host claude-code`, while keeping Claude Code's native plugin install/trust flow host-local. Use `repo/scripts/toolkit-local-bridge.cjs` for shared bridge setup, repo auto-update enablement, sync, audit, disable, stale-state recovery, and troubleshooting. Use `repo/scripts/repair-codex-plugin-windows-hooks.cjs` only for post-install Windows hook audit/repair of an installed Codex plugin root.
 
 On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable WindowsApps alias. Use `setup-codex-toolkit-plugin.cjs --codex-cli "%USERPROFILE%\\.codex\\plugins\\.plugin-appserver\\codex.exe"` when an explicit CLI path is needed.
 
-6. Before final response after repo changes, run the relevant validators or tests for the touched surface.
+6. Before final response after setup, report the active worktree path and commit if inspected, managed checkout path and commit, exact setup script path executed, and whether the question bank appeared. Before final response after repo changes, run the relevant validators or tests for the touched surface.
 
 ## Safety Rules
 

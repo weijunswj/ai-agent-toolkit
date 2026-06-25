@@ -146,12 +146,16 @@ The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and ex
 For `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context, agents must run the full script-backed journey even when Toolkit is already installed:
 
 ```powershell
-node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
-# In Claude Code:
-node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code
+node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
 ```
 
-The orchestrator discovers current state, shows one consolidated upfront setup question bank, pauses before preference or target writes, then runs to completion unless a real safety blocker appears. It uses a managed clean `main` checkout as the default source, not the active Codex or Claude Code conversation worktree.
+```sh
+node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main
+```
+
+Append `--host claude-code` for Claude Code. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing. If fallback/bootstrap is used, say it is bootstrap-only and hand off to the managed checkout script after the managed checkout exists.
+
+The orchestrator discovers current state, shows one consolidated upfront setup question bank, pauses before preference or target writes, then runs to completion unless a real safety blocker appears. It uses a managed clean `main` checkout as the default source for setup, not the active Codex or Claude Code conversation worktree.
 
 **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 
@@ -162,7 +166,7 @@ Default managed source path:
 
 Setup creates or verifies that checkout, validates the expected remote, refuses dirty worktrees, fetches `origin main`, updates only by fast-forward, runs hook-light validation, and makes it the default `repo_path` for repo-backed auto-update. If the active Toolkit worktree is on a PR branch, setup warns that the active session may remain there and continues with the managed clean `main` source.
 
-The question bank collects the managed checkout path, repo-backed auto-update, current host native cache behavior, meaningful update report writes, report auto-open, report/log retention days, and OpenCode or Antigravity 2 target decisions up front. It must show current state and a recommended default for each question. Keep current, refresh/sync, disable, and skip are distinct target answers; skip must not mean disable. Do not reintroduce later preference pauses. Codex agents verify and refresh only the Codex native Toolkit plugin cache. Claude Code verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, then relies on Claude Code's own native plugin install/trust flow when the host reports the package is missing, stale, disabled, or untrusted. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
+The question bank collects the managed checkout path, repo-backed auto-update, current host native cache behavior, meaningful update report writes, report auto-open, report/log retention days, and OpenCode or Antigravity 2 target decisions up front. It must show current state and a recommended default for each question. Keep current, refresh/sync, disable, and skip are distinct target answers; skip must not mean disable. Do not reintroduce later preference pauses. Verification after managed setup must use the managed checkout verifier, not an active stale verifier. Codex agents verify and refresh only the Codex native Toolkit plugin cache from the managed checkout. Claude Code verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, then relies on Claude Code's own native plugin install/trust flow when the host reports the package is missing, stale, disabled, or untrusted. Final setup reports should state active worktree path/commit if inspected, managed checkout path/commit, exact setup script path executed, and whether the question bank appeared. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
 
 Before reporting `setup toolkit` complete, run:
 
@@ -170,7 +174,7 @@ Before reporting `setup toolkit` complete, run:
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-If the plugin is missing, disabled, stale, points at another source path, has same-version cache content that does not match this repo, or its installed plugin cache does not contain Toolkit version `2.2.1` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
+If the plugin is missing, disabled, stale, points at another source path, has same-version cache content that does not match this repo, or its installed plugin cache does not contain Toolkit version `2.2.2` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
 
 ```powershell
 node repo/scripts/setup-codex-toolkit-plugin.cjs --write
@@ -178,9 +182,9 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --write
 
 The verifier uses only supported Codex plugin commands. If no usable Codex CLI with `plugin marketplace` support is available, or if local marketplace installation fails, setup must fail clearly instead of pretending native plugin activation completed.
 
-The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. CLI list verification remains the preferred path. If the CLI list is empty or unreliable, the helper may use config/cache fallback verification only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.1`, the cache manifest has the expected Toolkit name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report this as config/cache fallback verification, not normal CLI verification.
+The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. CLI list verification remains the preferred path. If the CLI list is empty or unreliable, the helper may use config/cache fallback verification only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.2`, the cache manifest has the expected Toolkit name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report this as config/cache fallback verification, not normal CLI verification.
 
-If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.2.1`, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
+If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.2.2`, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
 
 After install, update, or verify, the helper prints or returns a `**Next Steps:**` section. It tells the user to restart Codex if installation changed anything, open Codex hook review when prompted, and trust the Codex `SessionStart` hook only if it runs:
 
@@ -208,8 +212,8 @@ Acceptance criteria:
 
 - `node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json` exits successfully. If the underlying `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` process keeps running after verification passes, setup output includes a warning that the command did not exit cleanly.
 - `codex plugin list --available --json` shows `ai-agent-toolkit@ai-agent-toolkit-local` installed and enabled with `authPolicy` `ON_USE`.
-- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.1`.
-- The final cache `.codex-plugin/plugin.json` reports version `2.2.1`.
+- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.2`.
+- The final cache `.codex-plugin/plugin.json` reports version `2.2.2`.
 - The final cache `.codex-plugin/hooks/hooks.json` includes a `SessionStart` hook.
 - Package-critical cache files match the local repo, including Codex plugin metadata, Toolkit bridge/setup scripts, hook-light validation test, assets, and `skills/`.
 
@@ -220,7 +224,7 @@ Repo auto-update uses the configured local Toolkit Git repo as source of truth. 
 Enable or refresh the managed-main setup with:
 
 ```powershell
-node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
+node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
 ```
 
 Advanced bridge-only configuration can still point at an explicit trusted checkout:
