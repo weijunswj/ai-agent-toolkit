@@ -27,6 +27,7 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - Use the local full-fidelity references in [references/n8n/](references/n8n/) for local dev setup, updates, Compose ngrok dev tunneling, production Cloudflare Tunnel self-hosting for local/CGNAT machines, Docker Compose plus Postgres, and hosted n8n Hostinger Coolify VPS details.
 - Treat the Compose ngrok service as the supported dev tunnel path for local webhook testing.
 - Treat the production Cloudflare Tunnel stack as the production self-hosting path for local/CGNAT machines. Keep it separate from the local dev stack and menu.
+- Do not treat TryCloudflare or Quick Tunnel as production hosting. If a quick tunnel smoke test is ever useful, keep it as a separate future smoke-test-only follow-up.
 - Use the local stack templates in [templates/local-stack/](templates/local-stack/) for local `n8n + postgres`.
 - Treat [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, Postgres backup packages, and local backup restore actions.
 - Use [templates/production-cloudflare-stack/](templates/production-cloudflare-stack/) for production self-hosting from a local/CGNAT machine through Cloudflare Tunnel.

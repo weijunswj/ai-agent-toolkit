@@ -5,7 +5,7 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "version_policy": "semver",
   "version_notes": "Bumps the native Toolkit package version for packaged n8n-local-setup skill content that adds a separate production Cloudflare Tunnel self-hosting guide and stack; bridge behavior is unchanged.",
   "outputs": [

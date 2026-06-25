@@ -14,6 +14,7 @@ This is not the local development path. For local development and webhook testin
 
 * Dev webhook testing remains on the Compose ngrok permanent/reserved URL path.
 * Production self-hosting from a local/CGNAT machine uses this separate Cloudflare Tunnel production stack.
+* Do not use TryCloudflare or Quick Tunnel for this production path. If a quick tunnel smoke test is ever useful, keep it as a separate future smoke-test-only follow-up, not production hosting.
 * Do not add Cloudflare production hosting controls to `_n8n-local.cmd`.
 * Do not add Caddy, Traefik, Nginx, or another local reverse proxy for this CGNAT path. CGNAT needs an outbound tunnel, not an inbound local reverse proxy.
 * Keep Postgres private.
@@ -58,7 +59,7 @@ The local machine initiates the tunnel connection outward. Cloudflare then route
 Cloudflare production hosting requires:
 
 - A Cloudflare account.
-- A domain or site added to Cloudflare.
+- A user-owned domain or site added to Cloudflare.
 - A Cloudflare Tunnel.
 - A tunnel token for the `cloudflared` connector.
 - A published public hostname for n8n.
@@ -187,7 +188,7 @@ For n8n behind Cloudflare Tunnel, set `WEBHOOK_URL` manually and set `N8N_PROXY_
 Do this in Cloudflare, not in repo files.
 
 1. Log in to Cloudflare.
-2. Make sure the domain or site you will use for n8n is added to Cloudflare.
+2. Make sure the user-owned domain or site you will use for n8n is added to Cloudflare.
 3. Create a Cloudflare Tunnel.
 4. Copy the tunnel token into your private `.env` as `CLOUDFLARED_TUNNEL_TOKEN`.
 5. Add a published application route or public hostname for n8n.
@@ -250,7 +251,7 @@ Do not start production until preflight passes.
 
 Start only after:
 
-- Cloudflare account and domain/site setup are ready.
+- Cloudflare account and user-owned domain/site setup are ready.
 - Tunnel exists.
 - Public hostname is configured.
 - The public hostname service URL points to `http://n8n:5678`.

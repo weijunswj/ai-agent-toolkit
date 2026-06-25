@@ -46,7 +46,7 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.2.2',
+    version: '2.2.4',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
@@ -139,16 +139,19 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createFakeManagedSetupScript(root, version = '2.2.2') {
+function createFakeManagedSetupScript(root, version = '2.2.4', options = {}) {
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
+  const emitQuestionBank = options.emitQuestionBank !== false;
+  const exitCode = Number.isInteger(options.exitCode) ? options.exitCode : 23;
   writeFile(scriptPath, [
     '#!/usr/bin/env node',
     "'use strict';",
     `console.log('managed setup script version ${version}');`,
-    "console.log('# setup toolkit question bank');",
+    ...(emitQuestionBank ? ["console.log('# setup toolkit question bank');"] : []),
+    ...(options.extraLines || []),
     "console.log('Setup script path executed: ' + __filename);",
-    'process.exit(23);',
+    `process.exit(${exitCode});`,
     ''
   ].join('\n'));
   writeFile(path.join(managedPath, 'AGENTS.md'), '# fake managed toolkit repo\n');
@@ -159,6 +162,26 @@ function createFakeManagedSetupScript(root, version = '2.2.2') {
   runTestGit(managedPath, ['add', '.']);
   runTestGit(managedPath, ['commit', '-m', 'managed setup']);
   return { managedPath, scriptPath };
+}
+
+function createGitBackedRealSetupRepo(root) {
+  const result = createGitBackedSetupRepo(root);
+  writeFile(path.join(result.setupRepo, 'repo', 'scripts', 'setup-toolkit.cjs'), fs.readFileSync(script, 'utf8'));
+  runTestGit(result.setupRepo, ['add', 'repo/scripts/setup-toolkit.cjs']);
+  runTestGit(result.setupRepo, ['commit', '-m', 'real setup script']);
+  runTestGit(result.setupRepo, ['push', 'origin', 'main']);
+  return result;
+}
+
+function runSetupScript(scriptPath, args, options = {}) {
+  return spawnSync(process.execPath, [scriptPath, ...args], {
+    cwd: options.cwd || path.dirname(scriptPath),
+    encoding: 'utf8',
+    env: { ...process.env, ...(options.env || {}) },
+    input: options.input,
+    timeout: 15000,
+    windowsHide: true
+  });
 }
 
 function flattenCommands(plan) {
@@ -355,7 +378,7 @@ test('setup execute creates missing managed checkout by cloning the expected rem
 
 test('active setup command delegates to managed checkout script when it exists', () => {
   const root = tmpRoot();
-  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.2.2');
+  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.2.4');
   const beforeStatus = runTestGit(repoRoot, ['status', '--short']);
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -370,8 +393,40 @@ test('active setup command delegates to managed checkout script when it exists',
   assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.match(result.stdout, /Managed checkout commit: [0-9a-f]{40}/);
   assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
-  assert.match(result.stdout, /managed setup script version 2\.2\.2/);
+  assert.match(result.stdout, /managed setup script version 2\.2\.4/);
   assert.match(result.stdout, /# setup toolkit question bank/);
+});
+
+test('managed question-bank pause is not bypassed with active fallback', () => {
+  const root = tmpRoot();
+  createFakeManagedSetupScript(root, '2.2.4');
+  const result = run(['--execute', '--profile', 'auto-main'], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.match(result.stdout, /# setup toolkit managed route/);
+  assert.match(result.stdout, /# setup toolkit question bank/);
+  assert.doesNotMatch(result.stdout, /# setup toolkit checklist/);
+  assert.doesNotMatch(result.stdout, /--yes-recommended selected/);
+});
+
+test('managed safety blocker is not bypassed with active fallback', () => {
+  const root = tmpRoot();
+  createFakeManagedSetupScript(root, '2.2.4', {
+    emitQuestionBank: false,
+    exitCode: 1,
+    extraLines: ["console.error('managed safety blocker');"]
+  });
+  const result = run(['--execute', '--profile', 'auto-main'], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stdout, /# setup toolkit managed route/);
+  assert.match(result.stderr, /managed safety blocker/);
+  assert.doesNotMatch(result.stdout, /# setup toolkit question bank/);
+  assert.doesNotMatch(result.stdout, /# setup toolkit checklist/);
 });
 
 test('active setup command falls back locally when managed checkout script is missing', () => {
@@ -383,6 +438,106 @@ test('active setup command falls back locally when managed checkout script is mi
   assert.equal(result.status, 23, result.stderr || result.stdout);
   assert.doesNotMatch(result.stdout, /# setup toolkit managed route/);
   assert.match(result.stdout, /# setup toolkit question bank/);
+});
+
+test('managed setup script running from standard managed checkout allows its own path', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedRealSetupRepo(root);
+  const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
+  const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
+  const audit = {
+    update_report_enabled: true,
+    update_report_open_enabled: false,
+    update_report_retention_days: 7,
+    codex_plugin_auto_refresh_enabled: false,
+    repo_auto_update: { enabled: true, last_status: 'configured', repo_path: managedPath },
+    update_report_cleanup: { retention_days: 7, deleted_count: 0, error_count: 0, report_log_directory: path.join(managedPath, 'tmp-reports') },
+    targets: {
+      opencode: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' },
+      ag2: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' }
+    }
+  };
+
+  const result = runSetupScript(scriptPath, [
+    '--execute',
+    '--profile', 'auto-main',
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-codex-plugin-auto-refresh'
+  ], {
+    cwd: managedPath,
+    env: { ...isolatedHomeEnv(root), SETUP_FAKE_AUDIT_JSON: JSON.stringify(audit) }
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Managed checkout:[\s\S]*recommended: keep/);
+  assert.match(result.stdout, /- Managed checkout: keep/);
+  assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
+  assert.doesNotMatch(result.stderr, /must not live inside the active Toolkit worktree/);
+});
+
+test('active user worktree is still rejected when selected as managed checkout', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedRealSetupRepo(root);
+  const scriptPath = path.join(setupRepo, 'repo', 'scripts', 'setup-toolkit.cjs');
+  const audit = {
+    update_report_enabled: true,
+    update_report_open_enabled: false,
+    update_report_retention_days: 7,
+    codex_plugin_auto_refresh_enabled: false,
+    repo_auto_update: { enabled: true, last_status: 'configured', repo_path: setupRepo },
+    update_report_cleanup: { retention_days: 7, deleted_count: 0, error_count: 0, report_log_directory: path.join(root, 'tmp-reports') },
+    targets: {
+      opencode: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' },
+      ag2: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' }
+    }
+  };
+
+  const result = runSetupScript(scriptPath, [
+    '--execute',
+    '--profile', 'auto-main',
+    '--repo-remote', origin
+  ], {
+    cwd: setupRepo,
+    env: { ...isolatedHomeEnv(root), SETUP_FAKE_AUDIT_JSON: JSON.stringify(audit) },
+    input: [
+      'keep',
+      'keep',
+      'keep',
+      'keep',
+      'keep',
+      'keep',
+      'keep',
+      'keep',
+      ''
+    ].join('\n')
+  });
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /Default managed source checkout must not live inside the active Toolkit worktree/);
+});
+
+test('unsafe plugin cache and tmp default managed paths are rejected', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  for (const unsafeHome of [
+    path.join(root, '.codex', 'plugins', 'cache', 'ai-agent-toolkit-local'),
+    path.join(root, '.tmp', 'marketplace-checkout')
+  ]) {
+    const result = run([
+      '--execute',
+      '--profile', 'auto-main',
+      '--repo-remote', origin,
+      '--yes-recommended',
+      '--skip-codex-plugin-auto-refresh'
+    ], {
+      env: isolatedHomeEnv(unsafeHome)
+    });
+
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(result.stderr, /Managed source checkout must not live inside plugin cache or temporary marketplace paths/);
+  }
 });
 
 test('yes-recommended uses the default managed checkout when stored repo path is the active worktree', () => {
@@ -551,5 +706,8 @@ test('setup docs route setup and refresh prompts to the one-checklist orchestrat
     assert.match(text, /plain `refresh`/i, relPath);
     assert.match(text, /dedicated clean `main` checkout/i, relPath);
     assert.match(text, /node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main/i, relPath);
+    assert.match(text, /exit code `23`|code `23`/i, relPath);
+    assert.match(text, /do not rerun with `--yes-recommended` unless the user explicitly|must not rerun with `--yes-recommended` unless the user explicitly/i, relPath);
+    assert.match(text, /non-interactive|chat/i, relPath);
   }
 });
