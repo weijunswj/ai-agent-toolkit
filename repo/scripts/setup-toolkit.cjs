@@ -690,8 +690,31 @@ function currentReportRetentionDays(current) {
   return current?.audit?.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
 }
 
+function hasUnsafeManagedPathMarker(value) {
+  const normalized = slash(path.resolve(value || '')).toLowerCase();
+  return ['/.tmp/', '/.codex/plugins/cache/', '/.claude/plugins/cache/', '/.codex/.tmp/marketplaces/']
+    .some((marker) => normalized.includes(marker));
+}
+
+function isStandardManagedCheckout(current) {
+  if (!current?.managed?.currentPath) return false;
+  return path.resolve(current.managed.currentPath) === path.resolve(current.managed.defaultPath);
+}
+
+function canRecommendKeepingManagedCheckout(current, args) {
+  const managed = current?.managed || {};
+  if (!managed.currentPath) return false;
+  if (!isStandardManagedCheckout(current)) return false;
+  const resolved = path.resolve(managed.currentPath);
+  if (isInside(repoRootFromScript(), resolved)) return false;
+  if (hasUnsafeManagedPathMarker(resolved)) return false;
+  if (!managed.exists || !managed.git || managed.dirty) return false;
+  if (managed.branch !== args.repoBranch) return false;
+  return normalizeRemote(managed.remote) === normalizeRemote(args.repoRemote);
+}
+
 function recommendedChoice(key, current, args) {
-  if (key === 'managedCheckout') return current.managed.currentPath ? 'keep' : 'default';
+  if (key === 'managedCheckout') return canRecommendKeepingManagedCheckout(current, args) ? 'keep' : 'default';
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
   if (key === 'updateReportOpen') return 'keep';
@@ -981,13 +1004,10 @@ function validateManagedSourcePath(args) {
   if (args.repoRootExplicit) return;
   const activeRoot = repoRootFromScript();
   const resolved = path.resolve(args.repoRoot);
-  const normalized = slash(resolved).toLowerCase();
   if (isInside(activeRoot, resolved)) {
     throw new Error(`Default managed source checkout must not live inside the active Toolkit worktree: ${resolved}`);
   }
-  for (const marker of ['/.tmp/', '/.codex/plugins/cache/', '/.claude/plugins/cache/', '/.codex/.tmp/marketplaces/']) {
-    if (normalized.includes(marker)) throw new Error(`Managed source checkout must not live inside plugin cache or temporary marketplace paths: ${resolved}`);
-  }
+  if (hasUnsafeManagedPathMarker(resolved)) throw new Error(`Managed source checkout must not live inside plugin cache or temporary marketplace paths: ${resolved}`);
 }
 
 function cloneManagedCheckoutIfMissing(args) {
@@ -1266,10 +1286,19 @@ function printPlan(plan, asJson) {
   }
 }
 
+function targetChoiceSummary(choice) {
+  if (choice === 'keep') return 'kept current state';
+  if (choice === 'skip') return 'skipped this run';
+  if (choice === 'enable-sync') return 'enabled/synced';
+  if (choice === 'disable') return 'disabled';
+  return 'not selected';
+}
+
 function printFinalSummary({ args, managed, nativeCache, audit }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const targets = audit?.targets || {};
+  const targetChoices = args.setupChoices?.targets || {};
   console.log('');
   console.log('# setup toolkit final summary');
   console.log(`Host: ${args.host}`);
@@ -1284,13 +1313,11 @@ function printFinalSummary({ args, managed, nativeCache, audit }) {
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
   console.log(`Update report/log cleanup: deleted=${cleanup.deleted_count ?? 0}, errors=${cleanup.error_count ?? 0}, directory=${cleanup.report_log_directory || 'unknown'}`);
   console.log(`OpenCode sync status: ${targets.opencode?.enabled ? (targets.opencode?.status || 'enabled') : 'disabled'}`);
+  console.log(`OpenCode target choice: ${targetChoiceSummary(targetChoices.opencode)}`);
   console.log(`AG2/Antigravity sync status: ${targets.ag2?.enabled ? (targets.ag2?.status || 'enabled') : 'disabled'}`);
+  console.log(`AG2/Antigravity target choice: ${targetChoiceSummary(targetChoices.ag2)}`);
   console.log(`Restart required: ${nativeCache.restart_required ? 'yes' : 'no'}`);
   console.log(`Hook trust action required: ${nativeCache.hook_trust_action || 'none'}`);
-  const skippedTargets = [];
-  if (!args.enableTargets.includes('opencode')) skippedTargets.push('OpenCode');
-  if (!args.enableTargets.includes('ag2')) skippedTargets.push('AG2/Antigravity');
-  if (skippedTargets.length) console.log(`Skipped target writes: ${skippedTargets.join(', ')} were not selected.`);
 }
 
 async function execute(args) {

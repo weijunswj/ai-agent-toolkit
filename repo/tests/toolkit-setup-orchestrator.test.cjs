@@ -226,7 +226,8 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /# setup toolkit final summary/);
   assert.match(result.stdout, /Managed checkout path:/);
   assert.match(result.stdout, /Update report\/log retention days: 7/);
-  assert.match(result.stdout, /Skipped target writes:/, 'OpenCode should remain disabled when only ag2 is selected');
+  assert.match(result.stdout, /OpenCode target choice: kept current state/, 'OpenCode should remain disabled when only ag2 is selected');
+  assert.match(result.stdout, /AG2\/Antigravity target choice: enabled\/synced/);
 
   const bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeLog, /--enable-repo-auto-update/);
@@ -326,6 +327,77 @@ test('setup execute creates missing managed checkout by cloning the expected rem
   assert.match(result.stdout, /Managed checkout path:/);
 });
 
+test('yes-recommended uses the default managed checkout when stored repo path is the active worktree', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
+  const audit = {
+    update_report_enabled: true,
+    update_report_open_enabled: true,
+    update_report_retention_days: 7,
+    codex_plugin_auto_refresh_enabled: false,
+    repo_auto_update: { enabled: true, last_status: 'configured', repo_path: repoRoot },
+    update_report_cleanup: { retention_days: 7, deleted_count: 0, error_count: 0, report_log_directory: path.join(root, 'tmp-reports') },
+    targets: {
+      opencode: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' },
+      ag2: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' }
+    }
+  };
+
+  const result = run([
+    '--execute',
+    '--profile', 'auto-main',
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-codex-plugin-auto-refresh'
+  ], {
+    env: { ...isolatedHomeEnv(root), SETUP_FAKE_AUDIT_JSON: JSON.stringify(audit) }
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Managed checkout:[\s\S]*recommended: default/);
+  assert.match(result.stdout, /- Managed checkout: default/);
+  assert.match(result.stdout, new RegExp(`Managed checkout path: ${managedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.equal(fs.existsSync(path.join(managedPath, 'AGENTS.md')), true);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'BRIDGE_ARGS.log')), false, 'active worktree must not receive setup writes');
+});
+
+test('yes-recommended may keep the safe standard managed checkout', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
+  const audit = {
+    update_report_enabled: true,
+    update_report_open_enabled: false,
+    update_report_retention_days: 7,
+    codex_plugin_auto_refresh_enabled: false,
+    repo_auto_update: { enabled: true, last_status: 'configured', repo_path: managedPath },
+    update_report_cleanup: { retention_days: 7, deleted_count: 0, error_count: 0, report_log_directory: path.join(managedPath, 'tmp-reports') },
+    targets: {
+      opencode: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' },
+      ag2: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' }
+    }
+  };
+
+  const result = run([
+    '--execute',
+    '--profile', 'auto-main',
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-codex-plugin-auto-refresh'
+  ], {
+    env: { ...isolatedHomeEnv(root), SETUP_FAKE_AUDIT_JSON: JSON.stringify(audit) }
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Managed checkout:[\s\S]*recommended: keep/);
+  assert.match(result.stdout, /- Managed checkout: keep/);
+  assert.match(result.stdout, new RegExp(`Managed checkout path: ${managedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false, 'old source worktree must not receive setup writes');
+});
+
 test('setup execute refuses local managed checkout divergence before plugin setup', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
@@ -364,6 +436,45 @@ test('claude-code setup execute verifies Claude plugin metadata and skips Codex 
   assert.match(bridgeLog, /--enable-repo-auto-update/);
   assert.doesNotMatch(bridgeLog, /--enable-codex-plugin-auto-refresh/);
   assert.match(bridgeLog, /--enable-target ag2 --write/);
+});
+
+test('setup final summary distinguishes target keep skip enable-sync and disable choices', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const first = run([
+    '--execute',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-codex-plugin-auto-refresh',
+    '--skip-target', 'opencode',
+    '--enable-target', 'ag2'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(first.status, 0, first.stderr || first.stdout);
+  assert.match(first.stdout, /OpenCode target choice: skipped this run/);
+  assert.match(first.stdout, /AG2\/Antigravity target choice: enabled\/synced/);
+  assert.doesNotMatch(first.stdout, /Skipped target writes:/);
+
+  fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
+  const second = run([
+    '--execute',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-codex-plugin-auto-refresh',
+    '--disable-target', 'opencode',
+    '--keep-target', 'ag2'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(second.status, 0, second.stderr || second.stdout);
+  assert.match(second.stdout, /OpenCode target choice: disabled/);
+  assert.match(second.stdout, /AG2\/Antigravity target choice: kept current state/);
+  assert.doesNotMatch(second.stdout, /Skipped target writes:/);
 });
 
 test('setup docs route setup and refresh prompts to the one-checklist orchestrator', () => {
