@@ -550,7 +550,7 @@ function validateAndUpdateRepo(state, args = {}) {
   if (!fetchResult.ok) {
     const fetchError = commandOutput(fetchResult) || 'fetch failed';
     const credentialHint = isCredentialError(fetchError)
-      ? `\nCredential hint: fetch failed in this environment. Run this command from the same shell/profile that already works for git pull/fetch, or run \`gh auth login\` in this context, then rerun setup/refresh.`
+      ? `\nCredential hint: fetch failed in this environment. Run this command from the same shell/profile that already works for git fetch, or run \`gh auth login\` in this context, then rerun setup/refresh.`
       : '';
     throw repoUpdateError('skipped', `git fetch origin ${branch} failed: ${fetchError}${credentialHint}`, {
       fromCommit,
