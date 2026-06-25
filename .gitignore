@@ -4,6 +4,8 @@
 .n8n-local/
 .n8n-local/backups/
 .n8n-local/import/
+.n8n-production-cloudflare/
+**/production-cloudflare-stack/backups/
 .tmp/
 .agent-toolkit-backups/
 /n8n-workflows/

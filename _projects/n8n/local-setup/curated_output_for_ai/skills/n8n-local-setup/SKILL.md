@@ -1,6 +1,6 @@
 ---
 name: n8n-local-setup
-description: Guide AI agents through safe local n8n setup with Docker Compose, Postgres, Compose ngrok, hosted n8n on Hostinger Coolify VPS, launcher/menu use, [official n8n Skills](https://github.com/n8n-io/skills) setup, and official instance-level MCP references. For any n8n workflow, helper-script, or live n8n task, first apply n8n-agent-rules.
+description: Guide AI agents through safe n8n environment setup with the localhost/ngrok dev stack, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, hosted n8n on Hostinger Coolify VPS, launcher/menu use, [official n8n Skills](https://github.com/n8n-io/skills) setup, and official instance-level MCP references. For any n8n workflow, helper-script, or live n8n task, first apply n8n-agent-rules.
 ---
 
 <!--
@@ -11,7 +11,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup
 
-Use this skill when the user needs to set up or explain local n8n, the Docker Compose local stack, Compose ngrok tunneling, hosted n8n on Hostinger Coolify VPS, the guided launcher/menu, [official n8n Skills](https://github.com/n8n-io/skills) routing, or official instance-level MCP references.
+Use this skill when the user needs to set up or explain local n8n, the Docker Compose local dev stack, Compose ngrok dev tunneling, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, hosted n8n on Hostinger Coolify VPS, the guided launchers/menus, [official n8n Skills](https://github.com/n8n-io/skills) routing, or official instance-level MCP references.
 
 For Hostinger VPS plus Coolify setup or server maintenance, use `codex-ssh-hostinger-coolify-setup-maintainer` first. Return to this skill for n8n-specific deployment guidance after Coolify exists.
 
@@ -24,10 +24,13 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 
 ## Core Rules
 
-- Use the local full-fidelity references in [references/n8n/](references/n8n/) for local setup, updates, Compose ngrok tunneling, Docker Compose plus Postgres, and hosted n8n Hostinger Coolify VPS details.
-- Treat the Compose ngrok service as the supported local tunnel path in this guide.
+- Use the local full-fidelity references in [references/n8n/](references/n8n/) for local dev setup, updates, Compose ngrok dev tunneling, production Cloudflare Tunnel self-hosting for local/CGNAT machines, Docker Compose plus Postgres, and hosted n8n Hostinger Coolify VPS details.
+- Treat the Compose ngrok service as the supported dev tunnel path for local webhook testing.
+- Treat the production Cloudflare Tunnel stack as the production self-hosting path for local/CGNAT machines. Keep it separate from the local dev stack and menu.
 - Use the local stack templates in [templates/local-stack/](templates/local-stack/) for local `n8n + postgres`.
 - Treat [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, Postgres backup packages, and local backup restore actions.
+- Use [templates/production-cloudflare-stack/](templates/production-cloudflare-stack/) for production self-hosting from a local/CGNAT machine through Cloudflare Tunnel.
+- Treat [templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd](templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd) as the production Cloudflare stack entrypoint for preflight, start/stop, restart, status, logs, Postgres backup, image updates, and production URL display.
 - Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, Claude web routing, [official n8n Skills](https://github.com/n8n-io/skills) installation notes, and official instance-level MCP references.
 - Use the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin instructions for Codex and Claude Code where plugin hooks are supported. Marketplace registration alone is not installation: before reporting setup complete, verify `n8n-skills@n8n-io` is installed and enabled in the host plugin list, not merely available. On Windows, immediately run `node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<installed-plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io`, then `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<installed-plugin-cache-path>" --windows --verify-output`, before approving or trusting hooks. Do not treat a temporary marketplace checkout such as `.tmp\marketplaces\n8n-io\plugins\n8n-skills` as the installed plugin cache.
 - The Windows hook repair wrapper invokes explicit Git Bash only: `C:\Program Files\Git\bin\bash.exe` or `C:\Program Files\Git\usr\bin\bash.exe`. It rejects WSL/System32 Bash, including `C:\WINDOWS\system32\bash.exe`.
@@ -37,9 +40,12 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - [Official n8n Skills](https://github.com/n8n-io/skills) plus official instance-level MCP setup/config references are secondary and not part of the beginner local setup path.
 - Use `skills/ai-coding-agent-rules` for generic AI coding agent rules.
 - Use `skills/n8n-agent-rules` or [references/n8n-agent-rules.md](references/n8n-agent-rules.md) for the full n8n operating ruleset.
-- Keep tokens, API keys, and webhook secrets out of repo files.
+- Keep tokens, API keys, webhook secrets, tunnel tokens, `.env` values, real domains, account IDs, DNS values, IPs, backups, exports, certs, and private deployment notes out of repo files and chats.
+- Do not expose Postgres publicly.
+- Do not expose n8n directly on public host port `5678`.
 - Do not run live n8n import/export, workflow activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
-- For live n8n work, require explicit current-turn confirmation and identify the target instance first.
+- Do not run live Cloudflare, DNS, tunnel, Docker, credential, workflow activation, import/export, or production actions without explicit current-turn approval naming the target and allowed operation.
+- For live n8n or production work, require explicit current-turn confirmation and identify the target instance first.
 
 ## Common Outputs
 
@@ -51,9 +57,14 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - Placeholder environment template: [templates/local-stack/.env.example](templates/local-stack/.env.example)
 - Guided local stack launcher: [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd)
 - PowerShell local stack menu: [templates/local-stack/scripts/n8n-local-menu.ps1](templates/local-stack/scripts/n8n-local-menu.ps1), including local-only backup and restore recovery actions.
+- Production Cloudflare stack: [templates/production-cloudflare-stack/docker-compose.yml](templates/production-cloudflare-stack/docker-compose.yml)
+- Production Cloudflare environment template: [templates/production-cloudflare-stack/.env.example](templates/production-cloudflare-stack/.env.example)
+- Guided production Cloudflare launcher: [templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd](templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd)
+- PowerShell production Cloudflare menu: [templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1](templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1), including production preflight, logs, status, Postgres backup, and image update actions.
 - Official instance-level MCP config templates: [templates/mcp-configs/](templates/mcp-configs/)
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
 - Hostinger Coolify VPS n8n reference: [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md)
+- Production self-hosting Cloudflare Tunnel reference: [references/n8n/production-cloudflare-tunnel.md](references/n8n/production-cloudflare-tunnel.md)
 - Pack checklist: [packs/codex-n8n-local/pack.json](packs/codex-n8n-local/pack.json)
 
 ## Workflow

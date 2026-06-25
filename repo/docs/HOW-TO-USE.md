@@ -257,10 +257,11 @@ Templates are published material. Review them before copying into a consumer rep
 
 - [Generic agent rule templates](../../skills/ai-coding-agent-rules/) contain generated inert slim baseline templates only. They intentionally do not include the full n8n ruleset or full skill-routing table.
 - [n8n agent rules](../../skills/n8n-agent-rules/) contain the full n8n operating ruleset plus optional brief adapters under `adapters/`.
-- [n8n local setup](../../skills/n8n-local-setup/references/n8n/local-setup.md) and [Hostinger Coolify VPS n8n](../../skills/n8n-local-setup/references/n8n/hostinger-vps.md) contain the full local and hosted n8n setup guides.
+- [n8n local setup](../../skills/n8n-local-setup/references/n8n/local-setup.md), [production Cloudflare Tunnel self-hosting](../../skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md), and [Hostinger Coolify VPS n8n](../../skills/n8n-local-setup/references/n8n/hostinger-vps.md) contain the full local dev, local/CGNAT production, and hosted n8n setup guides.
 - [Codex SSH Hostinger Coolify Setup Maintainer](../../skills/codex-ssh-hostinger-coolify-setup-maintainer/) is the separate skill for Hostinger VPS plus Coolify setup, SSH preflight, maintenance, and incident response. Use it before the hosted n8n guide when Coolify is not already running.
 - [n8n AI-agent platform references](../../skills/n8n-local-setup/references/ai-agent-platforms/) contain platform-specific skills/rules pointers, [official n8n Skills](https://github.com/n8n-io/skills) setup, and official n8n MCP setup.
-- [n8n local stack templates](../../skills/n8n-local-setup/templates/local-stack/) contain the local Docker Compose, placeholder environment, launcher, and menu files.
+- [n8n local stack templates](../../skills/n8n-local-setup/templates/local-stack/) contain the localhost/ngrok dev Docker Compose, placeholder environment, launcher, and menu files.
+- [n8n production Cloudflare stack templates](../../skills/n8n-local-setup/templates/production-cloudflare-stack/) contain the separate production Docker Compose, placeholder environment, launcher, and menu files for local/CGNAT self-hosting through Cloudflare Tunnel.
 - [n8n MCP config templates](../../skills/n8n-local-setup/templates/mcp-configs/) contain official instance-level MCP config examples for users intentionally enabling n8n MCP.
 - [n8n import/export sync helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/) contain n8n import/export, validation, compare, prepare, and sync helper templates.
 - [n8n sanitizer helpers](../../skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/) contain sanitizer tooling.
@@ -295,6 +296,8 @@ Use:
 - [optional Codex n8n adapter](../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
+- [Production Cloudflare Tunnel reference](../../skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md)
+- [Production Cloudflare stack templates](../../skills/n8n-local-setup/templates/production-cloudflare-stack/)
 - [Local n8n setup source module](../../_projects/n8n/local-setup/)
 
 Keep live n8n tokens in user environment variables, not repo files. Codex [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup is secondary and not part of the beginner local setup path.
@@ -310,6 +313,8 @@ Use:
 - [optional Claude n8n adapter](../../skills/n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
+- [Production Cloudflare Tunnel reference](../../skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md)
+- [Production Cloudflare stack templates](../../skills/n8n-local-setup/templates/production-cloudflare-stack/)
 
 Claude Code [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup is secondary and not part of the beginner local setup path.
 
@@ -323,6 +328,8 @@ Use:
 - [optional OpenCode n8n adapter](../../skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
+- [Production Cloudflare Tunnel reference](../../skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md)
+- [Production Cloudflare stack templates](../../skills/n8n-local-setup/templates/production-cloudflare-stack/)
 
 OpenCode [official n8n Skills](https://github.com/n8n-io/skills) support is platform-dependent; the official instance-level MCP setup is secondary and not part of the beginner local setup path.
 
@@ -338,6 +345,8 @@ Use:
 - [optional Antigravity 2 n8n adapter](../../skills/n8n-agent-rules/adapters/GEMINI.n8n-brief.template.md)
 - [Local n8n setup reference](../../skills/n8n-local-setup/references/n8n/local-setup.md)
 - [Local stack templates](../../skills/n8n-local-setup/templates/local-stack/)
+- [Production Cloudflare Tunnel reference](../../skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md)
+- [Production Cloudflare stack templates](../../skills/n8n-local-setup/templates/production-cloudflare-stack/)
 
 Antigravity 2 [official n8n Skills](https://github.com/n8n-io/skills) support is platform-dependent; the official instance-level MCP setup is secondary and not part of the beginner local setup path.
 
