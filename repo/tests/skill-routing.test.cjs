@@ -324,7 +324,10 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /For normal human setup, keep the journey short/);
   assert.match(howToUse, /In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh`/);
   assert.match(howToUse, /manually approve the startup hook when Codex prompts/);
-  assert.match(howToUse, /Claude Code uses `node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main --host claude-code`/);
+  assert.match(howToUse, /Windows Codex uses `node "%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs" --execute --profile auto-main`/);
+  assert.match(howToUse, /POSIX Codex uses `node "\$HOME\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs" --execute --profile auto-main`/);
+  assert.match(howToUse, /Claude Code appends `--host claude-code`/);
+  assert.match(howToUse, /active repo only as bootstrap\/fallback|active repo.*bootstrap\/fallback/i);
   assert.match(howToUse, /\.codex-plugin\/plugin\.json/);
   assert.match(howToUse, /\.claude-plugin\/plugin\.json/);
   assert.match(howToUse, /Codex does not install or update Claude Code/);
@@ -357,7 +360,10 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /\| Plugin-scoped \| `C:\\Users\\<user>\\\.gemini\\config\\plugins\\<plugin-name>\\skills\\<skill-name>\\SKILL\.md` \|/);
 
   assert.match(readme, /In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh`/);
-  assert.match(readme, /Codex uses `node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main`; Claude Code uses `node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main --host claude-code`/);
+  assert.match(readme, /managed checkout setup script when it exists|managed checkout script when it exists/i);
+  assert.match(readme, /node "%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs" --execute --profile auto-main/);
+  assert.match(readme, /node "\$HOME\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs" --execute --profile auto-main/);
+  assert.match(readme, /active repo.*bootstrap\/fallback/i);
   assert.match(readme, /manually approve the startup hook when Codex prompts/);
   assert.match(readme, /Keep native plugin installs host-local: Codex must not install\/update Claude Code, and Claude Code must not install\/update Codex/);
   assert.match(readmeInstallSection, /Copy the whole `skills\/<skill-name>\/` folder into \*\*ANY ONE\*\* supported location/);

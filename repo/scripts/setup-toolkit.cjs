@@ -25,6 +25,10 @@ function defaultManagedSourcePath() {
   return path.join(os.homedir(), '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
 }
 
+function defaultManagedSetupScriptPath() {
+  return path.join(defaultManagedSourcePath(), 'repo', 'scripts', 'setup-toolkit.cjs');
+}
+
 function quote(value) {
   return JSON.stringify(String(value));
 }
@@ -36,6 +40,13 @@ function slash(value) {
 function isInside(parent, child) {
   const rel = path.relative(path.resolve(parent), path.resolve(child));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function samePath(left, right) {
+  const leftResolved = path.resolve(left);
+  const rightResolved = path.resolve(right);
+  if (process.platform === 'win32') return leftResolved.toLowerCase() === rightResolved.toLowerCase();
+  return leftResolved === rightResolved;
 }
 
 function normalizeRemote(value) {
@@ -427,13 +438,15 @@ function printHelp() {
     'AI Agent Toolkit setup orchestrator',
     '',
     'Default mode is --plan. The recommended setup entrypoint is:',
-    '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main',
+    '  node "%USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main',
+    '  node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main',
+    '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main  # bootstrap/fallback only when managed script is missing',
     '',
     'Common commands:',
     '  node repo/scripts/setup-toolkit.cjs --plan --json',
     '  node repo/scripts/setup-toolkit.cjs --execute --auto-main',
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --yes-recommended',
-    '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --host claude-code',
+    '  node "%USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
     '  node repo/scripts/setup-toolkit.cjs --execute --auto-main --enable-target opencode',
     '  node repo/scripts/setup-toolkit.cjs --execute --auto-main --enable-target opencode --enable-target ag2',
     '',
@@ -550,6 +563,44 @@ function runGitCapture(repoRoot, args, label, allowFailure = false, quiet = fals
   const result = runCommand(label, 'git', args, { cwd: repoRoot, capture: true, timeout: 60000, allowFailure: true, quiet });
   if (result.status !== 0 && !allowFailure) throw new Error(`${label} failed with exit code ${result.status}: ${(result.stderr || result.stdout || '').trim()}`);
   return (result.stdout || '').trim();
+}
+
+function commitForSummary(repoPath) {
+  if (!repoPath || !fs.existsSync(repoPath)) return 'unknown';
+  return runGitCapture(repoPath, ['rev-parse', 'HEAD'], 'git rev-parse HEAD', true, true) || 'unknown';
+}
+
+function delegateToManagedSetupIfAvailable(args) {
+  if (!args.execute || args.repoRootExplicit) return null;
+  const managedScript = defaultManagedSetupScriptPath();
+  const currentScript = path.resolve(__filename);
+  if (!fs.existsSync(managedScript) || samePath(managedScript, currentScript)) return null;
+
+  const activeRoot = repoRootFromScript();
+  const managedRoot = defaultManagedSourcePath();
+  console.log('# setup toolkit managed route');
+  console.log(`Active worktree path: ${activeRoot}`);
+  console.log(`Active worktree commit: ${commitForSummary(activeRoot)}`);
+  console.log(`Managed checkout path: ${managedRoot}`);
+  console.log(`Managed checkout commit: ${commitForSummary(managedRoot)}`);
+  console.log(`Setup script path executed: ${managedScript}`);
+  console.log('Active worktree setup is bootstrap/fallback only; delegating to the managed checkout setup script.');
+  console.log('');
+
+  const interactive = process.stdin.isTTY;
+  const result = spawnSync(process.execPath, [managedScript, ...args.argv], {
+    cwd: managedRoot,
+    encoding: interactive ? undefined : 'utf8',
+    input: interactive ? undefined : fs.readFileSync(0, 'utf8'),
+    stdio: interactive ? 'inherit' : ['pipe', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  if (result.error) throw result.error;
+  if (!interactive) {
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+  }
+  return typeof result.status === 'number' ? result.status : 1;
 }
 
 function scriptRootForReadOnlyProbe(args) {
@@ -1349,6 +1400,8 @@ async function main(argv = process.argv.slice(2)) {
     verifyClaudeNativePluginMetadata(args);
     return 0;
   }
+  const delegatedCode = delegateToManagedSetupIfAvailable(args);
+  if (delegatedCode !== null) return delegatedCode;
   const plan = setupPlan(args);
   if (args.plan) {
     printPlan(plan, args.json);

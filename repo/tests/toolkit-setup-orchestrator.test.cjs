@@ -135,6 +135,32 @@ function createGitBackedSetupRepo(root) {
   return { origin, setupRepo };
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function createFakeManagedSetupScript(root, version = '2.2.1') {
+  const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
+  writeFile(scriptPath, [
+    '#!/usr/bin/env node',
+    "'use strict';",
+    `console.log('managed setup script version ${version}');`,
+    "console.log('# setup toolkit question bank');",
+    "console.log('Setup script path executed: ' + __filename);",
+    'process.exit(23);',
+    ''
+  ].join('\n'));
+  writeFile(path.join(managedPath, 'AGENTS.md'), '# fake managed toolkit repo\n');
+  runTestGit(managedPath, ['init']);
+  runTestGit(managedPath, ['checkout', '-b', 'main']);
+  runTestGit(managedPath, ['config', 'user.email', 'setup-test@example.invalid']);
+  runTestGit(managedPath, ['config', 'user.name', 'Setup Test']);
+  runTestGit(managedPath, ['add', '.']);
+  runTestGit(managedPath, ['commit', '-m', 'managed setup']);
+  return { managedPath, scriptPath };
+}
+
 function flattenCommands(plan) {
   return plan.steps.flatMap((step) => step.commands || []);
 }
@@ -327,6 +353,38 @@ test('setup execute creates missing managed checkout by cloning the expected rem
   assert.match(result.stdout, /Managed checkout path:/);
 });
 
+test('active setup command delegates to managed checkout script when it exists', () => {
+  const root = tmpRoot();
+  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.2.1');
+  const beforeStatus = runTestGit(repoRoot, ['status', '--short']);
+  const result = run(['--execute', '--profile', 'auto-main'], {
+    env: isolatedHomeEnv(root)
+  });
+  const afterStatus = runTestGit(repoRoot, ['status', '--short']);
+
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.equal(beforeStatus, afterStatus, 'active worktree status must not change during delegation');
+  assert.match(result.stdout, /# setup toolkit managed route/);
+  assert.match(result.stdout, new RegExp(`Active worktree path: ${escapeRegExp(repoRoot)}`));
+  assert.match(result.stdout, /Active worktree commit: [0-9a-f]{40}/);
+  assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
+  assert.match(result.stdout, /Managed checkout commit: [0-9a-f]{40}/);
+  assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
+  assert.match(result.stdout, /managed setup script version 2\.2\.1/);
+  assert.match(result.stdout, /# setup toolkit question bank/);
+});
+
+test('active setup command falls back locally when managed checkout script is missing', () => {
+  const root = tmpRoot();
+  const result = run(['--execute', '--profile', 'auto-main'], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stdout, /# setup toolkit managed route/);
+  assert.match(result.stdout, /# setup toolkit question bank/);
+});
+
 test('yes-recommended uses the default managed checkout when stored repo path is the active worktree', () => {
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
@@ -358,7 +416,7 @@ test('yes-recommended uses the default managed checkout when stored repo path is
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Managed checkout:[\s\S]*recommended: default/);
   assert.match(result.stdout, /- Managed checkout: default/);
-  assert.match(result.stdout, new RegExp(`Managed checkout path: ${managedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.equal(fs.existsSync(path.join(managedPath, 'AGENTS.md')), true);
   assert.equal(fs.existsSync(path.join(repoRoot, 'BRIDGE_ARGS.log')), false, 'active worktree must not receive setup writes');
 });
@@ -394,7 +452,7 @@ test('yes-recommended may keep the safe standard managed checkout', () => {
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Managed checkout:[\s\S]*recommended: keep/);
   assert.match(result.stdout, /- Managed checkout: keep/);
-  assert.match(result.stdout, new RegExp(`Managed checkout path: ${managedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false, 'old source worktree must not receive setup writes');
 });
 

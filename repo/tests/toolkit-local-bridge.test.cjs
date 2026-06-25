@@ -2297,8 +2297,13 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
   for (const relPath of paths) {
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
-    assert.match(text, /node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main/, relPath);
-    assert.match(text, /node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main --host claude-code/, relPath);
+    assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/, relPath);
+    assert.match(text, /\$HOME\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs/, relPath);
+    assert.match(text, /active repo command is bootstrap\/fallback only|active `repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` as bootstrap\/fallback only|active repo only as bootstrap\/fallback/i, relPath);
+    assert.match(text, /append `--host claude-code`|with `--host claude-code`/i, relPath);
+    assert.match(text, /Do not run an active stale verifier after managed setup|Verification after managed setup must use the managed checkout verifier/i, relPath);
+    assert.match(text, /active worktree path and commit|active worktree path\/commit/i, relPath);
+    assert.match(text, /exact setup script path executed/i, relPath);
     assert.match(text, /dedicated clean `main` checkout as the single update source/, relPath);
     assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit/, relPath);
     assert.match(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
