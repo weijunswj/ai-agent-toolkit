@@ -39,6 +39,15 @@ function allowImplicit(skillName) {
   return match[1] === 'true';
 }
 
+test('OpenAI skill metadata declares Codex product surface for plugin grouping', () => {
+  for (const skillName of skillNames()) {
+    const relPath = path.join('skills', skillName, 'agents', 'openai.yaml');
+    const text = readText(relPath);
+    assert.match(text, /^\s*products:\s*$/m, relPath + ' must declare policy.products');
+    assert.match(text, /^\s*-\s*codex\s*$/m, relPath + ' must include codex in policy.products');
+  }
+});
+
 test('OpenAI invocation policy keeps only safety, setup, and high-signal knowledge routers implicit', () => {
   const actualImplicit = skillNames().filter((name) => allowImplicit(name));
   assert.deepEqual(actualImplicit, intendedImplicitSkills);
