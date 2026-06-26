@@ -1,0 +1,11 @@
+interface:
+  display_name: n8n Workflow Templates
+  short_description: Review generic inactive n8n workflow templates.
+  primary_color: '#EA4B71'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: false

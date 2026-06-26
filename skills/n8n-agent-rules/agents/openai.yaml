@@ -1,0 +1,11 @@
+interface:
+  display_name: n8n Agent Rules
+  short_description: Apply the mandatory n8n safety router.
+  primary_color: '#EA4B71'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: true

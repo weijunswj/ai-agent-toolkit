@@ -1,6 +1,6 @@
 ---
 name: n8n-workflow-helper-scripts
-description: Use for safe n8n workflow helper-script templates, including sanitizer helpers, import/export sync helpers, validation, comparison, live-import preparation, and repo/live workflow hygiene. Applies when copying, reviewing, or explaining these helper scripts for a consumer repo, after applying n8n-agent-rules.
+description: Use when copying, reviewing, or explaining safe n8n workflow helper-script templates such as sanitizer helpers, import/export sync helpers, validation, comparison, live-import preparation, and repo/live workflow hygiene. Apply n8n-agent-rules first.
 ---
 
 <!--

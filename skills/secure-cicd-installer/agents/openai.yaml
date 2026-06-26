@@ -1,0 +1,11 @@
+interface:
+  display_name: Secure CI/CD Installer
+  short_description: Plan CI/CD hardening with approval gates.
+  primary_color: '#DC2626'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: false

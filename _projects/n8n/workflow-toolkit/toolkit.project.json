@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "version_policy": "semver",
-  "version_notes": "Refreshes n8n workflow skill dependency wording to route through official n8n Skills (https://github.com/n8n-io/skills) and capability-aware official n8n MCP use before live work.",
+  "version_notes": "Adds OpenAI invocation-policy metadata so n8n workflow helper and template skills stay explicit-only behind the n8n-agent-rules safety router.",
   "outputs": [
     {
       "kind": "curated",
@@ -127,6 +127,20 @@
       "output": "skills/n8n-workflow-templates/templates/chatbot-with-RAG/rag-ingestion.workflow.template.json",
       "notes": "Reviewed generic inactive RAG knowledge-base ingestion workflow template generated from preserved source JSON.",
       "fidelity": "exact"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-workflow-helper-scripts/agents/openai.yaml",
+      "output": "skills/n8n-workflow-helper-scripts/agents/openai.yaml",
+      "notes": "OpenAI-facing metadata for explicit-only n8n helper-script guidance.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-workflow-templates/agents/openai.yaml",
+      "output": "skills/n8n-workflow-templates/agents/openai.yaml",
+      "notes": "OpenAI-facing metadata for explicit-only n8n workflow-template guidance.",
+      "fidelity": "generated_metadata"
     }
   ],
   "writes": {
@@ -160,7 +174,9 @@
       "skills/n8n-workflow-templates/templates/README.md",
       "skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json",
       "skills/n8n-workflow-templates/templates/chatbot-with-RAG/customer-support-agent.workflow.template.json",
-      "skills/n8n-workflow-templates/templates/chatbot-with-RAG/rag-ingestion.workflow.template.json"
+      "skills/n8n-workflow-templates/templates/chatbot-with-RAG/rag-ingestion.workflow.template.json",
+      "skills/n8n-workflow-helper-scripts/agents/openai.yaml",
+      "skills/n8n-workflow-templates/agents/openai.yaml"
     ],
     "denied": [
       ".env*",

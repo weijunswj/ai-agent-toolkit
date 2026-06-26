@@ -23,6 +23,7 @@ The source-of-truth contract partial is the repo-managed contract block source u
 
 - `skills/context-preserving-ai-publisher/SKILL.md` is a concise curated router.
 - `skills/context-preserving-ai-publisher/README.md` is a curated install/use note.
+- `skills/context-preserving-ai-publisher/agents/openai.yaml` is generated from reviewed curated OpenAI invocation-policy metadata.
 - `skills/context-preserving-ai-publisher/references/README.md` is a curated skill-local reference index.
 - `skills/context-preserving-ai-publisher/references/*.md` are exact generated copies from `_main/*.md`.
 - `skills/context-preserving-ai-publisher/templates/**` are exact generated copies from `_main/templates/**`.

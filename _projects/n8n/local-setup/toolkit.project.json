@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.5.0",
+  "version": "3.5.1",
   "version_policy": "semver",
-  "version_notes": "Adds a separate production Cloudflare Tunnel self-hosting guide and stack for local/CGNAT machines while keeping the existing localhost/ngrok dev stack unchanged.",
+  "version_notes": "Adds OpenAI invocation-policy metadata so n8n-local-setup stays explicit-only while n8n-agent-rules remains the implicit safety router.",
   "outputs": [
     {
       "kind": "curated",
@@ -343,6 +343,13 @@
       "output": "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
       "notes": "Published install pack generated from project-owned curated AI output.",
       "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-local-setup/agents/openai.yaml",
+      "output": "skills/n8n-local-setup/agents/openai.yaml",
+      "notes": "OpenAI-facing metadata for explicit-only n8n environment setup guidance.",
+      "fidelity": "generated_metadata"
     }
   ],
   "writes": {
@@ -377,7 +384,8 @@
       "skills/n8n-local-setup/packs/codex-n8n-local/README.md",
       "skills/n8n-local-setup/packs/codex-n8n-local/pack.json",
       "skills/n8n-local-setup/packs/claude-code-n8n-local/README.md",
-      "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json"
+      "skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json",
+      "skills/n8n-local-setup/agents/openai.yaml"
     ],
     "denied": [
       ".env*",

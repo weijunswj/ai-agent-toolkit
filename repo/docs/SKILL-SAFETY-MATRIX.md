@@ -44,7 +44,7 @@ It does not grant permission to run risky actions. Repo rules, skill instruction
 
 ## Description Review Notes
 
-Current `SKILL.md` descriptions are specific enough to route the existing skills without edits in this pass. The n8n family intentionally overlaps, but `n8n-agent-rules` remains the required safety router before setup, helper-script, template, workflow, or live n8n work. The project completion audit skill is intentionally guarded: implicit routing, where it happens at all, is preflight-only until explicit target/scope confirmation. The Hostinger/Coolify skill is production-sensitive setup and maintainer guidance with owner approval gates; the local AI and self-hosted safety skills are intentionally review-only and should not trigger for ordinary coding tasks.
+OpenAI/Codex packaged metadata intentionally keeps implicit invocation sparse for Plugin Eval and runtime token hygiene. The only intended implicit skills are `toolkit-setup`, `n8n-agent-rules`, and `agent-skill-supply-chain-audit`: `toolkit-setup` stays implicit for `setup toolkit`, `refresh toolkit`, and Toolkit bridge routing; `n8n-agent-rules` and `agent-skill-supply-chain-audit` stay implicit as safety routers. Broad, heavy, production-sensitive, or companion skills should stay explicit-only unless a future review documents a narrow safety-router reason. The project completion audit skill must remain explicit-only and guarded because final readiness audits can become broad, expensive, and security-sensitive.
 
 Watch these trigger boundaries when editing descriptions:
 

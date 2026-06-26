@@ -23,11 +23,11 @@
       "notes": "Toolkit-adapted after migration to cover Windows Start-Process duplicate Path/PATH failures, Codex sandbox background process persistence, single-string ArgumentList usage, logged launch, and HTTP health polling guidance."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "skills/windows-localhost-workflows/agents/openai.yaml",
       "project_path": "_projects/development/windows-localhost-workflows/_main/skill/agents/openai.yaml",
       "source_blob_sha": "57c8b6d98ca2770a46d27036200f6a6bf9a2c465",
-      "notes": "Former standalone OpenAI platform metadata promoted exactly into _main/skill."
+      "notes": "Toolkit-adapted after migration to keep Windows localhost workflow guidance explicit-only in packaged OpenAI metadata and reduce Plugin Eval trigger/invoke budgets."
     }
   ]
 }

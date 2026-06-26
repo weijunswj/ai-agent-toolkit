@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.2.4';
+const BRIDGE_VERSION = '2.2.5';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];

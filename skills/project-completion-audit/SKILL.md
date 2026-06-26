@@ -1,6 +1,6 @@
 ---
 name: project-completion-audit
-description: Guarded project completion and production-readiness audit loop for final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready", "/goal" readiness remediation, audit against original docs, security-readiness check, or final readiness check. Performs lightweight preflight only until explicit confirmation authorizes full audit, security scan, browser verification, and remediation scope.
+description: Use when running a guarded final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready", "/goal" readiness remediation, security-readiness check, or final readiness check. Performs preflight only until explicit confirmation authorizes scope.
 ---
 
 <!--

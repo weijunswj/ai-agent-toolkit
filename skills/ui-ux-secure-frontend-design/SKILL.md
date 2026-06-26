@@ -1,6 +1,6 @@
 ---
 name: ui-ux-secure-frontend-design
-description: Security-first frontend UI/UX design skill for creating, reviewing, and improving web interfaces. Use for design systems, landing pages, SaaS dashboards, forms, component planning, accessibility, responsive polish, privacy-safe UX, and implementation review.
+description: Use when creating, reviewing, or improving frontend web interfaces, including design systems, landing pages, SaaS dashboards, forms, component planning, accessibility, responsive polish, privacy-safe UX, and implementation review.
 ---
 
 <!--

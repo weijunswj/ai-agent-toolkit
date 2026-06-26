@@ -1,6 +1,6 @@
 ---
 name: n8n-local-setup
-description: Guide AI agents through safe n8n environment setup with the localhost/ngrok dev stack, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, hosted n8n on Hostinger Coolify VPS, launcher/menu use, [official n8n Skills](https://github.com/n8n-io/skills) setup, and official instance-level MCP references. For any n8n workflow, helper-script, or live n8n task, first apply n8n-agent-rules.
+description: Use when setting up safe n8n environments: localhost/ngrok dev stack, production Cloudflare Tunnel self-hosting for local/CGNAT machines, hosted n8n on Hostinger Coolify VPS, launcher/menu use, official n8n Skills setup, or instance-level MCP references. For workflow, helper-script, or live n8n tasks, first apply n8n-agent-rules.
 ---
 
 <!--

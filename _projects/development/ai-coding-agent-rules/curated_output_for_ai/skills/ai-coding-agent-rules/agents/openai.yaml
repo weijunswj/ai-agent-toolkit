@@ -1,0 +1,11 @@
+interface:
+  display_name: AI Coding Agent Rules
+  short_description: Bootstrap or repair repo-local agent instructions.
+  primary_color: '#2563EB'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: false

@@ -1,0 +1,11 @@
+interface:
+  display_name: n8n Local Setup
+  short_description: Set up safe local or self-hosted n8n environments.
+  primary_color: '#EA4B71'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: false
