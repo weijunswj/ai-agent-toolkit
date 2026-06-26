@@ -525,6 +525,11 @@ function runCommand(label, command, args, options = {}) {
   return result;
 }
 
+function recordValidation(validationResults, command, status) {
+  if (!validationResults) return;
+  validationResults.push({ command, status });
+}
+
 function isCredentialError(message = '') {
   return /SEC_E_NO_CREDENTIALS|Authentication failed|could not read Username|Authentication|permission denied|terminal prompts disabled/i.test(message);
 }
@@ -570,6 +575,17 @@ function commitForSummary(repoPath) {
   return runGitCapture(repoPath, ['rev-parse', 'HEAD'], 'git rev-parse HEAD', true, true) || 'unknown';
 }
 
+function branchForSummary(repoPath) {
+  if (!repoPath || !fs.existsSync(repoPath)) return 'unknown';
+  return runGitCapture(repoPath, ['branch', '--show-current'], 'git branch --show-current', true, true) || 'unknown';
+}
+
+function statusForSummary(repoPath) {
+  if (!repoPath || !fs.existsSync(repoPath)) return 'unknown';
+  const status = runGitCapture(repoPath, ['status', '--short'], 'git status --short', true, true);
+  return status ? 'dirty' : 'clean';
+}
+
 function delegateToManagedSetupIfAvailable(args) {
   if (!args.execute || args.repoRootExplicit) return null;
   const managedScript = defaultManagedSetupScriptPath();
@@ -580,8 +596,12 @@ function delegateToManagedSetupIfAvailable(args) {
   const managedRoot = defaultManagedSourcePath();
   console.log('# setup toolkit managed route');
   console.log(`Active worktree path: ${activeRoot}`);
+  console.log(`Active worktree branch: ${branchForSummary(activeRoot)}`);
   console.log(`Active worktree commit: ${commitForSummary(activeRoot)}`);
+  console.log(`Active worktree status: ${statusForSummary(activeRoot)}`);
+  console.log('Active worktree role: delegated to managed checkout');
   console.log(`Managed checkout path: ${managedRoot}`);
+  console.log(`Managed checkout default path: ${defaultManagedSourcePath()} (Windows default: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit; POSIX default: $HOME/.ai-agent-toolkit/source/ai-agent-toolkit)`);
   console.log(`Managed checkout commit: ${commitForSummary(managedRoot)}`);
   console.log(`Setup script path executed: ${managedScript}`);
   console.log('Active worktree setup is bootstrap/fallback only; delegating to the managed checkout setup script.');
@@ -959,8 +979,11 @@ async function promptForCustomPath(lines, rl) {
 async function answerSetupQuestionBank(args, current) {
   const specs = setupQuestionSpecs(args, current);
   printSetupQuestionBank(args, current, specs);
+  const initialMissingCount = specs.filter((spec) => !choiceForKey(args, spec.key)).length;
+  let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
 
   if (args.yesRecommended) {
+    answerSource = 'user-approved yes-recommended';
     console.log('');
     console.log('--yes-recommended selected; setup will apply these choices before writing:');
     for (const spec of specs) {
@@ -997,6 +1020,11 @@ async function answerSetupQuestionBank(args, current) {
   console.log('');
   console.log('Setup choices confirmed before writes:');
   for (const spec of specs) console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
+  return {
+    appeared: true,
+    stopped_for_answers: initialMissingCount > 0 && !args.yesRecommended,
+    answer_source: answerSource || 'none'
+  };
 }
 
 function applySetupChoices(args, current) {
@@ -1073,7 +1101,7 @@ function cloneManagedCheckoutIfMissing(args) {
   return true;
 }
 
-function verifyAndUpdateTrustedRepo(args) {
+function verifyAndUpdateTrustedRepo(args, validationResults) {
   validateManagedSourcePath(args);
   const cloned = cloneManagedCheckoutIfMissing(args);
   assertRepoRoot(args.repoRoot);
@@ -1111,11 +1139,16 @@ function verifyAndUpdateTrustedRepo(args) {
   });
   if (ancestor.status !== 0) throw new Error(`Managed source checkout cannot fast-forward from ${headBefore} to ${fetchedCommit}`);
   runCommand('git merge --ff-only FETCH_HEAD', 'git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: args.repoRoot, timeout: 120000 });
-  runManagedHookLightValidation(args);
+  runManagedHookLightValidation(args, validationResults);
+  const headAfter = runGitCapture(args.repoRoot, ['rev-parse', 'HEAD'], 'git rev-parse HEAD');
   return {
     cloned,
     branch,
-    commit: runGitCapture(args.repoRoot, ['rev-parse', 'HEAD'], 'git rev-parse HEAD')
+    remote,
+    commit_before: cloned ? 'unknown' : headBefore,
+    commit_after: headAfter,
+    commit: headAfter,
+    update_action: cloned ? 'cloned' : (headBefore === headAfter ? 'already up to date' : 'fast-forwarded')
   };
 }
 
@@ -1129,6 +1162,26 @@ function setupCodexArgs(args, mode) {
   return nodeScriptArgs('repo/scripts/setup-codex-toolkit-plugin.cjs', extra);
 }
 
+function parseJsonFromOutput(text) {
+  return parseFirstJsonObject(text) || {};
+}
+
+function expectedToolkitVersion(repoRoot, platform = 'codex') {
+  const rel = platform === 'claude-code'
+    ? ['.claude-plugin', 'plugin.json']
+    : ['.codex-plugin', 'plugin.json'];
+  try {
+    return readJsonFile(path.join(repoRoot, ...rel)).version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function defaultCodexPluginCachePath(version) {
+  if (!version || version === 'unknown') return 'unknown';
+  return path.join(os.homedir(), '.codex', 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', version);
+}
+
 function runCodexNativePluginSetup(args) {
   const verify = runCommand(
     'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
@@ -1136,9 +1189,19 @@ function runCodexNativePluginSetup(args) {
     setupCodexArgs(args, '--verify'),
     { cwd: args.repoRoot, capture: true, timeout: 120000, allowFailure: true }
   );
+  const expectedVersion = expectedToolkitVersion(args.repoRoot, 'codex');
   if (verify.status === 0) {
     process.stdout.write(verify.stdout || '');
-    return { status: 'fresh', restart_required: false, hook_trust_action: 'review Codex hook trust if prompted' };
+    const summary = parseJsonFromOutput(verify.stdout);
+    return {
+      status: 'already fresh',
+      cache_path: summary.cache_root || defaultCodexPluginCachePath(summary.version || expectedVersion),
+      expected_version: expectedVersion,
+      installed_version: summary.version || expectedVersion,
+      updated_this_run: false,
+      restart_required: false,
+      hook_trust_action: summary.hook_trust_message || 'review Codex hook trust if prompted'
+    };
   }
   process.stderr.write(verify.stderr || '');
 
@@ -1148,13 +1211,23 @@ function runCodexNativePluginSetup(args) {
     setupCodexArgs(args, '--write'),
     { cwd: args.repoRoot, timeout: 180000 }
   );
-  runCommand(
+  const finalVerify = runCommand(
     'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
     process.execPath,
     setupCodexArgs(args, '--verify'),
-    { cwd: args.repoRoot, timeout: 120000 }
+    { cwd: args.repoRoot, capture: true, timeout: 120000 }
   );
-  return { status: 'refreshed', restart_required: true, hook_trust_action: 'approve the Codex SessionStart hook when Codex prompts' };
+  process.stdout.write(finalVerify.stdout || '');
+  const summary = parseJsonFromOutput(finalVerify.stdout);
+  return {
+    status: 'refreshed',
+    cache_path: summary.cache_root || defaultCodexPluginCachePath(summary.version || expectedVersion),
+    expected_version: expectedVersion,
+    installed_version: summary.version || expectedVersion,
+    updated_this_run: true,
+    restart_required: true,
+    hook_trust_action: summary.hook_trust_message || 'approve the Codex SessionStart hook when Codex prompts'
+  };
 }
 
 function readJsonFile(filePath) {
@@ -1196,7 +1269,15 @@ function verifyClaudeNativePluginMetadata(args) {
   }
   console.log('Claude Code native plugin metadata verified.');
   console.log('If Claude Code reports the Toolkit plugin is missing, stale, disabled, or untrusted, refresh it through Claude Code native plugin UI/flow. Codex will not mutate Claude Code plugin cache.');
-  return { status: 'verified-manual-refresh-if-needed', restart_required: false, hook_trust_action: 'follow Claude Code native plugin trust prompts if shown' };
+  return {
+    status: 'metadata present',
+    manifest_path: pluginPath,
+    expected_version: expectedToolkitVersion(args.repoRoot, 'claude-code'),
+    manifest_version: plugin.version || 'unknown',
+    updated_this_run: false,
+    restart_required: false,
+    hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
+  };
 }
 
 function bridgeArgs(args, extraArgs = []) {
@@ -1205,21 +1286,25 @@ function bridgeArgs(args, extraArgs = []) {
   return result;
 }
 
-function runManagedHookLightValidation(args) {
+function runManagedHookLightValidation(args, validationResults) {
+  const command = 'node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs';
   runCommand(
-    'node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs',
+    command,
     process.execPath,
     ['--test', path.join('repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs')],
     { cwd: args.repoRoot, timeout: 60000 }
   );
+  recordValidation(validationResults, command, 'passed');
 }
 
-function runLiteValidation(args) {
-  runCommand('node repo/scripts/validate-toolkit.cjs', process.execPath, nodeScriptArgs('repo/scripts/validate-toolkit.cjs'), {
+function runLiteValidation(args, validationResults) {
+  const validateCommand = 'node repo/scripts/validate-toolkit.cjs';
+  runCommand(validateCommand, process.execPath, nodeScriptArgs('repo/scripts/validate-toolkit.cjs'), {
     cwd: args.repoRoot,
     timeout: 120000
   });
-  runManagedHookLightValidation(args);
+  recordValidation(validationResults, validateCommand, 'passed');
+  runManagedHookLightValidation(args, validationResults);
 }
 
 function runBridgeWrite(args, label, extraArgs) {
@@ -1338,55 +1423,163 @@ function printPlan(plan, asJson) {
 }
 
 function targetChoiceSummary(choice) {
-  if (choice === 'keep') return 'kept current state';
-  if (choice === 'skip') return 'skipped this run';
+  if (choice === 'keep') return 'kept';
+  if (choice === 'skip') return 'skipped';
   if (choice === 'enable-sync') return 'enabled/synced';
   if (choice === 'disable') return 'disabled';
-  return 'not selected';
+  return 'not touched';
 }
 
-function printFinalSummary({ args, managed, nativeCache, audit }) {
+function unknown(value) {
+  if (value === undefined || value === null || value === '') return 'unknown';
+  return value;
+}
+
+function yesNo(value) {
+  return value ? 'yes' : 'no';
+}
+
+function activeWorktreeSummary(args) {
+  const activeRoot = repoRootFromScript();
+  let role = 'bootstrap/fallback only';
+  if (samePath(activeRoot, args.repoRoot)) role = 'managed checkout itself';
+  else if (args.repoRootExplicit) role = 'not used for writes';
+  return {
+    path: activeRoot,
+    branch: branchForSummary(activeRoot),
+    commit: commitForSummary(activeRoot),
+    status: statusForSummary(activeRoot),
+    role
+  };
+}
+
+function targetActionSummary(choice) {
+  return targetChoiceSummary(choice);
+}
+
+function printTargetSummary(label, target, choice) {
+  console.log(`${label} detected: ${yesNo(target?.detected === true)}`);
+  console.log(`${label} enabled: ${yesNo(target?.enabled === true)}`);
+  console.log(`${label} synced: ${yesNo(target?.synced === true)}`);
+  console.log(`${label} version: ${unknown(target?.synced_version)}`);
+  console.log(`${label} path: ${unknown(target?.path || target?.target_path || target?.sync_path)}`);
+  console.log(`${label} status: ${unknown(target?.status)}`);
+  console.log(`${label} action this run: ${targetActionSummary(choice)}`);
+}
+
+function printValidationSummary(validationResults) {
+  if (!validationResults || !validationResults.length) {
+    console.log('Validation command: none');
+    console.log('Validation status: skipped');
+    return;
+  }
+  for (const entry of validationResults) {
+    console.log(`Validation command: ${entry.command}`);
+    console.log(`Validation status: ${entry.status}`);
+  }
+}
+
+function printFinalSummary({ args, current, managed, nativeCache, audit, questionBank, validationResults }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const targets = audit?.targets || {};
   const targetChoices = args.setupChoices?.targets || {};
+  const active = activeWorktreeSummary(args);
+  const defaultPath = defaultManagedSourcePath();
+  const setupScriptPath = path.join(args.repoRoot, 'repo', 'scripts', 'setup-toolkit.cjs');
   console.log('');
   console.log('# setup toolkit final summary');
-  console.log(`Host: ${args.host}`);
+  console.log('');
+  console.log('## Active worktree');
+  console.log(`Active worktree path: ${active.path}`);
+  console.log(`Active worktree branch: ${active.branch}`);
+  console.log(`Active worktree commit: ${active.commit}`);
+  console.log(`Active worktree status: ${active.status}`);
+  console.log(`Active worktree role: ${active.role}`);
+  console.log('');
+  console.log('## Managed main checkout');
   console.log(`Managed checkout path: ${args.repoRoot}`);
+  console.log(`Managed checkout default path: ${defaultPath} (Windows default: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit; POSIX default: $HOME/.ai-agent-toolkit/source/ai-agent-toolkit)`);
   console.log(`Managed checkout branch: ${args.repoBranch}`);
-  console.log(`Managed checkout commit: ${managed.commit || 'unknown'}`);
-  console.log(`Repo auto-update status: ${args.repoAutoUpdate ? (repo.last_status || 'configured') : 'disabled'}`);
-  console.log(`Native plugin cache status: ${nativeCache.status || 'unknown'}`);
-  console.log(`Current host cache auto-refresh enabled: ${args.host === 'codex' ? args.codexPluginAutoRefresh : 'manual via Claude Code native flow'}`);
+  console.log(`Managed checkout remote: ${unknown(managed.remote || args.repoRemote)}`);
+  console.log(`Managed checkout commit before: ${unknown(managed.commit_before || current?.managed?.commit)}`);
+  console.log(`Managed checkout commit after: ${unknown(managed.commit_after || managed.commit)}`);
+  console.log(`Managed checkout update action: ${unknown(managed.update_action)}`);
+  console.log(`Setup script path executed: ${setupScriptPath}`);
+  console.log('');
+  console.log('## Question bank');
+  console.log(`Question bank appeared: ${yesNo(questionBank?.appeared)}`);
+  console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
+  console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
+  console.log('Preference/target writes before answers: no');
+  console.log('');
+  console.log('## Codex native plugin');
+  if (args.host === 'codex') {
+    console.log(`Codex plugin cache path: ${unknown(nativeCache.cache_path)}`);
+    console.log(`Codex expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
+    console.log(`Codex installed Toolkit version: ${unknown(nativeCache.installed_version)}`);
+    console.log(`Codex plugin status: ${unknown(nativeCache.status)}`);
+    console.log(`Codex plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
+    console.log(`Codex restart required: ${yesNo(nativeCache.restart_required === true)}`);
+    console.log(`Codex hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
+  } else {
+    console.log('Codex plugin status: not checked for this host');
+    console.log('Codex plugin mutation: no');
+  }
+  console.log('');
+  console.log('## Claude Code native plugin');
+  if (args.host === 'claude-code') {
+    console.log(`Claude plugin manifest path: ${unknown(nativeCache.manifest_path)}`);
+    console.log(`Claude expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
+    console.log(`Claude manifest Toolkit version: ${unknown(nativeCache.manifest_version)}`);
+    console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
+    console.log(`Claude plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
+    console.log(`Claude restart required: ${yesNo(nativeCache.restart_required === true)}`);
+    console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
+  } else {
+    console.log('Claude plugin status: not checked for this host');
+    console.log('Claude plugin mutation: no; Codex setup does not mutate Claude Code plugin cache.');
+  }
+  console.log('');
+  console.log('## Bridge state');
+  console.log(`Repo auto-update enabled: ${yesNo(repo.enabled === true || args.repoAutoUpdate === true)}`);
+  console.log(`Repo auto-update path: ${unknown(repo.repo_path || args.repoRoot)}`);
+  console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
   console.log(`Update report writes enabled: ${args.updateReports}`);
   console.log(`Update report auto-open enabled: ${args.updateReportOpen}`);
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
-  console.log(`Update report/log cleanup: deleted=${cleanup.deleted_count ?? 0}, errors=${cleanup.error_count ?? 0}, directory=${cleanup.report_log_directory || 'unknown'}`);
-  console.log(`OpenCode sync status: ${targets.opencode?.enabled ? (targets.opencode?.status || 'enabled') : 'disabled'}`);
-  console.log(`OpenCode target choice: ${targetChoiceSummary(targetChoices.opencode)}`);
-  console.log(`AG2/Antigravity sync status: ${targets.ag2?.enabled ? (targets.ag2?.status || 'enabled') : 'disabled'}`);
-  console.log(`AG2/Antigravity target choice: ${targetChoiceSummary(targetChoices.ag2)}`);
-  console.log(`Restart required: ${nativeCache.restart_required ? 'yes' : 'no'}`);
-  console.log(`Hook trust action required: ${nativeCache.hook_trust_action || 'none'}`);
+  console.log(`Update report/log directory: ${unknown(cleanup.report_log_directory)}`);
+  console.log(`Update report cleanup deleted count: ${cleanup.deleted_count ?? 0}`);
+  console.log(`Update report cleanup error count: ${cleanup.error_count ?? 0}`);
+  console.log('');
+  console.log('## Targets');
+  console.log('### OpenCode');
+  printTargetSummary('OpenCode', targets.opencode || {}, targetChoices.opencode);
+  console.log('');
+  console.log('### AG2/Antigravity');
+  printTargetSummary('AG2', targets.ag2 || {}, targetChoices.ag2);
+  console.log('');
+  console.log('## Validation');
+  printValidationSummary(validationResults);
 }
 
 async function execute(args) {
   const current = collectCurrentState(args);
-  await answerSetupQuestionBank(args, current);
+  const questionBank = await answerSetupQuestionBank(args, current);
   const plan = setupPlan(args);
   printSetupChecklist(plan);
   const warning = activeToolkitWarning(args);
   if (warning) console.warn(`WARNING: ${warning}`);
-  const managed = verifyAndUpdateTrustedRepo(args);
+  const validationResults = [];
+  const managed = verifyAndUpdateTrustedRepo(args, validationResults);
   const nativeCache = args.host === 'claude-code'
     ? verifyClaudeNativePluginMetadata(args)
     : runCodexNativePluginSetup(args);
-  runLiteValidation(args);
+  runLiteValidation(args, validationResults);
   writeBridgePreferences(args);
   runApprovedTargetSync(args);
   const audit = runBridgeAudit(args);
-  printFinalSummary({ args, managed, nativeCache, audit });
+  printFinalSummary({ args, current, managed, nativeCache, audit, questionBank, validationResults });
   return 0;
 }
 

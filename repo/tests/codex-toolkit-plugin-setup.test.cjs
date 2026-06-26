@@ -40,10 +40,10 @@ function copyPackageFingerprint(sourceRoot, cacheRoot) {
 }
 
 function writeInstalledCache(codexHome, options = {}) {
-  const version = options.version || '2.2.2';
+  const version = options.version || '2.2.4';
   const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', version);
   copyPackageFingerprint(repoRoot, root);
-  if (version !== '2.2.2') {
+  if (version !== '2.2.4') {
     const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     manifest.version = version;
@@ -86,7 +86,7 @@ function writeCodexConfig(codexHome, options = {}) {
 }
 
 function installedList(options = {}) {
-  const version = options.version || '2.2.2';
+  const version = options.version || '2.2.4';
   return {
     installed: [
       {
@@ -156,7 +156,7 @@ function copyPackageFingerprint(repoRoot, cacheRoot) {
 }
 
 function installCache(repoRoot) {
-  const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '2.2.2');
+  const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '2.2.4');
   fs.rmSync(root, { recursive: true, force: true });
   copyPackageFingerprint(repoRoot, root);
   if (omitSessionStart) {
@@ -185,7 +185,7 @@ if (args[0] === 'plugin' && args[1] === 'list') {
         pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
         name: 'ai-agent-toolkit',
         marketplaceName: 'ai-agent-toolkit-local',
-        version: '2.2.2',
+        version: '2.2.4',
         installed: true,
         enabled: true,
         authPolicy: 'ON_USE',
@@ -292,7 +292,7 @@ test('Codex Toolkit plugin source validates manifest icon assets', () => {
   assert.deepEqual(setup.validateRepoPluginSource(repoRoot), []);
 });
 
-test('Codex Toolkit plugin setup verifier accepts active 2.2.2 install with SessionStart cache', () => {
+test('Codex Toolkit plugin setup verifier accepts active 2.2.4 install with SessionStart cache', () => {
   const codexHome = tmpRoot();
   const cacheRoot = writeInstalledCache(codexHome);
 
@@ -315,7 +315,7 @@ test('Codex Toolkit plugin setup verifier rejects stale, disabled, or hookless i
     repoRoot
   });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /expected version 2\.2\.2/i);
+  assert.match(state.errors.join('\n'), /expected version 2\.2\.4/i);
 
   codexHome = tmpRoot();
   writeInstalledCache(codexHome);
@@ -409,7 +409,7 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
           pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
           name: 'ai-agent-toolkit',
           marketplaceName: 'ai-agent-toolkit-local',
-          version: '2.2.2',
+          version: '2.2.4',
           installed: true,
           enabled: true,
           authPolicy,
