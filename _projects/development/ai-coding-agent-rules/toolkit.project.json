@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "version_policy": "semver",
-  "version_notes": "Adds a portable guarded project completion and production-readiness audit playbook route.",
+  "version_notes": "Adds OpenAI invocation-policy metadata for ai-coding-agent-rules and n8n-agent-rules so packaged Plugin Eval routing stays explicit and n8n safety remains implicit.",
   "outputs": [
     {
       "kind": "curated",
@@ -150,6 +150,20 @@
       "shared_surface": true,
       "surface_owner_project": "n8n.workflow-toolkit",
       "shared_surface_reason": "n8n-workflow-templates depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership."
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/agents/openai.yaml",
+      "output": "skills/ai-coding-agent-rules/agents/openai.yaml",
+      "notes": "OpenAI-facing metadata that keeps repo-local instruction repair explicit-only in the packaged plugin.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/n8n-agent-rules/agents/openai.yaml",
+      "output": "skills/n8n-agent-rules/agents/openai.yaml",
+      "notes": "OpenAI-facing metadata that keeps the n8n safety router implicit while companion n8n skills stay explicit-only.",
+      "fidelity": "generated_metadata"
     }
   ],
   "writes": {
@@ -170,7 +184,9 @@
       "skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs",
       "skills/n8n-local-setup/references/n8n-agent-rules.md",
       "skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md",
-      "skills/n8n-workflow-templates/references/n8n-agent-rules.md"
+      "skills/n8n-workflow-templates/references/n8n-agent-rules.md",
+      "skills/ai-coding-agent-rules/agents/openai.yaml",
+      "skills/n8n-agent-rules/agents/openai.yaml"
     ],
     "denied": [
       ".env*",

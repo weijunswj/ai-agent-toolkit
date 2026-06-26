@@ -1,6 +1,6 @@
 ---
 name: managed-app-foundation-review
-description: Review an implementation plan to decide whether to use low-cost, free, managed, or owner-hosted foundations instead of building common product, backend, data, automation, account, admin, ops, and security infrastructure from scratch. Use when the user asks to cut build scope, reduce security risk, compare build-vs-buy, choose managed services, plan upgrade triggers, or revisit a plan around auth, users, databases, backend APIs, workflows/automation, CRM, forms, email, storage, analytics, traffic/security monitoring, signup/login/password reset, email verification, contact forms, or low-cost app foundations.
+description: Use when reviewing an implementation plan to compare low-cost managed or owner-hosted foundations before custom-building auth, accounts, databases, backend APIs, workflow automation, CRM/contact pipelines, forms, email, storage, analytics, ops, traffic/security monitoring, or account-security foundations.
 ---
 
 # Managed App Foundation Review

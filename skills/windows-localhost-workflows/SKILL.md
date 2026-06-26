@@ -1,6 +1,6 @@
 ---
 name: windows-localhost-workflows
-description: start, relaunch, verify, and troubleshoot localhost development workflows on windows. use before starting localhost web apps, api servers, or development services on windows or in codex windows shells, and when debugging windows startup failures involving powershell scripts, execution policy, corepack, package managers, python runtime discovery, spawn eperm, duplicate path/path environment keys, port conflicts, detached background launch, non-persistent sandbox background processes, or empty log files. supports chatgpt, codex, claude, and claude code where shell access is available.
+description: Use when starting, relaunching, verifying, or debugging Windows localhost web apps, API servers, or dev services, especially PowerShell startup, execution policy, Corepack/package-manager, Python runtime, spawn EPERM, duplicate Path/PATH, port conflict, detached launch, sandbox persistence, or empty-log failures.
 ---
 
 <!--

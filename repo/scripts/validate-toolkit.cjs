@@ -657,7 +657,7 @@ function validateSkills(errors) {
   }
 
   const designSkill = 'skills/ui-ux-secure-frontend-design/SKILL.md';
-  const expectedDescription = 'Security-first frontend UI/UX design skill for creating, reviewing, and improving web interfaces. Use for design systems, landing pages, SaaS dashboards, forms, component planning, accessibility, responsive polish, privacy-safe UX, and implementation review.';
+  const expectedDescription = 'Use when creating, reviewing, or improving frontend web interfaces, including design systems, landing pages, SaaS dashboards, forms, component planning, accessibility, responsive polish, privacy-safe UX, and implementation review.';
   const designMatter = parseFrontMatter(readText(designSkill));
   if (designMatter?.name !== 'ui-ux-secure-frontend-design') fail(errors, 'Design skill front matter name is not approved');
   if (designMatter?.description !== expectedDescription) fail(errors, 'Design skill front matter description is not approved');
@@ -670,7 +670,7 @@ function validateSkills(errors) {
     '  brand_color: "#7C3AED"',
     '',
     'policy:',
-    '  allow_implicit_invocation: true',
+    '  allow_implicit_invocation: false',
     ''
   ].join('\n');
   if (openai !== expectedOpenai) fail(errors, 'Design skill agents/openai.yaml does not match approved shape');

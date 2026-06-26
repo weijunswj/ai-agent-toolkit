@@ -1,6 +1,6 @@
 ---
 name: local-ai-stack-safety
-description: Use only when reviewing or planning local AI stack setup such as local LLM runners, model servers, Stable Diffusion or ComfyUI-style web UIs, vector databases, model downloads, GPU/runtime changes, or exposing local AI endpoints. Do not use for ordinary AI API coding, model prompting, or general application work.
+description: Use when reviewing or planning local AI stack setup such as local LLM runners, model servers, Stable Diffusion or ComfyUI-style web UIs, vector databases, model downloads, GPU/runtime changes, or exposed local AI endpoints. Do not use for ordinary AI API coding, model prompting, or general app work.
 ---
 
 <!--

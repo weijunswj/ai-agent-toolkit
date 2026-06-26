@@ -1,6 +1,6 @@
 ---
 name: self-hosted-service-safety
-description: Use only when reviewing or planning non-n8n self-hosted service setup, Docker Compose services, VPS deployment notes, reverse proxies, public ports, DNS/TLS, tunnels, admin panels, backups, or first-run hardening. Do not use for ordinary app coding, local-only dev servers, or n8n work.
+description: Use when reviewing or planning non-n8n self-hosted service setup, Docker Compose services, VPS deployment notes, reverse proxies, public ports, DNS/TLS, tunnels, admin panels, backups, or first-run hardening. Do not use for ordinary app coding, local-only dev servers, or n8n work.
 ---
 
 <!--

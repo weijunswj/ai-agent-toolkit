@@ -10,6 +10,10 @@ const sourceSkill = path.join(repoRoot, '_projects', 'knowledge', 'knowledge-ind
 const generatedSkill = path.join(repoRoot, 'skills', 'knowledge-index-updater', 'SKILL.md');
 const sourceReadme = path.join(repoRoot, '_projects', 'knowledge', 'knowledge-index-updater', '_main', 'skill', 'README.md');
 const generatedReadme = path.join(repoRoot, 'skills', 'knowledge-index-updater', 'README.md');
+const sourceScheduledReference = path.join(repoRoot, '_projects', 'knowledge', 'knowledge-index-updater', '_main', 'skill', 'references', 'scheduled-updater-prompts.md');
+const generatedScheduledReference = path.join(repoRoot, 'skills', 'knowledge-index-updater', 'references', 'scheduled-updater-prompts.md');
+const sourceUpdateReference = path.join(repoRoot, '_projects', 'knowledge', 'knowledge-index-updater', '_main', 'skill', 'references', 'update-confirmation.md');
+const generatedUpdateReference = path.join(repoRoot, 'skills', 'knowledge-index-updater', 'references', 'update-confirmation.md');
 const fakeDataSourceId = 'collection://replace-with-your-notion-data-source-id';
 const realDataSourceIdPattern = /collection:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -43,12 +47,30 @@ function countMatches(text, pattern) {
   return [...text.matchAll(pattern)].length;
 }
 
+function referenceFor(filePath, kind) {
+  if (filePath === sourceSkill) return kind === 'scheduled' ? sourceScheduledReference : sourceUpdateReference;
+  if (filePath === generatedSkill) return kind === 'scheduled' ? generatedScheduledReference : generatedUpdateReference;
+  return '';
+}
+
 function updateSectionFor(filePath, text) {
+  const reference = referenceFor(filePath, 'update');
+  if (reference) return section(read(reference), '### Existing row update confirmation', '###');
   const heading = filePath.includes('README.md') ? '## Existing row update confirmation' : '### Existing row update confirmation';
   const nextLevel = filePath.includes('README.md') ? '##' : '###';
   return section(text, heading, nextLevel);
 }
 
+function scheduledSectionFor(filePath) {
+  const reference = referenceFor(filePath, 'scheduled');
+  return reference ? read(reference) : section(read(filePath), '### 7. Scheduled updater behaviour');
+}
+
+function expandedTextFor(filePath) {
+  const scheduledReference = referenceFor(filePath, 'scheduled');
+  const updateReference = referenceFor(filePath, 'update');
+  return [read(filePath), scheduledReference ? read(scheduledReference) : '', updateReference ? read(updateReference) : ''].join('\n');
+}
 test('Knowledge Index clean default schema excludes Canonical Key', () => {
   for (const filePath of [sourceSkill, generatedSkill]) {
     const text = read(filePath);
@@ -64,8 +86,7 @@ test('Knowledge Index clean default schema excludes Canonical Key', () => {
 });
 
 test('Knowledge Index scheduled prompt treats Notion and GitHub keys as the only hard identity fields', () => {
-  const text = read(sourceSkill);
-  const scheduled = section(text, '### 7. Scheduled updater behaviour');
+  const scheduled = scheduledSectionFor(sourceSkill);
   assert.match(scheduled, /Treat `Notion Key` and `GitHub Key` as the only hard identity fields\./);
   assert.match(scheduled, /Do not use `Canonical Key` for matching, creating, merging, or deduplication\./);
   assert.match(scheduled, /If an existing row still has a `Canonical Key`, ignore it unless I explicitly ask for legacy cleanup\./);
@@ -75,19 +96,17 @@ test('Knowledge Index scheduled prompt treats Notion and GitHub keys as the only
 
 test('Knowledge Index scheduled prompt uses database placeholders instead of a real data source ID', () => {
   for (const filePath of [sourceSkill, generatedSkill]) {
-    const text = read(filePath);
-    const scheduled = section(text, '### 7. Scheduled updater behaviour');
-    assert.match(scheduled, /Replace the placeholder database name and data source URL with the user's actual Notion Knowledge Index details before using this prompt in an external scheduler\./, filePath);
+    const scheduled = scheduledSectionFor(filePath);
+    assert.match(scheduled, /Replace placeholder database names and data-source URLs before use\./, filePath);
     assert.match(scheduled, /- Name: <Knowledge Index database name>/, filePath);
     assert.match(scheduled, /- Data source: <collection:\/\/your-notion-data-source-id>/, filePath);
-    assert.doesNotMatch(text, realDataSourceIdPattern, filePath);
+    assert.doesNotMatch(expandedTextFor(filePath), realDataSourceIdPattern, filePath);
   }
 });
 
 test('Knowledge Index scheduled section includes Codex prompt and fallback guidance', () => {
   for (const filePath of skillFiles) {
-    const text = read(filePath);
-    const scheduled = section(text, '### 7. Scheduled updater behaviour');
+    const scheduled = scheduledSectionFor(filePath);
     const codexPromptSection = subsection(scheduled, '#### Recommended Codex automation prompt');
     const staticPromptSection = subsection(scheduled, '#### Static fallback prompt for external schedulers that cannot load skills');
 
@@ -143,8 +162,7 @@ test('Knowledge Index proposes meaningful writes with explicit format and confir
 
 test('Knowledge Index scheduled updater prompt requires explicit approval for meaningful writes', () => {
   for (const filePath of skillFiles) {
-    const text = read(filePath);
-    const scheduled = section(text, '### 7. Scheduled updater behaviour');
+    const scheduled = scheduledSectionFor(filePath);
 
     assert.doesNotMatch(scheduled, /unless the user\s+explicitly requested automatic updates/i, filePath);
     assert.match(scheduled, /Scheduled runs must propose meaningful writes instead of applying them automatically\./, filePath);
@@ -157,8 +175,7 @@ test('Knowledge Index scheduled updater prompt requires explicit approval for me
 
 test('Knowledge Index scheduled updater proposal format includes required fields', () => {
   for (const filePath of [sourceSkill, generatedSkill]) {
-    const text = read(filePath);
-    const scheduled = section(text, '### 7. Scheduled updater behaviour');
+    const scheduled = scheduledSectionFor(filePath);
 
     assert.match(scheduled, /- \*\*Target:\*\* /, filePath);
     assert.match(scheduled, /- \*\*Write type:\*\* /, filePath);
@@ -172,8 +189,7 @@ test('Knowledge Index scheduled updater proposal format includes required fields
 
 test('Knowledge Index explicitly requires confirmation for meaningful writes and row creation', () => {
   for (const filePath of skillFiles) {
-    const text = read(filePath);
-    const updateSection = section(text, '### Existing row update confirmation', '###');
+    const updateSection = updateSectionFor(filePath, read(filePath));
 
     const requiredMeanings = [
       'Creating a Notion page/row.',
@@ -205,7 +221,7 @@ test('Knowledge Index explicitly requires confirmation for meaningful writes and
 
 test('Knowledge Index does not treat safe wording as confirmation bypass', () => {
   for (const { filePath } of sourceFiles) {
-    const text = read(filePath);
+    const text = expandedTextFor(filePath);
     assert.doesNotMatch(text, /safe non-destructive/i, filePath);
     assert.doesNotMatch(text, /batch-style.*without confirmation/i, filePath);
     assert.doesNotMatch(text, /go ahead and.*apply/i, filePath);
@@ -217,8 +233,7 @@ test('Knowledge Index does not treat safe wording as confirmation bypass', () =>
 
 test('Knowledge Index explicitly documents batch write rules', () => {
   for (const filePath of skillFiles) {
-    const text = read(filePath);
-    const updateSection = section(text, '### Existing row update confirmation', '###');
+    const updateSection = updateSectionFor(filePath, read(filePath));
 
     assert.match(updateSection, /Special rule for batch writes:/, filePath);
     assert.match(updateSection, /Batch writes are allowed without confirmation only when every item in the batch is a pure `Last checked` refresh for a row with no meaningful changes\./, filePath);
@@ -228,8 +243,7 @@ test('Knowledge Index explicitly documents batch write rules', () => {
 
 test('Knowledge Index allows only pure Last checked refreshes without confirmation', () => {
   for (const filePath of skillFiles) {
-    const text = read(filePath);
-    const updateSection = section(text, '### Existing row update confirmation', '###');
+    const updateSection = updateSectionFor(filePath, read(filePath));
 
     assert.match(updateSection, /`Last checked` may be refreshed without confirmation only when all conditions are true:/, filePath);
     assert.match(updateSection, /1\.\s*The user requested a check\/update\/sync\/review run\./, filePath);
@@ -243,8 +257,7 @@ test('Knowledge Index allows only pure Last checked refreshes without confirmati
 
 test('Knowledge Index documents the required Last checked refresh reporting format', () => {
   for (const filePath of skillFiles) {
-    const text = read(filePath);
-    const updateSection = section(text, '### Existing row update confirmation', '###');
+    const updateSection = updateSectionFor(filePath, read(filePath));
 
     assert.match(updateSection, /#### Refreshed without confirmation/i, filePath);
     assert.match(updateSection, /- `<NAME>` - `Last checked` refreshed because no meaningful changes were found\./, filePath);
@@ -266,7 +279,7 @@ test('Knowledge Index README documents same proposal-first rule', () => {
 
 test('Knowledge Index preserves strict scheduled safety rules', () => {
   for (const filePath of skillFiles) {
-    const text = read(filePath);
+    const text = expandedTextFor(filePath);
     assert.match(text, /Do not apply any meaningful write without confirmation\./, filePath);
     assert.match(text, /Scheduled runs must propose meaningful writes instead of applying them automatically\./, filePath);
     assert.match(text, /Add new canonical rows only when no key or clear real-world match exists, with explicit current-turn confirmation\./, filePath);

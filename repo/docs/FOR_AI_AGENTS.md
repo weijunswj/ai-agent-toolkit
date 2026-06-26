@@ -66,6 +66,7 @@ Use installed skills only when they clearly match the task and improve correctne
 - When changing skill names, `SKILL.md` frontmatter, or descriptions, update README skill tables when applicable, the routing partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
 - When a new skill should not be auto-routed, document why it is intentionally omitted from routing.
 - Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
+- For OpenAI/Codex packaged metadata, keep implicit invocation sparse. The intentional implicit skills are `toolkit-setup`, `n8n-agent-rules`, and `agent-skill-supply-chain-audit`; broad, heavy, production-sensitive, or companion skills should be explicit-only unless a future safety-router review documents otherwise. Native plugin `interface.defaultPrompt` should stay at three or fewer strong starter prompts.
 
 ## Skill Creation Center
 

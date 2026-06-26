@@ -1,0 +1,11 @@
+interface:
+  display_name: n8n Workflow Helper Scripts
+  short_description: Use safe n8n workflow helper templates.
+  primary_color: '#EA4B71'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: false

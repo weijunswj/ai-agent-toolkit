@@ -7,6 +7,8 @@
 - `skill/SKILL.md`
 - `skill/agents/claude.md`
 - `skill/agents/openai.yaml`
+- `skill/references/update-confirmation.md`
+- `skill/references/scheduled-updater-prompts.md`
 
 `_main/skill/**` contains the canonical full standalone skill source promoted from the existing root `skills/knowledge-index-updater/` folder in the pinned source commit.
 
@@ -16,6 +18,8 @@
 - `skills/knowledge-index-updater/SKILL.md` is generated from `_main/skill/SKILL.md`.
 - `skills/knowledge-index-updater/agents/claude.md` is generated from `_main/skill/agents/claude.md`.
 - `skills/knowledge-index-updater/agents/openai.yaml` is generated from `_main/skill/agents/openai.yaml`.
+- `skills/knowledge-index-updater/references/update-confirmation.md` is generated from `_main/skill/references/update-confirmation.md`.
+- `skills/knowledge-index-updater/references/scheduled-updater-prompts.md` is generated from `_main/skill/references/scheduled-updater-prompts.md`.
 
 The published skill outputs are deterministic copies from `_main/skill/**`. Markdown outputs receive the standard generated notice required by the sync system; the underlying standalone skill content is preserved in `_main/skill/**`.
 

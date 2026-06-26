@@ -1,6 +1,6 @@
 ---
 name: n8n-agent-rules
-description: Use for every n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named using-n8n-skills, n8n workflow JSON, official n8n MCP, n8n_live, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, workflow activation, execution, repo/live sync, and n8n safety. Always apply before n8n workflow or live n8n work.
+description: Use when working on any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), using-n8n-skills, n8n workflow JSON, official n8n MCP, n8n_live, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, workflow activation, execution, repo/live sync, and n8n safety. Always apply before n8n workflow or live n8n work.
 ---
 
 <!--

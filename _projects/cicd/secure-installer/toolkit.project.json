@@ -5,9 +5,9 @@
   "title": "Secure CI/CD Installer",
   "module_path": "_projects/cicd/secure-installer",
   "main_path": "_projects/cicd/secure-installer/_main",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "version_policy": "semver",
-  "version_notes": "Adds privacy-safe deployment and AI-module observability baseline guidance to the CI/CD prompt and status templates.",
+  "version_notes": "Adds OpenAI invocation-policy metadata so CI/CD installer guidance is explicit-only in packaged Plugin Eval budgets.",
   "outputs": [
     {
       "kind": "curated",
@@ -81,6 +81,13 @@
       "output": "skills/secure-cicd-installer/packs/secure-cicd/README.md",
       "notes": "Skill-local pack README generated from project-owned curated AI output.",
       "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/secure-cicd-installer/agents/openai.yaml",
+      "output": "skills/secure-cicd-installer/agents/openai.yaml",
+      "notes": "OpenAI-facing metadata for explicit-only secure CI/CD installer guidance.",
+      "fidelity": "generated_metadata"
     }
   ],
   "writes": {
@@ -94,7 +101,8 @@
       "skills/secure-cicd-installer/templates/github-actions/README.md",
       "skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md",
       "skills/secure-cicd-installer/packs/secure-cicd/pack.json",
-      "skills/secure-cicd-installer/packs/secure-cicd/README.md"
+      "skills/secure-cicd-installer/packs/secure-cicd/README.md",
+      "skills/secure-cicd-installer/agents/openai.yaml"
     ],
     "denied": [
       ".env*",

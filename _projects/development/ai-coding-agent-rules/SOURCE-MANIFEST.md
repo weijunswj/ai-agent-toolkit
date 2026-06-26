@@ -31,6 +31,8 @@ The manual global templates `_main/AGENTS.template.md`, `_main/CLAUDE.template.m
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md`
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md`
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md`
+- `curated_output_for_ai/skills/ai-coding-agent-rules/agents/openai.yaml`
+- `curated_output_for_ai/skills/n8n-agent-rules/agents/openai.yaml`
 
 The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/` are skill-facing automatic folder-local bootstrap payloads. They intentionally contain only the exact curated-source safety comment plus destination-file content so agents can copy them wholesale into target repos. Every required repo-local template includes complete `AI-AGENT-TOOLKIT` managed marker pairs so later sessions can verify structural currency without reading or comparing template bodies. `AGENTS.managed.template.md` carries the execution prompt payload from `_partials/ai-coding-agent-execution.md`, including its top-level document title, compact portable playbook routing, optional managed memory behavior, and final-report requirements, plus `_partials/n8n-agent-rules-adapter.md`; the Claude, Gemini, and Antigravity shims are direct tiny template sources and are not assembled from separate five-line partials.
 
@@ -42,6 +44,7 @@ The repo-local templates under `curated_output_for_ai/skills/ai-coding-agent-rul
 - `skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks/*.md` is copied exactly from `_main/repo-local/docs/agent-playbooks/` without generated notices because these files are copied into target repo `docs/agent-playbooks/`.
 - Root `AGENTS.md` keeps managed execution and n8n adapter blocks generated from this project, then appends toolkit-specific root rules maintained directly in `AGENTS.md`. Root `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` are checked by `repo/scripts/sync-agent-instruction-shims.cjs`; run `node repo/scripts/sync-agent-instruction-shims.cjs --write` after changing the portable execution partial, manual templates, curated repo-local templates, or active root shims.
 - `skills/n8n-agent-rules/SKILL.md` and `README.md` are generated from reviewed curated skill entrypoint source.
+- `skills/ai-coding-agent-rules/agents/openai.yaml` and `skills/n8n-agent-rules/agents/openai.yaml` are generated from reviewed curated OpenAI invocation-policy metadata.
 - `skills/n8n-agent-rules/n8n-agent-rules.md` is copied exactly from `_main/_partials/n8n-agent-rules.md`.
 - `skills/n8n-agent-rules/adapters/*.n8n-brief.template.md` are optional brief adapter snippets generated from curated source. They are not appended to generic templates automatically.
 - `skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs` is copied from `_main/scripts/` and is dry-run/write gated.

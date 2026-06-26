@@ -1,6 +1,6 @@
 ---
 name: secure-cicd-installer
-description: Instruction-only guidance for security-first CI/CD setup, GitHub Actions workflows, pipeline hardening, required checks, deployment automation planning, branch/status checks, release automation, installer prompt/status templates, and safe rollout planning. Use for any request mentioning CI/CD, CI, CD, GitHub Actions, workflows, pipelines, deployment automation, build/test automation, security checks, secret scanning, required checks, branch protection, or automated validation.
+description: Use when planning security-first CI/CD setup, GitHub Actions workflows, pipelines, pipeline hardening, required checks, security checks, deployment automation, build/test automation, automated validation, secret scanning, branch protection, release automation, installer prompt/status templates, or safe rollout planning.
 ---
 
 <!--

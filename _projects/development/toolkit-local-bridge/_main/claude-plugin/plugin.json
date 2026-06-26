@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-toolkit",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "description": "Source-first AI-agent toolkit with native Claude Code plugin metadata, English setup routing, Windows-safe hook repair, opt-in repo auto-update, and local bridge adapters.",
   "author": {
     "name": "weijunswj",
@@ -32,8 +32,7 @@
     "defaultPrompt": [
       "Setup toolkit.",
       "Refresh toolkit.",
-      "Audit the local Toolkit bridge state.",
-      "Set up the Antigravity 2 bridge after showing me the planned writes."
+      "Audit the local Toolkit bridge state."
     ],
     "websiteURL": "https://github.com/weijunswj/ai-agent-toolkit",
     "privacyPolicyURL": "https://github.com/weijunswj/ai-agent-toolkit",

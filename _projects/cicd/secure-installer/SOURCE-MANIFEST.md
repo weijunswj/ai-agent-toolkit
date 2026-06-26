@@ -9,7 +9,7 @@
 
 ## AI-Facing Surfaces
 
-- AI-facing skill, MCP doc, short overview/safety wrapper, template docs, and pack are generated from `curated_output_for_ai/`.
+- AI-facing skill, OpenAI invocation-policy metadata, MCP doc, short overview/safety wrapper, template docs, and pack are generated from `curated_output_for_ai/`.
 - The AI-facing Secure CI/CD prompt is extracted exactly from the preserved `_main/README.md` prompt section.
 - Reviewed AI-facing status, source-update policy, GitHub Actions template index, and Secure CI/CD pack README surfaces are generated from `curated_output_for_ai/`. The consumer-repo CI/CD status guidance points agents to `docs/ci-cd/CURRENT_CICD_STATUS.md` unless the target repo already documents another CI/CD status path:
   - `curated_output_for_ai/templates/cicd/CURRENT_CICD_STATUS.template.md`

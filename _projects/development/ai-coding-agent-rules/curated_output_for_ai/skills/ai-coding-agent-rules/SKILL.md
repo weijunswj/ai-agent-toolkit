@@ -1,6 +1,6 @@
 ---
 name: ai-coding-agent-rules
-description: Bootstrap or repair repo-local AI coding agent instruction files. Use once before repository/project-folder edits for any unchecked target folder, including fresh folders or existing repos, when required repo-local instruction files may be missing, custom/unmanaged, stale, or lack structurally current AI-AGENT-TOOLKIT managed marker pairs; also use when the user asks to install, check, repair, refresh, or bootstrap repo-local agent rules. Do not use again after required files are checked and structurally current unless instruction-file state may have changed.
+description: Use when asked to install, check, repair, refresh, or bootstrap repo-local agent rules. Bootstrap or repair repo-local AI coding agent instruction files such as AGENTS.md, CLAUDE.md, GEMINI.md, or .agents/rules. Use once for unchecked target folders, then stop unless instruction-file state may have changed.
 ---
 
 <!--
@@ -27,7 +27,7 @@ This works for GitHub, GitLab, Bitbucket, local git repos, and plain folders. Gi
    - Claude Code: `AGENTS.md` and `CLAUDE.md`.
    - Antigravity: `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
 3. Check only the required files for the selected platform.
-4. For each required file, check existence and `AI-AGENT-TOOLKIT` managed-marker structure.
+4. For each required file, check existence and AI-AGENT-TOOLKIT managed-marker structure.
 5. If every required file is structurally current enough and the user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions, do not read templates, do not inspect or compare managed body content beyond marker structure, do not rewrite files, and continue the original user task.
 
 A required file is structurally current enough only when:

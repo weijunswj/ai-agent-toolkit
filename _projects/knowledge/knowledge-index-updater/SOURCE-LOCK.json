@@ -30,11 +30,11 @@
       "notes": "Former standalone Claude platform note promoted exactly into _main/skill."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "skills/knowledge-index-updater/agents/openai.yaml",
       "project_path": "_projects/knowledge/knowledge-index-updater/_main/skill/agents/openai.yaml",
       "source_blob_sha": "bcd6129aed13cf9ab8ad1478b0249ab737732eb3",
-      "notes": "Former standalone OpenAI platform metadata promoted exactly into _main/skill."
+      "notes": "Toolkit-adapted after migration to keep external Notion/GitHub knowledge-index writes explicit-only in packaged OpenAI metadata and reduce Plugin Eval trigger/invoke budgets."
     }
   ]
 }
