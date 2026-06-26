@@ -670,6 +670,11 @@ function validateSkills(errors) {
     '  brand_color: "#7C3AED"',
     '',
     'policy:',
+    '  products:',
+    '    - chatgpt',
+    '    - codex',
+    '    - api',
+    '    - atlas',
     '  allow_implicit_invocation: false',
     ''
   ].join('\n');
