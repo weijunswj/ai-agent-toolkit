@@ -24,6 +24,8 @@ Routine setup routes through the host-aware orchestrator in the managed checkout
 
 Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing. After bootstrap creates the managed checkout, hand off to the managed checkout script.
 
+Exit code `23` or a required-answer question-bank message is an intentional pause for user answers. Stop and ask the user; do not rerun with `--yes-recommended` unless the user explicitly requested recommended/default choices in the current turn.
+
 **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 
 Codex and Claude Code native plugin handling is host-local; OpenCode and Antigravity 2 sync remain explicit opt-ins.

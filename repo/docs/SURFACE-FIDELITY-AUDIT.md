@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-21 (Toolkit Local Bridge native plugin metadata and one setup discoverability skill)
+Latest update: 2026-06-25 (n8n production Cloudflare Tunnel guide and stack templates)
 
 ## Current state
 
@@ -28,9 +28,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 15 |
-| publishedFiles | 211 |
-| declaredOutputFiles | 211 |
-| packInstalledFiles | 74 |
+| publishedFiles | 216 |
+| declaredOutputFiles | 216 |
+| packInstalledFiles | 79 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
 | crossOwnedOutputs | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 211 |
+| boundaryRecipeOutputs | 216 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -47,7 +47,7 @@ Current published-file classifications:
 | Classification | Count |
 | --- | ---: |
 | declared_generated | 137 |
-| pack_installed_declared | 74 |
+| pack_installed_declared | 79 |
 
 Current boundary recipe classifications:
 
@@ -64,7 +64,7 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 156 |
+| main_full_fidelity | 161 |
 
 Known baseline context:
 

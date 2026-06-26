@@ -571,7 +571,7 @@ test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
   assert.match(bridgeDoc, /polls `codex plugin list --available --json`/);
   assert.match(bridgeDoc, /did not exit cleanly/);
   assert.match(bridgeDoc, /codex plugin list --available --json/);
-  assert.match(bridgeDoc, /plugins\/cache\/ai-agent-toolkit-local\/ai-agent-toolkit\/2\.2\.2/);
+  assert.match(bridgeDoc, /plugins\/cache\/ai-agent-toolkit-local\/ai-agent-toolkit\/2\.2\.4/);
   assert.match(bridgeDoc, /SessionStart/);
 });
 

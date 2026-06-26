@@ -49,6 +49,14 @@ function samePath(left, right) {
   return leftResolved === rightResolved;
 }
 
+function isRunningFromStandardManagedCheckout() {
+  return samePath(repoRootFromScript(), defaultManagedSourcePath());
+}
+
+function isStandardManagedPath(value) {
+  return samePath(value, defaultManagedSourcePath());
+}
+
 function normalizeRemote(value) {
   let remote = String(value || '').trim();
   if (/^git@github\.com:/i.test(remote)) {
@@ -769,7 +777,7 @@ function hasUnsafeManagedPathMarker(value) {
 
 function isStandardManagedCheckout(current) {
   if (!current?.managed?.currentPath) return false;
-  return path.resolve(current.managed.currentPath) === path.resolve(current.managed.defaultPath);
+  return samePath(current.managed.currentPath, current.managed.defaultPath);
 }
 
 function canRecommendKeepingManagedCheckout(current, args) {
@@ -777,7 +785,7 @@ function canRecommendKeepingManagedCheckout(current, args) {
   if (!managed.currentPath) return false;
   if (!isStandardManagedCheckout(current)) return false;
   const resolved = path.resolve(managed.currentPath);
-  if (isInside(repoRootFromScript(), resolved)) return false;
+  if (isInside(repoRootFromScript(), resolved) && !(isRunningFromStandardManagedCheckout() && isStandardManagedPath(resolved))) return false;
   if (hasUnsafeManagedPathMarker(resolved)) return false;
   if (!managed.exists || !managed.git || managed.dirty) return false;
   if (managed.branch !== args.repoBranch) return false;
@@ -1083,7 +1091,8 @@ function validateManagedSourcePath(args) {
   if (args.repoRootExplicit) return;
   const activeRoot = repoRootFromScript();
   const resolved = path.resolve(args.repoRoot);
-  if (isInside(activeRoot, resolved)) {
+  const allowedSelfManagedPath = isRunningFromStandardManagedCheckout() && isStandardManagedPath(resolved);
+  if (isInside(activeRoot, resolved) && !allowedSelfManagedPath) {
     throw new Error(`Default managed source checkout must not live inside the active Toolkit worktree: ${resolved}`);
   }
   if (hasUnsafeManagedPathMarker(resolved)) throw new Error(`Managed source checkout must not live inside plugin cache or temporary marketplace paths: ${resolved}`);
@@ -1611,10 +1620,12 @@ if (require.main === module) {
     .catch((error) => {
       if (/Setup question bank requires|must be one of|requires a path answer/.test(error.message)) {
         process.exitCode = SETUP_PAUSED_FOR_QUESTION_BANK;
+        console.error(`SETUP PAUSED: ${error.message}`);
+        console.error('Question bank pause is intentional. Ask the user for the missing setup answers; do not rerun with --yes-recommended unless the user explicitly requested recommended defaults.');
       } else {
         process.exitCode = 1;
+        console.error(`FAIL: ${error.message}`);
       }
-    console.error(`FAIL: ${error.message}`);
     });
 }
 

@@ -4,6 +4,8 @@ Use this page when you want an always-on public n8n server on a Hostinger VPS th
 
 This is not the local Docker Desktop path. If you are testing on your own Windows computer, start with [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md).
 
+This is not the local/CGNAT Cloudflare Tunnel production path. If you want to host production n8n publicly from a local machine through an outbound Cloudflare Tunnel connector, use [Page 3 - Production Self-Hosting With Cloudflare Tunnel](./Page%203%20-%20Production%20Self-Hosting%20With%20Cloudflare%20Tunnel.md).
+
 This is also not Hostinger's one-click n8n VPS template path. Choose the Hostinger Coolify VPS path when you want one VPS that can host n8n plus future apps, sites, databases, workers, or other Docker services under one deployment platform.
 
 * Set up the Hostinger VPS and Coolify first.
@@ -19,6 +21,7 @@ This is also not Hostinger's one-click n8n VPS template path. Choose the Hosting
 | Path | Use when | Public access model |
 | --- | --- | --- |
 | Local n8n setup | You are learning, testing, or building workflows on your own Windows computer. | Localhost by default; optional ngrok tunnel only when an external service must call your local machine. |
+| Production Cloudflare Tunnel stack | You want production n8n publicly hosted from a local/CGNAT machine. | Cloudflare public hostname routes through an outbound `cloudflared` connector to n8n inside the local Docker Compose network. |
 | Hostinger one-click n8n VPS template | You want Hostinger to provision a VPS that already has n8n-specific template material. | Hostinger template manages the n8n shape. This is not the Coolify platform path. |
 | Hostinger Coolify VPS with n8n inside Coolify | You want one VPS to host n8n and future apps/sites/databases through Coolify. | Coolify reverse proxy handles HTTPS and routes public domains to internal app ports. |
 
@@ -367,6 +370,7 @@ Keep Traefik/Coolify production reverse-proxy guidance in this hosted path, not 
 ## 14. References
 
 - [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md)
+- [Page 3 - Production Self-Hosting With Cloudflare Tunnel](./Page%203%20-%20Production%20Self-Hosting%20With%20Cloudflare%20Tunnel.md)
 - [Codex SSH Hostinger Coolify Setup Maintainer](../../../../skills/codex-ssh-hostinger-coolify-setup-maintainer/)
 - [Hostinger Coolify maintainer full reference](../../../../skills/codex-ssh-hostinger-coolify-setup-maintainer/references/hostinger-coolify-production-guide.md)
 - [n8n environment variable docs](https://docs.n8n.io/hosting/configuration/environment-variables/)

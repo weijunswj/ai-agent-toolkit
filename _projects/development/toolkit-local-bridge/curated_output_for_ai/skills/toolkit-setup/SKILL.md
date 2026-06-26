@@ -37,6 +37,8 @@ node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit
 
 The orchestrator discovers current state, shows one consolidated upfront setup question bank, pauses before preference or target writes, then runs to completion unless a real safety blocker appears.
 
+If the setup command exits with code `23` or prints that the setup question bank requires answers, treat that as an intentional pause for user input, not a setup failure. Stop and present the question bank choices to the user in chat when the shell is non-interactive. Do not guess or infer. Do not rerun with `--yes-recommended` unless the user explicitly asked to use recommended/default choices in the current turn.
+
 It must show this explanation:
 
 **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
@@ -54,7 +56,7 @@ If the managed checkout path does not yet exist or does not contain `repo/script
 node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
 ```
 
-When fallback/bootstrap is used, say that it is bootstrap-only. After the managed checkout exists, hand off to the managed checkout script above and use that script for the question bank, setup writes, and verification. In Claude Code, append `--host claude-code` to the managed or fallback setup command. Do not run an active stale verifier after managed setup; verify from the same managed checkout script/repo that performed setup.
+When fallback/bootstrap is used, say that it is bootstrap-only. After the managed checkout exists, hand off to the managed checkout script above and use that script for the question bank, setup writes, and verification. In Claude Code, append `--host claude-code` to the managed or fallback setup command. If the managed setup script exists but exits for question-bank pause or a real safety blocker, do not fall back to the active repo command; stop and report the pause or blocker. Do not run an active stale verifier after managed setup; verify from the same managed checkout script/repo that performed setup.
 
 3. The one setup question bank must show current state, recommended default, and choices for every setup decision before writes:
 
@@ -68,7 +70,7 @@ When fallback/bootstrap is used, say that it is bootstrap-only. After the manage
 - OpenCode target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
 - AG2/Antigravity target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
 
-After the question bank is answered by interactive input, explicit flags, or `--yes-recommended`, do not pause again for preference questions.
+After the question bank is answered by interactive input, explicit flags, or explicitly user-requested `--yes-recommended`, do not pause again for preference questions.
 
 Allowed later blockers include dirty managed checkout, unexpected remote, fetch/auth failure, non-fast-forward update, validation failure, plugin cache verification failure, host hook trust required, unsupported/missing host CLI, or unsafe OpenCode/AG2 target writes.
 

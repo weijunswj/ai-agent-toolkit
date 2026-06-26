@@ -31,11 +31,12 @@ For normal human setup, keep the journey short:
 2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state.
 3. The agent must run the managed checkout setup script when it exists, not just `node repo/scripts/sync-toolkit-projects.cjs --write`: Windows Codex uses `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`; POSIX Codex uses `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`; Claude Code appends `--host claude-code`.
 4. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing, then hand off to the managed checkout script after it exists.
-5. Let the host install, verify, or refresh its own Toolkit native plugin path, then answer the required setup gates.
-6. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
-7. Restart the host if setup says the plugin needs a fresh session.
-8. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
-9. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
+5. If setup exits with code `23` or says the question bank requires answers, the agent must stop and ask you; it must not rerun with `--yes-recommended` unless you explicitly ask for recommended/default choices.
+6. Let the host install, verify, or refresh its own Toolkit native plugin path, then answer the required setup gates.
+7. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
+8. Restart the host if setup says the plugin needs a fresh session.
+9. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
+10. Add OpenCode or Antigravity 2 bridge targets only when you ask for that setup and approve the writes.
 
 More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills); detailed plugin and bridge mechanics live in [Toolkit Local Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 
@@ -66,7 +67,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 
 | Project | Purpose | Source |
 |---|---|---|
-| [Local n8n Setup](_projects/n8n/local-setup/) | Local n8n setup, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu cleanup, local stack templates, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. | [_main/](_projects/n8n/local-setup/_main/) |
+| [Local n8n Setup](_projects/n8n/local-setup/) | Local n8n dev setup, production Cloudflare Tunnel self-hosting for local/CGNAT machines, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu cleanup, stack templates, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. | [_main/](_projects/n8n/local-setup/_main/) |
 | [n8n Workflow Toolkit](_projects/n8n/workflow-toolkit/) | n8n helper-script sources and inactive workflow templates. | [_main/](_projects/n8n/workflow-toolkit/_main/) |
 | [Secure CI/CD Installer](_projects/cicd/secure-installer/) | CI/CD planning prompt, status templates, and safety policy source. | [_main/](_projects/cicd/secure-installer/_main/) |
 | [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Frontend design guidance, local generator source, and attribution notes. | [_main/](_projects/design/ui-ux-pro-max/_main/) |
@@ -91,7 +92,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [AI Coding Agent Rules](skills/ai-coding-agent-rules/) | Install generic execution-first agent rules for supported coding agents. |
 | [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, Antigravity 2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
 | [n8n Agent Rules](skills/n8n-agent-rules/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
-| [n8n Local Setup](skills/n8n-local-setup/) | Set up local n8n with Docker Compose, Postgres, Compose ngrok, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu use, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. |
+| [n8n Local Setup](skills/n8n-local-setup/) | Set up n8n with the localhost/ngrok dev stack, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu use, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. |
 | [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
 | [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
 | [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |

@@ -7,7 +7,7 @@
   "main_path": "_projects/development/toolkit-local-bridge/_main",
   "version": "2.2.4",
   "version_policy": "semver",
-  "version_notes": "Improves setup final-report audit logging with stable active worktree, managed checkout, question-bank, host-native plugin, bridge, target, and validation summary labels.",
+  "version_notes": "Bumps the native Toolkit package version for packaged n8n-local-setup Cloudflare Tunnel content and improves setup final-report audit logging with stable active worktree, managed checkout, question-bank, host-native plugin, bridge, target, and validation summary labels.",
   "outputs": [
     {
       "kind": "curated",
