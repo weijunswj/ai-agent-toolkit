@@ -50,6 +50,11 @@ function createMinimalSetupRepo(root) {
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
+  writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
+    name: 'ai-agent-toolkit',
+    version: '2.2.4',
+    hooks: './.codex-plugin/hooks/hooks.json'
+  }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
     hooks: {
       SessionStart: [
@@ -70,7 +75,7 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.2.4', cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_message: 'review Codex hook trust if prompted' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -89,8 +94,8 @@ function createMinimalSetupRepo(root) {
     "    repo_auto_update: { enabled: false, last_status: 'configured', repo_path: '' },",
     "    update_report_cleanup: { retention_days: 7, deleted_count: 0, error_count: 0, report_log_directory: path.join(process.cwd(), 'tmp-reports') },",
     "    targets: {",
-    "      opencode: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' },",
-    "      ag2: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '' }",
+    "      opencode: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '', path: '' },",
+    "      ag2: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '', path: '' }",
     "    }",
     "  };",
     "  process.stdout.write(JSON.stringify(process.env.SETUP_FAKE_AUDIT_JSON ? JSON.parse(process.env.SETUP_FAKE_AUDIT_JSON) : fallback));",
@@ -273,10 +278,64 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.doesNotMatch(result.stdout, /SETUP PAUSED/);
   assert.match(result.stdout, /# setup toolkit checklist/);
   assert.match(result.stdout, /# setup toolkit final summary/);
+  for (const heading of [
+    '## Active worktree',
+    '## Managed main checkout',
+    '## Question bank',
+    '## Codex native plugin',
+    '## Claude Code native plugin',
+    '## Bridge state',
+    '## Targets',
+    '## Validation'
+  ]) {
+    assert.match(result.stdout, new RegExp(escapeRegExp(heading)));
+  }
+  assert.match(result.stdout, /Active worktree path:/);
+  assert.match(result.stdout, /Active worktree branch:/);
+  assert.match(result.stdout, /Active worktree commit: [0-9a-f]{40}/);
+  assert.match(result.stdout, /Active worktree status: clean|dirty|unknown/);
+  assert.match(result.stdout, /Active worktree role: not used for writes/);
   assert.match(result.stdout, /Managed checkout path:/);
+  assert.match(result.stdout, /Managed checkout default path: .*\.ai-agent-toolkit.*source.*ai-agent-toolkit/);
+  assert.match(result.stdout, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit/);
+  assert.match(result.stdout, /\$HOME\/.ai-agent-toolkit\/source\/ai-agent-toolkit/);
+  assert.match(result.stdout, /Managed checkout branch: main/);
+  assert.match(result.stdout, /Managed checkout remote:/);
+  assert.match(result.stdout, /Managed checkout commit before: [0-9a-f]{40}|unknown/);
+  assert.match(result.stdout, /Managed checkout commit after: [0-9a-f]{40}/);
+  assert.match(result.stdout, /Managed checkout update action: already up to date/);
+  assert.match(result.stdout, /Setup script path executed:/);
+  assert.match(result.stdout, /Question bank appeared: yes/);
+  assert.match(result.stdout, /Question bank stopped for answers: no/);
+  assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
+  assert.match(result.stdout, /Preference\/target writes before answers: no/);
+  assert.match(result.stdout, /Codex plugin cache path:/);
+  assert.match(result.stdout, /Codex expected Toolkit version: 2\.2\.4/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.2\.4/);
+  assert.match(result.stdout, /Codex plugin status: already fresh/);
+  assert.match(result.stdout, /Codex plugin updated this run: no/);
+  assert.match(result.stdout, /Codex restart required: no/);
+  assert.match(result.stdout, /Codex hook trust action:/);
+  assert.match(result.stdout, /Claude plugin status: not checked for this host/);
+  assert.match(result.stdout, /Claude plugin mutation: no; Codex setup does not mutate Claude Code plugin cache\./);
+  assert.match(result.stdout, /Repo auto-update enabled: yes/);
+  assert.match(result.stdout, /Repo auto-update path:/);
+  assert.match(result.stdout, /Repo auto-update status:/);
   assert.match(result.stdout, /Update report\/log retention days: 7/);
-  assert.match(result.stdout, /OpenCode target choice: kept current state/, 'OpenCode should remain disabled when only ag2 is selected');
-  assert.match(result.stdout, /AG2\/Antigravity target choice: enabled\/synced/);
+  assert.match(result.stdout, /Update report\/log directory:/);
+  assert.match(result.stdout, /Update report cleanup deleted count: 0/);
+  assert.match(result.stdout, /Update report cleanup error count: 0/);
+  assert.match(result.stdout, /OpenCode detected: no/);
+  assert.match(result.stdout, /OpenCode enabled: no/);
+  assert.match(result.stdout, /OpenCode synced: no/);
+  assert.match(result.stdout, /OpenCode version: unknown/);
+  assert.match(result.stdout, /OpenCode path: unknown/);
+  assert.match(result.stdout, /OpenCode status:/);
+  assert.match(result.stdout, /OpenCode action this run: kept/, 'OpenCode should remain disabled when only ag2 is selected');
+  assert.match(result.stdout, /AG2 action this run: enabled\/synced/);
+  assert.match(result.stdout, /Validation command: node --test repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs/);
+  assert.match(result.stdout, /Validation command: node repo\/scripts\/validate-toolkit\.cjs/);
+  assert.match(result.stdout, /Validation status: passed/);
 
   const bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeLog, /--enable-repo-auto-update/);
@@ -374,6 +433,33 @@ test('setup execute creates missing managed checkout by cloning the expected rem
   assert.equal(fs.existsSync(path.join(managedPath, 'AGENTS.md')), true);
   assert.equal(runTestGit(managedPath, ['branch', '--show-current']), 'main');
   assert.match(result.stdout, /Managed checkout path:/);
+  assert.match(result.stdout, /Managed checkout update action: cloned/);
+});
+
+test('setup final summary distinguishes fast-forwarded managed checkout', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
+  writeFile(path.join(setupRepo, 'REMOTE_ONLY.md'), 'remote-only\n');
+  runTestGit(setupRepo, ['add', 'REMOTE_ONLY.md']);
+  runTestGit(setupRepo, ['commit', '-m', 'remote only']);
+  runTestGit(setupRepo, ['push', 'origin', 'main']);
+
+  const result = run([
+    '--execute',
+    '--repo-root', managedPath,
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-codex-plugin-auto-refresh'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Managed checkout commit before: [0-9a-f]{40}/);
+  assert.match(result.stdout, /Managed checkout commit after: [0-9a-f]{40}/);
+  assert.match(result.stdout, /Managed checkout update action: fast-forwarded/);
 });
 
 test('active setup command delegates to managed checkout script when it exists', () => {
@@ -644,6 +730,16 @@ test('claude-code setup execute verifies Claude plugin metadata and skips Codex 
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Claude Code native plugin metadata verified/);
+  assert.match(result.stdout, /## Claude Code native plugin/);
+  assert.match(result.stdout, /Claude plugin manifest path:/);
+  assert.match(result.stdout, /Claude expected Toolkit version: 2\.2\.4/);
+  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.2\.4/);
+  assert.match(result.stdout, /Claude plugin status: metadata present/);
+  assert.match(result.stdout, /Claude plugin updated this run: no/);
+  assert.match(result.stdout, /Claude restart required: no/);
+  assert.match(result.stdout, /Claude hook trust action:/);
+  assert.match(result.stdout, /Codex plugin status: not checked for this host/);
+  assert.match(result.stdout, /Codex plugin mutation: no/);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false, 'Claude setup must not call the Codex helper');
   const bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeLog, /--enable-repo-auto-update/);
@@ -667,8 +763,8 @@ test('setup final summary distinguishes target keep skip enable-sync and disable
   });
 
   assert.equal(first.status, 0, first.stderr || first.stdout);
-  assert.match(first.stdout, /OpenCode target choice: skipped this run/);
-  assert.match(first.stdout, /AG2\/Antigravity target choice: enabled\/synced/);
+  assert.match(first.stdout, /OpenCode action this run: skipped/);
+  assert.match(first.stdout, /AG2 action this run: enabled\/synced/);
   assert.doesNotMatch(first.stdout, /Skipped target writes:/);
 
   fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
@@ -685,8 +781,8 @@ test('setup final summary distinguishes target keep skip enable-sync and disable
   });
 
   assert.equal(second.status, 0, second.stderr || second.stdout);
-  assert.match(second.stdout, /OpenCode target choice: disabled/);
-  assert.match(second.stdout, /AG2\/Antigravity target choice: kept current state/);
+  assert.match(second.stdout, /OpenCode action this run: disabled/);
+  assert.match(second.stdout, /AG2 action this run: kept/);
   assert.doesNotMatch(second.stdout, /Skipped target writes:/);
 });
 
