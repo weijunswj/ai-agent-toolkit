@@ -8,6 +8,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const intendedImplicitSkills = [
   'agent-skill-supply-chain-audit',
+  'knowledge-index-updater',
   'n8n-agent-rules',
   'toolkit-setup'
 ];
@@ -38,7 +39,7 @@ function allowImplicit(skillName) {
   return match[1] === 'true';
 }
 
-test('OpenAI invocation policy keeps only safety and setup routers implicit', () => {
+test('OpenAI invocation policy keeps only safety, setup, and high-signal knowledge routers implicit', () => {
   const actualImplicit = skillNames().filter((name) => allowImplicit(name));
   assert.deepEqual(actualImplicit, intendedImplicitSkills);
   assert.equal(allowImplicit('project-completion-audit'), false, 'project-completion-audit must remain explicit-only');
