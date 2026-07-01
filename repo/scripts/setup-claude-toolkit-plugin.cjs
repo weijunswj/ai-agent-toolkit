@@ -126,12 +126,34 @@ function commandOutput(result) {
 // spawnSync cannot execute directly (ENOENT/EINVAL) without going through a
 // shell. `shell: true` fixes that, but Node only concatenates array args with
 // spaces rather than quoting them, which silently truncates any argument
-// containing a space (e.g. a repo path) at the first space. Quote manually.
+// containing a space (e.g. a repo path) at the first space. Quote manually,
+// following the standard Windows CommandLineToArgvW quoting algorithm: a
+// backslash only needs doubling when it directly precedes a quote (either an
+// escaped literal quote, or the closing quote appended at the end), since an
+// unescaped trailing backslash would otherwise escape that following quote
+// instead of terminating the argument.
 function quoteWindowsArg(value) {
   const str = String(value);
   if (str === '') return '""';
   if (!/[\s"&|<>^%]/.test(str)) return str;
-  return `"${str.replace(/"/g, '\\"')}"`;
+
+  let result = '"';
+  let backslashes = 0;
+  for (const ch of str) {
+    if (ch === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (ch === '"') {
+      result += '\\'.repeat(backslashes * 2 + 1) + '"';
+      backslashes = 0;
+      continue;
+    }
+    result += '\\'.repeat(backslashes) + ch;
+    backslashes = 0;
+  }
+  result += '\\'.repeat(backslashes * 2) + '"';
+  return result;
 }
 
 function claudeSpawnParts(command, args) {
