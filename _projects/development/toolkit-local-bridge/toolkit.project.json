@@ -71,6 +71,13 @@
       "output": ".claude-plugin/hooks/hooks.json",
       "notes": "Claude Code native plugin hook config generated from first-party module source; hook only calls the shared updater.",
       "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "json",
+      "source": "_main/claude-plugin/marketplace.json",
+      "output": ".claude-plugin/marketplace.json",
+      "notes": "Claude Code native local marketplace manifest generated from first-party module source; declares this repo as a one-plugin local marketplace, mirroring the Codex .agents/plugins/marketplace.json wrapper.",
+      "fidelity": "generated_metadata"
     }
   ],
   "writes": {
@@ -83,7 +90,8 @@
       ".codex-plugin/assets/logo.png",
       ".codex-plugin/hooks/hooks.json",
       ".claude-plugin/plugin.json",
-      ".claude-plugin/hooks/hooks.json"
+      ".claude-plugin/hooks/hooks.json",
+      ".claude-plugin/marketplace.json"
     ],
     "denied": [
       ".env*",

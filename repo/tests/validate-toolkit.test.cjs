@@ -504,11 +504,11 @@ test('native Codex and Claude plugin manifests are generated package metadata', 
     '.codex-plugin/assets/logo.png',
     '.codex-plugin/hooks/hooks.json',
     '.claude-plugin/plugin.json',
-    '.claude-plugin/hooks/hooks.json'
+    '.claude-plugin/hooks/hooks.json',
+    '.claude-plugin/marketplace.json'
   ]) {
     assert.equal(fs.existsSync(path.join(repoRoot, relPath)), true, relPath);
   }
-  assert.equal(fs.existsSync(path.join(repoRoot, '.claude-plugin', 'marketplace.json')), false);
 });
 
 test('Toolkit plugin packaged version surfaces stay aligned', () => {
@@ -2938,6 +2938,7 @@ test('validator rejects forbidden files but tolerates ignored local runtime fold
   const cwd = tempCopy();
   fs.writeFileSync(path.join(cwd, '.env'), 'EXAMPLE=unsafe\n');
   fs.mkdirSync(path.join(cwd, '.n8n-local'), { recursive: true });
+  fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(cwd, '.n8n-local', '.env.n8n-archived-workflow-cleanup'), 'N8N_API_KEY="local-secret"\n');
   fs.mkdirSync(path.join(cwd, 'n8n-workflows'), { recursive: true });
   fs.writeFileSync(path.join(cwd, 'n8n-workflows', 'local.live-export.json'), '{}\n');
@@ -2947,6 +2948,7 @@ test('validator rejects forbidden files but tolerates ignored local runtime fold
   assert.match(result.stderr, /Forbidden env file/);
   assert.doesNotMatch(result.stderr, /Forbidden directory present: \.n8n-local/);
   assert.doesNotMatch(result.stderr, /Unexpected root entry: \.n8n-local/);
+  assert.doesNotMatch(result.stderr, /Unexpected root entry: \.claude/);
   assert.doesNotMatch(result.stderr, /Unexpected root entry: n8n-workflows/);
   assert.doesNotMatch(result.stderr, /n8n-workflows\/local\.live-export\.json/);
   assert.match(result.stderr, /Live n8n import\/export file/);
