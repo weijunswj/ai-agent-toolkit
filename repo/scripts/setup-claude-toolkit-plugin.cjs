@@ -40,6 +40,18 @@ function readExpectedToolkitVersion(repoRoot = repoRootFromScript()) {
   return manifest.version;
 }
 
+function compareSemver(left, right) {
+  const leftParts = String(left || '').split('.').map((part) => Number.parseInt(part, 10));
+  const rightParts = String(right || '').split('.').map((part) => Number.parseInt(part, 10));
+  for (let index = 0; index < 3; index += 1) {
+    const leftPart = Number.isFinite(leftParts[index]) ? leftParts[index] : 0;
+    const rightPart = Number.isFinite(rightParts[index]) ? rightParts[index] : 0;
+    if (leftPart > rightPart) return 1;
+    if (leftPart < rightPart) return -1;
+  }
+  return 0;
+}
+
 function pluginId() {
   return `${TOOLKIT_PLUGIN_NAME}@${TOOLKIT_MARKETPLACE_NAME}`;
 }
@@ -280,15 +292,21 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
   if (installed.enabled === false) {
     errors.push(`${pluginId()} is installed but not enabled`);
   }
+  let refusesDowngrade = false;
   if (installed.version && installed.version !== expectedVersion) {
-    errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version}`);
+    if (compareSemver(installed.version, expectedVersion) > 0) {
+      refusesDowngrade = true;
+      errors.push(`Refusing downgrade: installed ${pluginId()} version ${installed.version} is newer than source version ${expectedVersion}. Update the managed source checkout or uninstall the newer plugin explicitly before retrying.`);
+    } else {
+      errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version}`);
+    }
   }
   const sourcePath = installed.projectPath || installed.source?.path || installed.path || '';
   if (sourcePath && path.resolve(sourcePath) !== repoRoot) {
     errors.push(`${pluginId()} source path does not match this local repo: ${sourcePath}`);
   }
 
-  return { ok: errors.length === 0, installed, errors };
+  return { ok: errors.length === 0, installed, errors, refusesDowngrade };
 }
 
 function claudeToolkitInstallCommands(repoRoot, scope = DEFAULT_SCOPE) {
@@ -398,7 +416,7 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
-  if (!state.ok && options.write) {
+  if (!state.ok && options.write && !state.refusesDowngrade) {
     const marketplaceAdd = runClaudeCommand(resolved.command, ['plugin', 'marketplace', 'add', options.repoRoot]);
     if (marketplaceAdd.status !== 0) {
       warnings.push(`claude plugin marketplace add did not exit cleanly: ${commandOutput(marketplaceAdd)}`);

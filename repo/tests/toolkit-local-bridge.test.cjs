@@ -11,7 +11,8 @@ const {
   getRepoValidationLabels,
   openUpdateReport,
   updateReportDir,
-  cleanupUpdateReports
+  cleanupUpdateReports,
+  replaceDirectoryAtomically
 } = require('../scripts/toolkit-local-bridge.cjs');
 const { verifyInstalledCacheFreshness } = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
@@ -19,7 +20,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.2.5';
+const expectedBridgeVersion = '2.3.0';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -2232,6 +2233,38 @@ test('update report cleanup refuses paths outside the Toolkit-managed report roo
   assert.equal(result.error_count, 1);
   assert.match(result.errors.join('\n'), /refusing cleanup outside Toolkit report directory/);
   assert.equal(fs.existsSync(outsideReport), true);
+});
+
+test('replaceDirectoryAtomically retries transient rename EPERM failures', () => {
+  const root = tmpRoot();
+  const source = path.join(root, 'source');
+  const target = path.join(root, 'current');
+  writeFile(path.join(source, 'manifest.json'), '{"next":true}\n');
+  writeFile(path.join(target, 'manifest.json'), '{"previous":true}\n');
+
+  const originalRenameSync = fs.renameSync;
+  let targetRenameAttempts = 0;
+  fs.renameSync = function flakyRename(from, to) {
+    if (path.resolve(from) === path.resolve(source) &&
+      path.resolve(to) === path.resolve(target) &&
+      targetRenameAttempts === 0) {
+      targetRenameAttempts += 1;
+      const error = new Error('simulated Windows file lock');
+      error.code = 'EPERM';
+      throw error;
+    }
+    return originalRenameSync.apply(this, arguments);
+  };
+
+  try {
+    replaceDirectoryAtomically(source, target, { retryDelayMs: 1 });
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+
+  assert.equal(targetRenameAttempts, 1);
+  assert.equal(fs.readFileSync(path.join(target, 'manifest.json'), 'utf8'), '{"next":true}\n');
+  assert.equal(fs.existsSync(source), false);
 });
 
 test('native plugin manifests and hooks are valid and policy-light', () => {

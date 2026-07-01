@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.2.5';
+const BRIDGE_VERSION = '2.3.0';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1916,16 +1916,42 @@ function releaseLock(lock) {
   if (lock?.acquired && lock.lockPath) fs.rmSync(lock.lockPath, { force: true });
 }
 
-function replaceDirectoryAtomically(sourceDir, targetDir) {
+function isTransientRenameError(error) {
+  return ['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error?.code);
+}
+
+function sleepSync(ms) {
+  if (!ms) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function renameSyncWithRetry(sourcePath, targetPath, options = {}) {
+  const attempts = options.renameAttempts || 6;
+  const delayMs = options.retryDelayMs || 75;
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      fs.renameSync(sourcePath, targetPath);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientRenameError(error) || attempt === attempts) break;
+      sleepSync(delayMs);
+    }
+  }
+  throw lastError;
+}
+
+function replaceDirectoryAtomically(sourceDir, targetDir, options = {}) {
   const parent = path.dirname(targetDir);
   fs.mkdirSync(parent, { recursive: true });
   const backup = path.join(parent, `.${path.basename(targetDir)}.backup-${process.pid}-${Date.now()}`);
   if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
-  if (fs.existsSync(targetDir)) fs.renameSync(targetDir, backup);
+  if (fs.existsSync(targetDir)) renameSyncWithRetry(targetDir, backup, options);
   try {
-    fs.renameSync(sourceDir, targetDir);
+    renameSyncWithRetry(sourceDir, targetDir, options);
   } catch (error) {
-    if (fs.existsSync(backup) && !fs.existsSync(targetDir)) fs.renameSync(backup, targetDir);
+    if (fs.existsSync(backup) && !fs.existsSync(targetDir)) renameSyncWithRetry(backup, targetDir, options);
     throw error;
   }
   if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
@@ -2614,5 +2640,6 @@ module.exports = {
   runRepoValidation,
   updateReportDir,
   cleanupUpdateReports,
-  openUpdateReport
+  openUpdateReport,
+  replaceDirectoryAtomically
 };

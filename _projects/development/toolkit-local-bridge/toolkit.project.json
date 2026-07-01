@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.2.5",
+  "version": "2.3.0",
   "version_policy": "semver",
-  "version_notes": "Improves packaged plugin-eval hygiene by trimming native default prompts, preserving toolkit-setup implicit routing, and aligning the native package version with invocation-policy metadata changes.",
+  "version_notes": "Adds a Claude Code local marketplace manifest and a setup-claude-toolkit-plugin.cjs parity script so `setup toolkit` can install/enable the Toolkit plugin in Claude Code non-interactively, matching the existing Codex auto-install path.",
   "outputs": [
     {
       "kind": "curated",
