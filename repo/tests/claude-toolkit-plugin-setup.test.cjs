@@ -111,7 +111,7 @@ process.exit(9);
   return fakeClaudeScript;
 }
 
-function runSetup(mode, fakeClaudePath, extraArgs = []) {
+function runSetup(mode, fakeClaudePath, extraArgs = [], options = {}) {
   return spawnSync(process.execPath, [
     path.join(repoRoot, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'),
     mode,
@@ -125,7 +125,8 @@ function runSetup(mode, fakeClaudePath, extraArgs = []) {
     cwd: repoRoot,
     encoding: 'utf8',
     timeout: 10000,
-    windowsHide: true
+    windowsHide: true,
+    env: options.env || process.env
   });
 }
 
@@ -210,6 +211,62 @@ test('Claude Toolkit plugin state evaluator rejects missing, disabled, stale, or
   assert.match(state.errors.join('\n'), /source path does not match/i);
 });
 
+test('Claude Toolkit plugin state evaluator accepts the real claude plugin list --json shape', () => {
+  // Confirmed against a real Claude Code 2.1.197 install: a flat array of
+  // { id: "name@marketplace", version, scope, enabled, projectPath } objects,
+  // with no wrapping object and no separate name/marketplace fields.
+  const realShapeList = [
+    {
+      id: `${setup.TOOLKIT_PLUGIN_NAME}@${setup.TOOLKIT_MARKETPLACE_NAME}`,
+      version: setup.EXPECTED_TOOLKIT_VERSION,
+      scope: 'project',
+      enabled: true,
+      installPath: 'C:\\Users\\someone\\.claude\\plugins\\cache\\ai-agent-toolkit-local\\ai-agent-toolkit\\2.3.0',
+      installedAt: '2026-07-01T14:44:35.944Z',
+      lastUpdated: '2026-07-01T14:44:35.944Z',
+      projectPath: repoRoot
+    }
+  ];
+  const state = setup.evaluateClaudeToolkitPluginState(realShapeList, { repoRoot });
+  assert.equal(state.ok, true);
+  assert.deepEqual(state.errors, []);
+});
+
+test('quoteWindowsArg quotes values with spaces and special characters, leaves plain values alone', () => {
+  assert.equal(setup.quoteWindowsArg('plain'), 'plain');
+  assert.equal(setup.quoteWindowsArg('ai-agent-toolkit@ai-agent-toolkit-local'), 'ai-agent-toolkit@ai-agent-toolkit-local');
+  assert.equal(setup.quoteWindowsArg('C:\\Users\\a b\\repo'), '"C:\\Users\\a b\\repo"');
+  assert.equal(setup.quoteWindowsArg('has "quote"'), '"has \\"quote\\""');
+  assert.equal(setup.quoteWindowsArg(''), '""');
+});
+
+test('claudeSpawnParts builds a single quoted command line on win32 for a bare CLI name, preserving spaces', () => {
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  try {
+    const parts = setup.claudeSpawnParts('claude', ['plugin', 'marketplace', 'add', 'C:\\Users\\a b\\repo']);
+    assert.equal(parts.shell, true);
+    assert.equal(parts.args, undefined);
+    assert.equal(parts.command, 'claude plugin marketplace add "C:\\Users\\a b\\repo"');
+  } finally {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
+  }
+});
+
+test('claudeSpawnParts does not use a shell for a .cjs fake CLI path even on win32', () => {
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  try {
+    const fakePath = 'C:\\Users\\a b\\fake-claude.cjs';
+    const parts = setup.claudeSpawnParts(fakePath, ['plugin', 'list', '--json']);
+    assert.equal(parts.shell, false);
+    assert.equal(parts.command, process.execPath);
+    assert.deepEqual(parts.args, [fakePath, 'plugin', 'list', '--json']);
+  } finally {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
+  }
+});
+
 test('Claude Toolkit plugin setup verify fails cleanly when not installed', () => {
   const stateDir = tmpRoot();
   const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false });
@@ -246,7 +303,14 @@ test('Claude Toolkit plugin setup rejects an unusable Claude CLI', () => {
   const stateDir = tmpRoot();
   const brokenClaude = path.join(stateDir, 'broken-claude.cjs');
   fs.writeFileSync(brokenClaude, "process.exit(1);\n", 'utf8');
-  const result = runSetup('--verify', brokenClaude);
+  // Isolate PATH and CLI-override env vars so this fails even on a machine
+  // that has a real, working Claude Code CLI installed globally -- otherwise
+  // the resolver's bare-`claude` fallback candidate would mask the broken
+  // explicit --claude-cli path and this test would no longer prove anything.
+  const isolatedEnv = { ...process.env, PATH: process.env.SystemRoot ? `${process.env.SystemRoot}\\System32` : '/usr/bin' };
+  delete isolatedEnv.CLAUDE_TOOLKIT_CLAUDE_CLI;
+  delete isolatedEnv.CLAUDE_CLI_PATH;
+  const result = runSetup('--verify', brokenClaude, [], { env: isolatedEnv });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /no usable claude code cli/i);
 });

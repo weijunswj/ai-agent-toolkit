@@ -121,18 +121,38 @@ function commandOutput(result) {
   return `${result?.stdout || ''}${result?.stderr || ''}${result?.error ? result.error.message : ''}`.trim();
 }
 
+// On Windows, a global npm install of the Claude Code CLI resolves the bare
+// `claude` command only to `claude.cmd`/`claude.ps1` shims, which Node's
+// spawnSync cannot execute directly (ENOENT/EINVAL) without going through a
+// shell. `shell: true` fixes that, but Node only concatenates array args with
+// spaces rather than quoting them, which silently truncates any argument
+// containing a space (e.g. a repo path) at the first space. Quote manually.
+function quoteWindowsArg(value) {
+  const str = String(value);
+  if (str === '') return '""';
+  if (!/[\s"&|<>^%]/.test(str)) return str;
+  return `"${str.replace(/"/g, '\\"')}"`;
+}
+
 function claudeSpawnParts(command, args) {
   const isNodeScript = /\.(?:cjs|mjs|js)$/i.test(command);
-  return {
-    command: isNodeScript ? process.execPath : command,
-    args: isNodeScript ? [command, ...args] : args
-  };
+  if (isNodeScript) {
+    return { command: process.execPath, args: [command, ...args], shell: false };
+  }
+  if (process.platform === 'win32') {
+    // Pass a single pre-quoted command line (no args array) so Node hands it
+    // to the shell as-is, instead of the array+shell:true form that both
+    // mis-concatenates spaces and triggers a DEP0190 warning on every call.
+    return { command: [command, ...args.map(quoteWindowsArg)].join(' '), args: undefined, shell: true };
+  }
+  return { command, args, shell: false };
 }
 
 function spawnClaude(command, args, options = {}) {
   const parts = claudeSpawnParts(command, args);
   return spawnSync(parts.command, parts.args, {
     ...options,
+    shell: parts.shell,
     windowsHide: true
   });
 }
@@ -184,18 +204,23 @@ function runClaudeCommand(command, args, options = {}) {
   return spawnClaude(command, args, { encoding: 'utf8', timeout: commandTimeoutMs(), ...options });
 }
 
-// `claude plugin list --json` output shape is not fully documented; walk the
-// parsed JSON recursively and match on name/marketplace fields rather than
-// assuming one fixed nesting, so this stays correct if the exact shape differs.
+// `claude plugin list --json` returns a flat array of entries shaped like
+// { id: "ai-agent-toolkit@ai-agent-toolkit-local", version, scope, enabled,
+//   installPath, projectPath }, confirmed against a real Claude Code 2.1.197
+// install. Match on `id` first; fall back to name/marketplace-style fields
+// too, since this isn't a documented/versioned schema and could vary.
 function findPluginEntries(node, matches = []) {
   if (!node || typeof node !== 'object') return matches;
   if (Array.isArray(node)) {
     for (const item of node) findPluginEntries(item, matches);
     return matches;
   }
+  const id = node.id || '';
   const name = node.name || node.pluginName || '';
   const marketplace = node.marketplace || node.marketplaceName || node.source?.marketplace || '';
-  if (name === TOOLKIT_PLUGIN_NAME && (!marketplace || marketplace === TOOLKIT_MARKETPLACE_NAME)) {
+  const idMatches = id === pluginId();
+  const nameMatches = name === TOOLKIT_PLUGIN_NAME && (!marketplace || marketplace === TOOLKIT_MARKETPLACE_NAME);
+  if (idMatches || nameMatches) {
     matches.push(node);
   }
   for (const value of Object.values(node)) {
@@ -221,7 +246,7 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
   if (installed.version && installed.version !== expectedVersion) {
     errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version}`);
   }
-  const sourcePath = installed.source?.path || installed.path || '';
+  const sourcePath = installed.projectPath || installed.source?.path || installed.path || '';
   if (sourcePath && path.resolve(sourcePath) !== repoRoot) {
     errors.push(`${pluginId()} source path does not match this local repo: ${sourcePath}`);
   }
@@ -392,7 +417,10 @@ module.exports = {
   DEFAULT_SCOPE,
   VALID_SCOPES,
   claudeToolkitInstallCommands,
+  claudeSpawnParts,
   evaluateClaudeToolkitPluginState,
+  findPluginEntries,
+  quoteWindowsArg,
   validateMarketplaceWrapper,
   validateRepoPluginSource,
   verifySessionStartHook,
