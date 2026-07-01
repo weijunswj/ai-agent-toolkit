@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.2.5';
+const EXPECTED_TOOLKIT_VERSION = '2.3.0';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
@@ -43,6 +43,18 @@ const CODEX_PLUGIN_ICON_SPECS = [
 
 function slash(value) {
   return String(value || '').replace(/\\/g, '/');
+}
+
+function compareSemver(left, right) {
+  const leftParts = String(left || '').split('.').map((part) => Number.parseInt(part, 10));
+  const rightParts = String(right || '').split('.').map((part) => Number.parseInt(part, 10));
+  for (let index = 0; index < 3; index += 1) {
+    const leftPart = Number.isFinite(leftParts[index]) ? leftParts[index] : 0;
+    const rightPart = Number.isFinite(rightParts[index]) ? rightParts[index] : 0;
+    if (leftPart > rightPart) return 1;
+    if (leftPart < rightPart) return -1;
+  }
+  return 0;
 }
 
 function readJson(filePath) {
@@ -473,6 +485,7 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
   const installed = findInstalledEntry(pluginList);
   const cacheRoot = cacheRootFor(codexHome, expectedVersion);
   const hookTrust = detectHookTrustStatus(codexHome, cacheRoot);
+  let refusesDowngrade = false;
 
   if (!installed) {
     if (options.allowConfigCacheFallback) {
@@ -486,12 +499,18 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
       errors,
       verificationMethod: 'codex-cli-list',
       hookTrustStatus: hookTrust.status,
-      hookTrustMessage: hookTrust.message
+      hookTrustMessage: hookTrust.message,
+      refusesDowngrade
     };
   }
   if (!installed.enabled) errors.push(`${pluginId()} is installed but not enabled`);
   if (installed.version !== expectedVersion) {
-    errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version || '<missing>'}`);
+    if (compareSemver(installed.version, expectedVersion) > 0) {
+      refusesDowngrade = true;
+      errors.push(`Refusing downgrade: installed ${pluginId()} version ${installed.version} is newer than source version ${expectedVersion}. Update the managed source checkout or remove the newer plugin explicitly before retrying.`);
+    } else {
+      errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version || '<missing>'}`);
+    }
   }
   if (installed.authPolicy !== 'ON_USE') {
     errors.push(`${pluginId()} expected authPolicy ON_USE for headless local install: ${installed.authPolicy || '<missing>'}`);
@@ -509,7 +528,8 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
     errors,
     verificationMethod: 'codex-cli-list',
     hookTrustStatus: hookTrust.status,
-    hookTrustMessage: hookTrust.message
+    hookTrustMessage: hookTrust.message,
+    refusesDowngrade
   };
 }
 
@@ -829,7 +849,7 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
-  if (!state.ok && options.write) {
+  if (!state.ok && options.write && !state.refusesDowngrade) {
     try {
       runCodexJson(resolved.command, ['plugin', 'marketplace', 'add', options.repoRoot, '--json']);
       pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);

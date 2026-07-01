@@ -206,13 +206,24 @@ test('Claude Toolkit plugin state evaluator rejects missing, disabled, stale, or
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /not enabled/i);
 
-  state = setup.evaluateClaudeToolkitPluginState(installedList({ version: '9.9.9' }), { repoRoot });
+  state = setup.evaluateClaudeToolkitPluginState(installedList({ version: '0.0.1' }), { repoRoot });
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /expected version/i);
 
   state = setup.evaluateClaudeToolkitPluginState(installedList({ sourcePath: tmpRoot() }), { repoRoot });
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /source path does not match/i);
+});
+
+test('Claude Toolkit plugin state evaluator refuses implicit downgrade from newer install', () => {
+  const state = setup.evaluateClaudeToolkitPluginState(installedList({ version: '9.9.9' }), {
+    repoRoot,
+    expectedVersion: expectedVersion()
+  });
+
+  assert.equal(state.ok, false);
+  assert.equal(state.refusesDowngrade, true);
+  assert.match(state.errors.join('\n'), /Refusing downgrade/i);
 });
 
 test('Claude Toolkit plugin state evaluator accepts the real claude plugin list --json shape', () => {
