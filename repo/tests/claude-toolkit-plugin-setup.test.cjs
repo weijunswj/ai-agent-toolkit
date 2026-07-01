@@ -19,8 +19,12 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+function expectedVersion() {
+  return setup.readExpectedToolkitVersion(repoRoot);
+}
+
 function installedList(options = {}) {
-  const version = options.version || setup.EXPECTED_TOOLKIT_VERSION;
+  const version = options.version || expectedVersion();
   return {
     installed: [
       {
@@ -43,7 +47,7 @@ function writeFakeClaude(stateDir, options = {}) {
   });
   const failMarketplaceAdd = Boolean(options.failMarketplaceAdd);
   const failInstall = Boolean(options.failInstall);
-  const installedVersion = options.installedVersion || setup.EXPECTED_TOOLKIT_VERSION;
+  const installedVersion = options.installedVersion || expectedVersion();
   fs.writeFileSync(fakeClaudeScript, `
 'use strict';
 
@@ -97,7 +101,7 @@ if (args[0] === 'plugin' && args[1] === 'list') {
       marketplace: ${JSON.stringify(setup.TOOLKIT_MARKETPLACE_NAME)},
       version: ${JSON.stringify(installedVersion)},
       enabled: true,
-      scope: state.scope || 'project',
+      scope: state.scope || 'user',
       source: { path: state.repoRoot }
     }
   ] : [];
@@ -146,7 +150,7 @@ test('Claude Toolkit plugin marketplace wrapper validator rejects wrong name/sou
   assert.match(
     setup.validateMarketplaceWrapper({
       name: setup.TOOLKIT_MARKETPLACE_NAME,
-      plugins: [{ name: setup.TOOLKIT_PLUGIN_NAME, source: './wrong' }]
+      plugins: [{ name: setup.TOOLKIT_PLUGIN_NAME, source: '.' }]
     }).join('\n'),
     /marketplace source must be local path/i
   );
@@ -218,8 +222,8 @@ test('Claude Toolkit plugin state evaluator accepts the real claude plugin list 
   const realShapeList = [
     {
       id: `${setup.TOOLKIT_PLUGIN_NAME}@${setup.TOOLKIT_MARKETPLACE_NAME}`,
-      version: setup.EXPECTED_TOOLKIT_VERSION,
-      scope: 'project',
+      version: expectedVersion(),
+      scope: 'user',
       enabled: true,
       installPath: 'C:\\Users\\someone\\.claude\\plugins\\cache\\ai-agent-toolkit-local\\ai-agent-toolkit\\2.3.0',
       installedAt: '2026-07-01T14:44:35.944Z',
@@ -289,12 +293,12 @@ test('Claude Toolkit plugin setup write installs and verify then reports success
   const stateDir = tmpRoot();
   const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false });
 
-  const writeResult = runSetup('--write', fakeClaude, ['--scope', 'project']);
+  const writeResult = runSetup('--write', fakeClaude);
   assert.equal(writeResult.status, 0, writeResult.stderr);
   const summary = JSON.parse(writeResult.stdout);
   assert.equal(summary.ok, true);
-  assert.equal(summary.scope, 'project');
-  assert.equal(summary.version, setup.EXPECTED_TOOLKIT_VERSION);
+  assert.equal(summary.scope, 'user');
+  assert.equal(summary.version, expectedVersion());
 
   const verifyResult = runSetup('--verify', fakeClaude);
   assert.equal(verifyResult.status, 0, verifyResult.stderr);

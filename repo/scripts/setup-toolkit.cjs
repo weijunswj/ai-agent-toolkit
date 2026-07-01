@@ -391,7 +391,7 @@ function setupPlan(options = {}) {
         title: 'Verify and install the Claude Code native plugin from this local marketplace when missing or disabled',
         commands: [
           relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--verify', '--json', '--repo-root', quote(repoRoot), ...claudeCliArgs]),
-          relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--write', '--json', '--scope', 'project', '--repo-root', quote(repoRoot), ...claudeCliArgs]),
+          relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--write', '--json', '--scope', 'user', '--repo-root', quote(repoRoot), ...claudeCliArgs]),
           relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--verify', '--json', '--repo-root', quote(repoRoot), ...claudeCliArgs])
         ],
         conditional_write: 'run --write --json only when --verify reports the plugin missing, disabled, wrong-version, or wrong-source'
@@ -503,7 +503,7 @@ function printHelp() {
     '  --keep-codex-plugin-auto-refresh',
     '                               preserve Codex plugin cache auto-refresh preference',
     '  --claude-plugin-behavior keep|instructions|install',
-    '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope project',
+    '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --enable-target opencode|ag2 enable and sync approved non-native bridge target',
     '  --disable-target opencode|ag2 disable target without deleting files',
     '  --keep-target opencode|ag2 preserve target state without refresh/sync',
@@ -886,7 +886,7 @@ function setupQuestionSpecs(args, current) {
       choices: ['keep', 'instructions', 'install'],
       recommended: recommendedChoice('claudePluginBehavior', current, args),
       selected: args.setupChoices.claudePluginBehavior,
-      current: `${current.nativePlugin.status}; install runs claude plugin marketplace add + install --scope project, no Codex mutation`
+      current: `${current.nativePlugin.status}; install runs claude plugin marketplace add + install --scope user, no Codex mutation`
     });
   }
 
@@ -1305,7 +1305,7 @@ function verifyClaudeNativePluginMetadata(args) {
 
 function setupClaudeArgs(args, mode) {
   const extra = [mode, '--json', '--repo-root', args.repoRoot];
-  if (mode === '--write') extra.push('--scope', 'project');
+  if (mode === '--write') extra.push('--scope', 'user');
   if (args.claudeCli) extra.push('--claude-cli', args.claudeCli);
   return nodeScriptArgs('repo/scripts/setup-claude-toolkit-plugin.cjs', extra);
 }
@@ -1328,7 +1328,7 @@ function runClaudeNativePluginSetup(args) {
       expected_version: expectedVersion,
       manifest_version: summary.version || expectedVersion,
       installed_version: summary.version || expectedVersion,
-      scope: summary.scope || 'project',
+      scope: summary.scope || 'user',
       updated_this_run: false,
       restart_required: false,
       hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
@@ -1337,7 +1337,7 @@ function runClaudeNativePluginSetup(args) {
   process.stderr.write(verify.stderr || '');
 
   runCommand(
-    'node repo/scripts/setup-claude-toolkit-plugin.cjs --write --json --scope project',
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --write --json --scope user',
     process.execPath,
     setupClaudeArgs(args, '--write'),
     { cwd: args.repoRoot, timeout: 180000 }
@@ -1356,7 +1356,7 @@ function runClaudeNativePluginSetup(args) {
     expected_version: expectedVersion,
     manifest_version: summary.version || expectedVersion,
     installed_version: summary.version || expectedVersion,
-    scope: summary.scope || 'project',
+    scope: summary.scope || 'user',
     updated_this_run: true,
     restart_required: true,
     hook_trust_action: 'approve the Claude Code plugin trust prompt when Claude Code prompts'

@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-01 (Toolkit 2.3.0 adds .claude-plugin/marketplace.json generated output and setup-claude-toolkit-plugin.cjs for Claude Code native plugin install parity with Codex)
+Latest update: 2026-07-01 (adds .claude-plugin/marketplace.json generated output and setup-claude-toolkit-plugin.cjs for Claude Code native plugin install parity without a Toolkit package version bump)
 
 ## Current state
 

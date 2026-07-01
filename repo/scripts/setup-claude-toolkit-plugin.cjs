@@ -7,9 +7,9 @@ const { spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.3.0';
+const PLUGIN_MANIFEST_REL_PATH = '.claude-plugin/plugin.json';
 const MARKETPLACE_REL_PATH = '.claude-plugin/marketplace.json';
-const DEFAULT_SCOPE = 'project';
+const DEFAULT_SCOPE = 'user';
 const VALID_SCOPES = ['user', 'project', 'local'];
 
 function slash(value) {
@@ -26,6 +26,18 @@ function repoRootFromScript() {
 
 function marketplacePath(repoRoot) {
   return path.join(repoRoot, ...MARKETPLACE_REL_PATH.split('/'));
+}
+
+function pluginManifestPath(repoRoot) {
+  return path.join(repoRoot, ...PLUGIN_MANIFEST_REL_PATH.split('/'));
+}
+
+function readExpectedToolkitVersion(repoRoot = repoRootFromScript()) {
+  const manifest = readJson(pluginManifestPath(repoRoot));
+  if (!manifest.version || typeof manifest.version !== 'string') {
+    throw new Error(`Claude Code plugin manifest must declare a string version: ${PLUGIN_MANIFEST_REL_PATH}`);
+  }
+  return manifest.version;
 }
 
 function pluginId() {
@@ -73,15 +85,15 @@ function validateMarketplaceWrapper(marketplace) {
     errors.push(`local marketplace must expose ${TOOLKIT_PLUGIN_NAME}`);
     return errors;
   }
-  if (plugin.source !== '.') {
-    errors.push(`${TOOLKIT_PLUGIN_NAME} marketplace source must be local path ".": ${JSON.stringify(plugin.source)}`);
+  if (plugin.source !== './') {
+    errors.push(`${TOOLKIT_PLUGIN_NAME} marketplace source must be local path "./": ${JSON.stringify(plugin.source)}`);
   }
   return errors;
 }
 
-function validateRepoPluginSource(repoRoot, expectedVersion = EXPECTED_TOOLKIT_VERSION) {
+function validateRepoPluginSource(repoRoot, expectedVersion = '') {
   const errors = [];
-  const manifestPath = path.join(repoRoot, '.claude-plugin', 'plugin.json');
+  const manifestPath = pluginManifestPath(repoRoot);
   const hooksPath = path.join(repoRoot, '.claude-plugin', 'hooks', 'hooks.json');
   const localMarketplacePath = marketplacePath(repoRoot);
 
@@ -92,7 +104,10 @@ function validateRepoPluginSource(repoRoot, expectedVersion = EXPECTED_TOOLKIT_V
     if (manifest.name !== TOOLKIT_PLUGIN_NAME) {
       errors.push(`Claude Code plugin manifest name must be ${TOOLKIT_PLUGIN_NAME}: ${manifest.name || '<missing>'}`);
     }
-    if (manifest.version !== expectedVersion) {
+    if (!manifest.version || typeof manifest.version !== 'string') {
+      errors.push('Claude Code plugin manifest must declare a string version');
+    }
+    if (expectedVersion && manifest.version !== expectedVersion) {
       errors.push(`Claude Code plugin manifest expected version ${expectedVersion}: ${manifest.version || '<missing>'}`);
     }
     if (manifest.hooks !== './.claude-plugin/hooks/hooks.json') {
@@ -253,7 +268,7 @@ function findPluginEntries(node, matches = []) {
 
 function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
   const repoRoot = path.resolve(options.repoRoot || repoRootFromScript());
-  const expectedVersion = options.expectedVersion || EXPECTED_TOOLKIT_VERSION;
+  const expectedVersion = options.expectedVersion || readExpectedToolkitVersion(repoRoot);
   const errors = [];
   const matches = findPluginEntries(pluginList);
   const installed = matches.find((entry) => entry.enabled !== false) || matches[0] || null;
@@ -356,6 +371,13 @@ async function main(argv = process.argv.slice(2)) {
     for (const error of repoErrors) console.error(`FAIL: ${error}`);
     return 1;
   }
+  let expectedVersion;
+  try {
+    expectedVersion = readExpectedToolkitVersion(options.repoRoot);
+  } catch (error) {
+    console.error(`FAIL: ${error.message}`);
+    return 1;
+  }
 
   const resolved = resolveClaudeCommand(options.claudeCommand);
   if (!resolved.command) {
@@ -370,7 +392,7 @@ async function main(argv = process.argv.slice(2)) {
 
   try {
     const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json']);
-    state = evaluateClaudeToolkitPluginState(pluginList, { repoRoot: options.repoRoot });
+    state = evaluateClaudeToolkitPluginState(pluginList, { repoRoot: options.repoRoot, expectedVersion });
   } catch (error) {
     console.error(`FAIL: ${error.message}`);
     return 1;
@@ -387,7 +409,7 @@ async function main(argv = process.argv.slice(2)) {
     }
     try {
       const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json']);
-      state = evaluateClaudeToolkitPluginState(pluginList, { repoRoot: options.repoRoot });
+      state = evaluateClaudeToolkitPluginState(pluginList, { repoRoot: options.repoRoot, expectedVersion });
     } catch (error) {
       console.error(`FAIL: ${error.message}`);
       return 1;
@@ -405,7 +427,7 @@ async function main(argv = process.argv.slice(2)) {
   const summary = {
     ok: true,
     plugin_id: pluginId(),
-    version: EXPECTED_TOOLKIT_VERSION,
+    version: expectedVersion,
     enabled: true,
     scope: options.scope,
     install_path: claudeToolkitInstallCommands(options.repoRoot, options.scope),
@@ -415,7 +437,7 @@ async function main(argv = process.argv.slice(2)) {
   for (const warning of warnings) console.error(`WARN: ${warning}`);
   if (options.json) console.log(JSON.stringify(summary, null, 2));
   else {
-    console.log(`OK: ${pluginId()} is installed and enabled, version ${EXPECTED_TOOLKIT_VERSION}, scope ${options.scope}.`);
+    console.log(`OK: ${pluginId()} is installed and enabled, version ${expectedVersion}, scope ${options.scope}.`);
     console.log('');
     console.log(nextSteps(options.scope).join('\n'));
   }
@@ -434,7 +456,7 @@ if (require.main === module) {
 module.exports = {
   TOOLKIT_PLUGIN_NAME,
   TOOLKIT_MARKETPLACE_NAME,
-  EXPECTED_TOOLKIT_VERSION,
+  PLUGIN_MANIFEST_REL_PATH,
   MARKETPLACE_REL_PATH,
   DEFAULT_SCOPE,
   VALID_SCOPES,
@@ -442,6 +464,7 @@ module.exports = {
   claudeSpawnParts,
   evaluateClaudeToolkitPluginState,
   findPluginEntries,
+  readExpectedToolkitVersion,
   quoteWindowsArg,
   validateMarketplaceWrapper,
   validateRepoPluginSource,

@@ -255,6 +255,7 @@ const allowedRootEntries = new Set([
   '.gitignore',
   '.codex-plugin',
   '.claude-plugin',
+  '.claude',
   '.agents',
   'AGENTS.md',
   'CLAUDE.md',
@@ -269,6 +270,7 @@ const allowedRootEntries = new Set([
 
 const ignoredLocalDirs = new Set([
   '.n8n-local',
+  '.claude',
   '.tmp',
   'n8n-workflows',
   '.to-sanitise',

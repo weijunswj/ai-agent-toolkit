@@ -46,13 +46,13 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.3.0',
+    version: '2.2.5',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.3.0',
+    version: '2.2.5',
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
@@ -75,7 +75,7 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.0', cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_message: 'review Codex hook trust if prompted' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.2.5', cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_message: 'review Codex hook trust if prompted' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -84,7 +84,7 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.0', scope: 'project' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.2.5', scope: 'user' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -319,8 +319,8 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
   assert.match(result.stdout, /Preference\/target writes before answers: no/);
   assert.match(result.stdout, /Codex plugin cache path:/);
-  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.0/);
-  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.0/);
+  assert.match(result.stdout, /Codex expected Toolkit version: 2\.2\.5/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.2\.5/);
   assert.match(result.stdout, /Codex plugin status: already fresh/);
   assert.match(result.stdout, /Codex plugin updated this run: no/);
   assert.match(result.stdout, /Codex restart required: no/);
@@ -742,8 +742,8 @@ test('claude-code setup execute with instructions behavior verifies Claude plugi
   assert.match(result.stdout, /Claude Code native plugin metadata verified/);
   assert.match(result.stdout, /## Claude Code native plugin/);
   assert.match(result.stdout, /Claude plugin manifest path:/);
-  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.0/);
-  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.0/);
+  assert.match(result.stdout, /Claude expected Toolkit version: 2\.2\.5/);
+  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.2\.5/);
   assert.match(result.stdout, /Claude plugin status: metadata present/);
   assert.match(result.stdout, /Claude plugin updated this run: no/);
   assert.match(result.stdout, /Claude restart required: no/);

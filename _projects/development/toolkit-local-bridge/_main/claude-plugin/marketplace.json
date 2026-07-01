@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "ai-agent-toolkit",
-      "source": "."
+      "source": "./"
     }
   ]
 }

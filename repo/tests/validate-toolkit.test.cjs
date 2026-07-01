@@ -516,13 +516,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.3.0';", "const BRIDGE_VERSION = '2.2.9';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.2.5';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.3\.0/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.2\.5/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -2938,6 +2938,7 @@ test('validator rejects forbidden files but tolerates ignored local runtime fold
   const cwd = tempCopy();
   fs.writeFileSync(path.join(cwd, '.env'), 'EXAMPLE=unsafe\n');
   fs.mkdirSync(path.join(cwd, '.n8n-local'), { recursive: true });
+  fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(cwd, '.n8n-local', '.env.n8n-archived-workflow-cleanup'), 'N8N_API_KEY="local-secret"\n');
   fs.mkdirSync(path.join(cwd, 'n8n-workflows'), { recursive: true });
   fs.writeFileSync(path.join(cwd, 'n8n-workflows', 'local.live-export.json'), '{}\n');
@@ -2947,6 +2948,7 @@ test('validator rejects forbidden files but tolerates ignored local runtime fold
   assert.match(result.stderr, /Forbidden env file/);
   assert.doesNotMatch(result.stderr, /Forbidden directory present: \.n8n-local/);
   assert.doesNotMatch(result.stderr, /Unexpected root entry: \.n8n-local/);
+  assert.doesNotMatch(result.stderr, /Unexpected root entry: \.claude/);
   assert.doesNotMatch(result.stderr, /Unexpected root entry: n8n-workflows/);
   assert.doesNotMatch(result.stderr, /n8n-workflows\/local\.live-export\.json/);
   assert.match(result.stderr, /Live n8n import\/export file/);
