@@ -504,11 +504,11 @@ test('native Codex and Claude plugin manifests are generated package metadata', 
     '.codex-plugin/assets/logo.png',
     '.codex-plugin/hooks/hooks.json',
     '.claude-plugin/plugin.json',
-    '.claude-plugin/hooks/hooks.json'
+    '.claude-plugin/hooks/hooks.json',
+    '.claude-plugin/marketplace.json'
   ]) {
     assert.equal(fs.existsSync(path.join(repoRoot, relPath)), true, relPath);
   }
-  assert.equal(fs.existsSync(path.join(repoRoot, '.claude-plugin', 'marketplace.json')), false);
 });
 
 test('Toolkit plugin packaged version surfaces stay aligned', () => {
@@ -516,13 +516,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.2.5';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.3.0';", "const BRIDGE_VERSION = '2.2.9';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.2\.5/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.3\.0/i);
 });
 
 test('skill discovery includes migrated skills', () => {

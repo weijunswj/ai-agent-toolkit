@@ -46,13 +46,13 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.2.5',
+    version: '2.3.0',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.2.5',
+    version: '2.3.0',
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
@@ -75,7 +75,16 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.2.5', cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_message: 'review Codex hook trust if prompted' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.0', cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_message: 'review Codex hook trust if prompted' }));",
+    'process.exit(0);',
+    ''
+  ].join('\n'));
+  writeFile(path.join(root, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'), [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.0', scope: 'project' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -310,8 +319,8 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
   assert.match(result.stdout, /Preference\/target writes before answers: no/);
   assert.match(result.stdout, /Codex plugin cache path:/);
-  assert.match(result.stdout, /Codex expected Toolkit version: 2\.2\.5/);
-  assert.match(result.stdout, /Codex installed Toolkit version: 2\.2\.5/);
+  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.0/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.0/);
   assert.match(result.stdout, /Codex plugin status: already fresh/);
   assert.match(result.stdout, /Codex plugin updated this run: no/);
   assert.match(result.stdout, /Codex restart required: no/);
@@ -713,7 +722,7 @@ test('setup execute refuses local managed checkout divergence before plugin setu
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false, 'plugin setup must not run from local-only commits');
 });
 
-test('claude-code setup execute verifies Claude plugin metadata and skips Codex helper', () => {
+test('claude-code setup execute with instructions behavior verifies Claude plugin metadata and skips Codex helper', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run([
@@ -722,6 +731,7 @@ test('claude-code setup execute verifies Claude plugin metadata and skips Codex 
     '--repo-root', setupRepo,
     '--repo-remote', origin,
     '--yes-recommended',
+    '--claude-plugin-behavior', 'instructions',
     '--skip-update-report-open',
     '--enable-target', 'ag2'
   ], {
@@ -732,8 +742,8 @@ test('claude-code setup execute verifies Claude plugin metadata and skips Codex 
   assert.match(result.stdout, /Claude Code native plugin metadata verified/);
   assert.match(result.stdout, /## Claude Code native plugin/);
   assert.match(result.stdout, /Claude plugin manifest path:/);
-  assert.match(result.stdout, /Claude expected Toolkit version: 2\.2\.5/);
-  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.2\.5/);
+  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.0/);
+  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.0/);
   assert.match(result.stdout, /Claude plugin status: metadata present/);
   assert.match(result.stdout, /Claude plugin updated this run: no/);
   assert.match(result.stdout, /Claude restart required: no/);
@@ -745,6 +755,28 @@ test('claude-code setup execute verifies Claude plugin metadata and skips Codex 
   assert.match(bridgeLog, /--enable-repo-auto-update/);
   assert.doesNotMatch(bridgeLog, /--enable-codex-plugin-auto-refresh/);
   assert.match(bridgeLog, /--enable-target ag2 --write/);
+});
+
+test('claude-code setup execute defaults to install behavior and calls the Claude helper, not the Codex helper', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const result = run([
+    '--execute',
+    '--host', 'claude-code',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-update-report-open'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Claude Code plugin behavior:[\s\S]*recommended: install/);
+  assert.match(result.stdout, /- Claude Code plugin behavior: install/);
+  assert.match(result.stdout, /Claude plugin status: already fresh/);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false, 'Claude install setup must not call the Codex helper');
+  assert.equal(fs.existsSync(path.join(setupRepo, 'CLAUDE_PLUGIN_SETUP.log')), false, 'verify-only pass must not invoke --write');
 });
 
 test('setup final summary distinguishes target keep skip enable-sync and disable choices', () => {

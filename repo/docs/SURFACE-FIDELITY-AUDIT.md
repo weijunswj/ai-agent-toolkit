@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-26 (Toolkit 2.2.5 plugin-eval hygiene metadata and progressive disclosure)
+Latest update: 2026-07-01 (Toolkit 2.3.0 adds .claude-plugin/marketplace.json generated output and setup-claude-toolkit-plugin.cjs for Claude Code native plugin install parity with Codex)
 
 ## Current state
 
@@ -29,7 +29,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | --- | ---: |
 | projects | 15 |
 | publishedFiles | 225 |
-| declaredOutputFiles | 225 |
+| declaredOutputFiles | 226 |
 | packInstalledFiles | 79 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 225 |
+| boundaryRecipeOutputs | 226 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
