@@ -83,6 +83,7 @@ function createMinimalSetupRepo(root) {
     "'use strict';",
     "const fs = require('node:fs');",
     "const path = require('node:path');",
+    "fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_HELPER_ARGS.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "process.stdout.write(JSON.stringify({ ok: true, version: '2.2.5', scope: 'user' }));",
     'process.exit(0);',
@@ -755,6 +756,30 @@ test('claude-code setup execute with instructions behavior verifies Claude plugi
   assert.match(bridgeLog, /--enable-repo-auto-update/);
   assert.doesNotMatch(bridgeLog, /--enable-codex-plugin-auto-refresh/);
   assert.match(bridgeLog, /--enable-target ag2 --write/);
+});
+
+test('--verify-claude-plugin delegates to the Claude helper verify path', () => {
+  const root = tmpRoot();
+  const { setupRepo } = createGitBackedSetupRepo(root);
+  const fakeClaudeCli = path.join(root, 'fake claude cli.cmd');
+  const result = run([
+    '--verify-claude-plugin',
+    '--host', 'claude-code',
+    '--repo-root', setupRepo,
+    '--claude-cli', fakeClaudeCli
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /"ok":true|"ok": true/);
+  assert.doesNotMatch(result.stdout, /Claude Code native plugin metadata verified/);
+  const helperLog = fs.readFileSync(path.join(setupRepo, 'CLAUDE_PLUGIN_HELPER_ARGS.log'), 'utf8');
+  assert.match(helperLog, /--verify --json/);
+  assert.match(helperLog, new RegExp(`--repo-root ${escapeRegExp(setupRepo)}`));
+  assert.match(helperLog, new RegExp(`--claude-cli ${escapeRegExp(fakeClaudeCli)}`));
+  assert.equal(fs.existsSync(path.join(setupRepo, 'CLAUDE_PLUGIN_SETUP.log')), false, 'verify must not invoke --write');
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false, 'Claude verify must not call the Codex helper');
 });
 
 test('claude-code setup execute defaults to install behavior and calls the Claude helper, not the Codex helper', () => {

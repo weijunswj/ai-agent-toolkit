@@ -1363,6 +1363,17 @@ function runClaudeNativePluginSetup(args) {
   };
 }
 
+function runClaudeNativePluginVerify(args) {
+  const result = runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupClaudeArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: 120000 }
+  );
+  process.stdout.write(result.stdout || '');
+  return parseJsonFromOutput(result.stdout);
+}
+
 function bridgeArgs(args, extraArgs = []) {
   const result = nodeScriptArgs('repo/scripts/toolkit-local-bridge.cjs', extraArgs);
   if (args.hub) result.push('--hub', args.hub);
@@ -1674,7 +1685,7 @@ async function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (args.verifyClaudePlugin) {
-    verifyClaudeNativePluginMetadata(args);
+    runClaudeNativePluginVerify(args);
     return 0;
   }
   const delegatedCode = delegateToManagedSetupIfAvailable(args);
