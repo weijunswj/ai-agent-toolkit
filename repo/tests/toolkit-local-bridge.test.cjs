@@ -20,7 +20,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.0';
+const expectedBridgeVersion = '2.3.1';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -2265,6 +2265,42 @@ test('replaceDirectoryAtomically retries transient rename EPERM failures', () =>
   assert.equal(targetRenameAttempts, 1);
   assert.equal(fs.readFileSync(path.join(target, 'manifest.json'), 'utf8'), '{"next":true}\n');
   assert.equal(fs.existsSync(source), false);
+});
+
+test('replaceDirectoryAtomically falls back to copy when Windows blocks final rename', () => {
+  const root = tmpRoot();
+  const source = path.join(root, 'source');
+  const target = path.join(root, 'current');
+  writeFile(path.join(source, 'manifest.json'), '{"next":true}\n');
+  writeFile(path.join(source, 'nested', 'state.json'), '{"ok":true}\n');
+  writeFile(path.join(target, 'manifest.json'), '{"previous":true}\n');
+
+  const originalRenameSync = fs.renameSync;
+  let targetRenameAttempts = 0;
+  fs.renameSync = function lockedFinalRename(from, to) {
+    if (path.resolve(from) === path.resolve(source) && path.resolve(to) === path.resolve(target)) {
+      targetRenameAttempts += 1;
+      const error = new Error('simulated persistent Windows file lock');
+      error.code = 'EPERM';
+      throw error;
+    }
+    return originalRenameSync.apply(this, arguments);
+  };
+
+  try {
+    replaceDirectoryAtomically(source, target, { renameAttempts: 2, retryDelayMs: 1 });
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+
+  assert.equal(targetRenameAttempts, 2);
+  assert.equal(fs.readFileSync(path.join(target, 'manifest.json'), 'utf8'), '{"next":true}\n');
+  assert.equal(fs.readFileSync(path.join(target, 'nested', 'state.json'), 'utf8'), '{"ok":true}\n');
+  assert.equal(fs.existsSync(source), false);
+  assert.deepEqual(
+    fs.readdirSync(root).filter((entry) => entry.includes('backup')),
+    []
+  );
 });
 
 test('native plugin manifests and hooks are valid and policy-light', () => {

@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "version_policy": "semver",
-  "version_notes": "Adds a Claude Code local marketplace manifest and a setup-claude-toolkit-plugin.cjs parity script so `setup toolkit` can install/enable the Toolkit plugin in Claude Code non-interactively, matching the existing Codex auto-install path.",
+  "version_notes": "Adds a Windows transient-rename copy fallback for Toolkit hub replacement so native launch hooks can recover when the final staging-to-current directory rename is blocked.",
   "outputs": [
     {
       "kind": "curated",

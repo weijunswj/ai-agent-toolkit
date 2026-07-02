@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.0';
+const BRIDGE_VERSION = '2.3.1';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1951,6 +1951,22 @@ function replaceDirectoryAtomically(sourceDir, targetDir, options = {}) {
   try {
     renameSyncWithRetry(sourceDir, targetDir, options);
   } catch (error) {
+    if (isTransientRenameError(error) && fs.existsSync(sourceDir) && !fs.existsSync(targetDir)) {
+      try {
+        fs.cpSync(sourceDir, targetDir, { recursive: true, force: false, errorOnExist: true });
+        fs.rmSync(sourceDir, { recursive: true, force: true });
+        if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
+        return;
+      } catch (copyError) {
+        if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+        const fallbackError = new Error(
+          `Failed to replace ${targetDir}: rename failed with ${error.code || error.message}; copy fallback failed with ${copyError.code || copyError.message}`
+        );
+        fallbackError.code = copyError.code || error.code;
+        fallbackError.cause = copyError;
+        error = fallbackError;
+      }
+    }
     if (fs.existsSync(backup) && !fs.existsSync(targetDir)) renameSyncWithRetry(backup, targetDir, options);
     throw error;
   }

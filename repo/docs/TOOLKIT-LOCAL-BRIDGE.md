@@ -64,7 +64,7 @@ The hub contains:
 
 The lock file lives beside the hub at `%USERPROFILE%\.ai-agent-toolkit\update.lock` or `~/.ai-agent-toolkit/update.lock`.
 
-Writes are atomic:
+Writes are rename-first and atomic in the normal case. On Windows, when the final staging-to-`current` directory rename is blocked by a transient `EPERM`, `EBUSY`, or `ENOTEMPTY` after the previous target has already been moved to a backup path, the bridge may fall back to copying the validated staging directory into the empty target path and then cleaning up staging plus backup. If the fallback copy fails, it removes the partial target and restores the backup.
 
 1. Write a staging directory.
 2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and Antigravity 2 adapter output.
@@ -176,7 +176,7 @@ Before reporting `setup toolkit` complete, run:
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-If the plugin is missing, disabled, stale, points at another source path, has same-version cache content that does not match this repo, or its installed plugin cache does not contain Toolkit version `2.3.0` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
+If the plugin is missing, disabled, stale, points at another source path, has same-version cache content that does not match this repo, or its installed plugin cache does not contain Toolkit version `2.3.1` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
 
 ```powershell
 node repo/scripts/setup-codex-toolkit-plugin.cjs --write
@@ -186,9 +186,9 @@ The verifier uses only supported Codex plugin commands. If no usable Codex CLI w
 
 Claude Code has the same three behavior choices in the setup question bank: `keep` (no action), `instructions` (verify metadata only and report manual native refresh instructions), and `install` (recommended default), which runs `node repo/scripts/setup-claude-toolkit-plugin.cjs` through the same verify-then-write-then-verify sequence as Codex, using the supported `claude plugin marketplace add <repo>` and `claude plugin install ai-agent-toolkit@ai-agent-toolkit-local --scope user` commands and `claude plugin list --json` for verification. Unlike Codex, this script does not fingerprint a version-pinned plugin cache directory, because Claude Code's local-marketplace install path has no documented equivalent to Codex's copied plugin cache; verification relies solely on `claude plugin list --json` reporting the plugin installed and enabled. `--scope user` avoids writing repo-tracked `.claude/settings.json` during setup. Codex must not install or update Claude Code, and Claude Code must not install or update Codex.
 
-The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. CLI list verification remains the preferred path. If the CLI list is empty or unreliable, the helper may use config/cache fallback verification only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.3.0`, the cache manifest has the expected Toolkit name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report this as config/cache fallback verification, not normal CLI verification.
+The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. CLI list verification remains the preferred path. If the CLI list is empty or unreliable, the helper may use config/cache fallback verification only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.3.1`, the cache manifest has the expected Toolkit name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report this as config/cache fallback verification, not normal CLI verification.
 
-If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.3.0`, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
+If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.3.1`, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
 
 After install, update, or verify, the helper prints or returns a `**Next Steps:**` section. It tells the user to restart Codex if installation changed anything, open Codex hook review when prompted, and trust the Codex `SessionStart` hook only if it runs:
 
@@ -216,8 +216,8 @@ Acceptance criteria:
 
 - `node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json` exits successfully. If the underlying `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` process keeps running after verification passes, setup output includes a warning that the command did not exit cleanly.
 - `codex plugin list --available --json` shows `ai-agent-toolkit@ai-agent-toolkit-local` installed and enabled with `authPolicy` `ON_USE`.
-- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.3.0`.
-- The final cache `.codex-plugin/plugin.json` reports version `2.3.0`.
+- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.3.1`.
+- The final cache `.codex-plugin/plugin.json` reports version `2.3.1`.
 - The final cache `.codex-plugin/hooks/hooks.json` includes a `SessionStart` hook.
 - Package-critical cache files match the local repo, including Codex plugin metadata, Toolkit bridge/setup scripts, hook-light validation test, assets, and `skills/`.
 
