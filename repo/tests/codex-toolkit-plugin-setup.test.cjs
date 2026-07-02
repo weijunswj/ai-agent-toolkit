@@ -316,7 +316,7 @@ test('Codex Toolkit plugin setup verifier rejects stale, disabled, or hookless i
     repoRoot
   });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /expected version 2\.3\.0/i);
+  assert.match(state.errors.join('\n'), /expected version 2\.3\.1/i);
 
   codexHome = tmpRoot();
   writeInstalledCache(codexHome);
@@ -424,7 +424,7 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
           pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
           name: 'ai-agent-toolkit',
           marketplaceName: 'ai-agent-toolkit-local',
-          version: '2.3.0',
+          version: '2.3.1',
           installed: true,
           enabled: true,
           authPolicy,
@@ -586,7 +586,7 @@ test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
   assert.match(bridgeDoc, /polls `codex plugin list --available --json`/);
   assert.match(bridgeDoc, /did not exit cleanly/);
   assert.match(bridgeDoc, /codex plugin list --available --json/);
-  assert.match(bridgeDoc, /plugins\/cache\/ai-agent-toolkit-local\/ai-agent-toolkit\/2\.3\.0/);
+  assert.match(bridgeDoc, /plugins\/cache\/ai-agent-toolkit-local\/ai-agent-toolkit\/2\.3\.1/);
   assert.match(bridgeDoc, /SessionStart/);
 });
 
