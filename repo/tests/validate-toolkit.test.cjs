@@ -553,6 +553,7 @@ test('project manifests include the current project modules without repo-wide MC
   const ids = validator.projectManifests().map((entry) => entry.id).sort();
   assert.deepEqual(ids, [
     'cicd.secure-installer',
+    'design.google-design-md',
     'design.ui-ux-pro-max',
     'development.ai-coding-agent-rules',
     'development.hostinger-coolify-production-guide',

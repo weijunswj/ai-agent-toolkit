@@ -6,7 +6,8 @@
   "risk_level": "low",
   "source_refs": [
     "skills/ui-ux-secure-frontend-design/",
-    "nextlevelbuilder/ui-ux-pro-max-skill:inspiration-only"
+    "nextlevelbuilder/ui-ux-pro-max-skill:inspiration-only",
+    "google-labs-code/design.md:Apache-2.0-reference"
   ],
   "suitable_for": [
     "Codex",
@@ -41,6 +42,7 @@
     "Instruction-first skill. The installed skill folder includes bundled local-only design-system generator scripts and CSV data.",
     "Pack installers must copy files only and must not run the generator during installation.",
     "No dependencies are installed.",
+    "DESIGN.md support is documentation-only by default; installers must not run upstream Google CLI or package tooling.",
     "Read-only local generator execution may support normal design creation or revision only from the trusted installed skill path; generated output writes require explicit current-turn approval."
   ]
 }

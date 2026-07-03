@@ -17,11 +17,22 @@ For design and review tasks, read the relevant references only when useful:
 
 - `references/design-system-workflow.md` for design system templates.
 - `references/component-patterns.md` for common UI patterns.
+- `references/design-md-contract.md` when the target app has `DESIGN.md` / `design.md`, or when proposing a durable design contract would prevent drift.
 - `references/frontend-quality-rubric.md` for scoring reviews.
 - `references/privacy-security-safety.md` for high-risk surface gates.
 - `references/stack-playbooks.md` for React, Next.js, Tailwind, shadcn/ui, charts, forms, and accessibility guidance.
 
 For design creation or revision tasks where CSV-backed recommendations would help, read `tools/design-system-generator/README.md` before running the generator.
+
+## DESIGN.md design contracts
+
+If the target app has a `DESIGN.md` or `design.md`, read it before changing frontend visuals. Use it alongside the existing design-system workflow, local source files, and the local generator when useful.
+
+If no design contract exists and design drift is likely, propose or create a `DESIGN.md` only when it is useful and within the user's requested scope. Existing app tokens, CSS variables, theme files, component libraries, and brand docs remain source of truth unless the user explicitly asks to convert or reconcile them.
+
+Do not overwrite an existing `DESIGN.md` without explicit current-turn approval. Do not run `npx @google/design.md`, install `@google/design.md`, add package scripts, fetch remote assets, call external validators, or use upstream executable tooling unless the user explicitly approves that exact action and the repo policy allows it.
+
+Treat `DESIGN.md` as a design contract, not a replacement for accessibility, privacy, security, auth, form validation, logging, or production-readiness checks. Keep Toolkit guidance stack-neutral by default; do not Tailwind-lock a project unless the target app already uses Tailwind as its source of truth.
 
 ## When to use the generator
 
@@ -110,8 +121,9 @@ Use when the user asks to create, redesign, polish, review, or plan:
 
 1. Clarify product intent only if needed.
 2. Inspect existing repo files before inventing new components.
-3. Identify stack and constraints.
-4. Create or infer a design system:
+3. Read any existing `DESIGN.md` or `design.md` before visual changes.
+4. Identify stack and constraints.
+5. Create or infer a design system:
    - Use the local generator when CSV-backed recommendations would improve the design direction.
    - Brand tone.
    - Colour roles.
@@ -124,7 +136,7 @@ Use when the user asks to create, redesign, polish, review, or plan:
    - Iconography.
    - Layout grid.
    - Accessibility constraints.
-5. Produce page-level overrides:
+6. Produce page-level overrides:
    - Page goal.
    - Primary user action.
    - Content hierarchy.
@@ -134,10 +146,10 @@ Use when the user asks to create, redesign, polish, review, or plan:
    - Mobile behaviour.
    - Security/privacy notes.
    - Privacy Policy and Terms of Use link placement when the frontend is product-facing and/or data-handling; skip this only for an isolated component, static UI experiment, internal throwaway mock, or non-product frontend-only task that is not intended for product use and does not handle user/business/confidential data.
-6. Implement or recommend changes.
+7. Implement or recommend changes.
    - When a mockup or screenshot has been confirmed as the implementation target, use the mockup-driven implementation loop below.
-7. Run review checklist.
-8. Report what changed, what was not changed, and remaining risks.
+8. Run review checklist.
+9. Report what changed, what was not changed, and remaining risks.
 
 ## Design system output
 
