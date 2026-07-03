@@ -497,7 +497,7 @@ function printHelp() {
     '  --keep-update-report-retention-days',
     '                               preserve current retention days',
     '  --enable-codex-plugin-auto-refresh',
-    '                               let Codex hooks refresh stale Codex Toolkit cache from managed main',
+    '                               let Codex hooks refresh stale Codex Toolkit cache and repair unsafe third-party hooks on Windows',
     '  --skip-codex-plugin-auto-refresh',
     '                               leave stale Codex plugin cache refresh manual',
     '  --keep-codex-plugin-auto-refresh',
@@ -871,8 +871,8 @@ function setupQuestionSpecs(args, current) {
   if (args.host === 'codex') {
     specs.push({
       key: 'codexPluginAutoRefresh',
-      title: 'Codex plugin cache auto-refresh',
-      prompt: 'Codex plugin cache auto-refresh choice',
+      title: 'Codex plugin cache auto-refresh and Windows hook repair',
+      prompt: 'Codex plugin cache auto-refresh and Windows hook repair choice',
       choices: ['keep', 'enable', 'disable'],
       recommended: recommendedChoice('codexPluginAutoRefresh', current, args),
       selected: args.setupChoices.codexPluginAutoRefresh,

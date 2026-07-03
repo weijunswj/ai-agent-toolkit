@@ -236,7 +236,7 @@ test('Claude Toolkit plugin state evaluator accepts the real claude plugin list 
       version: expectedVersion(),
       scope: 'user',
       enabled: true,
-      installPath: 'C:\\Users\\someone\\.claude\\plugins\\cache\\ai-agent-toolkit-local\\ai-agent-toolkit\\2.3.1',
+      installPath: 'C:\\Users\\someone\\.claude\\plugins\\cache\\ai-agent-toolkit-local\\ai-agent-toolkit\\2.3.2',
       installedAt: '2026-07-01T14:44:35.944Z',
       lastUpdated: '2026-07-01T14:44:35.944Z',
       projectPath: repoRoot

@@ -12,7 +12,8 @@ const {
   openUpdateReport,
   updateReportDir,
   cleanupUpdateReports,
-  replaceDirectoryAtomically
+  replaceDirectoryAtomically,
+  repairThirdPartyCodexPluginHooks
 } = require('../scripts/toolkit-local-bridge.cjs');
 const { verifyInstalledCacheFreshness } = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
@@ -20,7 +21,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.1';
+const expectedBridgeVersion = '2.3.2';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -500,6 +501,34 @@ function writeN8nPluginHookFixture(pluginRoot) {
       // Windows Git Bash can usually run these, and chmod can be unavailable in restricted filesystems.
     }
   }
+}
+
+function writeGenericPluginHookFixture(pluginRoot, command = 'hooks/session-start.sh') {
+  writeJson(path.join(pluginRoot, 'plugin.json'), {
+    name: 'generic-third-party',
+    version: '0.0.0-test',
+    repository: 'https://example.invalid/generic-third-party'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup',
+          hooks: [
+            {
+              type: 'command',
+              command
+            }
+          ]
+        }
+      ]
+    }
+  });
+  writeFile(path.join(pluginRoot, 'hooks', 'session-start.sh'), [
+    '#!/usr/bin/env bash',
+    'echo "generic hook"',
+    ''
+  ].join('\n'));
 }
 
 function pushRepoToolkitUpdate(fixture, label) {
@@ -2599,4 +2628,83 @@ test('Windows n8n plugin hook repair removes bare shell hooks and verifies hook 
 
   const errors = auditPluginRoot(pluginRoot, { windows: true, verifyOutput: true });
   assert.deepEqual(errors, []);
+});
+
+test('third-party Codex plugin hook repair discovers generic installed plugin caches', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
+  const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
+  writeGenericPluginHookFixture(toolkitRoot);
+  writeGenericPluginHookFixture(thirdPartyRoot);
+
+  const result = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    currentPluginRoot: toolkitRoot,
+    windows: true,
+    write: true
+  });
+
+  assert.equal(result.status, 'repaired');
+  assert.deepEqual(result.repaired.map((entry) => entry.plugin_root), [thirdPartyRoot]);
+  assert.deepEqual(result.skipped.map((entry) => entry.plugin_root), [toolkitRoot]);
+
+  const repairedHooks = readJson(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
+  const repairedCommand = collectHookCommands(repairedHooks)[0].command;
+  assert.match(repairedCommand, /^powershell(?:\.exe)?\s/i);
+  assert.match(repairedCommand, /hooks\/run-hook\.ps1/);
+  assert.equal(fs.existsSync(path.join(thirdPartyRoot, 'hooks', 'run-hook.ps1')), true);
+
+  const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
+  assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
+});
+
+test('Codex hook auto-repairs third-party plugin hooks after setup opt-in', {
+  skip: process.platform !== 'win32' ? 'Windows hook repair is Windows-only' : false
+}, () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha hook repair\n' });
+  const hub = path.join(root, 'hub', 'current');
+  const codexHome = path.join(root, 'codex-home');
+  const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
+  const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
+  writeGenericPluginHookFixture(toolkitRoot);
+  writeGenericPluginHookFixture(thirdPartyRoot);
+
+  let result = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--enable-codex-plugin-auto-refresh',
+    '--sync-source', 'codex-plugin'
+  ], {
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      CODEX_HOME: codexHome,
+      PLUGIN_ROOT: toolkitRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      CODEX_HOME: codexHome,
+      PLUGIN_ROOT: toolkitRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit updated:/);
+
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Repaired `1` third-party Codex plugin hook cache/);
+  assert.match(report.text, /generic-third-party@example-marketplace/);
+  assert.match(report.text, /third-party Codex plugin hook repair: `repaired`/);
+
+  const repairedHooks = readJson(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
+  assert.match(collectHookCommands(repairedHooks)[0].command, /^powershell(?:\.exe)?\s/i);
+  const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
+  assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
 });
