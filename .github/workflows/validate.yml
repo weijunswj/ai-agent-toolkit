@@ -34,6 +34,7 @@ jobs:
           node repo/scripts/sync-toolkit-projects.cjs --check
           node repo/scripts/audit-project-source-locks.cjs
           node repo/scripts/audit-published-surfaces.cjs --check
+          node repo/scripts/audit-fallback-risk.cjs
           node repo/scripts/validate-toolkit.cjs
           node --test repo/tests/*.test.cjs
           node repo/scripts/package-skills.cjs --check

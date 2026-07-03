@@ -24,19 +24,28 @@ function extractSection(text, heading) {
 
 function assertCompactApplicationErrorBlock(text, relPath) {
   const section = extractSection(text, 'Application Error, Logging, And Privacy Defaults');
-  const bulletCount = section.split('\n').filter((line) => line.trim().startsWith('- ')).length;
-  assert.ok(bulletCount >= 3 && bulletCount <= 5, `${relPath} should keep the app error block compact`);
+  assert.ok(section.length <= 420, `${relPath} should keep the app error block compact`);
   assert.match(section, /generic user-facing errors/i, relPath);
   assert.match(section, /support-safe traceable reference/i, relPath);
-  assert.match(section, /same event\/request-specific reference/i, relPath);
-  assert.match(section, /server logs or the approved logging backend/i, relPath);
-  assert.match(section, /privacy-minimized/i, relPath);
-  assert.match(section, /raw prompts, uploads, model responses, secrets, auth headers, cookies, payment data, private connector data, private files, or unnecessary PII/i, relPath);
-  assert.match(section, /Do not add broad fallbacks or backwards compatibility by default/i, relPath);
-  assert.match(section, /route to the relevant frontend\/backend\/privacy\/observability skills and reference docs/i, relPath);
+  assert.match(section, /same event\/request ref in server logs/i, relPath);
+  assert.match(section, /privacy-minimized logs/i, relPath);
+  assert.match(section, /prompts\/uploads\/model outputs, secrets, auth headers\/cookies, payment data, private connector data\/files, or unneeded PII/i, relPath);
   assert.doesNotMatch(section, /UNKNOWN_ERROR|INTERNAL_ERROR|ERR_GENERIC/, `${relPath} should leave static-code details to skills`);
   assert.doesNotMatch(section, /accounts, forms, uploads, analytics, AI, payments, user data, customer\/business data, admin workflows, dashboards, or confidential business data/i, `${relPath} should leave legal-page detail to skills`);
   assert.doesNotMatch(section, /Privacy Policy|Terms of Use/i, `${relPath} should leave legal-page detail to skills`);
+}
+
+function assertFallbackPolicyBlock(text, relPath) {
+  const section = extractSection(text, 'Fallback Policy');
+  assert.match(section, /Do not add broad fallbacks, silent compatibility paths, synthetic\/sample data fallbacks, fake success states, or catch-and-continue behaviour by default/i, relPath);
+  assert.match(section, /prefer fixing the real failure path/i, relPath);
+  assert.match(section, /correctness, data safety, migration safety, or explicitly approved compatibility/i, relPath);
+  assert.match(section, /narrow, visible via logs\/diagnostics\/user-safe status/i, relPath);
+  assert.match(section, /tested on primary\/fallback paths/i, relPath);
+  assert.match(section, /reason-documented/i, relPath);
+  assert.match(section, /temporary removal\/review condition/i, relPath);
+  assert.match(section, /Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation/i, relPath);
+  assert.match(section, /never use fake business data or silently downgrade production behaviour/i, relPath);
 }
 
 function assertTraceableErrorReference(text, relPath) {
@@ -150,5 +159,6 @@ test('repo-local agent rules keep application error defaults compact', () => {
   ]) {
     const text = readText(relPath);
     assertCompactApplicationErrorBlock(text, relPath);
+    assertFallbackPolicyBlock(text, relPath);
   }
 });
