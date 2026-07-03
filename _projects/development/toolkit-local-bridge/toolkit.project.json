@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "version_policy": "semver",
-  "version_notes": "Packages the updated portable documentation-closure and managed-memory agent-rule guidance.",
+  "version_notes": "Packages the n8n MCP metadata and static MCP config review safety guidance.",
   "outputs": [
     {
       "kind": "curated",

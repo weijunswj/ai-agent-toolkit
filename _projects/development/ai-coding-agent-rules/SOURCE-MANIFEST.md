@@ -25,6 +25,10 @@
 
 The manual global templates `_main/AGENTS.template.md`, `_main/CLAUDE.template.md`, and `_main/GEMINI.template.md` are human-facing reference docs generated from `_partials/ai-coding-agent-execution.md`. They may explain manual global setup.
 
+## Reference-Only External Context
+
+The 2026-07-03 gap audit compared Microsoft Agent Governance Toolkit at `microsoft/agent-governance-toolkit@d3c2a29e90a5c80dd9b34badd868233d3dcbec83` for MCP metadata threat-model concepts only. No AGT code, text, packages, policy files, or generated assets were copied, adapted, installed, vendored, executed, or added as source-watch dependencies. The resulting MCP metadata and static config review guidance in `_partials/n8n-agent-rules.md` is first-party wording.
+
 ## Reviewed Skill-Facing Source
 
 - `curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`
