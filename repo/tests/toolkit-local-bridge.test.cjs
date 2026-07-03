@@ -1403,7 +1403,7 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
   assert.match(report.text, /- `skills\/fixture-skill\/SKILL\.md`/);
   assert.match(report.text, /repo update status: `updated`/);
   assert.match(report.text, /hook-light validation: `passed`/);
-  assert.match(report.text, /Skipped n8n\/live systems; not touched\./);
+  assert.match(report.text, /Skipped live n8n systems; not touched\./);
 });
 
 test('no-op repo auto-update hook with unchanged observed commit does not create a report', () => {
@@ -1772,7 +1772,7 @@ test('legacy delegated repo sync writes an update report using stored repo updat
   assert.match(report.text, /repo update status: `updated`/);
   assert.match(report.text, /target sync status: `synced`/);
   assert.match(report.text, /checksum: `[a-f0-9]{64}`/);
-  assert.match(report.text, /Skipped n8n\/live systems; not touched\./);
+  assert.match(report.text, /Skipped live n8n systems; not touched\./);
 });
 
 test('suppressed legacy delegated repo sync does not write an update report', () => {
