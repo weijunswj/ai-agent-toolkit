@@ -85,13 +85,11 @@ Never introduce secrets, credentials, tokens, private keys, `.env` values, or pr
 
 ## Application Error, Logging, And Privacy Defaults
 
-When touching product frontend/backend behavior, preserve privacy-safe diagnostics without turning root instructions into a full policy manual.
+When touching app behavior, use generic user-facing errors with support-safe traceable reference, same event/request ref in server logs, and no internal/private data. Keep privacy-minimized logs; do not log prompts/uploads/model outputs, secrets, auth headers/cookies, payment data, private connector data/files, or unneeded PII.
 
-- Show generic user-facing errors with a support-safe traceable reference; do not expose internals or private payloads in UI.
-- Store the same event/request-specific reference in server logs or the approved logging backend so support can trace the failure.
-- Keep logs privacy-minimized; do not log raw prompts, uploads, model responses, secrets, auth headers, cookies, payment data, private connector data, private files, or unnecessary PII.
-- Do not add broad fallbacks or backwards compatibility by default. Ask the user first; if approved, keep the path narrow, visible, logged, tested, and documented with a removal or review condition.
-- For detailed frontend, backend, privacy, AI observability, and legal-page requirements, route to the relevant frontend/backend/privacy/observability skills and reference docs.
+## Fallback Policy
+
+Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fallbacks, fake success states, or catch-and-continue behaviour by default; prefer fixing the real failure path. Allow only for correctness, data safety, migration safety, or explicitly approved compatibility. Approved fallbacks must be narrow, visible via logs/diagnostics/user-safe status as appropriate, tested on primary/fallback paths, reason-documented, with temporary removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never use fake business data or silently downgrade production behaviour.
 
 ## User Action Questions
 
