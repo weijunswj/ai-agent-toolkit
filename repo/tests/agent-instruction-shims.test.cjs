@@ -244,6 +244,9 @@ test('execution prompt requires full-bold user-action questions and generated su
     /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./,
     /## Managed Memory/,
     /Treat `MEMORY\.md` as managed, non-authoritative project memory\./,
+    /## Documentation Closure/,
+    /Use context-preserving compression, not blind deletion\./,
+    /Keep repo maps pointer-based and current;/,
     /Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task/,
     /Instruction sources used/,
     /MEMORY\.md changed: Yes\/No/

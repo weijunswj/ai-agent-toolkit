@@ -30,6 +30,17 @@ Do not commit files from those folders. They are allowed only as local staging/o
 
 Keep historical source provenance in [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md) and `_projects/**/SOURCE-LOCK.json`. Do not recreate temporary migration checklists as active repo policy.
 
+## Documentation Closure
+
+For broad docs, audit, planning, migration, readiness, cleanup, architecture, security, production-readiness, source-of-truth, or repo-wide work, close the documentation loop before claiming completion.
+
+- Merge durable findings into the smallest existing canonical docs.
+- Preserve durable decisions, current state, validation commands/results, unresolved risks, source-of-truth links, ownership boundaries, generated-surface notes, repo navigation hints, and provenance needed for auditability.
+- Compress or remove repeated narrative, old progress chatter, superseded plans, stale blockers, duplicate audits, obsolete handoffs, and completion noise.
+- Retire, delete, or archive temporary audit/status/plan/handoff/progress/completion docs when they no longer represent current truth.
+- Do not replace detailed source, provenance, licensing, validation, security, or maintenance references with lossy summaries.
+- If there is doubt whether a document still contains durable value, retain it or merge the durable parts first.
+
 ## Old Root Folders
 
 Old root skill folders are removed only after their skill contents are moved under `skills/` and validation confirms the new paths.

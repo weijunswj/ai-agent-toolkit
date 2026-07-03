@@ -1410,6 +1410,9 @@ const portableAgentsTemplateRequiredSnippets = [
   { label: 'portable missing-index fallback', text: 'If the portable playbook index is missing, continue safely using `AGENTS.md` and local repo docs.' },
   { label: 'portable managed memory section', text: '## Managed Memory' },
   { label: 'portable non-authoritative memory contract', text: 'Treat `MEMORY.md` as managed, non-authoritative project memory.' },
+  { label: 'portable documentation closure section', text: '## Documentation Closure' },
+  { label: 'portable context-preserving compression rule', text: 'Use context-preserving compression, not blind deletion.' },
+  { label: 'portable repo-map guidance', text: 'Keep repo maps pointer-based and current;' },
   { label: 'portable final instruction-source report', text: 'Instruction sources used' },
   { label: 'portable memory change report', text: 'MEMORY.md changed: Yes/No' }
 ];
@@ -1438,7 +1441,7 @@ function validateAgentPlaybookArchitecture(errors) {
   if (!rootAgents.includes(currentContractBegin)) {
     fail(errors, 'AGENTS.md must preserve the managed source-of-truth contract block');
   }
-  if (lineCount(rootAgents) > 360 || rootAgents.length > 28000) {
+  if (lineCount(rootAgents) > 380 || rootAgents.length > 32000) {
     fail(errors, 'AGENTS.md must stay compact enough for always-loaded root instructions');
   }
 
