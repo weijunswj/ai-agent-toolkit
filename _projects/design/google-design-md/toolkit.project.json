@@ -1,0 +1,61 @@
+{
+  "id": "design.google-design-md",
+  "category": "design",
+  "name": "google-design-md",
+  "title": "Google DESIGN.md Design Reference",
+  "module_path": "_projects/design/google-design-md",
+  "main_path": "_projects/design/google-design-md/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial third-party-attributed Toolkit reference for Google Labs DESIGN.md. Upstream repo, ref, commit, file pins, attribution, and manual-review update policy are tracked in SOURCE-LOCK.json.",
+  "outputs": [
+    {
+      "kind": "copy",
+      "source": "_main/design-md-contract.md",
+      "output": "skills/ui-ux-secure-frontend-design/references/design-md-contract.md",
+      "notes": "Shared-surface DESIGN.md reference generated from this provenance-owned design module into the existing UI/UX skill.",
+      "fidelity": "exact",
+      "shared_surface": true,
+      "surface_owner_project": "design.ui-ux-pro-max",
+      "shared_surface_reason": "The Google DESIGN.md source/provenance belongs to design.google-design-md, while the runtime reference belongs inside the UI/UX skill that consumes design contracts."
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/ui-ux-secure-frontend-design/references/design-md-contract.md"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "arbitrary-output-paths/**",
+      "user-home/**",
+      "system-paths/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "Google DESIGN.md Design Reference",
+    "category": "design",
+    "summary": "Third-party-attributed, local-only reference for safely using DESIGN.md design contracts with the UI/UX skill."
+  },
+  "surface": {
+    "publish_as": "source_only",
+    "skill": {
+      "status": "not_applicable"
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}
+

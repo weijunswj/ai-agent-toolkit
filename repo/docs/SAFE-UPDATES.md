@@ -80,6 +80,17 @@ For `nextlevelbuilder/ui-ux-pro-max-skill`, the allowlist is:
 - `src/ui-ux-pro-max/data/**/*.csv`
 - `LICENSE`
 
+For `google-labs-code/design.md`, the allowlist is:
+
+- `docs/spec.md`
+- `README.md`
+- `LICENSE`
+- `package.json`
+- `packages/cli/package.json`
+- `bun.lock`
+
+The Google Labs DESIGN.md source remains documentation/reference-only in this toolkit. Future reviews must not vendor or execute the upstream CLI, package tooling, examples, workflows, lockfiles, generated assets, remote validators, package install paths, or `npx @google/design.md` commands without a separate approved source update.
+
 ## AI Review
 
 Optional AI review is advisory only. It can help summarize a diff, but it cannot approve or apply changes.

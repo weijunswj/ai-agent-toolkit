@@ -12,6 +12,14 @@ const root = process.cwd();
 const projectRoot = '_projects';
 
 const allowlists = {
+  'google-labs-code/design.md': [
+    'docs/spec.md',
+    'README.md',
+    'LICENSE',
+    'package.json',
+    'packages/cli/package.json',
+    'bun.lock'
+  ],
   'nextlevelbuilder/ui-ux-pro-max-skill': [
     'src/ui-ux-pro-max/scripts/core.py',
     'src/ui-ux-pro-max/scripts/design_system.py',

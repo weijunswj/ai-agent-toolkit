@@ -20,6 +20,15 @@ The skill is instruction-first. It also includes a local-only design-system gene
 4. Reviews finished UI for visual polish, accessibility, responsiveness, performance, privacy, security, and safety.
 5. Keeps risky surfaces such as auth, forms, dashboards, file uploads, analytics, AI controls, and automation controls under stricter review.
 6. Uses bundled local CSV data to generate design-system recommendations for design creation or revision when helpful.
+7. Reads existing `DESIGN.md` / `design.md` files before frontend visual changes and may propose a durable design contract when drift is likely.
+
+## DESIGN.md compatibility
+
+If a target app has `DESIGN.md` or `design.md`, agents should read it before changing frontend visuals. Use it alongside [references/design-md-contract.md](references/design-md-contract.md), the normal design-system workflow, local app tokens, CSS/theme files, component code, and the local generator when useful.
+
+If no design contract exists and repeated UI changes are likely to drift, agents may propose or create a `DESIGN.md` only when it is useful and within the user's requested scope. Existing app tokens, CSS variables, theme files, component libraries, and brand docs remain source of truth unless the user explicitly asks to convert or reconcile them.
+
+This compatibility path is documentation-only by default. Do not run `npx @google/design.md`, install `@google/design.md`, add package scripts, fetch remote assets, call external validators, or use upstream executable tooling unless the user explicitly approves that exact action and the target repo policy allows it.
 
 ## Generator routing
 
@@ -42,9 +51,10 @@ Run the generator only from the trusted installed skill directory that provided 
 
 1. No package manifests, installers, global CLI tools, dependency setup, or executable helpers outside the documented local-only generator.
 2. No upstream package wrapper, generated upstream outputs, remote assets, browser automation, or templates.
-3. No credentials, tokens, private URLs, private exports, or environment-specific values.
-4. No third-party tracking, analytics, remote fonts, embeds, pixels, or external network calls.
-5. No permission grants or tool allowlists.
+3. No Google DESIGN.md CLI install, `npx @google/design.md` execution, package scripts, remote validators, or upstream executable tooling by default.
+4. No credentials, tokens, private URLs, private exports, or environment-specific values.
+5. No third-party tracking, analytics, remote fonts, embeds, pixels, or external network calls.
+6. No permission grants or tool allowlists.
 
 ## Generator safety boundary
 
@@ -89,4 +99,5 @@ See [INSTALL.md](INSTALL.md) for platform-specific paths.
 | Analytics and tracking | Prefer privacy-preserving defaults and explicit consent. |
 | Dark patterns | Ban fake urgency, deceptive opt-ins, hidden fees, and confusing unsubscribe flows. |
 | n8n and automation UI | Treat workflow triggers, credentials, executions, and destructive actions as high-risk controls. |
+| DESIGN.md | Read existing design contracts before visual changes; propose one only when useful; never overwrite one or run upstream tooling without explicit approval. |
 | Local generator | May be used proactively for design creation or revision only from the trusted installed skill path; require explicit approval for unverified paths or writes and keep any writes inside the documented output folder. |
