@@ -864,6 +864,10 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
     assert.match(text, /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./, `${relPath} keeps missing-index fallback`);
     assert.match(text, /## Managed Memory/, `${relPath} keeps portable managed memory guidance`);
     assert.match(text, /Treat `MEMORY\.md` as managed, non-authoritative project memory\./, `${relPath} keeps non-authoritative memory contract`);
+    assert.match(text, /Do not create `MEMORY\.md` merely because it is absent\./, `${relPath} keeps memory rare and optional`);
+    assert.match(text, /## Documentation Closure/, `${relPath} requires documentation closure`);
+    assert.match(text, /Use context-preserving compression, not blind deletion\./, `${relPath} protects durable repo intelligence`);
+    assert.match(text, /Keep repo maps pointer-based and current;/, `${relPath} keeps compact repo-map guidance`);
     assert.match(text, /Instruction sources used/, `${relPath} requires instruction-source reporting`);
     assert.match(text, /MEMORY\.md changed: Yes\/No/, `${relPath} requires memory change reporting`);
     assert.match(text, /## Scope Control/, `${relPath} keeps generic execution guidance`);
@@ -1705,6 +1709,9 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
   assert.match(portableAgents, /## Local Documentation/, 'portable AGENTS template carries local-doc discovery');
   assert.match(portableAgents, /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/, 'portable AGENTS template links portable docs');
   assert.match(portableAgents, /## Managed Memory/, 'portable AGENTS template carries optional managed memory guidance');
+  assert.match(portableAgents, /## Documentation Closure/, 'portable AGENTS template carries documentation closure guidance');
+  assert.match(portableAgents, /Use context-preserving compression, not blind deletion\./, 'portable AGENTS template preserves repo intelligence during cleanup');
+  assert.match(portableAgents, /Keep repo maps pointer-based and current;/, 'portable AGENTS template carries compact repo-map guidance');
   assert.match(portableAgents, /Instruction sources used/, 'portable AGENTS template requires instruction-source reporting');
   assert.match(portableAgents, /MEMORY\.md changed: Yes\/No/, 'portable AGENTS template requires memory change reporting');
   assert.doesNotMatch(portableAgents, /This root `AGENTS\.md` is toolkit-repo-specific|## Repo-Local Router/, 'portable AGENTS template has no toolkit repo wrapper');
