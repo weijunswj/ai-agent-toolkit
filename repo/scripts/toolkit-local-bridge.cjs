@@ -7,9 +7,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.cjs');
+const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.1';
+const BRIDGE_VERSION = '2.3.2';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -26,6 +27,7 @@ const HOOK_LIGHT_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bri
 const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
 const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
 const NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT = 5;
+const THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT = 5;
 const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
 
 function slash(value) {
@@ -232,7 +234,7 @@ function printHelp() {
     '  --enable-update-report-open persist opt-in opening of generated update reports',
     '  --disable-update-report-open',
     '  --enable-codex-plugin-auto-refresh',
-    '                                persist opt-in native Codex plugin cache auto-refresh from trusted repo hooks',
+    '                                persist opt-in Codex Toolkit cache refresh and Windows third-party hook repair',
     '  --disable-codex-plugin-auto-refresh',
     '  --audit',
     '  --force-downgrade',
@@ -248,6 +250,10 @@ function printHelp() {
 
 function defaultHubPath() {
   return path.join(os.homedir(), '.ai-agent-toolkit', 'current');
+}
+
+function defaultCodexHome() {
+  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 }
 
 function isInside(parent, child) {
@@ -1561,6 +1567,7 @@ function updateReportIsMeaningful(context) {
   if (repoStatus === 'sync-delegation-failed') return true;
   if (repoStatus === 'skipped' && context.repo?.error) return true;
   if (['stale', 'refreshed', 'refresh-failed'].includes(context.nativePluginCache?.status)) return true;
+  if (['repaired', 'repair-failed', 'partial-failed'].includes(context.thirdPartyHookRepair?.status)) return true;
   if ((context.targetSyncs || []).length) return true;
   return (context.targetSyncs || []).some((entry) => (entry.removedSkillNames || []).length);
 }
@@ -1599,9 +1606,10 @@ function branchMismatchSuggestion(warning) {
     : '';
 }
 
-function actionTldr({ repo, nativePluginCache, warning }) {
+function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning }) {
   if (nativePluginCache.status === 'stale') return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
+  if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check third-party Codex plugin hook repair';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
   if (repo.status === 'sync-delegation-failed') return 'check target sync';
   const branchAction = branchMismatchSuggestion(warning);
@@ -1615,6 +1623,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   const targetSyncs = context.targetSyncs || [];
   const skippedTargets = context.skippedTargets || [];
   const nativePluginCache = context.nativePluginCache || {};
+  const thirdPartyHookRepair = context.thirdPartyHookRepair || {};
   const cleanup = context.cleanup || state.last_update_report_cleanup || {};
   const warning = repo.error || context.warning || '';
   const branchAction = branchMismatchSuggestion(warning);
@@ -1629,7 +1638,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
     '',
     `- Repo: ${repoTldr(repo, previousCommit, commit, warning)}.`,
     `- Targets: ${targetsTldr(targetSyncs, targetSyncStatus)}.`,
-    `- Action needed: ${actionTldr({ repo, nativePluginCache, warning })}.`,
+    `- Action needed: ${actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning })}.`,
     '',
     '## Details',
     '',
@@ -1702,7 +1711,17 @@ function buildUpdateReport({ args, state, checksum, context }) {
   } else if (nativePluginCache.status === 'check-only' && nativePluginCache.manual_action) {
     lines.push(`- Claude Code native plugin cache: ${nativePluginCache.manual_action}`);
   }
-  lines.push('- Skipped n8n/live systems; not touched.');
+  if (thirdPartyHookRepair.status === 'repaired' || thirdPartyHookRepair.status === 'partial-failed') {
+    lines.push(`- Repaired ${inlineCode((thirdPartyHookRepair.repaired || []).length)} third-party Codex plugin hook cache(s).`);
+    for (const entry of thirdPartyHookRepair.repaired || []) {
+      lines.push(`  - ${inlineCode(entry.plugin_id || entry.plugin_root)}`);
+    }
+  } else if (thirdPartyHookRepair.status === 'repair-failed') {
+    lines.push('- Third-party Codex plugin hook repair failed.');
+  } else if (thirdPartyHookRepair.status === 'not-needed') {
+    lines.push('- Third-party Codex plugin hooks were already Windows-safe.');
+  }
+  lines.push('- Skipped live n8n systems; not touched.');
 
   lines.push('', '## Update Report And Log Cleanup', '');
   lines.push(`- directory: ${inlineCode(cleanup.report_log_directory || updateReportDir())}`);
@@ -1720,6 +1739,10 @@ function buildUpdateReport({ args, state, checksum, context }) {
     const cacheLabel = nativePluginCache.host === 'claude-code' ? 'Claude Code native plugin cache' : 'Codex native plugin cache';
     lines.push(`- ${cacheLabel}: ${inlineCode(nativePluginCache.status)}`);
     for (const error of nativePluginCache.errors || []) lines.push(`  - ${inlineCode(error)}`);
+  }
+  if (thirdPartyHookRepair.status) {
+    lines.push(`- third-party Codex plugin hook repair: ${inlineCode(thirdPartyHookRepair.status)}`);
+    for (const error of thirdPartyHookRepair.errors || []) lines.push(`  - ${inlineCode(error)}`);
   }
   lines.push(`- checksum: ${inlineCode(checksum)}`);
   if (warning) {
@@ -1739,6 +1762,7 @@ function writeUpdateReportFile(markdown) {
 function updateReportSignature({ args, checksum, context }) {
   const repo = context.repo || {};
   const nativePluginCache = context.nativePluginCache || {};
+  const thirdPartyHookRepair = context.thirdPartyHookRepair || {};
   const cleanup = context.cleanup || {};
   const targetSyncs = context.targetSyncs || [];
   const skippedTargets = context.skippedTargets || [];
@@ -1762,6 +1786,15 @@ function updateReportSignature({ args, checksum, context }) {
     nativePluginCache: {
       status: nativePluginCache.status || '',
       errors: nativePluginCache.errors || []
+    },
+    thirdPartyHookRepair: {
+      status: thirdPartyHookRepair.status || '',
+      repaired: (thirdPartyHookRepair.repaired || []).map((entry) => ({
+        plugin_id: entry.plugin_id || '',
+        plugin_root: entry.plugin_root || '',
+        actions: entry.actions || []
+      })),
+      errors: thirdPartyHookRepair.errors || []
     },
     cleanup: {
       retentionDays: cleanup.retention_days || '',
@@ -2232,6 +2265,110 @@ function nativePluginCacheStatus(args, state) {
   return { status: '' };
 }
 
+function isToolkitCodexCacheRoot(cacheRoot, currentPluginRoot) {
+  const normalized = path.resolve(cacheRoot);
+  if (currentPluginRoot && path.resolve(currentPluginRoot) === normalized) return true;
+  const parts = normalized.split(path.sep).map((part) => part.toLowerCase());
+  for (let index = 0; index < parts.length - 2; index += 1) {
+    if (
+      parts[index] === 'ai-agent-toolkit-local' &&
+      parts[index + 1] === 'ai-agent-toolkit'
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function discoverCodexPluginHookRoots({ codexHome = defaultCodexHome(), currentPluginRoot = '' } = {}) {
+  const cacheBase = path.join(codexHome, 'plugins', 'cache');
+  const roots = [];
+  const skipped = [];
+  if (!fs.existsSync(cacheBase)) return { roots, skipped };
+
+  for (const marketplace of fs.readdirSync(cacheBase, { withFileTypes: true })) {
+    if (!marketplace.isDirectory()) continue;
+    const marketplacePath = path.join(cacheBase, marketplace.name);
+    for (const plugin of fs.readdirSync(marketplacePath, { withFileTypes: true })) {
+      if (!plugin.isDirectory()) continue;
+      const pluginPath = path.join(marketplacePath, plugin.name);
+      for (const version of fs.readdirSync(pluginPath, { withFileTypes: true })) {
+        if (!version.isDirectory()) continue;
+        const cacheRoot = path.join(pluginPath, version.name);
+        const hooksJsonPath = path.join(cacheRoot, 'hooks', 'hooks.json');
+        if (!fs.existsSync(hooksJsonPath)) continue;
+        const entry = {
+          plugin_id: `${plugin.name}@${marketplace.name}`,
+          plugin_root: cacheRoot
+        };
+        if (isToolkitCodexCacheRoot(cacheRoot, currentPluginRoot)) {
+          skipped.push({ ...entry, reason: 'toolkit native plugin cache' });
+          continue;
+        }
+        roots.push(entry);
+      }
+    }
+  }
+  roots.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
+  skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
+  return { roots, skipped };
+}
+
+function repairThirdPartyCodexPluginHooks(options = {}) {
+  const codexHome = path.resolve(options.codexHome || defaultCodexHome());
+  const windows = options.windows ?? process.platform === 'win32';
+  const write = Boolean(options.write);
+  const currentPluginRoot = options.currentPluginRoot || runtimeCodexPluginRoot();
+  const discovered = discoverCodexPluginHookRoots({ codexHome, currentPluginRoot });
+  const result = {
+    status: windows ? 'not-needed' : 'not-supported',
+    codex_home: codexHome,
+    write,
+    scanned: discovered.roots.length,
+    skipped: discovered.skipped,
+    repaired: [],
+    unchanged: [],
+    errors: []
+  };
+
+  if (!windows) return result;
+
+  for (const entry of discovered.roots) {
+    try {
+      const repair = repairPluginRoot(entry.plugin_root, {
+        windows: true,
+        write
+      });
+      if (repair.repaired) {
+        result.repaired.push({
+          ...entry,
+          actions: repair.actions || []
+        });
+      } else {
+        result.unchanged.push(entry);
+      }
+    } catch (error) {
+      result.errors.push(`${entry.plugin_id}: ${error.message}`);
+    }
+  }
+
+  if (result.errors.length && result.repaired.length) result.status = 'partial-failed';
+  else if (result.errors.length) result.status = 'repair-failed';
+  else if (result.repaired.length) result.status = 'repaired';
+  else result.status = 'not-needed';
+  result.errors = result.errors.slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
+  return result;
+}
+
+function maybeRepairThirdPartyCodexPluginHooks(args, state) {
+  if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
+  if (!state.codex_plugin_auto_refresh_enabled) return { status: '' };
+  return repairThirdPartyCodexPluginHooks({
+    write: true,
+    currentPluginRoot: runtimeCodexPluginRoot()
+  });
+}
+
 function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath }) {
   const before = codexNativePluginCacheStatus(args, state);
   if (before.status !== 'stale') return before;
@@ -2446,6 +2583,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     state: finalState,
     repoPath: updateResult.repoPath
   });
+  const thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, finalState);
   const report = maybeWriteUpdateReport({
     args,
     hubPath,
@@ -2456,6 +2594,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       targetSyncs: completedTargetSyncs,
       skippedTargets,
       nativePluginCache,
+      thirdPartyHookRepair,
       targetSyncStatus: plannedTargetSyncs.length
         ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
         : 'not needed'
@@ -2541,6 +2680,7 @@ function run(argv = process.argv.slice(2)) {
       context: {
         repo: repoReportContextFromState(nextState, args),
         nativePluginCache: nativePluginCacheStatus(args, nextState),
+        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, nextState),
         targetSyncStatus: 'not needed'
       }
     });
@@ -2559,6 +2699,7 @@ function run(argv = process.argv.slice(2)) {
       context: {
         repo: repoReportContextFromState(nextState, args),
         nativePluginCache: nativePluginCacheStatus(args, nextState),
+        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, nextState),
         targetSyncStatus: 'not needed'
       }
     });
@@ -2614,6 +2755,7 @@ function run(argv = process.argv.slice(2)) {
         targetSyncs,
         skippedTargets: SUPPORTED_TARGETS.filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled),
         nativePluginCache: nativePluginCacheStatus(args, nextState),
+        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, nextState),
         targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
       }
     });
@@ -2657,5 +2799,7 @@ module.exports = {
   updateReportDir,
   cleanupUpdateReports,
   openUpdateReport,
-  replaceDirectoryAtomically
+  replaceDirectoryAtomically,
+  discoverCodexPluginHookRoots,
+  repairThirdPartyCodexPluginHooks
 };

@@ -302,6 +302,7 @@ function auditPluginRoot(pluginRoot, options = {}) {
   const errors = [];
   const windowsMode = Boolean(options.windows);
   const verifyOutput = Boolean(options.verifyOutput);
+  const requireNodeFallbacks = options.requireNodeFallbacks !== false;
   const pluginJsonPath = path.join(pluginRoot, '.codex-plugin', 'plugin.json');
   const hooksJsonPath = path.join(pluginRoot, 'hooks', 'hooks.json');
 
@@ -344,24 +345,25 @@ function auditPluginRoot(pluginRoot, options = {}) {
     }
   }
 
-  for (const relPath of [
-    'hooks/session-start.sh',
-    'hooks/pre-tool-use/_emit.sh',
-    ...referencedShellScripts
-  ]) {
+  for (const relPath of referencedShellScripts) {
     const normalizedRelPath = normalizeRelPath(relPath);
     const scriptPath = path.join(pluginRoot, ...normalizedRelPath.split('/'));
     if (!fs.existsSync(scriptPath)) {
-      if (referencedShellScripts.has(normalizedRelPath)) {
-        errors.push(`${normalizedRelPath} is referenced by hooks/hooks.json but does not exist`);
-      }
-      continue;
+      errors.push(`${normalizedRelPath} is referenced by hooks/hooks.json but does not exist`);
     }
-    const text = fs.readFileSync(scriptPath, 'utf8');
-    if (shouldRequireNodeJsonFallback(normalizedRelPath, text) && !hasNodeJsonFallback(text)) {
-      errors.push(
-        `${normalizedRelPath} must include a Node JSON fallback so hooks still emit valid JSON when jq and python3 are unavailable`
-      );
+  }
+
+  if (requireNodeFallbacks) {
+    for (const relPath of ['hooks/session-start.sh', 'hooks/pre-tool-use/_emit.sh', ...referencedShellScripts]) {
+      const normalizedRelPath = normalizeRelPath(relPath);
+      const scriptPath = path.join(pluginRoot, ...normalizedRelPath.split('/'));
+      if (!fs.existsSync(scriptPath)) continue;
+      const text = fs.readFileSync(scriptPath, 'utf8');
+      if (shouldRequireNodeJsonFallback(normalizedRelPath, text) && !hasNodeJsonFallback(text)) {
+        errors.push(
+          `${normalizedRelPath} must include a Node JSON fallback so hooks still emit valid JSON when jq and python3 are unavailable`
+        );
+      }
     }
   }
 
