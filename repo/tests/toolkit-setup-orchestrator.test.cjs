@@ -320,8 +320,8 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
   assert.match(result.stdout, /Preference\/target writes before answers: no/);
   assert.match(result.stdout, /Codex plugin cache path:/);
-  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.2/);
-  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.2/);
+  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.3/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.3/);
   assert.match(result.stdout, /Codex plugin status: already fresh/);
   assert.match(result.stdout, /Codex plugin updated this run: no/);
   assert.match(result.stdout, /Codex restart required: no/);
@@ -743,8 +743,8 @@ test('claude-code setup execute with instructions behavior verifies Claude plugi
   assert.match(result.stdout, /Claude Code native plugin metadata verified/);
   assert.match(result.stdout, /## Claude Code native plugin/);
   assert.match(result.stdout, /Claude plugin manifest path:/);
-  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.2/);
-  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.2/);
+  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.3/);
+  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.3/);
   assert.match(result.stdout, /Claude plugin status: metadata present/);
   assert.match(result.stdout, /Claude plugin updated this run: no/);
   assert.match(result.stdout, /Claude restart required: no/);
