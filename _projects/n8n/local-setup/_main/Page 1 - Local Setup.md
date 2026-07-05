@@ -486,7 +486,7 @@ If the active `WEBHOOK_URL` in `.env.active` is an ngrok URL while `ngrok` is st
 | 4 | `Update` | You want to check and apply Docker image updates. | Yes. |
 | 5 | `Show Compose status` | You need deeper troubleshooting details: service state, health, container names, and ports. | No. |
 | 6 | `View logs` | You want to inspect all logs or one service's logs. | Yes. |
-| 7 | `Back up` | You want a local Postgres SQL backup. | No. |
+| 7 | `Back up` | You want a local Postgres SQL backup or n8n CLI workflow/credential backup actions. | Yes. |
 | 8 | `Advanced / Recovery: Restore local n8n from backup` | You need to replace the current local database state from a backup package. | No. |
 | 9 | `Command list` | You want a plain explanation of what each menu command does. | No. |
 | 10 | `Exit` | You want to close the launcher cleanly. | No. |
@@ -578,7 +578,18 @@ Logs show the last 200 lines and then return to the menu prompt. This keeps the 
 
 ### 8.6 `Back up`, Restore, And `Command list`
 
-`Back up`:
+`Back up` opens a backup submenu:
+
+| Choice | Use when | What it does |
+| --- | --- | --- |
+| `Back up Postgres database now` | You want a database-level recovery point before updates or restore testing. | Writes the existing Postgres SQL backup package. |
+| `Configure scheduled n8n CLI backups` | You want local workflow and/or credential exports on a cadence. | Prompts for backup settings, saves local config, and creates or updates a Windows Task Scheduler task. |
+| `Run n8n CLI backup now` | You want to test the configured n8n CLI backup immediately. | Runs the configured workflow/credential export once and applies retention cleanup. |
+| `Show n8n CLI backup configuration` | You want to inspect the current local backup settings. | Prints the local config path, cadence, retention, destination, export choices, and task name. |
+| `Disable scheduled n8n CLI backups` | You want to stop automatic backups without deleting existing backup folders. | Removes the scheduled task when present and marks the local config disabled. |
+| `Cancel` | You do not want a backup action. | Returns to the main menu. |
+
+Postgres database backup:
 
 - Writes a timestamped folder under `%USERPROFILE%\.n8n-local\backups`.
 - Includes `database.sql`.
@@ -586,6 +597,70 @@ Logs show the last 200 lines and then return to the menu prompt. This keeps the 
 - Also includes `restore-manifest.json` and `HOW TO USE THIS RESTORE FOLDER.txt`.
 - Keep the whole folder private.
 - Do not commit it.
+
+n8n CLI backup configuration prompts:
+
+1. Backup cadence in days.
+2. Retention period in days.
+3. Backup destination. The safe default is:
+
+```text
+%USERPROFILE%\.n8n-local\backups\n8n-cli
+```
+
+4. Whether to include workflows. Default: yes.
+5. Whether to include credentials. Default: no.
+6. Whether to export decrypted credentials. Default: no.
+
+Decrypted credential export warning:
+
+- The default is **No**.
+- Decrypted credential exports expose credential secrets in plain text files.
+- If you enable decrypted credential exports, the menu shows a warning and requires you to type `EXPORT DECRYPTED CREDENTIALS`.
+- Keep decrypted backups offline/private, delete them when they are no longer needed, and never commit them.
+
+n8n CLI backup behaviour:
+
+- Workflow backups run inside the Docker Compose `n8n` service with:
+
+```text
+n8n export:workflow --backup --output=<backup_dir>
+```
+
+- Credential backups run inside the Docker Compose `n8n` service with:
+
+```text
+n8n export:credentials --backup --output=<backup_dir>
+```
+
+- If decrypted credential export is enabled, the credentials command also adds `--decrypted`.
+- The launcher writes export files to a temporary path inside the n8n container, copies them into the local backup folder, then removes the temporary container path.
+- Each run writes a timestamped folder named like `n8n-cli-YYYYMMDD-HHMMSS`.
+- Each run writes `manifest.json` with the timestamp, Compose project, n8n service/container details, backup options, generated files, credential inclusion, and decrypted credential status.
+- The local config file is saved under `%USERPROFILE%\.n8n-local\backups\n8n-cli-backup-config.json` by default. It stores schedule and export choices, not secrets.
+
+Retention cleanup:
+
+- The launcher deletes only timestamped child folders named like `n8n-cli-YYYYMMDD-HHMMSS` under the configured backup root.
+- It refuses unsafe backup roots, including empty paths, filesystem roots, your home folder, the local stack root, obvious git repo roots, and other broad locations.
+- It checks that every deletion target is inside the configured backup root before removing it.
+- It does not delete arbitrary files, non-matching folders, the backup root itself, or anything outside the configured backup root.
+
+Scheduling limitations:
+
+- Scheduling uses Windows Task Scheduler because this local stack is Windows-first.
+- The scheduled task runs the same menu script with `--run-n8n-cli-backup --scheduled`.
+- Scheduled backups require Windows, Task Scheduler, Docker Desktop, this local stack folder, and the `n8n` service to be running when the task fires.
+- If Docker Desktop or n8n is stopped, the scheduled run fails closed instead of starting containers or deleting data.
+- There is no cloud, remote storage, or off-machine copy in this first backup feature.
+
+Command-line helpers:
+
+```powershell
+.\_n8n-local.cmd --show-n8n-cli-backup-config
+.\_n8n-local.cmd --run-n8n-cli-backup
+.\_n8n-local.cmd --disable-n8n-cli-backups
+```
 
 Restore:
 
@@ -623,9 +698,29 @@ Safety behaviour:
 
 Not supported here:
 
-- Normal workflow JSON import.
-- Credential JSON-only import.
+- Automated restore of n8n CLI workflow export folders.
+- Automated restore of n8n CLI credential export folders.
 - Folder input.
+
+Basic restore commands for n8n CLI workflow/credential exports:
+
+- First review the backup folder and confirm you are targeting the correct local n8n instance.
+- Copy or mount the selected backup folder into the n8n container before importing.
+- Import workflows from a separate-file workflow export directory with:
+
+```text
+n8n import:workflow --separate --input=<workflows_dir>
+```
+
+- Import credentials from a separate-file credential export directory with:
+
+```text
+n8n import:credentials --separate --input=<credentials_dir>
+```
+
+- Importing exported credentials normally requires the same `N8N_ENCRYPTION_KEY` unless you intentionally exported decrypted credential files.
+- Importing decrypted credentials reads secrets from files. Protect those files carefully.
+- This first local backup PR focuses on backup creation, manifests, scheduling, and retention cleanup; use restore commands manually until the launcher grows a dedicated n8n CLI restore flow.
 
 Advanced target `.env`:
 

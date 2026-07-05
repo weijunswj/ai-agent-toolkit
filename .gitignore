@@ -3,6 +3,7 @@
 !.env.example
 .n8n-local/
 .n8n-local/backups/
+.n8n-local/backups/n8n-cli/
 .n8n-local/import/
 .n8n-production-cloudflare/
 **/production-cloudflare-stack/backups/

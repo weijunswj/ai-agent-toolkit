@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.5.1",
+  "version": "3.6.0",
   "version_policy": "semver",
-  "version_notes": "Adds OpenAI invocation-policy metadata so n8n-local-setup stays explicit-only while n8n-agent-rules remains the implicit safety router.",
+  "version_notes": "Adds configurable local n8n CLI workflow/credential backups with retention cleanup and Windows Task Scheduler integration for the local stack.",
   "outputs": [
     {
       "kind": "curated",
@@ -234,6 +234,13 @@
     },
     {
       "kind": "copy",
+      "source": "_main/templates/local-stack/.gitignore",
+      "output": "skills/n8n-local-setup/templates/local-stack/.gitignore",
+      "notes": "Local stack runtime ignore template for private env, backups, imports, and credential export artifacts.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
       "source": "_main/templates/local-stack/_n8n-local.cmd",
       "output": "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "notes": "Windows launcher for the guided local n8n stack menu.",
@@ -369,6 +376,7 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
       "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
       "skills/n8n-local-setup/templates/local-stack/.env.example",
+      "skills/n8n-local-setup/templates/local-stack/.gitignore",
       "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
       "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
