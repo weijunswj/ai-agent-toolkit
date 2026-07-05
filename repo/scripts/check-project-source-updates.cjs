@@ -46,7 +46,7 @@ function usage() {
     'Usage: node repo/scripts/check-project-source-updates.cjs [--workspace <dir>] [--report <path>] [--advisory-doc <path>]',
     '',
     'Checks active third-party SOURCE-LOCK.json entries and actionable advisory targets against GitHub.',
-    'When review is needed, writes a review-notification report only. It never copies upstream files or updates SOURCE-LOCK.json or advisory target documents.'
+    'When review is needed, writes a review-notification report only. It never copies upstream files, updates SOURCE-LOCK.json or advisory target documents, or changes toolkit components.'
   ].join('\n');
 }
 
@@ -193,9 +193,10 @@ function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
     'No source files or advisory tracking documents were updated.',
     'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
+    'No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.',
     'No upstream code was executed.',
     'No auto-merge is allowed.',
-    'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and then ask an AI agent to inspect before any real edits happen.'
+    'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.'
   ];
   const checklist = [
     '- [ ] Review upstream diff manually.',
@@ -203,6 +204,8 @@ function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
     '- [ ] Confirm attribution/licence notes still apply.',
     '- [ ] Confirm no upstream code was executed.',
     '- [ ] Decide whether a separate update PR should copy/adapt files.',
+    '- [ ] For Host Harness Capability Drift Review, classify affected toolkit components using the linked template before proposing changes.',
+    '- [ ] Confirm any shrink, move, host-native, or delete recommendation is implemented only in a separate evidence-backed PR.',
     '- [ ] If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
     '- [ ] Run npm run validate:all before any real source update merge.'
   ];
@@ -217,6 +220,7 @@ function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
     `Advisory actions, when present, are read from \`${advisoryDocPath}\`.`,
     'No advisory tracking document was changed by this workflow.',
     'If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
+    'If meaningful host-harness drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.',
     '',
     '## Manual Review Checklist',
     '',

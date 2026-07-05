@@ -42,7 +42,7 @@ To run the same active third-party commit drift check used by the scheduled PR n
 node repo/scripts/check-project-source-updates.cjs
 ```
 
-Retired internal sources are provenance-only, not active update targets. Third-party active sources require manual review. The scheduled source-watch PR is a notification only; it must not copy upstream files or update SOURCE-LOCK pins.
+Retired internal sources are provenance-only, not active update targets. Third-party active sources require manual review. The scheduled source-watch PR is a notification only; it must not copy upstream files, update SOURCE-LOCK pins, update advisory records, or change toolkit components. Host-harness capability drift reviews live under [repo/source-watch/](../source-watch/) and can only recommend separate evidence-backed PRs.
 
 ## Install Toolkit Skills
 

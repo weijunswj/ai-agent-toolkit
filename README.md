@@ -144,6 +144,7 @@ The supported path is skills-first: humans use `_projects/**`; agents use `skill
 | [.codex-plugin/](.codex-plugin/) | You want generated Codex native plugin metadata. |
 | [.claude-plugin/](.claude-plugin/) | You want generated Claude Code native plugin metadata. |
 | [repo/](repo/) | You are maintaining this toolkit. |
+| [repo/source-watch/](repo/source-watch/) | You are reviewing source-watch lanes, including host-harness capability drift. |
 
 ## For Maintainers
 

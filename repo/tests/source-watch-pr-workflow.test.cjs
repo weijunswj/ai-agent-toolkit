@@ -89,4 +89,7 @@ test('source-watch PR notifier documents advisory actions as report-only', () =>
   assert.match(workflow, /Advisory actions, when present, are read from `repo\/source-watch\/advisory-targets\.json`\./);
   assert.match(workflow, /No advisory tracking document was changed by this workflow\./);
   assert.match(workflow, /If advisory action is taken, update the advisory document in a separate human-reviewed PR\./);
+  assert.match(workflow, /No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted\./);
+  assert.match(workflow, /For Host Harness Capability Drift Review, classify affected toolkit components using the linked template before proposing changes\./);
+  assert.match(workflow, /separate evidence-backed PR/);
 });
