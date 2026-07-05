@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "version_policy": "semver",
-  "version_notes": "Adds configurable local n8n CLI workflow/credential backups with retention cleanup and Windows Task Scheduler integration for the local stack.",
+  "version_notes": "Simplifies the local backup menu around safe manual n8n CLI backups and clearer automatic backup setup/removal while preserving retention cleanup and Windows Task Scheduler integration.",
   "outputs": [
     {
       "kind": "curated",

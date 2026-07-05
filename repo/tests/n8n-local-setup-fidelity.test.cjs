@@ -177,12 +177,12 @@ const expectedUpdateMenuOptions = [
 ];
 
 const expectedBackupMenuOptions = [
-  'Back up Postgres database now',
-  'Configure scheduled n8n CLI backups',
-  'Run n8n CLI backup now',
-  'Show n8n CLI backup configuration',
-  'Disable scheduled n8n CLI backups',
-  'Cancel'
+  'Back up now',
+  'Change automatic backup settings',
+  'Remove automatic backups',
+  'Back',
+  'Set up automatic backups',
+  'Back'
 ];
 
 function tempCopy() {
@@ -594,12 +594,20 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /^### 8\.4 `Update` Menu$/m);
   assert.match(localSetup, /^### 8\.5 `View logs` Menu$/m);
   assert.match(localSetup, /The update menu asks what you want to update first\. After you choose, it pulls the selected image\(s\) and recreates the selected container\(s\) automatically\./);
-  assert.match(localSetup, /`Back up` opens a backup submenu/);
+  assert.match(localSetup, /`Back up` opens a simplified backup submenu/);
+  assert.match(localSetup, /Automatic backups: Not set up/);
+  assert.match(localSetup, /Automatic backups: Enabled/);
   assert.match(localSetup, /Writes a timestamped folder under `%USERPROFILE%\\\.n8n-local\\backups`/);
-  assert.match(localSetup, /Configure scheduled n8n CLI backups/);
-  assert.match(localSetup, /Run n8n CLI backup now/);
-  assert.match(localSetup, /Show n8n CLI backup configuration/);
-  assert.match(localSetup, /Disable scheduled n8n CLI backups/);
+  assert.match(localSetup, /`Back up now`/);
+  assert.match(localSetup, /workflows included, credentials included, and decrypted credentials disabled/);
+  assert.match(localSetup, /`Set up automatic backups`/);
+  assert.match(localSetup, /`Change automatic backup settings`/);
+  assert.match(localSetup, /`Remove automatic backups`/);
+  assert.doesNotMatch(localSetup, /Back up Postgres database now/);
+  assert.doesNotMatch(localSetup, /Configure scheduled n8n CLI backups/);
+  assert.doesNotMatch(localSetup, /Run n8n CLI backup now/);
+  assert.doesNotMatch(localSetup, /Show n8n CLI backup configuration/);
+  assert.doesNotMatch(localSetup, /Disable scheduled n8n CLI backups/);
   assert.match(localSetup, /n8n export:workflow --backup --output=<backup_dir>/);
   assert.match(localSetup, /n8n export:credentials --backup --output=<backup_dir>/);
   assert.match(localSetup, /Decrypted credential exports expose credential secrets in plain text files/);
@@ -618,7 +626,7 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /For normal use, the quick status at the top of the main menu is enough/);
   assert.match(localSetup, /Use `Show Compose status` only when you need the more detailed Docker Compose view/);
   assert.match(localSetup, /`Command list` explains the numbered menu options/);
-  assert.match(localSetup, /If the update includes Postgres, the launcher runs `Back up` first/);
+  assert.match(localSetup, /If the update includes Postgres, the launcher creates a database-level recovery backup first/);
 });
 
 test('local launcher and menu keep the console open until Exit', () => {
@@ -697,10 +705,12 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Write-RestoreReadme'), /HOW TO USE THIS RESTORE FOLDER\.txt[\s\S]*N8N_IMAGE from SECRET-DO-NOT-COMMIT\.env/);
   assert.doesNotMatch(functionBody(menu, 'Write-RestoreReadme'), /Image\/version context/);
   assert.match(functionBody(menu, 'Write-CommandListItem'), /\$itemLabelWidth = 19[\s\S]*\$itemPrefix = \("  \{0\}\. \{1,-\$itemLabelWidth\}: " -f \$Number, \$Name\)/);
-  assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens Postgres backup and n8n CLI backup actions\.'/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens safe manual and automatic backup actions\.'/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '8' -Name 'Advanced \/ Recovery: Restore local n8n from backup' -Description 'Restores a local database or entities backup after pre-restore backups and approval\.'/);
-  assert.match(functionBody(menu, 'Show-BackupMenu'), /Back up Postgres database now[\s\S]*Configure scheduled n8n CLI backups[\s\S]*Run n8n CLI backup now[\s\S]*Show n8n CLI backup configuration[\s\S]*Disable scheduled n8n CLI backups/);
-  assert.match(functionBody(menu, 'Show-BackupMenu'), /Backup-Postgres[\s\S]*Configure-N8nCliBackupSchedule[\s\S]*Invoke-N8nCliBackupFromConfig[\s\S]*Show-N8nCliBackupConfiguration[\s\S]*Disable-N8nCliBackupSchedule/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Write-N8nCliBackupAutomaticStatus[\s\S]*Back up now[\s\S]*Change automatic backup settings[\s\S]*Remove automatic backups[\s\S]*Set up automatic backups/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Invoke-N8nCliBackupNow[\s\S]*Configure-N8nCliBackupSchedule[\s\S]*Disable-N8nCliBackupSchedule/);
+  assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Back up Postgres database now|Run n8n CLI backup now|Show n8n CLI backup configuration|Disable scheduled n8n CLI backups/);
+  assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Backup-Postgres|Show-N8nCliBackupConfiguration|Invoke-N8nCliBackupFromConfig/);
   assert.match(menu, /function Show-UpdateMenu/);
   assert.match(menu, /Choose what to update\. The launcher pulls images, then recreates selected containers automatically\./);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Read-Host 'Enter a number'[\s\S]*Apply-Update -Services \$selection/);
@@ -1049,6 +1059,18 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
     'if ($invalidRetention.Ok) { throw "non-numeric retention was accepted" }',
     '$safe = Test-SafeN8nCliBackupRoot -Path $safeRoot',
     'if (-not $safe.Ok) { throw "safe backup root was rejected: $($safe.Error)" }',
+    '$existingAutomaticConfig = [pscustomobject]@{ enabled = $true; cadenceDays = 7; retentionDays = 14; backupRoot = $safeRoot; includeWorkflows = $false; includeCredentials = $false; exportDecryptedCredentials = $true; scheduledTime = "around 3:00 AM local time" }',
+    '$manualConfig = New-N8nCliBackupNowConfig -ExistingConfig $existingAutomaticConfig',
+    'if ($manualConfig.includeWorkflows -ne $true) { throw "manual backup did not include workflows" }',
+    'if ($manualConfig.includeCredentials -ne $true) { throw "manual backup did not include credentials" }',
+    'if ($manualConfig.exportDecryptedCredentials -ne $false) { throw "manual backup enabled decrypted credentials" }',
+    'if ($manualConfig.backupRoot -ne $safeRoot) { throw "manual backup did not reuse configured destination" }',
+    'if ($manualConfig.retentionDays -ne 14) { throw "manual backup did not reuse configured retention" }',
+    'if (-not (Test-N8nCliBackupAutomaticEnabled -Config $existingAutomaticConfig)) { throw "enabled automatic backup config was not detected" }',
+    '$disabledAutomaticConfig = [pscustomobject]@{ enabled = $false; backupRoot = $safeRoot }',
+    'if (Test-N8nCliBackupAutomaticEnabled -Config $disabledAutomaticConfig) { throw "disabled automatic backup config was treated as enabled" }',
+    '$scheduleText = Get-N8nCliBackupScheduleTimeText -Config $existingAutomaticConfig',
+    'if ($scheduleText -ne "around 3:00 AM local time") { throw "schedule time text mismatch: $scheduleText" }',
     '$homeUnsafe = Test-SafeN8nCliBackupRoot -Path $HOME',
     'if ($homeUnsafe.Ok) { throw "home directory was accepted as backup root" }',
     '$stackUnsafe = Test-SafeN8nCliBackupRoot -Path $script:StackRoot',
