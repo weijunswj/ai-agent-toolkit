@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-03 (keeps the 2026-07-01 Claude Code native plugin install parity updates and adds the Google DESIGN.md source-tracked reference module with one shared UI/UX skill reference output)
+Latest update: 2026-07-05 (keeps the 2026-07-03 Google DESIGN.md source-tracked reference module and adds the n8n local setup generated local-stack `.gitignore` output)
 
 ## Current state
 
@@ -28,8 +28,8 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 16 |
-| publishedFiles | 227 |
-| declaredOutputFiles | 227 |
+| publishedFiles | 228 |
+| declaredOutputFiles | 228 |
 | packInstalledFiles | 80 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 227 |
+| boundaryRecipeOutputs | 228 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 147 |
+| declared_generated | 148 |
 | pack_installed_declared | 80 |
 
 Current boundary recipe classifications:
@@ -64,7 +64,7 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 165 |
+| main_full_fidelity | 166 |
 
 Known baseline context:
 

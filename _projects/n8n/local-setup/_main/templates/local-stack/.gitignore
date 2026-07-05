@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+.env.active
+backups/
+import/
+*.zip
+*.credentials.json
+*.credential*.json
+*n8n*credential*.json
+*n8n*binding*.json
+SECRET-DO-NOT-COMMIT.env
+**/SECRET-DO-NOT-COMMIT.env

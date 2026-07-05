@@ -93,6 +93,10 @@ const localStackOutputs = [
     output: 'skills/n8n-local-setup/templates/local-stack/.env.example'
   },
   {
+    source: '_main/templates/local-stack/.gitignore',
+    output: 'skills/n8n-local-setup/templates/local-stack/.gitignore'
+  },
+  {
     source: '_main/templates/local-stack/_n8n-local.cmd',
     output: 'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd'
   },
@@ -169,6 +173,15 @@ const expectedUpdateMenuOptions = [
   'n8n only',
   'postgres only',
   'ngrok only',
+  'Cancel'
+];
+
+const expectedBackupMenuOptions = [
+  'Back up Postgres database now',
+  'Configure scheduled n8n CLI backups',
+  'Run n8n CLI backup now',
+  'Show n8n CLI backup configuration',
+  'Disable scheduled n8n CLI backups',
   'Cancel'
 ];
 
@@ -564,6 +577,7 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.deepEqual(menuOptions(menu, 'Show-StartMenu'), expectedStartMenuOptions);
   assert.deepEqual(menuOptions(menu, 'Show-StopMenu'), expectedStopMenuOptions);
   assert.deepEqual(menuOptions(menu, 'Show-UpdateMenu'), expectedUpdateMenuOptions);
+  assert.deepEqual(menuOptions(menu, 'Show-BackupMenu'), expectedBackupMenuOptions);
 
   for (const option of expectedMainMenuOptions.filter((name) => name !== 'Exit')) {
     assert.match(localSetup, new RegExp(`\\| \`${escapeRegExp(option)}\` \\|`), option);
@@ -580,8 +594,23 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /^### 8\.4 `Update` Menu$/m);
   assert.match(localSetup, /^### 8\.5 `View logs` Menu$/m);
   assert.match(localSetup, /The update menu asks what you want to update first\. After you choose, it pulls the selected image\(s\) and recreates the selected container\(s\) automatically\./);
-  assert.match(localSetup, /`Back up`:/);
+  assert.match(localSetup, /`Back up` opens a backup submenu/);
   assert.match(localSetup, /Writes a timestamped folder under `%USERPROFILE%\\\.n8n-local\\backups`/);
+  assert.match(localSetup, /Configure scheduled n8n CLI backups/);
+  assert.match(localSetup, /Run n8n CLI backup now/);
+  assert.match(localSetup, /Show n8n CLI backup configuration/);
+  assert.match(localSetup, /Disable scheduled n8n CLI backups/);
+  assert.match(localSetup, /n8n export:workflow --backup --output=<backup_dir>/);
+  assert.match(localSetup, /n8n export:credentials --backup --output=<backup_dir>/);
+  assert.match(localSetup, /Decrypted credential exports expose credential secrets in plain text files/);
+  assert.match(localSetup, /n8n-cli-YYYYMMDD-HHMMSS/);
+  assert.match(localSetup, /manifest\.json/);
+  assert.match(localSetup, /Windows Task Scheduler/);
+  assert.match(localSetup, /--run-n8n-cli-backup/);
+  assert.match(localSetup, /--show-n8n-cli-backup-config/);
+  assert.match(localSetup, /--disable-n8n-cli-backups/);
+  assert.match(localSetup, /n8n import:workflow --separate --input=<workflows_dir>/);
+  assert.match(localSetup, /n8n import:credentials --separate --input=<credentials_dir>/);
   assert.match(localSetup, /%USERPROFILE%\\\.n8n-local\\backups/);
   assert.match(localSetup, /^Restore:$/m);
   assert.match(localSetup, /If the backup env\/key is missing, restore stops before stopping services or touching the database/);
@@ -668,8 +697,10 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Write-RestoreReadme'), /HOW TO USE THIS RESTORE FOLDER\.txt[\s\S]*N8N_IMAGE from SECRET-DO-NOT-COMMIT\.env/);
   assert.doesNotMatch(functionBody(menu, 'Write-RestoreReadme'), /Image\/version context/);
   assert.match(functionBody(menu, 'Write-CommandListItem'), /\$itemLabelWidth = 19[\s\S]*\$itemPrefix = \("  \{0\}\. \{1,-\$itemLabelWidth\}: " -f \$Number, \$Name\)/);
-  assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a timestamped backup folder under \.\\backups\.'/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens Postgres backup and n8n CLI backup actions\.'/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '8' -Name 'Advanced \/ Recovery: Restore local n8n from backup' -Description 'Restores a local database or entities backup after pre-restore backups and approval\.'/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Back up Postgres database now[\s\S]*Configure scheduled n8n CLI backups[\s\S]*Run n8n CLI backup now[\s\S]*Show n8n CLI backup configuration[\s\S]*Disable scheduled n8n CLI backups/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Backup-Postgres[\s\S]*Configure-N8nCliBackupSchedule[\s\S]*Invoke-N8nCliBackupFromConfig[\s\S]*Show-N8nCliBackupConfiguration[\s\S]*Disable-N8nCliBackupSchedule/);
   assert.match(menu, /function Show-UpdateMenu/);
   assert.match(menu, /Choose what to update\. The launcher pulls images, then recreates selected containers automatically\./);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Read-Host 'Enter a number'[\s\S]*Apply-Update -Services \$selection/);
@@ -705,7 +736,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(envExample, /This key is needed to decrypt saved n8n credentials in the database\./);
   assert.match(envExample, /If you restore from a backup, use the N8N_ENCRYPTION_KEY that came with that backup\./);
 
-  for (const ignored of ['.n8n-local/backups/', '.n8n-local/import/', '**/SECRET-DO-NOT-COMMIT.env']) {
+  for (const ignored of ['.n8n-local/backups/', '.n8n-local/backups/n8n-cli/', '.n8n-local/import/', '**/SECRET-DO-NOT-COMMIT.env']) {
     assert.match(gitignore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
   }
 
@@ -719,8 +750,9 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(localSetup, /If the backup env\/key is missing, restore stops before stopping services or touching the database/);
   assert.match(localSetup, /Keep `SECRET-DO-NOT-COMMIT\.env` beside `database\.sql`/);
   assert.match(localSetup, /Type `PROCEED` when asked/);
-  assert.match(localSetup, /Normal workflow JSON import/);
-  assert.match(localSetup, /Credential JSON-only import/);
+  assert.match(localSetup, /Automated restore of n8n CLI workflow export folders/);
+  assert.match(localSetup, /Automated restore of n8n CLI credential export folders/);
+  assert.match(localSetup, /Basic restore commands for n8n CLI workflow\/credential exports/);
   assert.match(localSetup, /HOW TO USE THIS RESTORE FOLDER\.txt/);
   assert.doesNotMatch(localSetup, /README-RESTORE\.txt/);
   assert.doesNotMatch(localSetup, /image-versions\.txt/);
@@ -793,7 +825,17 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Restore-PreRestorePostgresBackup',
     'Restore-PreRestoreEncryptionKeyBackup',
     'Restore-N8nEntitiesBackup',
-    'Restore-LocalN8nFromBackupMenu'
+    'Restore-LocalN8nFromBackupMenu',
+    'Get-N8nCliBackupDefaultRoot',
+    'Get-N8nCliBackupConfigPath',
+    'Convert-N8nCliBackupDayValue',
+    'Test-SafeN8nCliBackupRoot',
+    'Get-N8nCliBackupExportSpecs',
+    'Invoke-N8nCliBackupRetentionCleanup',
+    'Configure-N8nCliBackupSchedule',
+    'Invoke-N8nCliBackupFromConfig',
+    'Disable-N8nCliBackupSchedule',
+    'Show-BackupMenu'
   ]) {
     assert.match(menu, new RegExp(`function ${escapeRegExp(functionName)}`), functionName);
   }
@@ -984,9 +1026,72 @@ test('local menu native command helper returns only the process exit code', (t) 
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
+test('local n8n CLI backup helpers validate config and generate safe commands', (t) => {
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    t.skip('PowerShell is not available in this environment');
+    return;
+  }
+
+  const command = [
+    '$ErrorActionPreference = "Stop"',
+    `. ${powerShellSingleQuoted(sourceScript)} --library`,
+    '$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("toolkit-n8n-cli-backup-" + [guid]::NewGuid().ToString("N"))',
+    '$script:StackRoot = Join-Path $testRoot "stack"',
+    'New-Item -ItemType Directory -Force -Path $script:StackRoot | Out-Null',
+    '$safeRoot = Join-Path $script:StackRoot "backups\\n8n-cli"',
+    '$validCadence = Convert-N8nCliBackupDayValue -Value "7" -Name "Backup cadence"',
+    'if (-not $validCadence.Ok -or $validCadence.Value -ne 7) { throw "valid cadence was rejected" }',
+    '$invalidCadence = Convert-N8nCliBackupDayValue -Value "0" -Name "Backup cadence"',
+    'if ($invalidCadence.Ok) { throw "zero cadence was accepted" }',
+    '$invalidRetention = Convert-N8nCliBackupDayValue -Value "abc" -Name "Retention period"',
+    'if ($invalidRetention.Ok) { throw "non-numeric retention was accepted" }',
+    '$safe = Test-SafeN8nCliBackupRoot -Path $safeRoot',
+    'if (-not $safe.Ok) { throw "safe backup root was rejected: $($safe.Error)" }',
+    '$homeUnsafe = Test-SafeN8nCliBackupRoot -Path $HOME',
+    'if ($homeUnsafe.Ok) { throw "home directory was accepted as backup root" }',
+    '$stackUnsafe = Test-SafeN8nCliBackupRoot -Path $script:StackRoot',
+    'if ($stackUnsafe.Ok) { throw "stack root was accepted as backup root" }',
+    '$rootUnsafe = Test-SafeN8nCliBackupRoot -Path ([System.IO.Path]::GetPathRoot($script:StackRoot))',
+    'if ($rootUnsafe.Ok) { throw "filesystem root was accepted as backup root" }',
+    'New-Item -ItemType Directory -Force -Path $safeRoot | Out-Null',
+    '$oldBackup = Join-Path $safeRoot "n8n-cli-20000101-000000"',
+    '$newBackup = Join-Path $safeRoot "n8n-cli-29990101-000000"',
+    '$unmatched = Join-Path $safeRoot "manual-folder"',
+    'New-Item -ItemType Directory -Force -Path $oldBackup, $newBackup, $unmatched | Out-Null',
+    '(Get-Item -LiteralPath $oldBackup).LastWriteTime = (Get-Date).AddDays(-40)',
+    '(Get-Item -LiteralPath $newBackup).LastWriteTime = Get-Date',
+    '(Get-Item -LiteralPath $unmatched).LastWriteTime = (Get-Date).AddDays(-40)',
+    'if (-not (Invoke-N8nCliBackupRetentionCleanup -BackupRoot $safeRoot -RetentionDays 30)) { throw "retention cleanup failed" }',
+    'if (Test-Path -LiteralPath $oldBackup) { throw "old timestamped backup was not deleted" }',
+    'if (-not (Test-Path -LiteralPath $newBackup)) { throw "new timestamped backup was deleted" }',
+    'if (-not (Test-Path -LiteralPath $unmatched)) { throw "non-matching folder was deleted" }',
+    '$specs = @(Get-N8nCliBackupExportSpecs -IncludeWorkflows $true -IncludeCredentials $true -ExportDecryptedCredentials $true -ContainerBackupRoot "/tmp/n8n-cli-backups/test")',
+    'if ($specs.Count -ne 2) { throw "expected two export specs, got $($specs.Count)" }',
+    '$workflowCommand = $specs[0].ComposeArguments -join " "',
+    '$credentialCommand = $specs[1].ComposeArguments -join " "',
+    'if ($workflowCommand -notmatch "exec -T n8n n8n export:workflow --backup --output=/tmp/n8n-cli-backups/test/workflows") { throw "workflow command mismatch: $workflowCommand" }',
+    'if ($credentialCommand -notmatch "exec -T n8n n8n export:credentials --backup --output=/tmp/n8n-cli-backups/test/credentials-decrypted --decrypted") { throw "credential command mismatch: $credentialCommand" }',
+    '$config = [pscustomobject]@{ enabled = $true; scheduler = "Windows Task Scheduler"; taskName = ("toolkit-n8n-cli-backup-test-" + [guid]::NewGuid().ToString("N")); cadenceDays = 1; retentionDays = 30; backupRoot = $safeRoot; includeWorkflows = $true; includeCredentials = $false; exportDecryptedCredentials = $false; n8nServiceName = "n8n" }',
+    'Save-N8nCliBackupConfig -Config $config | Out-Null',
+    'if (-not (Disable-N8nCliBackupSchedule)) { throw "disable returned false" }',
+    '$disabled = Read-N8nCliBackupConfig',
+    'if ($disabled.enabled) { throw "disable did not persist enabled=false" }'
+  ].join('; ');
+
+  const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
 test('local stack templates stay placeholder-only and local-first', () => {
   const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/docker-compose.yml');
   const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
+  const localGitignore = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.gitignore');
   const shortcut = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local-desktop-shortcut.cmd');
 
   assert.match(compose, /^\s{2}postgres:/m);
@@ -1027,6 +1132,10 @@ test('local stack templates stay placeholder-only and local-first', () => {
   assert.match(shortcut, /%USERPROFILE%\\\.n8n-local/);
   assert.match(shortcut, /_n8n-local\.cmd/);
   assert.doesNotMatch(shortcut, /POSTGRES_PASSWORD|N8N_ENCRYPTION_KEY|NGROK_AUTHTOKEN/);
+
+  for (const ignored of ['.env', '.env.*', '!.env.example', '.env.active', 'backups/', 'import/', '*.credentials.json', '**/SECRET-DO-NOT-COMMIT.env']) {
+    assert.match(localGitignore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
+  }
 });
 
 test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only', () => {

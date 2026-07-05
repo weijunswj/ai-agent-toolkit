@@ -2,9 +2,13 @@ $ErrorActionPreference = 'Stop'
 
 $script:MenuArguments = @($args)
 $script:StackRoot = (Get-Location).Path
+$script:MenuScriptPath = $PSCommandPath
 $script:CoreServices = @('postgres', 'n8n')
 $script:Services = @('n8n', 'postgres', 'ngrok')
 $script:ExitRequested = $false
+$script:N8nCliBackupService = 'n8n'
+$script:N8nCliBackupContainerRootBase = '/tmp/n8n-cli-backups'
+$script:N8nCliBackupTaskPrefix = 'n8n-local-cli-backup'
 $script:ServiceImageDefaults = @{
   n8n = 'docker.n8n.io/n8nio/n8n:stable'
   postgres = 'postgres:16-alpine'
@@ -2101,6 +2105,701 @@ function Open-N8n {
   Write-Success 'Opened local n8n in your browser.'
 }
 
+function Get-N8nCliBackupDefaultRoot {
+  return (Join-Path (Join-Path $script:StackRoot 'backups') 'n8n-cli')
+}
+
+function Get-N8nCliBackupConfigPath {
+  return (Join-Path (Join-Path $script:StackRoot 'backups') 'n8n-cli-backup-config.json')
+}
+
+function Convert-N8nCliBackupDayValue {
+  param(
+    [string]$Value,
+    [string]$Name,
+    [int]$Min = 1,
+    [int]$Max = 3650
+  )
+
+  $text = ([string]$Value).Trim()
+  if (-not $text) {
+    return [pscustomobject]@{ Ok = $false; Error = "$Name is required."; Value = 0 }
+  }
+
+  $number = 0
+  if (-not [int]::TryParse($text, [ref]$number)) {
+    return [pscustomobject]@{ Ok = $false; Error = "$Name must be a whole number of days."; Value = 0 }
+  }
+
+  if ($number -lt $Min -or $number -gt $Max) {
+    return [pscustomobject]@{ Ok = $false; Error = "$Name must be between $Min and $Max days."; Value = 0 }
+  }
+
+  return [pscustomobject]@{ Ok = $true; Error = ''; Value = $number }
+}
+
+function Read-N8nCliBackupDayInput {
+  param(
+    [string]$Prompt,
+    [int]$Default,
+    [string]$Name,
+    [int]$Min = 1,
+    [int]$Max = 3650
+  )
+
+  while ($true) {
+    $value = (Read-Host "$Prompt [$Default]").Trim()
+    if (-not $value) {
+      $value = [string]$Default
+    }
+
+    $parsed = Convert-N8nCliBackupDayValue -Value $value -Name $Name -Min $Min -Max $Max
+    if ($parsed.Ok) {
+      return $parsed.Value
+    }
+
+    Write-Warning $parsed.Error
+  }
+}
+
+function Read-YesNoInput {
+  param(
+    [string]$Prompt,
+    [bool]$DefaultYes = $false
+  )
+
+  $suffix = 'y/N'
+  if ($DefaultYes) {
+    $suffix = 'Y/n'
+  }
+
+  while ($true) {
+    $value = (Read-Host "$Prompt ($suffix)").Trim()
+    if (-not $value) {
+      return $DefaultYes
+    }
+    if ($value -match '^(y|yes)$') {
+      return $true
+    }
+    if ($value -match '^(n|no)$') {
+      return $false
+    }
+    Write-Warning 'Answer yes or no.'
+  }
+}
+
+function Get-ResolvedPathOrEmpty {
+  param([string]$Path)
+
+  $value = ([string]$Path).Trim().Trim('"')
+  if (-not $value) {
+    return ''
+  }
+
+  try {
+    return [System.IO.Path]::GetFullPath($value)
+  } catch {
+    return ''
+  }
+}
+
+function Test-SafeN8nCliBackupRoot {
+  param([string]$Path)
+
+  $resolved = Get-ResolvedPathOrEmpty -Path $Path
+  if (-not $resolved) {
+    return [pscustomobject]@{ Ok = $false; Path = ''; Error = 'Backup root is empty or invalid.' }
+  }
+
+  $pathRoot = [System.IO.Path]::GetPathRoot($resolved)
+  if ($pathRoot) {
+    $trimmedPath = $resolved.TrimEnd('\', '/')
+    $trimmedRoot = $pathRoot.TrimEnd('\', '/')
+    if ($trimmedPath -eq $trimmedRoot) {
+      return [pscustomobject]@{ Ok = $false; Path = $resolved; Error = 'Backup root cannot be a drive or filesystem root.' }
+    }
+  }
+
+  $unsafeExactPaths = New-Object System.Collections.Generic.List[string]
+  foreach ($candidate in @($HOME, $env:USERPROFILE, $script:StackRoot, (Split-Path -Parent $script:StackRoot))) {
+    $candidatePath = Get-ResolvedPathOrEmpty -Path $candidate
+    if ($candidatePath) {
+      $unsafeExactPaths.Add($candidatePath)
+    }
+  }
+
+  foreach ($specialFolder in @('Desktop', 'MyDocuments')) {
+    try {
+      $specialPath = [Environment]::GetFolderPath($specialFolder)
+      if ($specialPath) {
+        $unsafeExactPaths.Add([System.IO.Path]::GetFullPath($specialPath))
+      }
+    } catch {
+      # Some PowerShell hosts do not expose every special folder name.
+    }
+  }
+
+  foreach ($unsafe in $unsafeExactPaths) {
+    if ((Test-SameResolvedPath -Left $resolved -Right $unsafe)) {
+      return [pscustomobject]@{ Ok = $false; Path = $resolved; Error = "Backup root is too broad: $resolved" }
+    }
+  }
+
+  $gitPath = Join-Path $resolved '.git'
+  if (Test-Path -LiteralPath $gitPath) {
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; Error = 'Backup root looks like a git repository root.' }
+  }
+
+  if ((Test-Path -LiteralPath (Join-Path $resolved 'AGENTS.md')) -and (Test-Path -LiteralPath (Join-Path $resolved 'package.json'))) {
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; Error = 'Backup root looks like this toolkit repository root.' }
+  }
+
+  return [pscustomobject]@{ Ok = $true; Path = $resolved; Error = '' }
+}
+
+function Get-N8nCliBackupTaskName {
+  $stackPath = [System.IO.Path]::GetFullPath($script:StackRoot).ToLowerInvariant()
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($stackPath)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hashBytes = $sha.ComputeHash($bytes)
+  } finally {
+    $sha.Dispose()
+  }
+
+  $hash = -join ($hashBytes | ForEach-Object { $_.ToString('x2') })
+  return "$($script:N8nCliBackupTaskPrefix)-$($hash.Substring(0, 12))"
+}
+
+function Get-N8nCliBackupScriptPath {
+  if ($script:MenuScriptPath) {
+    return [System.IO.Path]::GetFullPath($script:MenuScriptPath)
+  }
+
+  return (Join-Path (Join-Path $script:StackRoot 'scripts') 'n8n-local-menu.ps1')
+}
+
+function Get-N8nCliBackupScheduleActionArguments {
+  $scriptPath = Get-N8nCliBackupScriptPath
+  return "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" --stack-dir `"$script:StackRoot`" --run-n8n-cli-backup --scheduled"
+}
+
+function Get-N8nCliBackupExportSpecs {
+  param(
+    [bool]$IncludeWorkflows = $true,
+    [bool]$IncludeCredentials = $false,
+    [bool]$ExportDecryptedCredentials = $false,
+    [string]$ContainerBackupRoot = '/tmp/n8n-cli-backups/test'
+  )
+
+  $specs = New-Object System.Collections.Generic.List[object]
+
+  if ($IncludeWorkflows) {
+    $workflowOutput = "$ContainerBackupRoot/workflows"
+    $specs.Add([pscustomobject]@{
+      Name = 'workflows'
+      HostFolder = 'workflows'
+      ContainerOutputDir = $workflowOutput
+      ComposeArguments = @('exec', '-T', $script:N8nCliBackupService, 'n8n', 'export:workflow', '--backup', "--output=$workflowOutput")
+    })
+  }
+
+  if ($IncludeCredentials) {
+    $credentialFolder = 'credentials'
+    if ($ExportDecryptedCredentials) {
+      $credentialFolder = 'credentials-decrypted'
+    }
+    $credentialOutput = "$ContainerBackupRoot/$credentialFolder"
+    $arguments = @('exec', '-T', $script:N8nCliBackupService, 'n8n', 'export:credentials', '--backup', "--output=$credentialOutput")
+    if ($ExportDecryptedCredentials) {
+      $arguments += '--decrypted'
+    }
+
+    $specs.Add([pscustomobject]@{
+      Name = $credentialFolder
+      HostFolder = $credentialFolder
+      ContainerOutputDir = $credentialOutput
+      ComposeArguments = $arguments
+    })
+  }
+
+  return $specs.ToArray()
+}
+
+function Join-CommandForDisplay {
+  param([string[]]$Parts)
+
+  $escaped = @()
+  foreach ($part in $Parts) {
+    $value = [string]$part
+    if ($value -match '\s') {
+      $escaped += '"' + ($value -replace '"', '\"') + '"'
+    } else {
+      $escaped += $value
+    }
+  }
+  return ($escaped -join ' ')
+}
+
+function Read-N8nCliBackupConfig {
+  $configPath = Get-N8nCliBackupConfigPath
+  if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    return $null
+  }
+
+  try {
+    return (Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json)
+  } catch {
+    Write-ErrorMessage "Could not read n8n CLI backup config: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+function Save-N8nCliBackupConfig {
+  param([object]$Config)
+
+  $configPath = Get-N8nCliBackupConfigPath
+  $configDir = Split-Path -Parent $configPath
+  New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+  $Config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $configPath -Encoding ascii
+  Write-Success "n8n CLI backup config saved to: $configPath"
+}
+
+function New-N8nCliBackupConfigFromPrompts {
+  Write-Header 'Configure Scheduled n8n CLI Backups'
+  Write-Info 'This stores local-only schedule settings in the stack backups folder, not in repo-tracked config.'
+  Write-Info 'Backups use n8n export:workflow and export:credentials inside the n8n Docker Compose service.'
+  Write-Warning 'Scheduled backups only run when Windows Task Scheduler, Docker Desktop, and the local n8n stack are available.'
+
+  $cadenceDays = Read-N8nCliBackupDayInput -Prompt 'Backup cadence in days' -Default 1 -Name 'Backup cadence'
+  $retentionDays = Read-N8nCliBackupDayInput -Prompt 'Retention period in days' -Default 30 -Name 'Retention period'
+
+  $defaultRoot = Get-N8nCliBackupDefaultRoot
+  while ($true) {
+    $backupRoot = (Read-Host "Backup destination [$defaultRoot]").Trim().Trim('"')
+    if (-not $backupRoot) {
+      $backupRoot = $defaultRoot
+    }
+
+    $safeRoot = Test-SafeN8nCliBackupRoot -Path $backupRoot
+    if ($safeRoot.Ok) {
+      $backupRoot = $safeRoot.Path
+      break
+    }
+
+    Write-Warning $safeRoot.Error
+  }
+
+  $includeWorkflows = Read-YesNoInput -Prompt 'Include workflows?' -DefaultYes $true
+  $includeCredentials = Read-YesNoInput -Prompt 'Include credentials?' -DefaultYes $false
+  $exportDecryptedCredentials = $false
+
+  if ($includeCredentials) {
+    Write-Warning 'Default is NO. Decrypted credential exports expose secrets in files.'
+    if (Read-YesNoInput -Prompt 'Export decrypted credentials?' -DefaultYes $false) {
+      Write-Warning 'DECRYPTED CREDENTIAL EXPORTS CONTAIN SECRETS IN PLAIN TEXT.'
+      Write-Warning 'Only enable this for an intentional local migration and protect or delete the files immediately.'
+      $confirmation = Read-Host 'Type EXPORT DECRYPTED CREDENTIALS to enable decrypted credential files'
+      if ($confirmation -eq 'EXPORT DECRYPTED CREDENTIALS') {
+        $exportDecryptedCredentials = $true
+      } else {
+        Write-Warning 'Decrypted credential export was not enabled.'
+      }
+    }
+  } else {
+    Write-Info 'Credentials are not included, so decrypted credential export is disabled.'
+  }
+
+  if (-not $includeWorkflows -and -not $includeCredentials) {
+    Write-ErrorMessage 'Choose workflows, credentials, or both. Backup configuration cancelled.'
+    return $null
+  }
+
+  $taskName = Get-N8nCliBackupTaskName
+  return [ordered]@{
+    enabled = $true
+    scheduler = 'Windows Task Scheduler'
+    taskName = $taskName
+    cadenceDays = $cadenceDays
+    retentionDays = $retentionDays
+    backupRoot = $backupRoot
+    includeWorkflows = $includeWorkflows
+    includeCredentials = $includeCredentials
+    exportDecryptedCredentials = $exportDecryptedCredentials
+    n8nServiceName = $script:N8nCliBackupService
+    configuredAt = (Get-Date -Format o)
+  }
+}
+
+function Register-N8nCliBackupSchedule {
+  param([object]$Config)
+
+  if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+    Write-ErrorMessage 'Windows Task Scheduler cmdlets are not available in this PowerShell session.'
+    Write-Info 'The config was not scheduled. Use Run n8n CLI backup now from this menu instead.'
+    return $false
+  }
+
+  $taskName = [string]$Config.taskName
+  if (-not $taskName) {
+    $taskName = Get-N8nCliBackupTaskName
+  }
+
+  $actionArgs = Get-N8nCliBackupScheduleActionArguments
+  $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $actionArgs
+  $trigger = New-ScheduledTaskTrigger -Daily -DaysInterval ([int]$Config.cadenceDays) -At 3am
+  $description = "Local n8n CLI backups for stack: $script:StackRoot"
+
+  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Description $description -Force | Out-Null
+  Write-Success "Scheduled task created or updated: $taskName"
+  Write-Info 'Backups run around 3:00 AM local time on the configured cadence when the local stack is available.'
+  return $true
+}
+
+function Configure-N8nCliBackupSchedule {
+  $config = New-N8nCliBackupConfigFromPrompts
+  if ($null -eq $config) {
+    return $false
+  }
+
+  if (-not (Register-N8nCliBackupSchedule -Config $config)) {
+    return $false
+  }
+
+  Save-N8nCliBackupConfig -Config $config
+  return $true
+}
+
+function Disable-N8nCliBackupSchedule {
+  Write-Header 'Disable Scheduled n8n CLI Backups'
+  $config = Read-N8nCliBackupConfig
+  $taskName = Get-N8nCliBackupTaskName
+  if ($null -ne $config -and $config.taskName) {
+    $taskName = [string]$config.taskName
+  }
+
+  if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task) {
+      Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+      Write-Success "Scheduled task removed: $taskName"
+    } else {
+      Write-Info "Scheduled task was not found: $taskName"
+    }
+  } else {
+    Write-Warning 'Windows Task Scheduler cmdlets are not available; only local config will be marked disabled.'
+  }
+
+  if ($null -eq $config) {
+    $config = [pscustomobject][ordered]@{
+      enabled = $false
+      scheduler = 'Windows Task Scheduler'
+      taskName = $taskName
+      backupRoot = Get-N8nCliBackupDefaultRoot
+      n8nServiceName = $script:N8nCliBackupService
+    }
+  }
+
+  $config | Add-Member -NotePropertyName enabled -NotePropertyValue $false -Force
+  $config | Add-Member -NotePropertyName disabledAt -NotePropertyValue (Get-Date -Format o) -Force
+  Save-N8nCliBackupConfig -Config $config
+  Write-Success 'Scheduled n8n CLI backups are disabled.'
+  return $true
+}
+
+function Show-N8nCliBackupConfiguration {
+  Write-Header 'n8n CLI Backup Configuration'
+  $config = Read-N8nCliBackupConfig
+  if ($null -eq $config) {
+    Write-Warning 'No n8n CLI backup configuration was found.'
+    Write-Info "Expected config path: $(Get-N8nCliBackupConfigPath)"
+    return
+  }
+
+  Write-Host "Enabled: $($config.enabled)" -ForegroundColor Cyan
+  Write-Host "Cadence days: $($config.cadenceDays)" -ForegroundColor Cyan
+  Write-Host "Retention days: $($config.retentionDays)" -ForegroundColor Cyan
+  Write-Host "Backup root: $($config.backupRoot)" -ForegroundColor Cyan
+  Write-Host "Include workflows: $($config.includeWorkflows)" -ForegroundColor Cyan
+  Write-Host "Include credentials: $($config.includeCredentials)" -ForegroundColor Cyan
+  Write-Host "Export decrypted credentials: $($config.exportDecryptedCredentials)" -ForegroundColor Cyan
+  Write-Host "n8n service: $($config.n8nServiceName)" -ForegroundColor Cyan
+  Write-Host "Task name: $($config.taskName)" -ForegroundColor Cyan
+  Write-Host "Config path: $(Get-N8nCliBackupConfigPath)" -ForegroundColor Cyan
+
+  if ($config.exportDecryptedCredentials) {
+    Write-Warning 'Decrypted credential exports expose secrets in backup files.'
+  }
+}
+
+function Get-N8nContainerDescriptor {
+  $containerId = ''
+  $containerName = ''
+  try {
+    $composeArgs = @((Get-ComposeGlobalArguments) + @('ps', '-q', $script:N8nCliBackupService))
+    $containerId = ([string](@(& docker compose @composeArgs 2>$null | Select-Object -First 1))).Trim()
+    if ($containerId) {
+      $containerName = ([string](& docker inspect --format '{{.Name}}' $containerId 2>$null | Select-Object -First 1)).Trim().TrimStart('/')
+    }
+  } catch {
+    $containerId = ''
+    $containerName = ''
+  }
+
+  return [pscustomobject]@{
+    serviceName = $script:N8nCliBackupService
+    composeProjectName = Get-ComposeProjectName
+    containerId = $containerId
+    containerName = $containerName
+  }
+}
+
+function Get-N8nCliBackupFileList {
+  param([string]$BackupDir)
+
+  if (-not (Test-Path -LiteralPath $BackupDir -PathType Container)) {
+    return @()
+  }
+
+  $root = [System.IO.Path]::GetFullPath($BackupDir)
+  if (-not $root.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+    $root = $root + [System.IO.Path]::DirectorySeparatorChar
+  }
+
+  return @(
+    Get-ChildItem -LiteralPath $BackupDir -File -Recurse -ErrorAction SilentlyContinue |
+      ForEach-Object {
+        $full = [System.IO.Path]::GetFullPath($_.FullName)
+        ($full.Substring($root.Length) -replace '\\', '/')
+      } |
+      Sort-Object
+  )
+}
+
+function Write-N8nCliBackupManifest {
+  param(
+    [string]$BackupDir,
+    [string]$Timestamp,
+    [object]$Config,
+    [object]$Container,
+    [object[]]$Specs,
+    [string[]]$Files,
+    [bool]$ScheduledRun
+  )
+
+  $manifestPath = Join-Path $BackupDir 'manifest.json'
+  $filesWithManifest = @($Files + 'manifest.json' | Sort-Object -Unique)
+  $manifest = [ordered]@{
+    timestamp = $Timestamp
+    createdAt = (Get-Date -Format o)
+    localOnly = $true
+    n8nServiceName = $Container.serviceName
+    n8nContainerName = $Container.containerName
+    n8nContainerId = $Container.containerId
+    composeProjectName = $Container.composeProjectName
+    backupOptions = [ordered]@{
+      scheduledRun = $ScheduledRun
+      cadenceDays = [int]$Config.cadenceDays
+      retentionDays = [int]$Config.retentionDays
+      backupRoot = [string]$Config.backupRoot
+      includeWorkflows = [bool]$Config.includeWorkflows
+      includeCredentials = [bool]$Config.includeCredentials
+      exportDecryptedCredentials = [bool]$Config.exportDecryptedCredentials
+    }
+    commands = @(
+      $Specs | ForEach-Object {
+        [ordered]@{
+          name = $_.Name
+          command = "docker compose $(Join-CommandForDisplay -Parts $_.ComposeArguments)"
+          containerOutputDir = $_.ContainerOutputDir
+          hostFolder = $_.HostFolder
+        }
+      }
+    )
+    filesGenerated = $filesWithManifest
+    credentialsIncluded = [bool]$Config.includeCredentials
+    decryptedCredentialsIncluded = [bool]$Config.exportDecryptedCredentials
+    warnings = @(
+      'Keep this backup folder private and out of Git.',
+      'Credential exports may require the original N8N_ENCRYPTION_KEY unless exported decrypted.',
+      'Decrypted credential exports expose secrets in files.'
+    )
+  }
+
+  $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding ascii
+  return $manifestPath
+}
+
+function Invoke-N8nCliBackupRetentionCleanup {
+  param(
+    [string]$BackupRoot,
+    [int]$RetentionDays,
+    [switch]$DryRun
+  )
+
+  $retention = Convert-N8nCliBackupDayValue -Value ([string]$RetentionDays) -Name 'Retention period'
+  if (-not $retention.Ok) {
+    Write-ErrorMessage $retention.Error
+    return $false
+  }
+
+  $safeRoot = Test-SafeN8nCliBackupRoot -Path $BackupRoot
+  if (-not $safeRoot.Ok) {
+    Write-ErrorMessage $safeRoot.Error
+    return $false
+  }
+
+  if (-not (Test-Path -LiteralPath $safeRoot.Path -PathType Container)) {
+    return $true
+  }
+
+  $cutoff = (Get-Date).AddDays(-1 * $retention.Value)
+  $deletedCount = 0
+  $backupFolders = @(
+    Get-ChildItem -LiteralPath $safeRoot.Path -Directory -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -match '^n8n-cli-\d{8}-\d{6}$' -and $_.LastWriteTime -lt $cutoff }
+  )
+
+  foreach ($folder in $backupFolders) {
+    if (-not (Test-PathInsideDirectory -Path $folder.FullName -Directory $safeRoot.Path)) {
+      Write-ErrorMessage "Refusing to delete a path outside the backup root: $($folder.FullName)"
+      return $false
+    }
+    if (Test-SameResolvedPath -Left $folder.FullName -Right $safeRoot.Path) {
+      Write-ErrorMessage 'Refusing to delete the backup root itself.'
+      return $false
+    }
+
+    if ($DryRun) {
+      Write-Info "Would delete old n8n CLI backup folder: $($folder.FullName)"
+    } else {
+      Remove-Item -LiteralPath $folder.FullName -Recurse -Force
+      Write-Info "Deleted old n8n CLI backup folder: $($folder.FullName)"
+    }
+    $deletedCount += 1
+  }
+
+  if ($deletedCount -eq 0) {
+    Write-Info 'No old n8n CLI backup folders were eligible for retention cleanup.'
+  }
+
+  return $true
+}
+
+function Invoke-N8nCliBackup {
+  param(
+    [object]$Config,
+    [switch]$Scheduled
+  )
+
+  Write-Header 'Run n8n CLI Backup'
+  if ($null -eq $Config) {
+    Write-ErrorMessage 'No n8n CLI backup configuration was provided.'
+    return $false
+  }
+
+  $cadence = Convert-N8nCliBackupDayValue -Value ([string]$Config.cadenceDays) -Name 'Backup cadence'
+  if (-not $cadence.Ok) {
+    Write-ErrorMessage $cadence.Error
+    return $false
+  }
+
+  $retention = Convert-N8nCliBackupDayValue -Value ([string]$Config.retentionDays) -Name 'Retention period'
+  if (-not $retention.Ok) {
+    Write-ErrorMessage $retention.Error
+    return $false
+  }
+
+  $safeRoot = Test-SafeN8nCliBackupRoot -Path ([string]$Config.backupRoot)
+  if (-not $safeRoot.Ok) {
+    Write-ErrorMessage $safeRoot.Error
+    return $false
+  }
+
+  $Config | Add-Member -NotePropertyName backupRoot -NotePropertyValue $safeRoot.Path -Force
+
+  if (-not [bool]$Config.includeWorkflows -and -not [bool]$Config.includeCredentials) {
+    Write-ErrorMessage 'Backup configuration includes neither workflows nor credentials.'
+    return $false
+  }
+
+  if (-not (Test-StackFiles)) { return $false }
+  if (-not (Test-DockerReady)) { return $false }
+
+  $runningServices = Get-RunningServices
+  if ($runningServices -notcontains $script:N8nCliBackupService) {
+    Write-ErrorMessage 'The n8n service is not running. Start local n8n before running CLI backups.'
+    Write-Info 'Scheduled backups have the same limitation: Docker Desktop and the local n8n stack must be running.'
+    return $false
+  }
+
+  New-Item -ItemType Directory -Force -Path $safeRoot.Path | Out-Null
+  if (-not (Invoke-N8nCliBackupRetentionCleanup -BackupRoot $safeRoot.Path -RetentionDays $retention.Value)) {
+    return $false
+  }
+
+  $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $backupDir = Join-Path $safeRoot.Path "n8n-cli-$timestamp"
+  New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+
+  $containerBackupRoot = "$($script:N8nCliBackupContainerRootBase)/$timestamp"
+  $specs = @(Get-N8nCliBackupExportSpecs -IncludeWorkflows ([bool]$Config.includeWorkflows) -IncludeCredentials ([bool]$Config.includeCredentials) -ExportDecryptedCredentials ([bool]$Config.exportDecryptedCredentials) -ContainerBackupRoot $containerBackupRoot)
+  if ($specs.Count -eq 0) {
+    Write-ErrorMessage 'No n8n CLI export commands were generated.'
+    return $false
+  }
+
+  $container = Get-N8nContainerDescriptor
+  $ok = $true
+  try {
+    foreach ($spec in $specs) {
+      Write-Info "Running n8n CLI export for $($spec.Name)."
+      if ((Invoke-Compose -Arguments $spec.ComposeArguments) -ne 0) {
+        $ok = $false
+        break
+      }
+
+      $hostTarget = Join-Path $backupDir $spec.HostFolder
+      if ((Invoke-Compose -Arguments @('cp', "$($script:N8nCliBackupService):$($spec.ContainerOutputDir)", $hostTarget)) -ne 0) {
+        $ok = $false
+        break
+      }
+    }
+  } finally {
+    [void](Invoke-Compose -Arguments @('exec', '-T', $script:N8nCliBackupService, 'rm', '-rf', $containerBackupRoot))
+  }
+
+  if (-not $ok) {
+    Write-ErrorMessage "n8n CLI backup failed. Partial backup folder, if any: $backupDir"
+    return $false
+  }
+
+  $files = Get-N8nCliBackupFileList -BackupDir $backupDir
+  $manifestPath = Write-N8nCliBackupManifest -BackupDir $backupDir -Timestamp $timestamp -Config $Config -Container $container -Specs $specs -Files $files -ScheduledRun ([bool]$Scheduled)
+
+  Write-Success "n8n CLI backup folder: $backupDir"
+  Write-Success "Manifest written to: $manifestPath"
+  [void](Invoke-N8nCliBackupRetentionCleanup -BackupRoot $safeRoot.Path -RetentionDays $retention.Value)
+  return $true
+}
+
+function Invoke-N8nCliBackupFromConfig {
+  param([switch]$Scheduled)
+
+  $config = Read-N8nCliBackupConfig
+  if ($null -eq $config) {
+    Write-ErrorMessage 'No n8n CLI backup config found. Choose Back up, then Configure scheduled n8n CLI backups.'
+    return $false
+  }
+
+  if ($Scheduled -and -not [bool]$config.enabled) {
+    Write-Info 'Scheduled n8n CLI backups are disabled; skipping this scheduled run.'
+    return $true
+  }
+
+  return (Invoke-N8nCliBackup -Config $config -Scheduled:$Scheduled)
+}
+
 function Test-PlaceholderEncryptionKey {
   param([string]$Value)
 
@@ -2244,6 +2943,29 @@ function Backup-Postgres {
       Write-ErrorMessage 'Required backup failed. No update was applied.'
     }
     return $false
+  }
+}
+
+function Show-BackupMenu {
+  Write-Header 'Back up'
+  Write-Host 'Choose a backup action:' -ForegroundColor Cyan
+  Write-Host '  1. Back up Postgres database now'
+  Write-Host '  2. Configure scheduled n8n CLI backups'
+  Write-Host '  3. Run n8n CLI backup now'
+  Write-Host '  4. Show n8n CLI backup configuration'
+  Write-Host '  5. Disable scheduled n8n CLI backups'
+  Write-Host '  6. Cancel'
+  Write-Host ''
+
+  $choice = (Read-Host 'Enter a number').Trim()
+  switch ($choice) {
+    '1' { [void](Backup-Postgres) }
+    '2' { [void](Configure-N8nCliBackupSchedule) }
+    '3' { [void](Invoke-N8nCliBackupFromConfig) }
+    '4' { Show-N8nCliBackupConfiguration }
+    '5' { [void](Disable-N8nCliBackupSchedule) }
+    '6' { Write-Warning 'Backup action cancelled.' }
+    default { Write-Warning 'Choose a number from 1 to 6.' }
   }
 }
 
@@ -3389,7 +4111,7 @@ function Show-CommandList {
   Write-CommandListItem -Number '4' -Name 'Update' -Description 'Pulls images and recreates selected containers automatically.'
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state, health, container names, and ports.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
-  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Writes a timestamped backup folder under .\backups.'
+  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens Postgres backup and n8n CLI backup actions.'
   Write-CommandListItem -Number '8' -Name 'Advanced / Recovery: Restore local n8n from backup' -Description 'Restores a local database or entities backup after pre-restore backups and approval.'
   Write-Host ''
   Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
@@ -3473,6 +4195,26 @@ function Show-MainMenu {
 }
 
 Initialize-MenuRuntime
+
+if (Test-MenuFlag -Name 'library') {
+  return
+}
+
+if (Test-MenuFlag -Name 'show-n8n-cli-backup-config') {
+  Show-N8nCliBackupConfiguration
+  exit 0
+}
+
+if (Test-MenuFlag -Name 'disable-n8n-cli-backups') {
+  if (Disable-N8nCliBackupSchedule) { exit 0 }
+  exit 1
+}
+
+if (Test-MenuFlag -Name 'run-n8n-cli-backup') {
+  if (Invoke-N8nCliBackupFromConfig -Scheduled:(Test-MenuFlag -Name 'scheduled')) { exit 0 }
+  exit 1
+}
+
 Invoke-LaunchPreflight
 
 while (-not $script:ExitRequested) {
@@ -3486,7 +4228,7 @@ while (-not $script:ExitRequested) {
     '4' { Invoke-MenuAction { Show-UpdateMenu } }
     '5' { Invoke-MenuAction { Show-Status } }
     '6' { Invoke-MenuAction { View-LogsMenu } }
-    '7' { Invoke-MenuAction { [void](Backup-Postgres) } }
+    '7' { Invoke-MenuAction { Show-BackupMenu } }
     '8' { Invoke-MenuAction { Restore-LocalN8nFromBackupMenu } }
     '9' { Invoke-MenuAction { Show-CommandList } }
     '10' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
