@@ -9,6 +9,7 @@ const path = require('node:path');
 const defaultAdvisoryDocPath = 'repo/source-watch/advisory-targets.json';
 const githubApiBaseUrl = 'https://api.github.com';
 const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
+const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 const hiddenUnicodeControlPattern = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 
 function sanitizeGeneratedMarkdown(value) {
@@ -54,6 +55,46 @@ function optionalString(value, label, targetId) {
   return value.trim();
 }
 
+function optionalStringArray(value, label, targetId) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new Error(`${targetId} ${label} must be an array when present`);
+  return value.map((item, index) => requireString(item, `${label}[${index}]`, targetId));
+}
+
+function validateIsoDate(value, label, targetId) {
+  if (!isoDatePattern.test(value)) throw new Error(`${targetId} ${label} must use YYYY-MM-DD`);
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new Error(`${targetId} ${label} must be a valid calendar date`);
+  }
+  return value;
+}
+
+function validateReviewCadence(rawTarget, targetId) {
+  if (rawTarget.review_cadence_days == null) return {};
+  if (!Number.isInteger(rawTarget.review_cadence_days) || rawTarget.review_cadence_days < 1) {
+    throw new Error(`${targetId} review_cadence_days must be a positive integer when present`);
+  }
+  const reviewTemplate = requireString(rawTarget.review_template, 'review_template', targetId);
+  const evidenceSources = optionalStringArray(rawTarget.evidence_sources, 'evidence_sources', targetId);
+  const toolkitScope = optionalStringArray(rawTarget.toolkit_scope, 'toolkit_scope', targetId);
+  const classificationOptions = optionalStringArray(rawTarget.classification_options, 'classification_options', targetId);
+  if (evidenceSources.length === 0) throw new Error(`${targetId} evidence_sources must list at least one source`);
+  if (toolkitScope.length === 0) throw new Error(`${targetId} toolkit_scope must list at least one toolkit area`);
+  if (classificationOptions.length === 0) throw new Error(`${targetId} classification_options must list at least one option`);
+  const lastReviewedAt = rawTarget.last_reviewed_at == null
+    ? null
+    : validateIsoDate(rawTarget.last_reviewed_at, 'last_reviewed_at', targetId);
+  return {
+    review_cadence_days: rawTarget.review_cadence_days,
+    last_reviewed_at: lastReviewedAt,
+    review_template: reviewTemplate,
+    evidence_sources: evidenceSources,
+    toolkit_scope: toolkitScope,
+    classification_options: classificationOptions
+  };
+}
+
 function validateAdvisoryDocument(document, relPath) {
   if (!document || typeof document !== 'object' || Array.isArray(document)) {
     throw new Error(`${relPath} must be a JSON object`);
@@ -95,7 +136,7 @@ function validateTarget(rawTarget) {
       throw new Error(`${id} baseline_sha must be a 40-character SHA when set`);
     }
   }
-  return { ...rawTarget, id, kind, state };
+  return { ...rawTarget, id, kind, state, ...validateReviewCadence(rawTarget, id) };
 }
 
 function requestJson(url, headers = {}) {
@@ -153,6 +194,42 @@ function authHeaders(env = process.env) {
   return headers;
 }
 
+function currentUtcDate(env = process.env) {
+  if (env.SOURCE_WATCH_TODAY) {
+    return new Date(`${validateIsoDate(env.SOURCE_WATCH_TODAY, 'SOURCE_WATCH_TODAY', 'env')}T00:00:00Z`);
+  }
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+function daysBetween(startDate, endDate) {
+  return Math.floor((endDate.getTime() - startDate.getTime()) / 86400000);
+}
+
+function periodicReviewFinding(target, env = process.env) {
+  if (!target.review_cadence_days) return null;
+  const today = currentUtcDate(env);
+  if (!target.last_reviewed_at) {
+    return {
+      type: 'periodic_review_due',
+      target,
+      today: today.toISOString().slice(0, 10),
+      due_reason: 'No last_reviewed_at is recorded.'
+    };
+  }
+  const lastReviewed = new Date(`${target.last_reviewed_at}T00:00:00Z`);
+  const elapsedDays = daysBetween(lastReviewed, today);
+  if (elapsedDays < 0) throw new Error(`${target.id} last_reviewed_at must not be in the future`);
+  if (elapsedDays < target.review_cadence_days) return null;
+  return {
+    type: 'periodic_review_due',
+    target,
+    today: today.toISOString().slice(0, 10),
+    elapsed_days: elapsedDays,
+    due_reason: `${elapsedDays} day(s) since last_reviewed_at.`
+  };
+}
+
 async function latestCommitForGitHubRepoTarget(target, env = process.env) {
   const { owner, repo } = parseGitHubRepo(target.repo);
   const url = new URL(`${githubApiBase(env)}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(target.ref)}`);
@@ -193,6 +270,8 @@ async function advisoryFindings({ workspace, advisoryDocPath = defaultAdvisoryDo
       findings.push({ type: 'pending_advisory_action', target });
       continue;
     }
+    const periodicReview = periodicReviewFinding(target, env);
+    if (periodicReview) findings.push(periodicReview);
     if (target.kind === 'manual') continue;
     if (!target.baseline_sha) {
       findings.push({
@@ -241,6 +320,24 @@ function renderAdvisoryFinding(finding) {
     lines.push('- Status: `Advisory update detected`');
     lines.push(`- Baseline commit: \`${sanitizeGeneratedMarkdown(finding.baseline_sha)}\``);
     lines.push(`- Latest commit: \`${sanitizeGeneratedMarkdown(finding.latest_sha)}\``);
+  } else if (finding.type === 'periodic_review_due') {
+    lines.push('- Status: `Periodic review due`');
+    lines.push(`- Review cadence: \`${target.review_cadence_days} day(s)\``);
+    lines.push(`- Last reviewed: \`${sanitizeGeneratedMarkdown(target.last_reviewed_at || 'never')}\``);
+    lines.push(`- Today: \`${sanitizeGeneratedMarkdown(finding.today)}\``);
+    lines.push(`- Due reason: ${sanitizeGeneratedMarkdown(finding.due_reason)}`);
+  }
+  if (target.review_template) lines.push(`- Review template: \`${sanitizeGeneratedMarkdown(target.review_template)}\``);
+  if (Array.isArray(target.evidence_sources) && target.evidence_sources.length > 0) {
+    lines.push('- Evidence sources:');
+    lines.push(...target.evidence_sources.map((item) => `  - ${sanitizeGeneratedMarkdown(item)}`));
+  }
+  if (Array.isArray(target.toolkit_scope) && target.toolkit_scope.length > 0) {
+    lines.push('- Toolkit scope:');
+    lines.push(...target.toolkit_scope.map((item) => `  - ${sanitizeGeneratedMarkdown(item)}`));
+  }
+  if (Array.isArray(target.classification_options) && target.classification_options.length > 0) {
+    lines.push(`- Classification options: ${target.classification_options.map(sanitizeGeneratedMarkdown).join(', ')}`);
   }
   lines.push(`- Recommendation: ${sanitizeGeneratedMarkdown(target.recommendation)}`);
   lines.push(`- Action taken: ${sanitizeGeneratedMarkdown(target.action_taken)}`);
@@ -263,7 +360,7 @@ function renderAdvisorySection(findings, advisoryDocPath = defaultAdvisoryDocPat
     '## Advisory Actions Requiring Review',
     '',
     `Advisory target document: \`${advisoryDocPath}\`.`,
-    `Update \`${advisoryDocPath}\` when advisory action is taken. Record the recommendation, action taken, remaining work, and removal condition. Remove a target once fully implemented and covered by normal SOURCE-LOCK source-watch, or once it is no longer relevant.`,
+    `Update \`${advisoryDocPath}\` when advisory action is taken. Record the recommendation, action taken, remaining work, and removal condition. For periodic manual reviews, record last_reviewed_at only in a separate human-reviewed PR. Remove a target once fully implemented and covered by normal SOURCE-LOCK source-watch, or once it is no longer relevant.`,
     '',
     ...findings.flatMap(renderAdvisoryFinding)
   ];
