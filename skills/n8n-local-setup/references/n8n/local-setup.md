@@ -553,7 +553,7 @@ Choose one:
 | `ngrok only` | ngrok tunnel container. | Safe when only tunnel image updates are available. |
 | `Cancel` | Nothing. | Returns to the menu. |
 
-If the update includes Postgres, the launcher runs `Back up` first. The backup file goes into:
+If the update includes Postgres, the launcher creates a database-level recovery backup first. The backup file goes into:
 
 ```text
 %USERPROFILE%\.n8n-local\backups
@@ -584,18 +584,42 @@ Logs show the last 200 lines and then return to the menu prompt. This keeps the 
 
 ### 8.6 `Back up`, Restore, And `Command list`
 
-`Back up` opens a backup submenu:
+`Back up` opens a simplified backup submenu. The header shows the automatic backup status first:
+
+- `Automatic backups: Not set up`
+- `Automatic backups: Enabled`, followed by cadence, retention, destination, and scheduled time when available.
+
+When automatic backups are not set up:
 
 | Choice | Use when | What it does |
 | --- | --- | --- |
-| `Back up Postgres database now` | You want a database-level recovery point before updates or restore testing. | Writes the existing Postgres SQL backup package. |
-| `Configure scheduled n8n CLI backups` | You want local workflow and/or credential exports on a cadence. | Prompts for backup settings, saves local config, and creates or updates a Windows Task Scheduler task. |
-| `Run n8n CLI backup now` | You want to test the configured n8n CLI backup immediately. | Runs the configured workflow/credential export once and applies retention cleanup. |
-| `Show n8n CLI backup configuration` | You want to inspect the current local backup settings. | Prints the local config path, cadence, retention, destination, export choices, and task name. |
-| `Disable scheduled n8n CLI backups` | You want to stop automatic backups without deleting existing backup folders. | Removes the scheduled task when present and marks the local config disabled. |
-| `Cancel` | You do not want a backup action. | Returns to the main menu. |
+| `Back up now` | You want a safe local export immediately. | Runs the n8n CLI backup path once with workflows included, credentials included, and decrypted credentials disabled. |
+| `Set up automatic backups` | You want local workflow and/or credential exports on a cadence. | Prompts for automatic backup settings, saves local config, and creates or updates a Windows Task Scheduler task. |
+| `Back` | You do not want a backup action. | Returns to the main menu. |
 
-Postgres database backup:
+When automatic backups are enabled:
+
+| Choice | Use when | What it does |
+| --- | --- | --- |
+| `Back up now` | You want a safe local export immediately. | Runs the n8n CLI backup path once with workflows included, credentials included, and decrypted credentials disabled. |
+| `Change automatic backup settings` | You want to change cadence, retention, destination, or export choices. | Prompts for automatic backup settings again, then updates the Windows Scheduled Task. |
+| `Remove automatic backups` | You want to stop automatic backups without deleting existing backup folders. | Removes the Windows Scheduled Task when present and marks the local config disabled. |
+| `Back` | You do not want a backup action. | Returns to the main menu. |
+
+`Back up now` behaviour:
+
+- Uses n8n CLI export inside the Docker Compose `n8n` service.
+- Includes workflows: yes.
+- Includes credentials: yes.
+- Exports decrypted credentials: no.
+- Uses the enabled automatic backup destination and retention when automatic backups are enabled.
+- Otherwise uses the safe local default destination:
+
+```text
+%USERPROFILE%\.n8n-local\backups\n8n-cli
+```
+
+Database-level recovery backup:
 
 - Writes a timestamped folder under `%USERPROFILE%\.n8n-local\backups`.
 - Includes `database.sql`.
@@ -603,8 +627,9 @@ Postgres database backup:
 - Also includes `restore-manifest.json` and `HOW TO USE THIS RESTORE FOLDER.txt`.
 - Keep the whole folder private.
 - Do not commit it.
+- The update flow creates this automatically before Postgres image updates. It is not the normal first-level `Back up now` path.
 
-n8n CLI backup configuration prompts:
+Automatic backup settings prompts:
 
 1. Backup cadence in days.
 2. Retention period in days.
@@ -658,9 +683,10 @@ Scheduling limitations:
 - The scheduled task runs the same menu script with `--run-n8n-cli-backup --scheduled`.
 - Scheduled backups require Windows, Task Scheduler, Docker Desktop, this local stack folder, and the `n8n` service to be running when the task fires.
 - If Docker Desktop or n8n is stopped, the scheduled run fails closed instead of starting containers or deleting data.
+- `Remove automatic backups` removes the scheduled task when present and persists the local config as disabled.
 - There is no cloud, remote storage, or off-machine copy in this first backup feature.
 
-Command-line helpers:
+Advanced command-line helpers:
 
 ```powershell
 .\_n8n-local.cmd --show-n8n-cli-backup-config

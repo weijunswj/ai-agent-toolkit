@@ -2355,6 +2355,39 @@ function Read-N8nCliBackupConfig {
   }
 }
 
+function Test-N8nCliBackupAutomaticEnabled {
+  param([object]$Config)
+
+  return ($null -ne $Config -and [bool]$Config.enabled)
+}
+
+function Get-N8nCliBackupScheduleTimeText {
+  param([object]$Config)
+
+  if ($null -ne $Config -and $Config.scheduledTime) {
+    return [string]$Config.scheduledTime
+  }
+
+  return 'around 3:00 AM local time'
+}
+
+function Write-N8nCliBackupAutomaticStatus {
+  param([object]$Config)
+
+  Write-Host 'Automatic backups: ' -NoNewline -ForegroundColor DarkCyan
+  if (-not (Test-N8nCliBackupAutomaticEnabled -Config $Config)) {
+    Write-Host 'Not set up' -ForegroundColor Yellow
+    return
+  }
+
+  $scheduleTime = Get-N8nCliBackupScheduleTimeText -Config $Config
+  Write-Host 'Enabled' -ForegroundColor Green
+  Write-Host "  Cadence: every $($Config.cadenceDays) day(s)" -ForegroundColor Cyan
+  Write-Host "  Retention: $($Config.retentionDays) day(s)" -ForegroundColor Cyan
+  Write-Host "  Destination: $($Config.backupRoot)" -ForegroundColor Cyan
+  Write-Host "  Scheduled time: $scheduleTime" -ForegroundColor Cyan
+}
+
 function Save-N8nCliBackupConfig {
   param([object]$Config)
 
@@ -2366,7 +2399,7 @@ function Save-N8nCliBackupConfig {
 }
 
 function New-N8nCliBackupConfigFromPrompts {
-  Write-Header 'Configure Scheduled n8n CLI Backups'
+  Write-Header 'Automatic Backup Settings'
   Write-Info 'This stores local-only schedule settings in the stack backups folder, not in repo-tracked config.'
   Write-Info 'Backups use n8n export:workflow and export:credentials inside the n8n Docker Compose service.'
   Write-Warning 'Scheduled backups only run when Windows Task Scheduler, Docker Desktop, and the local n8n stack are available.'
@@ -2427,6 +2460,7 @@ function New-N8nCliBackupConfigFromPrompts {
     includeCredentials = $includeCredentials
     exportDecryptedCredentials = $exportDecryptedCredentials
     n8nServiceName = $script:N8nCliBackupService
+    scheduledTime = 'around 3:00 AM local time'
     configuredAt = (Get-Date -Format o)
   }
 }
@@ -2436,7 +2470,7 @@ function Register-N8nCliBackupSchedule {
 
   if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
     Write-ErrorMessage 'Windows Task Scheduler cmdlets are not available in this PowerShell session.'
-    Write-Info 'The config was not scheduled. Use Run n8n CLI backup now from this menu instead.'
+    Write-Info 'The config was not scheduled. Use Back up now from this menu instead.'
     return $false
   }
 
@@ -2471,7 +2505,7 @@ function Configure-N8nCliBackupSchedule {
 }
 
 function Disable-N8nCliBackupSchedule {
-  Write-Header 'Disable Scheduled n8n CLI Backups'
+  Write-Header 'Remove Automatic Backups'
   $config = Read-N8nCliBackupConfig
   $taskName = Get-N8nCliBackupTaskName
   if ($null -ne $config -and $config.taskName) {
@@ -2503,7 +2537,7 @@ function Disable-N8nCliBackupSchedule {
   $config | Add-Member -NotePropertyName enabled -NotePropertyValue $false -Force
   $config | Add-Member -NotePropertyName disabledAt -NotePropertyValue (Get-Date -Format o) -Force
   Save-N8nCliBackupConfig -Config $config
-  Write-Success 'Scheduled n8n CLI backups are disabled.'
+  Write-Success 'Automatic backups are removed.'
   return $true
 }
 
@@ -2788,7 +2822,7 @@ function Invoke-N8nCliBackupFromConfig {
 
   $config = Read-N8nCliBackupConfig
   if ($null -eq $config) {
-    Write-ErrorMessage 'No n8n CLI backup config found. Choose Back up, then Configure scheduled n8n CLI backups.'
+    Write-ErrorMessage 'No automatic backup config found. Choose Back up, then Set up automatic backups.'
     return $false
   }
 
@@ -2798,6 +2832,44 @@ function Invoke-N8nCliBackupFromConfig {
   }
 
   return (Invoke-N8nCliBackup -Config $config -Scheduled:$Scheduled)
+}
+
+function New-N8nCliBackupNowConfig {
+  param([object]$ExistingConfig)
+
+  $backupRoot = Get-N8nCliBackupDefaultRoot
+  $retentionDays = 30
+  if ($null -ne $ExistingConfig) {
+    if ($ExistingConfig.backupRoot) {
+      $backupRoot = [string]$ExistingConfig.backupRoot
+    }
+    if ($ExistingConfig.retentionDays) {
+      $retentionDays = [int]$ExistingConfig.retentionDays
+    }
+  }
+
+  return [ordered]@{
+    enabled = $false
+    scheduler = 'Manual'
+    taskName = ''
+    cadenceDays = 1
+    retentionDays = $retentionDays
+    backupRoot = $backupRoot
+    includeWorkflows = $true
+    includeCredentials = $true
+    exportDecryptedCredentials = $false
+    n8nServiceName = $script:N8nCliBackupService
+    configuredAt = (Get-Date -Format o)
+  }
+}
+
+function Invoke-N8nCliBackupNow {
+  $existingConfig = Read-N8nCliBackupConfig
+  if (-not (Test-N8nCliBackupAutomaticEnabled -Config $existingConfig)) {
+    $existingConfig = $null
+  }
+  $config = New-N8nCliBackupNowConfig -ExistingConfig $existingConfig
+  return (Invoke-N8nCliBackup -Config $config)
 }
 
 function Test-PlaceholderEncryptionKey {
@@ -2948,24 +3020,38 @@ function Backup-Postgres {
 
 function Show-BackupMenu {
   Write-Header 'Back up'
+  $config = Read-N8nCliBackupConfig
+  $automaticEnabled = Test-N8nCliBackupAutomaticEnabled -Config $config
+  Write-N8nCliBackupAutomaticStatus -Config $config
+  Write-Host ''
   Write-Host 'Choose a backup action:' -ForegroundColor Cyan
-  Write-Host '  1. Back up Postgres database now'
-  Write-Host '  2. Configure scheduled n8n CLI backups'
-  Write-Host '  3. Run n8n CLI backup now'
-  Write-Host '  4. Show n8n CLI backup configuration'
-  Write-Host '  5. Disable scheduled n8n CLI backups'
-  Write-Host '  6. Cancel'
+  Write-Host '  1. Back up now'
+  if ($automaticEnabled) {
+    Write-Host '  2. Change automatic backup settings'
+    Write-Host '  3. Remove automatic backups'
+    Write-Host '  4. Back'
+  } else {
+    Write-Host '  2. Set up automatic backups'
+    Write-Host '  3. Back'
+  }
   Write-Host ''
 
   $choice = (Read-Host 'Enter a number').Trim()
-  switch ($choice) {
-    '1' { [void](Backup-Postgres) }
-    '2' { [void](Configure-N8nCliBackupSchedule) }
-    '3' { [void](Invoke-N8nCliBackupFromConfig) }
-    '4' { Show-N8nCliBackupConfiguration }
-    '5' { [void](Disable-N8nCliBackupSchedule) }
-    '6' { Write-Warning 'Backup action cancelled.' }
-    default { Write-Warning 'Choose a number from 1 to 6.' }
+  if ($automaticEnabled) {
+    switch ($choice) {
+      '1' { [void](Invoke-N8nCliBackupNow) }
+      '2' { [void](Configure-N8nCliBackupSchedule) }
+      '3' { [void](Disable-N8nCliBackupSchedule) }
+      '4' { return }
+      default { Write-Warning 'Choose a number from 1 to 4.' }
+    }
+  } else {
+    switch ($choice) {
+      '1' { [void](Invoke-N8nCliBackupNow) }
+      '2' { [void](Configure-N8nCliBackupSchedule) }
+      '3' { return }
+      default { Write-Warning 'Choose a number from 1 to 3.' }
+    }
   }
 }
 
@@ -4111,7 +4197,7 @@ function Show-CommandList {
   Write-CommandListItem -Number '4' -Name 'Update' -Description 'Pulls images and recreates selected containers automatically.'
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state, health, container names, and ports.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
-  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens Postgres backup and n8n CLI backup actions.'
+  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens safe manual and automatic backup actions.'
   Write-CommandListItem -Number '8' -Name 'Advanced / Recovery: Restore local n8n from backup' -Description 'Restores a local database or entities backup after pre-restore backups and approval.'
   Write-Host ''
   Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
