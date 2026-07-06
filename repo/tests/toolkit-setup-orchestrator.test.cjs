@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, spawn } = require('node:child_process');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -203,6 +203,45 @@ function flattenCommands(plan) {
   return plan.steps.flatMap((step) => step.commands || []);
 }
 
+// Regression harness for the stdin-hang bug: a plain spawnSync call (even
+// with an explicit non-TTY stdio array) auto-closes an unwritten stdin pipe,
+// so it can never reproduce "a non-interactive harness whose stdin pipe is
+// left open forever." Only an async spawn() with a stdin pipe that the
+// parent deliberately never writes to or ends reproduces that condition.
+function runWithUnclosedStdin(scriptPath, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      cwd: options.cwd || repoRoot,
+      env: { ...process.env, ...(options.env || {}) },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    const deadlineMs = options.deadlineMs || 15000;
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(
+        `${path.basename(scriptPath)} did not exit within ${deadlineMs}ms even though every setup question ` +
+        `was already answered; it appears blocked on an unconditional stdin read.\nstdout:\n${stdout}\nstderr:\n${stderr}`
+      ));
+    }, deadlineMs);
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      child.stdin.destroy();
+      reject(error);
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      child.stdin.destroy();
+      resolve({ code, stdout, stderr });
+    });
+    // Deliberately never write to or end child.stdin.
+  });
+}
+
 test('setup toolkit plan shows one upfront checklist and managed main checkout defaults', () => {
   const root = tmpRoot();
   const result = run(['--plan', '--json'], {
@@ -355,6 +394,25 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.doesNotMatch(bridgeLog, /--enable-target opencode/);
 });
 
+test('setup execute with every question pre-answered does not block on an unclosed non-interactive stdin pipe', async () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+
+  const result = await runWithUnclosedStdin(script, [
+    '--execute',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-codex-plugin-auto-refresh'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /# setup toolkit final summary/);
+  assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
+});
+
 test('setup execute without explicit choices pauses before preference or target writes', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
@@ -491,6 +549,19 @@ test('active setup command delegates to managed checkout script when it exists',
   assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
   assert.match(result.stdout, /managed setup script version 2\.3\.4/);
   assert.match(result.stdout, /# setup toolkit question bank/);
+});
+
+test('active setup command does not block on stdin before delegating to the managed checkout', async () => {
+  const root = tmpRoot();
+  createFakeManagedSetupScript(root, '2.3.4', { emitQuestionBank: false, exitCode: 0 });
+
+  const result = await runWithUnclosedStdin(script, ['--execute', '--profile', 'auto-main'], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /# setup toolkit managed route/);
+  assert.match(result.stdout, /managed setup script version 2\.3\.4/);
 });
 
 test('managed question-bank pause is not bypassed with active fallback', () => {
