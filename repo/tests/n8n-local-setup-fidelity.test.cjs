@@ -218,8 +218,10 @@ const expectedBackupMenuOptions = [
   'Back up now',
   'Change automatic backup settings',
   'Remove automatic backups',
+  'Export workflows/credentials (advanced)',
   'Back',
   'Set up automatic backups',
+  'Export workflows/credentials (advanced)',
   'Back'
 ];
 
@@ -642,12 +644,14 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /`Back up` opens a simplified backup submenu/);
   assert.match(localSetup, /Automatic backups: Not set up/);
   assert.match(localSetup, /Automatic backups: Enabled/);
-  assert.match(localSetup, /Writes a timestamped folder under `%USERPROFILE%\\\.n8n-local\\backups`/);
   assert.match(localSetup, /`Back up now`/);
-  assert.match(localSetup, /workflows included, credentials included, and decrypted credentials disabled/);
+  assert.match(localSetup, /restore-compatible `\.zip` recovery package/);
+  assert.match(localSetup, /n8n-recovery-YYYYMMDD-HHMMSS\.zip/);
+  assert.match(localSetup, /The package can be selected directly in `Advanced \/ Recovery: Restore local n8n from backup`/);
   assert.match(localSetup, /`Set up automatic backups`/);
   assert.match(localSetup, /`Change automatic backup settings`/);
   assert.match(localSetup, /`Remove automatic backups`/);
+  assert.match(localSetup, /`Export workflows\/credentials \(advanced\)`/);
   assert.doesNotMatch(localSetup, /Back up Postgres database now/);
   assert.doesNotMatch(localSetup, /Configure scheduled n8n CLI backups/);
   assert.doesNotMatch(localSetup, /Run n8n CLI backup now/);
@@ -659,6 +663,7 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /n8n-cli-YYYYMMDD-HHMMSS/);
   assert.match(localSetup, /manifest\.json/);
   assert.match(localSetup, /Windows Task Scheduler/);
+  assert.match(localSetup, /--run-n8n-recovery-backup/);
   assert.match(localSetup, /--run-n8n-cli-backup/);
   assert.match(localSetup, /--show-n8n-cli-backup-config/);
   assert.match(localSetup, /--disable-n8n-cli-backups/);
@@ -666,6 +671,7 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /n8n import:credentials --separate --input=<credentials_dir>/);
   assert.match(localSetup, /%USERPROFILE%\\\.n8n-local\\backups/);
   assert.match(localSetup, /^Restore:$/m);
+  assert.match(localSetup, /\.zip` can be the restore-compatible package created by `Back up now` or automatic backups/);
   assert.match(localSetup, /If the backup env\/key is missing, restore stops before stopping services or touching the database/);
   assert.match(localSetup, /The launcher clears the completed command output, trims the console buffer when Windows allows it, and redraws the main menu\./);
   assert.match(localSetup, /For normal use, the quick status at the top of the main menu is enough/);
@@ -747,13 +753,18 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Show-Status'), /Write-ImageVersions/);
   assert.match(functionBody(menu, 'Apply-Update'), /This update includes Postgres[\s\S]*Backup-Postgres -Required[\s\S]*Update cancelled because the automatic Postgres backup did not complete/);
   assert.match(functionBody(menu, 'Backup-Postgres'), /n8n-postgres-\$timestamp[\s\S]*database\.sql[\s\S]*Write-BackupSecretFile[\s\S]*return \$true[\s\S]*return \$false/);
+  assert.match(functionBody(menu, 'Backup-Postgres'), /CreatePackage[\s\S]*Compress-RestoreCompatibleBackupPackage -BackupDir \$backupDir/);
+  assert.match(functionBody(menu, 'Compress-RestoreCompatibleBackupPackage'), /CreateFromDirectory\(\$backupDirFull, \$zipPath\)[\s\S]*Restore-compatible backup package/);
+  assert.match(functionBody(menu, 'Invoke-N8nRecoveryBackup'), /n8n-recovery-\$timestamp[\s\S]*Backup-Postgres -Required -BackupDir \$backupDir -CreatePackage/);
+  assert.match(functionBody(menu, 'Invoke-N8nRecoveryBackupNow'), /New-N8nRecoveryBackupNowConfig[\s\S]*Invoke-N8nRecoveryBackup -Config \$config/);
+  assert.match(functionBody(menu, 'Invoke-N8nCliBackupFromConfig'), /Invoke-N8nRecoveryBackup -Config \$config -Scheduled:\$Scheduled/);
   assert.match(functionBody(menu, 'Write-RestoreReadme'), /HOW TO USE THIS RESTORE FOLDER\.txt[\s\S]*N8N_IMAGE from SECRET-DO-NOT-COMMIT\.env/);
   assert.doesNotMatch(functionBody(menu, 'Write-RestoreReadme'), /Image\/version context/);
   assert.match(functionBody(menu, 'Write-CommandListItem'), /\$itemLabelWidth = 19[\s\S]*\$itemPrefix = \("  \{0\}\. \{1,-\$itemLabelWidth\}: " -f \$Number, \$Name\)/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens safe manual and automatic backup actions\.'/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '8' -Name 'Advanced \/ Recovery: Restore local n8n from backup' -Description 'Restores a local database or entities backup after pre-restore backups and approval\.'/);
-  assert.match(functionBody(menu, 'Show-BackupMenu'), /Write-N8nCliBackupAutomaticStatus[\s\S]*Back up now[\s\S]*Change automatic backup settings[\s\S]*Remove automatic backups[\s\S]*Set up automatic backups/);
-  assert.match(functionBody(menu, 'Show-BackupMenu'), /Invoke-N8nCliBackupNow[\s\S]*Configure-N8nCliBackupSchedule[\s\S]*Disable-N8nCliBackupSchedule/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Write-N8nCliBackupAutomaticStatus[\s\S]*Back up now[\s\S]*Change automatic backup settings[\s\S]*Remove automatic backups[\s\S]*Export workflows\/credentials \(advanced\)[\s\S]*Set up automatic backups/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Invoke-N8nRecoveryBackupNow[\s\S]*Configure-N8nCliBackupSchedule[\s\S]*Disable-N8nCliBackupSchedule[\s\S]*Invoke-N8nCliEntityExportNow/);
   assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Back up Postgres database now|Run n8n CLI backup now|Show n8n CLI backup configuration|Disable scheduled n8n CLI backups/);
   assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Backup-Postgres|Show-N8nCliBackupConfiguration|Invoke-N8nCliBackupFromConfig/);
   assert.match(menu, /function Show-UpdateMenu/);
@@ -859,6 +870,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Get-RestoreZipLimits',
     'Test-RestoreZipEntryLimits',
     'Expand-RestoreEntitiesZipToStaging',
+    'Expand-RestorePackageZipToStaging',
     'Test-PlaceholderEncryptionKey',
     'Write-MissingRestoreEnvError',
     'Write-MissingCredentialRestoreKeyError',
@@ -887,6 +899,9 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
     'Test-SafeN8nCliBackupRoot',
     'Get-N8nCliBackupExportSpecs',
     'Invoke-N8nCliBackupRetentionCleanup',
+    'Invoke-N8nRecoveryBackup',
+    'Invoke-N8nRecoveryBackupNow',
+    'Invoke-N8nCliEntityExportNow',
     'Configure-N8nCliBackupSchedule',
     'Invoke-N8nCliBackupFromConfig',
     'Disable-N8nCliBackupSchedule',
@@ -980,8 +995,11 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Get-RestoreZipLimits'), /MaxFiles[\s\S]*MaxCompressedBytes[\s\S]*MaxEntryBytes[\s\S]*MaxTotalBytes[\s\S]*MaxCompressionRatio/);
   assert.match(functionBody(menu, 'Test-RestoreZipEntryLimits'), /MaxFiles[\s\S]*MaxEntryBytes[\s\S]*MaxTotalBytes[\s\S]*MaxCompressionRatio[\s\S]*MaxCompressedBytes/);
   assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*Find-RestoreEntityDirectory/);
+  assert.match(functionBody(menu, 'Expand-RestorePackageZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*database\.sql/);
   assert.match(functionBody(menu, 'New-RestoreEntityImportDirectory'), /EndsWith\('\.jsonl'\)[\s\S]*migrations\.jsonl[\s\S]*workflows_tags\.jsonl[\s\S]*workflowtagmapping\.jsonl[\s\S]*both files import into the workflows_tags table[\s\S]*Copy-Item -LiteralPath \$file\.FullName[\s\S]*CreateFromDirectory\(\$zipSourceDir, \$zipPath\)[\s\S]*Rebuilt clean entities\.zip with \$copiedCount/);
   assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /New-RestoreEntityImportDirectory -EntityDir \$entityDir -StagingDir \$stagingDir[\s\S]*did not contain migrations\.jsonl[\s\S]*clean entities\.zip rebuilt from all extracted n8n entity JSONL files[\s\S]*EntityDir = \$importDir[\s\S]*SourceEntityDir = \$entityDir/);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /database\.sql[\s\S]*restore-manifest\.json[\s\S]*postgres-package-zip[\s\S]*restore-compatible backup package/);
+  assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /Expand-RestorePackageZipToStaging[\s\S]*Type = 'postgres-sql'[\s\S]*InputPath = \$expanded\.DatabaseSqlPath/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /Expand-RestoreEntitiesZipToStaging[\s\S]*InputDir = \$expanded\.EntityDir[\s\S]*SourceEntityDir = \$expanded\.SourceEntityDir/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /\$inputDir = \$Backup\.InputDir[\s\S]*\$mountValue = "\$\{inputDir\}:\/restore"[\s\S]*--inputDir[\s\S]*\/restore/);
   assert.doesNotMatch(menu, /Copy-RestoreEntitiesZipToStaging/);
@@ -998,7 +1016,7 @@ test('local backup packages and restore flow protect n8n encryption keys', () =>
   assert.match(functionBody(menu, 'Test-N8nHttpReady'), /foreach \(\$url in \(Get-LocalN8nProbeUrls\)\)[\s\S]*Invoke-WebRequest -Uri \$url/);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must use one of these extensions: \.sql, \.zip/i);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must be a backup file/);
-  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Get-ZipEntryNames[\s\S]*Test-RestoreEntityFileName[\s\S]*Filename-level detection/);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Get-ZipEntryNames[\s\S]*restore-manifest\.json[\s\S]*Test-RestoreEntityFileName[\s\S]*Filename-level detection/);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /credentialsentity\.jsonl[\s\S]*HasCredentialEntities/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /HasCredentialEntities = \$detected\.HasCredentialEntities/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Find-RestoreBackupEnvValue -Path \$backupPath -Name 'N8N_IMAGE'[\s\S]*Resolve-N8nImageForEntityRestore -Backup \$detected[\s\S]*Could not determine the n8n image version required by this entities export[\s\S]*Test-TrustedRestoreN8nImageRef -Image \$backupN8nImage[\s\S]*Write-UntrustedRestoreN8nImageError -Image \$backupN8nImage[\s\S]*Set-LocalN8nImageForRestore -BackupN8nImage \$backupN8nImage -EnvPath \$resolvedEnvPath[\s\S]*Set-LocalEncryptionKeyForRestore/);
@@ -1105,10 +1123,11 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
     '$safe = Test-SafeN8nCliBackupRoot -Path $safeRoot',
     'if (-not $safe.Ok) { throw "safe backup root was rejected: $($safe.Error)" }',
     '$existingAutomaticConfig = [pscustomobject]@{ enabled = $true; cadenceDays = 7; retentionDays = 14; backupRoot = $safeRoot; includeWorkflows = $false; includeCredentials = $false; exportDecryptedCredentials = $true; scheduledTime = "around 3:00 AM local time" }',
-    '$manualConfig = New-N8nCliBackupNowConfig -ExistingConfig $existingAutomaticConfig',
+    '$manualConfig = New-N8nRecoveryBackupNowConfig -ExistingConfig $existingAutomaticConfig',
     'if ($manualConfig.includeWorkflows -ne $true) { throw "manual backup did not include workflows" }',
     'if ($manualConfig.includeCredentials -ne $true) { throw "manual backup did not include credentials" }',
     'if ($manualConfig.exportDecryptedCredentials -ne $false) { throw "manual backup enabled decrypted credentials" }',
+    'if ($manualConfig.backupMode -ne "restore-compatible-package") { throw "manual backup did not use package mode" }',
     'if ($manualConfig.backupRoot -ne $safeRoot) { throw "manual backup did not reuse configured destination" }',
     'if ($manualConfig.retentionDays -ne 14) { throw "manual backup did not reuse configured retention" }',
     'if (-not (Test-N8nCliBackupAutomaticEnabled -Config $existingAutomaticConfig)) { throw "enabled automatic backup config was not detected" }',
@@ -1125,15 +1144,28 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
     'New-Item -ItemType Directory -Force -Path $safeRoot | Out-Null',
     '$oldBackup = Join-Path $safeRoot "n8n-cli-20000101-000000"',
     '$newBackup = Join-Path $safeRoot "n8n-cli-29990101-000000"',
+    '$oldRecoveryFolder = Join-Path $safeRoot "n8n-recovery-20000101-000000"',
+    '$newRecoveryZip = Join-Path $safeRoot "n8n-recovery-29990101-000000.zip"',
+    '$oldRecoveryZip = Join-Path $safeRoot "n8n-recovery-20000101-000000.zip"',
     '$unmatched = Join-Path $safeRoot "manual-folder"',
-    'New-Item -ItemType Directory -Force -Path $oldBackup, $newBackup, $unmatched | Out-Null',
+    'New-Item -ItemType Directory -Force -Path $oldBackup, $newBackup, $oldRecoveryFolder, $unmatched | Out-Null',
+    'Set-Content -LiteralPath $oldRecoveryZip -Value "fake" -Encoding ascii',
+    'Set-Content -LiteralPath $newRecoveryZip -Value "fake" -Encoding ascii',
     '(Get-Item -LiteralPath $oldBackup).LastWriteTime = (Get-Date).AddDays(-40)',
+    '(Get-Item -LiteralPath $oldRecoveryFolder).LastWriteTime = (Get-Date).AddDays(-40)',
+    '(Get-Item -LiteralPath $oldRecoveryZip).LastWriteTime = (Get-Date).AddDays(-40)',
     '(Get-Item -LiteralPath $newBackup).LastWriteTime = Get-Date',
+    '(Get-Item -LiteralPath $newRecoveryZip).LastWriteTime = Get-Date',
     '(Get-Item -LiteralPath $unmatched).LastWriteTime = (Get-Date).AddDays(-40)',
     'if (-not (Invoke-N8nCliBackupRetentionCleanup -BackupRoot $safeRoot -RetentionDays 30)) { throw "retention cleanup failed" }',
     'if (Test-Path -LiteralPath $oldBackup) { throw "old timestamped backup was not deleted" }',
+    'if (Test-Path -LiteralPath $oldRecoveryFolder) { throw "old timestamped recovery folder was not deleted" }',
+    'if (Test-Path -LiteralPath $oldRecoveryZip) { throw "old timestamped recovery package was not deleted" }',
     'if (-not (Test-Path -LiteralPath $newBackup)) { throw "new timestamped backup was deleted" }',
+    'if (-not (Test-Path -LiteralPath $newRecoveryZip)) { throw "new timestamped recovery package was deleted" }',
     'if (-not (Test-Path -LiteralPath $unmatched)) { throw "non-matching folder was deleted" }',
+    '$scheduleArgs = Get-N8nCliBackupScheduleActionArguments',
+    'if ($scheduleArgs -notmatch "--run-n8n-recovery-backup --scheduled") { throw "scheduled task does not use recovery backup flag: $scheduleArgs" }',
     '$specs = @(Get-N8nCliBackupExportSpecs -IncludeWorkflows $true -IncludeCredentials $true -ExportDecryptedCredentials $true -ContainerBackupRoot "/tmp/n8n-cli-backups/test")',
     'if ($specs.Count -ne 2) { throw "expected two export specs, got $($specs.Count)" }',
     '$workflowCommand = $specs[0].ComposeArguments -join " "',
@@ -1155,7 +1187,7 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
-test('local n8n CLI backup setup prompts make recommended defaults explicit and safe', (t) => {
+test('local n8n backup setup prompts make recommended defaults explicit and safe', (t) => {
   const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
   const powerShell = findPowerShell();
   if (!powerShell) {
@@ -1170,13 +1202,15 @@ test('local n8n CLI backup setup prompts make recommended defaults explicit and 
     '$script:StackRoot = Join-Path $testRoot "stack"',
     'New-Item -ItemType Directory -Force -Path $script:StackRoot | Out-Null',
     'function Invoke-BackupPromptScenario { param([string[]]$Responses) $script:PromptLog = New-Object System.Collections.Generic.List[string]; $script:PromptResponses = New-Object System.Collections.Queue; foreach ($response in $Responses) { $script:PromptResponses.Enqueue($response) }; function global:Read-Host { param([string]$Prompt) $script:PromptLog.Add($Prompt); if ($script:PromptResponses.Count -gt 0) { return [string]$script:PromptResponses.Dequeue() }; return "" }; try { $config = New-N8nCliBackupConfigFromPrompts; return [pscustomobject]@{ Config = $config; Prompts = [string[]]$script:PromptLog.ToArray() } } finally { Remove-Item Function:\\Read-Host -ErrorAction SilentlyContinue } }',
-    '$defaultScenario = Invoke-BackupPromptScenario -Responses @("", "", "", "", "", "")',
+    'function Invoke-EntityExportPromptScenario { param([string[]]$Responses) $script:PromptLog = New-Object System.Collections.Generic.List[string]; $script:PromptResponses = New-Object System.Collections.Queue; foreach ($response in $Responses) { $script:PromptResponses.Enqueue($response) }; function global:Read-Host { param([string]$Prompt) $script:PromptLog.Add($Prompt); if ($script:PromptResponses.Count -gt 0) { return [string]$script:PromptResponses.Dequeue() }; return "" }; try { $config = New-N8nCliEntityExportConfigFromPrompts; return [pscustomobject]@{ Config = $config; Prompts = [string[]]$script:PromptLog.ToArray() } } finally { Remove-Item Function:\\Read-Host -ErrorAction SilentlyContinue } }',
+    '$defaultScenario = Invoke-BackupPromptScenario -Responses @("", "", "")',
     '$defaultConfig = $defaultScenario.Config',
     '$defaultRoot = [System.IO.Path]::GetFullPath((Get-N8nCliBackupDefaultRoot))',
     'if ($null -eq $defaultConfig) { throw "default prompt scenario returned null config" }',
     'if ($defaultConfig.cadenceDays -ne 1) { throw "empty cadence input did not select default 1" }',
     'if ($defaultConfig.retentionDays -ne 30) { throw "empty retention input did not select default 30" }',
     'if ($defaultConfig.backupRoot -ne $defaultRoot) { throw "empty destination input did not select default root: $($defaultConfig.backupRoot)" }',
+    'if ($defaultConfig.backupMode -ne "restore-compatible-package") { throw "automatic backup did not select recovery package mode" }',
     'if ($defaultConfig.includeWorkflows -ne $true) { throw "empty workflow input did not default to yes" }',
     'if ($defaultConfig.includeCredentials -ne $true) { throw "empty credential input did not default to yes" }',
     'if ($defaultConfig.exportDecryptedCredentials -ne $false) { throw "empty decrypted credential input did not default to no" }',
@@ -1184,9 +1218,19 @@ test('local n8n CLI backup setup prompts make recommended defaults explicit and 
     'if ($promptText -notmatch "Backup cadence in days\\. Press Enter for recommended default: 1") { throw "cadence prompt did not explain Enter default: $promptText" }',
     'if ($promptText -notmatch "Retention period in days\\. Press Enter for recommended default: 30") { throw "retention prompt did not explain Enter default: $promptText" }',
     'if ($promptText -notmatch "Backup destination\\. Press Enter for recommended default:") { throw "destination prompt did not explain Enter default: $promptText" }',
-    'if ($promptText -notmatch "Include workflows\\? Recommended: Yes\\. Press Enter for recommended default: Yes") { throw "workflow prompt did not show recommended Yes: $promptText" }',
-    'if ($promptText -notmatch "Include credentials\\? Recommended: Yes, encrypted credential export only\\. Press Enter for recommended default: Yes") { throw "credential prompt did not show encrypted-only recommended Yes: $promptText" }',
-    'if ($promptText -notmatch "Export decrypted credentials\\? Recommended: No\\. Do not export decrypted credentials unless you explicitly understand the risk\\. Press Enter for recommended default: No") { throw "decrypted credential prompt did not show explicit No warning: $promptText" }',
+    'if ($promptText -match "Export decrypted credentials") { throw "automatic backup setup should not prompt for decrypted entity export: $promptText" }',
+    '$entityScenario = Invoke-EntityExportPromptScenario -Responses @("", "", "", "", "")',
+    '$entityConfig = $entityScenario.Config',
+    'if ($entityConfig.retentionDays -ne 30) { throw "empty entity export retention did not select default 30" }',
+    'if ($entityConfig.backupRoot -ne $defaultRoot) { throw "empty entity export destination did not select default root: $($entityConfig.backupRoot)" }',
+    'if ($entityConfig.includeWorkflows -ne $true) { throw "empty workflow input did not default to yes" }',
+    'if ($entityConfig.includeCredentials -ne $true) { throw "empty credential input did not default to yes" }',
+    'if ($entityConfig.exportDecryptedCredentials -ne $false) { throw "empty decrypted credential input did not default to no" }',
+    '$entityPromptText = $entityScenario.Prompts -join "`n"',
+    'if ($entityPromptText -notmatch "Export destination\\. Press Enter for recommended default:") { throw "entity export destination prompt did not explain Enter default: $entityPromptText" }',
+    'if ($entityPromptText -notmatch "Include workflows\\? Recommended: Yes\\. Press Enter for recommended default: Yes") { throw "workflow prompt did not show recommended Yes: $entityPromptText" }',
+    'if ($entityPromptText -notmatch "Include credentials\\? Recommended: Yes, encrypted credential export only\\. Press Enter for recommended default: Yes") { throw "credential prompt did not show encrypted-only recommended Yes: $entityPromptText" }',
+    'if ($entityPromptText -notmatch "Export decrypted credentials\\? Recommended: No\\. Do not export decrypted credentials unless you explicitly understand the risk\\. Press Enter for recommended default: No") { throw "decrypted credential prompt did not show explicit No warning: $entityPromptText" }',
     '$script:ColorLog = New-Object System.Collections.Generic.List[object]',
     'function global:Write-Host { param([Parameter(Position=0)][object]$Object, [switch]$NoNewline, [ConsoleColor]$ForegroundColor) $script:ColorLog.Add([pscustomobject]@{ Text = [string]$Object; Color = [string]$ForegroundColor; NoNewline = [bool]$NoNewline }) }',
     'try { Write-N8nCliBackupRecommendedPrompt -Prompt "Include credentials?" -DefaultText "Yes" -Recommendation "Yes, encrypted credential export only" -Suffix "Y/n" } finally { Remove-Item Function:\\Write-Host -ErrorAction SilentlyContinue }',
@@ -1198,10 +1242,10 @@ test('local n8n CLI backup setup prompts make recommended defaults explicit and 
     'if (-not ($script:ColorLog | Where-Object { $_.Text -eq " Press Enter for recommended default: " -and $_.Color -eq "DarkCyan" })) { throw "Enter default hint was not dark cyan" }',
     'if (-not ($script:ColorLog | Where-Object { $_.Text -eq "Yes" -and $_.Color -eq "Green" })) { throw "default value was not green" }',
     'if (-not ($script:ColorLog | Where-Object { $_.Text -eq " (Y/n)" -and $_.Color -eq "DarkGray" })) { throw "yes/no suffix was not dark gray" }',
-    '$wrongConfirmation = Invoke-BackupPromptScenario -Responses @("", "", "", "", "", "y", "NOPE")',
+    '$wrongConfirmation = Invoke-EntityExportPromptScenario -Responses @("", "", "", "", "y", "NOPE")',
     'if ($wrongConfirmation.Config.exportDecryptedCredentials) { throw "decrypted credentials enabled without exact confirmation phrase" }',
     'if (($wrongConfirmation.Prompts -join "`n") -notmatch "Type EXPORT DECRYPTED CREDENTIALS to enable decrypted credential files") { throw "decrypted credential confirmation prompt was not shown" }',
-    '$exactConfirmation = Invoke-BackupPromptScenario -Responses @("", "", "", "", "", "y", "EXPORT DECRYPTED CREDENTIALS")',
+    '$exactConfirmation = Invoke-EntityExportPromptScenario -Responses @("", "", "", "", "y", "EXPORT DECRYPTED CREDENTIALS")',
     'if (-not $exactConfirmation.Config.exportDecryptedCredentials) { throw "exact confirmation phrase did not enable decrypted credential export" }'
   ].join('; ');
 
