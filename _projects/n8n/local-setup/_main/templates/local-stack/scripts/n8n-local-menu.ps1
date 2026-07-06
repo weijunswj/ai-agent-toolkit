@@ -2500,8 +2500,8 @@ function Save-N8nCliBackupConfig {
 function New-N8nCliBackupConfigFromPrompts {
   Write-Header 'Automatic Backup Settings'
   Write-Info 'This stores local-only schedule settings in the stack backups folder, not in repo-tracked config.'
-  Write-Info 'Automatic backups create restore-compatible .zip recovery packages by default.'
-  Write-Info 'Each package includes database.sql, restore metadata, restore notes, and the private backup .env when available.'
+  Write-Info 'Automatic backups create restore-compatible recovery folders by default.'
+  Write-Info 'Each folder includes database.sql, restore metadata, restore notes, and the private backup .env when available.'
   Write-Warning 'Scheduled backups only run when Windows Task Scheduler, Docker Desktop, and the local n8n stack are available.'
 
   $cadenceDays = Read-N8nCliBackupDayInput -Prompt 'Backup cadence in days' -Default 1 -Name 'Backup cadence'
@@ -2544,7 +2544,7 @@ function New-N8nCliBackupConfigFromPrompts {
 function New-N8nCliEntityExportConfigFromPrompts {
   Write-Header 'Export Workflows/Credentials'
   Write-Info 'This is an advanced entity export for manual workflow or credential portability.'
-  Write-Info 'Use Back up now for the default restore-compatible .zip recovery package.'
+  Write-Info 'Use Back up now for the default restore-compatible recovery folder.'
   Write-Warning 'Credential exports are encrypted by default. Decrypted credential export is off unless explicitly confirmed.'
 
   $retentionDays = Read-N8nCliBackupDayInput -Prompt 'Retention period in days' -Default 30 -Name 'Retention period'
@@ -2623,7 +2623,7 @@ function Register-N8nCliBackupSchedule {
   $actionArgs = Get-N8nCliBackupScheduleActionArguments
   $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $actionArgs
   $trigger = New-ScheduledTaskTrigger -Daily -DaysInterval ([int]$Config.cadenceDays) -At 3am
-  $description = "Local n8n recovery backup packages for stack: $script:StackRoot"
+  $description = "Local n8n recovery backup folders for stack: $script:StackRoot"
 
   Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Description $description -Force | Out-Null
   Write-Success "Scheduled task created or updated: $taskName"
@@ -2912,9 +2912,9 @@ function Invoke-N8nRecoveryBackup {
   if ($Scheduled) {
     $runLabel = 'scheduled'
   }
-  Write-Info "Creating a restore-compatible $runLabel backup package."
-  if (-not (Backup-Postgres -Required -BackupDir $backupDir -CreatePackage)) {
-    Write-ErrorMessage 'Recovery backup package was not created.'
+  Write-Info "Creating a restore-compatible $runLabel backup folder."
+  if (-not (Backup-Postgres -Required -BackupDir $backupDir)) {
+    Write-ErrorMessage 'Recovery backup folder was not created.'
     return $false
   }
 
@@ -3161,7 +3161,7 @@ function Write-RestoreReadme {
     "Backup type: $BackupType",
     '',
     'Keep SECRET-DO-NOT-COMMIT.env in this folder. It is the private backup .env.',
-    'Open _n8n-local.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to this .zip backup package or to database.sql.',
+    'Open _n8n-local.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to this folder or to database.sql.',
     'Type PROCEED when asked.',
     'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.',
     'Restore also reads N8N_IMAGE from SECRET-DO-NOT-COMMIT.env when present and applies that image pin for schema compatibility.',
@@ -3172,39 +3172,11 @@ function Write-RestoreReadme {
   return $readmePath
 }
 
-function Compress-RestoreCompatibleBackupPackage {
-  param([string]$BackupDir)
-
-  if (-not (Test-Path -LiteralPath $BackupDir -PathType Container)) {
-    Write-ErrorMessage 'Cannot create a backup package because the backup folder does not exist.'
-    return ''
-  }
-
-  Enable-ZipSupport
-  $backupDirFull = [System.IO.Path]::GetFullPath($BackupDir)
-  $zipPath = "$backupDirFull.zip"
-  $zipParent = Split-Path -Parent $zipPath
-  $backupParent = Split-Path -Parent $backupDirFull
-  if (-not (Test-SameResolvedPath -Left $zipParent -Right $backupParent)) {
-    Write-ErrorMessage 'Refusing to create a backup package outside the backup folder parent.'
-    return ''
-  }
-
-  if (Test-Path -LiteralPath $zipPath -PathType Leaf) {
-    Remove-Item -LiteralPath $zipPath -Force
-  }
-
-  [System.IO.Compression.ZipFile]::CreateFromDirectory($backupDirFull, $zipPath)
-  Write-Success "Restore-compatible backup package: $zipPath"
-  return $zipPath
-}
-
 function Backup-Postgres {
   param(
     [switch]$Required,
     [string]$EnvPath = '',
-    [string]$BackupDir = '',
-    [switch]$CreatePackage
+    [string]$BackupDir = ''
   )
 
   Write-Header 'Backup Postgres Database'
@@ -3251,12 +3223,6 @@ function Backup-Postgres {
     Write-Success "Restore manifest written to: $manifestPath"
     Write-Success "Restore instructions written to: $readmePath"
     Write-Success "Backup folder: $backupDir"
-    if ($CreatePackage) {
-      $zipPath = Compress-RestoreCompatibleBackupPackage -BackupDir $backupDir
-      if (-not $zipPath) {
-        return $false
-      }
-    }
     return $true
   } else {
     Write-ErrorMessage 'Backup failed. Check the Postgres logs for details.'
@@ -3693,34 +3659,39 @@ function Get-RestoreBackupType {
   }
 
   $item = Get-Item -LiteralPath $inputPath
-  if (-not $item.PSIsContainer) {
-    $name = $item.Name.ToLowerInvariant()
-    if ($name -match '\.sql$') {
-      return [pscustomobject]@{ Type = 'postgres-sql'; Label = 'Postgres SQL backup'; InputPath = $item.FullName }
+  if ($item.PSIsContainer) {
+    $databaseSql = Join-Path $item.FullName 'database.sql'
+    $restoreManifest = Join-Path $item.FullName 'restore-manifest.json'
+    if ((Test-Path -LiteralPath $databaseSql -PathType Leaf) -and (Test-Path -LiteralPath $restoreManifest -PathType Leaf)) {
+      return [pscustomobject]@{ Type = 'postgres-sql'; Label = 'restore-compatible backup folder'; InputPath = $databaseSql }
     }
-    if ($name -match '\.zip$') {
-      $entries = @(Get-ZipEntryNames -ZipPath $item.FullName)
-      $hasDatabaseSql = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'database.sql' }).Count -gt 0
-      $hasRestoreManifest = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'restore-manifest.json' }).Count -gt 0
-      $hasEntities = @($entries | Where-Object { Test-RestoreEntityFileName -Name $_ }).Count -gt 0
-      $hasCredentialEntities = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'credentialsentity.jsonl' }).Count -gt 0
-      if ($hasDatabaseSql -and $hasRestoreManifest) {
-        return [pscustomobject]@{ Type = 'postgres-package-zip'; Label = 'restore-compatible backup package'; InputPath = $item.FullName; NeedsPackageStaging = $true }
-      }
-      if ($hasEntities) {
-        return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package'; InputPath = $item.FullName; NeedsStaging = $true; HasCredentialEntities = $hasCredentialEntities }
-      }
-
-      Write-Warning 'Unknown zip backup. Filename-level detection found these entries:'
-      foreach ($entryName in $entries) {
-        Write-Warning "  $entryName"
-      }
-      return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown zip'; Reason = 'Unknown zip backup package.' }
-    }
-    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported file type'; Reason = 'Restore input must use one of these extensions: .sql, .zip.' }
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported restore folder'; Reason = 'Restore folder must contain database.sql and restore-manifest.json.' }
   }
 
-  return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported restore path'; Reason = 'Restore input must be a backup file (.sql or .zip), not a folder.' }
+  $name = $item.Name.ToLowerInvariant()
+  if ($name -match '\.sql$') {
+    return [pscustomobject]@{ Type = 'postgres-sql'; Label = 'Postgres SQL backup'; InputPath = $item.FullName }
+  }
+  if ($name -match '\.zip$') {
+    $entries = @(Get-ZipEntryNames -ZipPath $item.FullName)
+    $hasDatabaseSql = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'database.sql' }).Count -gt 0
+    $hasRestoreManifest = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'restore-manifest.json' }).Count -gt 0
+    $hasEntities = @($entries | Where-Object { Test-RestoreEntityFileName -Name $_ }).Count -gt 0
+    $hasCredentialEntities = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'credentialsentity.jsonl' }).Count -gt 0
+    if ($hasDatabaseSql -and $hasRestoreManifest) {
+      return [pscustomobject]@{ Type = 'postgres-package-zip'; Label = 'restore-compatible backup package'; InputPath = $item.FullName; NeedsPackageStaging = $true }
+    }
+    if ($hasEntities) {
+      return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package'; InputPath = $item.FullName; NeedsStaging = $true; HasCredentialEntities = $hasCredentialEntities }
+    }
+
+    Write-Warning 'Unknown zip backup. Filename-level detection found these entries:'
+    foreach ($entryName in $entries) {
+      Write-Warning "  $entryName"
+    }
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown zip'; Reason = 'Unknown zip backup package.' }
+  }
+  return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported file type'; Reason = 'Restore input must be a recovery backup folder or a backup file using one of these extensions: .sql, .zip.' }
 }
 
 function Prepare-RestoreBackupInput {
@@ -4337,7 +4308,7 @@ function Restore-LocalN8nFromBackupMenu {
   Write-Warning 'Local recovery only. Do not use this for production or remote n8n restore.'
   Write-Warning 'This is for database/environment restore, not normal workflow JSON import.'
   Write-Host ''
-  $backupPath = (Read-Host 'Enter the local restore backup file path (.sql or .zip)').Trim().Trim('"')
+  $backupPath = (Read-Host 'Enter the local restore backup folder or file path (.sql or .zip)').Trim().Trim('"')
   Write-Host ''
   if (-not $backupPath) {
     Write-Warning 'Restore cancelled.'

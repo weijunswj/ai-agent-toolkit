@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "version_policy": "semver",
-  "version_notes": "Adds production/company-server n8n backup guidance and templates for Linux server deployments plus all-inclusive production Cloudflare stack backups, while leaving the local Windows backup flow unchanged.",
+  "version_notes": "Changes local Windows recovery backups to generate restore-compatible folders without default sibling zip packages, while preserving legacy zip restore compatibility.",
   "outputs": [
     {
       "kind": "curated",
