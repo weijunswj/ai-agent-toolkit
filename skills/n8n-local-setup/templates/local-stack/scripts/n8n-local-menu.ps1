@@ -2168,6 +2168,72 @@ function Format-N8nCliBackupRecommendedPrompt {
   return $text
 }
 
+function Write-N8nCliBackupRecommendedPrompt {
+  param(
+    [string]$Prompt,
+    [string]$DefaultText,
+    [string]$Recommendation = '',
+    [string]$Suffix = ''
+  )
+
+  $promptText = ([string]$Prompt).Trim()
+  if ($promptText -and $promptText -notmatch '[.!?]$') {
+    $promptText = "$promptText."
+  }
+
+  Write-Host $promptText -NoNewline -ForegroundColor Cyan
+
+  $recommendationText = ([string]$Recommendation).Trim()
+  if ($recommendationText) {
+    if ($recommendationText -notmatch '[.!?]$') {
+      $recommendationText = "$recommendationText."
+    }
+
+    Write-Host ' Recommended: ' -NoNewline -ForegroundColor DarkCyan
+    $recommendationColor = 'Green'
+    if ($recommendationText -match 'plain text|understand the risk|Do not export') {
+      $recommendationColor = 'Yellow'
+    }
+    Write-Host $recommendationText -NoNewline -ForegroundColor $recommendationColor
+  }
+
+  Write-Host ' Press Enter for recommended default: ' -NoNewline -ForegroundColor DarkCyan
+  Write-Host $DefaultText -NoNewline -ForegroundColor Green
+
+  $suffixText = ([string]$Suffix).Trim()
+  if ($suffixText) {
+    Write-Host " ($suffixText)" -NoNewline -ForegroundColor DarkGray
+  }
+
+  Write-Host ': ' -NoNewline -ForegroundColor DarkCyan
+}
+
+function Read-N8nCliBackupRecommendedInput {
+  param(
+    [string]$Prompt,
+    [string]$DefaultText,
+    [string]$Recommendation = '',
+    [string]$Suffix = ''
+  )
+
+  $fallbackPrompt = Format-N8nCliBackupRecommendedPrompt -Prompt $Prompt -DefaultText $DefaultText -Recommendation $Recommendation -Suffix $Suffix
+  $readHostCommand = Get-Command Read-Host -ErrorAction SilentlyContinue
+  if ($readHostCommand -and $readHostCommand.CommandType -ne 'Cmdlet') {
+    return Read-Host $fallbackPrompt
+  }
+
+  if ([Console]::IsInputRedirected) {
+    return Read-Host $fallbackPrompt
+  }
+
+  Write-N8nCliBackupRecommendedPrompt -Prompt $Prompt -DefaultText $DefaultText -Recommendation $Recommendation -Suffix $Suffix
+  $value = [Console]::ReadLine()
+  if ($null -eq $value) {
+    return ''
+  }
+  return $value
+}
+
 function Read-N8nCliBackupDayInput {
   param(
     [string]$Prompt,
@@ -2178,7 +2244,7 @@ function Read-N8nCliBackupDayInput {
   )
 
   while ($true) {
-    $value = (Read-Host (Format-N8nCliBackupRecommendedPrompt -Prompt $Prompt -DefaultText ([string]$Default))).Trim()
+    $value = (Read-N8nCliBackupRecommendedInput -Prompt $Prompt -DefaultText ([string]$Default)).Trim()
     if (-not $value) {
       $value = [string]$Default
     }
@@ -2207,7 +2273,7 @@ function Read-YesNoInput {
   }
 
   while ($true) {
-    $value = (Read-Host (Format-N8nCliBackupRecommendedPrompt -Prompt $Prompt -DefaultText $defaultText -Recommendation $Recommendation -Suffix $suffix)).Trim()
+    $value = (Read-N8nCliBackupRecommendedInput -Prompt $Prompt -DefaultText $defaultText -Recommendation $Recommendation -Suffix $suffix).Trim()
     if (-not $value) {
       return $DefaultYes
     }
@@ -2442,7 +2508,7 @@ function New-N8nCliBackupConfigFromPrompts {
 
   $defaultRoot = Get-N8nCliBackupDefaultRoot
   while ($true) {
-    $backupRoot = (Read-Host (Format-N8nCliBackupRecommendedPrompt -Prompt 'Backup destination' -DefaultText $defaultRoot)).Trim().Trim('"')
+    $backupRoot = (Read-N8nCliBackupRecommendedInput -Prompt 'Backup destination' -DefaultText $defaultRoot).Trim().Trim('"')
     if (-not $backupRoot) {
       $backupRoot = $defaultRoot
     }
