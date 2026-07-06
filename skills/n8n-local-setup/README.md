@@ -12,7 +12,7 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # n8n Local Setup Skill
 
-Instruction-only skill for safe n8n environment setup: localhost/ngrok dev, production Cloudflare Tunnel self-hosting for local/CGNAT machines, hosted n8n references, stack templates, [official n8n Skills](https://github.com/n8n-io/skills), and official instance-level MCP references.
+Instruction-only skill for safe n8n environment setup: local dev, production Cloudflare Tunnel, Hostinger/Coolify, production backups, stack templates, [official n8n Skills](https://github.com/n8n-io/skills), and instance-level MCP references.
 
 ## Start Here
 
@@ -25,23 +25,21 @@ Instruction-only skill for safe n8n environment setup: localhost/ngrok dev, prod
 | [Official n8n Skills](https://github.com/n8n-io/skills) and agent routing | [references/ai-agent-platforms/](references/ai-agent-platforms/) |
 | Local stack templates | [templates/local-stack/](templates/local-stack/) |
 | Production Cloudflare stack templates | [templates/production-cloudflare-stack/](templates/production-cloudflare-stack/) |
+| Production server backup templates | [templates/production-server-backups/](templates/production-server-backups/) |
 | Official MCP config templates | [templates/mcp-configs/](templates/mcp-configs/) |
 
-Normal skill use does not require `_projects/`. Dev webhook testing stays on the local ngrok permanent/reserved URL path. Local/CGNAT production self-hosting uses the separate Cloudflare Tunnel guide and stack.
-
-## Skill Note
-
-Copy whole toolkit-owned skill folders, not just `SKILL.md`. [Official n8n Skills](https://github.com/n8n-io/skills) are upstream-owned; use the platform references for that route.
+Normal skill use does not require `_projects/`. Dev webhook testing stays on the local ngrok path. Production uses either the Cloudflare stack or the Linux server backup template with systemd/cron scheduling.
 
 ## Agent Rules And Adapters
 
-Before repo file edits, automatically check repo-local agent instructions. If they are missing, unmanaged, stale, or structurally broken, bootstrap/repair them first.
+Load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, import/export, credential, execution, repo/live sync, or live-instance work. A generated cross-skill copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md).
 
-Install or load [n8n Agent Rules](../n8n-agent-rules/) before n8n workflow, import/export, credential, execution, repo/live sync, or live-instance work. A generated cross-skill copy is available at [references/n8n-agent-rules.md](references/n8n-agent-rules.md).
+Before repo file edits, automatically check repo-local agent instructions. If they are missing, unmanaged, stale, or structurally broken, bootstrap/repair them first.
 
 ## Safety Notes
 
 - Keep tokens, API keys, webhook secrets, tunnel tokens, real domains, DNS values, backups, and `.env` values out of repo files.
+- Keep workflow exports, credential exports, database dumps, manifests, backup logs, and restore notes private.
 - Do not run live n8n import/export, workflow activation, execution, publish, unpublish, archive, delete, or credential actions from this toolkit repo.
 - Do not run live Cloudflare, DNS, tunnel, Docker, credential, workflow activation, import/export, or production actions without explicit current-turn confirmation naming the target and operation.
 - For live n8n or production work, require explicit current-turn confirmation and identify the target instance first.

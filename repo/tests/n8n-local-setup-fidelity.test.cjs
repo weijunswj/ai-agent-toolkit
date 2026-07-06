@@ -19,6 +19,10 @@ const guideOutputs = [
   {
     source: '_main/Page 2 - Hostinger VPS.md',
     output: 'skills/n8n-local-setup/references/n8n/hostinger-vps.md'
+  },
+  {
+    source: '_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md',
+    output: 'skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md'
   }
 ];
 
@@ -107,6 +111,40 @@ const localStackOutputs = [
   {
     source: '_main/templates/local-stack/scripts/n8n-local-menu.ps1',
     output: 'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1'
+  }
+];
+
+const productionStackOutputs = [
+  {
+    source: '_main/templates/production-cloudflare-stack/docker-compose.yml',
+    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml'
+  },
+  {
+    source: '_main/templates/production-cloudflare-stack/.env.example',
+    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example'
+  },
+  {
+    source: '_main/templates/production-cloudflare-stack/.gitignore',
+    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore'
+  },
+  {
+    source: '_main/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd',
+    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd'
+  },
+  {
+    source: '_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1',
+    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1'
+  }
+];
+
+const productionServerBackupOutputs = [
+  {
+    source: '_main/templates/production-server-backups/README.md',
+    output: 'skills/n8n-local-setup/templates/production-server-backups/README.md'
+  },
+  {
+    source: '_main/templates/production-server-backups/n8n-production-backup.sh.template',
+    output: 'skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template'
   }
 ];
 
@@ -248,7 +286,7 @@ function localSetupManifest(root = repoRoot) {
 }
 
 function auditJson(root = repoRoot) {
-  const result = spawnSync(process.execPath, [auditScript, '--json'], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [auditScript, '--json'], { cwd: root, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
@@ -294,7 +332,7 @@ function powerShellSingleQuoted(value) {
 
 test('n8n local setup final source and generated surfaces are declared', () => {
   const manifest = localSetupManifest();
-  for (const expected of [...guideOutputs, ...localStackOutputs, ...platformOutputs, ...mcpConfigOutputs]) {
+  for (const expected of [...guideOutputs, ...localStackOutputs, ...productionStackOutputs, ...productionServerBackupOutputs, ...platformOutputs, ...mcpConfigOutputs]) {
     const output = manifest.outputs.find((entry) => entry.output === expected.output);
     assert.ok(output, expected.output);
     assert.equal(output.kind, 'copy', expected.output);
@@ -342,6 +380,13 @@ test('n8n local setup generated files preserve source bodies', () => {
   for (const expected of localStackOutputs) {
     const source = readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`).trimEnd() + '\n';
     const output = readText(repoRoot, expected.output);
+    assert.equal(output, source, expected.output);
+  }
+
+  for (const expected of [...productionStackOutputs, ...productionServerBackupOutputs]) {
+    const source = readText(repoRoot, `_projects/n8n/local-setup/${expected.source}`).trimEnd() + '\n';
+    const outputText = readText(repoRoot, expected.output);
+    const output = expected.output.endsWith('.md') ? stripGeneratedNotices(outputText) : outputText;
     assert.equal(output, source, expected.output);
   }
 
@@ -1110,6 +1155,53 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
+test('local n8n CLI backup setup prompts make recommended defaults explicit and safe', (t) => {
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    t.skip('PowerShell is not available in this environment');
+    return;
+  }
+
+  const command = [
+    '$ErrorActionPreference = "Stop"',
+    `. ${powerShellSingleQuoted(sourceScript)} --library`,
+    '$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("toolkit-n8n-cli-backup-prompts-" + [guid]::NewGuid().ToString("N"))',
+    '$script:StackRoot = Join-Path $testRoot "stack"',
+    'New-Item -ItemType Directory -Force -Path $script:StackRoot | Out-Null',
+    'function Invoke-BackupPromptScenario { param([string[]]$Responses) $script:PromptLog = New-Object System.Collections.Generic.List[string]; $script:PromptResponses = New-Object System.Collections.Queue; foreach ($response in $Responses) { $script:PromptResponses.Enqueue($response) }; function global:Read-Host { param([string]$Prompt) $script:PromptLog.Add($Prompt); if ($script:PromptResponses.Count -gt 0) { return [string]$script:PromptResponses.Dequeue() }; return "" }; try { $config = New-N8nCliBackupConfigFromPrompts; return [pscustomobject]@{ Config = $config; Prompts = [string[]]$script:PromptLog.ToArray() } } finally { Remove-Item Function:\\Read-Host -ErrorAction SilentlyContinue } }',
+    '$defaultScenario = Invoke-BackupPromptScenario -Responses @("", "", "", "", "", "")',
+    '$defaultConfig = $defaultScenario.Config',
+    '$defaultRoot = [System.IO.Path]::GetFullPath((Get-N8nCliBackupDefaultRoot))',
+    'if ($null -eq $defaultConfig) { throw "default prompt scenario returned null config" }',
+    'if ($defaultConfig.cadenceDays -ne 1) { throw "empty cadence input did not select default 1" }',
+    'if ($defaultConfig.retentionDays -ne 30) { throw "empty retention input did not select default 30" }',
+    'if ($defaultConfig.backupRoot -ne $defaultRoot) { throw "empty destination input did not select default root: $($defaultConfig.backupRoot)" }',
+    'if ($defaultConfig.includeWorkflows -ne $true) { throw "empty workflow input did not default to yes" }',
+    'if ($defaultConfig.includeCredentials -ne $true) { throw "empty credential input did not default to yes" }',
+    'if ($defaultConfig.exportDecryptedCredentials -ne $false) { throw "empty decrypted credential input did not default to no" }',
+    '$promptText = $defaultScenario.Prompts -join "`n"',
+    'if ($promptText -notmatch "Backup cadence in days\\. Press Enter for recommended default: 1") { throw "cadence prompt did not explain Enter default: $promptText" }',
+    'if ($promptText -notmatch "Retention period in days\\. Press Enter for recommended default: 30") { throw "retention prompt did not explain Enter default: $promptText" }',
+    'if ($promptText -notmatch "Backup destination\\. Press Enter for recommended default:") { throw "destination prompt did not explain Enter default: $promptText" }',
+    'if ($promptText -notmatch "Include workflows\\? Recommended: Yes\\. Press Enter for recommended default: Yes") { throw "workflow prompt did not show recommended Yes: $promptText" }',
+    'if ($promptText -notmatch "Include credentials\\? Recommended: Yes, encrypted credential export only\\. Press Enter for recommended default: Yes") { throw "credential prompt did not show encrypted-only recommended Yes: $promptText" }',
+    'if ($promptText -notmatch "Export decrypted credentials\\? Recommended: No\\. Do not export decrypted credentials unless you explicitly understand the risk\\. Press Enter for recommended default: No") { throw "decrypted credential prompt did not show explicit No warning: $promptText" }',
+    '$wrongConfirmation = Invoke-BackupPromptScenario -Responses @("", "", "", "", "", "y", "NOPE")',
+    'if ($wrongConfirmation.Config.exportDecryptedCredentials) { throw "decrypted credentials enabled without exact confirmation phrase" }',
+    'if (($wrongConfirmation.Prompts -join "`n") -notmatch "Type EXPORT DECRYPTED CREDENTIALS to enable decrypted credential files") { throw "decrypted credential confirmation prompt was not shown" }',
+    '$exactConfirmation = Invoke-BackupPromptScenario -Responses @("", "", "", "", "", "y", "EXPORT DECRYPTED CREDENTIALS")',
+    'if (-not $exactConfirmation.Config.exportDecryptedCredentials) { throw "exact confirmation phrase did not enable decrypted credential export" }'
+  ].join('; ');
+
+  const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
 test('local stack templates stay placeholder-only and local-first', () => {
   const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/docker-compose.yml');
   const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
@@ -1203,7 +1295,21 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
     'GENERIC_TIMEZONE',
     'pg_isready',
     'service_healthy',
-    'deployment/default network'
+    'deployment/default network',
+    'templates/production-server-backups/',
+    'n8n export:workflow --backup --output=<backup_dir>',
+    'n8n export:credentials --backup --output=<backup_dir>',
+    'encrypted credential export only',
+    'pg_dump',
+    'n8n-production-YYYYMMDD-HHMMSS',
+    'manifest.json',
+    'RESTORE-NOTES.txt',
+    'backup.log',
+    'systemd',
+    'cron',
+    'N8N_BACKUP_RETENTION_DAYS',
+    'N8N_SERVICE_NAME',
+    'N8N_BACKUP_POSTGRES_SERVICE'
   ]) {
     assert.match(vps, new RegExp(escapeRegExp(expected)), expected);
   }
@@ -1221,6 +1327,10 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
   assert.match(vps, /WEBHOOK_URL.*must end with `\/`/);
   assert.match(vps, /Do not assign Postgres a public domain, public route, Coolify proxy route/);
   assert.match(vps, /Docker host port mapping for `5432`/);
+  assert.match(vps, /Do not use Windows Task Scheduler for Hostinger\/Coolify or company-server backups/);
+  assert.match(vps, /decrypted credential export disabled/i);
+  assert.match(vps, /Offsite or cloud storage is intentionally not configured here/);
+  assert.match(vps, /future hardening item/);
   assert.doesNotMatch(vps, /^\s{4}ports:/m);
   assert.doesNotMatch(vps, /^networks:/m);
   assert.doesNotMatch(vps, /driver: bridge/);
@@ -1233,6 +1343,115 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
   assert.doesNotMatch(vps, /Docker Compose Manager/);
   assert.doesNotMatch(vps, /generic company VM/i);
   assert.doesNotMatch(vps, /unrelated hosting providers/i);
+});
+
+test('Production Cloudflare guide and menu use all-inclusive production backups', () => {
+  const guide = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md');
+  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1');
+  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.env.example');
+  const runtimeIgnore = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.gitignore');
+
+  assert.match(guide, /Private runtime ignore template/);
+  assert.match(guide, /Linux server backup template/);
+  assert.match(guide, /\[production server backup template\]\(\.\/templates\/production-server-backups\/\)/);
+  assert.match(guide, /`Back up now`/);
+  assert.match(guide, /n8n export:workflow --backup --output=<backup_dir>/);
+  assert.match(guide, /n8n export:credentials --backup --output=<backup_dir>/);
+  assert.match(guide, /encrypted credential export only/);
+  assert.match(guide, /Postgres `pg_dump`/);
+  assert.match(guide, /n8n-production-YYYYMMDD-HHMMSS/);
+  assert.match(guide, /manifest\.json/);
+  assert.match(guide, /RESTORE-NOTES\.txt/);
+  assert.match(guide, /backup\.log/);
+  assert.match(guide, /retention cleanup using `N8N_BACKUP_RETENTION_DAYS`/);
+  assert.match(guide, /does not set up automatic backups/);
+  assert.match(guide, /Do not use Windows Task Scheduler for this production\/server documentation path/);
+  assert.match(guide, /schedule it with systemd or cron/);
+  assert.match(guide, /Offsite or cloud storage is intentionally not configured here/);
+  assert.match(guide, /future hardening item/);
+  assert.doesNotMatch(guide, /Backup Postgres/);
+
+  assert.deepEqual(menuOptions(menu, 'Show-MainMenu'), [
+    'Safety preflight',
+    'Start production stack',
+    'Stop production stack',
+    'Restart n8n',
+    'View status',
+    'View logs',
+    'Back up now',
+    'Check/update images',
+    'Print production URL',
+    'Command list',
+    'Exit'
+  ]);
+
+  assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /export:workflow[\s\S]*export:credentials/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Get-N8nCliProductionBackupSpecs[\s\S]*Backup-Postgres/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Add-ProductionBackupLog[\s\S]*Write-ProductionBackupRestoreNotes[\s\S]*Write-ProductionBackupManifest/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /manifest\.json[\s\S]*backup\.log[\s\S]*RESTORE-NOTES\.txt/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /RESTORE-NOTES\.txt[\s\S]*import:workflow[\s\S]*import:credentials/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-ProductionBackupRetentionCleanup/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Decrypted credential export is disabled/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /includeWorkflows = \$true[\s\S]*includeCredentials = \$true[\s\S]*exportDecryptedCredentials = \$false[\s\S]*includeDatabase = \$true/);
+  assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /\^n8n-production-\\d\{8\}-\\d\{6\}\$/);
+  assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /Test-PathInsideDirectory[\s\S]*Remove-Item -LiteralPath \$folder\.FullName -Recurse -Force/);
+  assert.match(functionBody(menu, 'Show-UpdateMenu'), /Backup-N8nProductionNow -Required/);
+  assert.doesNotMatch(functionBody(menu, 'Show-MainMenu'), /Backup Postgres/);
+  assert.doesNotMatch(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /--decrypted/);
+  assert.doesNotMatch(menu, /Windows Task Scheduler|Register-ScheduledTask|New-ScheduledTaskTrigger|Unregister-ScheduledTask/);
+
+  assert.match(envExample, /^N8N_BACKUP_RETENTION_DAYS=30$/m);
+  for (const ignored of ['.env', '.env.*', '!.env.example', 'backups/', 'logs/', '*.sql', '*.dump', '*.backup', '*.zip', '*.tar', '*.tgz', '**/SECRET-DO-NOT-COMMIT.env']) {
+    assert.match(runtimeIgnore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
+  }
+});
+
+test('production server backup template uses Linux scheduling and guarded credential export', () => {
+  const readme = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-server-backups/README.md');
+  const script = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-server-backups/n8n-production-backup.sh.template');
+  const rootIgnore = readText(repoRoot, '.gitignore');
+
+  for (const expected of [
+    'Hostinger VPS plus Coolify',
+    'n8n CLI workflow export',
+    'n8n CLI credential export',
+    'Postgres `pg_dump`',
+    'manifest file',
+    'Restore notes',
+    'A run log',
+    'Retention cleanup',
+    'N8N_BACKUP_EXPORT_DECRYPTED_CREDENTIALS=1',
+    'N8N_BACKUP_CONFIRM_DECRYPTED_EXPORT=EXPORT_DECRYPTED_CREDENTIALS',
+    'systemd',
+    'OnCalendar=*-*-* 03:15:00',
+    'cron',
+    'Do not use Windows Task Scheduler',
+    'Offsite or cloud storage is intentionally not configured'
+  ]) {
+    assert.match(readme, new RegExp(escapeRegExp(expected)), expected);
+  }
+
+  assert.match(script, /n8n export:workflow --backup/);
+  assert.match(script, /n8n "\$\{credential_args\[@\]\}"/);
+  assert.match(script, /export:credentials --backup/);
+  assert.match(script, /N8N_BACKUP_EXPORT_DECRYPTED_CREDENTIALS:-0/);
+  assert.match(script, /N8N_BACKUP_CONFIRM_DECRYPTED_EXPORT:-/);
+  assert.match(script, /EXPORT_DECRYPTED_CREDENTIALS/);
+  assert.match(script, /--decrypted/);
+  assert.match(script, /pg_dump -U "\$postgres_user" -d "\$postgres_db"/);
+  assert.match(script, /manifest\.json/);
+  assert.match(script, /RESTORE-NOTES\.txt/);
+  assert.match(script, /backup\.log/);
+  assert.match(script, /status": "\$\(json_escape "\$status"\)"/);
+  assert.match(script, /find "\$backup_root_abs" -maxdepth 1 -type d -name 'n8n-production-/);
+  assert.match(script, /rm -rf -- \{\} \+/);
+  assert.match(script, /Refusing unsafe backup root/);
+  assert.match(script, /Refusing backup root that begins with dash/);
+  assert.doesNotMatch(script, /Register-ScheduledTask|schtasks|Windows Task Scheduler|powershell\.exe/i);
+
+  for (const ignored of ['.n8n-production-cloudflare/', '.n8n-production-cloudflare/backups/', '**/n8n-production-*/', '*.log', '*.sql', '*.dump', '*.backup', '*.tar']) {
+    assert.match(rootIgnore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
+  }
 });
 
 test('linked n8n Skills and MCP setup surfaces are shipped as secondary AI-coding-agent references', () => {
@@ -1413,6 +1632,13 @@ test('n8n local setup packs install current files only', () => {
       'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd',
       'skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd',
       'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
+      'skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml',
+      'skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example',
+      'skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore',
+      'skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd',
+      'skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1',
+      'skills/n8n-local-setup/templates/production-server-backups/README.md',
+      'skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template',
       'skills/n8n-agent-rules/SKILL.md',
       'skills/n8n-agent-rules/README.md',
       'skills/n8n-agent-rules/n8n-agent-rules.md',
@@ -1426,6 +1652,11 @@ test('n8n local setup packs install current files only', () => {
       assert.equal(pack.installs.some((entry) => entry.includes(stale)), false, `${pack.id}: ${stale}`);
       assert.equal((pack.source_refs || []).some((entry) => entry.includes(stale)), false, `${pack.id}: ${stale} source_refs`);
     }
+
+    assert.ok(pack.source_refs.includes('skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore'), `${pack.id}: production .gitignore source ref`);
+    assert.ok(pack.source_refs.includes('skills/n8n-local-setup/templates/production-server-backups/README.md'), `${pack.id}: production backup README source ref`);
+    assert.ok(pack.source_refs.includes('skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template'), `${pack.id}: production backup script source ref`);
+    assert.ok((pack.notes || []).some((entry) => /systemd timer or cron scheduling/.test(entry)), `${pack.id}: production scheduling note`);
   }
 
   assert.ok(codex.installs.includes('skills/n8n-local-setup/references/ai-agent-platforms/codex.md'));
@@ -1454,7 +1685,7 @@ test('n8n local setup published surface audit findings are resolved', () => {
 test('changing a preserved n8n local setup source guide makes sync check fail stale', () => {
   const cwd = tempCopy();
   fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'Page 2 - Hostinger VPS.md'), '\nStale output regression fixture.\n', 'utf8');
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/references\/n8n\/hostinger-vps\.md/);
 });

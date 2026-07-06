@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+backups/
+logs/
+*.sql
+*.dump
+*.backup
+*.zip
+*.tar
+*.tgz
+*.credentials.json
+*.credential*.json
+*n8n*credential*.json
+*n8n*binding*.json
+SECRET-DO-NOT-COMMIT.env
+**/SECRET-DO-NOT-COMMIT.env

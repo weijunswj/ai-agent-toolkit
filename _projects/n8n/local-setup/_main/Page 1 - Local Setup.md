@@ -625,21 +625,24 @@ Database-level recovery backup:
 
 Automatic backup settings prompts:
 
-1. Backup cadence in days.
-2. Retention period in days.
-3. Backup destination. The safe default is:
+Each prompt names the recommended default. Press `Enter` on an empty prompt to accept the displayed recommended default.
+
+1. Backup cadence in days. Recommended default: `1`.
+2. Retention period in days. Recommended default: `30`.
+3. Backup destination. Recommended default:
 
 ```text
 %USERPROFILE%\.n8n-local\backups\n8n-cli
 ```
 
-4. Whether to include workflows. Default: yes.
-5. Whether to include credentials. Default: no.
-6. Whether to export decrypted credentials. Default: no.
+4. Whether to include workflows. Recommended default: **Yes**.
+5. Whether to include credentials. Recommended default: **Yes**, encrypted credential export only.
+6. Whether to export decrypted credentials. Recommended default: **No**.
 
 Decrypted credential export warning:
 
 - The default is **No**.
+- Workflows and encrypted credentials are the recommended local automatic backup contents.
 - Decrypted credential exports expose credential secrets in plain text files.
 - If you enable decrypted credential exports, the menu shows a warning and requires you to type `EXPORT DECRYPTED CREDENTIALS`.
 - Keep decrypted backups offline/private, delete them when they are no longer needed, and never commit them.

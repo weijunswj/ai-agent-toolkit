@@ -6,7 +6,9 @@
 .n8n-local/backups/n8n-cli/
 .n8n-local/import/
 .n8n-production-cloudflare/
+.n8n-production-cloudflare/backups/
 **/production-cloudflare-stack/backups/
+**/n8n-production-*/
 .claude/
 .tmp/
 .agent-toolkit-backups/
@@ -21,7 +23,12 @@ coverage/
 __pycache__/
 *.pyc
 *.zip
+*.tar
 *.tgz
+*.log
+*.sql
+*.dump
+*.backup
 *.live-export.json
 *.live-import.json
 *.credentials.json

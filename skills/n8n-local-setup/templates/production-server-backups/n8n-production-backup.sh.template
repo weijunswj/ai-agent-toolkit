@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+set -u
+
+log() {
+  printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+fail() {
+  failure_reason="$*"
+  log "ERROR: $failure_reason"
+  write_manifest "failed" "$failure_reason" || true
+  exit 1
+}
+
+is_true() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|y|Y) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+json_escape() {
+  printf '%s' "${1:-}" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+abs_dir() {
+  local target="$1"
+  mkdir -p "$target" || return 1
+  cd "$target" >/dev/null 2>&1 && pwd -P
+}
+
+validate_days() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+    *) [ "$1" -ge 1 ] && [ "$1" -le 3650 ] ;;
+  esac
+}
+
+detect_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    compose_cmd=(docker compose)
+    return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    compose_cmd=(docker-compose)
+    return 0
+  fi
+  return 1
+}
+
+compose() {
+  "${compose_cmd[@]}" "$@"
+}
+
+service_has_container() {
+  [ -n "$(compose ps -q "$1" 2>/dev/null | head -n 1)" ]
+}
+
+write_restore_notes() {
+  cat > "$backup_dir/RESTORE-NOTES.txt" <<'EOF'
+Production n8n restore notes
+
+Keep this folder private. Do not commit backups, exports, logs, database dumps, or credential files.
+
+Before restore:
+1. Confirm owner approval and a maintenance window.
+2. Take a new current-state backup.
+3. Confirm the target n8n instance uses the correct N8N_ENCRYPTION_KEY.
+4. Confirm the target n8n version can read this export.
+
+Workflow import shape:
+  docker compose cp workflows n8n:/tmp/n8n-restore-workflows
+  docker compose exec -T n8n n8n import:workflow --separate --input=/tmp/n8n-restore-workflows
+
+Credential import shape:
+  docker compose cp credentials n8n:/tmp/n8n-restore-credentials
+  docker compose exec -T n8n n8n import:credentials --separate --input=/tmp/n8n-restore-credentials
+
+Database restore is deployment-specific and destructive. Restore database/database.sql only after a current-state backup, owner approval, and verification that the target database should be replaced.
+
+Encrypted credential exports require the original N8N_ENCRYPTION_KEY. Decrypted exports, when explicitly created, expose secret values in plain text and must be handled as sensitive secrets.
+EOF
+}
+
+write_manifest() {
+  local status="${1:-unknown}"
+  local reason="${2:-}"
+  [ -n "${backup_dir:-}" ] || return 0
+  mkdir -p "$backup_dir" || return 1
+
+  cat > "$backup_dir/manifest.json" <<EOF
+{
+  "template": "n8n-production-backup.sh.template",
+  "createdAt": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+  "timestamp": "$(json_escape "${timestamp:-}")",
+  "status": "$(json_escape "$status")",
+  "failureReason": "$(json_escape "$reason")",
+  "stackDir": "$(json_escape "${stack_dir_abs:-}")",
+  "backupRoot": "$(json_escape "${backup_root_abs:-}")",
+  "n8nServiceName": "$(json_escape "${n8n_service:-}")",
+  "postgresServiceName": "$(json_escape "${postgres_service:-}")",
+  "retentionDays": ${retention_days:-30},
+  "backupOptions": {
+    "includeWorkflows": true,
+    "includeCredentials": true,
+    "includeDatabase": $(is_true "$include_database" && printf 'true' || printf 'false'),
+    "exportDecryptedCredentials": $(is_true "$export_decrypted_credentials" && printf 'true' || printf 'false')
+  },
+  "outputs": {
+    "workflows": "workflows/",
+    "credentials": "$(is_true "$export_decrypted_credentials" && printf 'credentials-decrypted/' || printf 'credentials/')",
+    "database": "database/database.sql",
+    "log": "backup.log",
+    "restoreNotes": "RESTORE-NOTES.txt"
+  },
+  "warnings": [
+    "Keep this backup folder private and out of Git.",
+    "Encrypted credential exports require the original N8N_ENCRYPTION_KEY.",
+    "Decrypted credential exports expose credential secrets in plain text."
+  ]
+}
+EOF
+}
+
+cleanup_container_backup() {
+  [ -n "${container_backup_root:-}" ] || return 0
+  if [ -n "${n8n_service:-}" ] && command -v docker >/dev/null 2>&1 && [ "${compose_cmd[*]:-}" ]; then
+    compose exec -T "$n8n_service" rm -rf "$container_backup_root" >/dev/null 2>&1 || true
+  fi
+}
+
+safe_retention_cleanup() {
+  if ! validate_days "$retention_days"; then
+    fail "Invalid N8N_BACKUP_RETENTION_DAYS value: $retention_days"
+  fi
+
+  case "$backup_root_abs" in
+    /|"$HOME"|"$stack_dir_abs"|-) fail "Refusing unsafe backup root: $backup_root_abs" ;;
+  esac
+  case "$backup_root_abs" in
+    -*) fail "Refusing backup root that begins with dash: $backup_root_abs" ;;
+  esac
+
+  find "$backup_root_abs" -maxdepth 1 -type d -name 'n8n-production-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]' -mtime +"$retention_days" -print -exec rm -rf -- {} +
+}
+
+main() {
+  stack_dir="${N8N_STACK_DIR:-$(pwd)}"
+  stack_dir_abs="$(abs_dir "$stack_dir")" || fail "Could not resolve stack directory: $stack_dir"
+
+  backup_root="${N8N_BACKUP_ROOT:-$stack_dir_abs/backups}"
+  case "$backup_root" in
+    /*) ;;
+    *) backup_root="$stack_dir_abs/$backup_root" ;;
+  esac
+  backup_root_abs="$(abs_dir "$backup_root")" || fail "Could not resolve backup root: $backup_root"
+
+  retention_days="${N8N_BACKUP_RETENTION_DAYS:-30}"
+  n8n_service="${N8N_SERVICE_NAME:-n8n}"
+  postgres_service="${N8N_BACKUP_POSTGRES_SERVICE:-postgres}"
+  postgres_user="${POSTGRES_USER:-n8n}"
+  postgres_db="${POSTGRES_DB:-n8n}"
+  include_database="${N8N_BACKUP_INCLUDE_DATABASE:-1}"
+  export_decrypted_credentials="${N8N_BACKUP_EXPORT_DECRYPTED_CREDENTIALS:-0}"
+  decrypted_confirmation="${N8N_BACKUP_CONFIRM_DECRYPTED_EXPORT:-}"
+
+  if is_true "$export_decrypted_credentials" && [ "$decrypted_confirmation" != "EXPORT_DECRYPTED_CREDENTIALS" ]; then
+    fail "Decrypted credential export requires N8N_BACKUP_CONFIRM_DECRYPTED_EXPORT=EXPORT_DECRYPTED_CREDENTIALS"
+  fi
+
+  timestamp="$(date -u '+%Y%m%d-%H%M%S')"
+  backup_dir="$backup_root_abs/n8n-production-$timestamp"
+  mkdir -p "$backup_dir"
+  log_file="$backup_dir/backup.log"
+  exec > >(tee -a "$log_file") 2>&1
+  trap cleanup_container_backup EXIT
+
+  log "Starting production n8n backup."
+  log "Stack directory: $stack_dir_abs"
+  log "Backup directory: $backup_dir"
+
+  cd "$stack_dir_abs" || fail "Could not enter stack directory: $stack_dir_abs"
+  detect_compose || fail "Docker Compose was not found."
+  service_has_container "$n8n_service" || fail "n8n service is not running or not found: $n8n_service"
+
+  safe_retention_cleanup
+
+  container_backup_root="/tmp/n8n-production-backups/$timestamp"
+  compose exec -T "$n8n_service" mkdir -p "$container_backup_root" || fail "Could not create container backup directory."
+
+  log "Exporting workflows with n8n CLI."
+  compose exec -T "$n8n_service" n8n export:workflow --backup --output="$container_backup_root/workflows" || fail "Workflow export failed."
+  compose cp "$n8n_service:$container_backup_root/workflows" "$backup_dir/workflows" || fail "Copying workflow export failed."
+
+  if is_true "$export_decrypted_credentials"; then
+    credential_container_dir="$container_backup_root/credentials-decrypted"
+    credential_host_dir="$backup_dir/credentials-decrypted"
+    credential_args=(export:credentials --backup "--output=$credential_container_dir" --decrypted)
+    log "Exporting decrypted credentials with n8n CLI after explicit confirmation."
+  else
+    credential_container_dir="$container_backup_root/credentials"
+    credential_host_dir="$backup_dir/credentials"
+    credential_args=(export:credentials --backup "--output=$credential_container_dir")
+    log "Exporting encrypted credentials with n8n CLI."
+  fi
+
+  compose exec -T "$n8n_service" n8n "${credential_args[@]}" || fail "Credential export failed."
+  compose cp "$n8n_service:$credential_container_dir" "$credential_host_dir" || fail "Copying credential export failed."
+
+  if is_true "$include_database"; then
+    if [ -n "$postgres_service" ] && service_has_container "$postgres_service"; then
+      mkdir -p "$backup_dir/database"
+      log "Running pg_dump from Compose service: $postgres_service"
+      compose exec -T "$postgres_service" pg_dump -U "$postgres_user" -d "$postgres_db" > "$backup_dir/database/database.sql" || fail "Database backup failed."
+    else
+      log "Postgres service not found; database backup skipped. Use provider/Coolify database backup if the database is external."
+    fi
+  else
+    log "Database backup disabled by N8N_BACKUP_INCLUDE_DATABASE."
+  fi
+
+  write_restore_notes
+  write_manifest "success" ""
+  safe_retention_cleanup
+
+  log "Production n8n backup completed: $backup_dir"
+  log "Manifest: $backup_dir/manifest.json"
+}
+
+main "$@"
