@@ -40,14 +40,18 @@ function installedList(options = {}) {
 
 function writeFakeClaude(stateDir, options = {}) {
   const fakeClaudeScript = path.join(stateDir, 'fake-claude.cjs');
+  const initialVersion = options.installedVersion || expectedVersion();
   writeJson(path.join(stateDir, 'state.json'), {
-    repoRoot: '',
+    repoRoot: options.initialInstalled ? (options.initialRepoRoot || repoRoot) : '',
     installed: Boolean(options.initialInstalled),
-    scope: ''
+    scope: options.initialInstalled ? 'user' : '',
+    version: initialVersion
   });
   const failMarketplaceAdd = Boolean(options.failMarketplaceAdd);
   const failInstall = Boolean(options.failInstall);
-  const installedVersion = options.installedVersion || expectedVersion();
+  const failUpdate = Boolean(options.failUpdate);
+  const failUninstall = Boolean(options.failUninstall);
+  const updatedVersion = options.updatedVersion || expectedVersion();
   fs.writeFileSync(fakeClaudeScript, `
 'use strict';
 
@@ -87,8 +91,37 @@ if (args[0] === 'plugin' && args[1] === 'install') {
   }
   const state = readState();
   state.installed = true;
+  state.version = ${JSON.stringify(updatedVersion)};
   const scopeIndex = args.indexOf('--scope');
   state.scope = scopeIndex !== -1 ? args[scopeIndex + 1] : 'user';
+  writeState(state);
+  process.exit(0);
+}
+
+if (args[0] === 'plugin' && args[1] === 'update') {
+  if (${JSON.stringify(failUpdate)}) {
+    process.stderr.write('fake update failure\\n');
+    process.exit(1);
+  }
+  const state = readState();
+  if (!state.installed) {
+    process.stderr.write('fake update failure: not installed\\n');
+    process.exit(1);
+  }
+  state.version = ${JSON.stringify(updatedVersion)};
+  const scopeIndex = args.indexOf('--scope');
+  if (scopeIndex !== -1) state.scope = args[scopeIndex + 1];
+  writeState(state);
+  process.exit(0);
+}
+
+if (args[0] === 'plugin' && (args[1] === 'uninstall' || args[1] === 'remove')) {
+  if (${JSON.stringify(failUninstall)}) {
+    process.stderr.write('fake uninstall failure\\n');
+    process.exit(1);
+  }
+  const state = readState();
+  state.installed = false;
   writeState(state);
   process.exit(0);
 }
@@ -99,7 +132,7 @@ if (args[0] === 'plugin' && args[1] === 'list') {
     {
       name: ${JSON.stringify(setup.TOOLKIT_PLUGIN_NAME)},
       marketplace: ${JSON.stringify(setup.TOOLKIT_MARKETPLACE_NAME)},
-      version: ${JSON.stringify(installedVersion)},
+      version: state.version,
       enabled: true,
       scope: state.scope || 'user',
       source: { path: state.repoRoot }
@@ -113,6 +146,10 @@ process.stderr.write('unexpected fake claude args: ' + args.join(' ') + '\\n');
 process.exit(9);
 `, 'utf8');
   return fakeClaudeScript;
+}
+
+function readFakeClaudeState(stateDir) {
+  return JSON.parse(fs.readFileSync(path.join(stateDir, 'state.json'), 'utf8'));
 }
 
 function runSetup(mode, fakeClaudePath, extraArgs = [], options = {}) {
@@ -223,7 +260,36 @@ test('Claude Toolkit plugin state evaluator refuses implicit downgrade from newe
 
   assert.equal(state.ok, false);
   assert.equal(state.refusesDowngrade, true);
+  assert.equal(state.canUpdateInPlace, false, 'a newer-than-expected install must never be offered as an in-place update target');
   assert.match(state.errors.join('\n'), /Refusing downgrade/i);
+});
+
+test('Claude Toolkit plugin state evaluator flags an older enabled correctly-sourced install as updatable in place', () => {
+  const state = setup.evaluateClaudeToolkitPluginState(installedList({ version: '2.3.0' }), {
+    repoRoot,
+    expectedVersion: expectedVersion()
+  });
+
+  assert.equal(state.ok, false);
+  assert.equal(state.staleVersion, true);
+  assert.equal(state.refusesDowngrade, false);
+  assert.equal(state.canUpdateInPlace, true);
+});
+
+test('Claude Toolkit plugin state evaluator does not offer an in-place update for a disabled or wrong-source stale install', () => {
+  let state = setup.evaluateClaudeToolkitPluginState(installedList({ version: '2.3.0', enabled: false }), {
+    repoRoot,
+    expectedVersion: expectedVersion()
+  });
+  assert.equal(state.staleVersion, true);
+  assert.equal(state.canUpdateInPlace, false, 'a disabled install must go through full reinstall, not plugin update');
+
+  state = setup.evaluateClaudeToolkitPluginState(installedList({ version: '2.3.0', sourcePath: tmpRoot() }), {
+    repoRoot,
+    expectedVersion: expectedVersion()
+  });
+  assert.equal(state.staleVersion, true);
+  assert.equal(state.canUpdateInPlace, false, 'plugin update cannot fix a wrong marketplace source path');
 });
 
 test('Claude Toolkit plugin state evaluator accepts the real claude plugin list --json shape', () => {
@@ -322,6 +388,58 @@ test('Claude Toolkit plugin setup write surfaces marketplace/install command fai
   const writeResult = runSetup('--write', fakeClaude);
   assert.notEqual(writeResult.status, 0);
   assert.match(writeResult.stderr, /is not installed|did not exit cleanly/i);
+});
+
+test('Claude Toolkit plugin setup write refreshes a stale enabled correctly-sourced install with plugin update, not marketplace add + install', () => {
+  const stateDir = tmpRoot();
+  // `plugin install` is a no-op on an id that already exists (it just
+  // reports "already installed"), so it can never refresh a stale cache by
+  // itself. Deliberately break marketplace-add/install here: if setup fell
+  // back to that path instead of `plugin update`, this write would fail.
+  const fakeClaude = writeFakeClaude(stateDir, {
+    initialInstalled: true,
+    installedVersion: '2.3.0',
+    failMarketplaceAdd: true,
+    failInstall: true
+  });
+
+  const writeResult = runSetup('--write', fakeClaude);
+  assert.equal(writeResult.status, 0, writeResult.stderr);
+  const summary = JSON.parse(writeResult.stdout);
+  assert.equal(summary.ok, true);
+  assert.equal(summary.version, expectedVersion());
+  assert.deepEqual(summary.warnings, []);
+
+  const state = readFakeClaudeState(stateDir);
+  assert.equal(state.version, expectedVersion());
+  assert.equal(state.installed, true);
+
+  const verifyResult = runSetup('--verify', fakeClaude);
+  assert.equal(verifyResult.status, 0, verifyResult.stderr);
+});
+
+test('Claude Toolkit plugin setup write falls back to uninstall and reinstall when plugin update fails', () => {
+  const stateDir = tmpRoot();
+  const fakeClaude = writeFakeClaude(stateDir, {
+    initialInstalled: true,
+    installedVersion: '2.3.0',
+    failUpdate: true
+  });
+
+  const writeResult = runSetup('--write', fakeClaude);
+  assert.equal(writeResult.status, 0, writeResult.stderr);
+  assert.match(writeResult.stderr, /claude plugin update did not exit cleanly/i);
+  const summary = JSON.parse(writeResult.stdout);
+  assert.equal(summary.ok, true);
+  assert.equal(summary.version, expectedVersion());
+  assert.ok(
+    summary.warnings.some((warning) => /claude plugin update did not exit cleanly/i.test(warning)),
+    summary.warnings.join('\n')
+  );
+
+  const state = readFakeClaudeState(stateDir);
+  assert.equal(state.version, expectedVersion());
+  assert.equal(state.installed, true);
 });
 
 test('Claude Toolkit plugin setup rejects an unusable Claude CLI', () => {

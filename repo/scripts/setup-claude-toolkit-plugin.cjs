@@ -287,26 +287,38 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
 
   if (!installed) {
     errors.push(`${pluginId()} is not installed`);
-    return { ok: false, installed: null, errors };
+    return { ok: false, installed: null, errors, refusesDowngrade: false, staleVersion: false, canUpdateInPlace: false };
   }
-  if (installed.enabled === false) {
+  const enabled = installed.enabled !== false;
+  if (!enabled) {
     errors.push(`${pluginId()} is installed but not enabled`);
   }
   let refusesDowngrade = false;
+  let staleVersion = false;
   if (installed.version && installed.version !== expectedVersion) {
     if (compareSemver(installed.version, expectedVersion) > 0) {
       refusesDowngrade = true;
       errors.push(`Refusing downgrade: installed ${pluginId()} version ${installed.version} is newer than source version ${expectedVersion}. Update the managed source checkout or uninstall the newer plugin explicitly before retrying.`);
     } else {
+      staleVersion = true;
       errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version}`);
     }
   }
   const sourcePath = installed.projectPath || installed.source?.path || installed.path || '';
-  if (sourcePath && path.resolve(sourcePath) !== repoRoot) {
+  const sourceMatches = !sourcePath || path.resolve(sourcePath) === repoRoot;
+  if (!sourceMatches) {
     errors.push(`${pluginId()} source path does not match this local repo: ${sourcePath}`);
   }
 
-  return { ok: errors.length === 0, installed, errors, refusesDowngrade };
+  // `claude plugin install` no-ops on an id that is already installed (it
+  // just reports "already installed"), so it never refreshes a stale cache.
+  // An in-place `claude plugin update` is only the right remediation when
+  // version staleness is the *only* problem -- an install that is also
+  // disabled or points at a different source path still needs the full
+  // marketplace add + install path.
+  const canUpdateInPlace = staleVersion && enabled && sourceMatches;
+
+  return { ok: errors.length === 0, installed, errors, refusesDowngrade, staleVersion, canUpdateInPlace };
 }
 
 function claudeToolkitInstallCommands(repoRoot, scope = DEFAULT_SCOPE) {
@@ -417,20 +429,48 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   if (!state.ok && options.write && !state.refusesDowngrade) {
-    const marketplaceAdd = runClaudeCommand(resolved.command, ['plugin', 'marketplace', 'add', options.repoRoot]);
-    if (marketplaceAdd.status !== 0) {
-      warnings.push(`claude plugin marketplace add did not exit cleanly: ${commandOutput(marketplaceAdd)}`);
+    if (state.canUpdateInPlace) {
+      const update = runClaudeCommand(resolved.command, ['plugin', 'update', pluginId(), '--scope', options.scope]);
+      if (update.status !== 0) {
+        warnings.push(`claude plugin update did not exit cleanly, falling back to uninstall + reinstall: ${commandOutput(update)}`);
+      } else {
+        try {
+          const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json']);
+          state = evaluateClaudeToolkitPluginState(pluginList, { repoRoot: options.repoRoot, expectedVersion });
+        } catch (error) {
+          console.error(`FAIL: ${error.message}`);
+          return 1;
+        }
+      }
     }
-    const install = runClaudeCommand(resolved.command, ['plugin', 'install', pluginId(), '--scope', options.scope]);
-    if (install.status !== 0) {
-      warnings.push(`claude plugin install did not exit cleanly: ${commandOutput(install)}`);
-    }
-    try {
-      const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json']);
-      state = evaluateClaudeToolkitPluginState(pluginList, { repoRoot: options.repoRoot, expectedVersion });
-    } catch (error) {
-      console.error(`FAIL: ${error.message}`);
-      return 1;
+
+    if (!state.ok && !state.refusesDowngrade) {
+      // A stale install can't be refreshed by `plugin install` alone (it
+      // no-ops on an id that already exists), and this is also the recovery
+      // path when `plugin update` itself failed above, so uninstall first.
+      if (state.installed) {
+        const uninstall = runClaudeCommand(resolved.command, [
+          'plugin', 'uninstall', pluginId(), '--scope', options.scope, '--keep-data', '--yes'
+        ]);
+        if (uninstall.status !== 0) {
+          warnings.push(`claude plugin uninstall did not exit cleanly: ${commandOutput(uninstall)}`);
+        }
+      }
+      const marketplaceAdd = runClaudeCommand(resolved.command, ['plugin', 'marketplace', 'add', options.repoRoot]);
+      if (marketplaceAdd.status !== 0) {
+        warnings.push(`claude plugin marketplace add did not exit cleanly: ${commandOutput(marketplaceAdd)}`);
+      }
+      const install = runClaudeCommand(resolved.command, ['plugin', 'install', pluginId(), '--scope', options.scope]);
+      if (install.status !== 0) {
+        warnings.push(`claude plugin install did not exit cleanly: ${commandOutput(install)}`);
+      }
+      try {
+        const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json']);
+        state = evaluateClaudeToolkitPluginState(pluginList, { repoRoot: options.repoRoot, expectedVersion });
+      } catch (error) {
+        console.error(`FAIL: ${error.message}`);
+        return 1;
+      }
     }
   }
 

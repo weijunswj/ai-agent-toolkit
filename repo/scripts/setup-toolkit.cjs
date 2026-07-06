@@ -630,11 +630,15 @@ function delegateToManagedSetupIfAvailable(args) {
   console.log('');
 
   const interactive = process.stdin.isTTY;
+  // Inherit stdin directly instead of eagerly buffering it with
+  // fs.readFileSync(0) and forwarding it as `input`: that eager read blocks
+  // until EOF even when the delegated child never ends up needing an answer
+  // (e.g. every setup question was already resolved by flags), hanging any
+  // non-interactive caller whose stdin pipe is never explicitly closed.
   const result = spawnSync(process.execPath, [managedScript, ...args.argv], {
     cwd: managedRoot,
     encoding: interactive ? undefined : 'utf8',
-    input: interactive ? undefined : fs.readFileSync(0, 'utf8'),
-    stdio: interactive ? 'inherit' : ['pipe', 'pipe', 'pipe'],
+    stdio: interactive ? 'inherit' : ['inherit', 'pipe', 'pipe'],
     windowsHide: true
   });
   if (result.error) throw result.error;
@@ -1020,8 +1024,10 @@ async function answerSetupQuestionBank(args, current) {
     console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
   }
 
-  const lines = !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
-  const rl = lines ? null : readline.createInterface({ input: process.stdin, output: process.stdout });
+  const needsPromptedAnswers = missing.length > 0
+    || (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit);
+  const lines = needsPromptedAnswers && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
+  const rl = needsPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
     for (const spec of missing) {
       const answer = await promptForChoice(spec, lines, rl);
