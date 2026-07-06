@@ -91,8 +91,10 @@ The production stack template folder is [templates/production-cloudflare-stack/]
 | --- | --- |
 | Production Docker Compose template | [docker-compose.yml](../../templates/production-cloudflare-stack/docker-compose.yml) |
 | Placeholder environment template | [.env.example](../../templates/production-cloudflare-stack/.env.example) |
+| Private runtime ignore template | [.gitignore](../../templates/production-cloudflare-stack/.gitignore) |
 | Windows production launcher | [_n8n-production-cloudflare.cmd](../../templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd) |
 | PowerShell production menu | [scripts/n8n-production-cloudflare-menu.ps1](../../templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1) |
+| Linux server backup template | [templates/production-server-backups/](../../templates/production-server-backups/) |
 
 The production Compose stack includes:
 
@@ -136,6 +138,7 @@ The copied folder should look like this:
 <PRODUCTION_STACK_FOLDER>
 |-- docker-compose.yml
 |-- .env.example
+|-- .gitignore
 |-- .env
 |-- _n8n-production-cloudflare.cmd
 `-- scripts\
@@ -289,22 +292,43 @@ Do not add production credentials or workflows until backups exist.
 At minimum:
 
 1. Store `N8N_ENCRYPTION_KEY` in a password manager.
-2. Create and test a Postgres backup process.
-3. Decide where private backups live.
-4. Decide who can restore.
-5. Take a backup before Postgres updates and before major n8n updates.
+2. Create and test an n8n CLI workflow export process.
+3. Create and test an n8n CLI credential export process.
+4. Keep decrypted credential export disabled unless an owner explicitly approves a break-glass export.
+5. Create and test a Postgres backup process.
+6. Decide where private backups live.
+7. Decide who can restore.
+8. Take a backup before Postgres updates and before major n8n updates.
 
 The production menu includes:
 
 ```text
-Backup Postgres
+Back up now
 ```
 
 It writes a timestamped backup folder under the private stack folder's `backups\` directory.
 
-Backups may contain private workflows, executions, and encrypted credential records. Keep them private. Do not commit backups.
+The manual production backup includes:
+
+- `n8n export:workflow --backup --output=<backup_dir>`
+- `n8n export:credentials --backup --output=<backup_dir>`
+- encrypted credential export only
+- Postgres `pg_dump`
+- timestamped folders named `n8n-production-YYYYMMDD-HHMMSS`
+- `manifest.json`
+- `RESTORE-NOTES.txt`
+- `backup.log`
+- retention cleanup using `N8N_BACKUP_RETENTION_DAYS`
+
+Backups may contain private workflows, executions, and encrypted credential records. Keep them private. Do not commit backups, logs, exports, database dumps, or production `.env` files.
 
 The menu intentionally does not copy `.env` or `N8N_ENCRYPTION_KEY` into backup folders. Store restore-critical secrets in a password manager or secret store.
+
+The production Cloudflare menu does not set up automatic backups. Do not use Windows Task Scheduler for this production/server documentation path.
+
+For a Linux server or company-server deployment such as Hostinger/Coolify, use the copy-ready [production server backup template](../../templates/production-server-backups/) and schedule it with systemd or cron. That template creates the same n8n CLI exports, database backup when applicable, manifest, restore notes, logs, and retention cleanup from the server side.
+
+Offsite or cloud storage is intentionally not configured here. Treat offsite storage as a future hardening item after local/private server backups and restore have been proven and the storage pattern is approved.
 
 ---
 
@@ -316,7 +340,7 @@ Use the menu:
 Check/update images
 ```
 
-If the update includes Postgres, the menu runs `Backup Postgres` first and stops the update if the backup fails.
+If the update includes Postgres, the menu runs `Back up now` first and stops the update if the backup fails.
 
 Update choices:
 
@@ -352,7 +376,7 @@ Use the production menu for normal operations:
 | `Restart n8n` | Apply n8n environment changes or restart the app container. |
 | `View status` | Inspect Compose service state and images. |
 | `View logs` | Inspect recent logs for all services or one service. |
-| `Backup Postgres` | Create a private database backup. |
+| `Back up now` | Create a private all-inclusive backup with workflow export, credential export, Postgres dump, manifest, restore notes, log, and retention cleanup. |
 | `Check/update images` | Pull and recreate selected services, with backup before Postgres update. |
 | `Print production URL` | Show `N8N_PUBLIC_URL` from private `.env`. |
 

@@ -24,4 +24,4 @@ These references are local to the copyable skill folder. Use them for normal exe
 
 ## Skills-First Note
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Dev webhook testing remains on ngrok permanent/reserved URL mode. Production self-hosting from local/CGNAT machines uses the separate Cloudflare Tunnel production guide and stack. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and not part of the beginner local setup flow.
+Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. Dev webhook testing remains on ngrok permanent/reserved URL mode. Production self-hosting from local/CGNAT machines uses the separate Cloudflare Tunnel production guide and stack. Hostinger/Coolify and company-server backups use the Linux production server backup templates under `templates/production-server-backups/`. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary and not part of the beginner local setup flow.

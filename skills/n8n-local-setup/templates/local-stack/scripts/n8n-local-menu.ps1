@@ -2138,6 +2138,36 @@ function Convert-N8nCliBackupDayValue {
   return [pscustomobject]@{ Ok = $true; Error = ''; Value = $number }
 }
 
+function Format-N8nCliBackupRecommendedPrompt {
+  param(
+    [string]$Prompt,
+    [string]$DefaultText,
+    [string]$Recommendation = '',
+    [string]$Suffix = ''
+  )
+
+  $text = ([string]$Prompt).Trim()
+  if ($text -and $text -notmatch '[.!?]$') {
+    $text = "$text."
+  }
+
+  $recommendationText = ([string]$Recommendation).Trim()
+  if ($recommendationText) {
+    if ($recommendationText -notmatch '[.!?]$') {
+      $recommendationText = "$recommendationText."
+    }
+    $text = "$text Recommended: $recommendationText"
+  }
+
+  $text = "$text Press Enter for recommended default: $DefaultText"
+  $suffixText = ([string]$Suffix).Trim()
+  if ($suffixText) {
+    $text = "$text ($suffixText)"
+  }
+
+  return $text
+}
+
 function Read-N8nCliBackupDayInput {
   param(
     [string]$Prompt,
@@ -2148,7 +2178,7 @@ function Read-N8nCliBackupDayInput {
   )
 
   while ($true) {
-    $value = (Read-Host "$Prompt [$Default]").Trim()
+    $value = (Read-Host (Format-N8nCliBackupRecommendedPrompt -Prompt $Prompt -DefaultText ([string]$Default))).Trim()
     if (-not $value) {
       $value = [string]$Default
     }
@@ -2165,16 +2195,19 @@ function Read-N8nCliBackupDayInput {
 function Read-YesNoInput {
   param(
     [string]$Prompt,
-    [bool]$DefaultYes = $false
+    [bool]$DefaultYes = $false,
+    [string]$Recommendation = ''
   )
 
   $suffix = 'y/N'
+  $defaultText = 'No'
   if ($DefaultYes) {
     $suffix = 'Y/n'
+    $defaultText = 'Yes'
   }
 
   while ($true) {
-    $value = (Read-Host "$Prompt ($suffix)").Trim()
+    $value = (Read-Host (Format-N8nCliBackupRecommendedPrompt -Prompt $Prompt -DefaultText $defaultText -Recommendation $Recommendation -Suffix $suffix)).Trim()
     if (-not $value) {
       return $DefaultYes
     }
@@ -2409,7 +2442,7 @@ function New-N8nCliBackupConfigFromPrompts {
 
   $defaultRoot = Get-N8nCliBackupDefaultRoot
   while ($true) {
-    $backupRoot = (Read-Host "Backup destination [$defaultRoot]").Trim().Trim('"')
+    $backupRoot = (Read-Host (Format-N8nCliBackupRecommendedPrompt -Prompt 'Backup destination' -DefaultText $defaultRoot)).Trim().Trim('"')
     if (-not $backupRoot) {
       $backupRoot = $defaultRoot
     }
@@ -2423,13 +2456,13 @@ function New-N8nCliBackupConfigFromPrompts {
     Write-Warning $safeRoot.Error
   }
 
-  $includeWorkflows = Read-YesNoInput -Prompt 'Include workflows?' -DefaultYes $true
-  $includeCredentials = Read-YesNoInput -Prompt 'Include credentials?' -DefaultYes $false
+  $includeWorkflows = Read-YesNoInput -Prompt 'Include workflows?' -DefaultYes $true -Recommendation 'Yes'
+  $includeCredentials = Read-YesNoInput -Prompt 'Include credentials?' -DefaultYes $true -Recommendation 'Yes, encrypted credential export only'
   $exportDecryptedCredentials = $false
 
   if ($includeCredentials) {
-    Write-Warning 'Default is NO. Decrypted credential exports expose secrets in files.'
-    if (Read-YesNoInput -Prompt 'Export decrypted credentials?' -DefaultYes $false) {
+    Write-Warning 'Recommended: No. Decrypted credential exports expose saved credential secrets as plain text files.'
+    if (Read-YesNoInput -Prompt 'Export decrypted credentials?' -DefaultYes $false -Recommendation 'No. Do not export decrypted credentials unless you explicitly understand the risk') {
       Write-Warning 'DECRYPTED CREDENTIAL EXPORTS CONTAIN SECRETS IN PLAIN TEXT.'
       Write-Warning 'Only enable this for an intentional local migration and protect or delete the files immediately.'
       $confirmation = Read-Host 'Type EXPORT DECRYPTED CREDENTIALS to enable decrypted credential files'

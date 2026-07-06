@@ -282,13 +282,62 @@ If any item is unknown, pause and resolve it before adding real credentials.
 
 ## 9. Backups And Restore Responsibility
 
-Before real workflows:
+Before real workflows, configure a production backup process that is separate from the local Windows launcher.
 
-1. Confirm Hostinger snapshot/backups or another VPS backup method.
-2. Configure database/data backups appropriate for the Coolify resource.
-3. Record who can restore.
-4. Store `N8N_ENCRYPTION_KEY` outside the VPS and outside this repo.
-5. Take a backup before updates or major config changes.
+Minimum backup design:
+
+1. Store `N8N_ENCRYPTION_KEY` outside the VPS and outside this repo.
+2. Export workflows with the n8n CLI.
+3. Export credentials with the n8n CLI.
+4. Keep decrypted credential export disabled unless an owner explicitly approves a break-glass export.
+5. Back up Postgres with `pg_dump` when the database is part of the Coolify Compose resource.
+6. Write each run into a timestamped private backup folder.
+7. Write `manifest.json`, `RESTORE-NOTES.txt`, and `backup.log` for each run.
+8. Apply retention cleanup only inside the approved backup root.
+9. Confirm Hostinger snapshots or another VPS-level backup method for disaster recovery.
+10. Record who can restore.
+11. Take a backup before updates or major config changes.
+
+The copy-ready Linux template is [templates/production-server-backups/](../../templates/production-server-backups/). It is for Hostinger/Coolify or another Linux company server. It is not used by the local Windows launcher.
+
+Server backup command shape:
+
+```bash
+cd /data/coolify/applications/<n8n-resource>
+N8N_BACKUP_ROOT=/data/backups/n8n-production \
+N8N_BACKUP_RETENTION_DAYS=30 \
+/usr/local/sbin/n8n-production-backup
+```
+
+The script defaults to:
+
+- `n8n export:workflow --backup --output=<backup_dir>`
+- `n8n export:credentials --backup --output=<backup_dir>`
+- encrypted credential export only
+- `pg_dump` from the Compose `postgres` service when present
+- timestamped folders named `n8n-production-YYYYMMDD-HHMMSS`
+- `manifest.json`
+- `RESTORE-NOTES.txt`
+- `backup.log`
+- retention cleanup for old `n8n-production-*` folders
+
+Use a Linux scheduler for the server path:
+
+- Recommended: a `systemd` timer with `OnCalendar=*-*-* 03:15:00`.
+- Acceptable: cron when that is the server standard.
+
+Do not use Windows Task Scheduler for Hostinger/Coolify or company-server backups.
+
+If your Coolify deployment uses different service names, configure `N8N_SERVICE_NAME` and `N8N_BACKUP_POSTGRES_SERVICE`. If Postgres is external or provider-managed, set the database backup expectation in the private SOP and use the provider/Coolify database backup mechanism instead of pretending the Compose `postgres` service exists.
+
+Restore notes:
+
+- Keep the original `N8N_ENCRYPTION_KEY`; encrypted credential exports need it.
+- Restore Postgres only during a maintenance window, after a current-state backup, and with owner approval.
+- Import workflow and credential exports only after confirming n8n version compatibility.
+- Verify login, workflows, saved credentials, and representative webhooks after restore.
+
+Offsite or cloud storage is intentionally not configured here. Treat offsite storage as a future hardening item after local server backups and restore have been proven and the storage pattern is approved.
 
 Minimum private SOP:
 
@@ -298,11 +347,13 @@ Deployment platform: Coolify
 n8n URL: https://n8n.example.com
 Coolify project/resource: <fill privately>
 Backup frequency: <fill privately>
+Backup root: <fill privately>
+Scheduler: <systemd timer or cron; fill privately>
 Restore owner: <fill privately>
 N8N_ENCRYPTION_KEY stored in: <password manager location>
 ```
 
-Do not commit this SOP if it includes real domains, IPs, secrets, resource names, or operational details that should stay private.
+Do not commit this SOP if it includes real domains, IPs, secrets, resource names, backup paths, or operational details that should stay private.
 
 ---
 

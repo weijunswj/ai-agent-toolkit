@@ -27,8 +27,11 @@
     "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
     "skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml",
     "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore",
     "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
     "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
+    "skills/n8n-local-setup/templates/production-server-backups/README.md",
+    "skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template",
     "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md"
   ],
   "suitable_for": [
@@ -47,8 +50,11 @@
     "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
     "skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml",
     "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
+    "skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore",
     "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
     "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
+    "skills/n8n-local-setup/templates/production-server-backups/README.md",
+    "skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template",
     "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
     "skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
     "skills/n8n-agent-rules/SKILL.md",
@@ -77,6 +83,11 @@
     "**/SECRET-DO-NOT-COMMIT.env",
     "*credential*",
     "*.zip",
+    "*.log",
+    "*.sql",
+    "*.dump",
+    "*.backup",
+    "*.tar",
     "*.tgz"
   ],
   "requires_approval": true,
@@ -84,6 +95,7 @@
   "notes": [
     "Copy .env.example to .env locally and do not commit .env.",
     "Production Cloudflare Tunnel self-hosting uses the separate production stack and guide, not the local dev menu.",
+    "Hostinger/Coolify and company-server backups use the Linux production server backup template with systemd timer or cron scheduling, not Windows Task Scheduler.",
     "Local backup packages may include SECRET-DO-NOT-COMMIT.env with the restore-critical N8N_ENCRYPTION_KEY. Keep it local and private.",
     "Claude Code official n8n Skills (https://github.com/n8n-io/skills) plus MCP setup is secondary and not part of the beginner local setup path.",
     "Live n8n, Cloudflare, DNS, tunnel, Docker, credential, workflow activation, import/export, and production actions require separate explicit confirmation."

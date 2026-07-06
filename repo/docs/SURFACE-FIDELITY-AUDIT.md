@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-05 (keeps the 2026-07-03 Google DESIGN.md source-tracked reference module and adds the n8n local setup generated local-stack `.gitignore` output)
+Latest update: 2026-07-06 (adds n8n production backup templates, production Cloudflare runtime ignore output, and matching generated skill pack references)
 
 ## Current state
 
@@ -28,9 +28,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 16 |
-| publishedFiles | 228 |
-| declaredOutputFiles | 228 |
-| packInstalledFiles | 80 |
+| publishedFiles | 231 |
+| declaredOutputFiles | 231 |
+| packInstalledFiles | 83 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
 | crossOwnedOutputs | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 228 |
+| boundaryRecipeOutputs | 231 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -47,7 +47,7 @@ Current published-file classifications:
 | Classification | Count |
 | --- | ---: |
 | declared_generated | 148 |
-| pack_installed_declared | 80 |
+| pack_installed_declared | 83 |
 
 Current boundary recipe classifications:
 
@@ -64,7 +64,7 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 166 |
+| main_full_fidelity | 169 |
 
 Known baseline context:
 
