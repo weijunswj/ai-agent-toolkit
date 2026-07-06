@@ -2380,7 +2380,7 @@ function Get-N8nCliBackupScriptPath {
 
 function Get-N8nCliBackupScheduleActionArguments {
   $scriptPath = Get-N8nCliBackupScriptPath
-  return "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" --stack-dir `"$script:StackRoot`" --run-n8n-cli-backup --scheduled"
+  return "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" --stack-dir `"$script:StackRoot`" --run-n8n-recovery-backup --scheduled"
 }
 
 function Get-N8nCliBackupExportSpecs {
@@ -2449,7 +2449,7 @@ function Read-N8nCliBackupConfig {
   try {
     return (Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json)
   } catch {
-    Write-ErrorMessage "Could not read n8n CLI backup config: $($_.Exception.Message)"
+    Write-ErrorMessage "Could not read automatic backup config: $($_.Exception.Message)"
     return $null
   }
 }
@@ -2494,13 +2494,14 @@ function Save-N8nCliBackupConfig {
   $configDir = Split-Path -Parent $configPath
   New-Item -ItemType Directory -Force -Path $configDir | Out-Null
   $Config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $configPath -Encoding ascii
-  Write-Success "n8n CLI backup config saved to: $configPath"
+  Write-Success "Automatic backup config saved to: $configPath"
 }
 
 function New-N8nCliBackupConfigFromPrompts {
   Write-Header 'Automatic Backup Settings'
   Write-Info 'This stores local-only schedule settings in the stack backups folder, not in repo-tracked config.'
-  Write-Info 'Backups use n8n export:workflow and export:credentials inside the n8n Docker Compose service.'
+  Write-Info 'Automatic backups create restore-compatible .zip recovery packages by default.'
+  Write-Info 'Each package includes database.sql, restore metadata, restore notes, and the private backup .env when available.'
   Write-Warning 'Scheduled backups only run when Windows Task Scheduler, Docker Desktop, and the local n8n stack are available.'
 
   $cadenceDays = Read-N8nCliBackupDayInput -Prompt 'Backup cadence in days' -Default 1 -Name 'Backup cadence'
@@ -2509,6 +2510,48 @@ function New-N8nCliBackupConfigFromPrompts {
   $defaultRoot = Get-N8nCliBackupDefaultRoot
   while ($true) {
     $backupRoot = (Read-N8nCliBackupRecommendedInput -Prompt 'Backup destination' -DefaultText $defaultRoot).Trim().Trim('"')
+    if (-not $backupRoot) {
+      $backupRoot = $defaultRoot
+    }
+
+    $safeRoot = Test-SafeN8nCliBackupRoot -Path $backupRoot
+    if ($safeRoot.Ok) {
+      $backupRoot = $safeRoot.Path
+      break
+    }
+
+    Write-Warning $safeRoot.Error
+  }
+
+  $taskName = Get-N8nCliBackupTaskName
+  return [ordered]@{
+    enabled = $true
+    scheduler = 'Windows Task Scheduler'
+    taskName = $taskName
+    cadenceDays = $cadenceDays
+    retentionDays = $retentionDays
+    backupRoot = $backupRoot
+    backupMode = 'restore-compatible-package'
+    includeWorkflows = $true
+    includeCredentials = $true
+    exportDecryptedCredentials = $false
+    n8nServiceName = $script:N8nCliBackupService
+    scheduledTime = 'around 3:00 AM local time'
+    configuredAt = (Get-Date -Format o)
+  }
+}
+
+function New-N8nCliEntityExportConfigFromPrompts {
+  Write-Header 'Export Workflows/Credentials'
+  Write-Info 'This is an advanced entity export for manual workflow or credential portability.'
+  Write-Info 'Use Back up now for the default restore-compatible .zip recovery package.'
+  Write-Warning 'Credential exports are encrypted by default. Decrypted credential export is off unless explicitly confirmed.'
+
+  $retentionDays = Read-N8nCliBackupDayInput -Prompt 'Retention period in days' -Default 30 -Name 'Retention period'
+
+  $defaultRoot = Get-N8nCliBackupDefaultRoot
+  while ($true) {
+    $backupRoot = (Read-N8nCliBackupRecommendedInput -Prompt 'Export destination' -DefaultText $defaultRoot).Trim().Trim('"')
     if (-not $backupRoot) {
       $backupRoot = $defaultRoot
     }
@@ -2543,23 +2586,22 @@ function New-N8nCliBackupConfigFromPrompts {
   }
 
   if (-not $includeWorkflows -and -not $includeCredentials) {
-    Write-ErrorMessage 'Choose workflows, credentials, or both. Backup configuration cancelled.'
+    Write-ErrorMessage 'Choose workflows, credentials, or both. Entity export cancelled.'
     return $null
   }
 
-  $taskName = Get-N8nCliBackupTaskName
   return [ordered]@{
-    enabled = $true
-    scheduler = 'Windows Task Scheduler'
-    taskName = $taskName
-    cadenceDays = $cadenceDays
+    enabled = $false
+    scheduler = 'Manual'
+    taskName = ''
+    cadenceDays = 1
     retentionDays = $retentionDays
     backupRoot = $backupRoot
+    backupMode = 'entity-export'
     includeWorkflows = $includeWorkflows
     includeCredentials = $includeCredentials
     exportDecryptedCredentials = $exportDecryptedCredentials
     n8nServiceName = $script:N8nCliBackupService
-    scheduledTime = 'around 3:00 AM local time'
     configuredAt = (Get-Date -Format o)
   }
 }
@@ -2581,7 +2623,7 @@ function Register-N8nCliBackupSchedule {
   $actionArgs = Get-N8nCliBackupScheduleActionArguments
   $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $actionArgs
   $trigger = New-ScheduledTaskTrigger -Daily -DaysInterval ([int]$Config.cadenceDays) -At 3am
-  $description = "Local n8n CLI backups for stack: $script:StackRoot"
+  $description = "Local n8n recovery backup packages for stack: $script:StackRoot"
 
   Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Description $description -Force | Out-Null
   Write-Success "Scheduled task created or updated: $taskName"
@@ -2641,10 +2683,10 @@ function Disable-N8nCliBackupSchedule {
 }
 
 function Show-N8nCliBackupConfiguration {
-  Write-Header 'n8n CLI Backup Configuration'
+  Write-Header 'Automatic Backup Configuration'
   $config = Read-N8nCliBackupConfig
   if ($null -eq $config) {
-    Write-Warning 'No n8n CLI backup configuration was found.'
+    Write-Warning 'No automatic backup configuration was found.'
     Write-Info "Expected config path: $(Get-N8nCliBackupConfigPath)"
     return
   }
@@ -2653,6 +2695,7 @@ function Show-N8nCliBackupConfiguration {
   Write-Host "Cadence days: $($config.cadenceDays)" -ForegroundColor Cyan
   Write-Host "Retention days: $($config.retentionDays)" -ForegroundColor Cyan
   Write-Host "Backup root: $($config.backupRoot)" -ForegroundColor Cyan
+  Write-Host "Backup mode: $($config.backupMode)" -ForegroundColor Cyan
   Write-Host "Include workflows: $($config.includeWorkflows)" -ForegroundColor Cyan
   Write-Host "Include credentials: $($config.includeCredentials)" -ForegroundColor Cyan
   Write-Host "Export decrypted credentials: $($config.exportDecryptedCredentials)" -ForegroundColor Cyan
@@ -2788,34 +2831,94 @@ function Invoke-N8nCliBackupRetentionCleanup {
 
   $cutoff = (Get-Date).AddDays(-1 * $retention.Value)
   $deletedCount = 0
-  $backupFolders = @(
+  $backupItems = @(
     Get-ChildItem -LiteralPath $safeRoot.Path -Directory -ErrorAction SilentlyContinue |
-      Where-Object { $_.Name -match '^n8n-cli-\d{8}-\d{6}$' -and $_.LastWriteTime -lt $cutoff }
+      Where-Object { $_.Name -match '^(n8n-cli|n8n-recovery)-\d{8}-\d{6}$' -and $_.LastWriteTime -lt $cutoff }
+    Get-ChildItem -LiteralPath $safeRoot.Path -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -match '^n8n-recovery-\d{8}-\d{6}\.zip$' -and $_.LastWriteTime -lt $cutoff }
   )
 
-  foreach ($folder in $backupFolders) {
-    if (-not (Test-PathInsideDirectory -Path $folder.FullName -Directory $safeRoot.Path)) {
-      Write-ErrorMessage "Refusing to delete a path outside the backup root: $($folder.FullName)"
+  foreach ($item in $backupItems) {
+    if (-not (Test-PathInsideDirectory -Path $item.FullName -Directory $safeRoot.Path)) {
+      Write-ErrorMessage "Refusing to delete a path outside the backup root: $($item.FullName)"
       return $false
     }
-    if (Test-SameResolvedPath -Left $folder.FullName -Right $safeRoot.Path) {
+    if (Test-SameResolvedPath -Left $item.FullName -Right $safeRoot.Path) {
       Write-ErrorMessage 'Refusing to delete the backup root itself.'
       return $false
     }
 
     if ($DryRun) {
-      Write-Info "Would delete old n8n CLI backup folder: $($folder.FullName)"
+      Write-Info "Would delete old local backup item: $($item.FullName)"
     } else {
-      Remove-Item -LiteralPath $folder.FullName -Recurse -Force
-      Write-Info "Deleted old n8n CLI backup folder: $($folder.FullName)"
+      if ($item.PSIsContainer) {
+        Remove-Item -LiteralPath $item.FullName -Recurse -Force
+      } else {
+        Remove-Item -LiteralPath $item.FullName -Force
+      }
+      Write-Info "Deleted old local backup item: $($item.FullName)"
     }
     $deletedCount += 1
   }
 
   if ($deletedCount -eq 0) {
-    Write-Info 'No old n8n CLI backup folders were eligible for retention cleanup.'
+    Write-Info 'No old local backup items were eligible for retention cleanup.'
   }
 
+  return $true
+}
+
+function Invoke-N8nRecoveryBackup {
+  param(
+    [object]$Config,
+    [switch]$Scheduled
+  )
+
+  Write-Header 'Back Up Now'
+  if ($null -eq $Config) {
+    Write-ErrorMessage 'No backup configuration was provided.'
+    return $false
+  }
+
+  $cadence = Convert-N8nCliBackupDayValue -Value ([string]$Config.cadenceDays) -Name 'Backup cadence'
+  if (-not $cadence.Ok) {
+    Write-ErrorMessage $cadence.Error
+    return $false
+  }
+
+  $retention = Convert-N8nCliBackupDayValue -Value ([string]$Config.retentionDays) -Name 'Retention period'
+  if (-not $retention.Ok) {
+    Write-ErrorMessage $retention.Error
+    return $false
+  }
+
+  $safeRoot = Test-SafeN8nCliBackupRoot -Path ([string]$Config.backupRoot)
+  if (-not $safeRoot.Ok) {
+    Write-ErrorMessage $safeRoot.Error
+    return $false
+  }
+
+  $Config | Add-Member -NotePropertyName backupRoot -NotePropertyValue $safeRoot.Path -Force
+  $Config | Add-Member -NotePropertyName backupMode -NotePropertyValue 'restore-compatible-package' -Force
+
+  New-Item -ItemType Directory -Force -Path $safeRoot.Path | Out-Null
+  if (-not (Invoke-N8nCliBackupRetentionCleanup -BackupRoot $safeRoot.Path -RetentionDays $retention.Value)) {
+    return $false
+  }
+
+  $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $backupDir = Join-Path $safeRoot.Path "n8n-recovery-$timestamp"
+  $runLabel = 'manual'
+  if ($Scheduled) {
+    $runLabel = 'scheduled'
+  }
+  Write-Info "Creating a restore-compatible $runLabel backup package."
+  if (-not (Backup-Postgres -Required -BackupDir $backupDir -CreatePackage)) {
+    Write-ErrorMessage 'Recovery backup package was not created.'
+    return $false
+  }
+
+  [void](Invoke-N8nCliBackupRetentionCleanup -BackupRoot $safeRoot.Path -RetentionDays $retention.Value)
   return $true
 }
 
@@ -2825,9 +2928,9 @@ function Invoke-N8nCliBackup {
     [switch]$Scheduled
   )
 
-  Write-Header 'Run n8n CLI Backup'
+  Write-Header 'Export Workflows/Credentials'
   if ($null -eq $Config) {
-    Write-ErrorMessage 'No n8n CLI backup configuration was provided.'
+    Write-ErrorMessage 'No n8n CLI entity export configuration was provided.'
     return $false
   }
 
@@ -2861,8 +2964,8 @@ function Invoke-N8nCliBackup {
 
   $runningServices = Get-RunningServices
   if ($runningServices -notcontains $script:N8nCliBackupService) {
-    Write-ErrorMessage 'The n8n service is not running. Start local n8n before running CLI backups.'
-    Write-Info 'Scheduled backups have the same limitation: Docker Desktop and the local n8n stack must be running.'
+    Write-ErrorMessage 'The n8n service is not running. Start local n8n before exporting workflows or credentials.'
+    Write-Info 'This advanced export uses the n8n CLI inside the local Docker Compose service.'
     return $false
   }
 
@@ -2903,14 +3006,14 @@ function Invoke-N8nCliBackup {
   }
 
   if (-not $ok) {
-    Write-ErrorMessage "n8n CLI backup failed. Partial backup folder, if any: $backupDir"
+    Write-ErrorMessage "n8n CLI entity export failed. Partial export folder, if any: $backupDir"
     return $false
   }
 
   $files = Get-N8nCliBackupFileList -BackupDir $backupDir
   $manifestPath = Write-N8nCliBackupManifest -BackupDir $backupDir -Timestamp $timestamp -Config $Config -Container $container -Specs $specs -Files $files -ScheduledRun ([bool]$Scheduled)
 
-  Write-Success "n8n CLI backup folder: $backupDir"
+  Write-Success "n8n CLI entity export folder: $backupDir"
   Write-Success "Manifest written to: $manifestPath"
   [void](Invoke-N8nCliBackupRetentionCleanup -BackupRoot $safeRoot.Path -RetentionDays $retention.Value)
   return $true
@@ -2926,14 +3029,14 @@ function Invoke-N8nCliBackupFromConfig {
   }
 
   if ($Scheduled -and -not [bool]$config.enabled) {
-    Write-Info 'Scheduled n8n CLI backups are disabled; skipping this scheduled run.'
+    Write-Info 'Scheduled automatic backups are disabled; skipping this scheduled run.'
     return $true
   }
 
-  return (Invoke-N8nCliBackup -Config $config -Scheduled:$Scheduled)
+  return (Invoke-N8nRecoveryBackup -Config $config -Scheduled:$Scheduled)
 }
 
-function New-N8nCliBackupNowConfig {
+function New-N8nRecoveryBackupNowConfig {
   param([object]$ExistingConfig)
 
   $backupRoot = Get-N8nCliBackupDefaultRoot
@@ -2954,6 +3057,7 @@ function New-N8nCliBackupNowConfig {
     cadenceDays = 1
     retentionDays = $retentionDays
     backupRoot = $backupRoot
+    backupMode = 'restore-compatible-package'
     includeWorkflows = $true
     includeCredentials = $true
     exportDecryptedCredentials = $false
@@ -2962,12 +3066,24 @@ function New-N8nCliBackupNowConfig {
   }
 }
 
-function Invoke-N8nCliBackupNow {
+function Invoke-N8nRecoveryBackupNow {
   $existingConfig = Read-N8nCliBackupConfig
   if (-not (Test-N8nCliBackupAutomaticEnabled -Config $existingConfig)) {
     $existingConfig = $null
   }
-  $config = New-N8nCliBackupNowConfig -ExistingConfig $existingConfig
+  $config = New-N8nRecoveryBackupNowConfig -ExistingConfig $existingConfig
+  return (Invoke-N8nRecoveryBackup -Config $config)
+}
+
+function Invoke-N8nCliBackupNow {
+  return (Invoke-N8nRecoveryBackupNow)
+}
+
+function Invoke-N8nCliEntityExportNow {
+  $config = New-N8nCliEntityExportConfigFromPrompts
+  if ($null -eq $config) {
+    return $false
+  }
   return (Invoke-N8nCliBackup -Config $config)
 }
 
@@ -3045,7 +3161,7 @@ function Write-RestoreReadme {
     "Backup type: $BackupType",
     '',
     'Keep SECRET-DO-NOT-COMMIT.env in this folder. It is the private backup .env.',
-    'Open _n8n-local.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to database.sql.',
+    'Open _n8n-local.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to this .zip backup package or to database.sql.',
     'Type PROCEED when asked.',
     'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.',
     'Restore also reads N8N_IMAGE from SECRET-DO-NOT-COMMIT.env when present and applies that image pin for schema compatibility.',
@@ -3056,11 +3172,39 @@ function Write-RestoreReadme {
   return $readmePath
 }
 
+function Compress-RestoreCompatibleBackupPackage {
+  param([string]$BackupDir)
+
+  if (-not (Test-Path -LiteralPath $BackupDir -PathType Container)) {
+    Write-ErrorMessage 'Cannot create a backup package because the backup folder does not exist.'
+    return ''
+  }
+
+  Enable-ZipSupport
+  $backupDirFull = [System.IO.Path]::GetFullPath($BackupDir)
+  $zipPath = "$backupDirFull.zip"
+  $zipParent = Split-Path -Parent $zipPath
+  $backupParent = Split-Path -Parent $backupDirFull
+  if (-not (Test-SameResolvedPath -Left $zipParent -Right $backupParent)) {
+    Write-ErrorMessage 'Refusing to create a backup package outside the backup folder parent.'
+    return ''
+  }
+
+  if (Test-Path -LiteralPath $zipPath -PathType Leaf) {
+    Remove-Item -LiteralPath $zipPath -Force
+  }
+
+  [System.IO.Compression.ZipFile]::CreateFromDirectory($backupDirFull, $zipPath)
+  Write-Success "Restore-compatible backup package: $zipPath"
+  return $zipPath
+}
+
 function Backup-Postgres {
   param(
     [switch]$Required,
     [string]$EnvPath = '',
-    [string]$BackupDir = ''
+    [string]$BackupDir = '',
+    [switch]$CreatePackage
   )
 
   Write-Header 'Backup Postgres Database'
@@ -3107,6 +3251,12 @@ function Backup-Postgres {
     Write-Success "Restore manifest written to: $manifestPath"
     Write-Success "Restore instructions written to: $readmePath"
     Write-Success "Backup folder: $backupDir"
+    if ($CreatePackage) {
+      $zipPath = Compress-RestoreCompatibleBackupPackage -BackupDir $backupDir
+      if (-not $zipPath) {
+        return $false
+      }
+    }
     return $true
   } else {
     Write-ErrorMessage 'Backup failed. Check the Postgres logs for details.'
@@ -3128,28 +3278,32 @@ function Show-BackupMenu {
   if ($automaticEnabled) {
     Write-Host '  2. Change automatic backup settings'
     Write-Host '  3. Remove automatic backups'
-    Write-Host '  4. Back'
+    Write-Host '  4. Export workflows/credentials (advanced)'
+    Write-Host '  5. Back'
   } else {
     Write-Host '  2. Set up automatic backups'
-    Write-Host '  3. Back'
+    Write-Host '  3. Export workflows/credentials (advanced)'
+    Write-Host '  4. Back'
   }
   Write-Host ''
 
   $choice = (Read-Host 'Enter a number').Trim()
   if ($automaticEnabled) {
     switch ($choice) {
-      '1' { [void](Invoke-N8nCliBackupNow) }
+      '1' { [void](Invoke-N8nRecoveryBackupNow) }
       '2' { [void](Configure-N8nCliBackupSchedule) }
       '3' { [void](Disable-N8nCliBackupSchedule) }
-      '4' { return }
-      default { Write-Warning 'Choose a number from 1 to 4.' }
+      '4' { [void](Invoke-N8nCliEntityExportNow) }
+      '5' { return }
+      default { Write-Warning 'Choose a number from 1 to 5.' }
     }
   } else {
     switch ($choice) {
-      '1' { [void](Invoke-N8nCliBackupNow) }
+      '1' { [void](Invoke-N8nRecoveryBackupNow) }
       '2' { [void](Configure-N8nCliBackupSchedule) }
-      '3' { return }
-      default { Write-Warning 'Choose a number from 1 to 3.' }
+      '3' { [void](Invoke-N8nCliEntityExportNow) }
+      '4' { return }
+      default { Write-Warning 'Choose a number from 1 to 4.' }
     }
   }
 }
@@ -3467,6 +3621,65 @@ function Expand-RestoreEntitiesZipToStaging {
   }
 }
 
+function Expand-RestorePackageZipToStaging {
+  param([string]$ZipPath)
+
+  $stagingDir = New-RestoreStagingDirectory
+  $stagingRoot = [System.IO.Path]::GetFullPath($stagingDir)
+
+  Enable-ZipSupport
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $limitCheck = Test-RestoreZipEntryLimits -Zip $zip
+    if ($limitCheck.Error) {
+      return [pscustomobject]@{ Error = $limitCheck.Error }
+    }
+
+    foreach ($entry in $zip.Entries) {
+      if (-not $entry.FullName) { continue }
+      $entryName = ($entry.FullName -replace '\\', '/')
+      if ($entryName.StartsWith('/') -or $entryName -match '^[A-Za-z]:') {
+        return [pscustomobject]@{ Error = 'Zip restore package contains an unsafe absolute path entry.' }
+      }
+
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($stagingRoot, $entryName))
+      if (-not (Test-PathInsideDirectory -Path $targetPath -Directory $stagingRoot)) {
+        return [pscustomobject]@{ Error = 'Zip restore package contains an unsafe path traversal entry.' }
+      }
+    }
+
+    foreach ($entry in $zip.Entries) {
+      if (-not $entry.FullName) { continue }
+      $entryName = ($entry.FullName -replace '\\', '/')
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($stagingRoot, $entryName))
+      if ($entryName.EndsWith('/')) {
+        New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+        continue
+      }
+
+      $targetDir = Split-Path -Parent $targetPath
+      if ($targetDir) {
+        New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+      }
+      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $targetPath, $true)
+    }
+  } finally {
+    $zip.Dispose()
+  }
+
+  $databaseSql = @(Get-ChildItem -LiteralPath $stagingDir -File -Recurse -Filter 'database.sql' -ErrorAction SilentlyContinue | Select-Object -First 1)
+  if ($databaseSql.Count -eq 0) {
+    return [pscustomobject]@{ Error = 'Zip restore package did not contain database.sql.' }
+  }
+
+  Write-Info "Backup zip extracted under: $stagingDir"
+  Write-Info 'Using database.sql from the restore-compatible backup package.'
+  return [pscustomobject]@{
+    StagingPath = $stagingDir
+    DatabaseSqlPath = $databaseSql[0].FullName
+  }
+}
+
 function Get-RestoreBackupType {
   param([string]$Path)
 
@@ -3487,8 +3700,13 @@ function Get-RestoreBackupType {
     }
     if ($name -match '\.zip$') {
       $entries = @(Get-ZipEntryNames -ZipPath $item.FullName)
+      $hasDatabaseSql = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'database.sql' }).Count -gt 0
+      $hasRestoreManifest = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'restore-manifest.json' }).Count -gt 0
       $hasEntities = @($entries | Where-Object { Test-RestoreEntityFileName -Name $_ }).Count -gt 0
       $hasCredentialEntities = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'credentialsentity.jsonl' }).Count -gt 0
+      if ($hasDatabaseSql -and $hasRestoreManifest) {
+        return [pscustomobject]@{ Type = 'postgres-package-zip'; Label = 'restore-compatible backup package'; InputPath = $item.FullName; NeedsPackageStaging = $true }
+      }
       if ($hasEntities) {
         return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package'; InputPath = $item.FullName; NeedsStaging = $true; HasCredentialEntities = $hasCredentialEntities }
       }
@@ -3509,6 +3727,20 @@ function Prepare-RestoreBackupInput {
   param([string]$Path)
 
   $detected = Get-RestoreBackupType -Path $Path
+  if ($detected.NeedsPackageStaging) {
+    $expanded = Expand-RestorePackageZipToStaging -ZipPath $detected.InputPath
+    if ($expanded.Error) {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported zip'; Reason = $expanded.Error }
+    }
+    $packageDetected = [pscustomobject]@{
+      Type = 'postgres-sql'
+      Label = 'restore-compatible backup package'
+      InputPath = $expanded.DatabaseSqlPath
+      HasCredentialEntities = $false
+    }
+    $packageDetected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $expanded.StagingPath -Force
+    $detected = $packageDetected
+  }
   if ($detected.NeedsStaging) {
     $expanded = Expand-RestoreEntitiesZipToStaging -ZipPath $detected.InputPath
     if ($expanded.Error) {
@@ -4395,7 +4627,7 @@ if (Test-MenuFlag -Name 'disable-n8n-cli-backups') {
   exit 1
 }
 
-if (Test-MenuFlag -Name 'run-n8n-cli-backup') {
+if ((Test-MenuFlag -Name 'run-n8n-recovery-backup') -or (Test-MenuFlag -Name 'run-n8n-cli-backup')) {
   if (Invoke-N8nCliBackupFromConfig -Scheduled:(Test-MenuFlag -Name 'scheduled')) { exit 0 }
   exit 1
 }

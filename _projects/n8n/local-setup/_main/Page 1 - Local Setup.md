@@ -587,25 +587,29 @@ When automatic backups are not set up:
 
 | Choice | Use when | What it does |
 | --- | --- | --- |
-| `Back up now` | You want a safe local export immediately. | Runs the n8n CLI backup path once with workflows included, credentials included, and decrypted credentials disabled. |
-| `Set up automatic backups` | You want local workflow and/or credential exports on a cadence. | Prompts for automatic backup settings, saves local config, and creates or updates a Windows Task Scheduler task. |
+| `Back up now` | You want a restore-ready local backup immediately. | Creates a restore-compatible `.zip` recovery package with `database.sql`, restore metadata, restore notes, and the private backup `.env` when available. |
+| `Set up automatic backups` | You want restore-compatible backup packages on a cadence. | Prompts for cadence, retention, and destination, saves local config, and creates or updates a Windows Task Scheduler task. |
+| `Export workflows/credentials (advanced)` | You intentionally need n8n entity exports instead of a recovery package. | Runs the n8n CLI export path with workflows and encrypted credentials selected by default; decrypted credential export stays disabled unless explicitly confirmed. |
 | `Back` | You do not want a backup action. | Returns to the main menu. |
 
 When automatic backups are enabled:
 
 | Choice | Use when | What it does |
 | --- | --- | --- |
-| `Back up now` | You want a safe local export immediately. | Runs the n8n CLI backup path once with workflows included, credentials included, and decrypted credentials disabled. |
-| `Change automatic backup settings` | You want to change cadence, retention, destination, or export choices. | Prompts for automatic backup settings again, then updates the Windows Scheduled Task. |
+| `Back up now` | You want a restore-ready local backup immediately. | Creates the same restore-compatible `.zip` recovery package, using the configured automatic backup destination and retention. |
+| `Change automatic backup settings` | You want to change cadence, retention, or destination. | Prompts for automatic backup settings again, then updates the Windows Scheduled Task. |
 | `Remove automatic backups` | You want to stop automatic backups without deleting existing backup folders. | Removes the Windows Scheduled Task when present and marks the local config disabled. |
+| `Export workflows/credentials (advanced)` | You intentionally need n8n entity exports instead of a recovery package. | Runs the n8n CLI export path with workflows and encrypted credentials selected by default; decrypted credential export stays disabled unless explicitly confirmed. |
 | `Back` | You do not want a backup action. | Returns to the main menu. |
 
 `Back up now` behaviour:
 
-- Uses n8n CLI export inside the Docker Compose `n8n` service.
-- Includes workflows: yes.
-- Includes credentials: yes.
-- Exports decrypted credentials: no.
+- Creates a timestamped folder named like `n8n-recovery-YYYYMMDD-HHMMSS`.
+- Writes `database.sql`.
+- Writes `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`, when the `.env` file is available.
+- Writes `restore-manifest.json` and `HOW TO USE THIS RESTORE FOLDER.txt`.
+- Creates a sibling restore-compatible package named like `n8n-recovery-YYYYMMDD-HHMMSS.zip`.
+- The package can be selected directly in `Advanced / Recovery: Restore local n8n from backup`.
 - Uses the enabled automatic backup destination and retention when automatic backups are enabled.
 - Otherwise uses the safe local default destination:
 
@@ -613,15 +617,14 @@ When automatic backups are enabled:
 %USERPROFILE%\.n8n-local\backups\n8n-cli
 ```
 
-Database-level recovery backup:
+Recovery package contents:
 
-- Writes a timestamped folder under `%USERPROFILE%\.n8n-local\backups`.
 - Includes `database.sql`.
 - Includes `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`.
 - Also includes `restore-manifest.json` and `HOW TO USE THIS RESTORE FOLDER.txt`.
-- Keep the whole folder private.
-- Do not commit it.
-- The update flow creates this automatically before Postgres image updates. It is not the normal first-level `Back up now` path.
+- Keep the whole folder and `.zip` package private.
+- Do not commit either one.
+- The update and restore flows still create database backup folders for rollback, but the normal first-level `Back up now` path creates a restore-compatible `.zip` package.
 
 Automatic backup settings prompts:
 
@@ -635,19 +638,32 @@ Each prompt names the recommended default. Press `Enter` on an empty prompt to a
 %USERPROFILE%\.n8n-local\backups\n8n-cli
 ```
 
-4. Whether to include workflows. Recommended default: **Yes**.
-5. Whether to include credentials. Recommended default: **Yes**, encrypted credential export only.
-6. Whether to export decrypted credentials. Recommended default: **No**.
+Automatic backups use the same recovery package format as `Back up now`. Workflows and saved credentials are included through the database backup, and saved credentials remain encrypted by `N8N_ENCRYPTION_KEY`.
+
+Advanced workflow/credential export prompts:
+
+Use `Export workflows/credentials (advanced)` only when you need n8n CLI entity exports for portability rather than local disaster recovery. Each prompt names the recommended default. Press `Enter` on an empty prompt to accept the displayed recommended default.
+
+1. Retention period in days. Recommended default: `30`.
+2. Export destination. Recommended default:
+
+```text
+%USERPROFILE%\.n8n-local\backups\n8n-cli
+```
+
+3. Whether to include workflows. Recommended default: **Yes**.
+4. Whether to include credentials. Recommended default: **Yes**, encrypted credential export only.
+5. Whether to export decrypted credentials. Recommended default: **No**.
 
 Decrypted credential export warning:
 
 - The default is **No**.
-- Workflows and encrypted credentials are the recommended local automatic backup contents.
+- Workflows and encrypted credentials are the recommended advanced entity export contents.
 - Decrypted credential exports expose credential secrets in plain text files.
 - If you enable decrypted credential exports, the menu shows a warning and requires you to type `EXPORT DECRYPTED CREDENTIALS`.
 - Keep decrypted backups offline/private, delete them when they are no longer needed, and never commit them.
 
-n8n CLI backup behaviour:
+n8n CLI entity export behaviour:
 
 - Workflow backups run inside the Docker Compose `n8n` service with:
 
@@ -665,11 +681,12 @@ n8n export:credentials --backup --output=<backup_dir>
 - The launcher writes export files to a temporary path inside the n8n container, copies them into the local backup folder, then removes the temporary container path.
 - Each run writes a timestamped folder named like `n8n-cli-YYYYMMDD-HHMMSS`.
 - Each run writes `manifest.json` with the timestamp, Compose project, n8n service/container details, backup options, generated files, credential inclusion, and decrypted credential status.
-- The local config file is saved under `%USERPROFILE%\.n8n-local\backups\n8n-cli-backup-config.json` by default. It stores schedule and export choices, not secrets.
+- Entity exports are secondary and are not the default recovery backup path.
+- The local config file is saved under `%USERPROFILE%\.n8n-local\backups\n8n-cli-backup-config.json` by default. It stores schedule settings, not secrets.
 
 Retention cleanup:
 
-- The launcher deletes only timestamped child folders named like `n8n-cli-YYYYMMDD-HHMMSS` under the configured backup root.
+- The launcher deletes only timestamped child folders named like `n8n-recovery-YYYYMMDD-HHMMSS` or `n8n-cli-YYYYMMDD-HHMMSS`, plus matching `n8n-recovery-YYYYMMDD-HHMMSS.zip` packages, under the configured backup root.
 - It refuses unsafe backup roots, including empty paths, filesystem roots, your home folder, the local stack root, obvious git repo roots, and other broad locations.
 - It checks that every deletion target is inside the configured backup root before removing it.
 - It does not delete arbitrary files, non-matching folders, the backup root itself, or anything outside the configured backup root.
@@ -677,9 +694,10 @@ Retention cleanup:
 Scheduling limitations:
 
 - Scheduling uses Windows Task Scheduler because this local stack is Windows-first.
-- The scheduled task runs the same menu script with `--run-n8n-cli-backup --scheduled`.
-- Scheduled backups require Windows, Task Scheduler, Docker Desktop, this local stack folder, and the `n8n` service to be running when the task fires.
-- If Docker Desktop or n8n is stopped, the scheduled run fails closed instead of starting containers or deleting data.
+- The scheduled task runs the same menu script with `--run-n8n-recovery-backup --scheduled`.
+- Existing scheduled tasks that still call `--run-n8n-cli-backup --scheduled` continue to work and now create recovery packages.
+- Scheduled backups require Windows, Task Scheduler, Docker Desktop, this local stack folder, and the local Postgres service to be available when the task fires.
+- If Docker Desktop or the local stack is stopped, the scheduled run fails closed instead of deleting data.
 - `Remove automatic backups` removes the scheduled task when present and persists the local config as disabled.
 - There is no cloud, remote storage, or off-machine copy in this first backup feature.
 
@@ -687,6 +705,7 @@ Advanced command-line helpers:
 
 ```powershell
 .\_n8n-local.cmd --show-n8n-cli-backup-config
+.\_n8n-local.cmd --run-n8n-recovery-backup
 .\_n8n-local.cmd --run-n8n-cli-backup
 .\_n8n-local.cmd --disable-n8n-cli-backups
 ```
@@ -697,7 +716,8 @@ Restore:
 - Paste only a `.sql` or `.zip` file path.
 - Type `PROCEED` when asked.
 - `.sql` must be `database.sql` from a backup folder.
-- `.zip` must contain n8n `export:entities` output files.
+- `.zip` can be the restore-compatible package created by `Back up now` or automatic backups.
+- `.zip` can also contain n8n `export:entities` output files for advanced entity restore.
 - `.zip` entity restore requires the same n8n migration state as the source export. If n8n reports a migration timestamp mismatch, retry with the same `N8N_IMAGE` version that created the export, or use a Postgres SQL backup.
 - Folder paths are not accepted.
 
