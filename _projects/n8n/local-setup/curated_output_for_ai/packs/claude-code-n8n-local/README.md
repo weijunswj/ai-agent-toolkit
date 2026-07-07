@@ -14,7 +14,7 @@ Review [pack.json](pack.json) before copying files.
 
 - [AI Coding Agent Rules](../../../ai-coding-agent-rules/), the repo-local `AGENTS.md` template, and the Claude Code `CLAUDE.md` shim.
 - [n8n Agent Rules](../../../n8n-agent-rules/) and the optional [Claude n8n adapter](../../../n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md).
-- [Local stack templates](../../templates/local-stack/), [production Cloudflare stack templates](../../templates/production-cloudflare-stack/), Claude Code [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup references, and the local/production n8n guides.
+- [Local stack templates](../../templates/local-stack/), [production Cloudflare stack templates](../../templates/production-cloudflare-stack/), [production server backup templates](../../templates/production-server-backups/), Claude Code [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup references, and the local/production n8n guides.
 
 ## Review Notes
 
@@ -24,4 +24,5 @@ Review [pack.json](pack.json) before copying files.
 - Claude Code [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup is secondary and not part of the beginner local path.
 - Dev webhook testing remains on the local ngrok permanent/reserved URL path. Production self-hosting from a local/CGNAT machine uses the separate Cloudflare Tunnel production guide and stack.
 - Local launcher backup and recovery options are local/dev database restore only, not production restore or the regular workflow JSON flow.
+- Hostinger/Coolify and company-server backups use the Linux production server backup template with n8n CLI exports, database backup where applicable, manifest/log/restore notes, retention cleanup, and systemd timer or cron scheduling.
 - Never commit `.env`, credentials, tunnel tokens, real domains, account IDs, DNS values, IPs, backups, runtime payloads, `.n8n-local/`, `.tmp/`, or live imports/exports.

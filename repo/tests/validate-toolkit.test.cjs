@@ -504,11 +504,11 @@ test('native Codex and Claude plugin manifests are generated package metadata', 
     '.codex-plugin/assets/logo.png',
     '.codex-plugin/hooks/hooks.json',
     '.claude-plugin/plugin.json',
-    '.claude-plugin/hooks/hooks.json'
+    '.claude-plugin/hooks/hooks.json',
+    '.claude-plugin/marketplace.json'
   ]) {
     assert.equal(fs.existsSync(path.join(repoRoot, relPath)), true, relPath);
   }
-  assert.equal(fs.existsSync(path.join(repoRoot, '.claude-plugin', 'marketplace.json')), false);
 });
 
 test('Toolkit plugin packaged version surfaces stay aligned', () => {
@@ -516,13 +516,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.2.5';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.3.4';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.2\.5/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.3\.4/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -553,6 +553,7 @@ test('project manifests include the current project modules without repo-wide MC
   const ids = validator.projectManifests().map((entry) => entry.id).sort();
   assert.deepEqual(ids, [
     'cicd.secure-installer',
+    'design.google-design-md',
     'design.ui-ux-pro-max',
     'development.ai-coding-agent-rules',
     'development.hostinger-coolify-production-guide',
@@ -863,6 +864,10 @@ test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', 
     assert.match(text, /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./, `${relPath} keeps missing-index fallback`);
     assert.match(text, /## Managed Memory/, `${relPath} keeps portable managed memory guidance`);
     assert.match(text, /Treat `MEMORY\.md` as managed, non-authoritative project memory\./, `${relPath} keeps non-authoritative memory contract`);
+    assert.match(text, /Do not create `MEMORY\.md` merely because it is absent\./, `${relPath} keeps memory rare and optional`);
+    assert.match(text, /## Documentation Closure/, `${relPath} requires documentation closure`);
+    assert.match(text, /Use context-preserving compression, not blind deletion\./, `${relPath} protects durable repo intelligence`);
+    assert.match(text, /Keep repo maps pointer-based and current;/, `${relPath} keeps compact repo-map guidance`);
     assert.match(text, /Instruction sources used/, `${relPath} requires instruction-source reporting`);
     assert.match(text, /MEMORY\.md changed: Yes\/No/, `${relPath} requires memory change reporting`);
     assert.match(text, /## Scope Control/, `${relPath} keeps generic execution guidance`);
@@ -957,6 +962,7 @@ test('validation workflow runs canonical full validation read-only', () => {
     'node repo/scripts/sync-toolkit-projects.cjs --check',
     'node repo/scripts/audit-project-source-locks.cjs',
     'node repo/scripts/audit-published-surfaces.cjs --check',
+    'node repo/scripts/audit-fallback-risk.cjs',
     'node repo/scripts/validate-toolkit.cjs',
     'node --test repo/tests/*.test.cjs',
     'node repo/scripts/package-skills.cjs --check',
@@ -1008,18 +1014,22 @@ test('source-watch PR notifier uses the stable review-notification PR contract',
     'No source files or advisory tracking documents were updated.',
     'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
+    'No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.',
     'No upstream code was executed.',
     'No auto-merge is allowed.',
-    'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and then ask an AI agent to inspect before any real edits happen.',
+    'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.',
     'Advisory actions, when present, are read from `repo/source-watch/advisory-targets.json`.',
     'No advisory tracking document was changed by this workflow.',
     'If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
+    'If meaningful host-harness drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.',
     '',
     '- [ ] Review upstream diff manually.',
     '- [ ] Confirm changed files are within allowlist.',
     '- [ ] Confirm attribution/licence notes still apply.',
     '- [ ] Confirm no upstream code was executed.',
     '- [ ] Decide whether a separate update PR should copy/adapt files.',
+    '- [ ] For Host Harness Capability Drift Review, classify affected toolkit components using the linked template before proposing changes.',
+    '- [ ] Confirm any shrink, move, host-native, or delete recommendation is implemented only in a separate evidence-backed PR.',
     '- [ ] If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
     '- [ ] Run npm run validate:all before any real source update merge.'
   ].join('\n'));
@@ -1703,6 +1713,9 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
   assert.match(portableAgents, /## Local Documentation/, 'portable AGENTS template carries local-doc discovery');
   assert.match(portableAgents, /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/, 'portable AGENTS template links portable docs');
   assert.match(portableAgents, /## Managed Memory/, 'portable AGENTS template carries optional managed memory guidance');
+  assert.match(portableAgents, /## Documentation Closure/, 'portable AGENTS template carries documentation closure guidance');
+  assert.match(portableAgents, /Use context-preserving compression, not blind deletion\./, 'portable AGENTS template preserves repo intelligence during cleanup');
+  assert.match(portableAgents, /Keep repo maps pointer-based and current;/, 'portable AGENTS template carries compact repo-map guidance');
   assert.match(portableAgents, /Instruction sources used/, 'portable AGENTS template requires instruction-source reporting');
   assert.match(portableAgents, /MEMORY\.md changed: Yes\/No/, 'portable AGENTS template requires memory change reporting');
   assert.doesNotMatch(portableAgents, /This root `AGENTS\.md` is toolkit-repo-specific|## Repo-Local Router/, 'portable AGENTS template has no toolkit repo wrapper');
@@ -2278,12 +2291,16 @@ test('internal AI-facing surfaces are generated from declared project output', (
   const expectedExactCopies = [
     ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/local-setup.md', '_main/Page 1 - Local Setup.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/hostinger-vps.md', '_main/Page 2 - Hostinger VPS.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md', '_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md', '_main/mcp setup - codex.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md', '_main/mcp setup - claude code.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md', '_main/mcp setup - opencode.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md', '_main/mcp setup - antigravity.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd', '_main/templates/local-stack/_n8n-local.cmd'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd', '_main/templates/local-stack/n8n-local-desktop-shortcut.cmd'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore', '_main/templates/production-cloudflare-stack/.gitignore'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/templates/production-server-backups/README.md', '_main/templates/production-server-backups/README.md'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template', '_main/templates/production-server-backups/n8n-production-backup.sh.template'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md', '_main/templates/mcp-configs/antigravity-mcp-config.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md', '_main/templates/mcp-configs/claude-mcp-config.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md', '_main/templates/mcp-configs/codex-mcp-config.md'],
@@ -2938,6 +2955,7 @@ test('validator rejects forbidden files but tolerates ignored local runtime fold
   const cwd = tempCopy();
   fs.writeFileSync(path.join(cwd, '.env'), 'EXAMPLE=unsafe\n');
   fs.mkdirSync(path.join(cwd, '.n8n-local'), { recursive: true });
+  fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(cwd, '.n8n-local', '.env.n8n-archived-workflow-cleanup'), 'N8N_API_KEY="local-secret"\n');
   fs.mkdirSync(path.join(cwd, 'n8n-workflows'), { recursive: true });
   fs.writeFileSync(path.join(cwd, 'n8n-workflows', 'local.live-export.json'), '{}\n');
@@ -2947,6 +2965,7 @@ test('validator rejects forbidden files but tolerates ignored local runtime fold
   assert.match(result.stderr, /Forbidden env file/);
   assert.doesNotMatch(result.stderr, /Forbidden directory present: \.n8n-local/);
   assert.doesNotMatch(result.stderr, /Unexpected root entry: \.n8n-local/);
+  assert.doesNotMatch(result.stderr, /Unexpected root entry: \.claude/);
   assert.doesNotMatch(result.stderr, /Unexpected root entry: n8n-workflows/);
   assert.doesNotMatch(result.stderr, /n8n-workflows\/local\.live-export\.json/);
   assert.match(result.stderr, /Live n8n import\/export file/);

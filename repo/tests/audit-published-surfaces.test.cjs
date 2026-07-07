@@ -151,11 +151,11 @@ test('audit-published-surfaces detects pack-installed undeclared files', () => {
   assert.ok(paths.includes('skills/ui-ux-secure-frontend-design/references/new-pack-undeclared-fixture.md'));
 });
 
-test('audit-published-surfaces records declared n8n cross-skill references', () => {
+test('audit-published-surfaces records declared shared-surface references', () => {
   const report = runAuditJson();
 
   assert.equal(report.summary.crossOwnedOutputs, 0);
-  assert.equal(report.summary.sharedSurfaceOutputs, 3);
+  assert.equal(report.summary.sharedSurfaceOutputs, 4);
   assert.equal(report.summary.sharedSurfaceMetadataFindings, 0);
   assert.deepEqual(report.issues.crossOwnedOutputs, []);
   assert.deepEqual(
@@ -163,7 +163,8 @@ test('audit-published-surfaces records declared n8n cross-skill references', () 
     [
       'skills/n8n-local-setup/references/n8n-agent-rules.md',
       'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
-      'skills/n8n-workflow-templates/references/n8n-agent-rules.md'
+      'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
+      'skills/ui-ux-secure-frontend-design/references/design-md-contract.md'
     ]
   );
 });

@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.2.5",
+  "version": "2.3.4",
   "version_policy": "semver",
-  "version_notes": "Improves packaged plugin-eval hygiene by trimming native default prompts, preserving toolkit-setup implicit routing, and aligning the native package version with invocation-policy metadata changes.",
+  "version_notes": "Packages the n8n MCP metadata and static MCP config review safety guidance.",
   "outputs": [
     {
       "kind": "curated",
@@ -71,6 +71,13 @@
       "output": ".claude-plugin/hooks/hooks.json",
       "notes": "Claude Code native plugin hook config generated from first-party module source; hook only calls the shared updater.",
       "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "json",
+      "source": "_main/claude-plugin/marketplace.json",
+      "output": ".claude-plugin/marketplace.json",
+      "notes": "Claude Code native local marketplace manifest generated from first-party module source; declares this repo as a one-plugin local marketplace, mirroring the Codex .agents/plugins/marketplace.json wrapper.",
+      "fidelity": "generated_metadata"
     }
   ],
   "writes": {
@@ -83,7 +90,8 @@
       ".codex-plugin/assets/logo.png",
       ".codex-plugin/hooks/hooks.json",
       ".claude-plugin/plugin.json",
-      ".claude-plugin/hooks/hooks.json"
+      ".claude-plugin/hooks/hooks.json",
+      ".claude-plugin/marketplace.json"
     ],
     "denied": [
       ".env*",
@@ -106,7 +114,7 @@
     "trigger": "Use toolkit-setup when the user asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity 2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. Do not invoke it for ordinary project coding, unrelated n8n setup, or as permission to run write commands without explicit approval.",
     "decision": "new_project_skill",
     "decision_reason": "A single compact toolkit-setup router skill is safer than a command-per-bridge skill family because it lets agents recognise setup requests while keeping implementation, command details, hooks, and policy in the shared updater, docs, validators, and tests.",
-    "unique_value": "The skill preserves the bridge and plugin-hook safety model in the trigger path: dry-run first, repo auto-update opt-in only, OpenCode and Antigravity 2 opt-in only, detection without autosetup, sync only enabled targets, post-install Windows hook repair before trusting Codex plugin hooks, no npm or pip installs, no arbitrary project repo mutation by default, no Codex-to-Claude or Claude-to-Codex cross-update, and downgrade refusal unless explicitly forced.",
+    "unique_value": "The skill preserves the bridge and plugin-hook safety model in the trigger path: dry-run first, repo auto-update opt-in only, OpenCode and Antigravity 2 opt-in only, detection without autosetup, sync only enabled targets, post-install Windows hook repair before trusting Codex plugin hooks, opt-in startup repair of unsafe installed third-party Codex hook caches, no npm or pip installs, no arbitrary project repo mutation by default, no Codex-to-Claude or Claude-to-Codex cross-update, and downgrade refusal unless explicitly forced.",
     "runtime_footprint": "SKILL.md stays a short router and safety checklist. It does not embed updater or repair implementation details or repeat command-per-target procedures; detailed behavior stays in repo/docs/TOOLKIT-LOCAL-BRIDGE.md, repo/docs/HOW-TO-USE.md, repo/scripts/toolkit-local-bridge.cjs, repo/scripts/repair-codex-plugin-windows-hooks.cjs, and tests.",
     "local_assets": "Only the toolkit-setup README, SKILL.md, and OpenAI metadata are published. No scripts, references, templates, package archives, third-party code, or generated bridge hub outputs are bundled in the skill.",
     "output_contract": "When used, the agent routes to the Toolkit setup subsystem, starts with audit or dry-run behavior, uses repo/scripts/toolkit-local-bridge.cjs for any requested operation, preserves explicit approval gates for writes, validates configured repo auto-updates before enabled-target sync, and runs relevant validators or tests before final reporting.",

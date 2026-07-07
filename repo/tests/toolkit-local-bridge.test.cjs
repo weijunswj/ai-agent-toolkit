@@ -11,7 +11,9 @@ const {
   getRepoValidationLabels,
   openUpdateReport,
   updateReportDir,
-  cleanupUpdateReports
+  cleanupUpdateReports,
+  replaceDirectoryAtomically,
+  repairThirdPartyCodexPluginHooks
 } = require('../scripts/toolkit-local-bridge.cjs');
 const { verifyInstalledCacheFreshness } = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
@@ -19,7 +21,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.2.5';
+const expectedBridgeVersion = '2.3.4';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -499,6 +501,34 @@ function writeN8nPluginHookFixture(pluginRoot) {
       // Windows Git Bash can usually run these, and chmod can be unavailable in restricted filesystems.
     }
   }
+}
+
+function writeGenericPluginHookFixture(pluginRoot, command = 'hooks/session-start.sh') {
+  writeJson(path.join(pluginRoot, 'plugin.json'), {
+    name: 'generic-third-party',
+    version: '0.0.0-test',
+    repository: 'https://example.invalid/generic-third-party'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup',
+          hooks: [
+            {
+              type: 'command',
+              command
+            }
+          ]
+        }
+      ]
+    }
+  });
+  writeFile(path.join(pluginRoot, 'hooks', 'session-start.sh'), [
+    '#!/usr/bin/env bash',
+    'echo "generic hook"',
+    ''
+  ].join('\n'));
 }
 
 function pushRepoToolkitUpdate(fixture, label) {
@@ -1373,7 +1403,7 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
   assert.match(report.text, /- `skills\/fixture-skill\/SKILL\.md`/);
   assert.match(report.text, /repo update status: `updated`/);
   assert.match(report.text, /hook-light validation: `passed`/);
-  assert.match(report.text, /Skipped n8n\/live systems; not touched\./);
+  assert.match(report.text, /Skipped live n8n systems; not touched\./);
 });
 
 test('no-op repo auto-update hook with unchanged observed commit does not create a report', () => {
@@ -1742,7 +1772,7 @@ test('legacy delegated repo sync writes an update report using stored repo updat
   assert.match(report.text, /repo update status: `updated`/);
   assert.match(report.text, /target sync status: `synced`/);
   assert.match(report.text, /checksum: `[a-f0-9]{64}`/);
-  assert.match(report.text, /Skipped n8n\/live systems; not touched\./);
+  assert.match(report.text, /Skipped live n8n systems; not touched\./);
 });
 
 test('suppressed legacy delegated repo sync does not write an update report', () => {
@@ -2234,6 +2264,74 @@ test('update report cleanup refuses paths outside the Toolkit-managed report roo
   assert.equal(fs.existsSync(outsideReport), true);
 });
 
+test('replaceDirectoryAtomically retries transient rename EPERM failures', () => {
+  const root = tmpRoot();
+  const source = path.join(root, 'source');
+  const target = path.join(root, 'current');
+  writeFile(path.join(source, 'manifest.json'), '{"next":true}\n');
+  writeFile(path.join(target, 'manifest.json'), '{"previous":true}\n');
+
+  const originalRenameSync = fs.renameSync;
+  let targetRenameAttempts = 0;
+  fs.renameSync = function flakyRename(from, to) {
+    if (path.resolve(from) === path.resolve(source) &&
+      path.resolve(to) === path.resolve(target) &&
+      targetRenameAttempts === 0) {
+      targetRenameAttempts += 1;
+      const error = new Error('simulated Windows file lock');
+      error.code = 'EPERM';
+      throw error;
+    }
+    return originalRenameSync.apply(this, arguments);
+  };
+
+  try {
+    replaceDirectoryAtomically(source, target, { retryDelayMs: 1 });
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+
+  assert.equal(targetRenameAttempts, 1);
+  assert.equal(fs.readFileSync(path.join(target, 'manifest.json'), 'utf8'), '{"next":true}\n');
+  assert.equal(fs.existsSync(source), false);
+});
+
+test('replaceDirectoryAtomically falls back to copy when Windows blocks final rename', () => {
+  const root = tmpRoot();
+  const source = path.join(root, 'source');
+  const target = path.join(root, 'current');
+  writeFile(path.join(source, 'manifest.json'), '{"next":true}\n');
+  writeFile(path.join(source, 'nested', 'state.json'), '{"ok":true}\n');
+  writeFile(path.join(target, 'manifest.json'), '{"previous":true}\n');
+
+  const originalRenameSync = fs.renameSync;
+  let targetRenameAttempts = 0;
+  fs.renameSync = function lockedFinalRename(from, to) {
+    if (path.resolve(from) === path.resolve(source) && path.resolve(to) === path.resolve(target)) {
+      targetRenameAttempts += 1;
+      const error = new Error('simulated persistent Windows file lock');
+      error.code = 'EPERM';
+      throw error;
+    }
+    return originalRenameSync.apply(this, arguments);
+  };
+
+  try {
+    replaceDirectoryAtomically(source, target, { renameAttempts: 2, retryDelayMs: 1 });
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+
+  assert.equal(targetRenameAttempts, 2);
+  assert.equal(fs.readFileSync(path.join(target, 'manifest.json'), 'utf8'), '{"next":true}\n');
+  assert.equal(fs.readFileSync(path.join(target, 'nested', 'state.json'), 'utf8'), '{"ok":true}\n');
+  assert.equal(fs.existsSync(source), false);
+  assert.deepEqual(
+    fs.readdirSync(root).filter((entry) => entry.includes('backup')),
+    []
+  );
+});
+
 test('native plugin manifests and hooks are valid and policy-light', () => {
   const codexManifest = readJson(path.join(repoRoot, '.codex-plugin', 'plugin.json'));
   const claudeManifest = readJson(path.join(repoRoot, '.claude-plugin', 'plugin.json'));
@@ -2530,4 +2628,83 @@ test('Windows n8n plugin hook repair removes bare shell hooks and verifies hook 
 
   const errors = auditPluginRoot(pluginRoot, { windows: true, verifyOutput: true });
   assert.deepEqual(errors, []);
+});
+
+test('third-party Codex plugin hook repair discovers generic installed plugin caches', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
+  const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
+  writeGenericPluginHookFixture(toolkitRoot);
+  writeGenericPluginHookFixture(thirdPartyRoot);
+
+  const result = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    currentPluginRoot: toolkitRoot,
+    windows: true,
+    write: true
+  });
+
+  assert.equal(result.status, 'repaired');
+  assert.deepEqual(result.repaired.map((entry) => entry.plugin_root), [thirdPartyRoot]);
+  assert.deepEqual(result.skipped.map((entry) => entry.plugin_root), [toolkitRoot]);
+
+  const repairedHooks = readJson(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
+  const repairedCommand = collectHookCommands(repairedHooks)[0].command;
+  assert.match(repairedCommand, /^powershell(?:\.exe)?\s/i);
+  assert.match(repairedCommand, /hooks\/run-hook\.ps1/);
+  assert.equal(fs.existsSync(path.join(thirdPartyRoot, 'hooks', 'run-hook.ps1')), true);
+
+  const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
+  assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
+});
+
+test('Codex hook auto-repairs third-party plugin hooks after setup opt-in', {
+  skip: process.platform !== 'win32' ? 'Windows hook repair is Windows-only' : false
+}, () => {
+  const root = tmpRoot();
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha hook repair\n' });
+  const hub = path.join(root, 'hub', 'current');
+  const codexHome = path.join(root, 'codex-home');
+  const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
+  const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
+  writeGenericPluginHookFixture(toolkitRoot);
+  writeGenericPluginHookFixture(thirdPartyRoot);
+
+  let result = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--enable-codex-plugin-auto-refresh',
+    '--sync-source', 'codex-plugin'
+  ], {
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      CODEX_HOME: codexHome,
+      PLUGIN_ROOT: toolkitRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      CODEX_HOME: codexHome,
+      PLUGIN_ROOT: toolkitRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit updated:/);
+
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Repaired `1` third-party Codex plugin hook cache/);
+  assert.match(report.text, /generic-third-party@example-marketplace/);
+  assert.match(report.text, /third-party Codex plugin hook repair: `repaired`/);
+
+  const repairedHooks = readJson(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
+  assert.match(collectHookCommands(repairedHooks)[0].command, /^powershell(?:\.exe)?\s/i);
+  const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
+  assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
 });

@@ -17,7 +17,7 @@ Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair
 
 ## Platform Split
 
-- Codex native plugin install/update is Codex-only. Codex may verify or refresh only the Codex Toolkit native plugin cache.
+- Codex native plugin install/update is Codex-only. Codex may verify or refresh only the Codex Toolkit native plugin cache. On Windows, the same opt-in may also repair unsafe installed third-party Codex plugin hook launchers after plugin updates.
 - Claude Code native plugin install/update is Claude Code-only. The setup orchestrator verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`; use Claude Code's native Toolkit plugin flow when Claude Code reports the package is missing, stale, disabled, or untrusted.
 - The shared bridge is platform-neutral. After the native Toolkit package is installed in Codex or Claude Code, use `repo/scripts/toolkit-local-bridge.cjs` for repo auto-update, audit, OpenCode sync, and Antigravity 2 sync.
 - Hook approval differs by host. Codex setup must explain Codex hook trust; Claude Code setup must follow Claude Code's own native plugin/hook review behavior and should confirm the hook uses `--sync-source claude-plugin`.
@@ -65,7 +65,7 @@ When fallback/bootstrap is used, say that it is bootstrap-only. After the manage
 - Update report writes: current enabled/disabled state and keep current / enable / disable.
 - Update report auto-open: current enabled/disabled state and keep current / enable / disable. Do not write `update_report_open_enabled=false` unless the user explicitly chooses disable or passes an explicit disable flag.
 - Update report/log retention: current days, default 7, and keep current / use default 7 / custom positive integer.
-- Codex plugin cache auto-refresh on Codex only: current enabled/disabled state and keep current / enable / disable.
+- Codex plugin cache auto-refresh on Codex only: current enabled/disabled state and keep current / enable / disable. When enabled on Windows, trusted Toolkit hooks may also repair unsafe installed third-party Codex plugin hook launchers and report the result.
 - Claude Code plugin behavior on Claude Code only: verify/report only, no Codex mutation, and keep manual/check-only behavior / show native refresh instructions if stale.
 - OpenCode target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
 - AG2/Antigravity target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
@@ -93,14 +93,14 @@ On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable Wi
 - Sync only enabled targets.
 - Disabled or never-enabled targets must not be touched.
 - Repo auto-update must validate the configured Toolkit repo and expected remote, refuse dirty worktrees without stashing or switching, auto-switch only the managed clean checkout back to the configured branch, fast-forward update, and run hook-light validation before enabled-target sync.
-- Codex plugin cache auto-refresh is Codex-only. When enabled, startup hooks may refresh stale Codex Toolkit plugin cache content only from the configured managed `main` repo after repo validation and delegated target sync succeed.
+- Codex plugin cache auto-refresh is Codex-only. When enabled, startup hooks may refresh stale Codex Toolkit plugin cache content only from the configured managed `main` repo after repo validation and delegated target sync succeed. On Windows, the same opt-in may scan installed non-Toolkit Codex plugin caches under `CODEX_HOME/plugins/cache` and repair unsafe `.sh` hook launchers with the Toolkit wrapper.
 - Claude Code plugin cache refresh is Claude-Code-only. If it cannot be automated, report the verified metadata/cache status and the exact manual Claude Code native plugin action required.
 - Meaningful update activity should write an update report when reports are enabled; no-op updates should print concise status instead of spamming reports.
 - Toolkit-managed update reports/logs older than 7 days are cleaned up best-effort from the Toolkit-managed report/log directory only. Cleanup failures should warn but not block setup or agent startup.
 - Do not run npm, pip, package installs, or dependency installers from this skill.
 - In Codex, the only allowed marketplace operation in this flow is the Codex-only local Toolkit plugin install/update path through `setup-codex-toolkit-plugin.cjs --write` or equivalent Codex local marketplace commands.
 - In Claude Code, use Claude Code's native Toolkit plugin flow and do not call Codex marketplace commands.
-- After a requested Codex plugin install or update on Windows, repair that installed plugin root before approving hooks. If repair cannot make hooks safe, fail with the repair error instead of reporting success.
+- After a requested Codex plugin install or update on Windows, repair that installed plugin root before approving hooks. If repair cannot make hooks safe, fail with the repair error instead of reporting success. Trusted Toolkit Codex startup hooks may repeat this repair for installed non-Toolkit Codex plugin caches when Codex plugin cache auto-refresh is enabled.
 - Do not mutate arbitrary project repos by default.
 - Do not use Codex to update Claude Code or Claude Code to update Codex.
 - Refuse downgrade unless the user explicitly requests `--force-downgrade` for recovery.
@@ -108,7 +108,7 @@ On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable Wi
 
 ## n8n Plugin Path Note
 
-Official `n8n-io/skills` plugin setup is owned by n8n setup guidance. Marketplace registration alone is not installation. Verify `n8n-skills@n8n-io` is installed and enabled, not merely available. On Windows, repair and audit the installed plugin cache path under `.codex/plugins/cache/n8n-io/n8n-skills/<version>` before trusting hooks. Do not repair or audit temporary marketplace checkout paths such as `.codex/.tmp/marketplaces/n8n-io/plugins/n8n-skills`.
+Official `n8n-io/skills` plugin setup is owned by n8n setup guidance. Marketplace registration alone is not installation. Verify `n8n-skills@n8n-io` is installed and enabled, not merely available. On Windows, repair and audit the installed plugin cache path under `.codex/plugins/cache/n8n-io/n8n-skills/<version>` before trusting hooks. Trusted Toolkit Codex startup hooks may repair it again after future plugin updates when Codex plugin cache auto-refresh is enabled. Do not repair or audit temporary marketplace checkout paths such as `.codex/.tmp/marketplaces/n8n-io/plugins/n8n-skills`.
 
 Plain skill installs for OpenCode, AG2/Antigravity, or other folder-based targets do not include official n8n plugin hooks, so target repo instructions must cue `using-n8n-skills`.
 

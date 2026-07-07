@@ -113,6 +113,41 @@ function manualAdvisory(overrides = {}) {
   };
 }
 
+function hostHarnessReviewTarget(overrides = {}) {
+  return {
+    id: 'host-harness-capability-drift-review',
+    name: 'Host Harness Capability Drift Review',
+    kind: 'manual',
+    enabled: true,
+    state: 'watching',
+    review_cadence_days: 90,
+    last_reviewed_at: null,
+    review_template: 'repo/source-watch/templates/host-harness-capability-drift-review.md',
+    evidence_sources: [
+      'OpenAI Codex changelog: https://developers.openai.com/codex/changelog',
+      'Claude Code changelog: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md'
+    ],
+    toolkit_scope: [
+      'skills/**',
+      'AGENTS.md, CLAUDE.md, GEMINI.md, and .agents/rules/**',
+      'MEMORY.md guidance'
+    ],
+    classification_options: [
+      'Keep',
+      'Shrink',
+      'Move to hook',
+      'Move to host-native feature',
+      'Delete',
+      'Needs benchmark/eval before decision'
+    ],
+    recommendation: 'Run the template on cadence.',
+    action_taken: 'Review lane added. No toolkit component has been changed by source-watch.',
+    remaining_work: 'Perform the next cadence review using the template.',
+    removal_condition: 'Remove only if another maintained lane owns this review.',
+    ...overrides
+  };
+}
+
 function tempWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'source-watch-test-'));
 }
@@ -179,12 +214,13 @@ function runScript(workspace, reportRel, apiBaseUrl) {
   });
 }
 
-function runScriptWithArgs(workspace, args, apiBaseUrl) {
+function runScriptWithArgs(workspace, args, apiBaseUrl, envOverrides = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [scriptPath, '--workspace', workspace, ...args], {
       cwd: repoRoot,
       env: {
         ...process.env,
+        ...envOverrides,
         SOURCE_WATCH_GITHUB_API_BASE_URL: apiBaseUrl,
         GITHUB_TOKEN: ''
       }
@@ -364,6 +400,63 @@ test('daily source-watch reports pending manual advisory actions without GitHub 
   assert.match(report, /Pending advisory action/);
   assert.match(report, /Start implementation only after reviewing the linked design note\./);
   assert.match(report, /Create a separate implementation PR or remove this target if rejected\./);
+});
+
+test('daily source-watch reports due host-harness capability drift reviews without mutating advisory state', async () => {
+  const workspace = tempWorkspace();
+  const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
+  const advisoryRel = 'repo/source-watch/advisory-targets.json';
+  const advisoryPath = path.join(workspace, advisoryRel);
+  writeJson(advisoryPath, advisoryDoc([
+    hostHarnessReviewTarget({ last_reviewed_at: '2026-01-01' })
+  ]));
+  const beforeAdvisory = fs.readFileSync(advisoryPath, 'utf8');
+
+  await withMockGitHub(latestSha, async (apiBaseUrl, requests) => {
+    const result = await runScriptWithArgs(
+      workspace,
+      ['--report', reportRel, '--advisory-doc', advisoryRel],
+      apiBaseUrl,
+      { SOURCE_WATCH_TODAY: '2026-07-05' }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /PR needed: yes \(0 source updates, 1 advisory action\)/);
+    assert.deepEqual(requests, []);
+  });
+
+  const report = fs.readFileSync(path.join(workspace, reportRel), 'utf8');
+  assert.match(report, /Host Harness Capability Drift Review/);
+  assert.match(report, /Periodic review due/);
+  assert.match(report, /Review cadence: `90 day\(s\)`/);
+  assert.match(report, /Last reviewed: `2026-01-01`/);
+  assert.match(report, /OpenAI Codex changelog/);
+  assert.match(report, /Claude Code changelog/);
+  assert.match(report, /Classification options: Keep, Shrink, Move to hook, Move to host-native feature, Delete, Needs benchmark\/eval before decision/);
+  assert.match(report, /No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted\./);
+  assert.match(report, /separate evidence-backed PR/);
+  assert.equal(fs.readFileSync(advisoryPath, 'utf8'), beforeAdvisory);
+});
+
+test('daily source-watch ignores host-harness capability drift reviews before cadence elapses', async () => {
+  const workspace = tempWorkspace();
+  const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
+  const advisoryRel = 'repo/source-watch/advisory-targets.json';
+  writeJson(path.join(workspace, advisoryRel), advisoryDoc([
+    hostHarnessReviewTarget({ last_reviewed_at: '2026-06-01' })
+  ]));
+
+  await withMockGitHub(latestSha, async (apiBaseUrl, requests) => {
+    const result = await runScriptWithArgs(
+      workspace,
+      ['--report', reportRel, '--advisory-doc', advisoryRel],
+      apiBaseUrl,
+      { SOURCE_WATCH_TODAY: '2026-07-05' }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Checked 0 active third-party source lock\(s\) and 1 advisory target\(s\); no actionable updates found\./);
+    assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
+    assert.deepEqual(requests, []);
+  });
 });
 
 test('daily source-watch removes hidden bidirectional controls from advisory report text', async () => {

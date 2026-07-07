@@ -1,0 +1,53 @@
+{
+  "source_repo": "google-labs-code/design.md",
+  "source_ref": "main",
+  "source_commit": "ea4a3240d4c0d06778b9e39efeb553851be27c17",
+  "source_lifecycle": "active",
+  "source_role": "third_party_attribution_source",
+  "source_update_policy": "manual_review_required",
+  "public_attribution_required": true,
+  "files": [
+    {
+      "mode": "adapted",
+      "source_path": "docs/spec.md",
+      "project_path": "_projects/design/google-design-md/_main/design-md-contract.md",
+      "source_blob_sha": "41b6d085316409cfbdb44c3b7c47534230d69f54",
+      "notes": "Adapted into a concise, Toolkit-local DESIGN.md contract reference for the UI/UX skill. The Toolkit does not vendor or execute upstream package tooling."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "docs/spec.md",
+      "root_surface_path": "skills/ui-ux-secure-frontend-design/references/design-md-contract.md",
+      "source_blob_sha": "41b6d085316409cfbdb44c3b7c47534230d69f54",
+      "notes": "AI-facing shared-surface reference generated from the Toolkit-local adapted source document."
+    },
+    {
+      "mode": "adapted",
+      "source_path": "LICENSE",
+      "project_path": "_projects/design/google-design-md/LICENSE-THIRD-PARTY-NOTES.md",
+      "source_blob_sha": "15e431c225cf463f87a61f4e2a76dfb09e2bf849",
+      "notes": "Apache-2.0 license summarized in Toolkit third-party notes; the full upstream license text is not vendored here."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "README.md",
+      "notes": "Reviewed for orientation and CLI references, but not copied. Toolkit guidance is re-authored locally and avoids upstream package or CLI execution."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "package.json",
+      "notes": "Excluded because Toolkit support is documentation/reference only and must not add the upstream package as a default dependency."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "packages/cli/package.json",
+      "notes": "Excluded because the Toolkit does not vendor, install, wrap, or execute the upstream CLI."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "bun.lock",
+      "notes": "Excluded because upstream package lockfiles and dependency state are outside the Toolkit local-only reference scope."
+    }
+  ]
+}
+

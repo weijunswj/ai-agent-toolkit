@@ -171,6 +171,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--host=')) args.host = arg.slice('--host='.length);
     else if (arg === '--codex-cli') args.codexCli = next();
     else if (arg.startsWith('--codex-cli=')) args.codexCli = arg.slice('--codex-cli='.length);
+    else if (arg === '--claude-cli') args.claudeCli = next();
+    else if (arg.startsWith('--claude-cli=')) args.claudeCli = arg.slice('--claude-cli='.length);
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--verify-claude-plugin') args.verifyClaudePlugin = true;
@@ -216,11 +218,11 @@ function parseArgs(argv = process.argv.slice(2)) {
     } else if (arg === '--keep-codex-plugin-auto-refresh') args.setupChoices.codexPluginAutoRefresh = 'keep';
     else if (arg === '--claude-plugin-behavior') {
       const choice = next().toLowerCase();
-      if (!['keep', 'instructions'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
+      if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
       args.setupChoices.claudePluginBehavior = choice;
     } else if (arg.startsWith('--claude-plugin-behavior=')) {
       const choice = arg.slice('--claude-plugin-behavior='.length).toLowerCase();
-      if (!['keep', 'instructions'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
+      if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
       args.setupChoices.claudePluginBehavior = choice;
     } else if (arg === '--enable-target') {
       for (const target of parseTargetList(next())) {
@@ -312,6 +314,7 @@ function setupPlan(options = {}) {
   if (!SUPPORTED_HOSTS.includes(host)) throw new Error(`Unsupported host: ${host}`);
   const hubArgs = options.hub ? ['--hub', quote(path.resolve(options.hub))] : [];
   const codexCliArgs = options.codexCli ? ['--codex-cli', quote(options.codexCli)] : [];
+  const claudeCliArgs = options.claudeCli ? ['--claude-cli', quote(options.claudeCli)] : [];
   const retentionDays = options.updateReportRetentionDays || DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
   const choices = options.setupChoices || emptySetupChoices();
   const reportArgs = [];
@@ -383,11 +386,20 @@ function setupPlan(options = {}) {
         ],
         stop_if: 'the managed checkout is dirty, remote is unexpected, fetch fails, update is not fast-forward, or hook-light validation fails'
       },
-      host === 'claude-code' ? {
+      host === 'claude-code' ? (choices.claudePluginBehavior === 'install' ? {
+        id: 'claude_native_plugin_install',
+        title: 'Verify and install the Claude Code native plugin from this local marketplace when missing or disabled',
+        commands: [
+          relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--verify', '--json', '--repo-root', quote(repoRoot), ...claudeCliArgs]),
+          relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--write', '--json', '--scope', 'user', '--repo-root', quote(repoRoot), ...claudeCliArgs]),
+          relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--verify', '--json', '--repo-root', quote(repoRoot), ...claudeCliArgs])
+        ],
+        conditional_write: 'run --write --json only when --verify reports the plugin missing, disabled, wrong-version, or wrong-source'
+      } : {
         id: 'claude_native_plugin_cache',
         title: 'Verify Claude Code native plugin metadata and report manual native refresh action if needed',
         commands: [relNodeCommand('repo/scripts/setup-toolkit.cjs', ['--verify-claude-plugin', '--host', 'claude-code', '--repo-root', quote(repoRoot)])]
-      } : {
+      }) : {
         id: 'codex_native_plugin_cache',
         title: 'Verify and refresh only the Codex native plugin cache when stale',
         commands: [
@@ -464,6 +476,7 @@ function printHelp() {
     '  --repo-remote <url>          default: https://github.com/weijunswj/ai-agent-toolkit',
     '  --host codex|claude-code     default: codex',
     '  --codex-cli <path>           explicit Codex CLI for native plugin setup',
+    '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
     '  --managed-checkout keep|default|custom',
@@ -484,13 +497,13 @@ function printHelp() {
     '  --keep-update-report-retention-days',
     '                               preserve current retention days',
     '  --enable-codex-plugin-auto-refresh',
-    '                               let Codex hooks refresh stale Codex Toolkit cache from managed main',
+    '                               let Codex hooks refresh stale Codex Toolkit cache and repair unsafe third-party hooks on Windows',
     '  --skip-codex-plugin-auto-refresh',
     '                               leave stale Codex plugin cache refresh manual',
     '  --keep-codex-plugin-auto-refresh',
     '                               preserve Codex plugin cache auto-refresh preference',
-    '  --claude-plugin-behavior keep|instructions',
-    '                               Claude Code only; verify/report or show native refresh instructions',
+    '  --claude-plugin-behavior keep|instructions|install',
+    '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --enable-target opencode|ag2 enable and sync approved non-native bridge target',
     '  --disable-target opencode|ag2 disable target without deleting files',
     '  --keep-target opencode|ag2 preserve target state without refresh/sync',
@@ -502,6 +515,7 @@ function assertRepoRoot(repoRoot) {
   const required = [
     path.join(repoRoot, 'AGENTS.md'),
     path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'),
+    path.join(repoRoot, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'),
     path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'),
     path.join(repoRoot, 'repo', 'scripts', 'validate-toolkit.cjs'),
     path.join(repoRoot, 'repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs')
@@ -616,11 +630,15 @@ function delegateToManagedSetupIfAvailable(args) {
   console.log('');
 
   const interactive = process.stdin.isTTY;
+  // Inherit stdin directly instead of eagerly buffering it with
+  // fs.readFileSync(0) and forwarding it as `input`: that eager read blocks
+  // until EOF even when the delegated child never ends up needing an answer
+  // (e.g. every setup question was already resolved by flags), hanging any
+  // non-interactive caller whose stdin pipe is never explicitly closed.
   const result = spawnSync(process.execPath, [managedScript, ...args.argv], {
     cwd: managedRoot,
     encoding: interactive ? undefined : 'utf8',
-    input: interactive ? undefined : fs.readFileSync(0, 'utf8'),
-    stdio: interactive ? 'inherit' : ['pipe', 'pipe', 'pipe'],
+    stdio: interactive ? 'inherit' : ['inherit', 'pipe', 'pipe'],
     windowsHide: true
   });
   if (result.error) throw result.error;
@@ -799,7 +817,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'updateReportOpen') return 'keep';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
-  if (key === 'claudePluginBehavior') return 'keep';
+  if (key === 'claudePluginBehavior') return 'install';
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode || 'keep';
   if (key === 'ag2Target') return args.setupChoices.targets.ag2 || 'keep';
   return 'keep';
@@ -857,8 +875,8 @@ function setupQuestionSpecs(args, current) {
   if (args.host === 'codex') {
     specs.push({
       key: 'codexPluginAutoRefresh',
-      title: 'Codex plugin cache auto-refresh',
-      prompt: 'Codex plugin cache auto-refresh choice',
+      title: 'Codex plugin cache auto-refresh and Windows hook repair',
+      prompt: 'Codex plugin cache auto-refresh and Windows hook repair choice',
       choices: ['keep', 'enable', 'disable'],
       recommended: recommendedChoice('codexPluginAutoRefresh', current, args),
       selected: args.setupChoices.codexPluginAutoRefresh,
@@ -869,10 +887,10 @@ function setupQuestionSpecs(args, current) {
       key: 'claudePluginBehavior',
       title: 'Claude Code plugin behavior',
       prompt: 'Claude Code plugin behavior choice',
-      choices: ['keep', 'instructions'],
+      choices: ['keep', 'instructions', 'install'],
       recommended: recommendedChoice('claudePluginBehavior', current, args),
       selected: args.setupChoices.claudePluginBehavior,
-      current: `${current.nativePlugin.status}; verify/report only, no Codex mutation`
+      current: `${current.nativePlugin.status}; install runs claude plugin marketplace add + install --scope user, no Codex mutation`
     });
   }
 
@@ -1006,8 +1024,10 @@ async function answerSetupQuestionBank(args, current) {
     console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
   }
 
-  const lines = !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
-  const rl = lines ? null : readline.createInterface({ input: process.stdin, output: process.stdout });
+  const needsPromptedAnswers = missing.length > 0
+    || (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit);
+  const lines = needsPromptedAnswers && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
+  const rl = needsPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
     for (const spec of missing) {
       const answer = await promptForChoice(spec, lines, rl);
@@ -1289,6 +1309,77 @@ function verifyClaudeNativePluginMetadata(args) {
   };
 }
 
+function setupClaudeArgs(args, mode) {
+  const extra = [mode, '--json', '--repo-root', args.repoRoot];
+  if (mode === '--write') extra.push('--scope', 'user');
+  if (args.claudeCli) extra.push('--claude-cli', args.claudeCli);
+  return nodeScriptArgs('repo/scripts/setup-claude-toolkit-plugin.cjs', extra);
+}
+
+function runClaudeNativePluginSetup(args) {
+  const verify = runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupClaudeArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: 120000, allowFailure: true }
+  );
+  const expectedVersion = expectedToolkitVersion(args.repoRoot, 'claude-code');
+  const manifestPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
+  if (verify.status === 0) {
+    process.stdout.write(verify.stdout || '');
+    const summary = parseJsonFromOutput(verify.stdout);
+    return {
+      status: 'already fresh',
+      manifest_path: manifestPath,
+      expected_version: expectedVersion,
+      manifest_version: summary.version || expectedVersion,
+      installed_version: summary.version || expectedVersion,
+      scope: summary.scope || 'user',
+      updated_this_run: false,
+      restart_required: false,
+      hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
+    };
+  }
+  process.stderr.write(verify.stderr || '');
+
+  runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --write --json --scope user',
+    process.execPath,
+    setupClaudeArgs(args, '--write'),
+    { cwd: args.repoRoot, timeout: 180000 }
+  );
+  const finalVerify = runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupClaudeArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: 120000 }
+  );
+  process.stdout.write(finalVerify.stdout || '');
+  const summary = parseJsonFromOutput(finalVerify.stdout);
+  return {
+    status: 'refreshed',
+    manifest_path: manifestPath,
+    expected_version: expectedVersion,
+    manifest_version: summary.version || expectedVersion,
+    installed_version: summary.version || expectedVersion,
+    scope: summary.scope || 'user',
+    updated_this_run: true,
+    restart_required: true,
+    hook_trust_action: 'approve the Claude Code plugin trust prompt when Claude Code prompts'
+  };
+}
+
+function runClaudeNativePluginVerify(args) {
+  const result = runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupClaudeArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: 120000 }
+  );
+  process.stdout.write(result.stdout || '');
+  return parseJsonFromOutput(result.stdout);
+}
+
 function bridgeArgs(args, extraArgs = []) {
   const result = nodeScriptArgs('repo/scripts/toolkit-local-bridge.cjs', extraArgs);
   if (args.hub) result.push('--hub', args.hub);
@@ -1542,6 +1633,7 @@ function printFinalSummary({ args, current, managed, nativeCache, audit, questio
     console.log(`Claude expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Claude manifest Toolkit version: ${unknown(nativeCache.manifest_version)}`);
     console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
+    if (nativeCache.scope) console.log(`Claude plugin install scope: ${nativeCache.scope}`);
     console.log(`Claude plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
     console.log(`Claude restart required: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
@@ -1582,7 +1674,7 @@ async function execute(args) {
   const validationResults = [];
   const managed = verifyAndUpdateTrustedRepo(args, validationResults);
   const nativeCache = args.host === 'claude-code'
-    ? verifyClaudeNativePluginMetadata(args)
+    ? (args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyClaudeNativePluginMetadata(args))
     : runCodexNativePluginSetup(args);
   runLiteValidation(args, validationResults);
   writeBridgePreferences(args);
@@ -1599,7 +1691,7 @@ async function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (args.verifyClaudePlugin) {
-    verifyClaudeNativePluginMetadata(args);
+    runClaudeNativePluginVerify(args);
     return 0;
   }
   const delegatedCode = delegateToManagedSetupIfAvailable(args);

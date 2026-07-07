@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, spawn } = require('node:child_process');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -46,13 +46,13 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.2.5',
+    version: '2.3.4',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.2.5',
+    version: '2.3.4',
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
@@ -75,7 +75,17 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.2.5', cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_message: 'review Codex hook trust if prompted' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.4', cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_message: 'review Codex hook trust if prompted' }));",
+    'process.exit(0);',
+    ''
+  ].join('\n'));
+  writeFile(path.join(root, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'), [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_HELPER_ARGS.log'), `${process.argv.slice(2).join(' ')}\\n`);",
+    "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.4', scope: 'user' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -144,7 +154,7 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createFakeManagedSetupScript(root, version = '2.2.5', options = {}) {
+function createFakeManagedSetupScript(root, version = '2.3.4', options = {}) {
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
   const emitQuestionBank = options.emitQuestionBank !== false;
@@ -191,6 +201,45 @@ function runSetupScript(scriptPath, args, options = {}) {
 
 function flattenCommands(plan) {
   return plan.steps.flatMap((step) => step.commands || []);
+}
+
+// Regression harness for the stdin-hang bug: a plain spawnSync call (even
+// with an explicit non-TTY stdio array) auto-closes an unwritten stdin pipe,
+// so it can never reproduce "a non-interactive harness whose stdin pipe is
+// left open forever." Only an async spawn() with a stdin pipe that the
+// parent deliberately never writes to or ends reproduces that condition.
+function runWithUnclosedStdin(scriptPath, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      cwd: options.cwd || repoRoot,
+      env: { ...process.env, ...(options.env || {}) },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    const deadlineMs = options.deadlineMs || 15000;
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(
+        `${path.basename(scriptPath)} did not exit within ${deadlineMs}ms even though every setup question ` +
+        `was already answered; it appears blocked on an unconditional stdin read.\nstdout:\n${stdout}\nstderr:\n${stderr}`
+      ));
+    }, deadlineMs);
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      child.stdin.destroy();
+      reject(error);
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      child.stdin.destroy();
+      resolve({ code, stdout, stderr });
+    });
+    // Deliberately never write to or end child.stdin.
+  });
 }
 
 test('setup toolkit plan shows one upfront checklist and managed main checkout defaults', () => {
@@ -310,8 +359,8 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
   assert.match(result.stdout, /Preference\/target writes before answers: no/);
   assert.match(result.stdout, /Codex plugin cache path:/);
-  assert.match(result.stdout, /Codex expected Toolkit version: 2\.2\.5/);
-  assert.match(result.stdout, /Codex installed Toolkit version: 2\.2\.5/);
+  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.4/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.4/);
   assert.match(result.stdout, /Codex plugin status: already fresh/);
   assert.match(result.stdout, /Codex plugin updated this run: no/);
   assert.match(result.stdout, /Codex restart required: no/);
@@ -343,6 +392,25 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(bridgeLog, /--enable-codex-plugin-auto-refresh --write/);
   assert.match(bridgeLog, /--enable-target ag2 --write/);
   assert.doesNotMatch(bridgeLog, /--enable-target opencode/);
+});
+
+test('setup execute with every question pre-answered does not block on an unclosed non-interactive stdin pipe', async () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+
+  const result = await runWithUnclosedStdin(script, [
+    '--execute',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-codex-plugin-auto-refresh'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /# setup toolkit final summary/);
+  assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
 });
 
 test('setup execute without explicit choices pauses before preference or target writes', () => {
@@ -464,7 +532,7 @@ test('setup final summary distinguishes fast-forwarded managed checkout', () => 
 
 test('active setup command delegates to managed checkout script when it exists', () => {
   const root = tmpRoot();
-  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.2.5');
+  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.3.4');
   const beforeStatus = runTestGit(repoRoot, ['status', '--short']);
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -479,13 +547,26 @@ test('active setup command delegates to managed checkout script when it exists',
   assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.match(result.stdout, /Managed checkout commit: [0-9a-f]{40}/);
   assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
-  assert.match(result.stdout, /managed setup script version 2\.2\.5/);
+  assert.match(result.stdout, /managed setup script version 2\.3\.4/);
   assert.match(result.stdout, /# setup toolkit question bank/);
+});
+
+test('active setup command does not block on stdin before delegating to the managed checkout', async () => {
+  const root = tmpRoot();
+  createFakeManagedSetupScript(root, '2.3.4', { emitQuestionBank: false, exitCode: 0 });
+
+  const result = await runWithUnclosedStdin(script, ['--execute', '--profile', 'auto-main'], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /# setup toolkit managed route/);
+  assert.match(result.stdout, /managed setup script version 2\.3\.4/);
 });
 
 test('managed question-bank pause is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.2.5');
+  createFakeManagedSetupScript(root, '2.3.4');
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
   });
@@ -499,7 +580,7 @@ test('managed question-bank pause is not bypassed with active fallback', () => {
 
 test('managed safety blocker is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.2.5', {
+  createFakeManagedSetupScript(root, '2.3.4', {
     emitQuestionBank: false,
     exitCode: 1,
     extraLines: ["console.error('managed safety blocker');"]
@@ -713,7 +794,7 @@ test('setup execute refuses local managed checkout divergence before plugin setu
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false, 'plugin setup must not run from local-only commits');
 });
 
-test('claude-code setup execute verifies Claude plugin metadata and skips Codex helper', () => {
+test('claude-code setup execute with instructions behavior verifies Claude plugin metadata and skips Codex helper', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run([
@@ -722,6 +803,7 @@ test('claude-code setup execute verifies Claude plugin metadata and skips Codex 
     '--repo-root', setupRepo,
     '--repo-remote', origin,
     '--yes-recommended',
+    '--claude-plugin-behavior', 'instructions',
     '--skip-update-report-open',
     '--enable-target', 'ag2'
   ], {
@@ -732,8 +814,8 @@ test('claude-code setup execute verifies Claude plugin metadata and skips Codex 
   assert.match(result.stdout, /Claude Code native plugin metadata verified/);
   assert.match(result.stdout, /## Claude Code native plugin/);
   assert.match(result.stdout, /Claude plugin manifest path:/);
-  assert.match(result.stdout, /Claude expected Toolkit version: 2\.2\.5/);
-  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.2\.5/);
+  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.4/);
+  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.4/);
   assert.match(result.stdout, /Claude plugin status: metadata present/);
   assert.match(result.stdout, /Claude plugin updated this run: no/);
   assert.match(result.stdout, /Claude restart required: no/);
@@ -745,6 +827,52 @@ test('claude-code setup execute verifies Claude plugin metadata and skips Codex 
   assert.match(bridgeLog, /--enable-repo-auto-update/);
   assert.doesNotMatch(bridgeLog, /--enable-codex-plugin-auto-refresh/);
   assert.match(bridgeLog, /--enable-target ag2 --write/);
+});
+
+test('--verify-claude-plugin delegates to the Claude helper verify path', () => {
+  const root = tmpRoot();
+  const { setupRepo } = createGitBackedSetupRepo(root);
+  const fakeClaudeCli = path.join(root, 'fake claude cli.cmd');
+  const result = run([
+    '--verify-claude-plugin',
+    '--host', 'claude-code',
+    '--repo-root', setupRepo,
+    '--claude-cli', fakeClaudeCli
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /"ok":true|"ok": true/);
+  assert.doesNotMatch(result.stdout, /Claude Code native plugin metadata verified/);
+  const helperLog = fs.readFileSync(path.join(setupRepo, 'CLAUDE_PLUGIN_HELPER_ARGS.log'), 'utf8');
+  assert.match(helperLog, /--verify --json/);
+  assert.match(helperLog, new RegExp(`--repo-root ${escapeRegExp(setupRepo)}`));
+  assert.match(helperLog, new RegExp(`--claude-cli ${escapeRegExp(fakeClaudeCli)}`));
+  assert.equal(fs.existsSync(path.join(setupRepo, 'CLAUDE_PLUGIN_SETUP.log')), false, 'verify must not invoke --write');
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false, 'Claude verify must not call the Codex helper');
+});
+
+test('claude-code setup execute defaults to install behavior and calls the Claude helper, not the Codex helper', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const result = run([
+    '--execute',
+    '--host', 'claude-code',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--skip-update-report-open'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Claude Code plugin behavior:[\s\S]*recommended: install/);
+  assert.match(result.stdout, /- Claude Code plugin behavior: install/);
+  assert.match(result.stdout, /Claude plugin status: already fresh/);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false, 'Claude install setup must not call the Codex helper');
+  assert.equal(fs.existsSync(path.join(setupRepo, 'CLAUDE_PLUGIN_SETUP.log')), false, 'verify-only pass must not invoke --write');
 });
 
 test('setup final summary distinguishes target keep skip enable-sync and disable choices', () => {

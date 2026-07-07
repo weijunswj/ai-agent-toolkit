@@ -40,10 +40,10 @@ function copyPackageFingerprint(sourceRoot, cacheRoot) {
 }
 
 function writeInstalledCache(codexHome, options = {}) {
-  const version = options.version || '2.2.5';
+  const version = options.version || setup.EXPECTED_TOOLKIT_VERSION;
   const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', version);
   copyPackageFingerprint(repoRoot, root);
-  if (version !== '2.2.5') {
+  if (version !== setup.EXPECTED_TOOLKIT_VERSION) {
     const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     manifest.version = version;
@@ -86,7 +86,7 @@ function writeCodexConfig(codexHome, options = {}) {
 }
 
 function installedList(options = {}) {
-  const version = options.version || '2.2.5';
+  const version = options.version || setup.EXPECTED_TOOLKIT_VERSION;
   return {
     installed: [
       {
@@ -109,6 +109,7 @@ function installedList(options = {}) {
 
 function writeFakeHangingCodex(codexHome, options = {}) {
   const fakeCodexScript = path.join(codexHome, 'fake-codex.cjs');
+  const expectedToolkitVersion = setup.EXPECTED_TOOLKIT_VERSION;
   writeJson(path.join(codexHome, 'state.json'), {
     repoRoot: '',
     installed: Boolean(options.initialInstalled)
@@ -156,7 +157,7 @@ function copyPackageFingerprint(repoRoot, cacheRoot) {
 }
 
 function installCache(repoRoot) {
-  const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '2.2.5');
+  const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', ${JSON.stringify(expectedToolkitVersion)});
   fs.rmSync(root, { recursive: true, force: true });
   copyPackageFingerprint(repoRoot, root);
   if (omitSessionStart) {
@@ -185,7 +186,7 @@ if (args[0] === 'plugin' && args[1] === 'list') {
         pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
         name: 'ai-agent-toolkit',
         marketplaceName: 'ai-agent-toolkit-local',
-        version: '2.2.5',
+        version: ${JSON.stringify(expectedToolkitVersion)},
         installed: true,
         enabled: true,
         authPolicy: 'ON_USE',
@@ -292,7 +293,7 @@ test('Codex Toolkit plugin source validates manifest icon assets', () => {
   assert.deepEqual(setup.validateRepoPluginSource(repoRoot), []);
 });
 
-test('Codex Toolkit plugin setup verifier accepts active 2.2.5 install with SessionStart cache', () => {
+test('Codex Toolkit plugin setup verifier accepts active expected-version install with SessionStart cache', () => {
   const codexHome = tmpRoot();
   const cacheRoot = writeInstalledCache(codexHome);
 
@@ -315,7 +316,7 @@ test('Codex Toolkit plugin setup verifier rejects stale, disabled, or hookless i
     repoRoot
   });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /expected version 2\.2\.5/i);
+  assert.match(state.errors.join('\n'), /expected version 2\.3\.4/i);
 
   codexHome = tmpRoot();
   writeInstalledCache(codexHome);
@@ -334,6 +335,20 @@ test('Codex Toolkit plugin setup verifier rejects stale, disabled, or hookless i
   });
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /SessionStart/i);
+});
+
+test('Codex Toolkit plugin setup verifier refuses implicit downgrade from newer install', () => {
+  const codexHome = tmpRoot();
+  writeInstalledCache(codexHome, { version: '9.9.9' });
+
+  const state = setup.evaluateCodexToolkitPluginState(installedList({ version: '9.9.9' }), {
+    codexHome,
+    repoRoot
+  });
+
+  assert.equal(state.ok, false);
+  assert.equal(state.refusesDowngrade, true);
+  assert.match(state.errors.join('\n'), /Refusing downgrade/i);
 });
 
 test('Codex Toolkit plugin setup verifier rejects same-version stale cache content', () => {
@@ -409,7 +424,7 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
           pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
           name: 'ai-agent-toolkit',
           marketplaceName: 'ai-agent-toolkit-local',
-          version: '2.2.5',
+          version: '2.3.4',
           installed: true,
           enabled: true,
           authPolicy,
@@ -571,7 +586,7 @@ test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
   assert.match(bridgeDoc, /polls `codex plugin list --available --json`/);
   assert.match(bridgeDoc, /did not exit cleanly/);
   assert.match(bridgeDoc, /codex plugin list --available --json/);
-  assert.match(bridgeDoc, /plugins\/cache\/ai-agent-toolkit-local\/ai-agent-toolkit\/2\.2\.5/);
+  assert.match(bridgeDoc, /plugins\/cache\/ai-agent-toolkit-local\/ai-agent-toolkit\/2\.3\.2/);
   assert.match(bridgeDoc, /SessionStart/);
 });
 

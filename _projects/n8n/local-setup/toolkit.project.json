@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.5.1",
+  "version": "3.8.1",
   "version_policy": "semver",
-  "version_notes": "Adds OpenAI invocation-policy metadata so n8n-local-setup stays explicit-only while n8n-agent-rules remains the implicit safety router.",
+  "version_notes": "Changes local Windows recovery backups to generate restore-compatible folders without default sibling zip packages, while preserving legacy zip restore compatibility.",
   "outputs": [
     {
       "kind": "curated",
@@ -82,6 +82,10 @@
         {
           "from": "./Page%203%20-%20Production%20Self-Hosting%20With%20Cloudflare%20Tunnel.md",
           "to": "production-cloudflare-tunnel.md"
+        },
+        {
+          "from": "./templates/production-server-backups/",
+          "to": "../../templates/production-server-backups/"
         }
       ]
     },
@@ -109,6 +113,10 @@
           "to": "../../templates/production-cloudflare-stack/.env.example"
         },
         {
+          "from": "./templates/production-cloudflare-stack/.gitignore",
+          "to": "../../templates/production-cloudflare-stack/.gitignore"
+        },
+        {
           "from": "./templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
           "to": "../../templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd"
         },
@@ -119,6 +127,10 @@
         {
           "from": "](./templates/production-cloudflare-stack/)",
           "to": "](../../templates/production-cloudflare-stack/)"
+        },
+        {
+          "from": "./templates/production-server-backups/",
+          "to": "../../templates/production-server-backups/"
         }
       ]
     },
@@ -234,6 +246,13 @@
     },
     {
       "kind": "copy",
+      "source": "_main/templates/local-stack/.gitignore",
+      "output": "skills/n8n-local-setup/templates/local-stack/.gitignore",
+      "notes": "Local stack runtime ignore template for private env, backups, imports, and credential export artifacts.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
       "source": "_main/templates/local-stack/_n8n-local.cmd",
       "output": "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "notes": "Windows launcher for the guided local n8n stack menu.",
@@ -269,6 +288,13 @@
     },
     {
       "kind": "copy",
+      "source": "_main/templates/production-cloudflare-stack/.gitignore",
+      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore",
+      "notes": "Production Cloudflare stack runtime ignore template for private env, backups, logs, dumps, archives, and credential export artifacts.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
       "source": "_main/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
       "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
       "notes": "Windows launcher for the guided production Cloudflare Tunnel stack menu.",
@@ -278,7 +304,21 @@
       "kind": "copy",
       "source": "_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
       "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
-      "notes": "PowerShell menu for production Cloudflare Tunnel preflight, start/stop, restart, status, logs, Postgres backup, image updates, and production URL display.",
+      "notes": "PowerShell menu for production Cloudflare Tunnel preflight, start/stop, restart, status, logs, all-inclusive manual backup, image updates, and production URL display.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/production-server-backups/README.md",
+      "output": "skills/n8n-local-setup/templates/production-server-backups/README.md",
+      "notes": "Linux production n8n server backup template guide for Hostinger/Coolify or company-server deployments.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/production-server-backups/n8n-production-backup.sh.template",
+      "output": "skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template",
+      "notes": "Copy-ready Linux production n8n backup shell template with n8n CLI workflow and credential exports, database backup where applicable, manifest, logging, restore notes, and retention cleanup.",
       "fidelity": "exact"
     },
     {
@@ -369,13 +409,17 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
       "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
       "skills/n8n-local-setup/templates/local-stack/.env.example",
+      "skills/n8n-local-setup/templates/local-stack/.gitignore",
       "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
       "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
       "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
       "skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml",
       "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
+      "skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore",
       "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
       "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
+      "skills/n8n-local-setup/templates/production-server-backups/README.md",
+      "skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md",
       "skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md",

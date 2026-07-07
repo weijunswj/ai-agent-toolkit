@@ -35,7 +35,7 @@ A localhost workflow is not done until both are true:
 
 ## Long-Running Localhost Server Rule
 
-Do not run persistent server commands such as `npm run dev`, `npm run start`, `uvicorn`, `flask run`, `python -m http.server`, `pnpm dev`, `yarn dev`, or `bun run dev` in the foreground unless the user explicitly asks for an interactive foreground terminal.
+Do not run persistent server commands such as `npm run dev`, `npm run start`, `npm run platform:start`, `uvicorn`, `flask run`, `python -m http.server`, `pnpm dev`, `yarn dev`, or `bun run dev` in the foreground unless the user explicitly asks for an interactive foreground terminal.
 
 Default behavior for persistent localhost servers:
 
@@ -51,7 +51,7 @@ If an agent must run a command that may be long-running, use one of:
 - a detached/background launch.
 - an explicit user-approved foreground run.
 
-If a command produces no readiness signal within the bounded wait, stop and summarize. Do not keep waiting.
+If a command produces no readiness signal within the bounded wait, stop and summarize. Do not "just wait".
 
 ## Workflow
 
@@ -86,7 +86,7 @@ if ($conn) { Get-Process -Id $conn.OwningProcess | Select-Object Id,ProcessName,
 Before launching, check whether the intended port is already listening. If the port is already listening, health-check it first.
 
 - If health is OK, do not start another server.
-- If a stale/broken process owns the port or a launcher is stale, ask before killing unless the process was clearly created by the current run and safe to stop.
+- If a stale/broken process owns the port or a launcher is stale, ask before killing unless it is clearly created by the current run and safe to stop.
 - Use process IDs in local notes.
 - Do not over-log private command lines if they contain secrets.
 - Reuse, stop, or change port only after understanding whether the process is the same app.
@@ -136,13 +136,12 @@ Use this when the service is long-running and the working command is known. A re
 
 1. Check the port.
 2. Normalize duplicate process environment keys before `Start-Process`.
-3. Use a single quoted `Start-Process -ArgumentList` string when passing script paths, app roots, or commands that may contain spaces. Array arguments can be mis-passed by wrappers in some Windows launch paths and split paths like `C:\Users\xPass\GitHub Projects\...`.
-4. Start the server with stdout/stderr logs.
-5. Poll a documented health endpoint such as `/api/health`, or the root URL when no health endpoint exists.
-6. After the launch shell command returns, re-check the port or HTTP endpoint before claiming the server persists.
-7. If a Codex sandbox launch does not persist after the shell command returns, retry with an escalated/unsandboxed launch when the environment supports it, then repeat the post-return port or HTTP check.
-8. Keep restart and verification as separate steps: stop or reuse an old server, start the new server, then health-check with a short timeout. Do not bundle stop/start/health into one long command where one hung step hides the actual state.
-9. Report the exact URL, command, process id, and log paths.
+3. Start the server with stdout/stderr logs.
+4. Poll a documented health endpoint such as `/api/health`, or the root URL when no health endpoint exists.
+5. After the launch shell command returns, re-check the port or HTTP endpoint before claiming the server persists.
+6. If a Codex sandbox launch does not persist after the shell command returns, retry with an escalated/unsandboxed launch when the environment supports it, then repeat the post-return port or HTTP check.
+7. Keep restart and verification as separate steps: stop or reuse an old server, start the new server, then health-check with a short timeout. Do not bundle stop/start/health into one long command where one hung step hides the actual state.
+8. Report the exact URL, command, process id, and log paths.
 
 Readiness checks must be bounded:
 
@@ -152,25 +151,69 @@ Readiness checks must be bounded:
 - Never rely only on `Start-Process` exit state as proof the app is running.
 - If not ready by timeout, stop and report the command attempted, safe log tail, port status, process status, and next manual action. Do not keep waiting.
 
+### 6. Preferred Windows-safe launcher example
+
+Prefer a temporary `.ps1` launcher script when the startup logic contains quotes, `#`, `=`, `$`, JSON, `.IndexOf("=")`, `.StartsWith("#")`, environment parsing, or multiline script logic. Avoid deeply nested one-line PowerShell strings inside `Start-Process -ArgumentList` for those cases.
+
+Good patterns:
+
+- Write a temporary `.ps1` launcher script and call it with `Start-Process powershell.exe -ArgumentList @("-NoExit", "-ExecutionPolicy", "Bypass", "-File", "<launcher.ps1>")` when an interactive visible window is explicitly wanted.
+- For automated agent launches, use `Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $launcher)` with `-WindowStyle Hidden` and redirected logs.
+- Use `Start-Job` for short background setup only, not persistent server ownership unless logs/process lifecycle are clear.
+- Use a simple `cmd /c` or PowerShell command only when no nested quoting is needed.
+
+If a temporary launcher script is created:
+
+- Place it in an ignored temp/logs folder when possible, such as `.tmp/localhost/`, `tmp/`, or another repo-approved local log folder.
+- Avoid committing it unless intentionally added as repo tooling.
+- Clean it up when no longer needed, or explain why it remains.
+
+This example creates a temporary launcher file, sets environment variables without printing secrets, redirects logs, polls readiness, and fails fast after timeout with a safe log tail.
+
 ```powershell
 $app = Resolve-Path .
 $port = 3000
-$url = "http://localhost:$port/api/health"
-$log = Join-Path $app 'dev-server.log'
-$err = Join-Path $app 'dev-server.err.log'
+$url = "http://127.0.0.1:$port/health"
+$runDir = Join-Path $app '.tmp/localhost'
+New-Item -ItemType Directory -Force -Path $runDir | Out-Null
+
+$launcher = Join-Path $runDir 'dev-server.launch.ps1'
+$log = Join-Path $runDir 'dev-server.out.log'
+$err = Join-Path $runDir 'dev-server.err.log'
 
 $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($conn) { Get-Process -Id $conn.OwningProcess | Select-Object Id,ProcessName,Path }
+if ($conn) {
+  try {
+    Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5 | Out-Null
+    [pscustomobject]@{ Ready = $true; Url = $url; ReusedProcessId = $conn.OwningProcess }
+    return
+  } catch {
+    Get-Process -Id $conn.OwningProcess | Select-Object Id,ProcessName,Path
+    throw "Port $port is already listening but health failed. Ask before killing the owner."
+  }
+}
 
 $processEnv = [Environment]::GetEnvironmentVariables("Process")
 if ($processEnv.Contains("Path") -and $processEnv.Contains("PATH")) {
   [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
 }
 
-$cmd = (Get-Command pnpm.cmd -ErrorAction Stop).Source
-$startCommand = "Set-Location '$app'; & '$cmd' dev"
+$npm = (Get-Command npm.cmd -ErrorAction Stop).Source
+
+@"
+`$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath '$app'
+
+# Set required non-secret dev env values here. Never print secrets.
+`$env:NODE_ENV = 'development'
+`$env:HOST = '127.0.0.1'
+`$env:PORT = '$port'
+
+& '$npm' run dev
+"@ | Set-Content -LiteralPath $launcher -Encoding UTF8
+
 $proc = Start-Process -FilePath 'powershell.exe' `
-  -ArgumentList "-NoProfile -Command `$ErrorActionPreference = 'Stop'; $startCommand" `
+  -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $launcher) `
   -WorkingDirectory $app `
   -RedirectStandardOutput $log `
   -RedirectStandardError $err `
@@ -184,9 +227,29 @@ do {
     Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5 | Out-Null
     $ready = $true
   } catch {
-    $ready = $false
+    $tcp = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    $ready = [bool]$tcp
   }
 } until ($ready -or (Get-Date) -gt $deadline)
+
+if (-not $ready) {
+  $tail = @()
+  foreach ($path in @($log, $err)) {
+    if (Test-Path $path) { $tail += Get-Content -LiteralPath $path -Tail 40 }
+  }
+  $tcp = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+  $procState = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,HasExited
+  [pscustomobject]@{
+    Ready = $false
+    Url = $url
+    CommandAttempted = "npm run dev"
+    ProcessStatus = $procState
+    PortStatus = $tcp
+    SafeLogTail = ($tail -join "`n")
+    NextManualAction = "Inspect sanitized logs and run the documented command manually if needed."
+  }
+  return
+}
 
 [pscustomobject]@{
   Ready = $ready
@@ -197,7 +260,13 @@ do {
 }
 ```
 
-Replace `pnpm dev` with the project's actual working command.
+Replace `npm run dev` with the project's actual working command. Keep sensitive values out of the launcher body when possible; prefer reading existing local `.env` through the app's normal config loader instead of echoing env values.
+
+Avoid this fragile nested-quote anti-pattern:
+
+```powershell
+Start-Process powershell -ArgumentList "-Command", "<large quoted script with `$line.IndexOf("=")` and `$line.StartsWith("#")`>"
+```
 
 Python localhost apps need the same quoting discipline, especially when the repo path contains spaces:
 
@@ -246,11 +315,11 @@ do {
 
 If `python.exe` and `py.exe` are unavailable, substitute a discovered platform-provided Python executable for `$python` rather than hardcoding a user-specific path in reusable instructions.
 
-### 6. Verify from logs and HTTP
+### 7. Verify from logs and HTTP
 
 ```powershell
-Get-Content -Raw .\dev-server.log
-Get-Content -Raw .\dev-server.err.log
+Get-Content -Tail 40 .\.tmp\localhost\dev-server.out.log
+Get-Content -Tail 40 .\.tmp\localhost\dev-server.err.log
 Invoke-WebRequest -Uri 'http://localhost:3000' -UseBasicParsing -TimeoutSec 15
 ```
 
@@ -262,6 +331,13 @@ http://localhost:8000/api/health
 ```
 
 Treat setup as incomplete until the HTTP check succeeds or the user explicitly accepts a partial result.
+
+## Log Handling Rules
+
+- Redirect stdout/stderr to local logs for server startup diagnosis.
+- Tail only a small safe excerpt, for example the last 30-80 lines.
+- Do not print secrets: DATABASE_URL, OAuth secrets, tokens, cookies, callback URLs with query params, launch tokens, private customer/profile/pricing data, generated quote contents, or raw private payloads.
+- If logs may contain secrets, sanitize or report only safe categories such as "database connection error", "missing env var name", "port already bound", "migration failed", or "syntax error in launcher wrapper".
 
 ## Windows Failure Patterns
 
@@ -292,6 +368,12 @@ if ($processEnv.Contains("Path") -and $processEnv.Contains("PATH")) {
 
 Do this only for the current process before `Start-Process`; do not edit machine or user environment variables for this workaround.
 
+### Fragile nested PowerShell quoting
+
+Avoid deeply nested one-line PowerShell strings inside `Start-Process -ArgumentList` when the command contains quotes, `#`, `=`, `$`, JSON, `.IndexOf("=")`, `.StartsWith("#")`, env parsing, or multiline script logic. Quote loss inside nested command strings can turn valid expressions into invalid parse fragments such as `$line.IndexOf(=)` or `$line.StartsWith(#)`.
+
+Prefer the temporary `.ps1` launcher pattern above and call it through `-File`. Never rely only on `Start-Process` exit state as proof the app is running.
+
 ### Sandbox `spawn EPERM`
 
 If the dev server fails inside an agent sandbox with `spawn EPERM`, request elevated/unsandboxed execution if the environment supports it. Do not keep retrying the same command inside the same failing sandbox.
@@ -314,7 +396,6 @@ Get-Process python,pip,node,npm,pnpm,yarn,bun -ErrorAction SilentlyContinue | Se
 ```
 
 Do not kill unrelated user processes. Stop a process only when it is clearly from the current agent run or after the user approves the specific PID/process name. After stopping a stale process, re-check the port or health endpoint with a short timeout before restarting.
-
 ### Port conflict
 
 If the target port is already bound, inspect the owning process. Reuse, stop, or change port only after understanding whether the process is the same app.
@@ -323,14 +404,37 @@ If the target port is already bound, inspect the owning process. Reuse, stop, or
 
 Re-run the exact command in the foreground with the real shell and capture stdout/stderr directly. Empty redirected logs often mean the wrapper process died before the app started.
 
+## Local UAT Launcher Checklist
+
+For a two-server local UAT such as a platform API plus an app:
+
+1. Start dependency services first, such as Docker/Postgres.
+2. Run DB preflight before migrations.
+3. Run migrations before app start.
+4. Start app servers separately.
+5. Health-check each URL independently.
+6. Use `127.0.0.1` consistently if the project requires it.
+7. Return a compact status block with dependency status, app server status, health status, URLs, and what remains manual.
+
+## Anti-patterns
+
+Avoid:
+
+- running a persistent server in the foreground and waiting indefinitely.
+- nested PowerShell command strings with complex quotes.
+- assuming successful process launch means server is ready.
+- restarting a server repeatedly without checking if the port is already bound.
+- printing full env or DB URLs during diagnosis.
+
 ## Reporting
 
 When finishing localhost setup, include:
 
-- whether the service is up.
-- the URL checked.
+- dependency status, when dependency services were part of the task.
+- app server status.
+- health status and URL checked.
 - the exact command that worked.
-- whether a workaround was needed for execution policy, Corepack, sandbox spawning, package-manager path, or port conflicts.
+- whether a workaround was needed for execution policy, Corepack, sandbox spawning, package-manager path, port conflicts, or PowerShell launcher safety.
 - where stdout/stderr logs live.
 - any remaining manual steps.
 
@@ -340,14 +444,16 @@ Use this compact format:
 ## Done
 
 ### Status
-- Service: Up / Not up / Partially started.
-- URL checked: <url>.
+- Dependencies: Up / Not checked / Not required / Blocked.
+- App server: Up / Not up / Partially started.
+- Health: Passing / Failing / Timed out.
+- URLs: <urls checked>.
 - Working command: `<command>`.
 
 ### Notes
 - Workaround used: <none / details>.
 - Logs: <paths>.
-- Caveats: <anything unresolved>.
+- Manual remaining: <anything unresolved>.
 ```
 
 ## Quality Checks

@@ -597,6 +597,7 @@ function repairPluginRoot(pluginRoot, options = {}) {
 
   const hooksJson = readJsonFile(hooksJsonPath, 'hooks/hooks.json');
   const entries = collectHookCommandEntries(hooksJson);
+  const n8nPlugin = isN8nSkillsPlugin(pluginRoot, effectiveOptions);
   let needsWrapper = false;
   let changedHooksJson = false;
 
@@ -622,7 +623,7 @@ function repairPluginRoot(pluginRoot, options = {}) {
   }
 
   if (needsWrapper) ensureWrapper(pluginRoot, actions, effectiveOptions);
-  if (isN8nSkillsPlugin(pluginRoot, effectiveOptions)) {
+  if (n8nPlugin) {
     patchN8nHookInternals(pluginRoot, actions, effectiveOptions);
   }
 
@@ -638,7 +639,10 @@ function repairPluginRoot(pluginRoot, options = {}) {
     };
   }
 
-  const auditErrors = auditPluginRoot(pluginRoot, { windows: effectiveOptions.windows });
+  const auditErrors = auditPluginRoot(pluginRoot, {
+    windows: effectiveOptions.windows,
+    requireNodeFallbacks: n8nPlugin
+  });
   if (auditErrors.length > 0) {
     throw new Error([
       'Plugin hook repair did not produce a Windows-safe install:',

@@ -58,13 +58,13 @@ The hub contains:
 - Sync timestamp.
 - Repo auto-update state: `repo_auto_update_enabled`, `repo_path`, `repo_branch`, `repo_remote`, `last_repo_update`, `last_repo_update_status`, `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_error`.
 - Update-report state: `last_update_report_path`, `update_report_enabled`, `update_report_open_enabled`, `update_report_retention_days`, and last cleanup status.
-- Codex plugin cache auto-refresh preference: `codex_plugin_auto_refresh_enabled`.
+- Codex plugin cache auto-refresh preference: `codex_plugin_auto_refresh_enabled`. On Codex/Windows, this same opt-in also allows trusted Toolkit startup hooks to repair Windows-unsafe installed third-party Codex plugin hook caches after plugin updates.
 - Target paths.
 - Target detected, enabled, disabled, stale, and synced state.
 
 The lock file lives beside the hub at `%USERPROFILE%\.ai-agent-toolkit\update.lock` or `~/.ai-agent-toolkit/update.lock`.
 
-Writes are atomic:
+Writes are rename-first and atomic in the normal case. On Windows, when the final staging-to-`current` directory rename is blocked by a transient `EPERM`, `EBUSY`, or `ENOTEMPTY` after the previous target has already been moved to a backup path, the bridge may fall back to copying the validated staging directory into the empty target path and then cleaning up staging plus backup. If the fallback copy fails, it removes the partial target and restores the backup.
 
 1. Write a staging directory.
 2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and Antigravity 2 adapter output.
@@ -168,7 +168,7 @@ Default managed source path:
 
 Setup creates or verifies that checkout, validates the expected remote, refuses dirty worktrees, fetches `origin main`, updates only by fast-forward, runs hook-light validation, and makes it the default `repo_path` for repo-backed auto-update. If the active Toolkit worktree is on a PR branch, setup warns that the active session may remain there and continues with the managed clean `main` source.
 
-The question bank collects the managed checkout path, repo-backed auto-update, current host native cache behavior, meaningful update report writes, report auto-open, report/log retention days, and OpenCode or Antigravity 2 target decisions up front. It must show current state and a recommended default for each question. Keep current, refresh/sync, disable, and skip are distinct target answers; skip must not mean disable. Do not reintroduce later preference pauses. `--yes-recommended` is a non-interactive automation choice only when the user explicitly asked for recommended/default choices. Verification after managed setup must use the managed checkout verifier, not an active stale verifier. Codex agents verify and refresh only the Codex native Toolkit plugin cache from the managed checkout. Claude Code verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, then relies on Claude Code's own native plugin install/trust flow when the host reports the package is missing, stale, disabled, or untrusted. Final setup reports should state active worktree path/commit if inspected, managed checkout path/commit, exact setup script path executed, and whether the question bank appeared. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
+The question bank collects the managed checkout path, repo-backed auto-update, current host native cache behavior, meaningful update report writes, report auto-open, report/log retention days, and OpenCode or Antigravity 2 target decisions up front. It must show current state and a recommended default for each question. Keep current, refresh/sync, disable, and skip are distinct target answers; skip must not mean disable. Do not reintroduce later preference pauses. `--yes-recommended` is a non-interactive automation choice only when the user explicitly asked for recommended/default choices. Verification after managed setup must use the managed checkout verifier, not an active stale verifier. Codex agents verify and refresh only the Codex native Toolkit plugin cache from the managed checkout. When Codex plugin cache auto-refresh is enabled on Windows, the trusted Toolkit Codex hook may also scan installed non-Toolkit Codex plugin caches under `CODEX_HOME/plugins/cache/**/**/<version>` and repair unsafe `.sh` hook launchers with the Toolkit Windows wrapper. Claude Code verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`, then relies on Claude Code's own native plugin install/trust flow when the host reports the package is missing, stale, disabled, or untrusted. Final setup reports should state active worktree path/commit if inspected, managed checkout path/commit, exact setup script path executed, and whether the question bank appeared. If an installed stale `toolkit-setup` skill says to run the full `repo/tests/toolkit-local-bridge.test.cjs` suite during routine setup, override it with root `AGENTS.md` and this document. Routine setup uses `repo/tests/toolkit-local-bridge-hook-light.test.cjs`; the full bridge suite is for bridge changes, PR review, or release validation.
 
 Before reporting `setup toolkit` complete, run:
 
@@ -176,7 +176,7 @@ Before reporting `setup toolkit` complete, run:
 node repo/scripts/setup-codex-toolkit-plugin.cjs --verify
 ```
 
-If the plugin is missing, disabled, stale, points at another source path, has same-version cache content that does not match this repo, or its installed plugin cache does not contain Toolkit version `2.2.5` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
+If the plugin is missing, disabled, stale, points at another source path, has same-version cache content that does not match this repo, or its installed plugin cache does not contain Toolkit version `2.3.2` with `.codex-plugin/hooks/hooks.json` and a Codex `SessionStart` hook, install or update it with:
 
 ```powershell
 node repo/scripts/setup-codex-toolkit-plugin.cjs --write
@@ -184,9 +184,11 @@ node repo/scripts/setup-codex-toolkit-plugin.cjs --write
 
 The verifier uses only supported Codex plugin commands. If no usable Codex CLI with `plugin marketplace` support is available, or if local marketplace installation fails, setup must fail clearly instead of pretending native plugin activation completed.
 
-The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. CLI list verification remains the preferred path. If the CLI list is empty or unreliable, the helper may use config/cache fallback verification only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.5`, the cache manifest has the expected Toolkit name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report this as config/cache fallback verification, not normal CLI verification.
+Claude Code has the same three behavior choices in the setup question bank: `keep` (no action), `instructions` (verify metadata only and report manual native refresh instructions), and `install` (recommended default), which runs `node repo/scripts/setup-claude-toolkit-plugin.cjs` through the same verify-then-write-then-verify sequence as Codex. A missing install uses the supported `claude plugin marketplace add <repo>` and `claude plugin install ai-agent-toolkit@ai-agent-toolkit-local --scope user` commands. `claude plugin install` no-ops on a plugin id that is already installed, so an install that is present but at an older version than this repo's `.claude-plugin/plugin.json` uses `claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user` instead; if that update command itself fails, the script falls back to `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local --scope user --keep-data --yes` followed by a fresh marketplace add and install. Like Codex, `claude plugin list --json` reports a version-pinned installed-cache path for each plugin (confirmed against a real Claude Code 2.1.198 install); verification and staleness detection use that reported `version`, `enabled`, and source path rather than reading the cache directory contents directly. `--scope user` avoids writing repo-tracked `.claude/settings.json` during setup. Codex must not install or update Claude Code, and Claude Code must not install or update Codex.
 
-If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.2.5`, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
+The setup helper checks `codex plugin list --available --json` after `codex plugin marketplace add` before invoking `codex plugin add`. CLI list verification remains the preferred path. If the CLI list is empty or unreliable, the helper may use config/cache fallback verification only when Codex config enables `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]`, Codex config includes `[marketplaces.ai-agent-toolkit-local]` with `path` or `source` resolving to this repo root, optional `source_type` or `type` is absent or `local`, the installed cache exists under the Codex home plugin cache at `plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.3.2`, the cache manifest has the expected Toolkit name/version, and the cache hook file contains the Toolkit `SessionStart` hook. The fallback normalizes Windows paths and strips a leading `\\?\` before comparing the marketplace source path. Report this as config/cache fallback verification, not normal CLI verification.
+
+If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms enabled Toolkit version `2.3.2`, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
 
 After install, update, or verify, the helper prints or returns a `**Next Steps:**` section. It tells the user to restart Codex if installation changed anything, open Codex hook review when prompted, and trust the Codex `SessionStart` hook only if it runs:
 
@@ -214,8 +216,8 @@ Acceptance criteria:
 
 - `node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json` exits successfully. If the underlying `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` process keeps running after verification passes, setup output includes a warning that the command did not exit cleanly.
 - `codex plugin list --available --json` shows `ai-agent-toolkit@ai-agent-toolkit-local` installed and enabled with `authPolicy` `ON_USE`.
-- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.2.5`.
-- The final cache `.codex-plugin/plugin.json` reports version `2.2.5`.
+- The final cache exists at `CODEX_HOME/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/2.3.2`.
+- The final cache `.codex-plugin/plugin.json` reports version `2.3.2`.
 - The final cache `.codex-plugin/hooks/hooks.json` includes a `SessionStart` hook.
 - Package-critical cache files match the local repo, including Codex plugin metadata, Toolkit bridge/setup scripts, hook-light validation test, assets, and `skills/`.
 
@@ -255,7 +257,7 @@ node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
 ```
 
-9. Checks the running host's native plugin cache state against the configured repo source. When Codex is the running host and `codex_plugin_auto_refresh_enabled` is true, the trusted `main` hook refreshes only the Codex Toolkit plugin cache through `repo/scripts/setup-codex-toolkit-plugin.cjs --write --json --repo-root <repo_path>` after repo validation and delegated target sync succeed. Claude Code hooks report check-only/manual native refresh status and do not mutate Codex or Claude plugin caches from the opposite host.
+9. Checks the running host's native plugin cache state against the configured repo source. When Codex is the running host and `codex_plugin_auto_refresh_enabled` is true, the trusted `main` hook refreshes only the Codex Toolkit plugin cache through `repo/scripts/setup-codex-toolkit-plugin.cjs --write --json --repo-root <repo_path>` after repo validation and delegated target sync succeed. On Codex/Windows, the same opt-in then audits installed non-Toolkit Codex plugin caches with `hooks/hooks.json`; if a cache directly invokes `.sh` hooks or uses bare/WSL bash, it rewrites those commands through the Toolkit PowerShell/Git Bash wrapper and records the result in the update report. Claude Code hooks report check-only/manual native refresh status and do not mutate Codex or Claude plugin caches from the opposite host.
 10. Delegates enabled-target sync to the freshly updated repo script with `--skip-repo-auto-update`.
 
 The delegated repo script builds the target payload from the updated local Toolkit repo `skills/` tree plus the small `ai-agent-toolkit` adapter skill. It must not use Codex or Claude private plugin caches as the skill payload source.
@@ -273,7 +275,7 @@ npm run validate:all
 node --test repo/tests/toolkit-local-bridge.test.cjs
 ```
 
-Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, Codex native plugin refresh/reinstall, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. If validation, fetch, fast-forward, or delegation fails in hook mode, the hook prints a concise warning, records the last repo update status in hub state when possible, skips target sync, and exits successfully so agent startup is not blocked.
+Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. Codex native Toolkit cache refresh and installed third-party hook repair run only after the user enables Codex plugin cache auto-refresh. If validation, fetch, fast-forward, delegation, native cache refresh, or third-party hook repair fails in hook mode, the hook prints or reports a concise warning, records the last status when possible, and exits successfully so agent startup is not blocked.
 
 ## Update Reports
 
@@ -294,6 +296,7 @@ Meaningful work means at least one of:
 - Repo auto-update auto-switched a clean non-configured branch back to the configured branch.
 - Repo auto-update skipped safely because the tree was dirty, the remote did not match, branch switching failed, fetch failed, or the fetched commit was not a fast-forward.
 - The Codex native plugin cache is stale relative to the configured repo source, was auto-refreshed, or failed auto-refresh.
+- A non-Toolkit installed Codex plugin cache had unsafe Windows hook launchers repaired, or third-party hook repair failed.
 
 Normal no-op hook runs with the same observed repo commit and no target sync, stale plugin cache, skip, or validation issue do not write or open a report. Meaningful reports are also deduplicated by event signature: if a later hook sees the same repo status, target-sync result, native plugin cache status, and checksum, it does not create or open another timestamped report. In hook mode, the bridge prints only:
 
@@ -301,7 +304,7 @@ Normal no-op hook runs with the same observed repo commit and no target sync, st
 Toolkit updated: <report path>
 ```
 
-The report starts with a short `TL;DR` section for repo status, target sync status, and any action needed. Details include the new and previous observed commits, sync source, Singapore time (`SGT`), a Repo Update section with configured branch and configured remote, changed files from the fast-forward or already-advanced observed range when available, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit n8n/live-system skip note, repo update status, hook-light validation result, target sync status, Codex native plugin cache status when checked, checksum, and any warning/error. If auto-update finds a clean local Toolkit repo on the wrong branch, the report says it auto-switched back to the configured branch. If the repo is dirty, the report explains that dirty local changes prevent auto-update and the hook leaves the current branch and changes untouched. For the default production configuration, this shows configured branch `main` and configured remote `https://github.com/weijunswj/ai-agent-toolkit` so users can see whether updates are coming from GitHub `main`. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
+The report starts with a short `TL;DR` section for repo status, target sync status, and any action needed. Details include the new and previous observed commits, sync source, Singapore time (`SGT`), a Repo Update section with configured branch and configured remote, changed files from the fast-forward or already-advanced observed range when available, synced target paths, copied/updated skill counts, removed stale managed skill folders, the explicit live n8n skip note, repo update status, hook-light validation result, target sync status, Codex native plugin cache status when checked, third-party Codex hook repair status when checked, checksum, and any warning/error. If auto-update finds a clean local Toolkit repo on the wrong branch, the report says it auto-switched back to the configured branch. If the repo is dirty, the report explains that dirty local changes prevent auto-update and the hook leaves the current branch and changes untouched. For the default production configuration, this shows configured branch `main` and configured remote `https://github.com/weijunswj/ai-agent-toolkit` so users can see whether updates are coming from GitHub `main`. The latest report path is stored in hub state as `last_update_report_path` and appears in `--audit`.
 
 For first-restart compatibility after a bridge update, an older installed native hook may fast-forward the configured local Toolkit repo and then delegate into the newly updated repo script without passing `--hook`. An unsuppressed delegated command with `--sync-enabled --write --sync-source repo --hub <same-hub> --skip-repo-auto-update` is report-eligible. When hub state contains `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_status`, the delegated repo script uses that stored metadata plus a local `git diff --name-only` over `repo_path` to populate the update report. New parent hooks pass `--suppress-update-report` to delegated sync so the parent hook remains the single report writer and duplicate reports are avoided.
 
@@ -311,11 +314,11 @@ During `setup toolkit`, report write, report auto-open, and retention preference
 
 Toolkit-managed update reports/logs older than the configured retention window are cleaned up best-effort on setup and hook/update runs. Default retention is 7 days and can be configured with `--update-report-retention-days <positive-integer>`. Cleanup only considers Toolkit report filenames under the Toolkit-managed update report/log directory, never arbitrary user files, and never treats cleanup failure as a setup or startup blocker. Setup and audit summaries include retention days, deleted count, skipped/error count, and the report/log directory path.
 
-Codex plugin cache auto-refresh is included in the setup checklist. Codex may refresh only the Codex Toolkit native plugin cache from the managed `main` checkout. Claude Code reports check-only/manual native refresh state and does not let Codex mutate Claude Code cache.
+Codex plugin cache auto-refresh is included in the setup checklist. Codex may refresh only the Codex Toolkit native plugin cache from the managed `main` checkout. On Windows, that opt-in also permits repair of unsafe hook launchers in installed third-party Codex plugin caches. Claude Code reports check-only/manual native refresh state and does not let Codex mutate Claude Code cache.
 
 ## Windows Codex Plugin Hook Repair
 
-Windows hook repair is a separate post-install maintenance utility, not part of the Local Bridge updater. Use [repair-codex-plugin-windows-hooks.cjs](../scripts/repair-codex-plugin-windows-hooks.cjs) after a requested Codex plugin install or update when an installed plugin root contains `hooks/hooks.json`.
+Windows hook repair is a separate post-install maintenance utility. Use [repair-codex-plugin-windows-hooks.cjs](../scripts/repair-codex-plugin-windows-hooks.cjs) after a requested Codex plugin install or update when an installed plugin root contains `hooks/hooks.json`. The Local Bridge updater may also call this utility from a trusted Codex startup hook when Codex plugin cache auto-refresh is enabled, limited to installed non-Toolkit Codex plugin caches under `CODEX_HOME/plugins/cache`.
 
 The repair utility:
 
@@ -325,6 +328,14 @@ The repair utility:
 - Rejects bare `bash`, `bash.exe`, and `C:\WINDOWS\system32\bash.exe` when the command cannot be safely normalized.
 - Applies the n8n-specific Node JSON fallback patch for `n8n-skills@n8n-io`.
 - Fails with an actionable error when a hook cannot be repaired safely.
+
+The automatic repair path is generic for third-party Codex plugin hook launchers but deliberately narrow:
+
+- It scans installed cache roots only, never temporary marketplace checkouts.
+- It skips the Toolkit native plugin cache so Toolkit updates remain source-owned by the managed checkout.
+- It writes only `hooks/hooks.json` launcher rewrites and the Toolkit-managed `hooks/run-hook.ps1` wrapper for generic plugins.
+- It applies n8n hook internals patches only when the installed plugin is identified as `n8n-skills`.
+- It writes details to the Toolkit update report and keeps hook stdout compact.
 
 Example:
 

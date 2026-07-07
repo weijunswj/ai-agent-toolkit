@@ -1,0 +1,12 @@
+{
+  "name": "ai-agent-toolkit-local",
+  "owner": {
+    "name": "weijunswj"
+  },
+  "plugins": [
+    {
+      "name": "ai-agent-toolkit",
+      "source": "./"
+    }
+  ]
+}

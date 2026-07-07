@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-06-26 (Toolkit 2.2.5 plugin-eval hygiene metadata and progressive disclosure)
+Latest update: 2026-07-06 (adds n8n production backup templates, production Cloudflare runtime ignore output, and matching generated skill pack references)
 
 ## Current state
 
@@ -27,18 +27,18 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 15 |
-| publishedFiles | 225 |
-| declaredOutputFiles | 225 |
-| packInstalledFiles | 79 |
+| projects | 16 |
+| publishedFiles | 231 |
+| declaredOutputFiles | 231 |
+| packInstalledFiles | 83 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
 | crossOwnedOutputs | 0 |
-| sharedSurfaceOutputs | 3 |
+| sharedSurfaceOutputs | 4 |
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 225 |
+| boundaryRecipeOutputs | 231 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -46,8 +46,8 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 146 |
-| pack_installed_declared | 79 |
+| declared_generated | 148 |
+| pack_installed_declared | 83 |
 
 Current boundary recipe classifications:
 
@@ -64,17 +64,18 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 163 |
+| main_full_fidelity | 169 |
 
 Known baseline context:
 
 - There are no current curated output boundary findings.
 - Current curated directory boundary finding: `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md` is a reviewed large Markdown platform reference retained in the audit baseline.
-- The three shared-surface outputs are intentional generated n8n-agent-rules references used by dependent n8n skills. The count movement from the previous snapshot is explained by adding explicit OpenAI agent metadata for plugin-eval hygiene while keeping only narrow router skills implicit.
+- The four shared-surface outputs are intentional generated references: three n8n-agent-rules references used by dependent n8n skills, plus one Google DESIGN.md reference published into the UI/UX skill from its provenance-owned design module. The count movement from the previous snapshot is explained by adding the Google DESIGN.md shared reference while keeping only narrow router skills implicit.
 
 ## Current project modules
 
 - `_projects/cicd/secure-installer`
+- `_projects/design/google-design-md`
 - `_projects/design/ui-ux-pro-max`
 - `_projects/development/ai-coding-agent-rules`
 - `_projects/development/local-ai-stack-safety`

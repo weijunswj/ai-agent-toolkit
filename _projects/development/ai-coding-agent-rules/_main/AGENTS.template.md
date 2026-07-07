@@ -93,21 +93,23 @@ For generated files, publishing, migrations, setup, operations, security, CI/CD,
 
 If a repo has another docs index, architecture guide, source-of-truth guide, or contributor guide, use it to choose targeted docs. Do not load unrelated docs by default.
 
+For repo-wide/navigation-heavy tasks, read an existing repo map or docs index before exploring. Keep repo maps pointer-based and current; create one only when it saves future context and fits repo convention.
+
 ## Managed Memory
 
 If root `MEMORY.md` exists, read it before planning or editing unless a local instruction file defines a more specific read order.
 
-Treat `MEMORY.md` as managed, non-authoritative project memory. It is for compact durable repo-specific context that future agents would otherwise rediscover repeatedly, but that does not belong better in canonical docs, source files, validation, or local instruction files.
+Treat `MEMORY.md` as managed, non-authoritative project memory. It is optional, usually absent, and reserved for compact durable repo-specific context future agents would otherwise rediscover repeatedly.
 
 `MEMORY.md` cannot override the user request, local instruction files, documented workflows, safety gates, source-of-truth docs, validation rules, generated-file rules, or code. If it conflicts with an authoritative source, ignore the memory entry and fix or remove it when appropriate.
 
-Agents may create or update `MEMORY.md` only for durable repo-specific decisions, maintainer preferences, local workflow notes, repeated context, or known pitfalls future agents likely need. Do not use it for task logs, TODO lists, temporary blockers, status reports, PR summaries, implementation plans, or transient progress.
+Do not create `MEMORY.md` merely because it is absent. Create or update it only when context is durable, compact, repeatedly useful, repo-specific, and not better placed in canonical docs, source files, validation, local instructions, repo maps, ADRs, changelogs, architecture, source-of-truth, or current-state docs.
 
-Prefer canonical docs, source files, validation, or local instruction files when the information is policy, workflow, validation, safety, source-of-truth material, or public maintainer guidance.
+Prefer those canonical homes for most durable context. Do not use `MEMORY.md` as history, changelog, PR log, task log, TODO list, blocker list, plan, handoff log, completion report, audit dump, or status report.
 
 Never store secrets, credentials, tokens, private keys, `.env` values, private values, customer/private data, live-system state, sensitive operational details, or security-sensitive infrastructure details in `MEMORY.md`.
 
-When creating `MEMORY.md`, start it with a header stating it is managed, non-authoritative project memory. Keep it small. If it grows beyond a compact project note, move the right material into canonical docs and trim memory.
+When creating `MEMORY.md`, start it with a managed, non-authoritative project memory header. Keep it small. If useful context fits cleanly in existing canonical docs or a repo map, do not create memory.
 
 ## Safety Gates
 
@@ -128,13 +130,11 @@ Never introduce secrets, credentials, tokens, private keys, `.env` values, or pr
 
 ## Application Error, Logging, And Privacy Defaults
 
-When touching product frontend/backend behavior, preserve privacy-safe diagnostics without turning root instructions into a full policy manual.
+When touching app behavior, use generic user-facing errors with support-safe traceable reference, same event/request ref in server logs, and no internal/private data. Keep privacy-minimized logs; do not log prompts/uploads/model outputs, secrets, auth headers/cookies, payment data, private connector data/files, or unneeded PII.
 
-- Show generic user-facing errors with a support-safe traceable reference; do not expose internals or private payloads in UI.
-- Store the same event/request-specific reference in server logs or the approved logging backend so support can trace the failure.
-- Keep logs privacy-minimized; do not log raw prompts, uploads, model responses, secrets, auth headers, cookies, payment data, private connector data, private files, or unnecessary PII.
-- Do not add broad fallbacks or backwards compatibility by default. Ask the user first; if approved, keep the path narrow, visible, logged, tested, and documented with a removal or review condition.
-- For detailed frontend, backend, privacy, AI observability, and legal-page requirements, route to the relevant frontend/backend/privacy/observability skills and reference docs.
+## Fallback Policy
+
+Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fallbacks, fake success states, or catch-and-continue behaviour by default; prefer fixing the real failure path. Allow only for correctness, data safety, migration safety, or explicitly approved compatibility. Approved fallbacks must be narrow, visible via logs/diagnostics/user-safe status as appropriate, tested on primary/fallback paths, reason-documented, with temporary removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never use fake business data or silently downgrade production behaviour.
 
 ## User Action Questions
 
@@ -149,6 +149,16 @@ During editing, keep the diff narrow and maintainable, match existing project st
 Persistent status, reports, plans, handoffs, operations notes, setup notes, CI/CD notes, deployment notes, safety notes, and troubleshooting notes belong under an existing docs path or another repo-documented folder. Do not create root-level files like `STATUS.md`, `REPORT.md`, or `PLAN.md` unless the repo explicitly requires that path.
 
 After editing, run the smallest relevant validation first. If validation fails, make a targeted repair and rerun. Review the diff for unrelated changes before final reporting.
+
+## Documentation Closure
+
+Before claiming completion on broad docs/audit/planning/migration/readiness/cleanup/architecture/security/production-readiness/source-of-truth/repo-wide work, review docs created or materially touched.
+
+Merge durable findings into the smallest existing canonical docs instead of leaving duplicate temporary docs. Prefer existing repo conventions for current-state, architecture, source-of-truth, ADR, changelog, index, or repo-map homes. Do not create new root-level history/status/report/plan docs unless explicitly required.
+
+Use context-preserving compression, not blind deletion. Preserve durable decisions, current state, validation results, unresolved risks, source-of-truth links, ownership boundaries, generated-surface notes, and repo navigation hints. Compress or remove old progress chatter, superseded plans, stale blockers, duplicate audits, obsolete handoffs, and completion noise. Retire, delete, or archive temporary audit/status/plan/handoff/progress/completion docs when stale; do not leave duplicates just in case.
+
+Do not summarize away source/provenance/reference detail needed for auditability, licensing, provenance, validation, source-of-truth, security, or maintenance. If unsure whether a document still has durable value, retain it or merge durable parts first. Final reports for qualifying tasks must say whether docs were consolidated, retained, archived, deleted, or intentionally left unchanged.
 
 ## Generated Files
 
@@ -193,7 +203,7 @@ Never:
 
 Use documented validation commands. If none exist, choose the smallest relevant check: docs lint; JSON/schema parse; safest focused script test; targeted tests plus fixture/e2e for parsers, validators, repair, or error handling; regenerated-template diff inspection.
 
-Command hygiene: keep resolvers separate from tests, avoid `pip install --dry-run --ignore-installed`, prefer bounded metadata or lockfile pin checks, use explicit discovery such as `python -m unittest discover -s tests`, and after interruptions check for orphaned package, test, or server processes before reruns.
+Hygiene: separate resolvers from tests; avoid `pip install --dry-run --ignore-installed`; prefer bounded pin checks; use `python -m unittest discover -s tests`; after interruptions check orphaned package/test/server processes before reruns.
 
 If validation is skipped, state why.
 
@@ -203,5 +213,5 @@ For long tasks, give short progress updates at meaningful checkpoints. Do not na
 
 After making changes, report files changed, what changed, validation run and exact result, generated-output status when applicable, remaining risks or manual checks, PR link if opened or updated, and CI/status if checked or why inaccessible.
 
-Final reports after repo work must include `Instruction sources used` and `MEMORY.md changed: Yes/No`. If `MEMORY.md` changed, explain what durable repo-specific context was added or updated, why it qualifies as durable project memory, and why it does not belong better in canonical docs, source files, validation, or local instruction files.
+Final reports after repo work must include `Instruction sources used` and `MEMORY.md changed: Yes/No`. `MEMORY.md changed: No; no memory file needed` is the normal outcome when no durable memory update is needed. If `MEMORY.md` changed, explain what changed, why it is durable repo memory, and why canonical docs were not better.
 ````````

@@ -35,6 +35,47 @@
       "action_taken": "No toolkit implementation has been accepted yet.",
       "remaining_work": "Decide whether any reviewed decision-ladder concept belongs in toolkit planning or review guidance. If accepted, open a separate implementation PR and then either move future upstream tracking into SOURCE-LOCK or remove this advisory target.",
       "removal_condition": "Remove after accepted Ponytail-inspired toolkit work is implemented and any ongoing upstream dependency is represented by SOURCE-LOCK daily source-watch, or after deciding no action is needed."
+    },
+    {
+      "id": "host-harness-capability-drift-review",
+      "name": "Host Harness Capability Drift Review",
+      "kind": "manual",
+      "enabled": true,
+      "state": "watching",
+      "review_cadence_days": 90,
+      "last_reviewed_at": null,
+      "review_template": "repo/source-watch/templates/host-harness-capability-drift-review.md",
+      "evidence_sources": [
+        "OpenAI Codex changelog: https://developers.openai.com/codex/changelog",
+        "OpenAI Codex AGENTS.md docs: https://developers.openai.com/codex/guides/agents-md",
+        "OpenAI Codex memories docs: https://developers.openai.com/codex/memories",
+        "OpenAI Codex hooks docs: https://developers.openai.com/codex/hooks",
+        "OpenAI Codex rules docs: https://developers.openai.com/codex/rules",
+        "Claude Code overview docs: https://code.claude.com/docs/en/overview",
+        "Claude Code memory and rules docs: https://code.claude.com/docs/en/memory",
+        "Claude Code hooks docs: https://code.claude.com/docs/en/hooks",
+        "Claude Code changelog: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
+      ],
+      "toolkit_scope": [
+        "skills/** and skill-routing guidance",
+        "AGENTS.md, CLAUDE.md, GEMINI.md, and .agents/rules/**",
+        ".codex-plugin/**, .claude-plugin/**, and hook guidance",
+        "repo-map and docs-index guidance",
+        "MEMORY.md guidance",
+        "documentation cleanup and token-saving/collapse guidance"
+      ],
+      "classification_options": [
+        "Keep",
+        "Shrink",
+        "Move to hook",
+        "Move to host-native feature",
+        "Delete",
+        "Needs benchmark/eval before decision"
+      ],
+      "recommendation": "Run the template on cadence. Keep safety rules unless official host behavior demonstrably covers the same risk; propose shrink, move, host-native migration, or deletion only in a separate evidence-backed PR.",
+      "action_taken": "Review lane added. No toolkit component has been changed by source-watch.",
+      "remaining_work": "Perform the next cadence review using the template. If no meaningful drift is found, update last_reviewed_at and this status record only. If meaningful drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.",
+      "removal_condition": "Remove only if supported host harnesses stop changing relevant native capabilities or another maintained source-watch lane fully owns this review."
     }
   ]
 }

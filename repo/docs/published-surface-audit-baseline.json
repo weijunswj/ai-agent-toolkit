@@ -2,18 +2,18 @@
   "version": 1,
   "description": "Known published-surface audit findings allowed until follow-up PRs classify or generate them.",
   "summary": {
-    "projects": 15,
-    "publishedFiles": 211,
-    "declaredOutputFiles": 211,
-    "packInstalledFiles": 74,
+    "projects": 16,
+    "publishedFiles": 231,
+    "declaredOutputFiles": 231,
+    "packInstalledFiles": 83,
     "undeclaredPublishedFiles": 0,
     "packInstalledUndeclared": 0,
     "crossOwnedOutputs": 0,
-    "sharedSurfaceOutputs": 3,
+    "sharedSurfaceOutputs": 4,
     "sharedSurfaceMetadataFindings": 0,
     "suspiciousPublishedSurfaces": 0,
     "duplicateProjectContentGroups": 0,
-    "boundaryRecipeOutputs": 211,
+    "boundaryRecipeOutputs": 231,
     "boundaryRecipeFindings": 0,
     "curatedDirectoryFindings": 1
   },
@@ -22,6 +22,7 @@
     "packInstalledUndeclared": [],
     "crossOwnedOutputs": [],
     "sharedSurfaceOutputs": [
+      "design.google-design-md -> design.ui-ux-pro-max: skills/ui-ux-secure-frontend-design/references/design-md-contract.md [The Google DESIGN.md source/provenance belongs to design.google-design-md, while the runtime reference belongs inside the UI/UX skill that consumes design contracts.]",
       "development.ai-coding-agent-rules -> n8n.local-setup: skills/n8n-local-setup/references/n8n-agent-rules.md [n8n-local-setup depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership.]",
       "development.ai-coding-agent-rules -> n8n.workflow-toolkit: skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md [n8n-workflow-helper-scripts depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership.]",
       "development.ai-coding-agent-rules -> n8n.workflow-toolkit: skills/n8n-workflow-templates/references/n8n-agent-rules.md [n8n-workflow-templates depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership.]"
