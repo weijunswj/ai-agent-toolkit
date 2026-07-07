@@ -1,6 +1,6 @@
 ---
 name: windows-localhost-workflows
-description: Use when starting, relaunching, verifying, or debugging Windows localhost web apps, API servers, or dev services, especially PowerShell startup, execution policy, Corepack/package-manager, Python runtime, spawn EPERM, duplicate Path/PATH, port conflict, detached launch, sandbox persistence, or empty-log failures.
+description: Use when starting, relaunching, verifying, or debugging Windows localhost web apps, API servers, or dev services, especially long-running dev servers, bounded readiness polling, interrupted command cleanup, PowerShell startup, execution policy, Corepack/package-manager, Python runtime, spawn EPERM, duplicate Path/PATH, port conflict, detached launch, sandbox persistence, or empty-log failures.
 ---
 
 # Windows Localhost Workflows
@@ -26,6 +26,26 @@ A localhost workflow is not done until both are true:
 
 1. The launch command is known and repeatable.
 2. The app responds on the expected localhost URL or health endpoint.
+
+## Long-Running Localhost Server Rule
+
+Do not run persistent server commands such as `npm run dev`, `npm run start`, `uvicorn`, `flask run`, `python -m http.server`, `pnpm dev`, `yarn dev`, or `bun run dev` in the foreground unless the user explicitly asks for an interactive foreground terminal.
+
+Default behavior for persistent localhost servers:
+
+1. Launch a detached/background process.
+2. Redirect stdout/stderr to temporary or repo-approved local logs.
+3. Run bounded readiness checks against an HTTP health URL, known app URL, or TCP port.
+4. Return a concise status summary.
+5. Never wait indefinitely.
+
+If an agent must run a command that may be long-running, use one of:
+
+- a timeout wrapper.
+- a detached/background launch.
+- an explicit user-approved foreground run.
+
+If a command produces no readiness signal within the bounded wait, stop and summarize. Do not keep waiting.
 
 ## Workflow
 
@@ -57,7 +77,13 @@ $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Silentl
 if ($conn) { Get-Process -Id $conn.OwningProcess | Select-Object Id,ProcessName,Path }
 ```
 
-If the port is already bound, decide whether to reuse the running service, stop it, or choose a different port based on project requirements.
+Before launching, check whether the intended port is already listening. If the port is already listening, health-check it first.
+
+- If health is OK, do not start another server.
+- If a stale/broken process owns the port or a launcher is stale, ask before killing unless the process was clearly created by the current run and safe to stop.
+- Use process IDs in local notes.
+- Do not over-log private command lines if they contain secrets.
+- Reuse, stop, or change port only after understanding whether the process is the same app.
 
 ### 3. Resolve runtimes and package-manager commands dynamically
 
@@ -83,9 +109,9 @@ $pnpm = (Get-Command pnpm.cmd -ErrorAction Stop).Source
 
 Use hardcoded paths only as a last-resort local fallback, and explain why.
 
-### 4. Start in the foreground once when the failure mode is unknown
+### 4. Diagnose unknown failures with bounded commands
 
-Run the project-native command directly first so the real error is visible.
+When the launch failure mode is unknown, run a short bounded diagnostic command so the real error is visible. Do not leave a persistent server command in the foreground without a timeout or explicit user-approved foreground run.
 
 Examples:
 
@@ -96,11 +122,11 @@ yarn dev
 bun run dev
 ```
 
-If a PowerShell helper script is the documented startup path, run it once to see whether it works. If it fails due to wrapper/tooling issues, stop retrying it and run the underlying command directly.
+If a PowerShell helper script is the documented startup path, run it once with a timeout wrapper or equivalent bounded shell execution to see whether it fails before binding the port. If it fails due to wrapper/tooling issues, stop retrying it and run the underlying command directly.
 
-### 5. Switch to detached background launch after the command is known
+### 5. Start long-running servers detached
 
-Use this when the service is long-running and the working command is known. A reliable Windows launch pattern is:
+Use this when the service is long-running and the working command is known. A reliable launch pattern is:
 
 1. Check the port.
 2. Normalize duplicate process environment keys before `Start-Process`.
@@ -109,7 +135,16 @@ Use this when the service is long-running and the working command is known. A re
 5. Poll a documented health endpoint such as `/api/health`, or the root URL when no health endpoint exists.
 6. After the launch shell command returns, re-check the port or HTTP endpoint before claiming the server persists.
 7. If a Codex sandbox launch does not persist after the shell command returns, retry with an escalated/unsandboxed launch when the environment supports it, then repeat the post-return port or HTTP check.
-8. Report the exact URL, command, process id, and log paths.
+8. Keep restart and verification as separate steps: stop or reuse an old server, start the new server, then health-check with a short timeout. Do not bundle stop/start/health into one long command where one hung step hides the actual state.
+9. Report the exact URL, command, process id, and log paths.
+
+Readiness checks must be bounded:
+
+- Use a clear max wait, usually 60-120 seconds unless the user explicitly asks otherwise.
+- Poll every 1-3 seconds.
+- Success must be based on observable readiness: HTTP 200/expected status, TCP port listening, or a known health endpoint.
+- Never rely only on `Start-Process` exit state as proof the app is running.
+- If not ready by timeout, stop and report the command attempted, safe log tail, port status, process status, and next manual action. Do not keep waiting.
 
 ```powershell
 $app = Resolve-Path .
@@ -260,6 +295,19 @@ If the dev server fails inside an agent sandbox with `spawn EPERM`, request elev
 In Codex sandboxed shells, background localhost servers may exit or be killed when the shell command returns. If the user needs the dev server to keep running after the command finishes, relaunch it with `sandbox_permissions: require_escalated` when available, then repeat the same log and HTTP health verification. Report that the escalation is for local process persistence, not for external network exposure.
 
 Even when a sandboxed background launch appears to work while the shell command is still running, do not claim the service is persistent until a follow-up port or HTTP check succeeds after that shell command has returned.
+
+### Interrupted command left orphaned child processes
+
+After a user interrupts a long localhost, validation, package-manager, or test command, immediately inspect likely child processes before retrying. Look for local `python`, `pip`, `node`, `npm`, `pnpm`, `yarn`, `bun`, test-runner, and dev-server processes that still own the target port or continue consuming CPU.
+
+On Windows, start with bounded, read-only process and port checks:
+
+```powershell
+Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 5
+Get-Process python,pip,node,npm,pnpm,yarn,bun -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,CPU,Path
+```
+
+Do not kill unrelated user processes. Stop a process only when it is clearly from the current agent run or after the user approves the specific PID/process name. After stopping a stale process, re-check the port or health endpoint with a short timeout before restarting.
 
 ### Port conflict
 

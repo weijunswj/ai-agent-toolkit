@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "version_policy": "semver",
-  "version_notes": "Adds OpenAI invocation-policy metadata for ai-coding-agent-rules and n8n-agent-rules so packaged Plugin Eval routing stays explicit and n8n safety remains implicit.",
+  "version_notes": "Adds validation command hygiene for package resolver isolation, bounded dependency pin checks, explicit Python unittest discovery, and orphan-process checks after interrupted long commands.",
   "outputs": [
     {
       "kind": "curated",
