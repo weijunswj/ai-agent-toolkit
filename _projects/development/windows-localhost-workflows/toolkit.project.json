@@ -5,9 +5,9 @@
   "title": "Windows Localhost Workflows",
   "module_path": "_projects/development/windows-localhost-workflows",
   "main_path": "_projects/development/windows-localhost-workflows/_main",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "version_policy": "semver",
-  "version_notes": "Adds bounded long-running localhost server guidance, safer Windows PowerShell temporary launcher patterns, readiness timeout reporting, safe log tailing, and local UAT status checklist coverage.",
+  "version_notes": "Adds 30-minute long-process checkpoints that inspect progress before continuing, diagnosing, stopping, or asking for user input.",
   "outputs": [
     {
       "kind": "copy",

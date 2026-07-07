@@ -1,6 +1,6 @@
 ---
 name: windows-localhost-workflows
-description: Use when starting, relaunching, verifying, or debugging Windows localhost web apps, API servers, or dev services, especially long-running dev servers, bounded readiness polling, PowerShell startup, execution policy, Corepack/package-manager, Python runtime, spawn EPERM, duplicate Path/PATH, port conflict, detached launch, sandbox persistence, or empty-log failures.
+description: Use when starting, relaunching, verifying, or debugging Windows localhost web apps, API servers, or dev services, especially long-running dev servers, bounded readiness polling, interrupted command cleanup, PowerShell startup, execution policy, Corepack/package-manager, Python runtime, spawn EPERM, duplicate Path/PATH, port conflict, detached launch, sandbox persistence, or empty-log failures.
 ---
 
 # Windows Localhost Workflows
@@ -46,6 +46,14 @@ If an agent must run a command that may be long-running, use one of:
 - an explicit user-approved foreground run.
 
 If a command produces no readiness signal within the bounded wait, stop and summarize. Do not "just wait".
+
+For commands that are expected to run longer than 30 minutes, or that have already exceeded 30 minutes, use 30-minute checkpoints. At each checkpoint, inspect whether the process is making progress before deciding what to do next:
+
+- Still running and progressing: report the observed signal, such as log growth, CPU activity, test count movement, build output, health status, or file changes, then continue to the next 30-minute checkpoint.
+- Ready: stop waiting and proceed to the next task step.
+- Stalled: capture a safe log tail and process/port status, then stop the current-run process if it is clearly owned by this agent run, or ask before stopping anything ambiguous.
+- Waiting for input, credentials, network, or a locked resource: stop waiting, report the blocker, and ask for the missing input or approval instead of silently burning time.
+- Orphaned after interruption: follow the interrupted-command cleanup rule before rerunning anything.
 
 ## Workflow
 
@@ -134,7 +142,8 @@ Use this when the service is long-running and the working command is known. A re
 4. Poll a documented health endpoint such as `/api/health`, or the root URL when no health endpoint exists.
 5. After the launch shell command returns, re-check the port or HTTP endpoint before claiming the server persists.
 6. If a Codex sandbox launch does not persist after the shell command returns, retry with an escalated/unsandboxed launch when the environment supports it, then repeat the post-return port or HTTP check.
-7. Report the exact URL, command, process id, and log paths.
+7. Keep restart and verification as separate steps: stop or reuse an old server, start the new server, then health-check with a short timeout. Do not bundle stop/start/health into one long command where one hung step hides the actual state.
+8. Report the exact URL, command, process id, and log paths.
 
 Readiness checks must be bounded:
 
@@ -376,6 +385,19 @@ If the dev server fails inside an agent sandbox with `spawn EPERM`, request elev
 In Codex sandboxed shells, background localhost servers may exit or be killed when the shell command returns. If the user needs the dev server to keep running after the command finishes, relaunch it with `sandbox_permissions: require_escalated` when available, then repeat the same log and HTTP health verification. Report that the escalation is for local process persistence, not for external network exposure.
 
 Even when a sandboxed background launch appears to work while the shell command is still running, do not claim the service is persistent until a follow-up port or HTTP check succeeds after that shell command has returned.
+
+### Interrupted command left orphaned child processes
+
+After a user interrupts a long localhost, validation, package-manager, or test command, immediately inspect likely child processes before retrying. Look for local `python`, `pip`, `node`, `npm`, `pnpm`, `yarn`, `bun`, test-runner, and dev-server processes that still own the target port or continue consuming CPU.
+
+On Windows, start with bounded, read-only process and port checks:
+
+```powershell
+Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 5
+Get-Process python,pip,node,npm,pnpm,yarn,bun -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,CPU,Path
+```
+
+Do not kill unrelated user processes. Stop a process only when it is clearly from the current agent run or after the user approves the specific PID/process name. After stopping a stale process, re-check the port or health endpoint with a short timeout before restarting.
 
 ### Port conflict
 
