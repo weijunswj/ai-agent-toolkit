@@ -186,9 +186,9 @@ Never:
 
 ## Validation
 
-Use documented validation commands. If none exist, choose the smallest relevant check: docs lint; JSON/schema parse; safest focused script test; targeted tests plus fixture/e2e for parsers, validators, repair, or error handling; regenerated-template diff inspection.
+Use documented validation. If absent, run the smallest relevant check: docs lint, JSON/schema parse, focused script/test, parser/repair fixture, or generated diff.
 
-Hygiene: separate resolvers from tests; avoid `pip install --dry-run --ignore-installed`; prefer bounded pin checks; use `python -m unittest discover -s tests`; after interruptions check orphaned package/test/server processes before reruns.
+Hygiene: separate resolvers/tests; avoid `pip install --dry-run --ignore-installed`; use `python -m unittest discover -s tests`; after interrupts check orphaned package/test/server processes; for >30m jobs checkpoint every 30m: inspect CPU/log/health, continue if progressing, otherwise diagnose, stop, or ask.
 
 If validation is skipped, state why.
 

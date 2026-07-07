@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.4.4",
+  "version": "2.4.5",
   "version_policy": "semver",
-  "version_notes": "Adds validation command hygiene for resolver isolation, bounded dependency pin checks, explicit Python unittest discovery, and orphan-process checks after interrupted long commands.",
+  "version_notes": "Adds 30-minute checkpoint guidance for very long validation or local processes, with progress inspection before continuing, diagnosing, stopping, or asking.",
   "outputs": [
     {
       "kind": "curated",

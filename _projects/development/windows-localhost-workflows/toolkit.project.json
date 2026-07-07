@@ -5,9 +5,9 @@
   "title": "Windows Localhost Workflows",
   "module_path": "_projects/development/windows-localhost-workflows",
   "main_path": "_projects/development/windows-localhost-workflows/_main",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "version_policy": "semver",
-  "version_notes": "Adds interrupted-command cleanup guidance and split restart/health-check hygiene on top of the bounded Windows localhost launcher workflow.",
+  "version_notes": "Adds 30-minute long-process checkpoints that inspect progress before continuing, diagnosing, stopping, or asking for user input.",
   "outputs": [
     {
       "kind": "copy",

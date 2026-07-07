@@ -47,6 +47,14 @@ If an agent must run a command that may be long-running, use one of:
 
 If a command produces no readiness signal within the bounded wait, stop and summarize. Do not "just wait".
 
+For commands that are expected to run longer than 30 minutes, or that have already exceeded 30 minutes, use 30-minute checkpoints. At each checkpoint, inspect whether the process is making progress before deciding what to do next:
+
+- Still running and progressing: report the observed signal, such as log growth, CPU activity, test count movement, build output, health status, or file changes, then continue to the next 30-minute checkpoint.
+- Ready: stop waiting and proceed to the next task step.
+- Stalled: capture a safe log tail and process/port status, then stop the current-run process if it is clearly owned by this agent run, or ask before stopping anything ambiguous.
+- Waiting for input, credentials, network, or a locked resource: stop waiting, report the blocker, and ask for the missing input or approval instead of silently burning time.
+- Orphaned after interruption: follow the interrupted-command cleanup rule before rerunning anything.
+
 ## Workflow
 
 ### 1. Discover the app root and native startup command
@@ -390,6 +398,7 @@ Get-Process python,pip,node,npm,pnpm,yarn,bun -ErrorAction SilentlyContinue | Se
 ```
 
 Do not kill unrelated user processes. Stop a process only when it is clearly from the current agent run or after the user approves the specific PID/process name. After stopping a stale process, re-check the port or health endpoint with a short timeout before restarting.
+
 ### Port conflict
 
 If the target port is already bound, inspect the owning process. Reuse, stop, or change port only after understanding whether the process is the same app.
