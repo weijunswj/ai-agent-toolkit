@@ -1567,12 +1567,12 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /The launcher allows this, but replace it before saving production data you care about/);
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /CLOUDFLARED_TUNNEL_TOKEN is present and not a placeholder/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /WEBHOOK_URL matches|N8N_EDITOR_BASE_URL matches|N8N_PROXY_HOPS is 1/);
-  assert.match(functionBody(menu, 'Start-ProductionStack'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*@\(\'up\', '-d', 'postgres', 'n8n'\)[\s\S]*Wait-ForProductionN8nReady -Context 'Production localhost n8n start'/);
+  assert.match(functionBody(menu, 'Start-ProductionStack'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*@\(\'up\', '-d', 'postgres', 'n8n'\)[\s\S]*Wait-ForProductionN8nReady -Context 'Production localhost n8n start' -AllowSelfHeal/);
   assert.doesNotMatch(functionBody(menu, 'Start-ProductionStack'), /Invoke-SafetyPreflight|cloudflared/);
   assert.match(functionBody(menu, 'Start-LocalhostOnly'), /Start-ProductionStack[\s\S]*cloudflared[\s\S]*stop', 'cloudflared'/);
   assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*Set-ActiveN8nUrl -Url \$publicUrl -Mode 'cloudflare' -HostName \$publicHost[\s\S]*cloudflared/);
-  assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /--force-recreate', 'n8n', 'cloudflared'[\s\S]*Wait-ForProductionN8nReady -Context 'Production Cloudflare n8n start'/);
-  assert.match(functionBody(menu, 'Wait-ForProductionN8nReady'), /Test-ProductionN8nHttpReady[\s\S]*n8n editor is responding and stayed reachable[\s\S]*Recent logs show mismatching encryption keys[\s\S]*database schema \/ n8n image version mismatch/);
+  assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /--force-recreate', 'n8n', 'cloudflared'[\s\S]*Wait-ForProductionN8nReady -Context 'Production Cloudflare n8n start' -AllowSelfHeal/);
+  assert.match(functionBody(menu, 'Wait-ForProductionN8nReady'), /Test-ProductionN8nHttpReady[\s\S]*n8n editor is responding and stayed reachable[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*n8n editor is responding after self-heal and stayed reachable[\s\S]*Recent logs show mismatching encryption keys[\s\S]*database schema \/ n8n image version mismatch/);
   assert.match(functionBody(menu, 'Stop-CloudflareTunnel'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local/);
   assert.doesNotMatch(menu, /function Get-N8nCliProductionBackupSpecs|function Invoke-N8nCliProductionBackupExport/);
   assert.match(functionBody(menu, 'Backup-Postgres'), /Join-Path \$BackupDir 'database\.sql'/);
@@ -1607,6 +1607,7 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Set-ProductionEncryptionKeyForRestore[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*\$ok = \$false/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /'n8n-entities' \{[\s\S]*Update-ProductionN8nImageForRestore[\s\S]*Restore-ProductionN8nEntitiesBackup -Backup \$detected/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /InputPath = \$preRestoreExpanded\.DatabaseSqlPath/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Pre-restore production \.env N8N_ENCRYPTION_KEY restored[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*Startup will attempt one more repair pass/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Restore-PreviousProductionServices -PreviousServices \$preRestoreServices -StartN8nWhenNone/);
   assert.match(functionBody(menu, 'Clear-ProductionPostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;[\s\S]*psql[\s\S]*ON_ERROR_STOP=1/);
   assert.match(functionBody(menu, 'Test-ProductionEntityImportApplied'), /workflow_entity[\s\S]*credentials_entity[\s\S]*ENTITY_RESTORE_ROW_COUNT[\s\S]*Entity import did not leave any supported n8n rows/);

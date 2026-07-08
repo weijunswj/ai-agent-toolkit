@@ -424,6 +424,8 @@ The preferred production restore input is a full backup zip containing `database
 
 After any production start or restore restart, the menu waits until the localhost n8n editor responds and stays reachable before returning to the next prompt.
 
+If startup logs show that `/home/node/.n8n/config` has an encryption key that does not match the active `.env`, the launcher attempts the same key-sync repair before recreating n8n one more time. Restore rollback also syncs the config file back to the pre-restore key before restarting services.
+
 Preflight is automatic on the launch, tunnel, backup, and update paths that need it. Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, recovery, and update choices stay visible.
 
 ---

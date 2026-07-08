@@ -581,7 +581,10 @@ function Test-ProductionN8nDatabaseImageMismatchLog {
 }
 
 function Wait-ForProductionN8nReady {
-  param([string]$Context = 'production n8n startup')
+  param(
+    [string]$Context = 'production n8n startup',
+    [switch]$AllowSelfHeal
+  )
 
   Write-Info "Waiting for n8n editor to respond at $(Get-LocalN8nUrl)."
   $readyStreak = 0
@@ -603,6 +606,32 @@ function Wait-ForProductionN8nReady {
   }
 
   $logs = @(Get-ProductionN8nRecentLogLines)
+  if ($AllowSelfHeal -and (Test-ProductionN8nEncryptionKeyMismatchLog -LogLines $logs)) {
+    if (Repair-ProductionN8nConfigEncryptionKey) {
+      Write-Info 'Recreating n8n after production config self-heal.'
+      if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n')) -ne 0) {
+        return $false
+      }
+      $readyStreak = 0
+      for ($attempt = 1; $attempt -le 20; $attempt += 1) {
+        if (Test-ProductionN8nHttpReady) {
+          $readyStreak += 1
+          if ($readyStreak -ge 3) {
+            $logs = @(Get-ProductionN8nRecentLogLines -Tail 60)
+            if (-not (Test-ProductionN8nDatabaseImageMismatchLog -LogLines $logs) -and -not (Test-ProductionN8nEncryptionKeyMismatchLog -LogLines $logs)) {
+              Write-Success 'n8n editor is responding after self-heal and stayed reachable.'
+              return $true
+            }
+            break
+          }
+        } else {
+          $readyStreak = 0
+        }
+        Start-Sleep -Seconds 2
+      }
+    }
+  }
+
   Write-ErrorMessage "$Context did not produce a reachable n8n editor at $(Get-LocalN8nUrl)."
   if (Test-ProductionN8nEncryptionKeyMismatchLog -LogLines $logs) {
     Write-ErrorMessage 'Recent logs show mismatching encryption keys between /home/node/.n8n/config and N8N_ENCRYPTION_KEY.'
@@ -941,7 +970,7 @@ function Start-ProductionStack {
   $values = Read-EnvFile
   if (-not (Set-ActiveN8nUrl -Url (Get-LocalN8nUrl -Values $values) -Mode 'localhost' -HostName 'localhost')) { return }
   if ((Invoke-Compose -Arguments @('up', '-d', 'postgres', 'n8n')) -ne 0) { return }
-  if (-not (Wait-ForProductionN8nReady -Context 'Production localhost n8n start')) { return }
+  if (-not (Wait-ForProductionN8nReady -Context 'Production localhost n8n start' -AllowSelfHeal)) { return }
   Write-Success "Local editor: $(Get-LocalN8nUrl -Values $values)"
   Write-Info 'For public Cloudflare access, fill the Cloudflare values in .env, then use Start Cloudflare tunnel.'
 }
@@ -985,7 +1014,7 @@ function Start-CloudflareTunnel {
   $publicHost = Get-EnvValue -Name 'N8N_PUBLIC_HOST' -Values $values
   if (-not (Set-ActiveN8nUrl -Url $publicUrl -Mode 'cloudflare' -HostName $publicHost)) { return }
   if ((Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n', 'cloudflared')) -ne 0) { return }
-  if (-not (Wait-ForProductionN8nReady -Context 'Production Cloudflare n8n start')) { return }
+  if (-not (Wait-ForProductionN8nReady -Context 'Production Cloudflare n8n start' -AllowSelfHeal)) { return }
   Write-Success 'n8n and Cloudflare tunnel started. n8n was recreated so current non-image .env values are applied.'
   Write-Host ''
   Write-Host "Public URL should be: $publicUrl" -ForegroundColor DarkYellow
@@ -2850,6 +2879,9 @@ function Restore-ProductionCloudflareFromBackupMenu {
     if ($preRestoreEncryptionKey) {
       Set-EnvFileValue -Path $envPath -Name 'N8N_ENCRYPTION_KEY' -Value $preRestoreEncryptionKey
       Write-Success 'Pre-restore production .env N8N_ENCRYPTION_KEY restored.'
+      if (-not (Repair-ProductionN8nConfigEncryptionKey)) {
+        Write-Warning 'Could not sync n8n config back to the pre-restore encryption key. Startup will attempt one more repair pass.'
+      }
     }
     Write-Success 'Pre-restore database rollback completed.'
     Restore-PreviousProductionServices -PreviousServices $preRestoreServices
