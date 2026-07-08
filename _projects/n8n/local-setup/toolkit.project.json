@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.3",
+  "version": "3.8.4",
   "version_policy": "semver",
-  "version_notes": "Aligns the production Cloudflare stack templates more closely with the local stack by simplifying env setup around one public URL and matching Compose defaults.",
+  "version_notes": "Removes backup retention from the normal production Cloudflare env template so setup stays closer to the local stack; the manual backup action keeps its built-in default.",
   "outputs": [
     {
       "kind": "curated",

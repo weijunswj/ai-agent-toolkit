@@ -1432,7 +1432,8 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(guide, /manifest\.json/);
   assert.match(guide, /RESTORE-NOTES\.txt/);
   assert.match(guide, /backup\.log/);
-  assert.match(guide, /retention cleanup using `N8N_BACKUP_RETENTION_DAYS`/);
+  assert.match(guide, /retention cleanup with a 30-day default/);
+  assert.match(guide, /Backups run only when you choose `Back up` from the menu/);
   assert.match(guide, /does not set up automatic backups/);
   assert.match(guide, /Do not use Windows Task Scheduler for this production\/server documentation path/);
   assert.match(guide, /schedule it with systemd or cron/);
@@ -1481,12 +1482,12 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(envExample, /^N8N_PUBLIC_HOST=n8n\.example\.com$/m);
   assert.match(envExample, /^N8N_PUBLIC_URL=https:\/\/n8n\.example\.com\/$/m);
   assert.match(envExample, /^CLOUDFLARED_TUNNEL_TOKEN=replace-with-cloudflare-tunnel-token$/m);
-  assert.match(envExample, /^N8N_BACKUP_RETENTION_DAYS=30$/m);
   assert.doesNotMatch(envExample, /^WEBHOOK_URL=/m);
   assert.doesNotMatch(envExample, /^N8N_EDITOR_BASE_URL=/m);
   assert.doesNotMatch(envExample, /^N8N_PROTOCOL=/m);
   assert.doesNotMatch(envExample, /^N8N_PROXY_HOPS=/m);
   assert.doesNotMatch(envExample, /^GENERIC_TIMEZONE=/m);
+  assert.doesNotMatch(envExample, /^N8N_BACKUP_RETENTION_DAYS=/m);
   assert.match(compose, /WEBHOOK_URL: \$\{N8N_PUBLIC_URL\}/);
   assert.match(compose, /N8N_EDITOR_BASE_URL: \$\{N8N_PUBLIC_URL\}/);
   assert.match(compose, /N8N_PROTOCOL: https/);

@@ -163,7 +163,6 @@ Do not paste real values into this repo, issues, pull requests, screenshots, cha
 | `N8N_IMAGE` | n8n image. | Default is `docker.n8n.io/n8nio/n8n:stable`; pin intentionally if needed. |
 | `POSTGRES_IMAGE` | Postgres image. | Default is `postgres:16-alpine`. |
 | `CLOUDFLARED_IMAGE` | Cloudflare connector image. | Default is `cloudflare/cloudflared:latest`; pin intentionally if needed. |
-| `N8N_BACKUP_RETENTION_DAYS` | Backup retention days. | Used by the production launcher Back up action. |
 | `N8N_PUBLIC_HOST` | Hostname only. | No `https://`, no path, no slash, no port. |
 | `N8N_PUBLIC_URL` | Full public URL. | Must start with `https://` and end with `/`. |
 | `CLOUDFLARED_TUNNEL_TOKEN` | Tunnel token from Cloudflare. | Store only in private `.env` or secret storage. |
@@ -311,13 +310,13 @@ The manual production backup includes:
 - `manifest.json`
 - `RESTORE-NOTES.txt`
 - `backup.log`
-- retention cleanup using `N8N_BACKUP_RETENTION_DAYS`
+- retention cleanup with a 30-day default
 
 Backups may contain private workflows, executions, and encrypted credential records. Keep them private. Do not commit backups, logs, exports, database dumps, or production `.env` files.
 
 The menu intentionally does not copy `.env` or `N8N_ENCRYPTION_KEY` into backup folders. Store restore-critical secrets in a password manager or secret store.
 
-The production Cloudflare menu does not set up automatic backups. Do not use Windows Task Scheduler for this production/server documentation path.
+The production Cloudflare menu does not set up automatic backups. Backups run only when you choose `Back up` from the menu. Do not use Windows Task Scheduler for this production/server documentation path.
 
 For a Linux server or company-server deployment such as Hostinger/Coolify, use the copy-ready [production server backup template](../../templates/production-server-backups/) and schedule it with systemd or cron. That template creates the same n8n CLI exports, database backup when applicable, manifest, restore notes, logs, and retention cleanup from the server side.
 
