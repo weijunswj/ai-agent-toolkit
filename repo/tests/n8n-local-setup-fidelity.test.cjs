@@ -1424,7 +1424,7 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
   assert.doesNotMatch(vps, /unrelated hosting providers/i);
 });
 
-test('Production Cloudflare guide and menu use all-inclusive production backups', () => {
+test('Production Cloudflare guide and menu use local-style database-first production backups', () => {
   const guide = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md');
   const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1');
   const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/docker-compose.yml');
@@ -1436,19 +1436,23 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(guide, /Linux server backup template/);
   assert.match(guide, /\[production server backup template\]\(\.\/templates\/production-server-backups\/\)/);
   assert.match(guide, /`Back up`/);
-  assert.match(guide, /n8n export:workflow --backup --output=<backup_dir>/);
-  assert.match(guide, /n8n export:credentials --backup --output=<backup_dir>/);
-  assert.match(guide, /encrypted credential export only/);
-  assert.match(guide, /Postgres `pg_dump`/);
+  assert.match(guide, /same restore-compatible database-first shape as the local stack/);
   assert.match(guide, /n8n-production-YYYYMMDD-HHMMSS/);
-  assert.match(guide, /manifest\.json/);
-  assert.match(guide, /RESTORE-NOTES\.txt/);
+  assert.match(guide, /database\.sql/);
+  assert.match(guide, /SECRET-DO-NOT-COMMIT\.env/);
+  assert.match(guide, /restore-manifest\.json/);
+  assert.match(guide, /HOW TO USE THIS RESTORE FOLDER\.txt/);
+  assert.match(guide, /README-PRIVATE\.txt/);
   assert.match(guide, /backup\.log/);
   assert.match(guide, /retention cleanup with a 30-day default/);
+  assert.match(guide, /`database\.sql` is the full n8n Postgres database backup/);
+  assert.match(guide, /contains workflows, encrypted credential records, settings, users\/projects/);
+  assert.match(guide, /does not create separate workflow or credential export folders by default/);
   assert.match(guide, /Backups run only when you choose `Back up` from the menu/);
   assert.match(guide, /does not set up automatic backups/);
   assert.match(guide, /Do not use Windows Task Scheduler for this production\/server documentation path/);
   assert.match(guide, /schedule it with systemd or cron/);
+  assert.match(guide, /server-side template is separate from this Windows Cloudflare launcher/);
   assert.match(guide, /Offsite or cloud storage is intentionally not configured here/);
   assert.match(guide, /future hardening item/);
   assert.match(guide, /You can start Postgres and n8n locally before Cloudflare is ready/);
@@ -1458,6 +1462,9 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(guide, /`N8N_PUBLIC_HOST` \| Your n8n subdomain\/hostname only/);
   assert.match(guide, /If `N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is still a placeholder, the Cloudflare preflight warns and continues/);
   assert.doesNotMatch(guide, /Backup Postgres/);
+  assert.doesNotMatch(guide, /n8n export:workflow --backup --output=<backup_dir>/);
+  assert.doesNotMatch(guide, /n8n export:credentials --backup --output=<backup_dir>/);
+  assert.doesNotMatch(guide, /encrypted credential export only/);
 
   assert.deepEqual(menuOptions(menu, 'Show-MainMenu'), [
     'Start n8n',
@@ -1515,34 +1522,38 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(functionBody(menu, 'Start-LocalhostOnly'), /Start-ProductionStack[\s\S]*cloudflared[\s\S]*stop', 'cloudflared'/);
   assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*Set-ActiveN8nUrl -Url \$publicUrl -Mode 'cloudflare' -HostName \$publicHost[\s\S]*cloudflared/);
   assert.match(functionBody(menu, 'Stop-CloudflareTunnel'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local/);
-  assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /export:workflow[\s\S]*export:credentials/);
-  assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /No workflows found with specified filters[\s\S]*No credentials found with specified filters/);
-  assert.match(functionBody(menu, 'Invoke-N8nCliProductionBackupExport'), /EmptyOutputPattern[\s\S]*Continuing with an empty[\s\S]*Invoke-Compose -Arguments @\('cp'/);
-  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Get-N8nCliProductionBackupSpecs[\s\S]*Backup-Postgres/);
-  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-N8nCliProductionBackupExport/);
+  assert.doesNotMatch(menu, /function Get-N8nCliProductionBackupSpecs|function Invoke-N8nCliProductionBackupExport/);
+  assert.match(functionBody(menu, 'Backup-Postgres'), /Join-Path \$BackupDir 'database\.sql'/);
+  assert.doesNotMatch(functionBody(menu, 'Backup-Postgres'), /Join-Path \$BackupDir 'database'/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Backup-Postgres -Required -BackupDir \$backupDir -SkipPreflight/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Write-ProductionBackupSecretFile -BackupDir \$backupDir/);
+  assert.doesNotMatch(functionBody(menu, 'Backup-N8nProductionNow'), /export:workflow|export:credentials|Invoke-N8nCliProductionBackupExport/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-BasePreflight/);
   assert.doesNotMatch(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-SafetyPreflight/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Add-ProductionBackupLog[\s\S]*Write-ProductionBackupRestoreNotes[\s\S]*Write-ProductionBackupManifest/);
-  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /manifest\.json[\s\S]*backup\.log[\s\S]*RESTORE-NOTES\.txt/);
-  assert.match(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /RESTORE-NOTES\.txt[\s\S]*import:workflow[\s\S]*import:credentials/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /restore-manifest\.json[\s\S]*database\.sql[\s\S]*SECRET-DO-NOT-COMMIT\.env[\s\S]*backup\.log[\s\S]*HOW TO USE THIS RESTORE FOLDER\.txt/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /HOW TO USE THIS RESTORE FOLDER\.txt[\s\S]*database\.sql is the full n8n Postgres database backup/);
+  assert.doesNotMatch(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /import:workflow|import:credentials/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-ProductionBackupRetentionCleanup/);
-  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Decrypted credential export is disabled/);
   assert.doesNotMatch(functionBody(menu, 'Test-ProductionBackupRoot'), /\$home\s*=/i);
   assert.match(functionBody(menu, 'Test-ProductionBackupRoot'), /\$userProfileRoot = \[System\.IO\.Path\]::GetFullPath/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Advanced \/ Recovery: Restore local n8n from backup/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Type PROCEED to continue[\s\S]*Backup-Postgres -Required -BackupDir \$preRestoreRoot -SkipPreflight[\s\S]*Restore-ProductionPostgresSqlBackup/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /InputPath = Join-Path \$preRestoreRoot 'database\.sql'/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Restore-PreviousProductionServices -PreviousServices \$preRestoreServices -StartN8nWhenNone/);
   assert.match(functionBody(menu, 'Restore-ProductionPostgresSqlBackup'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;[\s\S]*psql[\s\S]*ON_ERROR_STOP=1[\s\S]*-f/);
+  assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Join-Path \$resolved 'database\.sql'/);
+  assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Join-Path \(Join-Path \$resolved 'database'\) 'database\.sql'/);
   assert.match(menu, /'8' \{ Invoke-MenuAction \{ Restore-ProductionCloudflareFromBackupMenu \} \}/);
   assert.match(shortcut, /%USERPROFILE%\\\.n8n-production-cloudflare/);
   assert.match(shortcut, /_n8n-production-cloudflare\.cmd/);
   assert.match(shortcut, /Copy the production Cloudflare stack templates into %STACK_DIR% first/);
-  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /includeWorkflows = \$true[\s\S]*includeCredentials = \$true[\s\S]*exportDecryptedCredentials = \$false[\s\S]*includeDatabase = \$true/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /includeWorkflows = \$false[\s\S]*includeCredentials = \$false[\s\S]*exportDecryptedCredentials = \$false[\s\S]*includeDatabase = \$true/);
   assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /\^n8n-production-\\d\{8\}-\\d\{6\}\$/);
   assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /Test-PathInsideDirectory[\s\S]*Remove-Item -LiteralPath \$folder\.FullName -Recurse -Force/);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Backup-N8nProductionNow -Required/);
   assert.doesNotMatch(functionBody(menu, 'Show-MainMenu'), /Backup Postgres/);
-  assert.doesNotMatch(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /--decrypted/);
+  assert.doesNotMatch(menu, /--decrypted/);
   assert.doesNotMatch(menu, /Windows Task Scheduler|Register-ScheduledTask|New-ScheduledTaskTrigger|Unregister-ScheduledTask/);
 
   assert.match(envExample, /\[ STEP 1: Fill These Before First Production Launch \]/);

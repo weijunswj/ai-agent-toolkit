@@ -822,14 +822,11 @@ function Backup-Postgres {
   $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
   if (-not $BackupDir) {
     $BackupDir = Join-Path (Join-Path $script:StackRoot 'backups') "n8n-production-postgres-$timestamp"
-    $databaseDir = $BackupDir
-  } else {
-    $databaseDir = Join-Path $BackupDir 'database'
   }
-  $backupPath = Join-Path $databaseDir 'database.sql'
+  $backupPath = Join-Path $BackupDir 'database.sql'
   $containerBackupPath = "/tmp/n8n-production-backup-$timestamp.sql"
 
-  New-Item -ItemType Directory -Force -Path $databaseDir | Out-Null
+  New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
   Write-Info 'Ensuring Postgres is running before backup.'
   if ((Invoke-Compose -Arguments @('up', '-d', 'postgres')) -ne 0) { return $false }
 
@@ -846,13 +843,14 @@ function Backup-Postgres {
     return $false
   }
 
-  $readmePath = Join-Path $backupDir 'README-PRIVATE.txt'
+  $readmePath = Join-Path $BackupDir 'README-PRIVATE.txt'
   Set-Content -LiteralPath $readmePath -Encoding ascii -Value @(
     'Private production n8n Postgres backup.',
     '',
     'Keep this backup private. Do not commit it.',
-    'This folder intentionally does not include .env or N8N_ENCRYPTION_KEY.',
-    'A full restore also needs the production N8N_ENCRYPTION_KEY stored in your password manager.'
+    'database.sql contains the full n8n database state for this stack.',
+    'SECRET-DO-NOT-COMMIT.env is a private copy of the backup .env when available.',
+    'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.'
   )
 
   Write-Success "Backup written to: $backupPath"
@@ -950,29 +948,43 @@ function Get-ProductionBackupFileList {
 function Write-ProductionBackupRestoreNotes {
   param([string]$BackupDir)
 
-  Set-Content -LiteralPath (Join-Path $BackupDir 'RESTORE-NOTES.txt') -Encoding ascii -Value @(
-    'Production n8n restore notes',
+  Set-Content -LiteralPath (Join-Path $BackupDir 'HOW TO USE THIS RESTORE FOLDER.txt') -Encoding ascii -Value @(
+    'How to use this restore folder',
     '',
-    'Keep this folder private. Do not commit backups, exports, logs, database dumps, or credential files.',
+    'Backup type: postgres-sql',
     '',
-    'Before restore:',
-    '1. Confirm owner approval and a maintenance window.',
-    '2. Take a new current-state backup.',
-    '3. Confirm the target n8n instance uses the correct N8N_ENCRYPTION_KEY.',
-    '4. Confirm the target n8n version can read this export.',
+    'database.sql is the full n8n Postgres database backup for this stack.',
+    'It contains workflows, encrypted credential records, settings, users/projects, and other database-backed n8n state.',
     '',
-    'Workflow import shape:',
-    '  docker compose cp workflows n8n:/tmp/n8n-restore-workflows',
-    '  docker compose exec -T n8n n8n import:workflow --separate --input=/tmp/n8n-restore-workflows',
+    'Keep SECRET-DO-NOT-COMMIT.env in this folder. It is the private backup .env.',
+    'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.',
     '',
-    'Credential import shape:',
-    '  docker compose cp credentials n8n:/tmp/n8n-restore-credentials',
-    '  docker compose exec -T n8n n8n import:credentials --separate --input=/tmp/n8n-restore-credentials',
-    '',
-    'Database restore is deployment-specific and destructive. Restore database/database.sql only after a current-state backup, owner approval, and verification that the target database should be replaced.',
-    '',
-    'Encrypted credential exports require the original N8N_ENCRYPTION_KEY. This production launcher does not create decrypted credential exports.'
+    'Open _n8n-production-cloudflare.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to this folder or to database.sql.',
+    'Type PROCEED when asked.',
+    'Restore replaces the current production Cloudflare n8n database state.',
+    'Do not commit this folder, backup files, or SECRET-DO-NOT-COMMIT.env.'
   )
+}
+
+function Write-ProductionBackupSecretFile {
+  param([string]$BackupDir)
+
+  $sourceEnvPath = Join-Path $script:StackRoot '.env'
+  if (-not (Test-Path -LiteralPath $sourceEnvPath -PathType Leaf)) {
+    Write-Warning 'No .env file was found to include in the backup. Saved credentials may not decrypt after restore.'
+    return ''
+  }
+
+  $values = Read-EnvFile
+  $encryptionKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -Values $values
+  if (Test-PlaceholderValue -Value $encryptionKey) {
+    Write-Warning 'N8N_ENCRYPTION_KEY is missing or still a placeholder, but the backup will include .env because existing saved credentials may depend on that exact value.'
+  }
+
+  $secretPath = Join-Path $BackupDir 'SECRET-DO-NOT-COMMIT.env'
+  Copy-Item -LiteralPath $sourceEnvPath -Destination $secretPath -Force
+  Write-Success "Private backup .env written to: $secretPath"
+  return $secretPath
 }
 
 function Write-ProductionBackupManifest {
@@ -984,35 +996,35 @@ function Write-ProductionBackupManifest {
     [int]$RetentionDays = 30
   )
 
-  $manifestPath = Join-Path $BackupDir 'manifest.json'
+  $manifestPath = Join-Path $BackupDir 'restore-manifest.json'
   $files = @(Get-ProductionBackupFileList -BackupDir $BackupDir)
-  $files = @($files + 'manifest.json' | Sort-Object -Unique)
+  $files = @($files + 'restore-manifest.json' | Sort-Object -Unique)
   $manifest = [ordered]@{
     template = 'n8n-production-cloudflare-menu.ps1'
     createdAt = (Get-Date -Format o)
     timestamp = $Timestamp
     status = $Status
+    backupType = 'postgres-sql'
     stackRoot = $script:StackRoot
     retentionDays = $RetentionDays
     backupOptions = [ordered]@{
-      includeWorkflows = $true
-      includeCredentials = $true
+      includeWorkflows = $false
+      includeCredentials = $false
       exportDecryptedCredentials = $false
       includeDatabase = $true
     }
     outputs = [ordered]@{
-      workflows = 'workflows/'
-      credentials = 'credentials/'
-      database = 'database/database.sql'
+      database = 'database.sql'
+      secretEnv = 'SECRET-DO-NOT-COMMIT.env'
       log = 'backup.log'
-      restoreNotes = 'RESTORE-NOTES.txt'
+      restoreNotes = 'HOW TO USE THIS RESTORE FOLDER.txt'
     }
     filesGenerated = $files
     errors = @($Errors)
     warnings = @(
       'Keep this backup folder private and out of Git.',
-      'Encrypted credential exports require the original N8N_ENCRYPTION_KEY.',
-      'This production launcher does not create decrypted credential exports.'
+      'database.sql is the full n8n Postgres database backup for this stack.',
+      'Saved credentials require the original N8N_ENCRYPTION_KEY from SECRET-DO-NOT-COMMIT.env.'
     )
   }
 
@@ -1061,76 +1073,6 @@ function Invoke-ProductionBackupRetentionCleanup {
   return $true
 }
 
-function Get-N8nCliProductionBackupSpecs {
-  param([string]$ContainerBackupRoot)
-
-  return @(
-    [pscustomobject]@{
-      Name = 'workflows'
-      HostFolder = 'workflows'
-      ContainerOutputDir = "$ContainerBackupRoot/workflows"
-      ComposeArguments = @('exec', '-T', 'n8n', 'n8n', 'export:workflow', '--backup', "--output=$ContainerBackupRoot/workflows")
-      EmptyOutputPattern = 'No workflows found with specified filters'
-    },
-    [pscustomobject]@{
-      Name = 'credentials'
-      HostFolder = 'credentials'
-      ContainerOutputDir = "$ContainerBackupRoot/credentials"
-      ComposeArguments = @('exec', '-T', 'n8n', 'n8n', 'export:credentials', '--backup', "--output=$ContainerBackupRoot/credentials")
-      EmptyOutputPattern = 'No credentials found with specified filters'
-    }
-  )
-}
-
-function Invoke-N8nCliProductionBackupExport {
-  param(
-    [pscustomobject]$Spec,
-    [string]$BackupDir
-  )
-
-  $display = "docker compose $($Spec.ComposeArguments -join ' ')"
-  Write-Info $display
-
-  $previousErrorActionPreference = $ErrorActionPreference
-  $output = @()
-  try {
-    $ErrorActionPreference = 'Continue'
-    $output = @(& docker compose @($Spec.ComposeArguments) 2>&1)
-    $exitCode = $LASTEXITCODE
-  } catch {
-    $output = @($_.Exception.Message)
-    $exitCode = 1
-  } finally {
-    $ErrorActionPreference = $previousErrorActionPreference
-  }
-
-  foreach ($line in $output) {
-    if ($null -ne $line) {
-      Write-Host ([string]$line)
-    }
-  }
-
-  $text = ($output | ForEach-Object { [string]$_ }) -join "`n"
-  if ($exitCode -ne 0) {
-    if ($Spec.EmptyOutputPattern -and $text -match [regex]::Escape([string]$Spec.EmptyOutputPattern)) {
-      $hostTarget = Join-Path $BackupDir $Spec.HostFolder
-      New-Item -ItemType Directory -Force -Path $hostTarget | Out-Null
-      Write-Warning "$($Spec.Name) export found no saved $($Spec.Name). Continuing with an empty $($Spec.HostFolder) folder."
-      return $true
-    }
-
-    Write-ErrorMessage "Command failed with exit code $exitCode."
-    return $false
-  }
-
-  $hostTarget = Join-Path $BackupDir $Spec.HostFolder
-  if ((Invoke-Compose -Arguments @('cp', "n8n:$($Spec.ContainerOutputDir)", $hostTarget)) -ne 0) {
-    return $false
-  }
-
-  return $true
-}
-
 function Backup-N8nProductionNow {
   param([switch]$Required)
 
@@ -1155,32 +1097,21 @@ function Backup-N8nProductionNow {
 
   $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
   $backupDir = Join-Path $safeRoot.Path "n8n-production-$timestamp"
-  $containerBackupRoot = "/tmp/n8n-production-backups/$timestamp"
   $errors = New-Object System.Collections.Generic.List[string]
 
   New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
   Add-ProductionBackupLog -BackupDir $backupDir -Message "Starting production n8n backup in $backupDir"
-  Write-Info 'Back up exports workflows, exports credentials, dumps Postgres, writes a manifest, and applies retention cleanup.'
-  Write-Info 'Decrypted credential export is disabled for this production launcher.'
+  Write-Info 'Back up creates one restore-compatible Postgres database dump, writes restore notes, and applies retention cleanup.'
+  Write-Info 'database.sql contains the full n8n database state, including workflows and encrypted credential records.'
 
   $ok = $true
-  try {
-    $specs = @(Get-N8nCliProductionBackupSpecs -ContainerBackupRoot $containerBackupRoot)
-    foreach ($spec in $specs) {
-      Add-ProductionBackupLog -BackupDir $backupDir -Message "Running n8n CLI export for $($spec.Name)."
-      if (-not (Invoke-N8nCliProductionBackupExport -Spec $spec -BackupDir $backupDir)) {
-        $errors.Add("$($spec.Name) export failed.")
-        $ok = $false
-        break
-      }
-    }
+  if (-not (Backup-Postgres -Required -BackupDir $backupDir -SkipPreflight)) {
+    $errors.Add('Postgres database backup failed.')
+    $ok = $false
+  }
 
-    if ($ok -and -not (Backup-Postgres -Required -BackupDir $backupDir -SkipPreflight)) {
-      $errors.Add('Postgres database backup failed.')
-      $ok = $false
-    }
-  } finally {
-    [void](Invoke-Compose -Arguments @('exec', '-T', 'n8n', 'rm', '-rf', $containerBackupRoot))
+  if ($ok) {
+    [void](Write-ProductionBackupSecretFile -BackupDir $backupDir)
   }
 
   Write-ProductionBackupRestoreNotes -BackupDir $backupDir
@@ -1199,7 +1130,7 @@ function Backup-N8nProductionNow {
   [void](Invoke-ProductionBackupRetentionCleanup -BackupRoot $safeRoot.Path -RetentionDays $retentionDays)
   Write-Success "Backup folder: $backupDir"
   Write-Success "Manifest written to: $manifestPath"
-  Write-Warning 'Keep this backup private. Do not commit backups, logs, exports, database dumps, or production .env files.'
+  Write-Warning 'Keep this backup private. Do not commit backups, logs, database dumps, or production .env files.'
   return $true
 }
 
@@ -1213,7 +1144,7 @@ function Test-ProductionPostgresSqlBackupFile {
 
   $extension = [System.IO.Path]::GetExtension($Path)
   if ($extension -ne '.sql') {
-    Write-ErrorMessage 'Production restore currently accepts a database.sql file or a production backup folder containing database/database.sql.'
+    Write-ErrorMessage 'Production restore currently accepts a database.sql file or a production backup folder containing database.sql.'
     return $false
   }
 
@@ -1243,11 +1174,15 @@ function Resolve-ProductionRestoreBackup {
   }
 
   if (Test-Path -LiteralPath $resolved -PathType Container) {
-    $databasePath = Join-Path (Join-Path $resolved 'database') 'database.sql'
-    if (Test-ProductionPostgresSqlBackupFile -Path $databasePath) {
+    $databasePath = Join-Path $resolved 'database.sql'
+    if ((Test-Path -LiteralPath $databasePath -PathType Leaf) -and (Test-ProductionPostgresSqlBackupFile -Path $databasePath)) {
       return [pscustomobject]@{ Ok = $true; Path = $resolved; InputPath = $databasePath; Label = 'production backup folder'; Error = '' }
     }
-    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Backup folder must contain database/database.sql.' }
+    $legacyDatabasePath = Join-Path (Join-Path $resolved 'database') 'database.sql'
+    if ((Test-Path -LiteralPath $legacyDatabasePath -PathType Leaf) -and (Test-ProductionPostgresSqlBackupFile -Path $legacyDatabasePath)) {
+      return [pscustomobject]@{ Ok = $true; Path = $resolved; InputPath = $legacyDatabasePath; Label = 'legacy production backup folder'; Error = '' }
+    }
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Backup folder must contain database.sql.' }
   }
 
   if (Test-ProductionPostgresSqlBackupFile -Path $resolved) {
@@ -1384,7 +1319,7 @@ function Restore-ProductionCloudflareFromBackupMenu {
 
   Write-ErrorMessage 'Restore failed. Rolling back to the pre-restore database backup now.'
   $rollback = [pscustomobject]@{
-    InputPath = Join-Path (Join-Path $preRestoreRoot 'database') 'database.sql'
+    InputPath = Join-Path $preRestoreRoot 'database.sql'
   }
   if (Restore-ProductionPostgresSqlBackup -Backup $rollback) {
     Write-Success 'Pre-restore database rollback completed.'

@@ -330,13 +330,10 @@ Do not add production credentials or workflows until backups exist.
 At minimum:
 
 1. Store `N8N_ENCRYPTION_KEY` in a password manager.
-2. Create and test an n8n CLI workflow export process.
-3. Create and test an n8n CLI credential export process.
-4. Keep decrypted credential export disabled unless an owner explicitly approves a break-glass export.
-5. Create and test a Postgres backup process.
-6. Decide where private backups live.
-7. Decide who can restore.
-8. Take a backup before Postgres updates and before major n8n updates.
+2. Create and test a Postgres backup and restore process.
+3. Decide where private backups live.
+4. Decide who can restore.
+5. Take a backup before Postgres updates and before major n8n updates.
 
 The production menu includes:
 
@@ -346,25 +343,24 @@ Back up
 
 It writes a timestamped backup folder under the private stack folder's `backups\` directory.
 
-The manual production backup includes:
+The manual production backup uses the same restore-compatible database-first shape as the local stack. It includes:
 
-- `n8n export:workflow --backup --output=<backup_dir>`
-- `n8n export:credentials --backup --output=<backup_dir>`
-- encrypted credential export only
-- Postgres `pg_dump`
 - timestamped folders named `n8n-production-YYYYMMDD-HHMMSS`
-- `manifest.json`
-- `RESTORE-NOTES.txt`
+- `database.sql`
+- `SECRET-DO-NOT-COMMIT.env` when `.env` exists
+- `restore-manifest.json`
+- `HOW TO USE THIS RESTORE FOLDER.txt`
+- `README-PRIVATE.txt`
 - `backup.log`
 - retention cleanup with a 30-day default
 
-Backups may contain private workflows, executions, and encrypted credential records. Keep them private. Do not commit backups, logs, exports, database dumps, or production `.env` files.
+`database.sql` is the full n8n Postgres database backup for this stack. It contains workflows, encrypted credential records, settings, users/projects, and other database-backed n8n state. The production Cloudflare menu does not create separate workflow or credential export folders by default because restore uses the database backup.
 
-The menu intentionally does not copy `.env` or `N8N_ENCRYPTION_KEY` into backup folders. Store restore-critical secrets in a password manager or secret store.
+Backups may contain private workflows, executions, encrypted credential records, and private environment values. Keep them private. Do not commit backups, logs, database dumps, `SECRET-DO-NOT-COMMIT.env`, or production `.env` files.
 
 The production Cloudflare menu does not set up automatic backups. Backups run only when you choose `Back up` from the menu. Do not use Windows Task Scheduler for this production/server documentation path.
 
-For a Linux server or company-server deployment such as Hostinger/Coolify, use the copy-ready [production server backup template](./templates/production-server-backups/) and schedule it with systemd or cron. That template creates the same n8n CLI exports, database backup when applicable, manifest, restore notes, logs, and retention cleanup from the server side.
+For a Linux server or company-server deployment such as Hostinger/Coolify, use the copy-ready [production server backup template](./templates/production-server-backups/) and schedule it with systemd or cron. That server-side template is separate from this Windows Cloudflare launcher and is designed for Linux production deployments.
 
 Offsite or cloud storage is intentionally not configured here. Treat offsite storage as a future hardening item after local/private server backups and restore have been proven and the storage pattern is approved.
 
@@ -412,7 +408,7 @@ Use the production menu for normal operations:
 | `Update` | Pull and recreate selected services, with backup before Postgres update. |
 | `Show Compose status` | Inspect Compose service state and images. |
 | `View logs` | Inspect recent logs for all services or one service. |
-| `Back up` | Create a private all-inclusive backup with workflow export, credential export, Postgres dump, manifest, restore notes, log, and retention cleanup. |
+| `Back up` | Create a private restore-compatible backup folder with `database.sql`, private env copy when available, restore manifest, restore notes, log, and retention cleanup. |
 | `Advanced / Recovery: Restore local n8n from backup` | Restore a production backup folder or trusted `database.sql` after a pre-restore backup and `PROCEED` approval. |
 | `Command list` | Show the recommended launcher and menu action summary. |
 

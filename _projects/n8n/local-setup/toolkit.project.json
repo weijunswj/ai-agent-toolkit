@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.12",
+  "version": "3.8.13",
   "version_policy": "semver",
-  "version_notes": "Adds the production Cloudflare desktop shortcut wrapper to match the local stack convenience launcher.",
+  "version_notes": "Aligns production Cloudflare backups with the local stack restore-compatible database-first backup folder shape.",
   "outputs": [
     {
       "kind": "curated",
@@ -294,7 +294,7 @@
       "kind": "copy",
       "source": "_main/templates/production-cloudflare-stack/.gitignore",
       "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore",
-      "notes": "Production Cloudflare stack runtime ignore template for private env, backups, logs, dumps, archives, and credential export artifacts.",
+      "notes": "Production Cloudflare stack runtime ignore template for private env, backups, logs, dumps, archives, and restore secret files.",
       "fidelity": "exact"
     },
     {
@@ -315,7 +315,7 @@
       "kind": "copy",
       "source": "_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
       "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
-      "notes": "PowerShell menu for production Cloudflare Tunnel preflight, start/stop, restart, status, logs, all-inclusive manual backup, image updates, and production URL display.",
+      "notes": "PowerShell menu for production Cloudflare Tunnel preflight, start/stop, restart, status, logs, restore-compatible Postgres manual backup, image updates, and production URL display.",
       "fidelity": "exact"
     },
     {
