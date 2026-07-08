@@ -1469,12 +1469,12 @@ function Resolve-ProductionRestoreBackup {
   }
 
   if (Test-Path -LiteralPath $resolved -PathType Container) {
-    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Production restore now accepts zip packages only. Open the backup folder and select its n8n-production-*.zip file.' }
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Please select a .zip backup package.' }
   }
 
   $extension = [System.IO.Path]::GetExtension($resolved)
   if ($extension -ne '.zip') {
-    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Production restore input must be a .zip backup package.' }
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Please select a .zip backup package.' }
   }
 
   $entries = @(Get-ZipEntryNames -ZipPath $resolved)

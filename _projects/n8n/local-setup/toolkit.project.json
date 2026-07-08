@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.14",
+  "version": "3.8.15",
   "version_policy": "semver",
-  "version_notes": "Packages local and production Cloudflare restore backups as zip files with sibling secret env files and zip-only restore selection.",
+  "version_notes": "Simplifies zip-only restore errors and writes local backup packages directly under the backups root instead of backups/n8n-cli.",
   "outputs": [
     {
       "kind": "curated",

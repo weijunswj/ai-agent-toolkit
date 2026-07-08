@@ -910,6 +910,7 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
     'Restore-N8nEntitiesBackup',
     'Restore-LocalN8nFromBackupMenu',
     'Get-N8nCliBackupDefaultRoot',
+    'Get-N8nCliBackupLegacyRoot',
     'Get-N8nCliBackupConfigPath',
     'Convert-N8nCliBackupDayValue',
     'Test-SafeN8nCliBackupRoot',
@@ -1014,7 +1015,7 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
   assert.match(functionBody(menu, 'Expand-RestorePackageZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*database\.sql/);
   assert.match(functionBody(menu, 'New-RestoreEntityImportDirectory'), /EndsWith\('\.jsonl'\)[\s\S]*migrations\.jsonl[\s\S]*workflows_tags\.jsonl[\s\S]*workflowtagmapping\.jsonl[\s\S]*both files import into the workflows_tags table[\s\S]*Copy-Item -LiteralPath \$file\.FullName[\s\S]*CreateFromDirectory\(\$zipSourceDir, \$zipPath\)[\s\S]*Rebuilt clean entities\.zip with \$copiedCount/);
   assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /New-RestoreEntityImportDirectory -EntityDir \$entityDir -StagingDir \$stagingDir[\s\S]*did not contain migrations\.jsonl[\s\S]*clean entities\.zip rebuilt from all extracted n8n entity JSONL files[\s\S]*EntityDir = \$importDir[\s\S]*SourceEntityDir = \$entityDir/);
-  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /PSIsContainer[\s\S]*Restore now accepts zip packages only/);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /PSIsContainer[\s\S]*Please select a \.zip backup package/);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /restore-compatible backup package[\s\S]*postgres-package-zip/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /Expand-RestorePackageZipToStaging[\s\S]*Type = 'postgres-sql'[\s\S]*InputPath = \$expanded\.DatabaseSqlPath/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /Expand-RestoreEntitiesZipToStaging[\s\S]*InputDir = \$expanded\.EntityDir[\s\S]*SourceEntityDir = \$expanded\.SourceEntityDir/);
@@ -1130,7 +1131,8 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
     '$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("toolkit-n8n-cli-backup-" + [guid]::NewGuid().ToString("N"))',
     '$script:StackRoot = Join-Path $testRoot "stack"',
     'New-Item -ItemType Directory -Force -Path $script:StackRoot | Out-Null',
-    '$safeRoot = Join-Path $script:StackRoot "backups\\n8n-cli"',
+    '$safeRoot = Join-Path $script:StackRoot "backups"',
+    '$legacyRoot = Join-Path $safeRoot "n8n-cli"',
     '$validCadence = Convert-N8nCliBackupDayValue -Value "7" -Name "Backup cadence"',
     'if (-not $validCadence.Ok -or $validCadence.Value -ne 7) { throw "valid cadence was rejected" }',
     '$invalidCadence = Convert-N8nCliBackupDayValue -Value "0" -Name "Backup cadence"',
@@ -1148,6 +1150,10 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
     'if ($manualConfig.backupRoot -ne $safeRoot) { throw "manual backup did not reuse configured destination" }',
     'if ($manualConfig.retentionDays -ne 14) { throw "manual backup did not reuse configured retention" }',
     'if (-not (Test-N8nCliBackupAutomaticEnabled -Config $existingAutomaticConfig)) { throw "enabled automatic backup config was not detected" }',
+    '$legacyAutomaticConfig = [pscustomobject]@{ enabled = $true; cadenceDays = 1; retentionDays = 30; backupRoot = $legacyRoot; includeWorkflows = $true; includeCredentials = $true; exportDecryptedCredentials = $false }',
+    'Save-N8nCliBackupConfig -Config $legacyAutomaticConfig | Out-Null',
+    '$normalizedLegacyConfig = Read-N8nCliBackupConfig',
+    'if ($normalizedLegacyConfig.backupRoot -ne $safeRoot) { throw "legacy n8n-cli backup root was not normalized: $($normalizedLegacyConfig.backupRoot)" }',
     '$disabledAutomaticConfig = [pscustomobject]@{ enabled = $false; backupRoot = $safeRoot }',
     'if (Test-N8nCliBackupAutomaticEnabled -Config $disabledAutomaticConfig) { throw "disabled automatic backup config was treated as enabled" }',
     '$scheduleText = Get-N8nCliBackupScheduleTimeText -Config $existingAutomaticConfig',
@@ -1186,7 +1192,7 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
     'Set-Content -LiteralPath (Join-Path $folderBackup "database.sql") -Value "-- fake sql" -Encoding ascii',
     'Set-Content -LiteralPath (Join-Path $folderBackup "restore-manifest.json") -Value "{}" -Encoding ascii',
     '$folderDetected = Get-RestoreBackupType -Path $folderBackup',
-    'if ($folderDetected.Type -ne "unsupported" -or $folderDetected.Reason -notmatch "zip packages only") { throw "recovery folder was accepted: $($folderDetected.Type) $($folderDetected.Reason)" }',
+    'if ($folderDetected.Type -ne "unsupported" -or $folderDetected.Reason -ne "Please select a .zip backup package.") { throw "recovery folder was accepted: $($folderDetected.Type) $($folderDetected.Reason)" }',
     '$packageZip = Join-Path $folderBackup "n8n-recovery-20010101-010101.zip"',
     '$createdPackage = New-ZipPackageFromDirectory -SourceDir $folderBackup -ZipPath $packageZip',
     'if (-not $createdPackage) { throw "recovery package zip was not created" }',
@@ -1551,8 +1557,8 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /InputPath = Join-Path \$preRestoreRoot 'database\.sql'/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Restore-PreviousProductionServices -PreviousServices \$preRestoreServices -StartN8nWhenNone/);
   assert.match(functionBody(menu, 'Restore-ProductionPostgresSqlBackup'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;[\s\S]*psql[\s\S]*ON_ERROR_STOP=1[\s\S]*-f/);
-  assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Production restore now accepts zip packages only/);
-  assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Production restore input must be a \.zip backup package/);
+  assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Please select a \.zip backup package/);
+  assert.doesNotMatch(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Production restore now accepts zip packages only|Production restore input must be a \.zip backup package/);
   assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Get-ZipEntryNames[\s\S]*database\.sql[\s\S]*Expand-ProductionRestorePackageZipToStaging[\s\S]*production backup zip package/);
   assert.match(functionBody(menu, 'Expand-ProductionRestorePackageZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*database\.sql/);
   assert.match(functionBody(menu, 'Get-ProductionRestoreEnvBackupNames'), /SECRET-DO-NOT-COMMIT\.env[\s\S]*\.env/);

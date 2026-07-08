@@ -619,7 +619,7 @@ When automatic backups are enabled:
 - Otherwise uses the safe local default destination:
 
 ```text
-%USERPROFILE%\.n8n-local\backups\n8n-cli
+%USERPROFILE%\.n8n-local\backups
 ```
 
 Recovery folder contents:
@@ -639,7 +639,7 @@ Each prompt names the recommended default. Press `Enter` on an empty prompt to a
 3. Backup destination. Recommended default:
 
 ```text
-%USERPROFILE%\.n8n-local\backups\n8n-cli
+%USERPROFILE%\.n8n-local\backups
 ```
 
 Automatic backups use the same recovery zip package format as `Back up now`. Workflows, saved credentials, user accounts, projects, settings, and other database-backed n8n state are included through `database.sql`, and saved credentials remain encrypted by `N8N_ENCRYPTION_KEY`.
@@ -652,7 +652,7 @@ Use `Export workflows/credentials (advanced)` only when you need n8n CLI entity 
 2. Export destination. Recommended default:
 
 ```text
-%USERPROFILE%\.n8n-local\backups\n8n-cli
+%USERPROFILE%\.n8n-local\backups
 ```
 
 3. Whether to include workflows. Recommended default: **Yes**.
@@ -687,6 +687,7 @@ n8n export:credentials --backup --output=<backup_dir>
 - Each run writes `n8n-cli-YYYYMMDD-HHMMSS.zip` with the exported files and `manifest.json`; `SECRET-DO-NOT-COMMIT.env` is kept beside the zip when available.
 - Entity exports are secondary and are not the default recovery backup path.
 - The local config file is saved under `%USERPROFILE%\.n8n-local\backups\n8n-cli-backup-config.json` by default. It stores schedule settings, not secrets.
+- Older configs that point to `%USERPROFILE%\.n8n-local\backups\n8n-cli` are treated as `%USERPROFILE%\.n8n-local\backups` so new backups stay at the backup root.
 
 Retention cleanup:
 

@@ -2106,6 +2106,10 @@ function Open-N8n {
 }
 
 function Get-N8nCliBackupDefaultRoot {
+  return (Join-Path $script:StackRoot 'backups')
+}
+
+function Get-N8nCliBackupLegacyRoot {
   return (Join-Path (Join-Path $script:StackRoot 'backups') 'n8n-cli')
 }
 
@@ -2447,7 +2451,13 @@ function Read-N8nCliBackupConfig {
   }
 
   try {
-    return (Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json)
+    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    $legacyRoot = Get-ResolvedPathOrEmpty -Path (Get-N8nCliBackupLegacyRoot)
+    $configuredRoot = Get-ResolvedPathOrEmpty -Path ([string]$config.backupRoot)
+    if ($legacyRoot -and $configuredRoot -and (Test-SameResolvedPath -Left $configuredRoot -Right $legacyRoot)) {
+      $config | Add-Member -NotePropertyName backupRoot -NotePropertyValue (Get-N8nCliBackupDefaultRoot) -Force
+    }
+    return $config
   } catch {
     Write-ErrorMessage "Could not read automatic backup config: $($_.Exception.Message)"
     return $null
@@ -3748,7 +3758,7 @@ function Get-RestoreBackupType {
 
   $item = Get-Item -LiteralPath $inputPath
   if ($item.PSIsContainer) {
-    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported restore folder'; Reason = 'Restore now accepts zip packages only. Open the backup folder and select its n8n-recovery-*.zip or n8n-cli-*.zip file.' }
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported restore folder'; Reason = 'Please select a .zip backup package.' }
   }
 
   $name = $item.Name.ToLowerInvariant()
