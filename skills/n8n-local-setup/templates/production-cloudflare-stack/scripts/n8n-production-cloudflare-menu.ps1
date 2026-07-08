@@ -262,6 +262,33 @@ function Get-EnvValue {
   return $Default
 }
 
+function Get-LocalN8nPort {
+  param([hashtable]$Values = $null)
+
+  if ($null -eq $Values) {
+    $Values = Read-EnvFile
+  }
+  return (Get-EnvValue -Name 'N8N_LOCAL_PORT' -Values $Values -Default '5678')
+}
+
+function Get-LocalN8nUrl {
+  param([hashtable]$Values = $null)
+
+  $port = Get-LocalN8nPort -Values $Values
+  return "http://localhost:$port/"
+}
+
+function Test-LocalPortConfig {
+  param([hashtable]$Values)
+
+  $portText = Get-LocalN8nPort -Values $Values
+  $port = 0
+  if (-not [int]::TryParse($portText, [ref]$port)) {
+    return $false
+  }
+  return ($port -ge 1 -and $port -le 65535)
+}
+
 function Test-PlaceholderValue {
   param([string]$Value)
 
@@ -354,11 +381,44 @@ function Test-ServiceHasPorts {
   return $false
 }
 
+function Get-ServicePortMappings {
+  param([string]$ServiceName)
+
+  $block = Get-ServiceBlock -ServiceName $ServiceName
+  $ports = New-Object System.Collections.Generic.List[string]
+  $insidePorts = $false
+  foreach ($line in $block) {
+    if ($line -match '^\s{4}ports:\s*$') {
+      $insidePorts = $true
+      continue
+    }
+    if ($insidePorts -and $line -match '^\s{4}[A-Za-z0-9_-]+:\s*') {
+      break
+    }
+    if ($insidePorts -and $line -match '^\s{6}-\s*"?([^"]+)"?\s*$') {
+      $ports.Add($matches[1].Trim())
+    }
+  }
+  return @($ports)
+}
+
+function Test-ServiceHasUnsafePublicPorts {
+  param([string]$ServiceName)
+
+  foreach ($portMapping in (Get-ServicePortMappings -ServiceName $ServiceName)) {
+    if ($portMapping -notmatch '^(127\.0\.0\.1|localhost):') {
+      return $true
+    }
+  }
+  return $false
+}
+
 function Add-PreflightResult {
   param(
     [string]$Name,
     [bool]$Passed,
-    [string]$Failure
+    [string]$Why,
+    [string]$Fix
   )
 
   if ($Passed) {
@@ -366,39 +426,71 @@ function Add-PreflightResult {
     return $true
   }
 
-  Write-ErrorMessage "$Name - $Failure"
+  Write-ErrorMessage $Name
+  if ($Why) {
+    Write-Host "       Why it failed: $Why" -ForegroundColor Red
+  }
+  if ($Fix) {
+    Write-Host "       Fix: $Fix" -ForegroundColor Red
+  }
   return $false
 }
 
-function Invoke-SafetyPreflight {
-  Write-Header 'Production Safety Preflight'
+function Invoke-BasePreflight {
+  param([switch]$FromCloudflarePreflight)
 
+  if (-not $FromCloudflarePreflight) {
+    Write-Header 'Base n8n Preflight'
+  }
   $ok = $true
   $composePath = Join-Path $script:StackRoot 'docker-compose.yml'
   $envPath = Get-EnvPath
-  $ok = (Add-PreflightResult -Name 'docker-compose.yml exists' -Passed (Test-Path -LiteralPath $composePath -PathType Leaf) -Failure 'copy the production stack templates first') -and $ok
-  $ok = (Add-PreflightResult -Name '.env exists' -Passed (Test-Path -LiteralPath $envPath -PathType Leaf) -Failure 'copy .env.example to .env and fill private values') -and $ok
+  $ok = (Add-PreflightResult -Name 'docker-compose.yml exists' -Passed (Test-Path -LiteralPath $composePath -PathType Leaf) -Why 'The launcher cannot know which services and ports to run without the Compose file.' -Fix 'Copy the production stack templates into this folder first.') -and $ok
+  $ok = (Add-PreflightResult -Name '.env exists' -Passed (Test-Path -LiteralPath $envPath -PathType Leaf) -Why 'The launcher needs private database and n8n settings from .env before starting containers.' -Fix 'Copy .env.example to .env and fill the Step 1 private values.') -and $ok
+
+  $values = Read-EnvFile
+  $ok = (Add-PreflightResult -Name 'N8N_LOCAL_PORT is a valid local port' -Passed (Test-LocalPortConfig -Values $values) -Why 'Docker needs a valid localhost port for the n8n editor.' -Fix 'Use a whole number from 1 to 65535, such as 5678 or 5679.') -and $ok
+
+  $n8nKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -Values $values
+  $ok = (Add-PreflightResult -Name 'N8N_ENCRYPTION_KEY is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $n8nKey)) -Why 'n8n uses this key to encrypt saved credentials; changing or missing it can make credentials unreadable.' -Fix 'Replace it privately in .env with a long random value, then keep the same value forever for this stack.') -and $ok
+
+  $postgresPassword = Get-EnvValue -Name 'POSTGRES_PASSWORD' -Values $values
+  $ok = (Add-PreflightResult -Name 'POSTGRES_PASSWORD is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $postgresPassword)) -Why 'Postgres requires a real private password before the database container starts.' -Fix 'Replace it privately in .env with a strong random password.') -and $ok
+
+  $ok = (Add-PreflightResult -Name 'Postgres has no public port mapping' -Passed (-not (Test-ServiceHasPorts -ServiceName 'postgres')) -Why 'A production database should not be exposed directly from this local machine.' -Fix 'Remove any ports: block from the postgres service.') -and $ok
+  $ok = (Add-PreflightResult -Name 'n8n browser port is loopback-only' -Passed (-not (Test-ServiceHasUnsafePublicPorts -ServiceName 'n8n')) -Why 'n8n may have a local browser port, but it must not bind to every network interface.' -Fix 'Use a loopback mapping like 127.0.0.1:${N8N_LOCAL_PORT:-5678}:5678; do not use 5678:5678 or 0.0.0.0:5678:5678.') -and $ok
+
+  if (-not $FromCloudflarePreflight) {
+    if ($ok) {
+      Write-Success 'Base n8n preflight passed.'
+    } else {
+      Write-ErrorMessage 'Base n8n preflight failed. Fix the items above before starting local n8n.'
+    }
+  }
+
+  return $ok
+}
+
+function Invoke-SafetyPreflight {
+  Write-Header 'Production Cloudflare Preflight'
+
+  $ok = Invoke-BasePreflight -FromCloudflarePreflight
 
   $values = Read-EnvFile
   $publicHost = Get-EnvValue -Name 'N8N_PUBLIC_HOST' -Values $values
   $publicUrl = Get-EnvValue -Name 'N8N_PUBLIC_URL' -Values $values
 
-  $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_HOST is hostname-only' -Passed (Test-HostnameOnly -HostName $publicHost) -Failure 'use a hostname like n8n.example.com, with no protocol, path, port, or slash') -and $ok
-  $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_URL starts with https:// and ends with /' -Passed ($publicUrl.StartsWith('https://') -and $publicUrl.EndsWith('/')) -Failure 'use a value shaped like https://n8n.example.com/') -and $ok
-  $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_URL host matches N8N_PUBLIC_HOST' -Passed (Test-PublicUrlMatchesHost -PublicUrl $publicUrl -PublicHost $publicHost) -Failure 'make N8N_PUBLIC_URL use the same hostname as N8N_PUBLIC_HOST') -and $ok
+  $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_HOST is hostname-only' -Passed (Test-HostnameOnly -HostName $publicHost) -Why 'Cloudflare routes a hostname, not a full URL.' -Fix 'Use your n8n subdomain, such as n8n.example.com, with no https://, path, port, or slash.') -and $ok
+  $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_URL starts with https:// and ends with /' -Passed ($publicUrl.StartsWith('https://') -and $publicUrl.EndsWith('/')) -Why 'n8n needs the public HTTPS editor and webhook base URL exactly.' -Fix 'Use a value shaped like https://n8n.example.com/.') -and $ok
+  $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_URL host matches N8N_PUBLIC_HOST' -Passed (Test-PublicUrlMatchesHost -PublicUrl $publicUrl -PublicHost $publicHost) -Why 'The public URL and Cloudflare hostname must describe the same n8n site.' -Fix 'Make N8N_PUBLIC_URL use the same hostname as N8N_PUBLIC_HOST.') -and $ok
 
-  foreach ($secretName in @('CLOUDFLARED_TUNNEL_TOKEN', 'N8N_ENCRYPTION_KEY', 'POSTGRES_PASSWORD')) {
-    $secretValue = Get-EnvValue -Name $secretName -Values $values
-    $ok = (Add-PreflightResult -Name "$secretName is present and not a placeholder" -Passed (-not (Test-PlaceholderValue -Value $secretValue)) -Failure 'fill this privately in .env before starting production') -and $ok
-  }
-
-  $ok = (Add-PreflightResult -Name 'Postgres has no public port mapping' -Passed (-not (Test-ServiceHasPorts -ServiceName 'postgres')) -Failure 'remove ports: from the postgres service') -and $ok
-  $ok = (Add-PreflightResult -Name 'n8n direct 5678 is not publicly mapped' -Passed (-not (Test-ServiceHasPorts -ServiceName 'n8n')) -Failure 'remove ports: from the n8n service; Cloudflare should reach http://n8n:5678 inside the Compose network') -and $ok
+  $tunnelToken = Get-EnvValue -Name 'CLOUDFLARED_TUNNEL_TOKEN' -Values $values
+  $ok = (Add-PreflightResult -Name 'CLOUDFLARED_TUNNEL_TOKEN is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $tunnelToken)) -Why 'cloudflared cannot attach this stack to your Cloudflare Tunnel without a real tunnel token.' -Fix 'Create or open the Cloudflare Tunnel, copy its token into .env, or use Start n8n to run locally without Cloudflare.') -and $ok
 
   if ($ok) {
-    Write-Success 'Production preflight passed.'
+    Write-Success 'Production Cloudflare preflight passed.'
   } else {
-    Write-ErrorMessage 'Production preflight failed. Fix the items above before starting or updating.'
+    Write-ErrorMessage 'Production Cloudflare preflight failed. Fix the items above before starting the tunnel or updating cloudflared.'
   }
 
   return $ok
@@ -406,6 +498,16 @@ function Invoke-SafetyPreflight {
 
 function Start-ProductionStack {
   Write-Header 'Start n8n'
+  if (-not (Invoke-BasePreflight)) { return }
+  if (-not (Test-DockerReady)) { return }
+  [void](Invoke-Compose -Arguments @('up', '-d', 'postgres', 'n8n'))
+  $values = Read-EnvFile
+  Write-Success "Local editor: $(Get-LocalN8nUrl -Values $values)"
+  Write-Info 'Cloudflare tunnel is not started by this action. Choose Start Cloudflare tunnel after Step 2 is filled.'
+}
+
+function Start-CloudflareTunnel {
+  Write-Header 'Start Cloudflare Tunnel'
   if (-not (Invoke-SafetyPreflight)) { return }
   if (-not (Test-DockerReady)) { return }
   [void](Invoke-Compose -Arguments @('up', '-d', 'postgres', 'n8n', 'cloudflared'))
@@ -419,7 +521,7 @@ function Stop-ProductionStack {
 
 function Restart-N8n {
   Write-Header 'Restart n8n'
-  if (-not (Invoke-SafetyPreflight)) { return }
+  if (-not (Invoke-BasePreflight)) { return }
   if (-not (Test-DockerReady)) { return }
   [void](Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n'))
 }
@@ -469,7 +571,7 @@ function Backup-Postgres {
 
   Write-Header 'Backup Postgres'
   if (-not $SkipPreflight) {
-    if (-not (Invoke-SafetyPreflight)) { return $false }
+    if (-not (Invoke-BasePreflight)) { return $false }
     if (-not (Test-DockerReady)) { return $false }
   }
 
@@ -741,7 +843,7 @@ function Backup-N8nProductionNow {
   param([switch]$Required)
 
   Write-Header 'Back Up Now'
-  if (-not (Invoke-SafetyPreflight)) { return $false }
+  if (-not (Invoke-BasePreflight)) { return $false }
   if (-not (Test-DockerReady)) { return $false }
 
   $retentionDays = Get-ProductionBackupRetentionDays
@@ -827,21 +929,27 @@ function Show-UpdateMenu {
   Write-Host ''
   $choice = Read-Host 'Enter a number'
   if ($choice -eq '5') { return }
-  if (-not (Invoke-SafetyPreflight)) { return }
-  if (-not (Test-DockerReady)) { return }
 
   $selected = @()
   $needsBackup = $false
+  $needsCloudflarePreflight = $false
   switch ($choice) {
-    '1' { $selected = @('postgres', 'n8n', 'cloudflared'); $needsBackup = $true }
+    '1' { $selected = @('postgres', 'n8n', 'cloudflared'); $needsBackup = $true; $needsCloudflarePreflight = $true }
     '2' { $selected = @('n8n') }
     '3' { $selected = @('postgres'); $needsBackup = $true }
-    '4' { $selected = @('cloudflared') }
+    '4' { $selected = @('cloudflared'); $needsCloudflarePreflight = $true }
     default {
       Write-Warning 'Choose a number from 1 to 5.'
       return
     }
   }
+
+  if ($needsCloudflarePreflight) {
+    if (-not (Invoke-SafetyPreflight)) { return }
+  } else {
+    if (-not (Invoke-BasePreflight)) { return }
+  }
+  if (-not (Test-DockerReady)) { return }
 
   if ($needsBackup) {
     if (-not (Backup-N8nProductionNow -Required)) {
@@ -889,19 +997,20 @@ function Show-CommandList {
   Write-Host 'Production requirements:' -ForegroundColor Cyan
   Write-Host '  Cloudflare public hostname service URL: http://n8n:5678'
   Write-Host '  No Postgres public ports'
-  Write-Host '  No public direct n8n host port 5678'
+  Write-Host '  n8n local browser port must be loopback-only'
   Write-Host '  Back up before updating Postgres'
   Write-Host '  Back up creates n8n CLI exports, a database dump, manifest, restore notes, and a log'
   Write-Host ''
   Write-Host 'Use the numbered menu options for normal work:' -ForegroundColor Cyan
-  Write-CommandListItem -Number '1' -Name 'Start n8n' -Description 'Runs production preflight, then starts Postgres, n8n, and cloudflared.'
-  Write-CommandListItem -Number '2' -Name 'Restart n8n' -Description 'Runs production preflight, then recreates only the n8n app container.'
+  Write-CommandListItem -Number '1' -Name 'Start n8n' -Description 'Runs base preflight, then starts Postgres and n8n for local browser access.'
+  Write-CommandListItem -Number '2' -Name 'Restart n8n' -Description 'Runs base preflight, then recreates only the n8n app container.'
   Write-CommandListItem -Number '3' -Name 'Stop n8n' -Description 'Stops the production Cloudflare stack.'
   Write-CommandListItem -Number '4' -Name 'Update' -Description 'Pulls selected images and recreates selected containers; backs up before database-impacting updates.'
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state and image details from Docker Compose.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
   Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Exports workflows and encrypted credentials, dumps Postgres, and writes restore notes.'
-  Write-CommandListItem -Number '8' -Name 'Advanced / Safety: Production preflight' -Description 'Checks Cloudflare, URL, secret-placeholder, and public-port safety settings.'
+  Write-CommandListItem -Number '8' -Name 'Start Cloudflare tunnel' -Description 'Runs Cloudflare preflight, then starts Postgres, n8n, and cloudflared.'
+  Write-CommandListItem -Number '9' -Name 'Advanced / Safety: Production preflight' -Description 'Checks Cloudflare, URL, secret-placeholder, and public-port safety settings.'
   Write-Host ''
   Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
 }
@@ -938,14 +1047,19 @@ function Show-LaunchStatus {
 
   $values = Read-EnvFile
   $publicUrl = Get-EnvValue -Name 'N8N_PUBLIC_URL' -Values $values
+  $localUrl = Get-LocalN8nUrl -Values $values
   if ($dockerReady -and $composeExists -and $envExists) {
     $runningServices = Get-RunningServices
-    $n8nWhenRunning = if ($publicUrl) { "production URL: $publicUrl" } else { 'production URL is not set in .env' }
+    $n8nWhenRunning = "local editor: $localUrl"
     Write-Host ''
     Write-Host 'Quick service status:' -ForegroundColor Cyan
     Write-ServiceStatus -Name 'postgres' -RunningServices $runningServices
-    Write-ServiceStatus -Name 'n8n' -RunningServices $runningServices -WhenRunning $n8nWhenRunning -WhenStopped 'public editor and webhooks are OFF'
+    Write-ServiceStatus -Name 'n8n' -RunningServices $runningServices -WhenRunning $n8nWhenRunning -WhenStopped 'local editor is OFF'
     Write-ServiceStatus -Name 'cloudflared' -RunningServices $runningServices -WhenRunning 'public tunnel is ON' -WhenStopped 'public tunnel is OFF'
+
+    $localLabel = "  {0,-22}: " -f 'local editor'
+    Write-Host $localLabel -NoNewline -ForegroundColor DarkCyan
+    Write-Host $localUrl -ForegroundColor DarkYellow
 
     if ($publicUrl) {
       $urlLabel = "  {0,-22}: " -f 'production URL'
@@ -973,9 +1087,10 @@ function Show-MainMenu {
   Write-Host '  5. Show Compose status'
   Write-Host '  6. View logs'
   Write-Host '  7. Back up'
-  Write-Host '  8. Advanced / Safety: Production preflight'
-  Write-Host '  9. Command list'
-  Write-Host '  10. Exit'
+  Write-Host '  8. Start Cloudflare tunnel'
+  Write-Host '  9. Advanced / Safety: Production preflight'
+  Write-Host '  10. Command list'
+  Write-Host '  11. Exit'
   Write-Host ''
 }
 
@@ -991,11 +1106,12 @@ while (-not $script:ExitRequested) {
     '5' { Invoke-MenuAction { Show-Status } }
     '6' { Invoke-MenuAction { View-LogsMenu } }
     '7' { Invoke-MenuAction { [void](Backup-N8nProductionNow) } }
-    '8' { Invoke-MenuAction { [void](Invoke-SafetyPreflight) } }
-    '9' { Invoke-MenuAction { Show-CommandList } }
-    '10' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
+    '8' { Invoke-MenuAction { Start-CloudflareTunnel } }
+    '9' { Invoke-MenuAction { [void](Invoke-SafetyPreflight) } }
+    '10' { Invoke-MenuAction { Show-CommandList } }
+    '11' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
     default {
-      Invoke-MenuAction { Write-Warning 'Choose a number from 1 to 10.' }
+      Invoke-MenuAction { Write-Warning 'Choose a number from 1 to 11.' }
     }
   }
 }

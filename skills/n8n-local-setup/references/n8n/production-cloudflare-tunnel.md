@@ -103,7 +103,7 @@ The production Compose stack includes:
 - `cloudflared`
 - persistent volumes for Postgres and n8n
 - no public Postgres port
-- no public direct n8n host port `5678`
+- no public direct n8n host port; the browser port is loopback-only
 - `cloudflared` using the tunnel token from environment
 
 ---
@@ -160,10 +160,11 @@ Do not paste real values into this repo, issues, pull requests, screenshots, cha
 | `POSTGRES_PASSWORD` | Strong production database password. | Generate privately and store in a password manager. |
 | `N8N_ENCRYPTION_KEY` | Long random key generated once. | Store outside the machine and never change after credentials exist. |
 | `LOCAL_TIMEZONE` | IANA timezone. | Matches the local stack variable name. |
+| `N8N_LOCAL_PORT` | Local browser port. | Same local-stack pattern: `5678` by default, or `5679` if `5678` is already used. |
 | `N8N_IMAGE` | n8n image. | Default is `docker.n8n.io/n8nio/n8n:stable`; pin intentionally if needed. |
 | `POSTGRES_IMAGE` | Postgres image. | Default is `postgres:16-alpine`. |
 | `CLOUDFLARED_IMAGE` | Cloudflare connector image. | Default is `cloudflare/cloudflared:latest`; pin intentionally if needed. |
-| `N8N_PUBLIC_HOST` | Hostname only. | No `https://`, no path, no slash, no port. |
+| `N8N_PUBLIC_HOST` | Your n8n subdomain/hostname only. | For example `n8n.example.com`. No `https://`, no path, no slash, no port. |
 | `N8N_PUBLIC_URL` | Full public URL. | Must start with `https://` and end with `/`. |
 | `CLOUDFLARED_TUNNEL_TOKEN` | Tunnel token from Cloudflare. | Store only in private `.env` or secret storage. |
 
@@ -177,6 +178,14 @@ N8N_PUBLIC_URL=https://n8n.example.com/
 Use your real private production hostname in `.env`, not in repo files.
 
 For n8n behind Cloudflare Tunnel, fill `N8N_PUBLIC_HOST` and `N8N_PUBLIC_URL` once. The Compose file derives `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL`, `N8N_PROTOCOL=https`, and `N8N_PROXY_HOPS=1` from those production values so the `.env` stays close to the local stack shape.
+
+You can start Postgres and n8n locally before Cloudflare is ready. The local browser URL is:
+
+```text
+http://localhost:5678/
+```
+
+If you changed `N8N_LOCAL_PORT`, use that port instead. The production Compose file binds n8n to `127.0.0.1` only, so this local editor port is not a public exposure.
 
 ---
 
@@ -213,7 +222,7 @@ Do not commit:
 
 ---
 
-## 7. Run Safety Preflight
+## 7. Start n8n Locally
 
 Open the private production stack folder and run:
 
@@ -224,10 +233,47 @@ Open the private production stack folder and run:
 Choose:
 
 ```text
-Advanced / Safety: Production preflight
+Start n8n
 ```
 
-The preflight validates:
+This starts:
+
+- Postgres
+- n8n
+
+It does not start `cloudflared`, and it does not require `CLOUDFLARED_TUNNEL_TOKEN`.
+
+The base n8n preflight validates:
+
+- `docker-compose.yml` exists.
+- `.env` exists.
+- `N8N_LOCAL_PORT` is a valid local port.
+- `N8N_ENCRYPTION_KEY` is present and not a placeholder.
+- `POSTGRES_PASSWORD` is present and not a placeholder.
+- Postgres has no public port mapping.
+- n8n's browser port is loopback-only.
+
+After startup, open:
+
+```text
+http://localhost:5678/
+```
+
+If you changed `N8N_LOCAL_PORT`, use that port instead.
+
+---
+
+## 8. Start Cloudflare Tunnel
+
+Run this only after Cloudflare setup is ready.
+
+From the menu, choose:
+
+```text
+Start Cloudflare tunnel
+```
+
+The Cloudflare preflight validates:
 
 - `N8N_PUBLIC_HOST` is hostname-only.
 - `N8N_PUBLIC_URL` starts with `https://` and ends with `/`.
@@ -236,13 +282,13 @@ The preflight validates:
 - `N8N_ENCRYPTION_KEY` is present and not a placeholder.
 - `POSTGRES_PASSWORD` is present and not a placeholder.
 - Postgres has no public port mapping.
-- n8n direct `5678` is not publicly mapped.
+- n8n's browser port is loopback-only.
 
-Do not start production until preflight passes.
+If you only want local n8n without Cloudflare, keep using `Start n8n`; Cloudflare-specific values can wait.
 
 ---
 
-## 8. Start Production
+## 9. Confirm Public Production Access
 
 Start only after:
 
@@ -257,10 +303,10 @@ Start only after:
 From the menu, choose:
 
 ```text
-Start n8n
+Start Cloudflare tunnel
 ```
 
-The menu starts:
+The menu starts or keeps running:
 
 - Postgres
 - n8n
@@ -277,7 +323,7 @@ After startup:
 
 ---
 
-## 9. Backups Before Credentials And Workflows
+## 10. Backups Before Credentials And Workflows
 
 Do not add production credentials or workflows until backups exist.
 
@@ -324,7 +370,7 @@ Offsite or cloud storage is intentionally not configured here. Treat offsite sto
 
 ---
 
-## 10. Updates
+## 11. Updates
 
 Use the menu:
 
@@ -354,19 +400,20 @@ Then restart n8n and verify editor and webhook URLs again.
 
 ---
 
-## 11. Maintenance Commands
+## 12. Maintenance Commands
 
 Use the production menu for normal operations:
 
 | Menu item | Use when |
 | --- | --- |
-| `Start n8n` | Run production preflight, then start Postgres, n8n, and cloudflared. |
+| `Start n8n` | Run base n8n preflight, then start Postgres and n8n for local browser access. |
 | `Restart n8n` | Apply n8n environment changes or restart the app container. |
 | `Stop n8n` | Stop the production stack without deleting volumes. |
 | `Update` | Pull and recreate selected services, with backup before Postgres update. |
 | `Show Compose status` | Inspect Compose service state and images. |
 | `View logs` | Inspect recent logs for all services or one service. |
 | `Back up` | Create a private all-inclusive backup with workflow export, credential export, Postgres dump, manifest, restore notes, log, and retention cleanup. |
+| `Start Cloudflare tunnel` | Run Cloudflare preflight, then start Postgres, n8n, and cloudflared. |
 | `Advanced / Safety: Production preflight` | Before first launch, after `.env` changes, and before production updates. |
 | `Command list` | Show the recommended launcher and menu action summary. |
 
@@ -374,7 +421,7 @@ Do not run Docker Desktop's direct container buttons as the normal production co
 
 ---
 
-## 12. What Not To Expose
+## 13. What Not To Expose
 
 Postgres must stay private.
 
@@ -405,7 +452,7 @@ That is internal Docker networking, not public host exposure.
 
 ---
 
-## 13. Safety Rules
+## 14. Safety Rules
 
 - Use [Page 1 - Local Setup](local-setup.md) for localhost and ngrok dev webhook testing.
 - Use this page for production self-hosting from local/CGNAT machines with Cloudflare Tunnel.
@@ -419,7 +466,7 @@ That is internal Docker networking, not public host exposure.
 
 ---
 
-## 14. References
+## 15. References
 
 - [Page 1 - Local Setup](local-setup.md)
 - [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md)

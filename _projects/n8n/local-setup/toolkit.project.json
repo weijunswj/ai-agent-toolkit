@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.4",
+  "version": "3.8.5",
   "version_policy": "semver",
-  "version_notes": "Removes backup retention from the normal production Cloudflare env template so setup stays closer to the local stack; the manual backup action keeps its built-in default.",
+  "version_notes": "Lets the production Cloudflare stack start Postgres and n8n locally before Cloudflare is ready, adds clearer why/fix preflight errors, and keeps tunnel startup behind a separate Cloudflare preflight.",
   "outputs": [
     {
       "kind": "curated",

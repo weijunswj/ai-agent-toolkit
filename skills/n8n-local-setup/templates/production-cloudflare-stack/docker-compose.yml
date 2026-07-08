@@ -23,6 +23,8 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    ports:
+      - "127.0.0.1:${N8N_LOCAL_PORT:-5678}:5678"
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
@@ -39,8 +41,6 @@ services:
       N8N_RUNNERS_ENABLED: true
       TZ: ${LOCAL_TIMEZONE:-Asia/Singapore}
       GENERIC_TIMEZONE: ${LOCAL_TIMEZONE:-Asia/Singapore}
-    expose:
-      - "5678"
     volumes:
       - n8n_data:/home/node/.n8n
 

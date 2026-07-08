@@ -1439,6 +1439,10 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(guide, /schedule it with systemd or cron/);
   assert.match(guide, /Offsite or cloud storage is intentionally not configured here/);
   assert.match(guide, /future hardening item/);
+  assert.match(guide, /You can start Postgres and n8n locally before Cloudflare is ready/);
+  assert.match(guide, /It does not start `cloudflared`, and it does not require `CLOUDFLARED_TUNNEL_TOKEN`/);
+  assert.match(guide, /`N8N_PUBLIC_HOST` \| Your n8n subdomain\/hostname only/);
+  assert.match(guide, /`Start Cloudflare tunnel` \| Run Cloudflare preflight/);
   assert.doesNotMatch(guide, /Backup Postgres/);
 
   assert.deepEqual(menuOptions(menu, 'Show-MainMenu'), [
@@ -1449,20 +1453,34 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
     'Show Compose status',
     'View logs',
     'Back up',
+    'Start Cloudflare tunnel',
     'Advanced / Safety: Production preflight',
     'Command list',
     'Exit'
   ]);
 
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Quick service status:/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /local editor:/);
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ServiceStatus -Name 'cloudflared'[\s\S]*public tunnel is ON/);
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ImageVersions -RunningServices \$runningServices/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Do not launch production n8n directly from Docker Desktop/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Start Cloudflare tunnel/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Advanced \/ Safety: Production preflight/);
+  assert.match(functionBody(menu, 'Add-PreflightResult'), /Why it failed:[\s\S]*Fix:/);
+  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /N8N_LOCAL_PORT is a valid local port/);
+  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /N8N_ENCRYPTION_KEY is present and not a placeholder/);
+  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /POSTGRES_PASSWORD is present and not a placeholder/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /CLOUDFLARED_TUNNEL_TOKEN|N8N_PUBLIC_HOST|N8N_PUBLIC_URL/);
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /N8N_PUBLIC_URL host matches N8N_PUBLIC_HOST/);
+  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /CLOUDFLARED_TUNNEL_TOKEN is present and not a placeholder/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /WEBHOOK_URL matches|N8N_EDITOR_BASE_URL matches|N8N_PROXY_HOPS is 1/);
+  assert.match(functionBody(menu, 'Start-ProductionStack'), /Invoke-BasePreflight[\s\S]*@\(\'up\', '-d', 'postgres', 'n8n'\)/);
+  assert.doesNotMatch(functionBody(menu, 'Start-ProductionStack'), /Invoke-SafetyPreflight|cloudflared/);
+  assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*cloudflared/);
   assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /export:workflow[\s\S]*export:credentials/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Get-N8nCliProductionBackupSpecs[\s\S]*Backup-Postgres/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-BasePreflight/);
+  assert.doesNotMatch(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-SafetyPreflight/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Add-ProductionBackupLog[\s\S]*Write-ProductionBackupRestoreNotes[\s\S]*Write-ProductionBackupManifest/);
   assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /manifest\.json[\s\S]*backup\.log[\s\S]*RESTORE-NOTES\.txt/);
   assert.match(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /RESTORE-NOTES\.txt[\s\S]*import:workflow[\s\S]*import:credentials/);
@@ -1479,6 +1497,7 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(envExample, /\[ STEP 1: Fill These Before First Production Launch \]/);
   assert.match(envExample, /\[ STEP 2: Fill These After Cloudflare Tunnel Is Ready \]/);
   assert.match(envExample, /^LOCAL_TIMEZONE=Asia\/Singapore$/m);
+  assert.match(envExample, /^N8N_LOCAL_PORT=5678$/m);
   assert.match(envExample, /^N8N_PUBLIC_HOST=n8n\.example\.com$/m);
   assert.match(envExample, /^N8N_PUBLIC_URL=https:\/\/n8n\.example\.com\/$/m);
   assert.match(envExample, /^CLOUDFLARED_TUNNEL_TOKEN=replace-with-cloudflare-tunnel-token$/m);
@@ -1493,7 +1512,9 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(compose, /N8N_PROTOCOL: https/);
   assert.match(compose, /N8N_PROXY_HOPS: 1/);
   assert.match(compose, /GENERIC_TIMEZONE: \$\{LOCAL_TIMEZONE:-Asia\/Singapore\}/);
-  assert.doesNotMatch(compose, /ports:\n\s+- "127\.0\.0\.1:\$\{N8N_LOCAL_PORT/);
+  assert.match(compose, /ports:\n\s+- "127\.0\.0\.1:\$\{N8N_LOCAL_PORT:-5678\}:5678"/);
+  assert.doesNotMatch(compose, /^\s+- "5678:5678"/m);
+  assert.doesNotMatch(compose, /^\s+- "0\.0\.0\.0:5678:5678"/m);
   for (const ignored of ['.env', '.env.*', '!.env.example', 'backups/', 'logs/', '*.sql', '*.dump', '*.backup', '*.zip', '*.tar', '*.tgz', '**/SECRET-DO-NOT-COMMIT.env']) {
     assert.match(runtimeIgnore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
   }
