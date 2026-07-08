@@ -2345,8 +2345,8 @@ const fs = require(`fs`);
 const path = require(`path`);
 const configPath = `/home/node/.n8n/config`;
 const key = process.env.N8N_ENCRYPTION_KEY;
-if (!key) {
-  console.error(`N8N_ENCRYPTION_KEY is missing.`);
+if (!key || key === `replace-with-32-random-character`) {
+  console.error(`N8N_ENCRYPTION_KEY is missing or still uses the placeholder.`);
   process.exit(2);
 }
 let config = {};
@@ -2848,7 +2848,6 @@ function Restore-ProductionCloudflareFromBackupMenu {
   $preRestoreEncryptionKey = Find-ProductionRestoreBackupEnvValue -Path $preRestoreZipPath -Name 'N8N_ENCRYPTION_KEY' -TargetEnvPath $envPath
   Write-Success "Pre-restore database backup package created: $preRestoreZipPath"
   if (-not (Set-ProductionEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $envPath)) { return }
-  if ($backupEncryptionKey -and -not (Repair-ProductionN8nConfigEncryptionKey)) { return }
 
   $ok = $false
   switch ($detected.Type) {
@@ -2856,6 +2855,9 @@ function Restore-ProductionCloudflareFromBackupMenu {
     'n8n-entities' {
       $n8nImageRefreshed = Update-ProductionN8nImageForRestore
       if (-not $n8nImageRefreshed) { return }
+      if (-not (Repair-ProductionN8nConfigEncryptionKey)) {
+        Write-Warning 'Could not sync production n8n config encryption key before restore completion. Startup will attempt one more repair pass.'
+      }
       $ok = Restore-ProductionN8nEntitiesBackup -Backup $detected -BackupEncryptionKey $backupEncryptionKey -ImageAlreadyRefreshed:$n8nImageRefreshed
     }
     default {
