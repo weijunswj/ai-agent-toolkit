@@ -153,7 +153,7 @@ Never:
 
 Use documented validation. If absent, run the smallest relevant check: docs lint, JSON/schema parse, focused script/test, parser/repair fixture, or generated diff.
 
-Hygiene: separate resolvers/tests; avoid `pip install --dry-run --ignore-installed`; use `python -m unittest discover -s tests`; after interrupts check orphaned package/test/server processes; for >30m jobs checkpoint every 30m: inspect CPU/log/health, continue if progressing, otherwise diagnose, stop, or ask.
+Hygiene: separate resolvers/tests; avoid `pip install --dry-run --ignore-installed`; use `python -m unittest discover -s tests`; after interrupts check orphaned package/test/server processes.
 
 If validation is skipped, state why.
 
