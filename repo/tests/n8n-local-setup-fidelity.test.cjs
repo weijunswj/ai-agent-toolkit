@@ -10,6 +10,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const syncScript = path.join(repoRoot, 'repo', 'scripts', 'sync-toolkit-projects.cjs');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
+const sharedLauncherFlowScript = path.join(repoRoot, 'repo', 'scripts', 'generate-n8n-stack-launcher-flow.cjs');
 
 const guideOutputs = [
   {
@@ -132,6 +133,10 @@ const productionStackOutputs = [
     output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd'
   },
   {
+    source: '_main/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd',
+    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd'
+  },
+  {
     source: '_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1',
     output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1'
   }
@@ -218,10 +223,8 @@ const expectedBackupMenuOptions = [
   'Back up now',
   'Change automatic backup settings',
   'Remove automatic backups',
-  'Export workflows/credentials (advanced)',
   'Back',
   'Set up automatic backups',
-  'Export workflows/credentials (advanced)',
   'Back'
 ];
 
@@ -401,6 +404,11 @@ test('n8n local setup generated files preserve source bodies', () => {
   const mcpIndexSource = stripGeneratedNotices(readText(repoRoot, `_projects/n8n/local-setup/${mcpConfigIndexOutput.source}`));
   const mcpIndexGenerated = stripGeneratedNotices(readText(repoRoot, mcpConfigIndexOutput.output));
   assert.equal(mcpIndexGenerated, mcpIndexSource, mcpConfigIndexOutput.output);
+});
+
+test('local and production launchers share the generated menu flow model', () => {
+  const result = spawnSync(process.execPath, [sharedLauncherFlowScript, '--check'], { cwd: repoRoot, encoding: 'utf8' });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
 test('obsolete n8n local setup pages and launchers are removed', () => {
@@ -645,36 +653,37 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /Automatic backups: Not set up/);
   assert.match(localSetup, /Automatic backups: Enabled/);
   assert.match(localSetup, /`Back up now`/);
-  assert.match(localSetup, /restore-compatible recovery folder/);
+  assert.match(localSetup, /restore-compatible recovery zip package/);
+  assert.match(localSetup, /one restore-compatible `\.zip` package; `SECRET-DO-NOT-COMMIT\.env` \/ `\.env` is inside that zip when available/);
   assert.match(localSetup, /n8n-recovery-YYYYMMDD-HHMMSS/);
-  assert.match(localSetup, /The folder can be selected directly in `Advanced \/ Recovery: Restore local n8n from backup`/);
+  assert.match(localSetup, /Select the `\.zip` file in `Advanced \/ Recovery: Restore local n8n from backup`/);
   assert.doesNotMatch(localSetup, /Creates a sibling restore-compatible package/);
+  assert.doesNotMatch(localSetup, /private backup `\.env` beside it/);
   assert.match(localSetup, /`Set up automatic backups`/);
   assert.match(localSetup, /`Change automatic backup settings`/);
   assert.match(localSetup, /`Remove automatic backups`/);
-  assert.match(localSetup, /`Export workflows\/credentials \(advanced\)`/);
+  assert.doesNotMatch(localSetup, /`Export workflows\/credentials \(advanced\)`/);
   assert.doesNotMatch(localSetup, /Back up Postgres database now/);
   assert.doesNotMatch(localSetup, /Configure scheduled n8n CLI backups/);
   assert.doesNotMatch(localSetup, /Run n8n CLI backup now/);
   assert.doesNotMatch(localSetup, /Show n8n CLI backup configuration/);
   assert.doesNotMatch(localSetup, /Disable scheduled n8n CLI backups/);
-  assert.match(localSetup, /n8n export:workflow --backup --output=<backup_dir>/);
-  assert.match(localSetup, /n8n export:credentials --backup --output=<backup_dir>/);
-  assert.match(localSetup, /Decrypted credential exports expose credential secrets in plain text files/);
-  assert.match(localSetup, /n8n-cli-YYYYMMDD-HHMMSS/);
+  assert.doesNotMatch(localSetup, /n8n export:workflow --backup --output=<backup_dir>/);
+  assert.doesNotMatch(localSetup, /n8n export:credentials --backup --output=<backup_dir>/);
+  assert.doesNotMatch(localSetup, /Decrypted credential exports expose credential secrets in plain text files/);
   assert.match(localSetup, /manifest\.json/);
   assert.match(localSetup, /Windows Task Scheduler/);
   assert.match(localSetup, /--run-n8n-recovery-backup/);
   assert.match(localSetup, /--run-n8n-cli-backup/);
-  assert.match(localSetup, /--show-n8n-cli-backup-config/);
+  assert.doesNotMatch(localSetup, /--show-n8n-cli-backup-config/);
   assert.match(localSetup, /--disable-n8n-cli-backups/);
   assert.match(localSetup, /n8n import:workflow --separate --input=<workflows_dir>/);
   assert.match(localSetup, /n8n import:credentials --separate --input=<credentials_dir>/);
   assert.match(localSetup, /%USERPROFILE%\\\.n8n-local\\backups/);
   assert.match(localSetup, /^Restore:$/m);
-  assert.match(localSetup, /Paste a recovery folder path, or a `\.sql` or `\.zip` file path/);
-  assert.match(localSetup, /Recovery folders must contain `database\.sql` and `restore-manifest\.json`/);
-  assert.match(localSetup, /\.zip` can contain a restore-compatible backup package from earlier Toolkit versions/);
+  assert.match(localSetup, /Paste a `\.zip` backup package path/);
+  assert.match(localSetup, /The zip contains `database\.sql`, `restore-manifest\.json`, `HOW TO USE THIS RESTORE FOLDER\.txt`, and `SECRET-DO-NOT-COMMIT\.env`/);
+  assert.match(localSetup, /Older `\.zip` files containing n8n `export:entities` output files are still accepted/);
   assert.match(localSetup, /If the backup env\/key is missing, restore stops before stopping services or touching the database/);
   assert.match(localSetup, /The launcher clears the completed command output, trims the console buffer when Windows allows it, and redraws the main menu\./);
   assert.match(localSetup, /For normal use, the quick status at the top of the main menu is enough/);
@@ -711,7 +720,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.doesNotMatch(menu, /function Get-BackupImageLogContent/);
   assert.match(functionBody(menu, 'Get-ComposeServiceRows'), /docker compose ps --format '\{\{\.Service\}\}\|\{\{\.Image\}\}\|\{\{\.State\}\}'/);
   assert.match(functionBody(menu, 'Get-RunningServiceImage'), /docker inspect \$container --format '\{\{\.Config\.Image\}\}'/);
-  assert.match(functionBody(menu, 'Get-ImageVersionLines'), /Get-RunningServiceImage[\s\S]*failed to detect[\s\S]*stopped/);
+  assert.match(functionBody(menu, 'Get-ImageVersionLines'), /Get-RunningServiceImage[\s\S]*running, image unknown[\s\S]*stopped/);
+  assert.doesNotMatch(functionBody(menu, 'Get-ImageVersionLines'), /failed to detect/);
   assert.doesNotMatch(functionBody(menu, 'Get-ImageVersionLines'), /\$script:ServiceImages/);
   assert.doesNotMatch(menu, /function Show-Help/);
   assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
@@ -755,10 +765,10 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Show-Status'), /Invoke-Compose -Arguments @\('ps'\)/);
   assert.match(functionBody(menu, 'Show-Status'), /Write-ImageVersions/);
   assert.match(functionBody(menu, 'Apply-Update'), /This update includes Postgres[\s\S]*Backup-Postgres -Required[\s\S]*Update cancelled because the automatic Postgres backup did not complete/);
-  assert.match(functionBody(menu, 'Backup-Postgres'), /n8n-postgres-\$timestamp[\s\S]*database\.sql[\s\S]*Write-BackupSecretFile[\s\S]*return \$true[\s\S]*return \$false/);
+  assert.match(functionBody(menu, 'Backup-Postgres'), /n8n-postgres-\$timestamp[\s\S]*database\.sql[\s\S]*Write-BackupSecretFile[\s\S]*PackageZipFileName[\s\S]*Convert-BackupFolderToZipPackage[\s\S]*return \$true[\s\S]*return \$false/);
   assert.doesNotMatch(functionBody(menu, 'Backup-Postgres'), /CreatePackage|Compress-RestoreCompatibleBackupPackage/);
   assert.doesNotMatch(menu, /function Compress-RestoreCompatibleBackupPackage/);
-  assert.match(functionBody(menu, 'Invoke-N8nRecoveryBackup'), /n8n-recovery-\$timestamp[\s\S]*Backup-Postgres -Required -BackupDir \$backupDir/);
+  assert.match(functionBody(menu, 'Invoke-N8nRecoveryBackup'), /n8n-recovery-\$timestamp[\s\S]*Backup-Postgres -Required -BackupDir \$backupDir -PackageZipFileName "n8n-recovery-\$timestamp\.zip"/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-N8nRecoveryBackup'), /-CreatePackage/);
   assert.match(functionBody(menu, 'Invoke-N8nRecoveryBackupNow'), /New-N8nRecoveryBackupNowConfig[\s\S]*Invoke-N8nRecoveryBackup -Config \$config/);
   assert.match(functionBody(menu, 'Invoke-N8nCliBackupFromConfig'), /Invoke-N8nRecoveryBackup -Config \$config -Scheduled:\$Scheduled/);
@@ -766,9 +776,10 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.doesNotMatch(functionBody(menu, 'Write-RestoreReadme'), /Image\/version context/);
   assert.match(functionBody(menu, 'Write-CommandListItem'), /\$itemLabelWidth = 19[\s\S]*\$itemPrefix = \("  \{0\}\. \{1,-\$itemLabelWidth\}: " -f \$Number, \$Name\)/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens safe manual and automatic backup actions\.'/);
-  assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '8' -Name 'Advanced \/ Recovery: Restore local n8n from backup' -Description 'Restores a local database or entities backup after pre-restore backups and approval\.'/);
-  assert.match(functionBody(menu, 'Show-BackupMenu'), /Write-N8nCliBackupAutomaticStatus[\s\S]*Back up now[\s\S]*Change automatic backup settings[\s\S]*Remove automatic backups[\s\S]*Export workflows\/credentials \(advanced\)[\s\S]*Set up automatic backups/);
-  assert.match(functionBody(menu, 'Show-BackupMenu'), /Invoke-N8nRecoveryBackupNow[\s\S]*Configure-N8nCliBackupSchedule[\s\S]*Disable-N8nCliBackupSchedule[\s\S]*Invoke-N8nCliEntityExportNow/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '8' -Name 'Advanced \/ Recovery: Restore local n8n from backup' -Description 'Restores a local backup zip after pre-restore backups and approval\.'/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Write-N8nCliBackupAutomaticStatus[\s\S]*Back up now[\s\S]*Change automatic backup settings[\s\S]*Remove automatic backups[\s\S]*Set up automatic backups/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Invoke-N8nRecoveryBackupNow[\s\S]*Configure-N8nCliBackupSchedule[\s\S]*Disable-N8nCliBackupSchedule/);
+  assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Export workflows\/credentials \(advanced\)|Invoke-N8nCliEntityExportNow/);
   assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Back up Postgres database now|Run n8n CLI backup now|Show n8n CLI backup configuration|Disable scheduled n8n CLI backups/);
   assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Backup-Postgres|Show-N8nCliBackupConfiguration|Invoke-N8nCliBackupFromConfig/);
   assert.match(menu, /function Show-UpdateMenu/);
@@ -812,13 +823,12 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
 
   assert.match(localSetup, /Restore local n8n from backup/);
   assert.match(localSetup, /^Restore:$/m);
-  assert.match(localSetup, /`?\.sql/);
   assert.match(localSetup, /`?\.zip/);
   assert.match(localSetup, /n8n `export:entities` output files/);
   assert.match(localSetup, /^Required backup env:$/m);
   assert.match(localSetup, /Restore requires the backup `\.env`/);
   assert.match(localSetup, /If the backup env\/key is missing, restore stops before stopping services or touching the database/);
-  assert.match(localSetup, /Keep `SECRET-DO-NOT-COMMIT\.env` beside `database\.sql`/);
+  assert.match(localSetup, /Use a `\.zip` that includes `SECRET-DO-NOT-COMMIT\.env` or `\.env`/);
   assert.match(localSetup, /Type `PROCEED` when asked/);
   assert.match(localSetup, /Automated restore of n8n CLI workflow export folders/);
   assert.match(localSetup, /Automated restore of n8n CLI credential export folders/);
@@ -827,8 +837,8 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
   assert.doesNotMatch(localSetup, /README-RESTORE\.txt/);
   assert.doesNotMatch(localSetup, /image-versions\.txt/);
   assert.doesNotMatch(localSetup, /does not restore from an extracted folder of JSONL files/);
-  assert.match(localSetup, /Includes `SECRET-DO-NOT-COMMIT\.env`, a private copy of the backup `\.env`/);
-  assert.match(localSetup, /Restore creates a pre-restore backup of the current database and current `\.env`/);
+  assert.match(localSetup, /SECRET-DO-NOT-COMMIT\.env`, a private copy of the backup `\.env`, inside that zip/);
+  assert.match(localSetup, /Restore creates a pre-restore zip backup of the current database and current `\.env`/);
   assert.match(localSetup, /Start and restart wait until the n8n editor answers at `localhost`/);
   assert.match(localSetup, /If the container runs but the editor is not reachable, the launcher reports an error instead of calling it healthy/);
   assert.match(localSetup, /syncs|attempts.*`\/home\/node\/\.n8n\/config` to the active `\.env` key/);
@@ -861,6 +871,8 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
     'Find-RestoreEnvBackupFileInDirectory',
     'Get-RestoreEnvBackupNames',
     'Get-RestoreBackupType',
+    'New-ZipPackageFromDirectory',
+    'Convert-BackupFolderToZipPackage',
     'Test-PathInsideDirectory',
     'Test-SameResolvedPath',
     'Test-N8nDatabaseImageMismatchLog',
@@ -898,6 +910,7 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
     'Restore-N8nEntitiesBackup',
     'Restore-LocalN8nFromBackupMenu',
     'Get-N8nCliBackupDefaultRoot',
+    'Get-N8nCliBackupLegacyRoot',
     'Get-N8nCliBackupConfigPath',
     'Convert-N8nCliBackupDayValue',
     'Test-SafeN8nCliBackupRoot',
@@ -920,7 +933,7 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
   assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Backup-CurrentEnvForRestore/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /replace the active local n8n database state with the backup state/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Find-RestoreBackupSecret -Path \$backupPath -TargetEnvPath \$resolvedEnvPath[\s\S]*Write-MissingRestoreEnvError -SecretSearchPath \$secretSearchPath[\s\S]*return[\s\S]*Test-DockerReady[\s\S]*Get-RunningServices/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Pre-restore database backup created; rollback \.env saved if present/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Pre-restore database backup package created: \$preRestoreZipPath/);
   assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current local n8n database backup created/);
   assert.doesNotMatch(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Current \.env backup created/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore requires the local stack to be stopped/);
@@ -937,7 +950,7 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
   assert.notEqual(backupIndex, -1, 'restore flow creates pre-restore backup');
   assert.ok(approvalIndex < prepareIndex, 'zip staging must happen only after PROCEED');
   assert.ok(prepareIndex < backupIndex, 'zip staging must complete before backup/restore mutation');
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreRestorePostgresBackup -BackupDir \$preRestoreRoot -EnvPath \$resolvedEnvPath/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreRestorePostgresBackup -BackupDir \$preRestoreRollbackRoot -EnvPath \$resolvedEnvPath/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Restore-PreRestoreEncryptionKeyBackup -SecretBackupPath \$preRestoreSecretPath -EnvPath \$resolvedEnvPath/);
   assert.match(functionBody(menu, 'Restore-PreRestorePostgresBackup'), /database\.sql[\s\S]*Restore-PostgresSqlBackup[\s\S]*Pre-restore database rollback completed/);
   assert.match(functionBody(menu, 'Restore-PreRestoreEncryptionKeyBackup'), /SECRET-DO-NOT-COMMIT\.env|N8N_ENCRYPTION_KEY/);
@@ -987,7 +1000,7 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
   assert.match(functionBody(menu, 'Write-MissingCredentialRestoreKeyError'), /Include the backup \.env or SECRET-DO-NOT-COMMIT\.env with the \.zip/);
   assert.match(functionBody(menu, 'Write-MissingRestoreEnvError'), /No backup \.env or SECRET-DO-NOT-COMMIT\.env with N8N_ENCRYPTION_KEY was found/);
   assert.match(functionBody(menu, 'Write-MissingRestoreEnvError'), /Restore cancelled before stopping services or changing the database/);
-  assert.match(functionBody(menu, 'Write-MissingRestoreEnvError'), /Keep SECRET-DO-NOT-COMMIT\.env with database\.sql/);
+  assert.match(functionBody(menu, 'Write-MissingRestoreEnvError'), /Use a \.zip that includes the backup \.env or SECRET-DO-NOT-COMMIT\.env/);
   assert.match(functionBody(menu, 'Set-LocalEncryptionKeyForRestore'), /already matches the backup secret file[\s\S]*return \$true[\s\S]*Set-EnvFileValue/);
   assert.match(functionBody(menu, 'Find-RestoreBackupSecret'), /Find-RestoreBackupEnvValue[\s\S]*N8N_ENCRYPTION_KEY/);
   assert.match(functionBody(menu, 'Find-RestoreBackupEnvValue'), /Get-RestoreEnvBackupNames[\s\S]*TargetEnvPath/);
@@ -1001,9 +1014,9 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
   assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*Find-RestoreEntityDirectory/);
   assert.match(functionBody(menu, 'Expand-RestorePackageZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*database\.sql/);
   assert.match(functionBody(menu, 'New-RestoreEntityImportDirectory'), /EndsWith\('\.jsonl'\)[\s\S]*migrations\.jsonl[\s\S]*workflows_tags\.jsonl[\s\S]*workflowtagmapping\.jsonl[\s\S]*both files import into the workflows_tags table[\s\S]*Copy-Item -LiteralPath \$file\.FullName[\s\S]*CreateFromDirectory\(\$zipSourceDir, \$zipPath\)[\s\S]*Rebuilt clean entities\.zip with \$copiedCount/);
-  assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /New-RestoreEntityImportDirectory -EntityDir \$entityDir -StagingDir \$stagingDir[\s\S]*did not contain migrations\.jsonl[\s\S]*clean entities\.zip rebuilt from all extracted n8n entity JSONL files[\s\S]*EntityDir = \$importDir[\s\S]*SourceEntityDir = \$entityDir/);
-  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /PSIsContainer[\s\S]*database\.sql[\s\S]*restore-manifest\.json[\s\S]*restore-compatible backup folder/);
-  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /postgres-package-zip[\s\S]*restore-compatible backup package/);
+  assert.match(functionBody(menu, 'Expand-RestoreEntitiesZipToStaging'), /nestedZips[\s\S]*Trying nested entity zip[\s\S]*New-RestoreEntityImportDirectory -EntityDir \$entityDir -StagingDir \$stagingDir[\s\S]*did not contain migrations\.jsonl[\s\S]*clean entities\.zip rebuilt from all extracted n8n entity JSONL files[\s\S]*EntityDir = \$importDir[\s\S]*SourceEntityDir = \$entityDir/);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /PSIsContainer[\s\S]*Please select a \.zip backup package/);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /restore-compatible backup package[\s\S]*postgres-package-zip/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /Expand-RestorePackageZipToStaging[\s\S]*Type = 'postgres-sql'[\s\S]*InputPath = \$expanded\.DatabaseSqlPath/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /Expand-RestoreEntitiesZipToStaging[\s\S]*InputDir = \$expanded\.EntityDir[\s\S]*SourceEntityDir = \$expanded\.SourceEntityDir/);
   assert.match(functionBody(menu, 'Restore-N8nEntitiesBackup'), /\$inputDir = \$Backup\.InputDir[\s\S]*\$mountValue = "\$\{inputDir\}:\/restore"[\s\S]*--inputDir[\s\S]*\/restore/);
@@ -1019,14 +1032,14 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
   assert.match(functionBody(menu, 'Set-EnvFileValue'), /\$lines\[\$index\] = \$replacement[\s\S]*break[\s\S]*Set-Content/);
   assert.match(functionBody(menu, 'Get-LocalN8nProbeUrls'), /127\.0\.0\.1[\s\S]*localhost/);
   assert.match(functionBody(menu, 'Test-N8nHttpReady'), /foreach \(\$url in \(Get-LocalN8nProbeUrls\)\)[\s\S]*Invoke-WebRequest -Uri \$url/);
-  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore folder must contain database\.sql and restore-manifest\.json/);
-  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must be a recovery backup folder or a backup file using one of these extensions: \.sql, \.zip/i);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Entity zip contains n8n JSONL files but is missing migrations\.jsonl/);
+  assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Restore input must be a \.zip backup package/i);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /Get-ZipEntryNames[\s\S]*restore-manifest\.json[\s\S]*Test-RestoreEntityFileName[\s\S]*Filename-level detection/);
   assert.match(functionBody(menu, 'Get-RestoreBackupType'), /credentialsentity\.jsonl[\s\S]*HasCredentialEntities/);
   assert.match(functionBody(menu, 'Prepare-RestoreBackupInput'), /HasCredentialEntities = \$detected\.HasCredentialEntities/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Find-RestoreBackupEnvValue -Path \$backupPath -Name 'N8N_IMAGE'[\s\S]*Resolve-N8nImageForEntityRestore -Backup \$detected[\s\S]*Could not determine the n8n image version required by this entities export[\s\S]*Test-TrustedRestoreN8nImageRef -Image \$backupN8nImage[\s\S]*Write-UntrustedRestoreN8nImageError -Image \$backupN8nImage[\s\S]*Set-LocalN8nImageForRestore -BackupN8nImage \$backupN8nImage -EnvPath \$resolvedEnvPath[\s\S]*Set-LocalEncryptionKeyForRestore/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Add-Member -NotePropertyName RestoreN8nImage -NotePropertyValue \$backupN8nImage/);
-  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Get-RunningServices -EnvPath \$resolvedEnvPath[\s\S]*Backup-Postgres -Required -EnvPath \$resolvedEnvPath -BackupDir \$preRestoreRoot/);
+  assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Get-RunningServices -EnvPath \$resolvedEnvPath[\s\S]*preRestoreZipPath[\s\S]*Backup-Postgres -Required -EnvPath \$resolvedEnvPath -BackupDir \$preRestoreRoot -PackageZipFileName "\$preRestoreName\.zip"[\s\S]*Expand-RestorePackageZipToStaging -ZipPath \$preRestoreZipPath/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /detected\.HasCredentialEntities[\s\S]*Write-MissingCredentialRestoreKeyError[\s\S]*return/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /Set-LocalEncryptionKeyForRestore[\s\S]*'postgres-sql' \{ \$ok = Restore-PostgresSqlBackup -Backup \$detected -EnvPath \$resolvedEnvPath \}/);
   assert.match(functionBody(menu, 'Restore-LocalN8nFromBackupMenu'), /'n8n-entities' \{[\s\S]*\$n8nImageRefreshed = Update-N8nImageForRestore[\s\S]*Repair-N8nConfigEncryptionKey[\s\S]*Restore-N8nEntitiesBackup[\s\S]*EnvPath \$resolvedEnvPath[\s\S]*ImageAlreadyRefreshed:\$n8nImageRefreshed[\s\S]*\}/);
@@ -1118,7 +1131,8 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
     '$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("toolkit-n8n-cli-backup-" + [guid]::NewGuid().ToString("N"))',
     '$script:StackRoot = Join-Path $testRoot "stack"',
     'New-Item -ItemType Directory -Force -Path $script:StackRoot | Out-Null',
-    '$safeRoot = Join-Path $script:StackRoot "backups\\n8n-cli"',
+    '$safeRoot = Join-Path $script:StackRoot "backups"',
+    '$legacyRoot = Join-Path $safeRoot "n8n-cli"',
     '$validCadence = Convert-N8nCliBackupDayValue -Value "7" -Name "Backup cadence"',
     'if (-not $validCadence.Ok -or $validCadence.Value -ne 7) { throw "valid cadence was rejected" }',
     '$invalidCadence = Convert-N8nCliBackupDayValue -Value "0" -Name "Backup cadence"',
@@ -1136,6 +1150,10 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
     'if ($manualConfig.backupRoot -ne $safeRoot) { throw "manual backup did not reuse configured destination" }',
     'if ($manualConfig.retentionDays -ne 14) { throw "manual backup did not reuse configured retention" }',
     'if (-not (Test-N8nCliBackupAutomaticEnabled -Config $existingAutomaticConfig)) { throw "enabled automatic backup config was not detected" }',
+    '$legacyAutomaticConfig = [pscustomobject]@{ enabled = $true; cadenceDays = 1; retentionDays = 30; backupRoot = $legacyRoot; includeWorkflows = $true; includeCredentials = $true; exportDecryptedCredentials = $false }',
+    'Save-N8nCliBackupConfig -Config $legacyAutomaticConfig | Out-Null',
+    '$normalizedLegacyConfig = Read-N8nCliBackupConfig',
+    'if ($normalizedLegacyConfig.backupRoot -ne $safeRoot) { throw "legacy n8n-cli backup root was not normalized: $($normalizedLegacyConfig.backupRoot)" }',
     '$disabledAutomaticConfig = [pscustomobject]@{ enabled = $false; backupRoot = $safeRoot }',
     'if (Test-N8nCliBackupAutomaticEnabled -Config $disabledAutomaticConfig) { throw "disabled automatic backup config was treated as enabled" }',
     '$scheduleText = Get-N8nCliBackupScheduleTimeText -Config $existingAutomaticConfig',
@@ -1174,9 +1192,42 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
     'Set-Content -LiteralPath (Join-Path $folderBackup "database.sql") -Value "-- fake sql" -Encoding ascii',
     'Set-Content -LiteralPath (Join-Path $folderBackup "restore-manifest.json") -Value "{}" -Encoding ascii',
     '$folderDetected = Get-RestoreBackupType -Path $folderBackup',
-    'if ($folderDetected.Type -ne "postgres-sql") { throw "recovery folder was not detected as postgres sql: $($folderDetected.Type)" }',
-    'if ($folderDetected.Label -ne "restore-compatible backup folder") { throw "recovery folder label mismatch: $($folderDetected.Label)" }',
-    'if ($folderDetected.InputPath -ne (Join-Path $folderBackup "database.sql")) { throw "recovery folder input path mismatch: $($folderDetected.InputPath)" }',
+    'if ($folderDetected.Type -ne "unsupported" -or $folderDetected.Reason -ne "Please select a .zip backup package.") { throw "recovery folder was accepted: $($folderDetected.Type) $($folderDetected.Reason)" }',
+    '$packageZip = Join-Path $folderBackup "n8n-recovery-20010101-010101.zip"',
+    '$createdPackage = New-ZipPackageFromDirectory -SourceDir $folderBackup -ZipPath $packageZip',
+    'if (-not $createdPackage) { throw "recovery package zip was not created" }',
+    '$zipDetected = Get-RestoreBackupType -Path $packageZip',
+    'if ($zipDetected.Type -ne "postgres-package-zip") { throw "recovery zip was not detected as postgres package: $($zipDetected.Type)" }',
+    'if ($zipDetected.Label -ne "restore-compatible backup package") { throw "recovery zip label mismatch: $($zipDetected.Label)" }',
+    'if ($zipDetected.InputPath -ne $packageZip) { throw "recovery zip input path mismatch: $($zipDetected.InputPath)" }',
+    '$singleZipFolder = Join-Path $safeRoot "single-zip-backup"',
+    'New-Item -ItemType Directory -Force -Path $singleZipFolder | Out-Null',
+    'Set-Content -LiteralPath (Join-Path $singleZipFolder "database.sql") -Value "-- fake sql" -Encoding ascii',
+    'Set-Content -LiteralPath (Join-Path $singleZipFolder "SECRET-DO-NOT-COMMIT.env") -Value "N8N_ENCRYPTION_KEY=test-key" -Encoding ascii',
+    '$singleZip = Convert-BackupFolderToZipPackage -BackupDir $singleZipFolder -ZipFileName "single-zip-backup.zip"',
+    'if (-not $singleZip) { throw "single backup zip was not created" }',
+    '$singleZipEntries = @(Get-ZipEntryNames -ZipPath $singleZip)',
+    'if ($singleZipEntries -notcontains "SECRET-DO-NOT-COMMIT.env") { throw "secret env was not included inside backup zip: $($singleZipEntries -join ",")" }',
+    'if (Test-Path -LiteralPath (Join-Path $singleZipFolder "SECRET-DO-NOT-COMMIT.env")) { throw "secret env was left beside backup zip" }',
+    '$legacyEntityDir = Join-Path $safeRoot "legacy-entities"',
+    'New-Item -ItemType Directory -Force -Path $legacyEntityDir | Out-Null',
+    'Set-Content -LiteralPath (Join-Path $legacyEntityDir "migrations.jsonl") -Value "{}`n" -Encoding ascii',
+    'Set-Content -LiteralPath (Join-Path $legacyEntityDir "workflowentity.jsonl") -Value "{}`n" -Encoding ascii',
+    'Set-Content -LiteralPath (Join-Path $legacyEntityDir "credentialsentity.jsonl") -Value "{}`n" -Encoding ascii',
+    '$legacyEntityZip = Join-Path $safeRoot "entities-clean-keep-workflows_tags.zip"',
+    '$createdLegacyEntityZip = New-ZipPackageFromDirectory -SourceDir $legacyEntityDir -ZipPath $legacyEntityZip',
+    'if (-not $createdLegacyEntityZip) { throw "legacy entity zip was not created" }',
+    '$outerEntityPackage = Join-Path $safeRoot "outer-entity-package"',
+    'New-Item -ItemType Directory -Force -Path $outerEntityPackage | Out-Null',
+    'Copy-Item -LiteralPath $legacyEntityZip -Destination (Join-Path $outerEntityPackage "entities-clean-keep-workflows_tags.zip") -Force',
+    'Set-Content -LiteralPath (Join-Path $outerEntityPackage "SECRET-DO-NOT-COMMIT.env") -Value "N8N_ENCRYPTION_KEY=test-key" -Encoding ascii',
+    '$outerEntityZip = Join-Path $safeRoot "outer-entity-package.zip"',
+    '$createdOuterEntityZip = New-ZipPackageFromDirectory -SourceDir $outerEntityPackage -ZipPath $outerEntityZip',
+    'if (-not $createdOuterEntityZip) { throw "outer entity package zip was not created" }',
+    '$nestedDetected = Get-RestoreBackupType -Path $outerEntityZip',
+    'if ($nestedDetected.Type -ne "zip-package" -or -not $nestedDetected.NeedsStaging -or -not $nestedDetected.HasCredentialEntities) { throw "nested entity zip was not detected safely: $($nestedDetected.Type) $($nestedDetected.NeedsStaging) $($nestedDetected.HasCredentialEntities)" }',
+    '$nestedPrepared = Prepare-RestoreBackupInput -Path $outerEntityZip',
+    'if ($nestedPrepared.Type -ne "n8n-entities" -or -not $nestedPrepared.InputDir) { throw "nested entity zip was not prepared: $($nestedPrepared.Type) $($nestedPrepared.Reason)" }',
     '$scheduleArgs = Get-N8nCliBackupScheduleActionArguments',
     'if ($scheduleArgs -notmatch "--run-n8n-recovery-backup --scheduled") { throw "scheduled task does not use recovery backup flag: $scheduleArgs" }',
     '$specs = @(Get-N8nCliBackupExportSpecs -IncludeWorkflows $true -IncludeCredentials $true -ExportDecryptedCredentials $true -ContainerBackupRoot "/tmp/n8n-cli-backups/test")',
@@ -1413,65 +1464,285 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
   assert.doesNotMatch(vps, /unrelated hosting providers/i);
 });
 
-test('Production Cloudflare guide and menu use all-inclusive production backups', () => {
+test('Production Cloudflare guide and menu use local-style database-first production backups', () => {
   const guide = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md');
   const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1');
+  const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/docker-compose.yml');
   const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.env.example');
   const runtimeIgnore = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.gitignore');
+  const shortcut = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd');
 
   assert.match(guide, /Private runtime ignore template/);
   assert.match(guide, /Linux server backup template/);
   assert.match(guide, /\[production server backup template\]\(\.\/templates\/production-server-backups\/\)/);
-  assert.match(guide, /`Back up now`/);
-  assert.match(guide, /n8n export:workflow --backup --output=<backup_dir>/);
-  assert.match(guide, /n8n export:credentials --backup --output=<backup_dir>/);
-  assert.match(guide, /encrypted credential export only/);
-  assert.match(guide, /Postgres `pg_dump`/);
+  assert.match(guide, /`Back up`/);
+  assert.match(guide, /same restore-compatible database-first shape as the local stack/);
   assert.match(guide, /n8n-production-YYYYMMDD-HHMMSS/);
-  assert.match(guide, /manifest\.json/);
-  assert.match(guide, /RESTORE-NOTES\.txt/);
+  assert.match(guide, /database\.sql/);
+  assert.match(guide, /SECRET-DO-NOT-COMMIT\.env/);
+  assert.match(guide, /restore-manifest\.json/);
+  assert.match(guide, /HOW TO USE THIS RESTORE FOLDER\.txt/);
+  assert.match(guide, /README-PRIVATE\.txt/);
   assert.match(guide, /backup\.log/);
-  assert.match(guide, /retention cleanup using `N8N_BACKUP_RETENTION_DAYS`/);
-  assert.match(guide, /does not set up automatic backups/);
-  assert.match(guide, /Do not use Windows Task Scheduler for this production\/server documentation path/);
+  assert.match(guide, /retention cleanup with a 30-day default/);
+  assert.match(guide, /`database\.sql` is the full n8n Postgres database backup/);
+  assert.match(guide, /contains workflows, encrypted credential records, settings, users\/projects/);
+  assert.match(guide, /does not create separate workflow or credential export folders by default/);
+  assert.match(guide, /`Back up` opens the production backup submenu/);
+  assert.match(guide, /`Back up now`/);
+  assert.match(guide, /`Set up automatic backups`/);
+  assert.match(guide, /uses Windows Task Scheduler for this Windows Cloudflare launcher/);
+  assert.match(guide, /prompts for cadence, retention, and destination/);
+  assert.match(guide, /schedules the same production backup zip package that `Back up now` creates/);
+  assert.match(guide, /Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT\.env` or `\.env` inside the selected zip/);
+  assert.match(guide, /Older n8n entity export zips are accepted as an advanced compatibility path/);
+  assert.match(guide, /Entity zip restore uses `n8n import:entities`, requires `migrations\.jsonl`, verifies that supported n8n rows were actually imported before reporting success, may require the source `N8N_IMAGE`/);
+  assert.match(guide, /After any production start or restore restart, the menu waits until the localhost n8n editor responds and stays reachable/);
   assert.match(guide, /schedule it with systemd or cron/);
+  assert.match(guide, /server-side template is separate from this Windows Cloudflare launcher/);
   assert.match(guide, /Offsite or cloud storage is intentionally not configured here/);
   assert.match(guide, /future hardening item/);
+  assert.match(guide, /You can start Postgres and n8n locally before Cloudflare is ready/);
+  assert.match(guide, /It does not start `cloudflared`, and it does not require `CLOUDFLARED_TUNNEL_TOKEN`/);
+  assert.match(guide, /launcher writes `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL`, `N8N_HOST`, and `N8N_PROTOCOL` into `\.env\.active`/);
+  assert.match(guide, /`N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is missing or still a placeholder/);
+  assert.match(guide, /`N8N_PUBLIC_HOST` \| Your n8n subdomain\/hostname only/);
+  assert.match(guide, /If `N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is still a placeholder, the Cloudflare preflight warns and continues/);
   assert.doesNotMatch(guide, /Backup Postgres/);
+  assert.doesNotMatch(guide, /n8n export:workflow --backup --output=<backup_dir>/);
+  assert.doesNotMatch(guide, /n8n export:credentials --backup --output=<backup_dir>/);
+  assert.doesNotMatch(guide, /encrypted credential export only/);
 
   assert.deepEqual(menuOptions(menu, 'Show-MainMenu'), [
-    'Safety preflight',
-    'Start production stack',
-    'Stop production stack',
+    'Start n8n',
     'Restart n8n',
-    'View status',
+    'Stop n8n',
+    'Update',
+    'Show Compose status',
     'View logs',
-    'Back up now',
-    'Check/update images',
-    'Print production URL',
+    'Back up',
+    'Advanced / Recovery: Restore local n8n from backup',
     'Command list',
     'Exit'
   ]);
+  assert.deepEqual(menuOptions(menu, 'Show-StartMenu'), [
+    'Localhost only',
+    'Start Cloudflare tunnel',
+    'Update all, then start with Cloudflare tunnel',
+    'Cancel'
+  ]);
+  assert.deepEqual(menuOptions(menu, 'Show-StopMenu'), [
+    'n8n + Cloudflare tunnel',
+    'Stop Cloudflare tunnel',
+    'Cancel'
+  ]);
+  assert.deepEqual(menuOptions(menu, 'Show-ProductionBackupMenu'), [
+    'Back up now',
+    'Set up automatic backups',
+    'Back'
+  ]);
 
-  assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /export:workflow[\s\S]*export:credentials/);
-  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Get-N8nCliProductionBackupSpecs[\s\S]*Backup-Postgres/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /Quick service status:/);
+  assert.match(functionBody(menu, 'Set-ActiveN8nUrl'), /\.env\.active[\s\S]*WEBHOOK_URL=\$activeUrl[\s\S]*N8N_EDITOR_BASE_URL=\$activeUrl[\s\S]*N8N_HOST=\$HostName[\s\S]*N8N_PROTOCOL=\$\(\$uri\.Scheme\)/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /active n8n URL/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /Active n8n URL is still using Cloudflare, but cloudflared is stopped/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ServiceStatus -Name 'cloudflared'[\s\S]*public tunnel is ON/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ImageVersions -RunningServices \$runningServices/);
+  assert.match(functionBody(menu, 'Get-ComposeServiceRows'), /docker compose ps --format '\{\{\.Service\}\}\|\{\{\.Image\}\}\|\{\{\.State\}\}'/);
+  assert.match(functionBody(menu, 'Get-RunningServiceImage'), /docker inspect \$container --format '\{\{\.Config\.Image\}\}'/);
+  assert.match(functionBody(menu, 'Get-ImageVersionLines'), /Get-RunningServiceImage[\s\S]*running, image unknown[\s\S]*stopped/);
+  assert.doesNotMatch(functionBody(menu, 'Get-ImageVersionLines'), /failed to detect/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Do not launch production n8n directly from Docker Desktop/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Start Cloudflare tunnel/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Advanced \/ Recovery: Restore local n8n from backup/);
+  assert.match(functionBody(menu, 'Add-PreflightResult'), /Why it failed:[\s\S]*Fix:/);
+  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /N8N_LOCAL_PORT is a valid local port/);
+  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /The launcher allows this, but replace it before saving credentials you care about/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /N8N_ENCRYPTION_KEY is present and not a placeholder/);
+  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /POSTGRES_PASSWORD is missing or still a placeholder[\s\S]*The launcher allows this, but replace it before saving production data you care about/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /POSTGRES_PASSWORD is present and not a placeholder/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /CLOUDFLARED_TUNNEL_TOKEN|N8N_PUBLIC_HOST|N8N_PUBLIC_URL/);
+  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /N8N_PUBLIC_URL host matches N8N_PUBLIC_HOST/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /N8N_ENCRYPTION_KEY is present and not a placeholder/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /POSTGRES_PASSWORD is present and not a placeholder/);
+  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /The launcher allows this, but replace it before saving credentials you care about/);
+  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /The launcher allows this, but replace it before saving production data you care about/);
+  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /CLOUDFLARED_TUNNEL_TOKEN is present and not a placeholder/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /WEBHOOK_URL matches|N8N_EDITOR_BASE_URL matches|N8N_PROXY_HOPS is 1/);
+  assert.match(functionBody(menu, 'Start-ProductionStack'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*@\(\'up\', '-d', 'postgres', 'n8n'\)[\s\S]*Wait-ForProductionN8nReady -Context 'Production localhost n8n start' -AllowSelfHeal/);
+  assert.doesNotMatch(functionBody(menu, 'Start-ProductionStack'), /Invoke-SafetyPreflight|cloudflared/);
+  assert.match(functionBody(menu, 'Start-LocalhostOnly'), /Start-ProductionStack[\s\S]*cloudflared[\s\S]*stop', 'cloudflared'/);
+  assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*Set-ActiveN8nUrl -Url \$publicUrl -Mode 'cloudflare' -HostName \$publicHost[\s\S]*cloudflared/);
+  assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /--force-recreate', 'n8n', 'cloudflared'[\s\S]*Wait-ForProductionN8nReady -Context 'Production Cloudflare n8n start' -AllowSelfHeal/);
+  assert.match(functionBody(menu, 'Restart-N8n'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--force-recreate', 'n8n'\)\) -ne 0\) \{ return \}[\s\S]*Wait-ForProductionN8nReady -Context 'Production n8n restart' -AllowSelfHeal/);
+  assert.match(functionBody(menu, 'Wait-ForProductionN8nReady'), /Test-ProductionN8nHttpReady[\s\S]*n8n editor is responding and stayed reachable[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*n8n editor is responding after self-heal and stayed reachable[\s\S]*Recent logs show mismatching encryption keys[\s\S]*database schema \/ n8n image version mismatch/);
+  assert.match(functionBody(menu, 'Stop-CloudflareTunnel'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local/);
+  assert.doesNotMatch(menu, /function Get-N8nCliProductionBackupSpecs|function Invoke-N8nCliProductionBackupExport/);
+  assert.match(functionBody(menu, 'Backup-Postgres'), /Join-Path \$BackupDir 'database\.sql'/);
+  assert.doesNotMatch(functionBody(menu, 'Backup-Postgres'), /Join-Path \$BackupDir 'database'/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Backup-Postgres -Required -BackupDir \$backupDir -SkipPreflight/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /param\([\s\S]*\[switch\]\$Required[\s\S]*\[switch\]\$Scheduled/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Write-ProductionBackupSecretFile -BackupDir \$backupDir/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Convert-ProductionBackupFolderToZipPackage -BackupDir \$backupDir -ZipFileName "n8n-production-\$timestamp\.zip"/);
+  assert.doesNotMatch(functionBody(menu, 'Backup-N8nProductionNow'), /export:workflow|export:credentials|Invoke-N8nCliProductionBackupExport/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-BasePreflight/);
+  assert.doesNotMatch(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-SafetyPreflight/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Add-ProductionBackupLog[\s\S]*Write-ProductionBackupRestoreNotes[\s\S]*Write-ProductionBackupManifest/);
-  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /manifest\.json[\s\S]*backup\.log[\s\S]*RESTORE-NOTES\.txt/);
-  assert.match(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /RESTORE-NOTES\.txt[\s\S]*import:workflow[\s\S]*import:credentials/);
+  assert.match(functionBody(menu, 'Show-ProductionBackupMenu'), /Write-ProductionBackupAutomaticStatus[\s\S]*Back up now[\s\S]*Set up automatic backups[\s\S]*Backup-N8nProductionNow[\s\S]*Configure-ProductionBackupSchedule/);
+  assert.match(functionBody(menu, 'New-ProductionBackupConfigFromPrompts'), /Backup cadence in days[\s\S]*Retention period in days[\s\S]*Backup destination[\s\S]*backupRoot = \$backupRoot/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupAutomaticStatus'), /Retention:[\s\S]*Destination:[\s\S]*Scheduled time:/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Read-ProductionBackupConfig[\s\S]*No automatic backup config found[\s\S]*\$config\.backupRoot[\s\S]*\$config\.retentionDays/);
+  assert.match(functionBody(menu, 'Get-ProductionBackupScheduleActionArguments'), /--stack-dir[\s\S]*--run-production-backup[\s\S]*--scheduled/);
+  assert.match(menu, /Test-MenuFlag -Name 'run-production-backup'[\s\S]*Backup-N8nProductionNow -Scheduled:\(Test-MenuFlag -Name 'scheduled'\)/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /restore-manifest\.json[\s\S]*database\.sql[\s\S]*SECRET-DO-NOT-COMMIT\.env[\s\S]*backup\.log[\s\S]*HOW TO USE THIS RESTORE FOLDER\.txt/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /HOW TO USE THIS RESTORE FOLDER\.txt[\s\S]*database\.sql is the full n8n Postgres database backup/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /paste the full path to the \.zip file in this folder/);
+  assert.doesNotMatch(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /import:workflow|import:credentials/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-ProductionBackupRetentionCleanup/);
-  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Decrypted credential export is disabled/);
-  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /includeWorkflows = \$true[\s\S]*includeCredentials = \$true[\s\S]*exportDecryptedCredentials = \$false[\s\S]*includeDatabase = \$true/);
+  assert.doesNotMatch(functionBody(menu, 'Test-ProductionBackupRoot'), /\$home\s*=/i);
+  assert.match(functionBody(menu, 'Test-ProductionBackupRoot'), /\$userProfileRoot = \[System\.IO\.Path\]::GetFullPath/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Advanced \/ Recovery: Restore local n8n from backup/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Full account\/login restore requires database\.sql; older entity zips import best effort/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Type PROCEED to continue[\s\S]*Backup-Postgres -Required -BackupDir \$preRestoreRoot -SkipPreflight[\s\S]*Convert-ProductionBackupFolderToZipPackage -BackupDir \$preRestoreRoot -ZipFileName "\$preRestoreName\.zip"[\s\S]*Expand-ProductionRestorePackageZipToStaging -ZipPath \$preRestoreZipPath[\s\S]*Restore-ProductionPostgresSqlBackup/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Resolve-ProductionN8nImageForEntityRestore -Backup \$detected/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Write-MissingProductionCredentialRestoreKeyError/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Add-Member -NotePropertyName RestoreN8nImage/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Set-ProductionEncryptionKeyForRestore[\s\S]*\$ok = \$false/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /'n8n-entities' \{[\s\S]*Update-ProductionN8nImageForRestore[\s\S]*Restore-ProductionN8nEntitiesBackup -Backup \$detected/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /InputPath = \$preRestoreExpanded\.DatabaseSqlPath/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Pre-restore production \.env N8N_ENCRYPTION_KEY restored[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*Startup will attempt one more repair pass/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Restore-PreviousProductionServices -PreviousServices \$preRestoreServices -StartN8nWhenNone/);
+  assert.match(functionBody(menu, 'Clear-ProductionPostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;[\s\S]*psql[\s\S]*ON_ERROR_STOP=1/);
+  assert.match(functionBody(menu, 'Test-ProductionEntityImportApplied'), /pg_temp\.entity_restore_row_count[\s\S]*workflow_entity[\s\S]*credentials_entity[\s\S]*SELECT 'ENTITY_RESTORE_ROW_COUNT=' \|\| pg_temp\.entity_restore_row_count\(\)[\s\S]*Entity import did not leave any supported n8n rows/);
+  assert.doesNotMatch(functionBody(menu, 'Test-ProductionEntityImportApplied'), /RAISE NOTICE/);
+  assert.match(functionBody(menu, 'Restore-ProductionPostgresSqlBackup'), /Clear-ProductionPostgresPublicSchema[\s\S]*psql[\s\S]*ON_ERROR_STOP=1[\s\S]*-f/);
+  assert.match(functionBody(menu, 'Get-ProductionRestoreBackupType'), /Please select a \.zip backup package/);
+  assert.doesNotMatch(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Production restore now accepts zip packages only|Production restore input must be a \.zip backup package/);
+  assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Prepare-ProductionRestoreBackupInput[\s\S]*postgres-sql[\s\S]*n8n-entities/);
+  assert.match(functionBody(menu, 'Get-ProductionRestoreBackupType'), /Get-ZipEntryNames[\s\S]*database\.sql[\s\S]*Test-ProductionRestoreEntityFileName[\s\S]*migrations\.jsonl[\s\S]*credentialsentity\.jsonl/);
+  assert.match(functionBody(menu, 'Get-ProductionRestoreBackupType'), /Entity zip contains n8n JSONL files but is missing migrations\.jsonl/);
+  assert.match(functionBody(menu, 'Prepare-ProductionRestoreBackupInput'), /Expand-ProductionRestorePackageZipToStaging[\s\S]*Type = 'postgres-sql'[\s\S]*Expand-ProductionRestoreEntitiesZipToStaging[\s\S]*Type = 'n8n-entities'/);
+  assert.match(functionBody(menu, 'Expand-ProductionRestoreEntitiesZipToStaging'), /Trying nested entity zip[\s\S]*New-ProductionRestoreEntityImportDirectory[\s\S]*clean entities\.zip rebuilt from all extracted n8n entity JSONL files/);
+  assert.match(functionBody(menu, 'Restore-ProductionN8nEntitiesBackup'), /Write-MissingProductionCredentialRestoreKeyError[\s\S]*Clear-ProductionPostgresPublicSchema[\s\S]*import:entities[\s\S]*--truncateTables[\s\S]*Test-ProductionEntityImportApplied/);
+  assert.match(functionBody(menu, 'Restore-ProductionN8nEntitiesBackup'), /RestoreN8nImage[\s\S]*Test-TrustedProductionRestoreN8nImageRef[\s\S]*\$env:N8N_IMAGE = \$restoreN8nImage[\s\S]*finally[\s\S]*Remove-Item Env:\\N8N_IMAGE/);
+  assert.match(functionBody(menu, 'Resolve-ProductionN8nImageForEntityRestore'), /SourceEntityDir[\s\S]*InputDir[\s\S]*Get-ProductionRestoreEntityLatestMigration[\s\S]*Find-ProductionN8nImageForEntityMigration/);
+  assert.match(functionBody(menu, 'Expand-ProductionRestorePackageZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*database\.sql/);
+  assert.match(functionBody(menu, 'Get-ProductionRestoreEnvBackupNames'), /SECRET-DO-NOT-COMMIT\.env[\s\S]*\.env/);
+  assert.match(functionBody(menu, 'Find-ProductionRestoreBackupEnvValue'), /ZipFile\]::OpenRead[\s\S]*siblingSecret/);
+  assert.match(functionBody(menu, 'Set-ProductionEncryptionKeyForRestore'), /N8N_ENCRYPTION_KEY[\s\S]*Set-EnvFileValue/);
+  assert.match(functionBody(menu, 'Repair-ProductionN8nConfigEncryptionKey'), /stop', '--timeout', '10', 'n8n'[\s\S]*const configPath = `\/home\/node\/\.n8n\/config`;[\s\S]*process\.env\.N8N_ENCRYPTION_KEY[\s\S]*missing or still uses the placeholder[\s\S]*config\.encryptionKey = key[\s\S]*'--pull', 'never'[\s\S]*--entrypoint', 'node'/);
+  assert.doesNotMatch(functionBody(menu, 'Repair-ProductionN8nConfigEncryptionKey'), /Write-Host \$key|Write-Info \$key|Write-Success \$key|Write-Warning \$key/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Find-ProductionRestoreBackupEnvValue -Path \$backupPath -Name 'N8N_ENCRYPTION_KEY'[\s\S]*Set-ProductionEncryptionKeyForRestore[\s\S]*'n8n-entities' \{[\s\S]*Update-ProductionN8nImageForRestore[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*Restore-ProductionN8nEntitiesBackup/);
+  assert.match(menu, /'8' \{ Invoke-MenuAction \{ Restore-ProductionCloudflareFromBackupMenu \} \}/);
+  assert.match(shortcut, /%USERPROFILE%\\\.n8n-production-cloudflare/);
+  assert.match(shortcut, /_n8n-production-cloudflare\.cmd/);
+  assert.match(shortcut, /Copy the production Cloudflare stack templates into %STACK_DIR% first/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /includeWorkflows = \$false[\s\S]*includeCredentials = \$false[\s\S]*exportDecryptedCredentials = \$false[\s\S]*includeDatabase = \$true/);
   assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /\^n8n-production-\\d\{8\}-\\d\{6\}\$/);
   assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /Test-PathInsideDirectory[\s\S]*Remove-Item -LiteralPath \$folder\.FullName -Recurse -Force/);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Backup-N8nProductionNow -Required/);
+  assert.match(menu, /'7' \{ Invoke-MenuAction \{ Show-ProductionBackupMenu \} \}/);
   assert.doesNotMatch(functionBody(menu, 'Show-MainMenu'), /Backup Postgres/);
-  assert.doesNotMatch(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /--decrypted/);
-  assert.doesNotMatch(menu, /Windows Task Scheduler|Register-ScheduledTask|New-ScheduledTaskTrigger|Unregister-ScheduledTask/);
+  assert.doesNotMatch(menu, /--decrypted/);
+  assert.match(menu, /Windows Task Scheduler/);
+  assert.match(functionBody(menu, 'Register-ProductionBackupSchedule'), /Register-ScheduledTask[\s\S]*New-ScheduledTaskTrigger/);
 
-  assert.match(envExample, /^N8N_BACKUP_RETENTION_DAYS=30$/m);
+  assert.match(envExample, /\[ STEP 1: Fill These Before First Production Launch \]/);
+  assert.match(envExample, /\[ STEP 2: Fill These After Cloudflare Tunnel Is Ready \]/);
+  assert.match(envExample, /launcher builds n8n public editor and webhook URLs from N8N_PUBLIC_URL/);
+  assert.match(envExample, /^LOCAL_TIMEZONE=Asia\/Singapore$/m);
+  assert.match(envExample, /^N8N_LOCAL_PORT=5678$/m);
+  assert.match(envExample, /^N8N_PUBLIC_HOST=n8n\.example\.com$/m);
+  assert.match(envExample, /^N8N_PUBLIC_URL=https:\/\/n8n\.example\.com\/$/m);
+  assert.match(envExample, /^CLOUDFLARED_TUNNEL_TOKEN=replace-with-cloudflare-tunnel-token$/m);
+  assert.doesNotMatch(envExample, /^WEBHOOK_URL=/m);
+  assert.doesNotMatch(envExample, /^N8N_EDITOR_BASE_URL=/m);
+  assert.doesNotMatch(envExample, /^N8N_PROTOCOL=/m);
+  assert.doesNotMatch(envExample, /^N8N_PROXY_HOPS=/m);
+  assert.doesNotMatch(envExample, /^GENERIC_TIMEZONE=/m);
+  assert.doesNotMatch(envExample, /^N8N_BACKUP_RETENTION_DAYS=/m);
+  assert.match(compose, /path: \.env\.active[\s\S]*required: false/);
+  assert.doesNotMatch(compose, /WEBHOOK_URL: \$\{N8N_PUBLIC_URL\}/);
+  assert.doesNotMatch(compose, /N8N_EDITOR_BASE_URL: \$\{N8N_PUBLIC_URL\}/);
+  assert.doesNotMatch(compose, /N8N_PROTOCOL: https/);
+  assert.match(compose, /N8N_PROXY_HOPS: 1/);
+  assert.match(compose, /GENERIC_TIMEZONE: \$\{LOCAL_TIMEZONE:-Asia\/Singapore\}/);
+  assert.match(compose, /ports:\n\s+- "127\.0\.0\.1:\$\{N8N_LOCAL_PORT:-5678\}:5678"/);
+  assert.doesNotMatch(compose, /^\s+- "5678:5678"/m);
+  assert.doesNotMatch(compose, /^\s+- "0\.0\.0\.0:5678:5678"/m);
   for (const ignored of ['.env', '.env.*', '!.env.example', 'backups/', 'logs/', '*.sql', '*.dump', '*.backup', '*.zip', '*.tar', '*.tgz', '**/SECRET-DO-NOT-COMMIT.env']) {
     assert.match(runtimeIgnore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
   }
+});
+
+test('production Cloudflare restore resolver accepts legacy entity zip packages', (t) => {
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1');
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    t.skip('PowerShell is not available in this environment');
+    return;
+  }
+
+  const command = [
+    '$ErrorActionPreference = "Stop"',
+    `$menu = Get-Content -LiteralPath ${powerShellSingleQuoted(sourceScript)} -Raw`,
+    '$end = $menu.LastIndexOf("`nInitialize-MenuRuntime")',
+    'if ($end -lt 0) { throw "could not find pre-loop marker" }',
+    '. ([scriptblock]::Create($menu.Substring(0, $end)))',
+    '$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("toolkit-prod-restore-" + [guid]::NewGuid().ToString("N"))',
+    '$script:StackRoot = Join-Path $testRoot "stack"',
+    'New-Item -ItemType Directory -Force -Path $script:StackRoot | Out-Null',
+    '$safeRoot = Join-Path $script:StackRoot "backups"',
+    'New-Item -ItemType Directory -Force -Path $safeRoot | Out-Null',
+    '$entityDir = Join-Path $safeRoot "legacy-entities"',
+    'New-Item -ItemType Directory -Force -Path $entityDir | Out-Null',
+    'Set-Content -LiteralPath (Join-Path $entityDir "migrations.jsonl") -Value "{}`n" -Encoding ascii',
+    'Set-Content -LiteralPath (Join-Path $entityDir "workflowentity.jsonl") -Value "{}`n" -Encoding ascii',
+    'Set-Content -LiteralPath (Join-Path $entityDir "credentialsentity.jsonl") -Value "{}`n" -Encoding ascii',
+    '$entityZip = Join-Path $safeRoot "entities-clean-keep-workflows_tags.zip"',
+    '$createdEntityZip = New-ZipPackageFromDirectory -SourceDir $entityDir -ZipPath $entityZip',
+    'if (-not $createdEntityZip) { throw "entity zip was not created" }',
+    '$entityDetected = Get-ProductionRestoreBackupType -Path $entityZip',
+    'if ($entityDetected.Type -ne "zip-package" -or -not $entityDetected.NeedsStaging -or -not $entityDetected.HasCredentialEntities) { throw "entity zip was not detected safely: $($entityDetected.Type) $($entityDetected.NeedsStaging) $($entityDetected.HasCredentialEntities)" }',
+    '$entityResolved = Resolve-ProductionRestoreBackup -Path $entityZip',
+    'if (-not $entityResolved.Ok -or $entityResolved.Type -ne "n8n-entities" -or -not $entityResolved.InputDir) { throw "entity zip was not resolved: $($entityResolved.Ok) $($entityResolved.Type) $($entityResolved.Error)" }',
+    'if (-not (Test-Path -LiteralPath (Join-Path $entityResolved.InputDir "entities.zip") -PathType Leaf)) { throw "clean entities.zip was not staged" }',
+    '$incompleteDir = Join-Path $safeRoot "incomplete-entities"',
+    'New-Item -ItemType Directory -Force -Path $incompleteDir | Out-Null',
+    'Set-Content -LiteralPath (Join-Path $incompleteDir "workflowentity.jsonl") -Value "{}`n" -Encoding ascii',
+    '$incompleteZip = Join-Path $safeRoot "incomplete-entities.zip"',
+    '$createdIncompleteZip = New-ZipPackageFromDirectory -SourceDir $incompleteDir -ZipPath $incompleteZip',
+    'if (-not $createdIncompleteZip) { throw "incomplete entity zip was not created" }',
+    '$incompleteDetected = Get-ProductionRestoreBackupType -Path $incompleteZip',
+    'if ($incompleteDetected.Type -ne "unsupported" -or $incompleteDetected.Reason -notmatch "missing migrations\\.jsonl") { throw "incomplete entity zip reason mismatch: $($incompleteDetected.Type) $($incompleteDetected.Reason)" }',
+    '$outerDir = Join-Path $safeRoot "outer-entity-package"',
+    'New-Item -ItemType Directory -Force -Path $outerDir | Out-Null',
+    'Copy-Item -LiteralPath $entityZip -Destination (Join-Path $outerDir "entities-clean-keep-workflows_tags.zip") -Force',
+    'Set-Content -LiteralPath (Join-Path $outerDir "SECRET-DO-NOT-COMMIT.env") -Value "N8N_ENCRYPTION_KEY=test-key" -Encoding ascii',
+    '$outerZip = Join-Path $safeRoot "outer-entity-package.zip"',
+    '$createdOuterZip = New-ZipPackageFromDirectory -SourceDir $outerDir -ZipPath $outerZip',
+    'if (-not $createdOuterZip) { throw "outer entity package zip was not created" }',
+    '$nestedResolved = Resolve-ProductionRestoreBackup -Path $outerZip',
+    'if (-not $nestedResolved.Ok -or $nestedResolved.Type -ne "n8n-entities") { throw "nested entity zip was not resolved: $($nestedResolved.Ok) $($nestedResolved.Type) $($nestedResolved.Error)" }',
+    '$dbDir = Join-Path $safeRoot "database-package"',
+    'New-Item -ItemType Directory -Force -Path $dbDir | Out-Null',
+    'Set-Content -LiteralPath (Join-Path $dbDir "database.sql") -Value "-- fake sql" -Encoding ascii',
+    'Set-Content -LiteralPath (Join-Path $dbDir "restore-manifest.json") -Value "{}" -Encoding ascii',
+    '$dbZip = Join-Path $safeRoot "database-package.zip"',
+    '$createdDbZip = New-ZipPackageFromDirectory -SourceDir $dbDir -ZipPath $dbZip',
+    'if (-not $createdDbZip) { throw "database package zip was not created" }',
+    '$dbResolved = Resolve-ProductionRestoreBackup -Path $dbZip',
+    'if (-not $dbResolved.Ok -or $dbResolved.Type -ne "postgres-sql" -or (Split-Path -Leaf $dbResolved.InputPath) -ne "database.sql") { throw "database zip was not resolved: $($dbResolved.Ok) $($dbResolved.Type) $($dbResolved.InputPath)" }',
+    '$folderDetected = Get-ProductionRestoreBackupType -Path $dbDir',
+    'if ($folderDetected.Type -ne "unsupported" -or $folderDetected.Reason -ne "Please select a .zip backup package.") { throw "folder input was not rejected cleanly: $($folderDetected.Type) $($folderDetected.Reason)" }'
+  ].join('; ');
+
+  const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
 test('production server backup template uses Linux scheduling and guarded credential export', () => {
@@ -1704,6 +1975,7 @@ test('n8n local setup packs install current files only', () => {
       'skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example',
       'skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore',
       'skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd',
+      'skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd',
       'skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1',
       'skills/n8n-local-setup/templates/production-server-backups/README.md',
       'skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template',

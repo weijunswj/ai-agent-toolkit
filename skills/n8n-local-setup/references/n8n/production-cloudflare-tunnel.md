@@ -93,6 +93,7 @@ The production stack template folder is [templates/production-cloudflare-stack/]
 | Placeholder environment template | [.env.example](../../templates/production-cloudflare-stack/.env.example) |
 | Private runtime ignore template | [.gitignore](../../templates/production-cloudflare-stack/.gitignore) |
 | Windows production launcher | [_n8n-production-cloudflare.cmd](../../templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd) |
+| Desktop shortcut launcher | [n8n-production-cloudflare-desktop-shortcut.cmd](../../templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd) |
 | PowerShell production menu | [scripts/n8n-production-cloudflare-menu.ps1](../../templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1) |
 | Linux server backup template | [templates/production-server-backups/](../../templates/production-server-backups/) |
 
@@ -103,7 +104,7 @@ The production Compose stack includes:
 - `cloudflared`
 - persistent volumes for Postgres and n8n
 - no public Postgres port
-- no public direct n8n host port `5678`
+- no public direct n8n host port; the browser port is loopback-only
 - `cloudflared` using the tunnel token from environment
 
 ---
@@ -131,6 +132,7 @@ Do not put the production runtime folder inside this toolkit repo. Do not put it
 3. Copy `.env.example` to `.env`.
 4. Fill `.env` privately.
 5. Do not commit `.env`.
+6. Optional: copy `n8n-production-cloudflare-desktop-shortcut.cmd` to your Desktop after the real stack folder is ready.
 
 The copied folder should look like this:
 
@@ -141,6 +143,7 @@ The copied folder should look like this:
 |-- .gitignore
 |-- .env
 |-- _n8n-production-cloudflare.cmd
+|-- n8n-production-cloudflare-desktop-shortcut.cmd
 `-- scripts\
     `-- n8n-production-cloudflare-menu.ps1
 ```
@@ -159,30 +162,33 @@ Do not paste real values into this repo, issues, pull requests, screenshots, cha
 | `POSTGRES_USER` | Production database user. | `n8n` is fine unless you intentionally separate stacks. |
 | `POSTGRES_PASSWORD` | Strong production database password. | Generate privately and store in a password manager. |
 | `N8N_ENCRYPTION_KEY` | Long random key generated once. | Store outside the machine and never change after credentials exist. |
-| `N8N_PUBLIC_HOST` | Hostname only. | No `https://`, no path, no slash, no port. |
-| `N8N_PUBLIC_URL` | Full public URL. | Must start with `https://` and end with `/`. |
-| `N8N_PROTOCOL` | Public protocol. | Use `https`. |
-| `WEBHOOK_URL` | Full public URL. | Must exactly match `N8N_PUBLIC_URL`. |
-| `N8N_EDITOR_BASE_URL` | Full public URL. | Must exactly match `N8N_PUBLIC_URL`. |
-| `N8N_PROXY_HOPS` | Trusted proxy hop count. | Use `1` for this Cloudflare Tunnel path. |
-| `CLOUDFLARED_IMAGE` | Cloudflare connector image. | Default is `cloudflare/cloudflared:latest`; pin intentionally if needed. |
-| `CLOUDFLARED_TUNNEL_TOKEN` | Tunnel token from Cloudflare. | Store only in private `.env` or secret storage. |
-| `GENERIC_TIMEZONE` | IANA timezone. | Example placeholder is `Etc/UTC`. |
+| `LOCAL_TIMEZONE` | IANA timezone. | Matches the local stack variable name. |
+| `N8N_LOCAL_PORT` | Local browser port. | Same local-stack pattern: `5678` by default, or `5679` if `5678` is already used. |
 | `N8N_IMAGE` | n8n image. | Default is `docker.n8n.io/n8nio/n8n:stable`; pin intentionally if needed. |
 | `POSTGRES_IMAGE` | Postgres image. | Default is `postgres:16-alpine`. |
+| `CLOUDFLARED_IMAGE` | Cloudflare connector image. | Default is `cloudflare/cloudflared:latest`; pin intentionally if needed. |
+| `N8N_PUBLIC_HOST` | Your n8n subdomain/hostname only. | For example `n8n.example.com`. No `https://`, no path, no slash, no port. |
+| `N8N_PUBLIC_URL` | Full public URL. | Must start with `https://` and end with `/`. |
+| `CLOUDFLARED_TUNNEL_TOKEN` | Tunnel token from Cloudflare. | Store only in private `.env` or secret storage. |
 
 Example placeholder shape:
 
 ```text
 N8N_PUBLIC_HOST=n8n.example.com
 N8N_PUBLIC_URL=https://n8n.example.com/
-WEBHOOK_URL=https://n8n.example.com/
-N8N_EDITOR_BASE_URL=https://n8n.example.com/
 ```
 
 Use your real private production hostname in `.env`, not in repo files.
 
-For n8n behind Cloudflare Tunnel, set `WEBHOOK_URL` manually and set `N8N_PROXY_HOPS=1`. n8n uses those values to show and register the correct public webhook URLs when the app is behind a proxy or tunnel.
+For n8n behind Cloudflare Tunnel, fill `N8N_PUBLIC_HOST` and `N8N_PUBLIC_URL` once. The launcher writes `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL`, `N8N_HOST`, and `N8N_PROTOCOL` into `.env.active` when you choose a start mode, so the `.env` stays close to the local stack shape.
+
+You can start Postgres and n8n locally before Cloudflare is ready. The local browser URL is:
+
+```text
+http://localhost:5678/
+```
+
+If you changed `N8N_LOCAL_PORT`, use that port instead. The production Compose file binds n8n to `127.0.0.1` only, so this local editor port is not a public exposure.
 
 ---
 
@@ -203,7 +209,7 @@ Do this in Cloudflare, not in repo files.
    ```
 
 8. Save the route.
-9. In `.env`, set `N8N_PUBLIC_HOST`, `N8N_PUBLIC_URL`, `WEBHOOK_URL`, and `N8N_EDITOR_BASE_URL` to match the public hostname.
+9. In `.env`, set `N8N_PUBLIC_HOST` and `N8N_PUBLIC_URL` to match the public hostname.
 
 Cloudflare Tunnel DNS routes the hostname to the tunnel target. Cloudflare may create or expect a DNS route such as a CNAME to the tunnel target, depending on whether you use the dashboard route flow or CLI-managed DNS route flow.
 
@@ -219,7 +225,7 @@ Do not commit:
 
 ---
 
-## 7. Run Safety Preflight
+## 7. Start n8n Locally
 
 Open the private production stack folder and run:
 
@@ -230,27 +236,64 @@ Open the private production stack folder and run:
 Choose:
 
 ```text
-Safety preflight
+Start n8n
+Localhost only
 ```
 
-The preflight validates:
+This starts:
 
-- `N8N_PUBLIC_HOST` is hostname-only.
-- `N8N_PUBLIC_URL` starts with `https://` and ends with `/`.
-- `WEBHOOK_URL` matches `N8N_PUBLIC_URL`.
-- `N8N_EDITOR_BASE_URL` matches `N8N_PUBLIC_URL`.
-- `N8N_PROXY_HOPS` is `1`.
-- `CLOUDFLARED_TUNNEL_TOKEN` is present and not a placeholder.
-- `N8N_ENCRYPTION_KEY` is present and not a placeholder.
-- `POSTGRES_PASSWORD` is present and not a placeholder.
+- Postgres
+- n8n
+
+It does not start `cloudflared`, and it does not require `CLOUDFLARED_TUNNEL_TOKEN`.
+
+The base n8n preflight validates:
+
+- `docker-compose.yml` exists.
+- `.env` exists.
+- `N8N_LOCAL_PORT` is a valid local port.
 - Postgres has no public port mapping.
-- n8n direct `5678` is not publicly mapped.
+- n8n's browser port is loopback-only.
 
-Do not start production until preflight passes.
+If `N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is missing or still a placeholder, the base preflight warns but still allows local n8n to start. Replace both before saving credentials or production data you care about.
+
+After startup, open:
+
+```text
+http://localhost:5678/
+```
+
+If you changed `N8N_LOCAL_PORT`, use that port instead.
 
 ---
 
-## 8. Start Production
+## 8. Start Cloudflare Tunnel
+
+Run this only after Cloudflare setup is ready.
+
+From the menu, choose:
+
+```text
+Start n8n
+Start Cloudflare tunnel
+```
+
+The Cloudflare preflight validates:
+
+- `N8N_PUBLIC_HOST` is hostname-only.
+- `N8N_PUBLIC_URL` starts with `https://` and ends with `/`.
+- `N8N_PUBLIC_URL` uses the same hostname as `N8N_PUBLIC_HOST`.
+- `CLOUDFLARED_TUNNEL_TOKEN` is present and not a placeholder.
+- Postgres has no public port mapping.
+- n8n's browser port is loopback-only.
+
+If `N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is still a placeholder, the Cloudflare preflight warns and continues.
+
+If you only want local n8n without Cloudflare, keep using `Start n8n`; Cloudflare-specific values can wait.
+
+---
+
+## 9. Confirm Public Production Access
 
 Start only after:
 
@@ -265,10 +308,11 @@ Start only after:
 From the menu, choose:
 
 ```text
-Start production stack
+Start n8n
+Start Cloudflare tunnel
 ```
 
-The menu starts:
+The menu starts or keeps running:
 
 - Postgres
 - n8n
@@ -285,62 +329,64 @@ After startup:
 
 ---
 
-## 9. Backups Before Credentials And Workflows
+## 10. Backups Before Credentials And Workflows
 
 Do not add production credentials or workflows until backups exist.
 
 At minimum:
 
 1. Store `N8N_ENCRYPTION_KEY` in a password manager.
-2. Create and test an n8n CLI workflow export process.
-3. Create and test an n8n CLI credential export process.
-4. Keep decrypted credential export disabled unless an owner explicitly approves a break-glass export.
-5. Create and test a Postgres backup process.
-6. Decide where private backups live.
-7. Decide who can restore.
-8. Take a backup before Postgres updates and before major n8n updates.
+2. Create and test a Postgres backup and restore process.
+3. Decide where private backups live.
+4. Decide who can restore.
+5. Take a backup before Postgres updates and before major n8n updates.
 
 The production menu includes:
 
 ```text
-Back up now
+Back up
 ```
 
-It writes a timestamped backup folder under the private stack folder's `backups\` directory.
+`Back up` opens the production backup submenu:
 
-The manual production backup includes:
+1. `Back up now`
+2. `Set up automatic backups`
 
-- `n8n export:workflow --backup --output=<backup_dir>`
-- `n8n export:credentials --backup --output=<backup_dir>`
-- encrypted credential export only
-- Postgres `pg_dump`
+`Back up now` writes a timestamped backup folder under the private stack folder's `backups\` directory. That folder contains one complete zip package with the private secret env file inside the zip when `.env` exists.
+
+The manual production backup uses the same restore-compatible database-first shape as the local stack. It includes:
+
 - timestamped folders named `n8n-production-YYYYMMDD-HHMMSS`
-- `manifest.json`
-- `RESTORE-NOTES.txt`
-- `backup.log`
-- retention cleanup using `N8N_BACKUP_RETENTION_DAYS`
+- `n8n-production-YYYYMMDD-HHMMSS.zip`
+- `SECRET-DO-NOT-COMMIT.env` inside the zip when `.env` exists
+- `database.sql` inside the zip
+- `restore-manifest.json` inside the zip
+- `HOW TO USE THIS RESTORE FOLDER.txt` inside the zip
+- `README-PRIVATE.txt` inside the zip
+- `backup.log` inside the zip
+- retention cleanup with a 30-day default
 
-Backups may contain private workflows, executions, and encrypted credential records. Keep them private. Do not commit backups, logs, exports, database dumps, or production `.env` files.
+`database.sql` is the full n8n Postgres database backup for this stack. It contains workflows, encrypted credential records, settings, users/projects, and other database-backed n8n state. The production Cloudflare menu does not create separate workflow or credential export folders by default because restore uses the database backup.
 
-The menu intentionally does not copy `.env` or `N8N_ENCRYPTION_KEY` into backup folders. Store restore-critical secrets in a password manager or secret store.
+Backups may contain private workflows, executions, encrypted credential records, and private environment values. Keep them private. Do not commit backup zips, logs, database dumps, `SECRET-DO-NOT-COMMIT.env`, or production `.env` files.
 
-The production Cloudflare menu does not set up automatic backups. Do not use Windows Task Scheduler for this production/server documentation path.
+`Set up automatic backups` uses Windows Task Scheduler for this Windows Cloudflare launcher. It prompts for cadence, retention, and destination, then schedules the same production backup zip package that `Back up now` creates. Scheduled backups require Windows, Task Scheduler, Docker Desktop, this production Cloudflare stack folder, and the local Postgres service to be available when the task fires.
 
-For a Linux server or company-server deployment such as Hostinger/Coolify, use the copy-ready [production server backup template](../../templates/production-server-backups/) and schedule it with systemd or cron. That template creates the same n8n CLI exports, database backup when applicable, manifest, restore notes, logs, and retention cleanup from the server side.
+For a Linux server or company-server deployment such as Hostinger/Coolify, use the copy-ready [production server backup template](../../templates/production-server-backups/) and schedule it with systemd or cron. That server-side template is separate from this Windows Cloudflare launcher and is designed for Linux production deployments.
 
 Offsite or cloud storage is intentionally not configured here. Treat offsite storage as a future hardening item after local/private server backups and restore have been proven and the storage pattern is approved.
 
 ---
 
-## 10. Updates
+## 11. Updates
 
 Use the menu:
 
 ```text
-Check/update images
+Update
 ```
 
-If the update includes Postgres, the menu runs `Back up now` first and stops the update if the backup fails.
+If the update includes Postgres, the menu runs `Back up` first and stops the update if the backup fails.
 
 Update choices:
 
@@ -357,34 +403,40 @@ If the public hostname changes, update:
 
 - `N8N_PUBLIC_HOST`
 - `N8N_PUBLIC_URL`
-- `WEBHOOK_URL`
-- `N8N_EDITOR_BASE_URL`
 
 Then restart n8n and verify editor and webhook URLs again.
 
 ---
 
-## 11. Maintenance Commands
+## 12. Maintenance Commands
 
 Use the production menu for normal operations:
 
 | Menu item | Use when |
 | --- | --- |
-| `Safety preflight` | Before first launch, after `.env` changes, and before production updates. |
-| `Start production stack` | Start Postgres, n8n, and cloudflared. |
-| `Stop production stack` | Stop the production stack without deleting volumes. |
+| `Start n8n` | Choose localhost-only or Cloudflare tunnel start mode. |
 | `Restart n8n` | Apply n8n environment changes or restart the app container. |
-| `View status` | Inspect Compose service state and images. |
+| `Stop n8n` | Stop Cloudflare only, or stop the production stack without deleting volumes. |
+| `Update` | Pull and recreate selected services, with backup before Postgres update. |
+| `Show Compose status` | Inspect Compose service state and images. |
 | `View logs` | Inspect recent logs for all services or one service. |
-| `Back up now` | Create a private all-inclusive backup with workflow export, credential export, Postgres dump, manifest, restore notes, log, and retention cleanup. |
-| `Check/update images` | Pull and recreate selected services, with backup before Postgres update. |
-| `Print production URL` | Show `N8N_PUBLIC_URL` from private `.env`. |
+| `Back up` | Create a private restore-compatible backup folder containing one complete zip package with the private env copy inside when available, and retention cleanup. |
+| `Advanced / Recovery: Restore local n8n from backup` | Restore a production backup zip after a pre-restore backup and `PROCEED` approval. |
+| `Command list` | Show the recommended launcher and menu action summary. |
 
-Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, and update choices stay visible.
+Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT.env` or `.env` inside the selected zip, or from older sidecar env files beside the zip, and applies it to the active production `.env` before the restored database is started. For older entity zip restores, the launcher mirrors the local stack flow by syncing `/home/node/.n8n/config` inside the n8n Docker volume to the active `.env` key before `n8n import:entities` runs. If no backup key is found, the database restore can continue, but saved credentials may not decrypt unless the active `.env` already has the original key.
+
+The preferred production restore input is a full backup zip containing `database.sql`. Older n8n entity export zips are accepted as an advanced compatibility path, including nested entity zips inside a newer backup package. Entity zip restore uses `n8n import:entities`, requires `migrations.jsonl`, verifies that supported n8n rows were actually imported before reporting success, may require the source `N8N_IMAGE`, and cannot restore account/login state as completely as `database.sql`.
+
+After any production start or restore restart, the menu waits until the localhost n8n editor responds and stays reachable before returning to the next prompt.
+
+If startup logs show that `/home/node/.n8n/config` has an encryption key that does not match the active `.env`, the launcher attempts the same key-sync repair before recreating n8n one more time. Restore rollback also syncs the config file back to the pre-restore key before restarting services.
+
+Preflight is automatic on the launch, tunnel, backup, and update paths that need it. Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, recovery, and update choices stay visible.
 
 ---
 
-## 12. What Not To Expose
+## 13. What Not To Expose
 
 Postgres must stay private.
 
@@ -415,7 +467,7 @@ That is internal Docker networking, not public host exposure.
 
 ---
 
-## 13. Safety Rules
+## 14. Safety Rules
 
 - Use [Page 1 - Local Setup](local-setup.md) for localhost and ngrok dev webhook testing.
 - Use this page for production self-hosting from local/CGNAT machines with Cloudflare Tunnel.
@@ -429,7 +481,7 @@ That is internal Docker networking, not public host exposure.
 
 ---
 
-## 14. References
+## 15. References
 
 - [Page 1 - Local Setup](local-setup.md)
 - [Page 2 - Hostinger Coolify VPS n8n](hostinger-vps.md)

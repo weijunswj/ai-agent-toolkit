@@ -1617,7 +1617,7 @@ function Get-ImageVersionLines {
     if ($runningImage) {
       $lines.Add("$label$runningImage")
     } elseif ($RunningServices -contains $service) {
-      $lines.Add("$($label)failed to detect")
+      $lines.Add("$($label)running, image unknown")
     } else {
       $lines.Add("$($label)stopped")
     }
@@ -2106,6 +2106,10 @@ function Open-N8n {
 }
 
 function Get-N8nCliBackupDefaultRoot {
+  return (Join-Path $script:StackRoot 'backups')
+}
+
+function Get-N8nCliBackupLegacyRoot {
   return (Join-Path (Join-Path $script:StackRoot 'backups') 'n8n-cli')
 }
 
@@ -2447,7 +2451,13 @@ function Read-N8nCliBackupConfig {
   }
 
   try {
-    return (Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json)
+    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    $legacyRoot = Get-ResolvedPathOrEmpty -Path (Get-N8nCliBackupLegacyRoot)
+    $configuredRoot = Get-ResolvedPathOrEmpty -Path ([string]$config.backupRoot)
+    if ($legacyRoot -and $configuredRoot -and (Test-SameResolvedPath -Left $configuredRoot -Right $legacyRoot)) {
+      $config | Add-Member -NotePropertyName backupRoot -NotePropertyValue (Get-N8nCliBackupDefaultRoot) -Force
+    }
+    return $config
   } catch {
     Write-ErrorMessage "Could not read automatic backup config: $($_.Exception.Message)"
     return $null
@@ -2500,8 +2510,8 @@ function Save-N8nCliBackupConfig {
 function New-N8nCliBackupConfigFromPrompts {
   Write-Header 'Automatic Backup Settings'
   Write-Info 'This stores local-only schedule settings in the stack backups folder, not in repo-tracked config.'
-  Write-Info 'Automatic backups create restore-compatible recovery folders by default.'
-  Write-Info 'Each folder includes database.sql, restore metadata, restore notes, and the private backup .env when available.'
+  Write-Info 'Automatic backups create restore-compatible recovery zip packages by default.'
+  Write-Info 'Each backup folder contains one complete zip package, including SECRET-DO-NOT-COMMIT.env when available.'
   Write-Warning 'Scheduled backups only run when Windows Task Scheduler, Docker Desktop, and the local n8n stack are available.'
 
   $cadenceDays = Read-N8nCliBackupDayInput -Prompt 'Backup cadence in days' -Default 1 -Name 'Backup cadence'
@@ -2544,7 +2554,7 @@ function New-N8nCliBackupConfigFromPrompts {
 function New-N8nCliEntityExportConfigFromPrompts {
   Write-Header 'Export Workflows/Credentials'
   Write-Info 'This is an advanced entity export for manual workflow or credential portability.'
-  Write-Info 'Use Back up now for the default restore-compatible recovery folder.'
+  Write-Info 'Use Back up now for the default restore-compatible recovery zip package.'
   Write-Warning 'Credential exports are encrypted by default. Decrypted credential export is off unless explicitly confirmed.'
 
   $retentionDays = Read-N8nCliBackupDayInput -Prompt 'Retention period in days' -Default 30 -Name 'Retention period'
@@ -2912,8 +2922,8 @@ function Invoke-N8nRecoveryBackup {
   if ($Scheduled) {
     $runLabel = 'scheduled'
   }
-  Write-Info "Creating a restore-compatible $runLabel backup folder."
-  if (-not (Backup-Postgres -Required -BackupDir $backupDir)) {
+  Write-Info "Creating a restore-compatible $runLabel backup zip package."
+  if (-not (Backup-Postgres -Required -BackupDir $backupDir -PackageZipFileName "n8n-recovery-$timestamp.zip")) {
     Write-ErrorMessage 'Recovery backup folder was not created.'
     return $false
   }
@@ -3010,11 +3020,17 @@ function Invoke-N8nCliBackup {
     return $false
   }
 
+  [void](Write-BackupSecretFile -BackupDir $backupDir)
   $files = Get-N8nCliBackupFileList -BackupDir $backupDir
   $manifestPath = Write-N8nCliBackupManifest -BackupDir $backupDir -Timestamp $timestamp -Config $Config -Container $container -Specs $specs -Files $files -ScheduledRun ([bool]$Scheduled)
+  $zipPath = Convert-BackupFolderToZipPackage -BackupDir $backupDir -ZipFileName "n8n-cli-$timestamp.zip"
+  if (-not $zipPath) {
+    Write-ErrorMessage 'n8n CLI entity export zip package was not created.'
+    return $false
+  }
 
-  Write-Success "n8n CLI entity export folder: $backupDir"
-  Write-Success "Manifest written to: $manifestPath"
+  Write-Success "n8n CLI entity export package folder: $backupDir"
+  Write-Success 'Manifest included in zip package.'
   [void](Invoke-N8nCliBackupRetentionCleanup -BackupRoot $safeRoot.Path -RetentionDays $retention.Value)
   return $true
 }
@@ -3138,7 +3154,7 @@ function Write-RestoreManifest {
     files = $Files
     notes = @(
       'Use the current local Compose Postgres connection settings as the restore target.',
-      'Keep SECRET-DO-NOT-COMMIT.env with this folder. It is the private backup .env.',
+      'SECRET-DO-NOT-COMMIT.env is included inside the backup zip when available.',
       'Restore reads N8N_ENCRYPTION_KEY from that file and patches only that key automatically.',
       'Restore replaces the current local n8n database state.'
     )
@@ -3160,8 +3176,8 @@ function Write-RestoreReadme {
     '',
     "Backup type: $BackupType",
     '',
-    'Keep SECRET-DO-NOT-COMMIT.env in this folder. It is the private backup .env.',
-    'Open _n8n-local.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to this folder or to database.sql.',
+    'SECRET-DO-NOT-COMMIT.env is included inside the backup zip when available.',
+    'Open _n8n-local.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to the .zip file in this folder.',
     'Type PROCEED when asked.',
     'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.',
     'Restore also reads N8N_IMAGE from SECRET-DO-NOT-COMMIT.env when present and applies that image pin for schema compatibility.',
@@ -3176,7 +3192,8 @@ function Backup-Postgres {
   param(
     [switch]$Required,
     [string]$EnvPath = '',
-    [string]$BackupDir = ''
+    [string]$BackupDir = '',
+    [string]$PackageZipFileName = ''
   )
 
   Write-Header 'Backup Postgres Database'
@@ -3222,7 +3239,17 @@ function Backup-Postgres {
     $readmePath = Write-RestoreReadme -BackupDir $backupDir -BackupType 'postgres-sql'
     Write-Success "Restore manifest written to: $manifestPath"
     Write-Success "Restore instructions written to: $readmePath"
-    Write-Success "Backup folder: $backupDir"
+    if (-not $PackageZipFileName) {
+      $PackageZipFileName = "$(Split-Path -Leaf $backupDir).zip"
+    }
+    $zipPath = Convert-BackupFolderToZipPackage -BackupDir $backupDir -ZipFileName $PackageZipFileName
+    if (-not $zipPath) {
+      if ($Required) {
+        Write-ErrorMessage 'Required backup failed. No update was applied.'
+      }
+      return $false
+    }
+    Write-Success "Backup package folder: $backupDir"
     return $true
   } else {
     Write-ErrorMessage 'Backup failed. Check the Postgres logs for details.'
@@ -3244,12 +3271,10 @@ function Show-BackupMenu {
   if ($automaticEnabled) {
     Write-Host '  2. Change automatic backup settings'
     Write-Host '  3. Remove automatic backups'
-    Write-Host '  4. Export workflows/credentials (advanced)'
-    Write-Host '  5. Back'
+    Write-Host '  4. Back'
   } else {
     Write-Host '  2. Set up automatic backups'
-    Write-Host '  3. Export workflows/credentials (advanced)'
-    Write-Host '  4. Back'
+    Write-Host '  3. Back'
   }
   Write-Host ''
 
@@ -3259,17 +3284,15 @@ function Show-BackupMenu {
       '1' { [void](Invoke-N8nRecoveryBackupNow) }
       '2' { [void](Configure-N8nCliBackupSchedule) }
       '3' { [void](Disable-N8nCliBackupSchedule) }
-      '4' { [void](Invoke-N8nCliEntityExportNow) }
-      '5' { return }
-      default { Write-Warning 'Choose a number from 1 to 5.' }
+      '4' { return }
+      default { Write-Warning 'Choose a number from 1 to 4.' }
     }
   } else {
     switch ($choice) {
       '1' { [void](Invoke-N8nRecoveryBackupNow) }
       '2' { [void](Configure-N8nCliBackupSchedule) }
-      '3' { [void](Invoke-N8nCliEntityExportNow) }
-      '4' { return }
-      default { Write-Warning 'Choose a number from 1 to 4.' }
+      '3' { return }
+      default { Write-Warning 'Choose a number from 1 to 3.' }
     }
   }
 }
@@ -3344,9 +3367,82 @@ function New-RestoreStagingDirectory {
 
 function Enable-ZipSupport {
   try {
+    Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
   } catch {
   }
+}
+
+function New-ZipPackageFromDirectory {
+  param(
+    [string]$SourceDir,
+    [string]$ZipPath,
+    [string[]]$ExcludeLeafNames = @()
+  )
+
+  Enable-ZipSupport
+  if (Test-Path -LiteralPath $ZipPath) {
+    Remove-Item -LiteralPath $ZipPath -Force
+  }
+
+  $sourceRoot = [System.IO.Path]::GetFullPath($SourceDir)
+  if (-not $sourceRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+    $sourceRoot = $sourceRoot + [System.IO.Path]::DirectorySeparatorChar
+  }
+  $resolvedZipPath = [System.IO.Path]::GetFullPath($ZipPath)
+  $excluded = @{}
+  foreach ($name in $ExcludeLeafNames) {
+    $leaf = ([string]$name).Trim().ToLowerInvariant()
+    if ($leaf) {
+      $excluded[$leaf] = $true
+    }
+  }
+
+  $zip = [System.IO.Compression.ZipFile]::Open($resolvedZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+  try {
+    $files = @(
+      Get-ChildItem -LiteralPath $SourceDir -File -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object FullName
+    )
+    foreach ($file in $files) {
+      $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
+      if ($fullPath -ieq $resolvedZipPath) { continue }
+      if ($excluded.ContainsKey($file.Name.ToLowerInvariant())) { continue }
+      $entryName = ($fullPath.Substring($sourceRoot.Length) -replace '\\', '/')
+      [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $fullPath, $entryName, [System.IO.Compression.CompressionLevel]::Optimal)
+    }
+  } finally {
+    $zip.Dispose()
+  }
+
+  if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
+    Write-ErrorMessage "Zip package was not created: $ZipPath"
+    return ''
+  }
+
+  return $ZipPath
+}
+
+function Convert-BackupFolderToZipPackage {
+  param(
+    [string]$BackupDir,
+    [string]$ZipFileName
+  )
+
+  $zipPath = Join-Path $BackupDir $ZipFileName
+  $createdZip = New-ZipPackageFromDirectory -SourceDir $BackupDir -ZipPath $zipPath
+  if (-not $createdZip) {
+    return ''
+  }
+
+  Get-ChildItem -LiteralPath $BackupDir -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne (Split-Path -Leaf $zipPath) } |
+    ForEach-Object {
+      Remove-Item -LiteralPath $_.FullName -Recurse -Force
+    }
+
+  Write-Success "Backup zip package: $zipPath"
+  return $zipPath
 }
 
 function Get-ZipEntryNames {
@@ -3524,7 +3620,10 @@ function New-RestoreEntityImportDirectory {
 }
 
 function Expand-RestoreEntitiesZipToStaging {
-  param([string]$ZipPath)
+  param(
+    [string]$ZipPath,
+    [int]$Depth = 0
+  )
 
   $stagingDir = New-RestoreStagingDirectory
   $stagingRoot = [System.IO.Path]::GetFullPath($stagingDir)
@@ -3571,6 +3670,19 @@ function Expand-RestoreEntitiesZipToStaging {
 
   $entityDir = Find-RestoreEntityDirectory -Root $stagingDir
   if (-not $entityDir) {
+    if ($Depth -lt 3) {
+      $nestedZips = @(
+        Get-ChildItem -LiteralPath $stagingDir -File -Recurse -Filter '*.zip' -ErrorAction SilentlyContinue |
+          Sort-Object FullName
+      )
+      foreach ($nestedZip in $nestedZips) {
+        Write-Info "Trying nested entity zip: $($nestedZip.FullName)"
+        $nestedExpanded = Expand-RestoreEntitiesZipToStaging -ZipPath $nestedZip.FullName -Depth ($Depth + 1)
+        if (-not $nestedExpanded.Error) {
+          return $nestedExpanded
+        }
+      }
+    }
     return [pscustomobject]@{ Error = 'Zip restore package did not contain n8n export:entities output files.' }
   }
 
@@ -3579,7 +3691,7 @@ function Expand-RestoreEntitiesZipToStaging {
     return [pscustomobject]@{ Error = 'Zip restore package did not contain migrations.jsonl in the detected n8n entity export directory.' }
   }
   Write-Info "Backup zip extracted under: $stagingDir"
-  Write-Info 'Using a clean entities.zip rebuilt from all extracted n8n entity JSONL files; nested zip artifacts are ignored.'
+  Write-Info 'Using a clean entities.zip rebuilt from all extracted n8n entity JSONL files.'
   return [pscustomobject]@{
     StagingPath = $stagingDir
     EntityDir = $importDir
@@ -3660,38 +3772,43 @@ function Get-RestoreBackupType {
 
   $item = Get-Item -LiteralPath $inputPath
   if ($item.PSIsContainer) {
-    $databaseSql = Join-Path $item.FullName 'database.sql'
-    $restoreManifest = Join-Path $item.FullName 'restore-manifest.json'
-    if ((Test-Path -LiteralPath $databaseSql -PathType Leaf) -and (Test-Path -LiteralPath $restoreManifest -PathType Leaf)) {
-      return [pscustomobject]@{ Type = 'postgres-sql'; Label = 'restore-compatible backup folder'; InputPath = $databaseSql }
-    }
-    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported restore folder'; Reason = 'Restore folder must contain database.sql and restore-manifest.json.' }
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported restore folder'; Reason = 'Please select a .zip backup package.' }
   }
 
   $name = $item.Name.ToLowerInvariant()
-  if ($name -match '\.sql$') {
-    return [pscustomobject]@{ Type = 'postgres-sql'; Label = 'Postgres SQL backup'; InputPath = $item.FullName }
-  }
   if ($name -match '\.zip$') {
     $entries = @(Get-ZipEntryNames -ZipPath $item.FullName)
     $hasDatabaseSql = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'database.sql' }).Count -gt 0
     $hasRestoreManifest = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'restore-manifest.json' }).Count -gt 0
     $hasEntities = @($entries | Where-Object { Test-RestoreEntityFileName -Name $_ }).Count -gt 0
+    $hasMigrations = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'migrations.jsonl' }).Count -gt 0
     $hasCredentialEntities = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'credentialsentity.jsonl' }).Count -gt 0
-    if ($hasDatabaseSql -and $hasRestoreManifest) {
-      return [pscustomobject]@{ Type = 'postgres-package-zip'; Label = 'restore-compatible backup package'; InputPath = $item.FullName; NeedsPackageStaging = $true }
+    $hasNestedZip = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant().EndsWith('.zip') }).Count -gt 0
+    if ($hasDatabaseSql) {
+      $label = 'restore-compatible backup package'
+      if (-not $hasRestoreManifest) {
+        Write-Warning 'Zip package contains database.sql but is missing restore-manifest.json. Continuing with database.sql restore.'
+        $label = 'restore-compatible backup package without manifest'
+      }
+      return [pscustomobject]@{ Type = 'postgres-package-zip'; Label = $label; InputPath = $item.FullName; NeedsPackageStaging = $true }
     }
-    if ($hasEntities) {
+    if ($hasEntities -and $hasMigrations) {
       return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package'; InputPath = $item.FullName; NeedsStaging = $true; HasCredentialEntities = $hasCredentialEntities }
+    }
+    if ($hasEntities -and -not $hasMigrations) {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'incomplete entity zip'; Reason = 'Entity zip contains n8n JSONL files but is missing migrations.jsonl, which n8n import:entities requires.' }
+    }
+    if ($hasNestedZip) {
+      return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package with nested entity zip'; InputPath = $item.FullName; NeedsStaging = $true; HasCredentialEntities = $true }
     }
 
     Write-Warning 'Unknown zip backup. Filename-level detection found these entries:'
     foreach ($entryName in $entries) {
       Write-Warning "  $entryName"
     }
-    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown zip'; Reason = 'Unknown zip backup package.' }
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown zip'; Reason = 'Zip package contained no database.sql and no supported n8n entity JSONL files to import.' }
   }
-  return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported file type'; Reason = 'Restore input must be a recovery backup folder or a backup file using one of these extensions: .sql, .zip.' }
+  return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported file type'; Reason = 'Restore input must be a .zip backup package.' }
 }
 
 function Prepare-RestoreBackupInput {
@@ -3837,7 +3954,7 @@ function Write-MissingRestoreEnvError {
   }
   Write-ErrorMessage "No backup .env or SECRET-DO-NOT-COMMIT.env with N8N_ENCRYPTION_KEY was found in $path."
   Write-Info 'Restore cancelled before stopping services or changing the database.'
-  Write-Info 'Keep SECRET-DO-NOT-COMMIT.env with database.sql, or include the backup .env / SECRET-DO-NOT-COMMIT.env in the entities zip.'
+  Write-Info 'Use a .zip that includes the backup .env or SECRET-DO-NOT-COMMIT.env, then run restore again.'
 }
 
 function Write-MissingCredentialRestoreKeyError {
@@ -4306,9 +4423,9 @@ function Restore-N8nEntitiesBackup {
 function Restore-LocalN8nFromBackupMenu {
   Write-Header 'Advanced / Recovery: Restore local n8n from backup'
   Write-Warning 'Local recovery only. Do not use this for production or remote n8n restore.'
-  Write-Warning 'This is for database/environment restore, not normal workflow JSON import.'
+  Write-Warning 'Select a .zip backup package. Full account/login restore requires a zip that contains database.sql.'
   Write-Host ''
-  $backupPath = (Read-Host 'Enter the local restore backup folder or file path (.sql or .zip)').Trim().Trim('"')
+  $backupPath = (Read-Host 'Enter the local restore .zip path').Trim().Trim('"')
   Write-Host ''
   if (-not $backupPath) {
     Write-Warning 'Restore cancelled.'
@@ -4416,13 +4533,21 @@ function Restore-LocalN8nFromBackupMenu {
     if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return }
   }
 
-  $preRestoreRoot = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-  if (-not (Backup-Postgres -Required -EnvPath $resolvedEnvPath -BackupDir $preRestoreRoot)) {
+  $preRestoreName = "pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+  $preRestoreRoot = Join-Path (Join-Path $script:StackRoot 'backups') $preRestoreName
+  $preRestoreZipPath = Join-Path $preRestoreRoot "$preRestoreName.zip"
+  if (-not (Backup-Postgres -Required -EnvPath $resolvedEnvPath -BackupDir $preRestoreRoot -PackageZipFileName "$preRestoreName.zip")) {
     Write-ErrorMessage 'Restore cancelled because the current local n8n database backup did not complete.'
     return
   }
-  $preRestoreSecretPath = Join-Path $preRestoreRoot 'SECRET-DO-NOT-COMMIT.env'
-  Write-Success 'Pre-restore database backup created; rollback .env saved if present.'
+  $preRestoreExpanded = Expand-RestorePackageZipToStaging -ZipPath $preRestoreZipPath
+  if ($preRestoreExpanded.Error) {
+    Write-ErrorMessage "Pre-restore backup zip could not be staged for rollback: $($preRestoreExpanded.Error)"
+    return
+  }
+  $preRestoreRollbackRoot = $preRestoreExpanded.StagingPath
+  $preRestoreSecretPath = Find-RestoreEnvBackupFileInDirectory -Directory $preRestoreRollbackRoot
+  Write-Success "Pre-restore database backup package created: $preRestoreZipPath"
 
   if (-not (Set-LocalN8nImageForRestore -BackupN8nImage $backupN8nImage -EnvPath $resolvedEnvPath)) { return }
   if (-not (Set-LocalEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $resolvedEnvPath)) { return }
@@ -4453,14 +4578,14 @@ function Restore-LocalN8nFromBackupMenu {
     Write-Info 'Verify workflows and saved credentials in n8n.'
   } else {
     Write-ErrorMessage 'Restore failed.'
-    $rollbackOk = Restore-PreRestorePostgresBackup -BackupDir $preRestoreRoot -EnvPath $resolvedEnvPath
+    $rollbackOk = Restore-PreRestorePostgresBackup -BackupDir $preRestoreRollbackRoot -EnvPath $resolvedEnvPath
     [void](Restore-PreRestoreEncryptionKeyBackup -SecretBackupPath $preRestoreSecretPath -EnvPath $resolvedEnvPath)
     [void](Restore-PreRestoreN8nImageBackup -SecretBackupPath $preRestoreSecretPath -EnvPath $resolvedEnvPath)
     if ($rollbackOk) {
       Restore-PreviousStackServices -PreviousServices $preRestoreServices
       Write-Info 'Verify the rollback database state and saved credentials.'
     } else {
-      Write-ErrorMessage 'Automatic rollback did not complete. Use the pre-restore backup folder as the manual rollback path.'
+      Write-ErrorMessage "Automatic rollback did not complete. Use this pre-restore backup zip as the manual rollback path: $preRestoreZipPath"
     }
   }
 }
@@ -4500,7 +4625,7 @@ function Show-CommandList {
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state, health, container names, and ports.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
   Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens safe manual and automatic backup actions.'
-  Write-CommandListItem -Number '8' -Name 'Advanced / Recovery: Restore local n8n from backup' -Description 'Restores a local database or entities backup after pre-restore backups and approval.'
+  Write-CommandListItem -Number '8' -Name 'Advanced / Recovery: Restore local n8n from backup' -Description 'Restores a local backup zip after pre-restore backups and approval.'
   Write-Host ''
   Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
 }
