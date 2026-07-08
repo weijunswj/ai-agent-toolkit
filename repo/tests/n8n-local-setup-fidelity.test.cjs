@@ -10,6 +10,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const syncScript = path.join(repoRoot, 'repo', 'scripts', 'sync-toolkit-projects.cjs');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
+const sharedLauncherFlowScript = path.join(repoRoot, 'repo', 'scripts', 'generate-n8n-stack-launcher-flow.cjs');
 
 const guideOutputs = [
   {
@@ -401,6 +402,11 @@ test('n8n local setup generated files preserve source bodies', () => {
   const mcpIndexSource = stripGeneratedNotices(readText(repoRoot, `_projects/n8n/local-setup/${mcpConfigIndexOutput.source}`));
   const mcpIndexGenerated = stripGeneratedNotices(readText(repoRoot, mcpConfigIndexOutput.output));
   assert.equal(mcpIndexGenerated, mcpIndexSource, mcpConfigIndexOutput.output);
+});
+
+test('local and production launchers share the generated menu flow model', () => {
+  const result = spawnSync(process.execPath, [sharedLauncherFlowScript, '--check'], { cwd: repoRoot, encoding: 'utf8' });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
 test('obsolete n8n local setup pages and launchers are removed', () => {

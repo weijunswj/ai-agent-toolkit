@@ -1281,8 +1281,8 @@ function Show-UpdateMenu {
   Write-Host '  4. cloudflared only'
   Write-Host '  5. Cancel'
   Write-Host ''
-  $choice = Read-Host 'Enter a number'
 
+  $choice = Read-Host 'Enter a number'
   $selected = @()
   $needsBackup = $false
   $needsCloudflarePreflight = $false
@@ -1325,6 +1325,7 @@ function Show-UpdateMenu {
 
 function Update-AllThenStartCloudflare {
   Write-Header 'Update All, Then Start With Cloudflare Tunnel'
+  Write-Info 'This runs the Update menu first.'
   Show-UpdateMenu -StartCloudflareAfter
 }
 

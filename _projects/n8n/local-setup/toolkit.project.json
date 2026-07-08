@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.9",
+  "version": "3.8.10",
   "version_policy": "semver",
-  "version_notes": "Moves the production Cloudflare advanced menu slot to restore recovery like the local stack and fixes the backup root helper's reserved HOME variable bug.",
+  "version_notes": "Adds a shared generated launcher-flow model so local and production Cloudflare menu flow stays aligned while each stack remains copyable on its own.",
   "outputs": [
     {
       "kind": "curated",
