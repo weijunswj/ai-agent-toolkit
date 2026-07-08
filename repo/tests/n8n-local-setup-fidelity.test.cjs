@@ -654,9 +654,11 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /Automatic backups: Enabled/);
   assert.match(localSetup, /`Back up now`/);
   assert.match(localSetup, /restore-compatible recovery zip package/);
+  assert.match(localSetup, /one restore-compatible `\.zip` package; `SECRET-DO-NOT-COMMIT\.env` \/ `\.env` is inside that zip when available/);
   assert.match(localSetup, /n8n-recovery-YYYYMMDD-HHMMSS/);
   assert.match(localSetup, /Select the `\.zip` file in `Advanced \/ Recovery: Restore local n8n from backup`/);
   assert.doesNotMatch(localSetup, /Creates a sibling restore-compatible package/);
+  assert.doesNotMatch(localSetup, /private backup `\.env` beside it/);
   assert.match(localSetup, /`Set up automatic backups`/);
   assert.match(localSetup, /`Change automatic backup settings`/);
   assert.match(localSetup, /`Remove automatic backups`/);
@@ -1572,6 +1574,7 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Start-LocalhostOnly'), /Start-ProductionStack[\s\S]*cloudflared[\s\S]*stop', 'cloudflared'/);
   assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*Set-ActiveN8nUrl -Url \$publicUrl -Mode 'cloudflare' -HostName \$publicHost[\s\S]*cloudflared/);
   assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /--force-recreate', 'n8n', 'cloudflared'[\s\S]*Wait-ForProductionN8nReady -Context 'Production Cloudflare n8n start' -AllowSelfHeal/);
+  assert.match(functionBody(menu, 'Restart-N8n'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--force-recreate', 'n8n'\)\) -ne 0\) \{ return \}[\s\S]*Wait-ForProductionN8nReady -Context 'Production n8n restart' -AllowSelfHeal/);
   assert.match(functionBody(menu, 'Wait-ForProductionN8nReady'), /Test-ProductionN8nHttpReady[\s\S]*n8n editor is responding and stayed reachable[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*n8n editor is responding after self-heal and stayed reachable[\s\S]*Recent logs show mismatching encryption keys[\s\S]*database schema \/ n8n image version mismatch/);
   assert.match(functionBody(menu, 'Stop-CloudflareTunnel'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local/);
   assert.doesNotMatch(menu, /function Get-N8nCliProductionBackupSpecs|function Invoke-N8nCliProductionBackupExport/);

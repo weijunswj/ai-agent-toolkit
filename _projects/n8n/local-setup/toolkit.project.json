@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.23",
+  "version": "3.8.24",
   "version_policy": "semver",
-  "version_notes": "Fixes production entity restore success verification so successful imports are not rolled back.",
+  "version_notes": "Applies production restart readiness/self-heal gating and corrects local backup zip docs.",
   "outputs": [
     {
       "kind": "curated",

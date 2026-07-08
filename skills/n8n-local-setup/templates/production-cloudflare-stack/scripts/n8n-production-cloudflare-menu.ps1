@@ -1052,7 +1052,8 @@ function Restart-N8n {
   if (-not (Test-DockerReady)) { return }
   $values = Read-EnvFile
   if (-not (Set-ActiveN8nUrl -Url (Get-LocalN8nUrl -Values $values) -Mode 'localhost' -HostName 'localhost')) { return }
-  [void](Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n'))
+  if ((Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n')) -ne 0) { return }
+  if (-not (Wait-ForProductionN8nReady -Context 'Production n8n restart' -AllowSelfHeal)) { return }
 }
 
 function Show-Status {

@@ -593,7 +593,7 @@ When automatic backups are not set up:
 
 | Choice | Use when | What it does |
 | --- | --- | --- |
-| `Back up now` | You want a restore-ready local backup immediately. | Creates a timestamped recovery folder containing a restore-compatible `.zip` package plus the private backup `.env` beside it when available. |
+| `Back up now` | You want a restore-ready local backup immediately. | Creates a timestamped recovery folder containing one restore-compatible `.zip` package; `SECRET-DO-NOT-COMMIT.env` / `.env` is inside that zip when available. |
 | `Set up automatic backups` | You want restore-compatible backup zip packages on a cadence. | Prompts for cadence, retention, and destination, saves local config, and creates or updates a Windows Task Scheduler task. |
 | `Back` | You do not want a backup action. | Returns to the main menu. |
 
