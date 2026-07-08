@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.4.5",
+  "version": "2.4.6",
   "version_policy": "semver",
-  "version_notes": "Adds 30-minute checkpoint guidance for very long validation or local processes, with progress inspection before continuing, diagnosing, stopping, or asking.",
+  "version_notes": "Removes 30-minute checkpoint guidance for long validation or local processes while keeping interrupt orphan-process hygiene.",
   "outputs": [
     {
       "kind": "curated",
