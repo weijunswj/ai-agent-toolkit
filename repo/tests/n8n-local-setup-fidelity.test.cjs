@@ -1494,7 +1494,8 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(guide, /schedules the same production backup zip package that `Back up now` creates/);
   assert.match(guide, /Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT\.env` or `\.env` inside the selected zip/);
   assert.match(guide, /Older n8n entity export zips are accepted as an advanced compatibility path/);
-  assert.match(guide, /Entity zip restore uses `n8n import:entities`, requires `migrations\.jsonl`, may require the source `N8N_IMAGE`/);
+  assert.match(guide, /Entity zip restore uses `n8n import:entities`, requires `migrations\.jsonl`, verifies that supported n8n rows were actually imported before reporting success, may require the source `N8N_IMAGE`/);
+  assert.match(guide, /After any production start or restore restart, the menu waits until the localhost n8n editor responds and stays reachable/);
   assert.match(guide, /schedule it with systemd or cron/);
   assert.match(guide, /server-side template is separate from this Windows Cloudflare launcher/);
   assert.match(guide, /Offsite or cloud storage is intentionally not configured here/);
@@ -1566,10 +1567,12 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /The launcher allows this, but replace it before saving production data you care about/);
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /CLOUDFLARED_TUNNEL_TOKEN is present and not a placeholder/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /WEBHOOK_URL matches|N8N_EDITOR_BASE_URL matches|N8N_PROXY_HOPS is 1/);
-  assert.match(functionBody(menu, 'Start-ProductionStack'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*@\(\'up\', '-d', 'postgres', 'n8n'\)/);
+  assert.match(functionBody(menu, 'Start-ProductionStack'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*@\(\'up\', '-d', 'postgres', 'n8n'\)[\s\S]*Wait-ForProductionN8nReady -Context 'Production localhost n8n start'/);
   assert.doesNotMatch(functionBody(menu, 'Start-ProductionStack'), /Invoke-SafetyPreflight|cloudflared/);
   assert.match(functionBody(menu, 'Start-LocalhostOnly'), /Start-ProductionStack[\s\S]*cloudflared[\s\S]*stop', 'cloudflared'/);
   assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*Set-ActiveN8nUrl -Url \$publicUrl -Mode 'cloudflare' -HostName \$publicHost[\s\S]*cloudflared/);
+  assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /--force-recreate', 'n8n', 'cloudflared'[\s\S]*Wait-ForProductionN8nReady -Context 'Production Cloudflare n8n start'/);
+  assert.match(functionBody(menu, 'Wait-ForProductionN8nReady'), /Test-ProductionN8nHttpReady[\s\S]*n8n editor is responding and stayed reachable[\s\S]*Recent logs show mismatching encryption keys[\s\S]*database schema \/ n8n image version mismatch/);
   assert.match(functionBody(menu, 'Stop-CloudflareTunnel'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local/);
   assert.doesNotMatch(menu, /function Get-N8nCliProductionBackupSpecs|function Invoke-N8nCliProductionBackupExport/);
   assert.match(functionBody(menu, 'Backup-Postgres'), /Join-Path \$BackupDir 'database\.sql'/);
@@ -1605,6 +1608,7 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /InputPath = \$preRestoreExpanded\.DatabaseSqlPath/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Restore-PreviousProductionServices -PreviousServices \$preRestoreServices -StartN8nWhenNone/);
   assert.match(functionBody(menu, 'Clear-ProductionPostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;[\s\S]*psql[\s\S]*ON_ERROR_STOP=1/);
+  assert.match(functionBody(menu, 'Test-ProductionEntityImportApplied'), /workflow_entity[\s\S]*credentials_entity[\s\S]*ENTITY_RESTORE_ROW_COUNT[\s\S]*Entity import did not leave any supported n8n rows/);
   assert.match(functionBody(menu, 'Restore-ProductionPostgresSqlBackup'), /Clear-ProductionPostgresPublicSchema[\s\S]*psql[\s\S]*ON_ERROR_STOP=1[\s\S]*-f/);
   assert.match(functionBody(menu, 'Get-ProductionRestoreBackupType'), /Please select a \.zip backup package/);
   assert.doesNotMatch(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Production restore now accepts zip packages only|Production restore input must be a \.zip backup package/);
@@ -1613,7 +1617,7 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Get-ProductionRestoreBackupType'), /Entity zip contains n8n JSONL files but is missing migrations\.jsonl/);
   assert.match(functionBody(menu, 'Prepare-ProductionRestoreBackupInput'), /Expand-ProductionRestorePackageZipToStaging[\s\S]*Type = 'postgres-sql'[\s\S]*Expand-ProductionRestoreEntitiesZipToStaging[\s\S]*Type = 'n8n-entities'/);
   assert.match(functionBody(menu, 'Expand-ProductionRestoreEntitiesZipToStaging'), /Trying nested entity zip[\s\S]*New-ProductionRestoreEntityImportDirectory[\s\S]*clean entities\.zip rebuilt from all extracted n8n entity JSONL files/);
-  assert.match(functionBody(menu, 'Restore-ProductionN8nEntitiesBackup'), /Write-MissingProductionCredentialRestoreKeyError[\s\S]*Clear-ProductionPostgresPublicSchema[\s\S]*import:entities[\s\S]*--truncateTables/);
+  assert.match(functionBody(menu, 'Restore-ProductionN8nEntitiesBackup'), /Write-MissingProductionCredentialRestoreKeyError[\s\S]*Clear-ProductionPostgresPublicSchema[\s\S]*import:entities[\s\S]*--truncateTables[\s\S]*Test-ProductionEntityImportApplied/);
   assert.match(functionBody(menu, 'Restore-ProductionN8nEntitiesBackup'), /RestoreN8nImage[\s\S]*Test-TrustedProductionRestoreN8nImageRef[\s\S]*\$env:N8N_IMAGE = \$restoreN8nImage[\s\S]*finally[\s\S]*Remove-Item Env:\\N8N_IMAGE/);
   assert.match(functionBody(menu, 'Resolve-ProductionN8nImageForEntityRestore'), /SourceEntityDir[\s\S]*InputDir[\s\S]*Get-ProductionRestoreEntityLatestMigration[\s\S]*Find-ProductionN8nImageForEntityMigration/);
   assert.match(functionBody(menu, 'Expand-ProductionRestorePackageZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*database\.sql/);

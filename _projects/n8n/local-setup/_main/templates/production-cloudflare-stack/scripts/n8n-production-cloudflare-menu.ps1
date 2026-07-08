@@ -162,6 +162,39 @@ function Invoke-Compose {
   return $exitCode
 }
 
+function Invoke-ComposeCapture {
+  param([string[]]$Arguments)
+
+  $previousComposeProgress = $env:COMPOSE_PROGRESS
+  $previousComposeAnsi = $env:COMPOSE_ANSI
+  try {
+    $env:COMPOSE_PROGRESS = 'plain'
+    $env:COMPOSE_ANSI = 'never'
+    $output = @(& docker compose @Arguments 2>&1)
+    return [pscustomobject]@{
+      ExitCode = $LASTEXITCODE
+      Output = @($output | ForEach-Object { [string]$_ })
+    }
+  } catch {
+    return [pscustomobject]@{
+      ExitCode = 1
+      Output = @([string]$_.Exception.Message)
+    }
+  } finally {
+    if ($null -eq $previousComposeProgress) {
+      Remove-Item Env:\COMPOSE_PROGRESS -ErrorAction SilentlyContinue
+    } else {
+      $env:COMPOSE_PROGRESS = $previousComposeProgress
+    }
+
+    if ($null -eq $previousComposeAnsi) {
+      Remove-Item Env:\COMPOSE_ANSI -ErrorAction SilentlyContinue
+    } else {
+      $env:COMPOSE_ANSI = $previousComposeAnsi
+    }
+  }
+}
+
 function Test-DockerReady {
   if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Write-ErrorMessage 'Docker CLI was not found. Install Docker Desktop or Docker Engine before running this stack.'
@@ -492,6 +525,98 @@ function Get-LocalN8nUrl {
   return "http://localhost:$port/"
 }
 
+function Get-ProductionN8nProbeUrls {
+  $port = Get-LocalN8nPort
+  return @(
+    "http://127.0.0.1:$port",
+    "http://localhost:$port"
+  )
+}
+
+function Test-ProductionN8nHttpReady {
+  param(
+    [int]$Attempts = 1,
+    [int]$DelaySeconds = 0,
+    [int]$TimeoutSeconds = 3
+  )
+
+  for ($attempt = 1; $attempt -le $Attempts; $attempt += 1) {
+    foreach ($url in (Get-ProductionN8nProbeUrls)) {
+      try {
+        $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec $TimeoutSeconds
+        return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+      } catch {
+        if ($_.Exception.Response) {
+          return $true
+        }
+      }
+    }
+
+    if ($attempt -lt $Attempts -and $DelaySeconds -gt 0) {
+      Start-Sleep -Seconds $DelaySeconds
+    }
+  }
+  return $false
+}
+
+function Get-ProductionN8nRecentLogLines {
+  param([int]$Tail = 80)
+
+  $result = Invoke-ComposeCapture -Arguments @('logs', '--tail', ([string]$Tail), 'n8n')
+  return @($result.Output)
+}
+
+function Test-ProductionN8nEncryptionKeyMismatchLog {
+  param([string[]]$LogLines)
+
+  $text = (($LogLines | Select-Object -Last 80) -join "`n")
+  return ($text -match 'Mismatching encryption keys' -or $text -match 'settings file .*/home/node/\.n8n/config.*N8N_ENCRYPTION_KEY')
+}
+
+function Test-ProductionN8nDatabaseImageMismatchLog {
+  param([string[]]$LogLines)
+
+  $text = (($LogLines | Select-Object -Last 80) -join "`n")
+  return ($text -match 'McpRegistryServerEntity\.id does not exist' -or $text -match 'different migration states' -or $text -match 'Migration timestamp mismatch')
+}
+
+function Wait-ForProductionN8nReady {
+  param([string]$Context = 'production n8n startup')
+
+  Write-Info "Waiting for n8n editor to respond at $(Get-LocalN8nUrl)."
+  $readyStreak = 0
+  for ($attempt = 1; $attempt -le 20; $attempt += 1) {
+    if (Test-ProductionN8nHttpReady) {
+      $readyStreak += 1
+      if ($readyStreak -ge 3) {
+        $logs = @(Get-ProductionN8nRecentLogLines -Tail 60)
+        if (-not (Test-ProductionN8nDatabaseImageMismatchLog -LogLines $logs) -and -not (Test-ProductionN8nEncryptionKeyMismatchLog -LogLines $logs)) {
+          Write-Success 'n8n editor is responding and stayed reachable.'
+          return $true
+        }
+        break
+      }
+    } else {
+      $readyStreak = 0
+    }
+    Start-Sleep -Seconds 2
+  }
+
+  $logs = @(Get-ProductionN8nRecentLogLines)
+  Write-ErrorMessage "$Context did not produce a reachable n8n editor at $(Get-LocalN8nUrl)."
+  if (Test-ProductionN8nEncryptionKeyMismatchLog -LogLines $logs) {
+    Write-ErrorMessage 'Recent logs show mismatching encryption keys between /home/node/.n8n/config and N8N_ENCRYPTION_KEY.'
+    Write-Info 'Use View logs for details. If this continues, the restored data likely belongs to a different N8N_ENCRYPTION_KEY than the active .env.'
+  } elseif (Test-ProductionN8nDatabaseImageMismatchLog -LogLines $logs) {
+    Write-ErrorMessage 'Recent logs show a database schema / n8n image version mismatch.'
+    Write-Info 'Restore can auto-apply N8N_IMAGE only when the backup .env includes it.'
+    Write-Info 'Use a backup zip that includes SECRET-DO-NOT-COMMIT.env / .env with the source N8N_IMAGE, or set N8N_IMAGE manually to the source n8n image and retry.'
+  } else {
+    Write-Info 'Use View logs to inspect the n8n startup error.'
+  }
+  return $false
+}
+
 function Normalize-N8nUrl {
   param([string]$Url)
 
@@ -815,7 +940,8 @@ function Start-ProductionStack {
   if (-not (Test-DockerReady)) { return }
   $values = Read-EnvFile
   if (-not (Set-ActiveN8nUrl -Url (Get-LocalN8nUrl -Values $values) -Mode 'localhost' -HostName 'localhost')) { return }
-  [void](Invoke-Compose -Arguments @('up', '-d', 'postgres', 'n8n'))
+  if ((Invoke-Compose -Arguments @('up', '-d', 'postgres', 'n8n')) -ne 0) { return }
+  if (-not (Wait-ForProductionN8nReady -Context 'Production localhost n8n start')) { return }
   Write-Success "Local editor: $(Get-LocalN8nUrl -Values $values)"
   Write-Info 'For public Cloudflare access, fill the Cloudflare values in .env, then use Start Cloudflare tunnel.'
 }
@@ -858,7 +984,8 @@ function Start-CloudflareTunnel {
   $publicUrl = Get-CloudflareN8nUrl -Values $values
   $publicHost = Get-EnvValue -Name 'N8N_PUBLIC_HOST' -Values $values
   if (-not (Set-ActiveN8nUrl -Url $publicUrl -Mode 'cloudflare' -HostName $publicHost)) { return }
-  [void](Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n', 'cloudflared'))
+  if ((Invoke-Compose -Arguments @('up', '-d', '--force-recreate', 'n8n', 'cloudflared')) -ne 0) { return }
+  if (-not (Wait-ForProductionN8nReady -Context 'Production Cloudflare n8n start')) { return }
   Write-Success 'n8n and Cloudflare tunnel started. n8n was recreated so current non-image .env values are applied.'
   Write-Host ''
   Write-Host "Public URL should be: $publicUrl" -ForegroundColor DarkYellow
@@ -2355,6 +2482,65 @@ function Clear-ProductionPostgresPublicSchema {
   return (Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'psql', '-U', $PostgresUser, '-d', $PostgresDb, '-v', 'ON_ERROR_STOP=1', '-c', $clearSql))
 }
 
+function Test-ProductionEntityImportApplied {
+  param(
+    [string]$PostgresUser,
+    [string]$PostgresDb
+  )
+
+  $checkSql = @'
+DO $$
+DECLARE
+  table_names text[] := ARRAY[
+    'workflow_entity',
+    'credentials_entity',
+    'settings',
+    'project',
+    'user',
+    'tag_entity',
+    'workflows_tags',
+    'shared_workflow',
+    'shared_credentials',
+    'data_table',
+    'data_table_column'
+  ];
+  table_name text;
+  table_count bigint;
+  total_rows bigint := 0;
+BEGIN
+  FOREACH table_name IN ARRAY table_names LOOP
+    IF to_regclass(format('public.%I', table_name)) IS NOT NULL THEN
+      EXECUTE format('SELECT count(*) FROM public.%I', table_name) INTO table_count;
+      total_rows := total_rows + table_count;
+    END IF;
+  END LOOP;
+
+  RAISE NOTICE 'ENTITY_RESTORE_ROW_COUNT=%', total_rows;
+  IF total_rows <= 0 THEN
+    RAISE EXCEPTION 'Entity import completed, but no supported n8n entity rows were found.';
+  END IF;
+END $$;
+'@
+
+  $result = Invoke-ComposeCapture -Arguments @('exec', '-T', 'postgres', 'psql', '-U', $PostgresUser, '-d', $PostgresDb, '-v', 'ON_ERROR_STOP=1', '-c', $checkSql)
+  if ($result.ExitCode -ne 0) {
+    Write-ErrorMessage 'Entity import did not leave any supported n8n rows in Postgres.'
+    Write-Info 'This usually means the zip did not contain importable n8n entity data for this n8n version, or n8n skipped every entity file.'
+    foreach ($line in @($result.Output | Select-Object -Last 20)) {
+      Write-Info $line
+    }
+    return $false
+  }
+
+  $rowCountLine = @($result.Output | Where-Object { $_ -match 'ENTITY_RESTORE_ROW_COUNT=' } | Select-Object -Last 1)
+  if ($rowCountLine.Count -gt 0) {
+    Write-Success (($rowCountLine[0] -replace '^.*ENTITY_RESTORE_ROW_COUNT=', 'Entity restore row count: ').Trim())
+  } else {
+    Write-Success 'Entity import left supported n8n rows in Postgres.'
+  }
+  return $true
+}
+
 function Restore-ProductionPostgresSqlBackup {
   param([object]$Backup)
 
@@ -2430,7 +2616,11 @@ function Restore-ProductionN8nEntitiesBackup {
       Write-ErrorMessage 'The entities import failed while encrypted credential data was present.'
       Write-Info 'Review the n8n import output above. Common causes are wrong N8N_ENCRYPTION_KEY, missing migrations.jsonl, or an incompatible N8N_IMAGE.'
     }
-    return ($exitCode -eq 0)
+    if ($exitCode -ne 0) {
+      return $false
+    }
+
+    return (Test-ProductionEntityImportApplied -PostgresUser $postgresUser -PostgresDb $postgresDb)
   } finally {
     if ($null -eq $previousN8nImageEnv) {
       Remove-Item Env:\N8N_IMAGE -ErrorAction SilentlyContinue
