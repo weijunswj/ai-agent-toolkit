@@ -420,6 +420,8 @@ Use the production menu for normal operations:
 
 Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT.env` or `.env` inside the selected zip, or from older sidecar env files beside the zip, and applies it to the active production `.env` before the restored database is started. If no backup key is found, the database restore can continue, but saved credentials may not decrypt unless the active `.env` already has the original key.
 
+The preferred production restore input is a full backup zip containing `database.sql`. Older n8n entity export zips are accepted as an advanced compatibility path, including nested entity zips inside a newer backup package. Entity zip restore uses `n8n import:entities`, requires `migrations.jsonl`, may require the source `N8N_IMAGE`, and cannot restore account/login state as completely as `database.sql`.
+
 Preflight is automatic on the launch, tunnel, backup, and update paths that need it. Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, recovery, and update choices stay visible.
 
 ---

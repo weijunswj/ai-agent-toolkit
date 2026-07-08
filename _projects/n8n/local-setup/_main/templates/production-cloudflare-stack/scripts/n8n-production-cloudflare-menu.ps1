@@ -1448,10 +1448,182 @@ function Test-RestoreZipEntryLimits {
 
 function New-ProductionRestoreStagingDirectory {
   $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $unique = [guid]::NewGuid().ToString('N').Substring(0, 8)
   $importRoot = Join-Path $script:StackRoot 'import'
-  $stagingDir = Join-Path $importRoot "production-restore-$timestamp"
+  $stagingDir = Join-Path $importRoot "production-restore-$timestamp-$unique"
   New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
   return $stagingDir
+}
+
+function Get-ProductionRestoreEntityFileNames {
+  return @(
+    'workflowentity.jsonl',
+    'credentialsentity.jsonl',
+    'settings.jsonl',
+    'project.jsonl',
+    'user.jsonl',
+    'tagentity.jsonl',
+    'workflowtagmapping.jsonl',
+    'sharedworkflow.jsonl',
+    'sharedcredentials.jsonl'
+  )
+}
+
+function Test-ProductionRestoreEntityFileName {
+  param([string]$Name)
+
+  $leaf = (Split-Path -Leaf ([string]$Name)).ToLowerInvariant()
+  return ((Get-ProductionRestoreEntityFileNames) -contains $leaf)
+}
+
+function Find-ProductionRestoreEntityDirectory {
+  param([string]$Root)
+
+  $entityFiles = @(
+    Get-ChildItem -LiteralPath $Root -File -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { Test-ProductionRestoreEntityFileName -Name $_.Name }
+  )
+
+  if ($entityFiles.Count -eq 0) {
+    return ''
+  }
+
+  $bestMatch = @(
+    $entityFiles |
+      Group-Object -Property DirectoryName |
+      Sort-Object -Property Count -Descending |
+      Select-Object -First 1
+  )
+
+  if ($bestMatch.Count -eq 0) {
+    return ''
+  }
+
+  return $bestMatch[0].Name
+}
+
+function New-ProductionRestoreEntityImportDirectory {
+  param(
+    [string]$EntityDir,
+    [string]$StagingDir
+  )
+
+  $importDir = Join-Path $StagingDir 'entities-import'
+  New-Item -ItemType Directory -Force -Path $importDir | Out-Null
+  $zipSourceDir = Join-Path $StagingDir 'entities-zip-source'
+  New-Item -ItemType Directory -Force -Path $zipSourceDir | Out-Null
+
+  $importFiles = @(
+    Get-ChildItem -LiteralPath $EntityDir -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name.ToLowerInvariant().EndsWith('.jsonl') }
+  )
+
+  $hasMigrationsFile = @($importFiles | Where-Object { $_.Name -ieq 'migrations.jsonl' }).Count -gt 0
+  if (-not $hasMigrationsFile) {
+    return ''
+  }
+
+  $hasWorkflowsTagsFile = @($importFiles | Where-Object { $_.Name -ieq 'workflows_tags.jsonl' }).Count -gt 0
+  $copiedCount = 0
+  foreach ($file in $importFiles) {
+    if ($hasWorkflowsTagsFile -and $file.Name -ieq 'workflowtagmapping.jsonl') {
+      Write-Warning 'Skipping workflowtagmapping.jsonl because workflows_tags.jsonl is also present; both files import into the workflows_tags table.'
+      continue
+    }
+
+    Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $zipSourceDir $file.Name) -Force
+    $copiedCount += 1
+  }
+
+  $zipPath = Join-Path $importDir 'entities.zip'
+  if (Test-Path -LiteralPath $zipPath) {
+    Remove-Item -LiteralPath $zipPath -Force
+  }
+
+  [System.IO.Compression.ZipFile]::CreateFromDirectory($zipSourceDir, $zipPath)
+  Write-Info "Rebuilt clean entities.zip with $copiedCount JSONL file(s)."
+  return $importDir
+}
+
+function Expand-ProductionRestoreEntitiesZipToStaging {
+  param(
+    [string]$ZipPath,
+    [int]$Depth = 0
+  )
+
+  $stagingDir = New-ProductionRestoreStagingDirectory
+  $stagingRoot = [System.IO.Path]::GetFullPath($stagingDir)
+
+  Enable-ZipSupport
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $limitCheck = Test-RestoreZipEntryLimits -Zip $zip
+    if ($limitCheck.Error) {
+      return [pscustomobject]@{ Error = $limitCheck.Error }
+    }
+
+    foreach ($entry in $zip.Entries) {
+      if (-not $entry.FullName) { continue }
+      $entryName = ($entry.FullName -replace '\\', '/')
+      if ($entryName.StartsWith('/') -or $entryName -match '^[A-Za-z]:') {
+        return [pscustomobject]@{ Error = 'Zip restore package contains an unsafe absolute path entry.' }
+      }
+
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($stagingRoot, $entryName))
+      if (-not (Test-PathInsideDirectory -Path $targetPath -Directory $stagingRoot)) {
+        return [pscustomobject]@{ Error = 'Zip restore package contains an unsafe path traversal entry.' }
+      }
+    }
+
+    foreach ($entry in $zip.Entries) {
+      if (-not $entry.FullName) { continue }
+      $entryName = ($entry.FullName -replace '\\', '/')
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($stagingRoot, $entryName))
+      if ($entryName.EndsWith('/')) {
+        New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+        continue
+      }
+
+      $targetDir = Split-Path -Parent $targetPath
+      if ($targetDir) {
+        New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+      }
+      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $targetPath, $true)
+    }
+  } finally {
+    $zip.Dispose()
+  }
+
+  $entityDir = Find-ProductionRestoreEntityDirectory -Root $stagingDir
+  if (-not $entityDir) {
+    if ($Depth -lt 3) {
+      $nestedZips = @(
+        Get-ChildItem -LiteralPath $stagingDir -File -Recurse -Filter '*.zip' -ErrorAction SilentlyContinue |
+          Sort-Object FullName
+      )
+      foreach ($nestedZip in $nestedZips) {
+        Write-Info "Trying nested entity zip: $($nestedZip.FullName)"
+        $nestedExpanded = Expand-ProductionRestoreEntitiesZipToStaging -ZipPath $nestedZip.FullName -Depth ($Depth + 1)
+        if (-not $nestedExpanded.Error) {
+          return $nestedExpanded
+        }
+      }
+    }
+    return [pscustomobject]@{ Error = 'Zip restore package did not contain n8n export:entities output files.' }
+  }
+
+  $importDir = New-ProductionRestoreEntityImportDirectory -EntityDir $entityDir -StagingDir $stagingDir
+  if (-not $importDir) {
+    return [pscustomobject]@{ Error = 'Zip restore package did not contain migrations.jsonl in the detected n8n entity export directory.' }
+  }
+
+  Write-Info "Backup zip extracted under: $stagingDir"
+  Write-Info 'Using a clean entities.zip rebuilt from all extracted n8n entity JSONL files.'
+  return [pscustomobject]@{
+    StagingPath = $stagingDir
+    EntityDir = $importDir
+    SourceEntityDir = $entityDir
+  }
 }
 
 function Expand-ProductionRestorePackageZipToStaging {
@@ -1502,7 +1674,7 @@ function Expand-ProductionRestorePackageZipToStaging {
 
   $databaseSql = @(Get-ChildItem -LiteralPath $stagingDir -File -Recurse -Filter 'database.sql' -ErrorAction SilentlyContinue | Select-Object -First 1)
   if ($databaseSql.Count -eq 0) {
-    return [pscustomobject]@{ Error = 'Zip package contained no database.sql. Production Cloudflare restore needs a full database backup zip.' }
+    return [pscustomobject]@{ Error = 'Zip restore package did not contain database.sql.' }
   }
 
   Write-Info "Backup zip extracted under: $stagingDir"
@@ -1511,6 +1683,99 @@ function Expand-ProductionRestorePackageZipToStaging {
     StagingPath = $stagingDir
     DatabaseSqlPath = $databaseSql[0].FullName
   }
+}
+
+function Get-ProductionRestoreBackupType {
+  param([string]$Path)
+
+  $inputPath = ([string]$Path).Trim().Trim('"')
+  if (-not $inputPath) {
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'missing input'; Reason = 'No backup path was provided.' }
+  }
+
+  if (-not (Test-Path -LiteralPath $inputPath)) {
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'missing input'; Reason = 'Backup path does not exist.' }
+  }
+
+  $item = Get-Item -LiteralPath $inputPath
+  if ($item.PSIsContainer) {
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported restore folder'; Reason = 'Please select a .zip backup package.' }
+  }
+
+  $name = $item.Name.ToLowerInvariant()
+  if ($name -match '\.zip$') {
+    $entries = @(Get-ZipEntryNames -ZipPath $item.FullName)
+    $hasDatabaseSql = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'database.sql' }).Count -gt 0
+    $hasRestoreManifest = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'restore-manifest.json' }).Count -gt 0
+    $hasEntities = @($entries | Where-Object { Test-ProductionRestoreEntityFileName -Name $_ }).Count -gt 0
+    $hasMigrations = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'migrations.jsonl' }).Count -gt 0
+    $hasCredentialEntities = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'credentialsentity.jsonl' }).Count -gt 0
+    $hasNestedZip = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant().EndsWith('.zip') }).Count -gt 0
+
+    if ($hasDatabaseSql) {
+      $label = 'production backup zip package'
+      if (-not $hasRestoreManifest) {
+        Write-Warning 'Zip package contains database.sql but is missing restore-manifest.json. Continuing with database.sql restore.'
+        $label = 'production backup zip package without manifest'
+      }
+      return [pscustomobject]@{ Type = 'postgres-package-zip'; Label = $label; InputPath = $item.FullName; NeedsPackageStaging = $true }
+    }
+    if ($hasEntities -and $hasMigrations) {
+      return [pscustomobject]@{ Type = 'zip-package'; Label = 'n8n entity export zip'; InputPath = $item.FullName; NeedsStaging = $true; HasCredentialEntities = $hasCredentialEntities }
+    }
+    if ($hasEntities -and -not $hasMigrations) {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'incomplete entity zip'; Reason = 'Entity zip contains n8n JSONL files but is missing migrations.jsonl, which n8n import:entities requires.' }
+    }
+    if ($hasNestedZip) {
+      return [pscustomobject]@{ Type = 'zip-package'; Label = 'zip backup package with nested entity zip'; InputPath = $item.FullName; NeedsStaging = $true; HasCredentialEntities = $true }
+    }
+
+    Write-Warning 'Unknown zip backup. Filename-level detection found these entries:'
+    foreach ($entryName in $entries) {
+      Write-Warning "  $entryName"
+    }
+    return [pscustomobject]@{ Type = 'unsupported'; Label = 'unknown zip'; Reason = 'Zip package contained no database.sql and no supported n8n entity JSONL files to import.' }
+  }
+
+  return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported file type'; Reason = 'Please select a .zip backup package.' }
+}
+
+function Prepare-ProductionRestoreBackupInput {
+  param([string]$Path)
+
+  $detected = Get-ProductionRestoreBackupType -Path $Path
+  if ($detected.NeedsPackageStaging) {
+    $expanded = Expand-ProductionRestorePackageZipToStaging -ZipPath $detected.InputPath
+    if ($expanded.Error) {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported zip'; Reason = $expanded.Error }
+    }
+    $packageDetected = [pscustomobject]@{
+      Type = 'postgres-sql'
+      Label = 'production backup zip package'
+      InputPath = $expanded.DatabaseSqlPath
+      HasCredentialEntities = $false
+    }
+    $packageDetected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $expanded.StagingPath -Force
+    $detected = $packageDetected
+  }
+
+  if ($detected.NeedsStaging) {
+    $expanded = Expand-ProductionRestoreEntitiesZipToStaging -ZipPath $detected.InputPath
+    if ($expanded.Error) {
+      return [pscustomobject]@{ Type = 'unsupported'; Label = 'unsupported zip'; Reason = $expanded.Error }
+    }
+    $stagingDetected = [pscustomobject]@{
+      Type = 'n8n-entities'
+      Label = 'n8n entities backup'
+      InputDir = $expanded.EntityDir
+      SourceEntityDir = $expanded.SourceEntityDir
+      HasCredentialEntities = $detected.HasCredentialEntities
+    }
+    $stagingDetected | Add-Member -NotePropertyName StagingPath -NotePropertyValue $expanded.StagingPath -Force
+    $detected = $stagingDetected
+  }
+
+  return $detected
 }
 
 function Write-ProductionBackupRestoreNotes {
@@ -1787,38 +2052,30 @@ function Test-ProductionPostgresSqlBackupFile {
 function Resolve-ProductionRestoreBackup {
   param([string]$Path)
 
-  $resolved = ''
-  try {
-    $resolved = [System.IO.Path]::GetFullPath($Path)
-  } catch {
-    return [pscustomobject]@{ Ok = $false; Path = ''; InputPath = ''; Label = ''; Error = $_.Exception.Message }
+  $detected = Prepare-ProductionRestoreBackupInput -Path $Path
+  if ($detected.Type -eq 'unsupported') {
+    return [pscustomobject]@{ Ok = $false; Path = ''; InputPath = ''; Label = ''; Type = 'unsupported'; Error = $detected.Reason }
   }
 
-  if (Test-Path -LiteralPath $resolved -PathType Container) {
-    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Please select a .zip backup package.' }
+  if ($detected.Type -eq 'postgres-sql') {
+    return [pscustomobject]@{ Ok = $true; Path = $detected.StagingPath; InputPath = $detected.InputPath; Label = $detected.Label; Type = $detected.Type; Error = ''; HasCredentialEntities = $false }
   }
 
-  $extension = [System.IO.Path]::GetExtension($resolved)
-  if ($extension -ne '.zip') {
-    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Please select a .zip backup package.' }
+  if ($detected.Type -eq 'n8n-entities') {
+    return [pscustomobject]@{
+      Ok = $true
+      Path = $detected.StagingPath
+      InputPath = ''
+      InputDir = $detected.InputDir
+      SourceEntityDir = $detected.SourceEntityDir
+      Label = $detected.Label
+      Type = $detected.Type
+      Error = ''
+      HasCredentialEntities = $detected.HasCredentialEntities
+    }
   }
 
-  $entries = @(Get-ZipEntryNames -ZipPath $resolved)
-  $hasDatabaseSql = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'database.sql' }).Count -gt 0
-  $hasRestoreManifest = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'restore-manifest.json' }).Count -gt 0
-  if (-not $hasDatabaseSql) {
-    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Zip package contained no database.sql. Production Cloudflare restore needs a full database backup zip.' }
-  }
-  if (-not $hasRestoreManifest) {
-    Write-Warning 'Zip package contains database.sql but is missing restore-manifest.json. Continuing with database.sql restore.'
-  }
-
-  $expanded = Expand-ProductionRestorePackageZipToStaging -ZipPath $resolved
-  if ($expanded.Error) {
-    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = $expanded.Error }
-  }
-
-  return [pscustomobject]@{ Ok = $true; Path = $expanded.StagingPath; InputPath = $expanded.DatabaseSqlPath; Label = 'production backup zip package'; Error = '' }
+  return [pscustomobject]@{ Ok = $false; Path = ''; InputPath = ''; Label = ''; Type = 'unsupported'; Error = 'Unsupported production restore backup type after detection.' }
 }
 
 function Get-ProductionRestoreEnvBackupNames {
@@ -1921,6 +2178,183 @@ function Set-ProductionEncryptionKeyForRestore {
   return $true
 }
 
+function Write-MissingProductionCredentialRestoreKeyError {
+  Write-ErrorMessage 'Credential entities were found, but no source backup N8N_ENCRYPTION_KEY was found.'
+  Write-Info 'Include the backup .env or SECRET-DO-NOT-COMMIT.env with the .zip, then run restore again.'
+  Write-Info 'The file must contain the N8N_ENCRYPTION_KEY from the n8n instance that created the export.'
+}
+
+function Test-TrustedProductionRestoreN8nImageRef {
+  param([string]$Image)
+
+  $rawImage = [string]$Image
+  $imageRef = $rawImage.Trim()
+  if (-not $imageRef) { return $true }
+  if ($rawImage -ne $imageRef -or $imageRef -match '\s') { return $false }
+
+  $officialTagged = '\Adocker\.n8n\.io/n8nio/n8n:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\z'
+  $officialDigest = '\Adocker\.n8n\.io/n8nio/n8n@sha256:[a-fA-F0-9]{64}\z'
+  return ($imageRef -match $officialTagged -or $imageRef -match $officialDigest)
+}
+
+function Write-UntrustedProductionRestoreN8nImageError {
+  param([string]$Image)
+
+  $imageRef = ([string]$Image).Trim()
+  Write-ErrorMessage "Backup N8N_IMAGE is not an allowed official n8n image reference: $imageRef"
+  Write-Info 'Restore accepts only docker.n8n.io/n8nio/n8n:<tag> or docker.n8n.io/n8nio/n8n@sha256:<digest> from backup .env files.'
+  Write-Info 'If you intentionally need another image, set N8N_IMAGE manually in the production .env after verifying the image yourself, then rerun restore without a backup-provided N8N_IMAGE.'
+}
+
+function Get-ProductionRestoreEntityLatestMigration {
+  param([string]$EntityDir)
+
+  $migrationPath = Join-Path $EntityDir 'migrations.jsonl'
+  if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) {
+    return $null
+  }
+
+  $latest = $null
+  foreach ($line in Get-Content -LiteralPath $migrationPath) {
+    $text = ([string]$line).Trim()
+    if (-not $text) { continue }
+    try {
+      $entry = $text | ConvertFrom-Json
+      $timestamp = [int64]0
+      if ($entry.timestamp -and [int64]::TryParse(([string]$entry.timestamp), [ref]$timestamp)) {
+        if ($null -eq $latest -or $timestamp -gt $latest.Timestamp) {
+          $latest = [pscustomobject]@{
+            Id = ([string]$entry.id)
+            Name = ([string]$entry.name)
+            Timestamp = $timestamp
+          }
+        }
+      }
+    } catch {
+      # n8n import performs the authoritative validation.
+    }
+  }
+
+  return $latest
+}
+
+function Get-ProductionN8nImageLatestMigration {
+  param([string]$Image)
+
+  $nodeScript = @'
+const fs = require(`fs`);
+const dir = `/usr/local/lib/node_modules/n8n/node_modules/@n8n/db/dist/migrations/common`;
+const files = fs.readdirSync(dir)
+  .filter((name) => name.endsWith(`.js`) && !name.endsWith(`.js.map`))
+  .sort();
+const latest = files[files.length - 1] || ``;
+const match = latest.match(/^(\d+)-(.+)\.js$/);
+if (!match) process.exit(2);
+console.log(`${match[1]}|${match[2]}`);
+'@
+
+  try {
+    $output = @(& docker run --rm --entrypoint node $Image -e $nodeScript 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $output.Count -eq 0) {
+      return $null
+    }
+    $parts = ([string]$output[0]).Trim() -split '\|', 2
+    if ($parts.Count -ne 2) {
+      return $null
+    }
+    return [pscustomobject]@{
+      Image = $Image
+      Timestamp = [int64]$parts[0]
+      Name = $parts[1]
+    }
+  } catch {
+    return $null
+  }
+}
+
+function Find-ProductionN8nImageForEntityMigration {
+  param([object]$Migration)
+
+  if ($null -eq $Migration) {
+    return ''
+  }
+
+  $images = @(
+    & docker image ls 'docker.n8n.io/n8nio/n8n' --format '{{.Repository}}:{{.Tag}}' 2>$null |
+      ForEach-Object { ([string]$_).Trim() } |
+      Where-Object { $_ -and $_ -notmatch ':<none>$' } |
+      Sort-Object -Unique
+  )
+
+  $matches = New-Object System.Collections.Generic.List[object]
+  foreach ($image in $images) {
+    $imageMigration = Get-ProductionN8nImageLatestMigration -Image $image
+    if ($null -ne $imageMigration -and $imageMigration.Timestamp -eq $Migration.Timestamp) {
+      $matches.Add($imageMigration)
+    }
+  }
+
+  if ($matches.Count -gt 0) {
+    $ranked = @(
+      $matches |
+        Sort-Object `
+          @{ Expression = { if ($_.Image -match ':(\d+\.\d+\.\d+)$') { [version]$Matches[1] } else { [version]'0.0.0' } }; Descending = $true },
+          @{ Expression = { if ($_.Image -match ':stable$|:latest$') { 1 } else { 0 } } }
+    )
+    return ([string]$ranked[0].Image)
+  }
+
+  if ($Migration.Timestamp -eq 1784000000006) {
+    return 'docker.n8n.io/n8nio/n8n:2.22.5'
+  }
+
+  return ''
+}
+
+function Resolve-ProductionN8nImageForEntityRestore {
+  param([object]$Backup)
+
+  $entityDir = $Backup.SourceEntityDir
+  if (-not $entityDir) {
+    $entityDir = $Backup.InputDir
+  }
+
+  $migration = Get-ProductionRestoreEntityLatestMigration -EntityDir $entityDir
+  if ($null -eq $migration) {
+    Write-Warning 'Could not read migrations.jsonl to infer the source n8n image for this entities export.'
+    return ''
+  }
+
+  Write-Info "Entities export latest migration: $($migration.Name)$($migration.Timestamp)."
+  $image = Find-ProductionN8nImageForEntityMigration -Migration $migration
+  if ($image) {
+    Write-Info "Matched entities export migration to N8N_IMAGE=$image."
+    return $image
+  }
+
+  Write-Warning 'No local or known n8n image mapping matched the entities export migration.'
+  return ''
+}
+
+function Update-ProductionN8nImageForRestore {
+  Write-Info 'Refreshing n8n image for restore. This can take a while when N8N_IMAGE changed.'
+  if ((Invoke-Compose -Arguments @('pull', 'n8n')) -ne 0) {
+    Write-Warning 'Could not refresh the n8n image; continuing only if the configured image is already cached.'
+  }
+
+  return $true
+}
+
+function Clear-ProductionPostgresPublicSchema {
+  param(
+    [string]$PostgresUser,
+    [string]$PostgresDb
+  )
+
+  $clearSql = 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+  return (Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'psql', '-U', $PostgresUser, '-d', $PostgresDb, '-v', 'ON_ERROR_STOP=1', '-c', $clearSql))
+}
+
 function Restore-ProductionPostgresSqlBackup {
   param([object]$Backup)
 
@@ -1937,8 +2371,7 @@ function Restore-ProductionPostgresSqlBackup {
   if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
   if ((Invoke-Compose -Arguments @('cp', $Backup.InputPath, "postgres:$containerPath")) -ne 0) { return $false }
 
-  $clearSql = 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
-  $clearExit = Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'psql', '-U', $postgresUser, '-d', $postgresDb, '-v', 'ON_ERROR_STOP=1', '-c', $clearSql)
+  $clearExit = Clear-ProductionPostgresPublicSchema -PostgresUser $postgresUser -PostgresDb $postgresDb
   if ($clearExit -ne 0) {
     [void](Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'rm', '-f', $containerPath))
     return $false
@@ -1947,6 +2380,64 @@ function Restore-ProductionPostgresSqlBackup {
   $restoreExit = Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'psql', '-U', $postgresUser, '-d', $postgresDb, '-v', 'ON_ERROR_STOP=1', '-f', $containerPath)
   [void](Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'rm', '-f', $containerPath))
   return ($restoreExit -eq 0)
+}
+
+function Restore-ProductionN8nEntitiesBackup {
+  param(
+    [object]$Backup,
+    [string]$BackupEncryptionKey = '',
+    [switch]$ImageAlreadyRefreshed
+  )
+
+  if ($Backup.HasCredentialEntities -and -not $BackupEncryptionKey) {
+    Write-MissingProductionCredentialRestoreKeyError
+    return $false
+  }
+
+  $previousN8nImageEnv = $env:N8N_IMAGE
+  $restoreN8nImage = ([string]$Backup.RestoreN8nImage).Trim()
+  if ($restoreN8nImage) {
+    if (-not (Test-TrustedProductionRestoreN8nImageRef -Image $restoreN8nImage)) {
+      Write-UntrustedProductionRestoreN8nImageError -Image $restoreN8nImage
+      return $false
+    }
+    $env:N8N_IMAGE = $restoreN8nImage
+  }
+
+  try {
+    if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
+    if (-not $ImageAlreadyRefreshed) {
+      if (-not (Update-ProductionN8nImageForRestore)) {
+        return $false
+      }
+    }
+
+    $values = Read-EnvFile
+    $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Values $values -Default 'n8n'
+    $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Values $values -Default 'n8n'
+    Write-Warning 'Resetting the production Cloudflare n8n Postgres schema so entities import can run at the export migration state.'
+    if ((Clear-ProductionPostgresPublicSchema -PostgresUser $postgresUser -PostgresDb $postgresDb) -ne 0) {
+      return $false
+    }
+
+    $inputDir = $Backup.InputDir
+    $mountValue = "${inputDir}:/restore"
+    $importArgs = @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '-v', $mountValue, 'n8n', 'import:entities', '--inputDir', '/restore', '--truncateTables')
+    Write-Info "docker compose $($importArgs -join ' ')"
+    $exitCode = Invoke-Compose -Arguments $importArgs
+
+    if ($Backup.HasCredentialEntities -and $exitCode -ne 0) {
+      Write-ErrorMessage 'The entities import failed while encrypted credential data was present.'
+      Write-Info 'Review the n8n import output above. Common causes are wrong N8N_ENCRYPTION_KEY, missing migrations.jsonl, or an incompatible N8N_IMAGE.'
+    }
+    return ($exitCode -eq 0)
+  } finally {
+    if ($null -eq $previousN8nImageEnv) {
+      Remove-Item Env:\N8N_IMAGE -ErrorAction SilentlyContinue
+    } else {
+      $env:N8N_IMAGE = $previousN8nImageEnv
+    }
+  }
 }
 
 function Restore-PreviousProductionServices {
@@ -1985,7 +2476,7 @@ function Restore-PreviousProductionServices {
 function Restore-ProductionCloudflareFromBackupMenu {
   Write-Header 'Advanced / Recovery: Restore local n8n from backup'
   Write-Warning 'This restore replaces the production Cloudflare stack database with a selected backup.'
-  Write-Warning 'Select a .zip backup package created by this launcher.'
+  Write-Warning 'Select a .zip backup package. Full account/login restore requires database.sql; older entity zips import best effort.'
   Write-Host ''
 
   $backupPath = (Read-Host 'Enter the production restore .zip path').Trim().Trim('"')
@@ -2001,14 +2492,41 @@ function Restore-ProductionCloudflareFromBackupMenu {
 
   $envPath = Get-EnvPath
   $backupEncryptionKey = Find-ProductionRestoreBackupEnvValue -Path $backupPath -Name 'N8N_ENCRYPTION_KEY' -TargetEnvPath $envPath
+  $backupN8nImage = Find-ProductionRestoreBackupEnvValue -Path $backupPath -Name 'N8N_IMAGE' -TargetEnvPath $envPath
   $detected = Resolve-ProductionRestoreBackup -Path $backupPath
   if (-not $detected.Ok) {
     Write-ErrorMessage $detected.Error
     return
   }
+  if (-not $backupEncryptionKey -and $detected.Path) {
+    $backupEncryptionKey = Find-ProductionRestoreBackupEnvValue -Path $detected.Path -Name 'N8N_ENCRYPTION_KEY' -TargetEnvPath $envPath
+  }
+  if (-not $backupN8nImage -and $detected.Path) {
+    $backupN8nImage = Find-ProductionRestoreBackupEnvValue -Path $detected.Path -Name 'N8N_IMAGE' -TargetEnvPath $envPath
+  }
+  if ($backupN8nImage -and -not (Test-TrustedProductionRestoreN8nImageRef -Image $backupN8nImage)) {
+    Write-UntrustedProductionRestoreN8nImageError -Image $backupN8nImage
+    return
+  }
+  if ($detected.HasCredentialEntities -and -not $backupEncryptionKey) {
+    Write-MissingProductionCredentialRestoreKeyError
+    return
+  }
 
   if (-not (Invoke-BasePreflight)) { return }
   if (-not (Test-DockerReady)) { return }
+
+  if (-not $backupN8nImage -and $detected.Type -eq 'n8n-entities') {
+    $backupN8nImage = Resolve-ProductionN8nImageForEntityRestore -Backup $detected
+  }
+  if ($detected.Type -eq 'n8n-entities' -and -not $backupN8nImage) {
+    Write-ErrorMessage 'Could not determine the n8n image version required by this entities export.'
+    Write-Info 'Include the backup .env / SECRET-DO-NOT-COMMIT.env with N8N_IMAGE, or use a Postgres SQL backup.'
+    return
+  }
+  if ($backupN8nImage) {
+    $detected | Add-Member -NotePropertyName RestoreN8nImage -NotePropertyValue $backupN8nImage -Force
+  }
 
   $preRestoreServices = @(
     Get-RunningServices | ForEach-Object { ([string]$_).Trim() } |
@@ -2017,7 +2535,11 @@ function Restore-ProductionCloudflareFromBackupMenu {
   )
 
   Write-Host "Detected backup type: $($detected.Label)." -ForegroundColor Cyan
-  Write-Host "Database restore file staged from zip: $($detected.InputPath)" -ForegroundColor Cyan
+  if ($detected.Type -eq 'n8n-entities') {
+    Write-Host "Entity import folder staged from zip: $($detected.InputDir)" -ForegroundColor Cyan
+  } else {
+    Write-Host "Database restore file staged from zip: $($detected.InputPath)" -ForegroundColor Cyan
+  }
   Write-Host ''
   Write-Warning 'This restore will replace the active production Cloudflare n8n database state.'
   Write-Warning 'The launcher will first create a pre-restore database backup for rollback.'
@@ -2058,7 +2580,21 @@ function Restore-ProductionCloudflareFromBackupMenu {
   Write-Success "Pre-restore database backup package created: $preRestoreZipPath"
   if (-not (Set-ProductionEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $envPath)) { return }
 
-  if (Restore-ProductionPostgresSqlBackup -Backup $detected) {
+  $ok = $false
+  switch ($detected.Type) {
+    'postgres-sql' { $ok = Restore-ProductionPostgresSqlBackup -Backup $detected }
+    'n8n-entities' {
+      $n8nImageRefreshed = Update-ProductionN8nImageForRestore
+      if (-not $n8nImageRefreshed) { return }
+      $ok = Restore-ProductionN8nEntitiesBackup -Backup $detected -BackupEncryptionKey $backupEncryptionKey -ImageAlreadyRefreshed:$n8nImageRefreshed
+    }
+    default {
+      Write-ErrorMessage 'Unsupported production restore backup type after detection.'
+      return
+    }
+  }
+
+  if ($ok) {
     Write-Success 'Production Cloudflare n8n database restore completed.'
     Restore-PreviousProductionServices -PreviousServices $preRestoreServices -StartN8nWhenNone
     Write-Info 'Verify workflows and saved credentials in n8n.'

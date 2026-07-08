@@ -1493,6 +1493,8 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(guide, /prompts for cadence, retention, and destination/);
   assert.match(guide, /schedules the same production backup zip package that `Back up now` creates/);
   assert.match(guide, /Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT\.env` or `\.env` inside the selected zip/);
+  assert.match(guide, /Older n8n entity export zips are accepted as an advanced compatibility path/);
+  assert.match(guide, /Entity zip restore uses `n8n import:entities`, requires `migrations\.jsonl`, may require the source `N8N_IMAGE`/);
   assert.match(guide, /schedule it with systemd or cron/);
   assert.match(guide, /server-side template is separate from this Windows Cloudflare launcher/);
   assert.match(guide, /Offsite or cloud storage is intentionally not configured here/);
@@ -1594,13 +1596,26 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.doesNotMatch(functionBody(menu, 'Test-ProductionBackupRoot'), /\$home\s*=/i);
   assert.match(functionBody(menu, 'Test-ProductionBackupRoot'), /\$userProfileRoot = \[System\.IO\.Path\]::GetFullPath/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Advanced \/ Recovery: Restore local n8n from backup/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Full account\/login restore requires database\.sql; older entity zips import best effort/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Type PROCEED to continue[\s\S]*Backup-Postgres -Required -BackupDir \$preRestoreRoot -SkipPreflight[\s\S]*Convert-ProductionBackupFolderToZipPackage -BackupDir \$preRestoreRoot -ZipFileName "\$preRestoreName\.zip"[\s\S]*Expand-ProductionRestorePackageZipToStaging -ZipPath \$preRestoreZipPath[\s\S]*Restore-ProductionPostgresSqlBackup/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Resolve-ProductionN8nImageForEntityRestore -Backup \$detected/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Write-MissingProductionCredentialRestoreKeyError/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Add-Member -NotePropertyName RestoreN8nImage/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /'n8n-entities' \{[\s\S]*Update-ProductionN8nImageForRestore[\s\S]*Restore-ProductionN8nEntitiesBackup -Backup \$detected/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /InputPath = \$preRestoreExpanded\.DatabaseSqlPath/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Restore-PreviousProductionServices -PreviousServices \$preRestoreServices -StartN8nWhenNone/);
-  assert.match(functionBody(menu, 'Restore-ProductionPostgresSqlBackup'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;[\s\S]*psql[\s\S]*ON_ERROR_STOP=1[\s\S]*-f/);
-  assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Please select a \.zip backup package/);
+  assert.match(functionBody(menu, 'Clear-ProductionPostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;[\s\S]*psql[\s\S]*ON_ERROR_STOP=1/);
+  assert.match(functionBody(menu, 'Restore-ProductionPostgresSqlBackup'), /Clear-ProductionPostgresPublicSchema[\s\S]*psql[\s\S]*ON_ERROR_STOP=1[\s\S]*-f/);
+  assert.match(functionBody(menu, 'Get-ProductionRestoreBackupType'), /Please select a \.zip backup package/);
   assert.doesNotMatch(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Production restore now accepts zip packages only|Production restore input must be a \.zip backup package/);
-  assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Get-ZipEntryNames[\s\S]*database\.sql[\s\S]*Expand-ProductionRestorePackageZipToStaging[\s\S]*production backup zip package/);
+  assert.match(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Prepare-ProductionRestoreBackupInput[\s\S]*postgres-sql[\s\S]*n8n-entities/);
+  assert.match(functionBody(menu, 'Get-ProductionRestoreBackupType'), /Get-ZipEntryNames[\s\S]*database\.sql[\s\S]*Test-ProductionRestoreEntityFileName[\s\S]*migrations\.jsonl[\s\S]*credentialsentity\.jsonl/);
+  assert.match(functionBody(menu, 'Get-ProductionRestoreBackupType'), /Entity zip contains n8n JSONL files but is missing migrations\.jsonl/);
+  assert.match(functionBody(menu, 'Prepare-ProductionRestoreBackupInput'), /Expand-ProductionRestorePackageZipToStaging[\s\S]*Type = 'postgres-sql'[\s\S]*Expand-ProductionRestoreEntitiesZipToStaging[\s\S]*Type = 'n8n-entities'/);
+  assert.match(functionBody(menu, 'Expand-ProductionRestoreEntitiesZipToStaging'), /Trying nested entity zip[\s\S]*New-ProductionRestoreEntityImportDirectory[\s\S]*clean entities\.zip rebuilt from all extracted n8n entity JSONL files/);
+  assert.match(functionBody(menu, 'Restore-ProductionN8nEntitiesBackup'), /Write-MissingProductionCredentialRestoreKeyError[\s\S]*Clear-ProductionPostgresPublicSchema[\s\S]*import:entities[\s\S]*--truncateTables/);
+  assert.match(functionBody(menu, 'Restore-ProductionN8nEntitiesBackup'), /RestoreN8nImage[\s\S]*Test-TrustedProductionRestoreN8nImageRef[\s\S]*\$env:N8N_IMAGE = \$restoreN8nImage[\s\S]*finally[\s\S]*Remove-Item Env:\\N8N_IMAGE/);
+  assert.match(functionBody(menu, 'Resolve-ProductionN8nImageForEntityRestore'), /SourceEntityDir[\s\S]*InputDir[\s\S]*Get-ProductionRestoreEntityLatestMigration[\s\S]*Find-ProductionN8nImageForEntityMigration/);
   assert.match(functionBody(menu, 'Expand-ProductionRestorePackageZipToStaging'), /ZipFile\]::OpenRead[\s\S]*Test-RestoreZipEntryLimits[\s\S]*Test-PathInsideDirectory[\s\S]*ExtractToFile[\s\S]*database\.sql/);
   assert.match(functionBody(menu, 'Get-ProductionRestoreEnvBackupNames'), /SECRET-DO-NOT-COMMIT\.env[\s\S]*\.env/);
   assert.match(functionBody(menu, 'Find-ProductionRestoreBackupEnvValue'), /ZipFile\]::OpenRead[\s\S]*siblingSecret/);
@@ -1646,6 +1661,76 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   for (const ignored of ['.env', '.env.*', '!.env.example', 'backups/', 'logs/', '*.sql', '*.dump', '*.backup', '*.zip', '*.tar', '*.tgz', '**/SECRET-DO-NOT-COMMIT.env']) {
     assert.match(runtimeIgnore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
   }
+});
+
+test('production Cloudflare restore resolver accepts legacy entity zip packages', (t) => {
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1');
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    t.skip('PowerShell is not available in this environment');
+    return;
+  }
+
+  const command = [
+    '$ErrorActionPreference = "Stop"',
+    `$menu = Get-Content -LiteralPath ${powerShellSingleQuoted(sourceScript)} -Raw`,
+    '$end = $menu.LastIndexOf("`nInitialize-MenuRuntime")',
+    'if ($end -lt 0) { throw "could not find pre-loop marker" }',
+    '. ([scriptblock]::Create($menu.Substring(0, $end)))',
+    '$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("toolkit-prod-restore-" + [guid]::NewGuid().ToString("N"))',
+    '$script:StackRoot = Join-Path $testRoot "stack"',
+    'New-Item -ItemType Directory -Force -Path $script:StackRoot | Out-Null',
+    '$safeRoot = Join-Path $script:StackRoot "backups"',
+    'New-Item -ItemType Directory -Force -Path $safeRoot | Out-Null',
+    '$entityDir = Join-Path $safeRoot "legacy-entities"',
+    'New-Item -ItemType Directory -Force -Path $entityDir | Out-Null',
+    'Set-Content -LiteralPath (Join-Path $entityDir "migrations.jsonl") -Value "{}`n" -Encoding ascii',
+    'Set-Content -LiteralPath (Join-Path $entityDir "workflowentity.jsonl") -Value "{}`n" -Encoding ascii',
+    'Set-Content -LiteralPath (Join-Path $entityDir "credentialsentity.jsonl") -Value "{}`n" -Encoding ascii',
+    '$entityZip = Join-Path $safeRoot "entities-clean-keep-workflows_tags.zip"',
+    '$createdEntityZip = New-ZipPackageFromDirectory -SourceDir $entityDir -ZipPath $entityZip',
+    'if (-not $createdEntityZip) { throw "entity zip was not created" }',
+    '$entityDetected = Get-ProductionRestoreBackupType -Path $entityZip',
+    'if ($entityDetected.Type -ne "zip-package" -or -not $entityDetected.NeedsStaging -or -not $entityDetected.HasCredentialEntities) { throw "entity zip was not detected safely: $($entityDetected.Type) $($entityDetected.NeedsStaging) $($entityDetected.HasCredentialEntities)" }',
+    '$entityResolved = Resolve-ProductionRestoreBackup -Path $entityZip',
+    'if (-not $entityResolved.Ok -or $entityResolved.Type -ne "n8n-entities" -or -not $entityResolved.InputDir) { throw "entity zip was not resolved: $($entityResolved.Ok) $($entityResolved.Type) $($entityResolved.Error)" }',
+    'if (-not (Test-Path -LiteralPath (Join-Path $entityResolved.InputDir "entities.zip") -PathType Leaf)) { throw "clean entities.zip was not staged" }',
+    '$incompleteDir = Join-Path $safeRoot "incomplete-entities"',
+    'New-Item -ItemType Directory -Force -Path $incompleteDir | Out-Null',
+    'Set-Content -LiteralPath (Join-Path $incompleteDir "workflowentity.jsonl") -Value "{}`n" -Encoding ascii',
+    '$incompleteZip = Join-Path $safeRoot "incomplete-entities.zip"',
+    '$createdIncompleteZip = New-ZipPackageFromDirectory -SourceDir $incompleteDir -ZipPath $incompleteZip',
+    'if (-not $createdIncompleteZip) { throw "incomplete entity zip was not created" }',
+    '$incompleteDetected = Get-ProductionRestoreBackupType -Path $incompleteZip',
+    'if ($incompleteDetected.Type -ne "unsupported" -or $incompleteDetected.Reason -notmatch "missing migrations\\.jsonl") { throw "incomplete entity zip reason mismatch: $($incompleteDetected.Type) $($incompleteDetected.Reason)" }',
+    '$outerDir = Join-Path $safeRoot "outer-entity-package"',
+    'New-Item -ItemType Directory -Force -Path $outerDir | Out-Null',
+    'Copy-Item -LiteralPath $entityZip -Destination (Join-Path $outerDir "entities-clean-keep-workflows_tags.zip") -Force',
+    'Set-Content -LiteralPath (Join-Path $outerDir "SECRET-DO-NOT-COMMIT.env") -Value "N8N_ENCRYPTION_KEY=test-key" -Encoding ascii',
+    '$outerZip = Join-Path $safeRoot "outer-entity-package.zip"',
+    '$createdOuterZip = New-ZipPackageFromDirectory -SourceDir $outerDir -ZipPath $outerZip',
+    'if (-not $createdOuterZip) { throw "outer entity package zip was not created" }',
+    '$nestedResolved = Resolve-ProductionRestoreBackup -Path $outerZip',
+    'if (-not $nestedResolved.Ok -or $nestedResolved.Type -ne "n8n-entities") { throw "nested entity zip was not resolved: $($nestedResolved.Ok) $($nestedResolved.Type) $($nestedResolved.Error)" }',
+    '$dbDir = Join-Path $safeRoot "database-package"',
+    'New-Item -ItemType Directory -Force -Path $dbDir | Out-Null',
+    'Set-Content -LiteralPath (Join-Path $dbDir "database.sql") -Value "-- fake sql" -Encoding ascii',
+    'Set-Content -LiteralPath (Join-Path $dbDir "restore-manifest.json") -Value "{}" -Encoding ascii',
+    '$dbZip = Join-Path $safeRoot "database-package.zip"',
+    '$createdDbZip = New-ZipPackageFromDirectory -SourceDir $dbDir -ZipPath $dbZip',
+    'if (-not $createdDbZip) { throw "database package zip was not created" }',
+    '$dbResolved = Resolve-ProductionRestoreBackup -Path $dbZip',
+    'if (-not $dbResolved.Ok -or $dbResolved.Type -ne "postgres-sql" -or (Split-Path -Leaf $dbResolved.InputPath) -ne "database.sql") { throw "database zip was not resolved: $($dbResolved.Ok) $($dbResolved.Type) $($dbResolved.InputPath)" }',
+    '$folderDetected = Get-ProductionRestoreBackupType -Path $dbDir',
+    'if ($folderDetected.Type -ne "unsupported" -or $folderDetected.Reason -ne "Please select a .zip backup package.") { throw "folder input was not rejected cleanly: $($folderDetected.Type) $($folderDetected.Reason)" }'
+  ].join('; ');
+
+  const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
 test('production server backup template uses Linux scheduling and guarded credential export', () => {
