@@ -493,7 +493,7 @@ If the active `WEBHOOK_URL` in `.env.active` is an ngrok URL while `ngrok` is st
 
 For normal use, the quick status at the top of the main menu is enough. Use `Show Compose status` only when you need the more detailed Docker Compose view.
 
-The first screen, `Show Compose status`, and backup metadata show the actual running container images for n8n, Postgres, and ngrok. If a service is not running, the launcher shows `stopped` for that service. If Compose reports a service is running but the image cannot be read, it shows `failed to detect`. These lines are runtime status only; `.env` image settings still control what the next start or update will use.
+The first screen, `Show Compose status`, and backup metadata show the actual running container images for n8n, Postgres, and ngrok. If a service is not running, the launcher shows `stopped` for that service. If Compose reports a service is running but the image cannot be read, it shows `running, image unknown`. These lines are runtime status only; `.env` image settings still control what the next start or update will use.
 
 ### 8.2 `Start n8n` Menu
 

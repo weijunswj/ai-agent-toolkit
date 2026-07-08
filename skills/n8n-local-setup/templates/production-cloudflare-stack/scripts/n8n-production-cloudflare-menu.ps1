@@ -188,24 +188,113 @@ function Write-ServiceStatus {
   }
 }
 
-function Get-RunningServiceImage {
-  param([string]$Service)
+function Get-ComposeServiceRows {
+  $rows = New-Object System.Collections.Generic.List[object]
 
   try {
-    $containerId = (& docker compose ps -q $Service 2>$null | Select-Object -First 1)
-    $containerId = ([string]$containerId).Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $containerId) {
-      return ''
+    $formatted = @(& docker compose ps --format '{{.Service}}|{{.Image}}|{{.State}}' 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $formatted.Count -gt 0) {
+      foreach ($line in $formatted) {
+        $parts = ([string]$line).Split('|')
+        if ($parts.Count -ge 3) {
+          $rows.Add([pscustomobject]@{
+            Service = $parts[0].Trim()
+            Image = $parts[1].Trim()
+            State = $parts[2].Trim()
+            ContainerId = ''
+            Name = ''
+          })
+        }
+      }
+    }
+  } catch {
+  }
+
+  if ($rows.Count -gt 0) {
+    return $rows.ToArray()
+  }
+
+  try {
+    $jsonOutput = @(& docker compose ps --format json 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $jsonOutput.Count -eq 0) {
+      return @()
     }
 
-    $image = (& docker inspect $containerId --format '{{.Config.Image}}' 2>$null | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0) {
+    $json = ($jsonOutput -join "`n").Trim()
+    if (-not $json) {
+      return @()
+    }
+
+    $parsed = $json | ConvertFrom-Json
+    foreach ($item in @($parsed)) {
+      $rows.Add([pscustomobject]@{
+        Service = ([string]$item.Service).Trim()
+        Image = ([string]$item.Image).Trim()
+        State = ([string]$item.State).Trim()
+        ContainerId = ([string]$item.ID).Trim()
+        Name = ([string]$item.Name).Trim()
+      })
+    }
+  } catch {
+  }
+
+  return $rows.ToArray()
+}
+
+function Get-RunningServiceImage {
+  param(
+    [string]$Service,
+    [object[]]$Rows = @()
+  )
+
+  try {
+    $row = @($Rows | Where-Object { $_.Service -eq $Service } | Select-Object -First 1)
+    if ($row.Count -gt 0) {
+      $state = ([string]$row[0].State).Trim().ToLowerInvariant()
+      $image = ([string]$row[0].Image).Trim()
+      if ($state -eq 'running' -or $state -like 'running*') {
+        if ($image) {
+          return $image
+        }
+
+        $container = ([string]$row[0].ContainerId).Trim()
+        if (-not $container) {
+          $container = ([string]$row[0].Name).Trim()
+        }
+        if ($container) {
+          $inspectedImage = (& docker inspect $container --format '{{.Config.Image}}' 2>$null | Select-Object -First 1)
+          if ($LASTEXITCODE -eq 0) {
+            return ([string]$inspectedImage).Trim()
+          }
+        }
+      }
       return ''
     }
-    return ([string]$image).Trim()
   } catch {
-    return ''
   }
+
+  return ''
+}
+
+function Get-ImageVersionLines {
+  param([string[]]$RunningServices = @())
+
+  $lines = New-Object System.Collections.Generic.List[string]
+  $rows = Get-ComposeServiceRows
+
+  foreach ($service in $script:Services) {
+    $label = "  {0,-10}: " -f $service
+    $runningImage = Get-RunningServiceImage -Service $service -Rows $rows
+    if ($runningImage) {
+      $lines.Add("$label$runningImage")
+    } elseif ($RunningServices -contains $service) {
+      $lines.Add("$($label)running, image unknown")
+    } else {
+      $lines.Add("$($label)stopped")
+    }
+  }
+
+  return $lines.ToArray()
 }
 
 function Write-ImageVersions {
@@ -213,15 +302,8 @@ function Write-ImageVersions {
 
   Write-Host ''
   Write-Host 'Container images:' -ForegroundColor Cyan
-  foreach ($service in $script:Services) {
-    $label = "  {0,-10}: " -f $service
-    if ($RunningServices -contains $service) {
-      $image = Get-RunningServiceImage -Service $service
-      if (-not $image) { $image = 'failed to detect' }
-    } else {
-      $image = 'stopped'
-    }
-    Write-Host "$label$image" -ForegroundColor White
+  foreach ($line in Get-ImageVersionLines -RunningServices $RunningServices) {
+    Write-Host $line -ForegroundColor White
   }
 }
 
@@ -988,14 +1070,65 @@ function Get-N8nCliProductionBackupSpecs {
       HostFolder = 'workflows'
       ContainerOutputDir = "$ContainerBackupRoot/workflows"
       ComposeArguments = @('exec', '-T', 'n8n', 'n8n', 'export:workflow', '--backup', "--output=$ContainerBackupRoot/workflows")
+      EmptyOutputPattern = 'No workflows found with specified filters'
     },
     [pscustomobject]@{
       Name = 'credentials'
       HostFolder = 'credentials'
       ContainerOutputDir = "$ContainerBackupRoot/credentials"
       ComposeArguments = @('exec', '-T', 'n8n', 'n8n', 'export:credentials', '--backup', "--output=$ContainerBackupRoot/credentials")
+      EmptyOutputPattern = 'No credentials found with specified filters'
     }
   )
+}
+
+function Invoke-N8nCliProductionBackupExport {
+  param(
+    [pscustomobject]$Spec,
+    [string]$BackupDir
+  )
+
+  $display = "docker compose $($Spec.ComposeArguments -join ' ')"
+  Write-Info $display
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  $output = @()
+  try {
+    $ErrorActionPreference = 'Continue'
+    $output = @(& docker compose @($Spec.ComposeArguments) 2>&1)
+    $exitCode = $LASTEXITCODE
+  } catch {
+    $output = @($_.Exception.Message)
+    $exitCode = 1
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
+  foreach ($line in $output) {
+    if ($null -ne $line) {
+      Write-Host ([string]$line)
+    }
+  }
+
+  $text = ($output | ForEach-Object { [string]$_ }) -join "`n"
+  if ($exitCode -ne 0) {
+    if ($Spec.EmptyOutputPattern -and $text -match [regex]::Escape([string]$Spec.EmptyOutputPattern)) {
+      $hostTarget = Join-Path $BackupDir $Spec.HostFolder
+      New-Item -ItemType Directory -Force -Path $hostTarget | Out-Null
+      Write-Warning "$($Spec.Name) export found no saved $($Spec.Name). Continuing with an empty $($Spec.HostFolder) folder."
+      return $true
+    }
+
+    Write-ErrorMessage "Command failed with exit code $exitCode."
+    return $false
+  }
+
+  $hostTarget = Join-Path $BackupDir $Spec.HostFolder
+  if ((Invoke-Compose -Arguments @('cp', "n8n:$($Spec.ContainerOutputDir)", $hostTarget)) -ne 0) {
+    return $false
+  }
+
+  return $true
 }
 
 function Backup-N8nProductionNow {
@@ -1035,15 +1168,8 @@ function Backup-N8nProductionNow {
     $specs = @(Get-N8nCliProductionBackupSpecs -ContainerBackupRoot $containerBackupRoot)
     foreach ($spec in $specs) {
       Add-ProductionBackupLog -BackupDir $backupDir -Message "Running n8n CLI export for $($spec.Name)."
-      if ((Invoke-Compose -Arguments $spec.ComposeArguments) -ne 0) {
+      if (-not (Invoke-N8nCliProductionBackupExport -Spec $spec -BackupDir $backupDir)) {
         $errors.Add("$($spec.Name) export failed.")
-        $ok = $false
-        break
-      }
-
-      $hostTarget = Join-Path $backupDir $spec.HostFolder
-      if ((Invoke-Compose -Arguments @('cp', "n8n:$($spec.ContainerOutputDir)", $hostTarget)) -ne 0) {
-        $errors.Add("$($spec.Name) copy failed.")
         $ok = $false
         break
       }

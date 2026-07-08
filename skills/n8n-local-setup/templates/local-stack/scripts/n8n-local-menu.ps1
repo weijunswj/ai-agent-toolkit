@@ -1617,7 +1617,7 @@ function Get-ImageVersionLines {
     if ($runningImage) {
       $lines.Add("$label$runningImage")
     } elseif ($RunningServices -contains $service) {
-      $lines.Add("$($label)failed to detect")
+      $lines.Add("$($label)running, image unknown")
     } else {
       $lines.Add("$($label)stopped")
     }

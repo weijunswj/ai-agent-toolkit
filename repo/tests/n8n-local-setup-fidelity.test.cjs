@@ -717,7 +717,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.doesNotMatch(menu, /function Get-BackupImageLogContent/);
   assert.match(functionBody(menu, 'Get-ComposeServiceRows'), /docker compose ps --format '\{\{\.Service\}\}\|\{\{\.Image\}\}\|\{\{\.State\}\}'/);
   assert.match(functionBody(menu, 'Get-RunningServiceImage'), /docker inspect \$container --format '\{\{\.Config\.Image\}\}'/);
-  assert.match(functionBody(menu, 'Get-ImageVersionLines'), /Get-RunningServiceImage[\s\S]*failed to detect[\s\S]*stopped/);
+  assert.match(functionBody(menu, 'Get-ImageVersionLines'), /Get-RunningServiceImage[\s\S]*running, image unknown[\s\S]*stopped/);
+  assert.doesNotMatch(functionBody(menu, 'Get-ImageVersionLines'), /failed to detect/);
   assert.doesNotMatch(functionBody(menu, 'Get-ImageVersionLines'), /\$script:ServiceImages/);
   assert.doesNotMatch(menu, /function Show-Help/);
   assert.match(menu, /try \{\n    & \$Action\n  \} catch \{/);
@@ -1483,6 +1484,10 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Active n8n URL is still using Cloudflare, but cloudflared is stopped/);
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ServiceStatus -Name 'cloudflared'[\s\S]*public tunnel is ON/);
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ImageVersions -RunningServices \$runningServices/);
+  assert.match(functionBody(menu, 'Get-ComposeServiceRows'), /docker compose ps --format '\{\{\.Service\}\}\|\{\{\.Image\}\}\|\{\{\.State\}\}'/);
+  assert.match(functionBody(menu, 'Get-RunningServiceImage'), /docker inspect \$container --format '\{\{\.Config\.Image\}\}'/);
+  assert.match(functionBody(menu, 'Get-ImageVersionLines'), /Get-RunningServiceImage[\s\S]*running, image unknown[\s\S]*stopped/);
+  assert.doesNotMatch(functionBody(menu, 'Get-ImageVersionLines'), /failed to detect/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Do not launch production n8n directly from Docker Desktop/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Start Cloudflare tunnel/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Advanced \/ Recovery: Restore local n8n from backup/);
@@ -1506,7 +1511,10 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*Set-ActiveN8nUrl -Url \$publicUrl -Mode 'cloudflare' -HostName \$publicHost[\s\S]*cloudflared/);
   assert.match(functionBody(menu, 'Stop-CloudflareTunnel'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local/);
   assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /export:workflow[\s\S]*export:credentials/);
+  assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /No workflows found with specified filters[\s\S]*No credentials found with specified filters/);
+  assert.match(functionBody(menu, 'Invoke-N8nCliProductionBackupExport'), /EmptyOutputPattern[\s\S]*Continuing with an empty[\s\S]*Invoke-Compose -Arguments @\('cp'/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Get-N8nCliProductionBackupSpecs[\s\S]*Backup-Postgres/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-N8nCliProductionBackupExport/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-BasePreflight/);
   assert.doesNotMatch(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-SafetyPreflight/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Add-ProductionBackupLog[\s\S]*Write-ProductionBackupRestoreNotes[\s\S]*Write-ProductionBackupManifest/);
