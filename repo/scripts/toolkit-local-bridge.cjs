@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.4';
+const BRIDGE_VERSION = '2.3.5';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -29,6 +29,17 @@ const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
 const NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT = 5;
 const THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT = 5;
 const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
+const AGENT_RULES_TEMPLATE_DIR = path.join('skills', 'ai-coding-agent-rules', 'repo-local');
+const AGENT_RULES_PREFLIGHT_MAX_FINDINGS = 8;
+const AGENT_RULES_PREFLIGHT_FILES = {
+  'codex-plugin': [
+    { target: 'AGENTS.md', template: 'AGENTS.managed.template.md' }
+  ],
+  'claude-plugin': [
+    { target: 'AGENTS.md', template: 'AGENTS.managed.template.md' },
+    { target: 'CLAUDE.md', template: 'CLAUDE.shim.template.md' }
+  ]
+};
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -1457,6 +1468,210 @@ function inlineCode(value) {
   return `\`${String(value || '').replace(/`/g, "'")}\``;
 }
 
+function normalizeManagedBlockText(value) {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''))
+    .join('\n')
+    .trim();
+}
+
+function markerIdentity(source, label) {
+  return `${source}::${label}`;
+}
+
+function parseManagedMarkerBlocks(text) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const markerPattern = /^\s*<!--\s*AI-AGENT-TOOLKIT:(.+?):(BEGIN|END)\s+(.+?)\s*-->\s*$/;
+  const blocks = new Map();
+  const errors = [];
+  let current = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!/^\s*<!--\s*AI-AGENT-TOOLKIT:/.test(line)) continue;
+    const match = line.match(markerPattern);
+    if (!match) {
+      errors.push(`line ${index + 1}: malformed AI-AGENT-TOOLKIT managed marker`);
+      continue;
+    }
+    const source = match[1].trim();
+    const action = match[2];
+    const rawLabel = match[3].trim();
+    const label = action === 'BEGIN' ? rawLabel.replace(/\s+v\d+$/i, '').trim() : rawLabel;
+    const key = markerIdentity(source, label);
+
+    if (action === 'BEGIN') {
+      if (current) {
+        errors.push(`line ${index + 1}: nested managed marker before END for ${current.label}`);
+        continue;
+      }
+      current = {
+        source,
+        label,
+        key,
+        startLine: index
+      };
+      continue;
+    }
+
+    if (!current) {
+      errors.push(`line ${index + 1}: END marker without matching BEGIN for ${label}`);
+      continue;
+    }
+    if (current.source !== source || current.label !== label) {
+      errors.push(`line ${index + 1}: END marker ${label} does not match BEGIN ${current.label}`);
+      current = null;
+      continue;
+    }
+    if (blocks.has(key)) {
+      errors.push(`line ${index + 1}: duplicate managed block ${label}`);
+      current = null;
+      continue;
+    }
+    const blockText = lines.slice(current.startLine, index + 1).join('\n');
+    blocks.set(key, {
+      source,
+      label,
+      key,
+      startLine: current.startLine + 1,
+      endLine: index + 1,
+      text: normalizeManagedBlockText(blockText)
+    });
+    current = null;
+  }
+
+  if (current) errors.push(`line ${current.startLine + 1}: BEGIN marker without matching END for ${current.label}`);
+  return { blocks, errors };
+}
+
+function agentRulesPreflightSpecs(syncSource) {
+  return AGENT_RULES_PREFLIGHT_FILES[syncSource] || [];
+}
+
+function agentRulesPluginRoot(args, options = {}) {
+  if (options.pluginRoot) return path.resolve(options.pluginRoot);
+  if (args.syncSource === 'claude-plugin') return runtimeClaudePluginRoot();
+  return runtimeCodexPluginRoot();
+}
+
+function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
+  const targetPath = path.join(targetRoot, spec.target);
+  const templatePath = path.join(templateRoot, spec.template);
+  if (!fs.existsSync(templatePath)) {
+    return [{
+      file: spec.target,
+      kind: 'template-missing',
+      detail: `bundled template missing: ${slash(templatePath)}`
+    }];
+  }
+  const template = parseManagedMarkerBlocks(fs.readFileSync(templatePath, 'utf8'));
+  if (template.errors.length) {
+    return template.errors.map((error) => ({
+      file: spec.target,
+      kind: 'template-broken',
+      detail: error
+    }));
+  }
+  if (!fs.existsSync(targetPath)) {
+    return [{
+      file: spec.target,
+      kind: 'missing',
+      detail: 'required instruction file is missing'
+    }];
+  }
+  if (!fs.statSync(targetPath).isFile()) {
+    return [{
+      file: spec.target,
+      kind: 'not-file',
+      detail: 'required instruction path is not a file'
+    }];
+  }
+  const target = parseManagedMarkerBlocks(fs.readFileSync(targetPath, 'utf8'));
+  if (target.errors.length) {
+    return target.errors.map((error) => ({
+      file: spec.target,
+      kind: 'broken-marker',
+      detail: error
+    }));
+  }
+  if (target.blocks.size === 0) {
+    return [{
+      file: spec.target,
+      kind: 'unmanaged',
+      detail: 'no complete AI-AGENT-TOOLKIT managed marker pair found'
+    }];
+  }
+
+  const findings = [];
+  for (const [key, templateBlock] of template.blocks) {
+    const targetBlock = target.blocks.get(key);
+    if (!targetBlock) {
+      findings.push({
+        file: spec.target,
+        kind: 'missing-block',
+        block: templateBlock.label,
+        detail: `missing managed block ${templateBlock.label}`
+      });
+      continue;
+    }
+    if (targetBlock.text !== templateBlock.text) {
+      findings.push({
+        file: spec.target,
+        kind: 'stale-block',
+        block: templateBlock.label,
+        detail: `managed block ${templateBlock.label} differs from the bundled template`
+      });
+    }
+  }
+  return findings;
+}
+
+function runAgentRulesPreflight(args, options = {}) {
+  if (!args.hook) return { status: 'not-applicable', targetRoot: '', findings: [] };
+  const specs = agentRulesPreflightSpecs(args.syncSource);
+  if (!specs.length) return { status: 'not-applicable', targetRoot: '', findings: [] };
+
+  const targetRoot = path.resolve(options.targetRoot || process.cwd());
+  const pluginRoot = agentRulesPluginRoot(args, options);
+  const templateRoot = path.join(pluginRoot, AGENT_RULES_TEMPLATE_DIR);
+  const findings = [];
+  for (const spec of specs) {
+    findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
+  }
+  return {
+    status: findings.length ? 'needs-attention' : 'ok',
+    targetRoot,
+    pluginRoot,
+    templateRoot,
+    findings
+  };
+}
+
+function formatAgentRulesPreflight(result) {
+  const findings = result.findings || [];
+  if (!findings.length) return '';
+  const shown = findings.slice(0, AGENT_RULES_PREFLIGHT_MAX_FINDINGS);
+  const lines = [
+    `Toolkit agent-rules preflight: repo-local instructions need attention in ${result.targetRoot}.`,
+    ...shown.map((finding) => `- ${finding.file}: ${finding.detail}`)
+  ];
+  if (findings.length > shown.length) {
+    lines.push(`- ${findings.length - shown.length} more issue(s) omitted.`);
+  }
+  lines.push('No files were changed by this hook. Ask to run `ai-coding-agent-rules` with an explicit check/repair/refresh request before implementation.');
+  return lines.join('\n');
+}
+
+function maybePrintAgentRulesPreflight(args) {
+  const result = runAgentRulesPreflight(args);
+  const message = formatAgentRulesPreflight(result);
+  if (message) console.error(message);
+  return result;
+}
+
 function targetDisplayName(targetName) {
   if (targetName === 'ag2') return 'Antigravity 2';
   if (targetName === 'opencode') return 'OpenCode';
@@ -1531,6 +1746,7 @@ function repoReportContextFromUpdate(state, updateResult, previousObservedCommit
     : [];
   return {
     status: updateResult.status,
+    repoPath: updateResult.repoPath || state.repo_path || '',
     fromCommit: updateResult.fromCommit,
     toCommit,
     changedFiles: externalAdvanceDetected ? externalChangedFiles : (updateResult.changedFiles || []),
@@ -1585,6 +1801,7 @@ function repoTldr(repo, previousCommit, commit, warning) {
   if (repo.externalAdvanceDetected) return 'already updated before this hook run';
   if (repo.status === 'validation-failed') return `updated to ${shortCommit(commit)}, but validation failed`;
   if (repo.status === 'sync-delegation-failed') return 'updated, but target sync failed';
+  if (repo.status === 'skipped' && isDirtyWorkingTreeWarning(warning)) return 'skipped (configured Toolkit source checkout is dirty)';
   if (repo.status === 'skipped') return warning ? `skipped (${warning})` : 'skipped safely';
   if (repo.status === 'up-to-date') return 'already up to date';
   return 'not updated in this run';
@@ -1606,14 +1823,28 @@ function branchMismatchSuggestion(warning) {
     : '';
 }
 
+function isDirtyWorkingTreeWarning(warning) {
+  return /dirty working tree/i.test(String(warning || ''));
+}
+
+function dirtyWorkingTreeSuggestion(warning) {
+  return isDirtyWorkingTreeWarning(warning)
+    ? 'finish or stash changes in the configured Toolkit source checkout, or run `setup toolkit` to use a dedicated clean `main` checkout for startup updates'
+    : '';
+}
+
+function warningSuggestion(warning) {
+  return branchMismatchSuggestion(warning) || dirtyWorkingTreeSuggestion(warning);
+}
+
 function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning }) {
   if (nativePluginCache.status === 'stale') return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
   if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check third-party Codex plugin hook repair';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
   if (repo.status === 'sync-delegation-failed') return 'check target sync';
-  const branchAction = branchMismatchSuggestion(warning);
-  if (branchAction) return branchAction;
+  const suggestion = warningSuggestion(warning);
+  if (suggestion) return suggestion;
   if (warning) return `check: ${warning}`;
   return 'none';
 }
@@ -1626,7 +1857,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   const thirdPartyHookRepair = context.thirdPartyHookRepair || {};
   const cleanup = context.cleanup || state.last_update_report_cleanup || {};
   const warning = repo.error || context.warning || '';
-  const branchAction = branchMismatchSuggestion(warning);
+  const suggestion = warningSuggestion(warning);
   const commit = repo.externalAdvanceToCommit || repo.toCommit || currentToolkitCommit(state);
   const previousCommit = repo.externalAdvanceFromCommit || repo.fromCommit || 'none';
   const validationStatus = repo.validationStatus || repo.validation?.status || (repo.status ? 'not run' : 'not run');
@@ -1666,6 +1897,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   }
 
   lines.push('', '## Repo Update', '');
+  if (repo.repoPath) lines.push(`- Configured repo path: ${inlineCode(repo.repoPath)}`);
   if (repo.branch) lines.push(`- Configured branch: ${inlineCode(repo.branch)}`);
   if (repo.remote) lines.push(`- Configured remote: ${inlineCode(repo.remote)}`);
   lines.push(`- Previous observed commit: ${inlineCode(previousCommit)}`);
@@ -1747,7 +1979,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   lines.push(`- checksum: ${inlineCode(checksum)}`);
   if (warning) {
     lines.push(`- warning/error: ${inlineCode(warning)}`);
-    if (branchAction) lines.push(`- Suggested fix: ${branchAction}.`);
+    if (suggestion) lines.push(`- Suggested fix: ${suggestion}.`);
   }
   return `${lines.join('\n')}\n`;
 }
@@ -2482,6 +2714,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
         context: {
           repo: {
             status: error.repoUpdateStatus || 'skipped',
+            repoPath: state.repo_path ? path.resolve(state.repo_path) : '',
             fromCommit: details.fromCommit || '',
             toCommit: details.toCommit || '',
             changedFiles: details.changedFiles || [],
@@ -2555,6 +2788,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       context: {
         repo: {
           status: 'sync-delegation-failed',
+          repoPath: updateResult.repoPath || state.repo_path || '',
           fromCommit: updateResult.fromCommit,
           toCommit: updateResult.toCommit,
           changedFiles: updateResult.changedFiles || [],
@@ -2613,6 +2847,7 @@ function run(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
   const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+  maybePrintAgentRulesPreflight(args);
 
   if (isHookNoop(args, existingState)) {
     if (existingState?.hub_version && !existingState.auto_sync_enabled) {
@@ -2800,6 +3035,9 @@ module.exports = {
   cleanupUpdateReports,
   openUpdateReport,
   replaceDirectoryAtomically,
+  parseManagedMarkerBlocks,
+  runAgentRulesPreflight,
+  formatAgentRulesPreflight,
   discoverCodexPluginHookRoots,
   repairThirdPartyCodexPluginHooks
 };

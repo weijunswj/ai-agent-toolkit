@@ -13,6 +13,8 @@ const {
   updateReportDir,
   cleanupUpdateReports,
   replaceDirectoryAtomically,
+  runAgentRulesPreflight,
+  formatAgentRulesPreflight,
   repairThirdPartyCodexPluginHooks
 } = require('../scripts/toolkit-local-bridge.cjs');
 const { verifyInstalledCacheFreshness } = require('../scripts/setup-codex-toolkit-plugin.cjs');
@@ -21,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.4';
+const expectedBridgeVersion = '2.3.5';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -38,7 +40,7 @@ function tmpRoot() {
 
 function run(args, options = {}) {
   return spawnSync(process.execPath, [script, ...args], {
-    cwd: repoRoot,
+    cwd: options.cwd || repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },
     timeout: 90000
@@ -1325,6 +1327,92 @@ test('hook mode validation uses hook-light smoke validation and skips full bridg
   );
 });
 
+test('agent-rules preflight accepts current managed blocks and ignores literal marker examples', () => {
+  const root = tmpRoot();
+  const agentsTemplate = fs.readFileSync(
+    path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    'utf8'
+  );
+  writeFile(path.join(root, 'AGENTS.md'), [
+    agentsTemplate,
+    '',
+    'Marker examples:',
+    '`<!-- AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1 -->`',
+    '`<!-- AI-AGENT-TOOLKIT:<source-path>:END <BLOCK-NAME> -->`',
+    ''
+  ].join('\n'));
+
+  const result = runAgentRulesPreflight(
+    { hook: true, syncSource: 'codex-plugin' },
+    { targetRoot: root, pluginRoot: repoRoot }
+  );
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.findings, []);
+});
+
+test('agent-rules preflight reports stale managed block content without writing files', () => {
+  const root = tmpRoot();
+  const agentsTemplate = fs.readFileSync(
+    path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    'utf8'
+  );
+  writeFile(
+    path.join(root, 'AGENTS.md'),
+    agentsTemplate.replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, unusually loud progress')
+  );
+
+  const result = runAgentRulesPreflight(
+    { hook: true, syncSource: 'codex-plugin' },
+    { targetRoot: root, pluginRoot: repoRoot }
+  );
+  assert.equal(result.status, 'needs-attention');
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].kind, 'stale-block');
+  assert.equal(result.findings[0].file, 'AGENTS.md');
+  assert.match(formatAgentRulesPreflight(result), /No files were changed by this hook/);
+  assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
+});
+
+test('agent-rules preflight checks Claude shim content in Claude hook mode', () => {
+  const root = tmpRoot();
+  const templateDir = path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local');
+  writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
+  writeFile(path.join(root, 'CLAUDE.md'), fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8').replace('@AGENTS.md', '@./AGENTS.md'));
+
+  const result = runAgentRulesPreflight(
+    { hook: true, syncSource: 'claude-plugin' },
+    { targetRoot: root, pluginRoot: repoRoot }
+  );
+  assert.equal(result.status, 'needs-attention');
+  assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), ['CLAUDE.md:stale-block']);
+});
+
+test('hook mode runs passive agent-rules preflight before bridge no-op return', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const agentsTemplate = fs.readFileSync(
+    path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    'utf8'
+  );
+  writeFile(
+    path.join(root, 'AGENTS.md'),
+    agentsTemplate.replace('Optimize for correctness, safety, useful progress', 'Optimize for correctness, safety, startup preflight test progress')
+  );
+
+  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    cwd: root,
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      PLUGIN_ROOT: repoRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Toolkit agent-rules preflight/);
+  assert.match(result.stderr, /AGENTS\.md: managed block GLOBAL-AGENTS\.MD-TEMPLATE differs from the bundled template/);
+  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
+});
+
 test('startup hook mode syncs stale enabled OpenCode and Antigravity 2 targets and does not reuse stale repo status', () => {
   const root = tmpRoot();
   createMinimalToolkitSource(root, { alpha: 'alpha startup source\n' });
@@ -1882,8 +1970,12 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
   assert.match(state.last_repo_update_error, /dirty/i);
   const report = readLatestReport(hub);
   assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(report.text, /Repo: skipped \(configured Toolkit source checkout is dirty\)\./);
+  assert.match(report.text, /Action needed: finish or stash changes in the configured Toolkit source checkout, or run `setup toolkit` to use a dedicated clean `main` checkout for startup updates\./);
+  assert.match(report.text, new RegExp(`Configured repo path: \`${fixture.repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``));
   assert.match(report.text, /repo update status: `skipped`/);
   assert.match(report.text, /warning\/error: `dirty working tree`/i);
+  assert.match(report.text, /Suggested fix: finish or stash changes in the configured Toolkit source checkout, or run `setup toolkit` to use a dedicated clean `main` checkout for startup updates\./);
 });
 
 test('hook mode auto-switches a clean repo back to main before update and sync', () => {
