@@ -120,6 +120,111 @@ function Test-DockerReady {
   return $true
 }
 
+function Get-RunningServices {
+  if (-not (Test-Path -LiteralPath (Join-Path $script:StackRoot 'docker-compose.yml') -PathType Leaf)) {
+    return @()
+  }
+
+  if (-not (Test-Path -LiteralPath (Get-EnvPath) -PathType Leaf)) {
+    return @()
+  }
+
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    return @()
+  }
+
+  try {
+    & docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+      return @()
+    }
+
+    $services = @(& docker compose ps --services --filter status=running 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+      return @()
+    }
+  } catch {
+    return @()
+  }
+
+  return @($services | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+}
+
+function Write-ServiceStatus {
+  param(
+    [string]$Name,
+    [string[]]$RunningServices,
+    [string]$WhenRunning = '',
+    [string]$WhenStopped = ''
+  )
+
+  $statusLabelWidth = 22
+  $isRunning = $RunningServices -contains $Name
+  $statusPrefix = ("  {0,-$statusLabelWidth}: " -f $Name)
+
+  Write-Host $statusPrefix -NoNewline -ForegroundColor DarkCyan
+  if ($isRunning) {
+    Write-Host 'running' -NoNewline -ForegroundColor Green
+    $suffix = $WhenRunning
+  } else {
+    Write-Host 'stopped' -NoNewline -ForegroundColor Yellow
+    $suffix = $WhenStopped
+  }
+
+  if ($suffix) {
+    Write-Host ' - ' -NoNewline
+    $parts = $suffix -split '(https?://\S+)'
+    foreach ($part in $parts) {
+      if ([string]::IsNullOrWhiteSpace($part)) { continue }
+      if ($part -match '^https?://\S+$') {
+        Write-Host $part -NoNewline -ForegroundColor DarkYellow
+      } else {
+        Write-Host $part -NoNewline -ForegroundColor White
+      }
+    }
+    Write-Host ''
+  } else {
+    Write-Host ''
+  }
+}
+
+function Get-RunningServiceImage {
+  param([string]$Service)
+
+  try {
+    $containerId = (& docker compose ps -q $Service 2>$null | Select-Object -First 1)
+    $containerId = ([string]$containerId).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $containerId) {
+      return ''
+    }
+
+    $image = (& docker inspect $containerId --format '{{.Config.Image}}' 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0) {
+      return ''
+    }
+    return ([string]$image).Trim()
+  } catch {
+    return ''
+  }
+}
+
+function Write-ImageVersions {
+  param([string[]]$RunningServices = @())
+
+  Write-Host ''
+  Write-Host 'Container images:' -ForegroundColor Cyan
+  foreach ($service in $script:Services) {
+    $label = "  {0,-10}: " -f $service
+    if ($RunningServices -contains $service) {
+      $image = Get-RunningServiceImage -Service $service
+      if (-not $image) { $image = 'failed to detect' }
+    } else {
+      $image = 'stopped'
+    }
+    Write-Host "$label$image" -ForegroundColor White
+  }
+}
+
 function Get-EnvPath {
   return (Join-Path $script:StackRoot '.env')
 }
@@ -290,14 +395,14 @@ function Invoke-SafetyPreflight {
 }
 
 function Start-ProductionStack {
-  Write-Header 'Start Production Stack'
+  Write-Header 'Start n8n'
   if (-not (Invoke-SafetyPreflight)) { return }
   if (-not (Test-DockerReady)) { return }
   [void](Invoke-Compose -Arguments @('up', '-d', 'postgres', 'n8n', 'cloudflared'))
 }
 
 function Stop-ProductionStack {
-  Write-Header 'Stop Production Stack'
+  Write-Header 'Stop n8n'
   if (-not (Test-DockerReady)) { return }
   [void](Invoke-Compose -Arguments @('down'))
 }
@@ -310,7 +415,7 @@ function Restart-N8n {
 }
 
 function Show-Status {
-  Write-Header 'Status'
+  Write-Header 'Compose Status'
   if (-not (Test-DockerReady)) { return }
   [void](Invoke-Compose -Arguments @('ps'))
   Write-Host ''
@@ -702,7 +807,7 @@ function Backup-N8nProductionNow {
 }
 
 function Show-UpdateMenu {
-  Write-Header 'Check / Update Images'
+  Write-Header 'Update'
   Write-Host 'Choose what to update:' -ForegroundColor Cyan
   Write-Host '  1. all services'
   Write-Host '  2. n8n only'
@@ -750,10 +855,26 @@ function Print-ProductionUrl {
   Write-Warning 'N8N_PUBLIC_URL is not set in .env.'
 }
 
+function Write-CommandListItem {
+  param(
+    [string]$Number,
+    [string]$Name,
+    [string]$Description
+  )
+
+  $itemLabelWidth = 40
+  $itemPrefix = ("  {0}. {1,-$itemLabelWidth}: " -f $Number, $Name)
+  Write-Host $itemPrefix -NoNewline
+  Write-Host $Description
+}
+
 function Show-CommandList {
   Write-Header 'Command List'
   Write-Host 'Recommended entrypoint:' -ForegroundColor Cyan
-  Write-Host '  _n8n-production-cloudflare.cmd'
+  Write-Host '  _n8n-production-cloudflare.cmd' -ForegroundColor White
+  Write-Host ''
+  Write-Host 'Do not launch production n8n directly from Docker Desktop. Launch it from _n8n-production-cloudflare.cmd instead.' -ForegroundColor Yellow
+  Write-Host 'Docker Desktop direct launch skips production preflight, status, backups, update choices, and logs.' -ForegroundColor Cyan
   Write-Host ''
   Write-Host 'Production requirements:' -ForegroundColor Cyan
   Write-Host '  Cloudflare public hostname service URL: http://n8n:5678'
@@ -762,29 +883,68 @@ function Show-CommandList {
   Write-Host '  Back up before updating Postgres'
   Write-Host '  Back up now creates n8n CLI exports, a database dump, manifest, restore notes, and a log'
   Write-Host ''
+  Write-Host 'Use the numbered menu options for normal work:' -ForegroundColor Cyan
+  Write-CommandListItem -Number '1' -Name 'Start n8n' -Description 'Runs production preflight, then starts Postgres, n8n, and cloudflared.'
+  Write-CommandListItem -Number '2' -Name 'Restart n8n' -Description 'Runs production preflight, then recreates only the n8n app container.'
+  Write-CommandListItem -Number '3' -Name 'Stop n8n' -Description 'Stops the production Cloudflare stack.'
+  Write-CommandListItem -Number '4' -Name 'Update' -Description 'Pulls selected images and recreates selected containers; backs up before database-impacting updates.'
+  Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state and image details from Docker Compose.'
+  Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
+  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Exports workflows and encrypted credentials, dumps Postgres, and writes restore notes.'
+  Write-CommandListItem -Number '8' -Name 'Advanced / Safety: Production preflight' -Description 'Checks Cloudflare, URL, secret-placeholder, and public-port safety settings.'
+  Write-Host ''
+  Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
 }
 
 function Show-LaunchStatus {
   Write-Host 'Folder: ' -NoNewline -ForegroundColor DarkCyan
   Write-Host $script:StackRoot -ForegroundColor White
+  $dockerReady = $false
+  $composeExists = Test-Path -LiteralPath (Join-Path $script:StackRoot 'docker-compose.yml') -PathType Leaf
+  $envExists = Test-Path -LiteralPath (Get-EnvPath) -PathType Leaf
 
-  $composePath = Join-Path $script:StackRoot 'docker-compose.yml'
-  $envPath = Get-EnvPath
-  if (Test-Path -LiteralPath $composePath -PathType Leaf) {
+  if ($composeExists) {
     Write-Success 'docker-compose.yml found'
   } else {
     Write-ErrorMessage 'docker-compose.yml missing'
   }
 
-  if (Test-Path -LiteralPath $envPath -PathType Leaf) {
+  if ($envExists) {
     Write-Success '.env found'
   } else {
     Write-Warning '.env missing. Copy .env.example to .env before starting production.'
   }
 
+  if (Get-Command docker -ErrorAction SilentlyContinue) {
+    if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) {
+      Write-Success 'Docker appears available and running'
+      $dockerReady = $true
+    } else {
+      Write-Warning 'Docker CLI exists, but Docker does not appear to be running'
+    }
+  } else {
+    Write-ErrorMessage 'Docker CLI was not found'
+  }
+
   $values = Read-EnvFile
   $publicUrl = Get-EnvValue -Name 'N8N_PUBLIC_URL' -Values $values
-  if ($publicUrl) {
+  if ($dockerReady -and $composeExists -and $envExists) {
+    $runningServices = Get-RunningServices
+    $n8nWhenRunning = if ($publicUrl) { "production URL: $publicUrl" } else { 'production URL is not set in .env' }
+    Write-Host ''
+    Write-Host 'Quick service status:' -ForegroundColor Cyan
+    Write-ServiceStatus -Name 'postgres' -RunningServices $runningServices
+    Write-ServiceStatus -Name 'n8n' -RunningServices $runningServices -WhenRunning $n8nWhenRunning -WhenStopped 'public editor and webhooks are OFF'
+    Write-ServiceStatus -Name 'cloudflared' -RunningServices $runningServices -WhenRunning 'public tunnel is ON' -WhenStopped 'public tunnel is OFF'
+
+    if ($publicUrl) {
+      $urlLabel = "  {0,-22}: " -f 'production URL'
+      Write-Host $urlLabel -NoNewline -ForegroundColor DarkCyan
+      Write-Host $publicUrl -ForegroundColor DarkYellow
+    }
+
+    Write-ImageVersions -RunningServices $runningServices
+  } elseif ($publicUrl) {
     Write-Host 'Production URL: ' -NoNewline -ForegroundColor DarkCyan
     Write-Host $publicUrl -ForegroundColor White
   }
@@ -796,17 +956,16 @@ function Show-MainMenu {
   Show-LaunchStatus
   Write-Host ''
   Write-Host 'Choose an action:' -ForegroundColor Cyan
-  Write-Host '  1. Safety preflight'
-  Write-Host '  2. Start production stack'
-  Write-Host '  3. Stop production stack'
-  Write-Host '  4. Restart n8n'
-  Write-Host '  5. View status'
+  Write-Host '  1. Start n8n'
+  Write-Host '  2. Restart n8n'
+  Write-Host '  3. Stop n8n'
+  Write-Host '  4. Update'
+  Write-Host '  5. Show Compose status'
   Write-Host '  6. View logs'
-  Write-Host '  7. Back up now'
-  Write-Host '  8. Check/update images'
-  Write-Host '  9. Print production URL'
-  Write-Host '  10. Command list'
-  Write-Host '  11. Exit'
+  Write-Host '  7. Back up'
+  Write-Host '  8. Advanced / Safety: Production preflight'
+  Write-Host '  9. Command list'
+  Write-Host '  10. Exit'
   Write-Host ''
 }
 
@@ -815,19 +974,18 @@ while (-not $script:ExitRequested) {
   $choice = Read-Host 'Enter a number'
 
   switch ($choice) {
-    '1' { Invoke-MenuAction { [void](Invoke-SafetyPreflight) } }
-    '2' { Invoke-MenuAction { Start-ProductionStack } }
+    '1' { Invoke-MenuAction { Start-ProductionStack } }
+    '2' { Invoke-MenuAction { Restart-N8n } }
     '3' { Invoke-MenuAction { Stop-ProductionStack } }
-    '4' { Invoke-MenuAction { Restart-N8n } }
+    '4' { Invoke-MenuAction { Show-UpdateMenu } }
     '5' { Invoke-MenuAction { Show-Status } }
     '6' { Invoke-MenuAction { View-LogsMenu } }
     '7' { Invoke-MenuAction { [void](Backup-N8nProductionNow) } }
-    '8' { Invoke-MenuAction { Show-UpdateMenu } }
-    '9' { Invoke-MenuAction { Print-ProductionUrl } }
-    '10' { Invoke-MenuAction { Show-CommandList } }
-    '11' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
+    '8' { Invoke-MenuAction { [void](Invoke-SafetyPreflight) } }
+    '9' { Invoke-MenuAction { Show-CommandList } }
+    '10' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
     default {
-      Invoke-MenuAction { Write-Warning 'Choose a number from 1 to 11.' }
+      Invoke-MenuAction { Write-Warning 'Choose a number from 1 to 10.' }
     }
   }
 }

@@ -1440,19 +1440,23 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.doesNotMatch(guide, /Backup Postgres/);
 
   assert.deepEqual(menuOptions(menu, 'Show-MainMenu'), [
-    'Safety preflight',
-    'Start production stack',
-    'Stop production stack',
+    'Start n8n',
     'Restart n8n',
-    'View status',
+    'Stop n8n',
+    'Update',
+    'Show Compose status',
     'View logs',
-    'Back up now',
-    'Check/update images',
-    'Print production URL',
+    'Back up',
+    'Advanced / Safety: Production preflight',
     'Command list',
     'Exit'
   ]);
 
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /Quick service status:/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ServiceStatus -Name 'cloudflared'[\s\S]*public tunnel is ON/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ImageVersions -RunningServices \$runningServices/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Do not launch production n8n directly from Docker Desktop/);
+  assert.match(functionBody(menu, 'Show-CommandList'), /Advanced \/ Safety: Production preflight/);
   assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /export:workflow[\s\S]*export:credentials/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Get-N8nCliProductionBackupSpecs[\s\S]*Backup-Postgres/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Add-ProductionBackupLog[\s\S]*Write-ProductionBackupRestoreNotes[\s\S]*Write-ProductionBackupManifest/);
