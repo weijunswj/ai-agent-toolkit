@@ -1043,22 +1043,18 @@ function Convert-ProductionBackupFolderToZipPackage {
   )
 
   $zipPath = Join-Path $BackupDir $ZipFileName
-  $createdZip = New-ZipPackageFromDirectory -SourceDir $BackupDir -ZipPath $zipPath -ExcludeLeafNames @('SECRET-DO-NOT-COMMIT.env')
+  $createdZip = New-ZipPackageFromDirectory -SourceDir $BackupDir -ZipPath $zipPath
   if (-not $createdZip) {
     return ''
   }
 
   Get-ChildItem -LiteralPath $BackupDir -Force -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -ne (Split-Path -Leaf $zipPath) -and $_.Name -ne 'SECRET-DO-NOT-COMMIT.env' } |
+    Where-Object { $_.Name -ne (Split-Path -Leaf $zipPath) } |
     ForEach-Object {
       Remove-Item -LiteralPath $_.FullName -Recurse -Force
     }
 
   Write-Success "Backup zip package: $zipPath"
-  $secretPath = Join-Path $BackupDir 'SECRET-DO-NOT-COMMIT.env'
-  if (Test-Path -LiteralPath $secretPath -PathType Leaf) {
-    Write-Success "Keep this secret file beside the zip: $secretPath"
-  }
   return $zipPath
 }
 
@@ -1245,7 +1241,7 @@ function Write-ProductionBackupRestoreNotes {
     'database.sql is the full n8n Postgres database backup for this stack.',
     'It contains workflows, encrypted credential records, settings, users/projects, and other database-backed n8n state.',
     '',
-    'Keep SECRET-DO-NOT-COMMIT.env in this folder. It is the private backup .env.',
+    'SECRET-DO-NOT-COMMIT.env is included inside the backup zip when available.',
     'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.',
     '',
     'Open _n8n-production-cloudflare.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to the .zip file in this folder.',
@@ -1708,12 +1704,28 @@ function Restore-ProductionCloudflareFromBackupMenu {
     [void](Invoke-Compose -Arguments @('stop', 'n8n', 'cloudflared'))
   }
 
-  $preRestoreRoot = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+  $preRestoreName = "pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+  $preRestoreRoot = Join-Path (Join-Path $script:StackRoot 'backups') $preRestoreName
+  $preRestoreZipPath = Join-Path $preRestoreRoot "$preRestoreName.zip"
   if (-not (Backup-Postgres -Required -BackupDir $preRestoreRoot -SkipPreflight)) {
     Write-ErrorMessage 'Restore cancelled because the current production database backup did not complete.'
     return
   }
-  Write-Success "Pre-restore database backup created: $preRestoreRoot"
+  [void](Write-ProductionBackupSecretFile -BackupDir $preRestoreRoot)
+  Write-ProductionBackupRestoreNotes -BackupDir $preRestoreRoot
+  [void](Write-ProductionBackupManifest -BackupDir $preRestoreRoot -Timestamp $preRestoreName.Replace('pre-restore-', '') -Status 'success' -Errors @() -RetentionDays (Get-ProductionBackupRetentionDays))
+  $createdPreRestoreZip = Convert-ProductionBackupFolderToZipPackage -BackupDir $preRestoreRoot -ZipFileName "$preRestoreName.zip"
+  if (-not $createdPreRestoreZip) {
+    Write-ErrorMessage 'Restore cancelled because the current production database backup zip was not created.'
+    return
+  }
+  $preRestoreExpanded = Expand-ProductionRestorePackageZipToStaging -ZipPath $preRestoreZipPath
+  if ($preRestoreExpanded.Error) {
+    Write-ErrorMessage "Pre-restore backup zip could not be staged for rollback: $($preRestoreExpanded.Error)"
+    return
+  }
+  $preRestoreEncryptionKey = Find-ProductionRestoreBackupEnvValue -Path $preRestoreZipPath -Name 'N8N_ENCRYPTION_KEY' -TargetEnvPath $envPath
+  Write-Success "Pre-restore database backup package created: $preRestoreZipPath"
   if (-not (Set-ProductionEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $envPath)) { return }
 
   if (Restore-ProductionPostgresSqlBackup -Backup $detected) {
@@ -1725,14 +1737,18 @@ function Restore-ProductionCloudflareFromBackupMenu {
 
   Write-ErrorMessage 'Restore failed. Rolling back to the pre-restore database backup now.'
   $rollback = [pscustomobject]@{
-    InputPath = Join-Path $preRestoreRoot 'database.sql'
+    InputPath = $preRestoreExpanded.DatabaseSqlPath
   }
   if (Restore-ProductionPostgresSqlBackup -Backup $rollback) {
+    if ($preRestoreEncryptionKey) {
+      Set-EnvFileValue -Path $envPath -Name 'N8N_ENCRYPTION_KEY' -Value $preRestoreEncryptionKey
+      Write-Success 'Pre-restore production .env N8N_ENCRYPTION_KEY restored.'
+    }
     Write-Success 'Pre-restore database rollback completed.'
     Restore-PreviousProductionServices -PreviousServices $preRestoreServices
     Write-Info 'Verify the rollback database state and saved credentials.'
   } else {
-    Write-ErrorMessage "Automatic rollback did not complete. Use this backup folder as the manual rollback path: $preRestoreRoot"
+    Write-ErrorMessage "Automatic rollback did not complete. Use this pre-restore backup zip as the manual rollback path: $preRestoreZipPath"
   }
 }
 

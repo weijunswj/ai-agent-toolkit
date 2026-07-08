@@ -341,13 +341,13 @@ The production menu includes:
 Back up
 ```
 
-It writes a timestamped backup folder under the private stack folder's `backups\` directory. That folder contains a zip package plus the private secret env file beside the zip when `.env` exists.
+It writes a timestamped backup folder under the private stack folder's `backups\` directory. That folder contains one complete zip package with the private secret env file inside the zip when `.env` exists.
 
 The manual production backup uses the same restore-compatible database-first shape as the local stack. It includes:
 
 - timestamped folders named `n8n-production-YYYYMMDD-HHMMSS`
 - `n8n-production-YYYYMMDD-HHMMSS.zip`
-- `SECRET-DO-NOT-COMMIT.env` beside the zip when `.env` exists
+- `SECRET-DO-NOT-COMMIT.env` inside the zip when `.env` exists
 - `database.sql` inside the zip
 - `restore-manifest.json` inside the zip
 - `HOW TO USE THIS RESTORE FOLDER.txt` inside the zip
@@ -409,11 +409,11 @@ Use the production menu for normal operations:
 | `Update` | Pull and recreate selected services, with backup before Postgres update. |
 | `Show Compose status` | Inspect Compose service state and images. |
 | `View logs` | Inspect recent logs for all services or one service. |
-| `Back up` | Create a private restore-compatible backup folder containing a zip package, private env copy beside the zip when available, and retention cleanup. |
+| `Back up` | Create a private restore-compatible backup folder containing one complete zip package with the private env copy inside when available, and retention cleanup. |
 | `Advanced / Recovery: Restore local n8n from backup` | Restore a production backup zip after a pre-restore backup and `PROCEED` approval. |
 | `Command list` | Show the recommended launcher and menu action summary. |
 
-Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT.env` beside the selected zip, or from an older zip that contains a backup `.env`, and applies it to the active production `.env` before the restored database is started. If no backup key is found, the database restore can continue, but saved credentials may not decrypt unless the active `.env` already has the original key.
+Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT.env` or `.env` inside the selected zip, or from older sidecar env files beside the zip, and applies it to the active production `.env` before the restored database is started. If no backup key is found, the database restore can continue, but saved credentials may not decrypt unless the active `.env` already has the original key.
 
 Preflight is automatic on the launch, tunnel, backup, and update paths that need it. Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, recovery, and update choices stay visible.
 

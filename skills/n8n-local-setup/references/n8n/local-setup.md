@@ -612,8 +612,7 @@ When automatic backups are enabled:
 
 - Creates a timestamped folder named like `n8n-recovery-YYYYMMDD-HHMMSS`.
 - Writes `n8n-recovery-YYYYMMDD-HHMMSS.zip` inside that folder.
-- The zip contains `database.sql`, `restore-manifest.json`, and `HOW TO USE THIS RESTORE FOLDER.txt`.
-- Writes `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`, beside the zip when the `.env` file is available.
+- The zip contains `database.sql`, `restore-manifest.json`, `HOW TO USE THIS RESTORE FOLDER.txt`, and `SECRET-DO-NOT-COMMIT.env` when the `.env` file is available.
 - Select the `.zip` file in `Advanced / Recovery: Restore local n8n from backup`.
 - Uses the enabled automatic backup destination and retention when automatic backups are enabled.
 - Otherwise uses the safe local default destination:
@@ -625,7 +624,7 @@ When automatic backups are enabled:
 Recovery folder contents:
 
 - Includes a restore-compatible `.zip` package with `database.sql`, `restore-manifest.json`, and `HOW TO USE THIS RESTORE FOLDER.txt`.
-- Keeps `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`, beside that zip.
+- Includes `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`, inside that zip when the `.env` file is available.
 - Keep the whole folder private.
 - Do not commit it.
 - The update and restore flows still create internal database backup folders for rollback, and the normal first-level `Back up now` path creates a restore-compatible recovery zip package.
@@ -684,7 +683,7 @@ n8n export:credentials --backup --output=<backup_dir>
 - If decrypted credential export is enabled, the credentials command also adds `--decrypted`.
 - The launcher writes export files to a temporary path inside the n8n container, copies them into a local staging folder, zips the export, then removes the temporary container path.
 - Each run writes a timestamped folder named like `n8n-cli-YYYYMMDD-HHMMSS`.
-- Each run writes `n8n-cli-YYYYMMDD-HHMMSS.zip` with the exported files and `manifest.json`; `SECRET-DO-NOT-COMMIT.env` is kept beside the zip when available.
+- Each run writes `n8n-cli-YYYYMMDD-HHMMSS.zip` with the exported files, `manifest.json`, and `SECRET-DO-NOT-COMMIT.env` when available.
 - Entity exports are secondary and are not the default recovery backup path.
 - The local config file is saved under `%USERPROFILE%\.n8n-local\backups\n8n-cli-backup-config.json` by default. It stores schedule settings, not secrets.
 - Older configs that point to `%USERPROFILE%\.n8n-local\backups\n8n-cli` are treated as `%USERPROFILE%\.n8n-local\backups` so new backups stay at the backup root.
@@ -721,14 +720,14 @@ Restore:
 - Paste a `.zip` backup package path.
 - Type `PROCEED` when asked.
 - A restore-compatible `.zip` should contain `database.sql`; `restore-manifest.json` is recommended but not required if `database.sql` is present.
-- Older `.zip` files containing n8n `export:entities` output files are still accepted for advanced entity restore.
+- Older `.zip` files containing n8n `export:entities` output files are still accepted for advanced entity restore, including when that older entity zip is nested inside a newer backup zip.
 - `.zip` entity restore requires the same n8n migration state as the source export. If n8n reports a migration timestamp mismatch, retry with the same `N8N_IMAGE` version that created the export, or use a Postgres SQL backup.
 
 Required backup env:
 
 - Restore requires the backup `.env`.
-- Keep `SECRET-DO-NOT-COMMIT.env` beside the selected `.zip`.
-- Older zips that already include `.env` or `SECRET-DO-NOT-COMMIT.env` are still supported.
+- Use a `.zip` that includes `SECRET-DO-NOT-COMMIT.env` or `.env`.
+- Older backups that kept `SECRET-DO-NOT-COMMIT.env` or `.env` beside the selected zip are still supported.
 - If the backup env/key is missing, restore stops before stopping services or touching the database.
 - Restore updates the active `.env` `N8N_ENCRYPTION_KEY`.
 - Restore also applies backup `.env` `N8N_IMAGE` when present so the database starts with the source n8n image.
@@ -743,7 +742,7 @@ Safety behaviour:
 - If the container runs but the editor is not reachable, the launcher reports an error instead of calling it healthy.
 - If logs show a local n8n config encryption-key mismatch, the launcher first attempts to sync `/home/node/.n8n/config` to the active `.env` key, then starts services with a second self-heal attempt.
 - If logs show a database schema / image version mismatch, use a zip with the source backup `.env` or sibling `SECRET-DO-NOT-COMMIT.env`, or set `N8N_IMAGE` manually to the source n8n image and retry.
-- Restore creates a pre-restore backup of the current database and current `.env`.
+- Restore creates a pre-restore zip backup of the current database and current `.env`.
 - If restore fails after changes begin, the launcher tries to roll back automatically.
 - Rollback restores the pre-restore database and pre-restore `.env` when possible.
 - If a `.zip` has credential entities but no backup key, import is refused before n8n can truncate tables.
