@@ -795,7 +795,7 @@ function Test-ProductionBackupRoot {
   try {
     $resolved = [System.IO.Path]::GetFullPath($Path)
     $stack = [System.IO.Path]::GetFullPath($script:StackRoot)
-    $home = [System.IO.Path]::GetFullPath([Environment]::GetFolderPath('UserProfile'))
+    $userProfileRoot = [System.IO.Path]::GetFullPath([Environment]::GetFolderPath('UserProfile'))
   } catch {
     return [pscustomobject]@{ Ok = $false; Path = ''; Error = $_.Exception.Message }
   }
@@ -806,7 +806,7 @@ function Test-ProductionBackupRoot {
   if ($resolved.TrimEnd('\') -eq $stack.TrimEnd('\')) {
     return [pscustomobject]@{ Ok = $false; Path = $resolved; Error = 'Refusing to use the stack root itself as the backup root.' }
   }
-  if ($home -and $resolved.TrimEnd('\') -eq $home.TrimEnd('\')) {
+  if ($userProfileRoot -and $resolved.TrimEnd('\') -eq $userProfileRoot.TrimEnd('\')) {
     return [pscustomobject]@{ Ok = $false; Path = $resolved; Error = 'Refusing to use the user profile root as the backup root.' }
   }
 
@@ -1077,6 +1077,198 @@ function Backup-N8nProductionNow {
   return $true
 }
 
+function Test-ProductionPostgresSqlBackupFile {
+  param([string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    Write-ErrorMessage "Database restore file does not exist: $Path"
+    return $false
+  }
+
+  $extension = [System.IO.Path]::GetExtension($Path)
+  if ($extension -ne '.sql') {
+    Write-ErrorMessage 'Production restore currently accepts a database.sql file or a production backup folder containing database/database.sql.'
+    return $false
+  }
+
+  try {
+    $sample = (Get-Content -LiteralPath $Path -TotalCount 40 -ErrorAction Stop) -join "`n"
+  } catch {
+    Write-ErrorMessage "Could not read database restore file: $($_.Exception.Message)"
+    return $false
+  }
+
+  if ($sample -notmatch '(?i)(PostgreSQL database dump|CREATE TABLE|COPY\s+|INSERT INTO|SET\s+)') {
+    Write-ErrorMessage 'The selected .sql file does not look like a Postgres SQL backup.'
+    return $false
+  }
+
+  return $true
+}
+
+function Resolve-ProductionRestoreBackup {
+  param([string]$Path)
+
+  $resolved = ''
+  try {
+    $resolved = [System.IO.Path]::GetFullPath($Path)
+  } catch {
+    return [pscustomobject]@{ Ok = $false; Path = ''; InputPath = ''; Label = ''; Error = $_.Exception.Message }
+  }
+
+  if (Test-Path -LiteralPath $resolved -PathType Container) {
+    $databasePath = Join-Path (Join-Path $resolved 'database') 'database.sql'
+    if (Test-ProductionPostgresSqlBackupFile -Path $databasePath) {
+      return [pscustomobject]@{ Ok = $true; Path = $resolved; InputPath = $databasePath; Label = 'production backup folder'; Error = '' }
+    }
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Backup folder must contain database/database.sql.' }
+  }
+
+  if (Test-ProductionPostgresSqlBackupFile -Path $resolved) {
+    return [pscustomobject]@{ Ok = $true; Path = (Split-Path -Parent $resolved); InputPath = $resolved; Label = 'Postgres SQL backup'; Error = '' }
+  }
+
+  return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Unsupported restore path.' }
+}
+
+function Restore-ProductionPostgresSqlBackup {
+  param([object]$Backup)
+
+  if (-not (Test-ProductionPostgresSqlBackupFile -Path $Backup.InputPath)) {
+    return $false
+  }
+
+  $values = Read-EnvFile
+  $postgresUser = Get-EnvValue -Name 'POSTGRES_USER' -Values $values -Default 'n8n'
+  $postgresDb = Get-EnvValue -Name 'POSTGRES_DB' -Values $values -Default 'n8n'
+  $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+  $containerPath = "/tmp/n8n-production-restore-$timestamp.sql"
+
+  if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', 'postgres')) -ne 0) { return $false }
+  if ((Invoke-Compose -Arguments @('cp', $Backup.InputPath, "postgres:$containerPath")) -ne 0) { return $false }
+
+  $clearSql = 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+  $clearExit = Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'psql', '-U', $postgresUser, '-d', $postgresDb, '-v', 'ON_ERROR_STOP=1', '-c', $clearSql)
+  if ($clearExit -ne 0) {
+    [void](Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'rm', '-f', $containerPath))
+    return $false
+  }
+
+  $restoreExit = Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'psql', '-U', $postgresUser, '-d', $postgresDb, '-v', 'ON_ERROR_STOP=1', '-f', $containerPath)
+  [void](Invoke-Compose -Arguments @('exec', '-T', 'postgres', 'rm', '-f', $containerPath))
+  return ($restoreExit -eq 0)
+}
+
+function Restore-PreviousProductionServices {
+  param(
+    [string[]]$PreviousServices,
+    [switch]$StartN8nWhenNone
+  )
+
+  $toRestore = @(
+    $PreviousServices | ForEach-Object { ([string]$_).Trim() } |
+      Where-Object { $_ -in @('n8n', 'cloudflared') } |
+      Sort-Object -Unique
+  )
+
+  if ($toRestore.Count -eq 0) {
+    if ($StartN8nWhenNone) {
+      Write-Info 'No production n8n services were detected before restore. Starting localhost n8n so you can verify the restored data.'
+      Start-ProductionStack
+      return
+    }
+    Write-Info 'No production n8n services were running before restore.'
+    return
+  }
+
+  Write-Info 'Restarting services that were running before restore.'
+  if ($toRestore -contains 'cloudflared') {
+    Start-N8nWithCloudflare
+    return
+  }
+
+  if ($toRestore -contains 'n8n') {
+    Start-ProductionStack
+  }
+}
+
+function Restore-ProductionCloudflareFromBackupMenu {
+  Write-Header 'Advanced / Recovery: Restore local n8n from backup'
+  Write-Warning 'This restore replaces the production Cloudflare stack database with a selected backup.'
+  Write-Warning 'Use a backup from this launcher, or a trusted database.sql for this same n8n stack.'
+  Write-Host ''
+
+  $backupPath = (Read-Host 'Enter the production backup folder or database.sql path').Trim().Trim('"')
+  Write-Host ''
+  if (-not $backupPath) {
+    Write-Warning 'Restore cancelled.'
+    return
+  }
+  if (-not (Test-Path -LiteralPath $backupPath)) {
+    Write-ErrorMessage 'Backup path does not exist.'
+    return
+  }
+
+  $detected = Resolve-ProductionRestoreBackup -Path $backupPath
+  if (-not $detected.Ok) {
+    Write-ErrorMessage $detected.Error
+    return
+  }
+
+  if (-not (Invoke-BasePreflight)) { return }
+  if (-not (Test-DockerReady)) { return }
+
+  $preRestoreServices = @(
+    Get-RunningServices | ForEach-Object { ([string]$_).Trim() } |
+      Where-Object { $_ -in @('n8n', 'cloudflared') } |
+      Sort-Object -Unique
+  )
+
+  Write-Host "Detected backup type: $($detected.Label)." -ForegroundColor Cyan
+  Write-Host "Database restore file: $($detected.InputPath)" -ForegroundColor Cyan
+  Write-Host ''
+  Write-Warning 'This restore will replace the active production Cloudflare n8n database state.'
+  Write-Warning 'The launcher will first create a pre-restore database backup for rollback.'
+  Write-Host ''
+  $approval = Read-Host 'Type PROCEED to continue'
+  Write-Host ''
+  if ($approval -ne 'PROCEED') {
+    Write-Warning 'Restore cancelled. No restore changes were applied.'
+    return
+  }
+
+  if ($preRestoreServices.Count -gt 0) {
+    Write-Info 'Stopping n8n and Cloudflare tunnel before database restore.'
+    [void](Invoke-Compose -Arguments @('stop', 'n8n', 'cloudflared'))
+  }
+
+  $preRestoreRoot = Join-Path (Join-Path $script:StackRoot 'backups') "pre-restore-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+  if (-not (Backup-Postgres -Required -BackupDir $preRestoreRoot -SkipPreflight)) {
+    Write-ErrorMessage 'Restore cancelled because the current production database backup did not complete.'
+    return
+  }
+  Write-Success "Pre-restore database backup created: $preRestoreRoot"
+
+  if (Restore-ProductionPostgresSqlBackup -Backup $detected) {
+    Write-Success 'Production Cloudflare n8n database restore completed.'
+    Restore-PreviousProductionServices -PreviousServices $preRestoreServices -StartN8nWhenNone
+    Write-Info 'Verify workflows and saved credentials in n8n.'
+    return
+  }
+
+  Write-ErrorMessage 'Restore failed. Rolling back to the pre-restore database backup now.'
+  $rollback = [pscustomobject]@{
+    InputPath = Join-Path (Join-Path $preRestoreRoot 'database') 'database.sql'
+  }
+  if (Restore-ProductionPostgresSqlBackup -Backup $rollback) {
+    Write-Success 'Pre-restore database rollback completed.'
+    Restore-PreviousProductionServices -PreviousServices $preRestoreServices
+    Write-Info 'Verify the rollback database state and saved credentials.'
+  } else {
+    Write-ErrorMessage "Automatic rollback did not complete. Use this backup folder as the manual rollback path: $preRestoreRoot"
+  }
+}
+
 function Show-UpdateMenu {
   param([switch]$StartCloudflareAfter)
 
@@ -1221,7 +1413,7 @@ function Show-CommandList {
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state and image details from Docker Compose.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
   Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Exports workflows and encrypted credentials, dumps Postgres, and writes restore notes.'
-  Write-CommandListItem -Number '8' -Name 'Advanced / Safety: Production preflight' -Description 'Checks Cloudflare URL, tunnel token, and public-port safety settings.'
+  Write-CommandListItem -Number '8' -Name 'Advanced / Recovery: Restore local n8n from backup' -Description 'Restores a production backup folder or database.sql after pre-restore backup and approval.'
   Write-Host ''
   Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
 }
@@ -1307,7 +1499,7 @@ function Show-MainMenu {
   Write-Host '  5. Show Compose status'
   Write-Host '  6. View logs'
   Write-Host '  7. Back up'
-  Write-Host '  8. Advanced / Safety: Production preflight'
+  Write-Host '  8. Advanced / Recovery: Restore local n8n from backup'
   Write-Host '  9. Command list'
   Write-Host '  10. Exit'
   Write-Host ''
@@ -1325,7 +1517,7 @@ while (-not $script:ExitRequested) {
     '5' { Invoke-MenuAction { Show-Status } }
     '6' { Invoke-MenuAction { View-LogsMenu } }
     '7' { Invoke-MenuAction { [void](Backup-N8nProductionNow) } }
-    '8' { Invoke-MenuAction { [void](Invoke-SafetyPreflight) } }
+    '8' { Invoke-MenuAction { Restore-ProductionCloudflareFromBackupMenu } }
     '9' { Invoke-MenuAction { Show-CommandList } }
     '10' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }
     default {

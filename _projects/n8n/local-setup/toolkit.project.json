@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.8",
+  "version": "3.8.9",
   "version_policy": "semver",
-  "version_notes": "Reshapes the production Cloudflare launcher to mirror the local stack start/stop flow, uses .env.active for active URLs, and makes placeholder credentials warnings rather than blockers.",
+  "version_notes": "Moves the production Cloudflare advanced menu slot to restore recovery like the local stack and fixes the backup root helper's reserved HOME variable bug.",
   "outputs": [
     {
       "kind": "curated",

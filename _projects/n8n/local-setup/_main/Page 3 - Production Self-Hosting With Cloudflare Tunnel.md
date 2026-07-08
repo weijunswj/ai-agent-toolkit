@@ -410,10 +410,10 @@ Use the production menu for normal operations:
 | `Show Compose status` | Inspect Compose service state and images. |
 | `View logs` | Inspect recent logs for all services or one service. |
 | `Back up` | Create a private all-inclusive backup with workflow export, credential export, Postgres dump, manifest, restore notes, log, and retention cleanup. |
-| `Advanced / Safety: Production preflight` | Before first launch, after `.env` changes, and before production updates. |
+| `Advanced / Recovery: Restore local n8n from backup` | Restore a production backup folder or trusted `database.sql` after a pre-restore backup and `PROCEED` approval. |
 | `Command list` | Show the recommended launcher and menu action summary. |
 
-Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, and update choices stay visible.
+Preflight is automatic on the launch, tunnel, backup, and update paths that need it. Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, recovery, and update choices stay visible.
 
 ---
 
