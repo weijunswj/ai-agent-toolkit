@@ -93,6 +93,7 @@ The production stack template folder is [templates/production-cloudflare-stack/]
 | Placeholder environment template | [.env.example](../../templates/production-cloudflare-stack/.env.example) |
 | Private runtime ignore template | [.gitignore](../../templates/production-cloudflare-stack/.gitignore) |
 | Windows production launcher | [_n8n-production-cloudflare.cmd](../../templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd) |
+| Desktop shortcut launcher | [n8n-production-cloudflare-desktop-shortcut.cmd](../../templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd) |
 | PowerShell production menu | [scripts/n8n-production-cloudflare-menu.ps1](../../templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1) |
 | Linux server backup template | [templates/production-server-backups/](../../templates/production-server-backups/) |
 
@@ -131,6 +132,7 @@ Do not put the production runtime folder inside this toolkit repo. Do not put it
 3. Copy `.env.example` to `.env`.
 4. Fill `.env` privately.
 5. Do not commit `.env`.
+6. Optional: copy `n8n-production-cloudflare-desktop-shortcut.cmd` to your Desktop after the real stack folder is ready.
 
 The copied folder should look like this:
 
@@ -141,6 +143,7 @@ The copied folder should look like this:
 |-- .gitignore
 |-- .env
 |-- _n8n-production-cloudflare.cmd
+|-- n8n-production-cloudflare-desktop-shortcut.cmd
 `-- scripts\
     `-- n8n-production-cloudflare-menu.ps1
 ```

@@ -133,6 +133,10 @@ const productionStackOutputs = [
     output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd'
   },
   {
+    source: '_main/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd',
+    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd'
+  },
+  {
     source: '_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1',
     output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1'
   }
@@ -1426,6 +1430,7 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/docker-compose.yml');
   const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.env.example');
   const runtimeIgnore = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.gitignore');
+  const shortcut = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd');
 
   assert.match(guide, /Private runtime ignore template/);
   assert.match(guide, /Linux server backup template/);
@@ -1529,6 +1534,9 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Restore-PreviousProductionServices -PreviousServices \$preRestoreServices -StartN8nWhenNone/);
   assert.match(functionBody(menu, 'Restore-ProductionPostgresSqlBackup'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;[\s\S]*psql[\s\S]*ON_ERROR_STOP=1[\s\S]*-f/);
   assert.match(menu, /'8' \{ Invoke-MenuAction \{ Restore-ProductionCloudflareFromBackupMenu \} \}/);
+  assert.match(shortcut, /%USERPROFILE%\\\.n8n-production-cloudflare/);
+  assert.match(shortcut, /_n8n-production-cloudflare\.cmd/);
+  assert.match(shortcut, /Copy the production Cloudflare stack templates into %STACK_DIR% first/);
   assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /includeWorkflows = \$true[\s\S]*includeCredentials = \$true[\s\S]*exportDecryptedCredentials = \$false[\s\S]*includeDatabase = \$true/);
   assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /\^n8n-production-\\d\{8\}-\\d\{6\}\$/);
   assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /Test-PathInsideDirectory[\s\S]*Remove-Item -LiteralPath \$folder\.FullName -Recurse -Force/);
@@ -1795,6 +1803,7 @@ test('n8n local setup packs install current files only', () => {
       'skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example',
       'skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore',
       'skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd',
+      'skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd',
       'skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1',
       'skills/n8n-local-setup/templates/production-server-backups/README.md',
       'skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template',

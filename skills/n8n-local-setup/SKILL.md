@@ -70,6 +70,7 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - Production Cloudflare environment template: [templates/production-cloudflare-stack/.env.example](templates/production-cloudflare-stack/.env.example)
 - Production Cloudflare runtime ignore template: [templates/production-cloudflare-stack/.gitignore](templates/production-cloudflare-stack/.gitignore)
 - Guided production Cloudflare launcher: [templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd](templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd)
+- Production Cloudflare desktop shortcut launcher: [templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd](templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd)
 - PowerShell production Cloudflare menu: [templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1](templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1), including production preflight, logs, status, all-inclusive manual backup, and image update actions.
 - Linux production server backup guide: [templates/production-server-backups/README.md](templates/production-server-backups/README.md)
 - Linux production server backup shell template: [templates/production-server-backups/n8n-production-backup.sh.template](templates/production-server-backups/n8n-production-backup.sh.template)

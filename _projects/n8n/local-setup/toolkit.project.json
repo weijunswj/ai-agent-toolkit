@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.11",
+  "version": "3.8.12",
   "version_policy": "semver",
-  "version_notes": "Clarifies launcher image lookup status and lets production backups succeed with empty workflow or credential exports.",
+  "version_notes": "Adds the production Cloudflare desktop shortcut wrapper to match the local stack convenience launcher.",
   "outputs": [
     {
       "kind": "curated",
@@ -119,6 +119,10 @@
         {
           "from": "./templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
           "to": "../../templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd"
+        },
+        {
+          "from": "./templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd",
+          "to": "../../templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd"
         },
         {
           "from": "./templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
@@ -302,6 +306,13 @@
     },
     {
       "kind": "copy",
+      "source": "_main/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd",
+      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd",
+      "notes": "Desktop shortcut launcher that delegates to %USERPROFILE%\\.n8n-production-cloudflare\\_n8n-production-cloudflare.cmd.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
       "source": "_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
       "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
       "notes": "PowerShell menu for production Cloudflare Tunnel preflight, start/stop, restart, status, logs, all-inclusive manual backup, image updates, and production URL display.",
@@ -417,6 +428,7 @@
       "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
       "skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore",
       "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
+      "skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd",
       "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
       "skills/n8n-local-setup/templates/production-server-backups/README.md",
       "skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template",
