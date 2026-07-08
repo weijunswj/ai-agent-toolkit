@@ -1441,7 +1441,7 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(guide, /future hardening item/);
   assert.match(guide, /You can start Postgres and n8n locally before Cloudflare is ready/);
   assert.match(guide, /It does not start `cloudflared`, and it does not require `CLOUDFLARED_TUNNEL_TOKEN`/);
-  assert.match(guide, /base preflight warns but still allows local n8n to start/);
+  assert.match(guide, /`N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is missing or still a placeholder/);
   assert.match(guide, /`N8N_PUBLIC_HOST` \| Your n8n subdomain\/hostname only/);
   assert.match(guide, /`Start Cloudflare tunnel` \| Run Cloudflare preflight/);
   assert.doesNotMatch(guide, /Backup Postgres/);
@@ -1471,10 +1471,12 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(functionBody(menu, 'Invoke-BasePreflight'), /N8N_LOCAL_PORT is a valid local port/);
   assert.match(functionBody(menu, 'Invoke-BasePreflight'), /Local n8n start is allowed/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /N8N_ENCRYPTION_KEY is present and not a placeholder/);
-  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /POSTGRES_PASSWORD is present and not a placeholder/);
+  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /POSTGRES_PASSWORD is missing or still a placeholder[\s\S]*Local n8n start is allowed/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /POSTGRES_PASSWORD is present and not a placeholder/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /CLOUDFLARED_TUNNEL_TOKEN|N8N_PUBLIC_HOST|N8N_PUBLIC_URL/);
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /N8N_PUBLIC_URL host matches N8N_PUBLIC_HOST/);
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /N8N_ENCRYPTION_KEY is present and not a placeholder/);
+  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /POSTGRES_PASSWORD is present and not a placeholder/);
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /CLOUDFLARED_TUNNEL_TOKEN is present and not a placeholder/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /WEBHOOK_URL matches|N8N_EDITOR_BASE_URL matches|N8N_PROXY_HOPS is 1/);
   assert.match(functionBody(menu, 'Start-ProductionStack'), /Invoke-BasePreflight[\s\S]*@\(\'up\', '-d', 'postgres', 'n8n'\)/);

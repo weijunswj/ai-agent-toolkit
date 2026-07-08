@@ -452,14 +452,22 @@ function Invoke-BasePreflight {
   $ok = (Add-PreflightResult -Name 'N8N_LOCAL_PORT is a valid local port' -Passed (Test-LocalPortConfig -Values $values) -Why 'Docker needs a valid localhost port for the n8n editor.' -Fix 'Use a whole number from 1 to 65535, such as 5678 or 5679.') -and $ok
 
   $n8nKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -Values $values
-  if (Test-PlaceholderValue -Value $n8nKey) {
-    Write-Warning 'N8N_ENCRYPTION_KEY is missing or still a placeholder. Local n8n start is allowed, but replace it before saving credentials or starting the Cloudflare tunnel.'
-  } else {
-    Write-Success 'N8N_ENCRYPTION_KEY is set'
+  if (-not $FromCloudflarePreflight) {
+    if (Test-PlaceholderValue -Value $n8nKey) {
+      Write-Warning 'N8N_ENCRYPTION_KEY is missing or still a placeholder. Local n8n start is allowed, but replace it before saving credentials or starting the Cloudflare tunnel.'
+    } else {
+      Write-Success 'N8N_ENCRYPTION_KEY is set'
+    }
   }
 
   $postgresPassword = Get-EnvValue -Name 'POSTGRES_PASSWORD' -Values $values
-  $ok = (Add-PreflightResult -Name 'POSTGRES_PASSWORD is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $postgresPassword)) -Why 'Postgres requires a real private password before the database container starts.' -Fix 'Replace it privately in .env with a strong random password.') -and $ok
+  if (-not $FromCloudflarePreflight) {
+    if (Test-PlaceholderValue -Value $postgresPassword) {
+      Write-Warning 'POSTGRES_PASSWORD is missing or still a placeholder. Local n8n start is allowed, but replace it before saving production data or starting the Cloudflare tunnel.'
+    } else {
+      Write-Success 'POSTGRES_PASSWORD is set'
+    }
+  }
 
   $ok = (Add-PreflightResult -Name 'Postgres has no public port mapping' -Passed (-not (Test-ServiceHasPorts -ServiceName 'postgres')) -Why 'A production database should not be exposed directly from this local machine.' -Fix 'Remove any ports: block from the postgres service.') -and $ok
   $ok = (Add-PreflightResult -Name 'n8n browser port is loopback-only' -Passed (-not (Test-ServiceHasUnsafePublicPorts -ServiceName 'n8n')) -Why 'n8n may have a local browser port, but it must not bind to every network interface.' -Fix 'Use a loopback mapping like 127.0.0.1:${N8N_LOCAL_PORT:-5678}:5678; do not use 5678:5678 or 0.0.0.0:5678:5678.') -and $ok
@@ -490,6 +498,9 @@ function Invoke-SafetyPreflight {
 
   $n8nKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -Values $values
   $ok = (Add-PreflightResult -Name 'N8N_ENCRYPTION_KEY is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $n8nKey)) -Why 'Public production n8n should not use a missing or template encryption key for saved credentials.' -Fix 'Replace it privately in .env with a long random value, then keep the same value forever for this stack.') -and $ok
+
+  $postgresPassword = Get-EnvValue -Name 'POSTGRES_PASSWORD' -Values $values
+  $ok = (Add-PreflightResult -Name 'POSTGRES_PASSWORD is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $postgresPassword)) -Why 'Public production Postgres should not use a missing or template database password.' -Fix 'Replace it privately in .env with a strong random password.') -and $ok
 
   $tunnelToken = Get-EnvValue -Name 'CLOUDFLARED_TUNNEL_TOKEN' -Values $values
   $ok = (Add-PreflightResult -Name 'CLOUDFLARED_TUNNEL_TOKEN is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $tunnelToken)) -Why 'cloudflared cannot attach this stack to your Cloudflare Tunnel without a real tunnel token.' -Fix 'Create or open the Cloudflare Tunnel, copy its token into .env, or use Start n8n to run locally without Cloudflare.') -and $ok

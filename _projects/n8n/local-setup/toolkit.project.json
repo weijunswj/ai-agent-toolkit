@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.6",
+  "version": "3.8.7",
   "version_policy": "semver",
-  "version_notes": "Allows the production Cloudflare base n8n start to proceed with an N8N_ENCRYPTION_KEY placeholder warning while keeping the full Cloudflare tunnel preflight strict.",
+  "version_notes": "Allows the production Cloudflare base n8n start to proceed with placeholder warnings for N8N_ENCRYPTION_KEY and POSTGRES_PASSWORD while keeping the full Cloudflare tunnel preflight strict.",
   "outputs": [
     {
       "kind": "curated",
