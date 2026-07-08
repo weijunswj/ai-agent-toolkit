@@ -331,6 +331,71 @@ function Read-EnvFile {
   return $values
 }
 
+function Read-EnvTextValue {
+  param(
+    [string]$Text,
+    [string]$Name
+  )
+
+  $pattern = "^\s*$([regex]::Escape($Name))\s*=\s*(.*)\s*$"
+  foreach ($line in (([string]$Text) -split "\r?\n")) {
+    if ($line -match $pattern) {
+      $value = $Matches[1].Trim()
+      $value = $value.Trim('"').Trim("'")
+      if ($value.Length -gt 0) {
+        return $value
+      }
+    }
+  }
+
+  return ''
+}
+
+function Read-EnvFileValue {
+  param(
+    [string]$Path,
+    [string]$Name
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return ''
+  }
+
+  return (Read-EnvTextValue -Text (Get-Content -LiteralPath $Path -Raw) -Name $Name)
+}
+
+function Set-EnvFileValue {
+  param(
+    [string]$Path,
+    [string]$Name,
+    [string]$Value
+  )
+
+  $lines = New-Object System.Collections.Generic.List[string]
+  if (Test-Path -LiteralPath $Path -PathType Leaf) {
+    foreach ($line in Get-Content -LiteralPath $Path) {
+      $lines.Add($line)
+    }
+  }
+
+  $pattern = "^\s*$([regex]::Escape($Name))\s*="
+  $replacement = "$Name=$Value"
+  $updated = $false
+  for ($index = 0; $index -lt $lines.Count; $index += 1) {
+    if ($lines[$index] -match $pattern) {
+      $lines[$index] = $replacement
+      $updated = $true
+      break
+    }
+  }
+
+  if (-not $updated) {
+    $lines.Add($replacement)
+  }
+
+  Set-Content -LiteralPath $Path -Value $lines.ToArray() -Encoding ascii
+}
+
 function Get-EnvValue {
   param(
     [string]$Name,
@@ -913,6 +978,90 @@ function Test-PathInsideDirectory {
   return $resolvedPath.StartsWith($resolvedDirectory, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+function Enable-ZipSupport {
+  try {
+    Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+  } catch {
+  }
+}
+
+function New-ZipPackageFromDirectory {
+  param(
+    [string]$SourceDir,
+    [string]$ZipPath,
+    [string[]]$ExcludeLeafNames = @()
+  )
+
+  Enable-ZipSupport
+  if (Test-Path -LiteralPath $ZipPath) {
+    Remove-Item -LiteralPath $ZipPath -Force
+  }
+
+  $sourceRoot = [System.IO.Path]::GetFullPath($SourceDir)
+  if (-not $sourceRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+    $sourceRoot = $sourceRoot + [System.IO.Path]::DirectorySeparatorChar
+  }
+  $resolvedZipPath = [System.IO.Path]::GetFullPath($ZipPath)
+  $excluded = @{}
+  foreach ($name in $ExcludeLeafNames) {
+    $leaf = ([string]$name).Trim().ToLowerInvariant()
+    if ($leaf) {
+      $excluded[$leaf] = $true
+    }
+  }
+
+  $zip = [System.IO.Compression.ZipFile]::Open($resolvedZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+  try {
+    $files = @(
+      Get-ChildItem -LiteralPath $SourceDir -File -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object FullName
+    )
+    foreach ($file in $files) {
+      $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
+      if ($fullPath -ieq $resolvedZipPath) { continue }
+      if ($excluded.ContainsKey($file.Name.ToLowerInvariant())) { continue }
+      $entryName = ($fullPath.Substring($sourceRoot.Length) -replace '\\', '/')
+      [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $fullPath, $entryName, [System.IO.Compression.CompressionLevel]::Optimal)
+    }
+  } finally {
+    $zip.Dispose()
+  }
+
+  if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
+    Write-ErrorMessage "Zip package was not created: $ZipPath"
+    return ''
+  }
+
+  return $ZipPath
+}
+
+function Convert-ProductionBackupFolderToZipPackage {
+  param(
+    [string]$BackupDir,
+    [string]$ZipFileName
+  )
+
+  $zipPath = Join-Path $BackupDir $ZipFileName
+  $createdZip = New-ZipPackageFromDirectory -SourceDir $BackupDir -ZipPath $zipPath -ExcludeLeafNames @('SECRET-DO-NOT-COMMIT.env')
+  if (-not $createdZip) {
+    return ''
+  }
+
+  Get-ChildItem -LiteralPath $BackupDir -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne (Split-Path -Leaf $zipPath) -and $_.Name -ne 'SECRET-DO-NOT-COMMIT.env' } |
+    ForEach-Object {
+      Remove-Item -LiteralPath $_.FullName -Recurse -Force
+    }
+
+  Write-Success "Backup zip package: $zipPath"
+  $secretPath = Join-Path $BackupDir 'SECRET-DO-NOT-COMMIT.env'
+  if (Test-Path -LiteralPath $secretPath -PathType Leaf) {
+    Write-Success "Keep this secret file beside the zip: $secretPath"
+  }
+  return $zipPath
+}
+
 function Add-ProductionBackupLog {
   param(
     [string]$BackupDir,
@@ -945,6 +1094,146 @@ function Get-ProductionBackupFileList {
   )
 }
 
+function Get-ZipEntryNames {
+  param([string]$ZipPath)
+
+  Enable-ZipSupport
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in $zip.Entries) {
+      if ($entry.FullName) {
+        $names.Add(($entry.FullName -replace '\\', '/'))
+      }
+    }
+    return $names.ToArray()
+  } finally {
+    $zip.Dispose()
+  }
+}
+
+function Get-RestoreZipLimits {
+  return [pscustomobject]@{
+    MaxFiles = 1000
+    MaxCompressedBytes = 268435456
+    MaxEntryBytes = 134217728
+    MaxTotalBytes = 536870912
+    MaxCompressionRatio = 100
+  }
+}
+
+function Test-RestoreZipEntryLimits {
+  param([object]$Zip)
+
+  $limits = Get-RestoreZipLimits
+  $fileCount = 0
+  $totalCompressedBytes = [int64]0
+  $totalBytes = [int64]0
+
+  foreach ($entry in $Zip.Entries) {
+    if (-not $entry.FullName) { continue }
+    $entryName = ($entry.FullName -replace '\\', '/')
+    if ($entryName.EndsWith('/')) { continue }
+
+    $fileCount += 1
+    if ($fileCount -gt $limits.MaxFiles) {
+      return [pscustomobject]@{ Error = "Zip restore package contains too many files. Limit: $($limits.MaxFiles)." }
+    }
+
+    if ($entry.Length -gt $limits.MaxEntryBytes) {
+      return [pscustomobject]@{ Error = "Zip restore package contains an entry larger than the allowed restore limit. Limit: $($limits.MaxEntryBytes) bytes." }
+    }
+
+    $totalBytes += [int64]$entry.Length
+    if ($totalBytes -gt $limits.MaxTotalBytes) {
+      return [pscustomobject]@{ Error = "Zip restore package expands beyond the allowed restore limit. Limit: $($limits.MaxTotalBytes) bytes." }
+    }
+
+    if ($entry.CompressedLength -gt 0) {
+      $totalCompressedBytes += [int64]$entry.CompressedLength
+      $ratio = ([double]$entry.Length / [double]$entry.CompressedLength)
+      if ($ratio -gt $limits.MaxCompressionRatio) {
+        return [pscustomobject]@{ Error = "Zip restore package contains an entry with an unsafe compression ratio. Limit: $($limits.MaxCompressionRatio):1." }
+      }
+    } elseif ($entry.Length -gt 0) {
+      return [pscustomobject]@{ Error = 'Zip restore package contains a compressed entry with no recorded compressed size.' }
+    }
+
+    if ($totalCompressedBytes -gt $limits.MaxCompressedBytes) {
+      return [pscustomobject]@{ Error = "Zip restore package compressed data is too large. Limit: $($limits.MaxCompressedBytes) bytes." }
+    }
+  }
+
+  return [pscustomobject]@{ Ok = $true }
+}
+
+function New-ProductionRestoreStagingDirectory {
+  $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $importRoot = Join-Path $script:StackRoot 'import'
+  $stagingDir = Join-Path $importRoot "production-restore-$timestamp"
+  New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
+  return $stagingDir
+}
+
+function Expand-ProductionRestorePackageZipToStaging {
+  param([string]$ZipPath)
+
+  $stagingDir = New-ProductionRestoreStagingDirectory
+  $stagingRoot = [System.IO.Path]::GetFullPath($stagingDir)
+
+  Enable-ZipSupport
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $limitCheck = Test-RestoreZipEntryLimits -Zip $zip
+    if ($limitCheck.Error) {
+      return [pscustomobject]@{ Error = $limitCheck.Error }
+    }
+
+    foreach ($entry in $zip.Entries) {
+      if (-not $entry.FullName) { continue }
+      $entryName = ($entry.FullName -replace '\\', '/')
+      if ($entryName.StartsWith('/') -or $entryName -match '^[A-Za-z]:') {
+        return [pscustomobject]@{ Error = 'Zip restore package contains an unsafe absolute path entry.' }
+      }
+
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($stagingRoot, $entryName))
+      if (-not (Test-PathInsideDirectory -Path $targetPath -Directory $stagingRoot)) {
+        return [pscustomobject]@{ Error = 'Zip restore package contains an unsafe path traversal entry.' }
+      }
+    }
+
+    foreach ($entry in $zip.Entries) {
+      if (-not $entry.FullName) { continue }
+      $entryName = ($entry.FullName -replace '\\', '/')
+      $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($stagingRoot, $entryName))
+      if ($entryName.EndsWith('/')) {
+        New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+        continue
+      }
+
+      $targetDir = Split-Path -Parent $targetPath
+      if ($targetDir) {
+        New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+      }
+      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $targetPath, $true)
+    }
+  } finally {
+    $zip.Dispose()
+  }
+
+  $databaseSql = @(Get-ChildItem -LiteralPath $stagingDir -File -Recurse -Filter 'database.sql' -ErrorAction SilentlyContinue | Select-Object -First 1)
+  if ($databaseSql.Count -eq 0) {
+    return [pscustomobject]@{ Error = 'Zip package contained no database.sql. Production Cloudflare restore needs a full database backup zip.' }
+  }
+
+  Write-Info "Backup zip extracted under: $stagingDir"
+  Write-Info 'Using database.sql from the production restore-compatible backup package.'
+  return [pscustomobject]@{
+    StagingPath = $stagingDir
+    DatabaseSqlPath = $databaseSql[0].FullName
+  }
+}
+
 function Write-ProductionBackupRestoreNotes {
   param([string]$BackupDir)
 
@@ -959,7 +1248,7 @@ function Write-ProductionBackupRestoreNotes {
     'Keep SECRET-DO-NOT-COMMIT.env in this folder. It is the private backup .env.',
     'Saved credentials require the same N8N_ENCRYPTION_KEY that created the backup.',
     '',
-    'Open _n8n-production-cloudflare.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to this folder or to database.sql.',
+    'Open _n8n-production-cloudflare.cmd, choose Advanced / Recovery: Restore local n8n from backup, and paste the full path to the .zip file in this folder.',
     'Type PROCEED when asked.',
     'Restore replaces the current production Cloudflare n8n database state.',
     'Do not commit this folder, backup files, or SECRET-DO-NOT-COMMIT.env.'
@@ -1127,9 +1416,15 @@ function Backup-N8nProductionNow {
 
   Add-ProductionBackupLog -BackupDir $backupDir -Message 'Backup completed successfully.'
   $manifestPath = Write-ProductionBackupManifest -BackupDir $backupDir -Timestamp $timestamp -Status 'success' -Errors @() -RetentionDays $retentionDays
+  $zipPath = Convert-ProductionBackupFolderToZipPackage -BackupDir $backupDir -ZipFileName "n8n-production-$timestamp.zip"
+  if (-not $zipPath) {
+    Write-ErrorMessage 'Production backup zip package was not created.'
+    if ($Required) { Write-ErrorMessage 'Required backup failed. No update was applied.' }
+    return $false
+  }
   [void](Invoke-ProductionBackupRetentionCleanup -BackupRoot $safeRoot.Path -RetentionDays $retentionDays)
-  Write-Success "Backup folder: $backupDir"
-  Write-Success "Manifest written to: $manifestPath"
+  Write-Success "Backup package folder: $backupDir"
+  Write-Success 'Manifest included in zip package.'
   Write-Warning 'Keep this backup private. Do not commit backups, logs, database dumps, or production .env files.'
   return $true
 }
@@ -1144,7 +1439,7 @@ function Test-ProductionPostgresSqlBackupFile {
 
   $extension = [System.IO.Path]::GetExtension($Path)
   if ($extension -ne '.sql') {
-    Write-ErrorMessage 'Production restore currently accepts a database.sql file or a production backup folder containing database.sql.'
+    Write-ErrorMessage 'Production restore expected the staged database.sql extracted from a backup zip.'
     return $false
   }
 
@@ -1174,22 +1469,130 @@ function Resolve-ProductionRestoreBackup {
   }
 
   if (Test-Path -LiteralPath $resolved -PathType Container) {
-    $databasePath = Join-Path $resolved 'database.sql'
-    if ((Test-Path -LiteralPath $databasePath -PathType Leaf) -and (Test-ProductionPostgresSqlBackupFile -Path $databasePath)) {
-      return [pscustomobject]@{ Ok = $true; Path = $resolved; InputPath = $databasePath; Label = 'production backup folder'; Error = '' }
-    }
-    $legacyDatabasePath = Join-Path (Join-Path $resolved 'database') 'database.sql'
-    if ((Test-Path -LiteralPath $legacyDatabasePath -PathType Leaf) -and (Test-ProductionPostgresSqlBackupFile -Path $legacyDatabasePath)) {
-      return [pscustomobject]@{ Ok = $true; Path = $resolved; InputPath = $legacyDatabasePath; Label = 'legacy production backup folder'; Error = '' }
-    }
-    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Backup folder must contain database.sql.' }
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Production restore now accepts zip packages only. Open the backup folder and select its n8n-production-*.zip file.' }
   }
 
-  if (Test-ProductionPostgresSqlBackupFile -Path $resolved) {
-    return [pscustomobject]@{ Ok = $true; Path = (Split-Path -Parent $resolved); InputPath = $resolved; Label = 'Postgres SQL backup'; Error = '' }
+  $extension = [System.IO.Path]::GetExtension($resolved)
+  if ($extension -ne '.zip') {
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Production restore input must be a .zip backup package.' }
   }
 
-  return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Unsupported restore path.' }
+  $entries = @(Get-ZipEntryNames -ZipPath $resolved)
+  $hasDatabaseSql = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'database.sql' }).Count -gt 0
+  $hasRestoreManifest = @($entries | Where-Object { (Split-Path -Leaf $_).ToLowerInvariant() -eq 'restore-manifest.json' }).Count -gt 0
+  if (-not $hasDatabaseSql) {
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = 'Zip package contained no database.sql. Production Cloudflare restore needs a full database backup zip.' }
+  }
+  if (-not $hasRestoreManifest) {
+    Write-Warning 'Zip package contains database.sql but is missing restore-manifest.json. Continuing with database.sql restore.'
+  }
+
+  $expanded = Expand-ProductionRestorePackageZipToStaging -ZipPath $resolved
+  if ($expanded.Error) {
+    return [pscustomobject]@{ Ok = $false; Path = $resolved; InputPath = ''; Label = ''; Error = $expanded.Error }
+  }
+
+  return [pscustomobject]@{ Ok = $true; Path = $expanded.StagingPath; InputPath = $expanded.DatabaseSqlPath; Label = 'production backup zip package'; Error = '' }
+}
+
+function Get-ProductionRestoreEnvBackupNames {
+  return @('SECRET-DO-NOT-COMMIT.env', '.env')
+}
+
+function Test-SameResolvedPath {
+  param(
+    [string]$Left,
+    [string]$Right
+  )
+
+  if (-not $Left -or -not $Right) {
+    return $false
+  }
+
+  try {
+    $trimChars = [char[]]@('\', '/')
+    $leftPath = [System.IO.Path]::GetFullPath($Left).TrimEnd($trimChars)
+    $rightPath = [System.IO.Path]::GetFullPath($Right).TrimEnd($trimChars)
+    return ($leftPath -ieq $rightPath)
+  } catch {
+    return $false
+  }
+}
+
+function Find-ProductionRestoreBackupEnvValue {
+  param(
+    [string]$Path,
+    [string]$Name,
+    [string]$TargetEnvPath = ''
+  )
+
+  $inputPath = ([string]$Path).Trim().Trim('"')
+  if (-not $inputPath -or -not (Test-Path -LiteralPath $inputPath)) {
+    return ''
+  }
+
+  $item = Get-Item -LiteralPath $inputPath
+  if ($item.PSIsContainer) {
+    foreach ($fileName in Get-ProductionRestoreEnvBackupNames) {
+      $match = @(Get-ChildItem -LiteralPath $item.FullName -File -Recurse -Filter $fileName -ErrorAction SilentlyContinue | Select-Object -First 1)
+      if ($match.Count -gt 0) {
+        return (Read-EnvFileValue -Path $match[0].FullName -Name $Name)
+      }
+    }
+    return ''
+  }
+
+  if ($item.Name.ToLowerInvariant() -match '\.zip$') {
+    Enable-ZipSupport
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($item.FullName)
+    try {
+      foreach ($fileName in Get-ProductionRestoreEnvBackupNames) {
+        foreach ($entry in $zip.Entries) {
+          if ((Split-Path -Leaf $entry.FullName) -eq $fileName) {
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            try {
+              return (Read-EnvTextValue -Text $reader.ReadToEnd() -Name $Name)
+            } finally {
+              $reader.Dispose()
+            }
+          }
+        }
+      }
+    } finally {
+      $zip.Dispose()
+    }
+  }
+
+  foreach ($fileName in Get-ProductionRestoreEnvBackupNames) {
+    $siblingSecret = Join-Path (Split-Path -Parent $item.FullName) $fileName
+    if ((Test-Path -LiteralPath $siblingSecret -PathType Leaf) -and -not (Test-SameResolvedPath -Left $siblingSecret -Right $TargetEnvPath)) {
+      return (Read-EnvFileValue -Path $siblingSecret -Name $Name)
+    }
+  }
+
+  return ''
+}
+
+function Set-ProductionEncryptionKeyForRestore {
+  param(
+    [string]$BackupEncryptionKey,
+    [string]$EnvPath
+  )
+
+  if (-not $BackupEncryptionKey) {
+    Write-Warning 'No backup N8N_ENCRYPTION_KEY was found beside or inside the selected zip. Database restore can continue, but saved credentials may not decrypt unless .env already has the original key.'
+    return $true
+  }
+
+  $currentKey = Read-EnvFileValue -Path $EnvPath -Name 'N8N_ENCRYPTION_KEY'
+  if ($currentKey -eq $BackupEncryptionKey) {
+    Write-Success 'Production .env N8N_ENCRYPTION_KEY already matches the backup secret file.'
+    return $true
+  }
+
+  Set-EnvFileValue -Path $EnvPath -Name 'N8N_ENCRYPTION_KEY' -Value $BackupEncryptionKey
+  Write-Success 'Production .env N8N_ENCRYPTION_KEY updated from the backup secret file.'
+  return $true
 }
 
 function Restore-ProductionPostgresSqlBackup {
@@ -1256,10 +1659,10 @@ function Restore-PreviousProductionServices {
 function Restore-ProductionCloudflareFromBackupMenu {
   Write-Header 'Advanced / Recovery: Restore local n8n from backup'
   Write-Warning 'This restore replaces the production Cloudflare stack database with a selected backup.'
-  Write-Warning 'Use a backup from this launcher, or a trusted database.sql for this same n8n stack.'
+  Write-Warning 'Select a .zip backup package created by this launcher.'
   Write-Host ''
 
-  $backupPath = (Read-Host 'Enter the production backup folder or database.sql path').Trim().Trim('"')
+  $backupPath = (Read-Host 'Enter the production restore .zip path').Trim().Trim('"')
   Write-Host ''
   if (-not $backupPath) {
     Write-Warning 'Restore cancelled.'
@@ -1270,6 +1673,8 @@ function Restore-ProductionCloudflareFromBackupMenu {
     return
   }
 
+  $envPath = Get-EnvPath
+  $backupEncryptionKey = Find-ProductionRestoreBackupEnvValue -Path $backupPath -Name 'N8N_ENCRYPTION_KEY' -TargetEnvPath $envPath
   $detected = Resolve-ProductionRestoreBackup -Path $backupPath
   if (-not $detected.Ok) {
     Write-ErrorMessage $detected.Error
@@ -1286,7 +1691,7 @@ function Restore-ProductionCloudflareFromBackupMenu {
   )
 
   Write-Host "Detected backup type: $($detected.Label)." -ForegroundColor Cyan
-  Write-Host "Database restore file: $($detected.InputPath)" -ForegroundColor Cyan
+  Write-Host "Database restore file staged from zip: $($detected.InputPath)" -ForegroundColor Cyan
   Write-Host ''
   Write-Warning 'This restore will replace the active production Cloudflare n8n database state.'
   Write-Warning 'The launcher will first create a pre-restore database backup for rollback.'
@@ -1309,6 +1714,7 @@ function Restore-ProductionCloudflareFromBackupMenu {
     return
   }
   Write-Success "Pre-restore database backup created: $preRestoreRoot"
+  if (-not (Set-ProductionEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $envPath)) { return }
 
   if (Restore-ProductionPostgresSqlBackup -Backup $detected) {
     Write-Success 'Production Cloudflare n8n database restore completed.'
@@ -1463,7 +1869,7 @@ function Show-CommandList {
   Write-Host '  No Postgres public ports'
   Write-Host '  n8n local browser port must be loopback-only'
   Write-Host '  Back up before updating Postgres'
-  Write-Host '  Back up creates n8n CLI exports, a database dump, manifest, restore notes, and a log'
+  Write-Host '  Back up creates a restore-compatible zip with database.sql, manifest, restore notes, and a log'
   Write-Host ''
   Write-Host 'The launcher writes the active n8n URL into .env.active automatically.' -ForegroundColor Cyan
   Write-Host ''
@@ -1474,8 +1880,8 @@ function Show-CommandList {
   Write-CommandListItem -Number '4' -Name 'Update' -Description 'Pulls selected images and recreates selected containers; backs up before database-impacting updates.'
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state and image details from Docker Compose.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
-  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Exports workflows and encrypted credentials, dumps Postgres, and writes restore notes.'
-  Write-CommandListItem -Number '8' -Name 'Advanced / Recovery: Restore local n8n from backup' -Description 'Restores a production backup folder or database.sql after pre-restore backup and approval.'
+  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Creates a restore-compatible zip package with private restore notes.'
+  Write-CommandListItem -Number '8' -Name 'Advanced / Recovery: Restore local n8n from backup' -Description 'Restores a production backup zip after pre-restore backup and approval.'
   Write-Host ''
   Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
 }

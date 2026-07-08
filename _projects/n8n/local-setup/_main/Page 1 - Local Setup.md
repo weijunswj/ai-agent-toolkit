@@ -487,7 +487,7 @@ If the active `WEBHOOK_URL` in `.env.active` is an ngrok URL while `ngrok` is st
 | 5 | `Show Compose status` | You need deeper troubleshooting details: service state, health, container names, and ports. | No. |
 | 6 | `View logs` | You want to inspect all logs or one service's logs. | Yes. |
 | 7 | `Back up` | You want a local Postgres SQL backup or n8n CLI workflow/credential backup actions. | Yes. |
-| 8 | `Advanced / Recovery: Restore local n8n from backup` | You need to replace the current local database state from a backup folder or file. | No. |
+| 8 | `Advanced / Recovery: Restore local n8n from backup` | You need to replace the current local database state from a backup `.zip` package. | No. |
 | 9 | `Command list` | You want a plain explanation of what each menu command does. | No. |
 | 10 | `Exit` | You want to close the launcher cleanly. | No. |
 
@@ -587,28 +587,28 @@ When automatic backups are not set up:
 
 | Choice | Use when | What it does |
 | --- | --- | --- |
-| `Back up now` | You want a restore-ready local backup immediately. | Creates a restore-compatible recovery folder with `database.sql`, restore metadata, restore notes, and the private backup `.env` when available. |
-| `Set up automatic backups` | You want restore-compatible backup folders on a cadence. | Prompts for cadence, retention, and destination, saves local config, and creates or updates a Windows Task Scheduler task. |
-| `Export workflows/credentials (advanced)` | You intentionally need n8n entity exports instead of a recovery folder. | Runs the n8n CLI export path with workflows and encrypted credentials selected by default; decrypted credential export stays disabled unless explicitly confirmed. |
+| `Back up now` | You want a restore-ready local backup immediately. | Creates a timestamped recovery folder containing a restore-compatible `.zip` package plus the private backup `.env` beside it when available. |
+| `Set up automatic backups` | You want restore-compatible backup zip packages on a cadence. | Prompts for cadence, retention, and destination, saves local config, and creates or updates a Windows Task Scheduler task. |
+| `Export workflows/credentials (advanced)` | You intentionally need n8n entity exports instead of the default recovery zip package. | Runs the n8n CLI export path with workflows and encrypted credentials selected by default; decrypted credential export stays disabled unless explicitly confirmed. |
 | `Back` | You do not want a backup action. | Returns to the main menu. |
 
 When automatic backups are enabled:
 
 | Choice | Use when | What it does |
 | --- | --- | --- |
-| `Back up now` | You want a restore-ready local backup immediately. | Creates the same restore-compatible recovery folder, using the configured automatic backup destination and retention. |
+| `Back up now` | You want a restore-ready local backup immediately. | Creates the same restore-compatible recovery zip package, using the configured automatic backup destination and retention. |
 | `Change automatic backup settings` | You want to change cadence, retention, or destination. | Prompts for automatic backup settings again, then updates the Windows Scheduled Task. |
 | `Remove automatic backups` | You want to stop automatic backups without deleting existing backup folders. | Removes the Windows Scheduled Task when present and marks the local config disabled. |
-| `Export workflows/credentials (advanced)` | You intentionally need n8n entity exports instead of a recovery folder. | Runs the n8n CLI export path with workflows and encrypted credentials selected by default; decrypted credential export stays disabled unless explicitly confirmed. |
+| `Export workflows/credentials (advanced)` | You intentionally need n8n entity exports instead of the default recovery zip package. | Runs the n8n CLI export path with workflows and encrypted credentials selected by default; decrypted credential export stays disabled unless explicitly confirmed. |
 | `Back` | You do not want a backup action. | Returns to the main menu. |
 
 `Back up now` behaviour:
 
 - Creates a timestamped folder named like `n8n-recovery-YYYYMMDD-HHMMSS`.
-- Writes `database.sql`.
-- Writes `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`, when the `.env` file is available.
-- Writes `restore-manifest.json` and `HOW TO USE THIS RESTORE FOLDER.txt`.
-- The folder can be selected directly in `Advanced / Recovery: Restore local n8n from backup`.
+- Writes `n8n-recovery-YYYYMMDD-HHMMSS.zip` inside that folder.
+- The zip contains `database.sql`, `restore-manifest.json`, and `HOW TO USE THIS RESTORE FOLDER.txt`.
+- Writes `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`, beside the zip when the `.env` file is available.
+- Select the `.zip` file in `Advanced / Recovery: Restore local n8n from backup`.
 - Uses the enabled automatic backup destination and retention when automatic backups are enabled.
 - Otherwise uses the safe local default destination:
 
@@ -618,12 +618,11 @@ When automatic backups are enabled:
 
 Recovery folder contents:
 
-- Includes `database.sql`.
-- Includes `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`.
-- Also includes `restore-manifest.json` and `HOW TO USE THIS RESTORE FOLDER.txt`.
+- Includes a restore-compatible `.zip` package with `database.sql`, `restore-manifest.json`, and `HOW TO USE THIS RESTORE FOLDER.txt`.
+- Keeps `SECRET-DO-NOT-COMMIT.env`, a private copy of the backup `.env`, beside that zip.
 - Keep the whole folder private.
 - Do not commit it.
-- The update and restore flows still create database backup folders for rollback, and the normal first-level `Back up now` path also creates a restore-compatible recovery folder.
+- The update and restore flows still create internal database backup folders for rollback, and the normal first-level `Back up now` path creates a restore-compatible recovery zip package.
 
 Automatic backup settings prompts:
 
@@ -637,7 +636,7 @@ Each prompt names the recommended default. Press `Enter` on an empty prompt to a
 %USERPROFILE%\.n8n-local\backups\n8n-cli
 ```
 
-Automatic backups use the same recovery folder format as `Back up now`. Workflows and saved credentials are included through the database backup, and saved credentials remain encrypted by `N8N_ENCRYPTION_KEY`.
+Automatic backups use the same recovery zip package format as `Back up now`. Workflows, saved credentials, user accounts, projects, settings, and other database-backed n8n state are included through `database.sql`, and saved credentials remain encrypted by `N8N_ENCRYPTION_KEY`.
 
 Advanced workflow/credential export prompts:
 
@@ -677,9 +676,9 @@ n8n export:credentials --backup --output=<backup_dir>
 ```
 
 - If decrypted credential export is enabled, the credentials command also adds `--decrypted`.
-- The launcher writes export files to a temporary path inside the n8n container, copies them into the local backup folder, then removes the temporary container path.
+- The launcher writes export files to a temporary path inside the n8n container, copies them into a local staging folder, zips the export, then removes the temporary container path.
 - Each run writes a timestamped folder named like `n8n-cli-YYYYMMDD-HHMMSS`.
-- Each run writes `manifest.json` with the timestamp, Compose project, n8n service/container details, backup options, generated files, credential inclusion, and decrypted credential status.
+- Each run writes `n8n-cli-YYYYMMDD-HHMMSS.zip` with the exported files and `manifest.json`; `SECRET-DO-NOT-COMMIT.env` is kept beside the zip when available.
 - Entity exports are secondary and are not the default recovery backup path.
 - The local config file is saved under `%USERPROFILE%\.n8n-local\backups\n8n-cli-backup-config.json` by default. It stores schedule settings, not secrets.
 
@@ -694,7 +693,7 @@ Scheduling limitations:
 
 - Scheduling uses Windows Task Scheduler because this local stack is Windows-first.
 - The scheduled task runs the same menu script with `--run-n8n-recovery-backup --scheduled`.
-- Existing scheduled tasks that still call `--run-n8n-cli-backup --scheduled` continue to work and now create recovery folders.
+- Existing scheduled tasks that still call `--run-n8n-cli-backup --scheduled` continue to work and now create recovery zip packages.
 - Scheduled backups require Windows, Task Scheduler, Docker Desktop, this local stack folder, and the local Postgres service to be available when the task fires.
 - If Docker Desktop or the local stack is stopped, the scheduled run fails closed instead of deleting data.
 - `Remove automatic backups` removes the scheduled task when present and persists the local config as disabled.
@@ -712,20 +711,17 @@ Advanced command-line helpers:
 Restore:
 
 - Choose `Advanced / Recovery: Restore local n8n from backup`.
-- Paste a recovery folder path, or a `.sql` or `.zip` file path.
+- Paste a `.zip` backup package path.
 - Type `PROCEED` when asked.
-- Recovery folders must contain `database.sql` and `restore-manifest.json`.
-- `.sql` must be `database.sql` from a backup folder.
-- `.zip` can contain a restore-compatible backup package from earlier Toolkit versions.
-- `.zip` can also contain n8n `export:entities` output files for advanced entity restore.
+- A restore-compatible `.zip` should contain `database.sql`; `restore-manifest.json` is recommended but not required if `database.sql` is present.
+- Older `.zip` files containing n8n `export:entities` output files are still accepted for advanced entity restore.
 - `.zip` entity restore requires the same n8n migration state as the source export. If n8n reports a migration timestamp mismatch, retry with the same `N8N_IMAGE` version that created the export, or use a Postgres SQL backup.
 
 Required backup env:
 
 - Restore requires the backup `.env`.
-- Keep `SECRET-DO-NOT-COMMIT.env` beside `database.sql`.
-- For a recovery folder, keep `SECRET-DO-NOT-COMMIT.env` inside that folder.
-- For `.zip`, include `.env` or `SECRET-DO-NOT-COMMIT.env` in the zip, or keep `SECRET-DO-NOT-COMMIT.env` next to the zip.
+- Keep `SECRET-DO-NOT-COMMIT.env` beside the selected `.zip`.
+- Older zips that already include `.env` or `SECRET-DO-NOT-COMMIT.env` are still supported.
 - If the backup env/key is missing, restore stops before stopping services or touching the database.
 - Restore updates the active `.env` `N8N_ENCRYPTION_KEY`.
 - Restore also applies backup `.env` `N8N_IMAGE` when present so the database starts with the source n8n image.
@@ -739,7 +735,7 @@ Safety behaviour:
 - If `n8n` and/or `ngrok` were running before restore, the launcher restarts only those services after restore or rollback.
 - If the container runs but the editor is not reachable, the launcher reports an error instead of calling it healthy.
 - If logs show a local n8n config encryption-key mismatch, the launcher first attempts to sync `/home/node/.n8n/config` to the active `.env` key, then starts services with a second self-heal attempt.
-- If logs show a database schema / image version mismatch, use a backup folder or zip that includes the source backup `.env`, or set `N8N_IMAGE` manually to the source n8n image and retry.
+- If logs show a database schema / image version mismatch, use a zip with the source backup `.env` or sibling `SECRET-DO-NOT-COMMIT.env`, or set `N8N_IMAGE` manually to the source n8n image and retry.
 - Restore creates a pre-restore backup of the current database and current `.env`.
 - If restore fails after changes begin, the launcher tries to roll back automatically.
 - Rollback restores the pre-restore database and pre-restore `.env` when possible.

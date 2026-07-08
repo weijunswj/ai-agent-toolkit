@@ -38,7 +38,7 @@ const configs = [
       update: 'Pulls images and recreates selected containers automatically.',
       status: 'Shows service state, health, container names, and ports.',
       backup: 'Opens safe manual and automatic backup actions.',
-      restore: 'Restores a local database or entities backup after pre-restore backups and approval.'
+      restore: 'Restores a local backup zip after pre-restore backups and approval.'
     },
     preLoop: [
       'Initialize-MenuRuntime',
@@ -78,7 +78,7 @@ const configs = [
       '  No Postgres public ports',
       '  n8n local browser port must be loopback-only',
       '  Back up before updating Postgres',
-      '  Back up creates n8n CLI exports, a database dump, manifest, restore notes, and a log'
+      '  Back up creates a restore-compatible zip with database.sql, manifest, restore notes, and a log'
     ],
     activeUrlLine: 'The launcher writes the active n8n URL into .env.active automatically.',
     tunnelLabel: 'Cloudflare tunnel',
@@ -98,8 +98,8 @@ const configs = [
       stop: 'Stops Cloudflare only, or stops the production stack.',
       update: 'Pulls selected images and recreates selected containers; backs up before database-impacting updates.',
       status: 'Shows service state and image details from Docker Compose.',
-      backup: 'Exports workflows and encrypted credentials, dumps Postgres, and writes restore notes.',
-      restore: 'Restores a production backup folder or database.sql after pre-restore backup and approval.'
+      backup: 'Creates a restore-compatible zip package with private restore notes.',
+      restore: 'Restores a production backup zip after pre-restore backup and approval.'
     },
     preLoop: []
   }

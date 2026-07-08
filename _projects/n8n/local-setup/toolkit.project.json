@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.13",
+  "version": "3.8.14",
   "version_policy": "semver",
-  "version_notes": "Aligns production Cloudflare backups with the local stack restore-compatible database-first backup folder shape.",
+  "version_notes": "Packages local and production Cloudflare restore backups as zip files with sibling secret env files and zip-only restore selection.",
   "outputs": [
     {
       "kind": "curated",
@@ -315,7 +315,7 @@
       "kind": "copy",
       "source": "_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
       "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
-      "notes": "PowerShell menu for production Cloudflare Tunnel preflight, start/stop, restart, status, logs, restore-compatible Postgres manual backup, image updates, and production URL display.",
+      "notes": "PowerShell menu for production Cloudflare Tunnel preflight, start/stop, restart, status, logs, restore-compatible Postgres manual backup zip packages, image updates, and production URL display.",
       "fidelity": "exact"
     },
     {

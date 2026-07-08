@@ -347,22 +347,23 @@ The production menu includes:
 Back up
 ```
 
-It writes a timestamped backup folder under the private stack folder's `backups\` directory.
+It writes a timestamped backup folder under the private stack folder's `backups\` directory. That folder contains a zip package plus the private secret env file beside the zip when `.env` exists.
 
 The manual production backup uses the same restore-compatible database-first shape as the local stack. It includes:
 
 - timestamped folders named `n8n-production-YYYYMMDD-HHMMSS`
-- `database.sql`
-- `SECRET-DO-NOT-COMMIT.env` when `.env` exists
-- `restore-manifest.json`
-- `HOW TO USE THIS RESTORE FOLDER.txt`
-- `README-PRIVATE.txt`
-- `backup.log`
+- `n8n-production-YYYYMMDD-HHMMSS.zip`
+- `SECRET-DO-NOT-COMMIT.env` beside the zip when `.env` exists
+- `database.sql` inside the zip
+- `restore-manifest.json` inside the zip
+- `HOW TO USE THIS RESTORE FOLDER.txt` inside the zip
+- `README-PRIVATE.txt` inside the zip
+- `backup.log` inside the zip
 - retention cleanup with a 30-day default
 
 `database.sql` is the full n8n Postgres database backup for this stack. It contains workflows, encrypted credential records, settings, users/projects, and other database-backed n8n state. The production Cloudflare menu does not create separate workflow or credential export folders by default because restore uses the database backup.
 
-Backups may contain private workflows, executions, encrypted credential records, and private environment values. Keep them private. Do not commit backups, logs, database dumps, `SECRET-DO-NOT-COMMIT.env`, or production `.env` files.
+Backups may contain private workflows, executions, encrypted credential records, and private environment values. Keep them private. Do not commit backup zips, logs, database dumps, `SECRET-DO-NOT-COMMIT.env`, or production `.env` files.
 
 The production Cloudflare menu does not set up automatic backups. Backups run only when you choose `Back up` from the menu. Do not use Windows Task Scheduler for this production/server documentation path.
 
@@ -414,9 +415,11 @@ Use the production menu for normal operations:
 | `Update` | Pull and recreate selected services, with backup before Postgres update. |
 | `Show Compose status` | Inspect Compose service state and images. |
 | `View logs` | Inspect recent logs for all services or one service. |
-| `Back up` | Create a private restore-compatible backup folder with `database.sql`, private env copy when available, restore manifest, restore notes, log, and retention cleanup. |
-| `Advanced / Recovery: Restore local n8n from backup` | Restore a production backup folder or trusted `database.sql` after a pre-restore backup and `PROCEED` approval. |
+| `Back up` | Create a private restore-compatible backup folder containing a zip package, private env copy beside the zip when available, and retention cleanup. |
+| `Advanced / Recovery: Restore local n8n from backup` | Restore a production backup zip after a pre-restore backup and `PROCEED` approval. |
 | `Command list` | Show the recommended launcher and menu action summary. |
+
+Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT.env` beside the selected zip, or from an older zip that contains a backup `.env`, and applies it to the active production `.env` before the restored database is started. If no backup key is found, the database restore can continue, but saved credentials may not decrypt unless the active `.env` already has the original key.
 
 Preflight is automatic on the launch, tunnel, backup, and update paths that need it. Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, recovery, and update choices stay visible.
 
