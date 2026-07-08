@@ -2305,6 +2305,56 @@ function Set-ProductionEncryptionKeyForRestore {
   return $true
 }
 
+function Repair-ProductionN8nConfigEncryptionKey {
+  Write-Warning 'n8n config encryption key does not match the active .env key. Attempting production stack self-heal.'
+  Write-Info 'Stopping n8n before updating /home/node/.n8n/config inside the production Docker volume.'
+  Write-Info 'Repair scope: writes only /home/node/.n8n/config inside the n8n container volume; your .env values are not changed.'
+  [void](Invoke-Compose -Arguments @('stop', '--timeout', '10', 'n8n'))
+
+  $nodeScript = @'
+const fs = require(`fs`);
+const path = require(`path`);
+const configPath = `/home/node/.n8n/config`;
+const key = process.env.N8N_ENCRYPTION_KEY;
+if (!key) {
+  console.error(`N8N_ENCRYPTION_KEY is missing.`);
+  process.exit(2);
+}
+let config = {};
+const configDir = path.dirname(configPath);
+if (!fs.existsSync(configDir)) {
+  fs.mkdirSync(configDir, { recursive: true });
+}
+if (fs.existsSync(configPath)) {
+  try {
+    const fileText = fs.readFileSync(configPath, `utf8`);
+    if (fileText.trim()) {
+      config = JSON.parse(fileText);
+    }
+  } catch (error) {
+    console.warn(`Could not parse existing n8n config file. Recreating with current encryption key.`);
+  }
+}
+if (!config || typeof config !== `object` || Array.isArray(config)) {
+  config = {};
+}
+if (config.encryptionKey === key) {
+  process.exit(0);
+}
+config.encryptionKey = key;
+fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+'@
+
+  $exitCode = Invoke-Compose -Arguments @('run', '--rm', '--pull', 'never', '--no-deps', '-T', '--entrypoint', 'node', 'n8n', '-e', $nodeScript)
+  if ($exitCode -ne 0) {
+    Write-ErrorMessage 'Could not update the production n8n config encryption key.'
+    return $false
+  }
+
+  Write-Success 'Production n8n config encryption key was synced to the active .env key.'
+  return $true
+}
+
 function Write-MissingProductionCredentialRestoreKeyError {
   Write-ErrorMessage 'Credential entities were found, but no source backup N8N_ENCRYPTION_KEY was found.'
   Write-Info 'Include the backup .env or SECRET-DO-NOT-COMMIT.env with the .zip, then run restore again.'
@@ -2769,6 +2819,7 @@ function Restore-ProductionCloudflareFromBackupMenu {
   $preRestoreEncryptionKey = Find-ProductionRestoreBackupEnvValue -Path $preRestoreZipPath -Name 'N8N_ENCRYPTION_KEY' -TargetEnvPath $envPath
   Write-Success "Pre-restore database backup package created: $preRestoreZipPath"
   if (-not (Set-ProductionEncryptionKeyForRestore -BackupEncryptionKey $backupEncryptionKey -EnvPath $envPath)) { return }
+  if ($backupEncryptionKey -and -not (Repair-ProductionN8nConfigEncryptionKey)) { return }
 
   $ok = $false
   switch ($detected.Type) {

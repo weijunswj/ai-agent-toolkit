@@ -1604,6 +1604,7 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Resolve-ProductionN8nImageForEntityRestore -Backup \$detected/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Write-MissingProductionCredentialRestoreKeyError/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Add-Member -NotePropertyName RestoreN8nImage/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Set-ProductionEncryptionKeyForRestore[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*\$ok = \$false/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /'n8n-entities' \{[\s\S]*Update-ProductionN8nImageForRestore[\s\S]*Restore-ProductionN8nEntitiesBackup -Backup \$detected/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /InputPath = \$preRestoreExpanded\.DatabaseSqlPath/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Restore-PreviousProductionServices -PreviousServices \$preRestoreServices -StartN8nWhenNone/);
@@ -1624,7 +1625,9 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Get-ProductionRestoreEnvBackupNames'), /SECRET-DO-NOT-COMMIT\.env[\s\S]*\.env/);
   assert.match(functionBody(menu, 'Find-ProductionRestoreBackupEnvValue'), /ZipFile\]::OpenRead[\s\S]*siblingSecret/);
   assert.match(functionBody(menu, 'Set-ProductionEncryptionKeyForRestore'), /N8N_ENCRYPTION_KEY[\s\S]*Set-EnvFileValue/);
-  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Find-ProductionRestoreBackupEnvValue -Path \$backupPath -Name 'N8N_ENCRYPTION_KEY'[\s\S]*Set-ProductionEncryptionKeyForRestore/);
+  assert.match(functionBody(menu, 'Repair-ProductionN8nConfigEncryptionKey'), /stop', '--timeout', '10', 'n8n'[\s\S]*const configPath = `\/home\/node\/\.n8n\/config`;[\s\S]*process\.env\.N8N_ENCRYPTION_KEY[\s\S]*config\.encryptionKey = key[\s\S]*'--pull', 'never'[\s\S]*--entrypoint', 'node'/);
+  assert.doesNotMatch(functionBody(menu, 'Repair-ProductionN8nConfigEncryptionKey'), /Write-Host \$key|Write-Info \$key|Write-Success \$key|Write-Warning \$key/);
+  assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Find-ProductionRestoreBackupEnvValue -Path \$backupPath -Name 'N8N_ENCRYPTION_KEY'[\s\S]*Set-ProductionEncryptionKeyForRestore[\s\S]*Repair-ProductionN8nConfigEncryptionKey/);
   assert.match(menu, /'8' \{ Invoke-MenuAction \{ Restore-ProductionCloudflareFromBackupMenu \} \}/);
   assert.match(shortcut, /%USERPROFILE%\\\.n8n-production-cloudflare/);
   assert.match(shortcut, /_n8n-production-cloudflare\.cmd/);

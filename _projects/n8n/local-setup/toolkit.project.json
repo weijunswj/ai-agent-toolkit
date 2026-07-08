@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.19",
+  "version": "3.8.20",
   "version_policy": "semver",
-  "version_notes": "Verifies production Cloudflare entity restore imports rows and waits for n8n readiness after production starts.",
+  "version_notes": "Syncs the production n8n volume config encryption key before restore imports or starts restored data.",
   "outputs": [
     {
       "kind": "curated",
