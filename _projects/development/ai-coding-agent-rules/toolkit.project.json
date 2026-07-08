@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "version_policy": "semver",
-  "version_notes": "Adds MCP metadata threat-model and static-only MCP config review guidance to the n8n-agent-rules operating contract.",
+  "version_notes": "Removes pending-CI wait guidance from repo-local agent rules so agents report pending status instead of waiting.",
   "outputs": [
     {
       "kind": "curated",

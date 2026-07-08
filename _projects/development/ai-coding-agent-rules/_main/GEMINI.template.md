@@ -173,7 +173,7 @@ After pushing:
 
 - Check PR CI/status before reporting completion.
 - If CI is green, report completion.
-- If pending, say it is pending and not yet verified, or wait when practical.
+- If pending, say it is pending and not yet verified.
 - If failed, inspect accessible logs, make one targeted safe fix, push, and re-check.
 - After two failed fix attempts, stop and report the blocker.
 - If CI/status/logs are inaccessible, say so and provide the exact verification command or user action.
