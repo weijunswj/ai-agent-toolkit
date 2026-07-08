@@ -242,10 +242,11 @@ The base n8n preflight validates:
 - `docker-compose.yml` exists.
 - `.env` exists.
 - `N8N_LOCAL_PORT` is a valid local port.
-- `N8N_ENCRYPTION_KEY` is present and not a placeholder.
 - `POSTGRES_PASSWORD` is present and not a placeholder.
 - Postgres has no public port mapping.
 - n8n's browser port is loopback-only.
+
+If `N8N_ENCRYPTION_KEY` is missing or still a placeholder, the base preflight warns but still allows local n8n to start. Replace it before saving production credentials or starting the Cloudflare tunnel.
 
 After startup, open:
 

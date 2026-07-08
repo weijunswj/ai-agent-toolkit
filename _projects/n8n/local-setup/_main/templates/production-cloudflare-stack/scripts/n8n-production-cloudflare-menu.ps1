@@ -452,7 +452,11 @@ function Invoke-BasePreflight {
   $ok = (Add-PreflightResult -Name 'N8N_LOCAL_PORT is a valid local port' -Passed (Test-LocalPortConfig -Values $values) -Why 'Docker needs a valid localhost port for the n8n editor.' -Fix 'Use a whole number from 1 to 65535, such as 5678 or 5679.') -and $ok
 
   $n8nKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -Values $values
-  $ok = (Add-PreflightResult -Name 'N8N_ENCRYPTION_KEY is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $n8nKey)) -Why 'n8n uses this key to encrypt saved credentials; changing or missing it can make credentials unreadable.' -Fix 'Replace it privately in .env with a long random value, then keep the same value forever for this stack.') -and $ok
+  if (Test-PlaceholderValue -Value $n8nKey) {
+    Write-Warning 'N8N_ENCRYPTION_KEY is missing or still a placeholder. Local n8n start is allowed, but replace it before saving credentials or starting the Cloudflare tunnel.'
+  } else {
+    Write-Success 'N8N_ENCRYPTION_KEY is set'
+  }
 
   $postgresPassword = Get-EnvValue -Name 'POSTGRES_PASSWORD' -Values $values
   $ok = (Add-PreflightResult -Name 'POSTGRES_PASSWORD is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $postgresPassword)) -Why 'Postgres requires a real private password before the database container starts.' -Fix 'Replace it privately in .env with a strong random password.') -and $ok
@@ -483,6 +487,9 @@ function Invoke-SafetyPreflight {
   $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_HOST is hostname-only' -Passed (Test-HostnameOnly -HostName $publicHost) -Why 'Cloudflare routes a hostname, not a full URL.' -Fix 'Use your n8n subdomain, such as n8n.example.com, with no https://, path, port, or slash.') -and $ok
   $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_URL starts with https:// and ends with /' -Passed ($publicUrl.StartsWith('https://') -and $publicUrl.EndsWith('/')) -Why 'n8n needs the public HTTPS editor and webhook base URL exactly.' -Fix 'Use a value shaped like https://n8n.example.com/.') -and $ok
   $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_URL host matches N8N_PUBLIC_HOST' -Passed (Test-PublicUrlMatchesHost -PublicUrl $publicUrl -PublicHost $publicHost) -Why 'The public URL and Cloudflare hostname must describe the same n8n site.' -Fix 'Make N8N_PUBLIC_URL use the same hostname as N8N_PUBLIC_HOST.') -and $ok
+
+  $n8nKey = Get-EnvValue -Name 'N8N_ENCRYPTION_KEY' -Values $values
+  $ok = (Add-PreflightResult -Name 'N8N_ENCRYPTION_KEY is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $n8nKey)) -Why 'Public production n8n should not use a missing or template encryption key for saved credentials.' -Fix 'Replace it privately in .env with a long random value, then keep the same value forever for this stack.') -and $ok
 
   $tunnelToken = Get-EnvValue -Name 'CLOUDFLARED_TUNNEL_TOKEN' -Values $values
   $ok = (Add-PreflightResult -Name 'CLOUDFLARED_TUNNEL_TOKEN is present and not a placeholder' -Passed (-not (Test-PlaceholderValue -Value $tunnelToken)) -Why 'cloudflared cannot attach this stack to your Cloudflare Tunnel without a real tunnel token.' -Fix 'Create or open the Cloudflare Tunnel, copy its token into .env, or use Start n8n to run locally without Cloudflare.') -and $ok
