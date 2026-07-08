@@ -153,30 +153,25 @@ Do not paste real values into this repo, issues, pull requests, screenshots, cha
 | `POSTGRES_USER` | Production database user. | `n8n` is fine unless you intentionally separate stacks. |
 | `POSTGRES_PASSWORD` | Strong production database password. | Generate privately and store in a password manager. |
 | `N8N_ENCRYPTION_KEY` | Long random key generated once. | Store outside the machine and never change after credentials exist. |
-| `N8N_PUBLIC_HOST` | Hostname only. | No `https://`, no path, no slash, no port. |
-| `N8N_PUBLIC_URL` | Full public URL. | Must start with `https://` and end with `/`. |
-| `N8N_PROTOCOL` | Public protocol. | Use `https`. |
-| `WEBHOOK_URL` | Full public URL. | Must exactly match `N8N_PUBLIC_URL`. |
-| `N8N_EDITOR_BASE_URL` | Full public URL. | Must exactly match `N8N_PUBLIC_URL`. |
-| `N8N_PROXY_HOPS` | Trusted proxy hop count. | Use `1` for this Cloudflare Tunnel path. |
-| `CLOUDFLARED_IMAGE` | Cloudflare connector image. | Default is `cloudflare/cloudflared:latest`; pin intentionally if needed. |
-| `CLOUDFLARED_TUNNEL_TOKEN` | Tunnel token from Cloudflare. | Store only in private `.env` or secret storage. |
-| `GENERIC_TIMEZONE` | IANA timezone. | Example placeholder is `Etc/UTC`. |
+| `LOCAL_TIMEZONE` | IANA timezone. | Matches the local stack variable name. |
 | `N8N_IMAGE` | n8n image. | Default is `docker.n8n.io/n8nio/n8n:stable`; pin intentionally if needed. |
 | `POSTGRES_IMAGE` | Postgres image. | Default is `postgres:16-alpine`. |
+| `CLOUDFLARED_IMAGE` | Cloudflare connector image. | Default is `cloudflare/cloudflared:latest`; pin intentionally if needed. |
+| `N8N_BACKUP_RETENTION_DAYS` | Backup retention days. | Used by the production launcher Back up action. |
+| `N8N_PUBLIC_HOST` | Hostname only. | No `https://`, no path, no slash, no port. |
+| `N8N_PUBLIC_URL` | Full public URL. | Must start with `https://` and end with `/`. |
+| `CLOUDFLARED_TUNNEL_TOKEN` | Tunnel token from Cloudflare. | Store only in private `.env` or secret storage. |
 
 Example placeholder shape:
 
 ```text
 N8N_PUBLIC_HOST=n8n.example.com
 N8N_PUBLIC_URL=https://n8n.example.com/
-WEBHOOK_URL=https://n8n.example.com/
-N8N_EDITOR_BASE_URL=https://n8n.example.com/
 ```
 
 Use your real private production hostname in `.env`, not in repo files.
 
-For n8n behind Cloudflare Tunnel, set `WEBHOOK_URL` manually and set `N8N_PROXY_HOPS=1`. n8n uses those values to show and register the correct public webhook URLs when the app is behind a proxy or tunnel.
+For n8n behind Cloudflare Tunnel, fill `N8N_PUBLIC_HOST` and `N8N_PUBLIC_URL` once. The Compose file derives `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL`, `N8N_PROTOCOL=https`, and `N8N_PROXY_HOPS=1` from those production values so the `.env` stays close to the local stack shape.
 
 ---
 
@@ -197,7 +192,7 @@ Do this in Cloudflare, not in repo files.
    ```
 
 8. Save the route.
-9. In `.env`, set `N8N_PUBLIC_HOST`, `N8N_PUBLIC_URL`, `WEBHOOK_URL`, and `N8N_EDITOR_BASE_URL` to match the public hostname.
+9. In `.env`, set `N8N_PUBLIC_HOST` and `N8N_PUBLIC_URL` to match the public hostname.
 
 Cloudflare Tunnel DNS routes the hostname to the tunnel target. Cloudflare may create or expect a DNS route such as a CNAME to the tunnel target, depending on whether you use the dashboard route flow or CLI-managed DNS route flow.
 
@@ -224,16 +219,14 @@ Open the private production stack folder and run:
 Choose:
 
 ```text
-Safety preflight
+Advanced / Safety: Production preflight
 ```
 
 The preflight validates:
 
 - `N8N_PUBLIC_HOST` is hostname-only.
 - `N8N_PUBLIC_URL` starts with `https://` and ends with `/`.
-- `WEBHOOK_URL` matches `N8N_PUBLIC_URL`.
-- `N8N_EDITOR_BASE_URL` matches `N8N_PUBLIC_URL`.
-- `N8N_PROXY_HOPS` is `1`.
+- `N8N_PUBLIC_URL` uses the same hostname as `N8N_PUBLIC_HOST`.
 - `CLOUDFLARED_TUNNEL_TOKEN` is present and not a placeholder.
 - `N8N_ENCRYPTION_KEY` is present and not a placeholder.
 - `POSTGRES_PASSWORD` is present and not a placeholder.
@@ -259,7 +252,7 @@ Start only after:
 From the menu, choose:
 
 ```text
-Start production stack
+Start n8n
 ```
 
 The menu starts:
@@ -297,7 +290,7 @@ At minimum:
 The production menu includes:
 
 ```text
-Back up now
+Back up
 ```
 
 It writes a timestamped backup folder under the private stack folder's `backups\` directory.
@@ -331,10 +324,10 @@ Offsite or cloud storage is intentionally not configured here. Treat offsite sto
 Use the menu:
 
 ```text
-Check/update images
+Update
 ```
 
-If the update includes Postgres, the menu runs `Back up now` first and stops the update if the backup fails.
+If the update includes Postgres, the menu runs `Back up` first and stops the update if the backup fails.
 
 Update choices:
 
@@ -351,8 +344,6 @@ If the public hostname changes, update:
 
 - `N8N_PUBLIC_HOST`
 - `N8N_PUBLIC_URL`
-- `WEBHOOK_URL`
-- `N8N_EDITOR_BASE_URL`
 
 Then restart n8n and verify editor and webhook URLs again.
 
@@ -364,15 +355,15 @@ Use the production menu for normal operations:
 
 | Menu item | Use when |
 | --- | --- |
-| `Safety preflight` | Before first launch, after `.env` changes, and before production updates. |
-| `Start production stack` | Start Postgres, n8n, and cloudflared. |
-| `Stop production stack` | Stop the production stack without deleting volumes. |
+| `Start n8n` | Run production preflight, then start Postgres, n8n, and cloudflared. |
 | `Restart n8n` | Apply n8n environment changes or restart the app container. |
-| `View status` | Inspect Compose service state and images. |
+| `Stop n8n` | Stop the production stack without deleting volumes. |
+| `Update` | Pull and recreate selected services, with backup before Postgres update. |
+| `Show Compose status` | Inspect Compose service state and images. |
 | `View logs` | Inspect recent logs for all services or one service. |
-| `Back up now` | Create a private all-inclusive backup with workflow export, credential export, Postgres dump, manifest, restore notes, log, and retention cleanup. |
-| `Check/update images` | Pull and recreate selected services, with backup before Postgres update. |
-| `Print production URL` | Show `N8N_PUBLIC_URL` from private `.env`. |
+| `Back up` | Create a private all-inclusive backup with workflow export, credential export, Postgres dump, manifest, restore notes, log, and retention cleanup. |
+| `Advanced / Safety: Production preflight` | Before first launch, after `.env` changes, and before production updates. |
+| `Command list` | Show the recommended launcher and menu action summary. |
 
 Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, and update choices stay visible.
 

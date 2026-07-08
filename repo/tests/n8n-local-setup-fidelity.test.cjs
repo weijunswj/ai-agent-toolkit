@@ -1416,13 +1416,14 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
 test('Production Cloudflare guide and menu use all-inclusive production backups', () => {
   const guide = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md');
   const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1');
+  const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/docker-compose.yml');
   const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.env.example');
   const runtimeIgnore = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.gitignore');
 
   assert.match(guide, /Private runtime ignore template/);
   assert.match(guide, /Linux server backup template/);
   assert.match(guide, /\[production server backup template\]\(\.\/templates\/production-server-backups\/\)/);
-  assert.match(guide, /`Back up now`/);
+  assert.match(guide, /`Back up`/);
   assert.match(guide, /n8n export:workflow --backup --output=<backup_dir>/);
   assert.match(guide, /n8n export:credentials --backup --output=<backup_dir>/);
   assert.match(guide, /encrypted credential export only/);
@@ -1457,6 +1458,8 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ImageVersions -RunningServices \$runningServices/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Do not launch production n8n directly from Docker Desktop/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Advanced \/ Safety: Production preflight/);
+  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /N8N_PUBLIC_URL host matches N8N_PUBLIC_HOST/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /WEBHOOK_URL matches|N8N_EDITOR_BASE_URL matches|N8N_PROXY_HOPS is 1/);
   assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /export:workflow[\s\S]*export:credentials/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Get-N8nCliProductionBackupSpecs[\s\S]*Backup-Postgres/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Add-ProductionBackupLog[\s\S]*Write-ProductionBackupRestoreNotes[\s\S]*Write-ProductionBackupManifest/);
@@ -1472,7 +1475,24 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.doesNotMatch(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /--decrypted/);
   assert.doesNotMatch(menu, /Windows Task Scheduler|Register-ScheduledTask|New-ScheduledTaskTrigger|Unregister-ScheduledTask/);
 
+  assert.match(envExample, /\[ STEP 1: Fill These Before First Production Launch \]/);
+  assert.match(envExample, /\[ STEP 2: Fill These After Cloudflare Tunnel Is Ready \]/);
+  assert.match(envExample, /^LOCAL_TIMEZONE=Asia\/Singapore$/m);
+  assert.match(envExample, /^N8N_PUBLIC_HOST=n8n\.example\.com$/m);
+  assert.match(envExample, /^N8N_PUBLIC_URL=https:\/\/n8n\.example\.com\/$/m);
+  assert.match(envExample, /^CLOUDFLARED_TUNNEL_TOKEN=replace-with-cloudflare-tunnel-token$/m);
   assert.match(envExample, /^N8N_BACKUP_RETENTION_DAYS=30$/m);
+  assert.doesNotMatch(envExample, /^WEBHOOK_URL=/m);
+  assert.doesNotMatch(envExample, /^N8N_EDITOR_BASE_URL=/m);
+  assert.doesNotMatch(envExample, /^N8N_PROTOCOL=/m);
+  assert.doesNotMatch(envExample, /^N8N_PROXY_HOPS=/m);
+  assert.doesNotMatch(envExample, /^GENERIC_TIMEZONE=/m);
+  assert.match(compose, /WEBHOOK_URL: \$\{N8N_PUBLIC_URL\}/);
+  assert.match(compose, /N8N_EDITOR_BASE_URL: \$\{N8N_PUBLIC_URL\}/);
+  assert.match(compose, /N8N_PROTOCOL: https/);
+  assert.match(compose, /N8N_PROXY_HOPS: 1/);
+  assert.match(compose, /GENERIC_TIMEZONE: \$\{LOCAL_TIMEZONE:-Asia\/Singapore\}/);
+  assert.doesNotMatch(compose, /ports:\n\s+- "127\.0\.0\.1:\$\{N8N_LOCAL_PORT/);
   for (const ignored of ['.env', '.env.*', '!.env.example', 'backups/', 'logs/', '*.sql', '*.dump', '*.backup', '*.zip', '*.tar', '*.tgz', '**/SECRET-DO-NOT-COMMIT.env']) {
     assert.match(runtimeIgnore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
   }

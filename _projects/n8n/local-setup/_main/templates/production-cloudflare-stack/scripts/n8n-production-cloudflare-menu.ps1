@@ -298,6 +298,21 @@ function Test-HostnameOnly {
   return $true
 }
 
+function Test-PublicUrlMatchesHost {
+  param(
+    [string]$PublicUrl,
+    [string]$PublicHost
+  )
+
+  try {
+    $uri = [Uri]$PublicUrl
+  } catch {
+    return $false
+  }
+
+  return ($uri.Scheme -eq 'https' -and $uri.Host -eq $PublicHost)
+}
+
 function Get-ServiceBlock {
   param([string]$ServiceName)
 
@@ -367,15 +382,10 @@ function Invoke-SafetyPreflight {
   $values = Read-EnvFile
   $publicHost = Get-EnvValue -Name 'N8N_PUBLIC_HOST' -Values $values
   $publicUrl = Get-EnvValue -Name 'N8N_PUBLIC_URL' -Values $values
-  $webhookUrl = Get-EnvValue -Name 'WEBHOOK_URL' -Values $values
-  $editorUrl = Get-EnvValue -Name 'N8N_EDITOR_BASE_URL' -Values $values
-  $proxyHops = Get-EnvValue -Name 'N8N_PROXY_HOPS' -Values $values
 
   $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_HOST is hostname-only' -Passed (Test-HostnameOnly -HostName $publicHost) -Failure 'use a hostname like n8n.example.com, with no protocol, path, port, or slash') -and $ok
   $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_URL starts with https:// and ends with /' -Passed ($publicUrl.StartsWith('https://') -and $publicUrl.EndsWith('/')) -Failure 'use a value shaped like https://n8n.example.com/') -and $ok
-  $ok = (Add-PreflightResult -Name 'WEBHOOK_URL matches N8N_PUBLIC_URL' -Passed ($webhookUrl -eq $publicUrl) -Failure 'set WEBHOOK_URL to the exact public URL, including trailing slash') -and $ok
-  $ok = (Add-PreflightResult -Name 'N8N_EDITOR_BASE_URL matches N8N_PUBLIC_URL' -Passed ($editorUrl -eq $publicUrl) -Failure 'set N8N_EDITOR_BASE_URL to the exact public URL, including trailing slash') -and $ok
-  $ok = (Add-PreflightResult -Name 'N8N_PROXY_HOPS is 1' -Passed ($proxyHops -eq '1') -Failure 'set N8N_PROXY_HOPS=1 for this Cloudflare Tunnel path') -and $ok
+  $ok = (Add-PreflightResult -Name 'N8N_PUBLIC_URL host matches N8N_PUBLIC_HOST' -Passed (Test-PublicUrlMatchesHost -PublicUrl $publicUrl -PublicHost $publicHost) -Failure 'make N8N_PUBLIC_URL use the same hostname as N8N_PUBLIC_HOST') -and $ok
 
   foreach ($secretName in @('CLOUDFLARED_TUNNEL_TOKEN', 'N8N_ENCRYPTION_KEY', 'POSTGRES_PASSWORD')) {
     $secretValue = Get-EnvValue -Name $secretName -Values $values
@@ -756,7 +766,7 @@ function Backup-N8nProductionNow {
 
   New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
   Add-ProductionBackupLog -BackupDir $backupDir -Message "Starting production n8n backup in $backupDir"
-  Write-Info 'Back up now exports workflows, exports credentials, dumps Postgres, writes a manifest, and applies retention cleanup.'
+  Write-Info 'Back up exports workflows, exports credentials, dumps Postgres, writes a manifest, and applies retention cleanup.'
   Write-Info 'Decrypted credential export is disabled for this production launcher.'
 
   $ok = $true
@@ -881,7 +891,7 @@ function Show-CommandList {
   Write-Host '  No Postgres public ports'
   Write-Host '  No public direct n8n host port 5678'
   Write-Host '  Back up before updating Postgres'
-  Write-Host '  Back up now creates n8n CLI exports, a database dump, manifest, restore notes, and a log'
+  Write-Host '  Back up creates n8n CLI exports, a database dump, manifest, restore notes, and a log'
   Write-Host ''
   Write-Host 'Use the numbered menu options for normal work:' -ForegroundColor Cyan
   Write-CommandListItem -Number '1' -Name 'Start n8n' -Description 'Runs production preflight, then starts Postgres, n8n, and cloudflared.'

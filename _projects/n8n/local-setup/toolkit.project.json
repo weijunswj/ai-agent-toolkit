@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.2",
+  "version": "3.8.3",
   "version_policy": "semver",
-  "version_notes": "Aligns the production Cloudflare Windows menu with the local stack menu shape, including quick status, image summaries, and matching top-level action order.",
+  "version_notes": "Aligns the production Cloudflare stack templates more closely with the local stack by simplifying env setup around one public URL and matching Compose defaults.",
   "outputs": [
     {
       "kind": "curated",
