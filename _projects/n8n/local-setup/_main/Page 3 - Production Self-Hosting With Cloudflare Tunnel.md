@@ -171,7 +171,7 @@ N8N_PUBLIC_URL=https://n8n.example.com/
 
 Use your real private production hostname in `.env`, not in repo files.
 
-For n8n behind Cloudflare Tunnel, fill `N8N_PUBLIC_HOST` and `N8N_PUBLIC_URL` once. The Compose file derives `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL`, `N8N_PROTOCOL=https`, and `N8N_PROXY_HOPS=1` from those production values so the `.env` stays close to the local stack shape.
+For n8n behind Cloudflare Tunnel, fill `N8N_PUBLIC_HOST` and `N8N_PUBLIC_URL` once. The launcher writes `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL`, `N8N_HOST`, and `N8N_PROTOCOL` into `.env.active` when you choose a start mode, so the `.env` stays close to the local stack shape.
 
 You can start Postgres and n8n locally before Cloudflare is ready. The local browser URL is:
 
@@ -228,6 +228,7 @@ Choose:
 
 ```text
 Start n8n
+Localhost only
 ```
 
 This starts:
@@ -245,7 +246,7 @@ The base n8n preflight validates:
 - Postgres has no public port mapping.
 - n8n's browser port is loopback-only.
 
-If `N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is missing or still a placeholder, the base preflight warns but still allows local n8n to start. Replace both before saving production credentials, saving production data, or starting the Cloudflare tunnel.
+If `N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is missing or still a placeholder, the base preflight warns but still allows local n8n to start. Replace both before saving credentials or production data you care about.
 
 After startup, open:
 
@@ -264,6 +265,7 @@ Run this only after Cloudflare setup is ready.
 From the menu, choose:
 
 ```text
+Start n8n
 Start Cloudflare tunnel
 ```
 
@@ -273,10 +275,10 @@ The Cloudflare preflight validates:
 - `N8N_PUBLIC_URL` starts with `https://` and ends with `/`.
 - `N8N_PUBLIC_URL` uses the same hostname as `N8N_PUBLIC_HOST`.
 - `CLOUDFLARED_TUNNEL_TOKEN` is present and not a placeholder.
-- `N8N_ENCRYPTION_KEY` is present and not a placeholder.
-- `POSTGRES_PASSWORD` is present and not a placeholder.
 - Postgres has no public port mapping.
 - n8n's browser port is loopback-only.
+
+If `N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is still a placeholder, the Cloudflare preflight warns and continues.
 
 If you only want local n8n without Cloudflare, keep using `Start n8n`; Cloudflare-specific values can wait.
 
@@ -297,6 +299,7 @@ Start only after:
 From the menu, choose:
 
 ```text
+Start n8n
 Start Cloudflare tunnel
 ```
 
@@ -400,14 +403,13 @@ Use the production menu for normal operations:
 
 | Menu item | Use when |
 | --- | --- |
-| `Start n8n` | Run base n8n preflight, then start Postgres and n8n for local browser access. |
+| `Start n8n` | Choose localhost-only or Cloudflare tunnel start mode. |
 | `Restart n8n` | Apply n8n environment changes or restart the app container. |
-| `Stop n8n` | Stop the production stack without deleting volumes. |
+| `Stop n8n` | Stop Cloudflare only, or stop the production stack without deleting volumes. |
 | `Update` | Pull and recreate selected services, with backup before Postgres update. |
 | `Show Compose status` | Inspect Compose service state and images. |
 | `View logs` | Inspect recent logs for all services or one service. |
 | `Back up` | Create a private all-inclusive backup with workflow export, credential export, Postgres dump, manifest, restore notes, log, and retention cleanup. |
-| `Start Cloudflare tunnel` | Run Cloudflare preflight, then start Postgres, n8n, and cloudflared. |
 | `Advanced / Safety: Production preflight` | Before first launch, after `.env` changes, and before production updates. |
 | `Command list` | Show the recommended launcher and menu action summary. |
 

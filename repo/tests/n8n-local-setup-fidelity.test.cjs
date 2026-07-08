@@ -1441,9 +1441,10 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(guide, /future hardening item/);
   assert.match(guide, /You can start Postgres and n8n locally before Cloudflare is ready/);
   assert.match(guide, /It does not start `cloudflared`, and it does not require `CLOUDFLARED_TUNNEL_TOKEN`/);
+  assert.match(guide, /launcher writes `WEBHOOK_URL`, `N8N_EDITOR_BASE_URL`, `N8N_HOST`, and `N8N_PROTOCOL` into `\.env\.active`/);
   assert.match(guide, /`N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is missing or still a placeholder/);
   assert.match(guide, /`N8N_PUBLIC_HOST` \| Your n8n subdomain\/hostname only/);
-  assert.match(guide, /`Start Cloudflare tunnel` \| Run Cloudflare preflight/);
+  assert.match(guide, /If `N8N_ENCRYPTION_KEY` or `POSTGRES_PASSWORD` is still a placeholder, the Cloudflare preflight warns and continues/);
   assert.doesNotMatch(guide, /Backup Postgres/);
 
   assert.deepEqual(menuOptions(menu, 'Show-MainMenu'), [
@@ -1454,14 +1455,26 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
     'Show Compose status',
     'View logs',
     'Back up',
-    'Start Cloudflare tunnel',
     'Advanced / Safety: Production preflight',
     'Command list',
     'Exit'
   ]);
+  assert.deepEqual(menuOptions(menu, 'Show-StartMenu'), [
+    'Localhost only',
+    'Start Cloudflare tunnel',
+    'Update all, then start with Cloudflare tunnel',
+    'Cancel'
+  ]);
+  assert.deepEqual(menuOptions(menu, 'Show-StopMenu'), [
+    'n8n + Cloudflare tunnel',
+    'Stop Cloudflare tunnel',
+    'Cancel'
+  ]);
 
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Quick service status:/);
-  assert.match(functionBody(menu, 'Show-LaunchStatus'), /local editor:/);
+  assert.match(functionBody(menu, 'Set-ActiveN8nUrl'), /\.env\.active[\s\S]*WEBHOOK_URL=\$activeUrl[\s\S]*N8N_EDITOR_BASE_URL=\$activeUrl[\s\S]*N8N_HOST=\$HostName[\s\S]*N8N_PROTOCOL=\$\(\$uri\.Scheme\)/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /active n8n URL/);
+  assert.match(functionBody(menu, 'Show-LaunchStatus'), /Active n8n URL is still using Cloudflare, but cloudflared is stopped/);
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ServiceStatus -Name 'cloudflared'[\s\S]*public tunnel is ON/);
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Write-ImageVersions -RunningServices \$runningServices/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Do not launch production n8n directly from Docker Desktop/);
@@ -1469,19 +1482,23 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.match(functionBody(menu, 'Show-CommandList'), /Advanced \/ Safety: Production preflight/);
   assert.match(functionBody(menu, 'Add-PreflightResult'), /Why it failed:[\s\S]*Fix:/);
   assert.match(functionBody(menu, 'Invoke-BasePreflight'), /N8N_LOCAL_PORT is a valid local port/);
-  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /Local n8n start is allowed/);
+  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /The launcher allows this, but replace it before saving credentials you care about/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /N8N_ENCRYPTION_KEY is present and not a placeholder/);
-  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /POSTGRES_PASSWORD is missing or still a placeholder[\s\S]*Local n8n start is allowed/);
+  assert.match(functionBody(menu, 'Invoke-BasePreflight'), /POSTGRES_PASSWORD is missing or still a placeholder[\s\S]*The launcher allows this, but replace it before saving production data you care about/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /POSTGRES_PASSWORD is present and not a placeholder/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-BasePreflight'), /CLOUDFLARED_TUNNEL_TOKEN|N8N_PUBLIC_HOST|N8N_PUBLIC_URL/);
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /N8N_PUBLIC_URL host matches N8N_PUBLIC_HOST/);
-  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /N8N_ENCRYPTION_KEY is present and not a placeholder/);
-  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /POSTGRES_PASSWORD is present and not a placeholder/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /N8N_ENCRYPTION_KEY is present and not a placeholder/);
+  assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /POSTGRES_PASSWORD is present and not a placeholder/);
+  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /The launcher allows this, but replace it before saving credentials you care about/);
+  assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /The launcher allows this, but replace it before saving production data you care about/);
   assert.match(functionBody(menu, 'Invoke-SafetyPreflight'), /CLOUDFLARED_TUNNEL_TOKEN is present and not a placeholder/);
   assert.doesNotMatch(functionBody(menu, 'Invoke-SafetyPreflight'), /WEBHOOK_URL matches|N8N_EDITOR_BASE_URL matches|N8N_PROXY_HOPS is 1/);
-  assert.match(functionBody(menu, 'Start-ProductionStack'), /Invoke-BasePreflight[\s\S]*@\(\'up\', '-d', 'postgres', 'n8n'\)/);
+  assert.match(functionBody(menu, 'Start-ProductionStack'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*@\(\'up\', '-d', 'postgres', 'n8n'\)/);
   assert.doesNotMatch(functionBody(menu, 'Start-ProductionStack'), /Invoke-SafetyPreflight|cloudflared/);
-  assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*cloudflared/);
+  assert.match(functionBody(menu, 'Start-LocalhostOnly'), /Start-ProductionStack[\s\S]*cloudflared[\s\S]*stop', 'cloudflared'/);
+  assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*Set-ActiveN8nUrl -Url \$publicUrl -Mode 'cloudflare' -HostName \$publicHost[\s\S]*cloudflared/);
+  assert.match(functionBody(menu, 'Stop-CloudflareTunnel'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local/);
   assert.match(functionBody(menu, 'Get-N8nCliProductionBackupSpecs'), /export:workflow[\s\S]*export:credentials/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Get-N8nCliProductionBackupSpecs[\s\S]*Backup-Postgres/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-BasePreflight/);
@@ -1501,6 +1518,7 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
 
   assert.match(envExample, /\[ STEP 1: Fill These Before First Production Launch \]/);
   assert.match(envExample, /\[ STEP 2: Fill These After Cloudflare Tunnel Is Ready \]/);
+  assert.match(envExample, /launcher builds n8n public editor and webhook URLs from N8N_PUBLIC_URL/);
   assert.match(envExample, /^LOCAL_TIMEZONE=Asia\/Singapore$/m);
   assert.match(envExample, /^N8N_LOCAL_PORT=5678$/m);
   assert.match(envExample, /^N8N_PUBLIC_HOST=n8n\.example\.com$/m);
@@ -1512,9 +1530,10 @@ test('Production Cloudflare guide and menu use all-inclusive production backups'
   assert.doesNotMatch(envExample, /^N8N_PROXY_HOPS=/m);
   assert.doesNotMatch(envExample, /^GENERIC_TIMEZONE=/m);
   assert.doesNotMatch(envExample, /^N8N_BACKUP_RETENTION_DAYS=/m);
-  assert.match(compose, /WEBHOOK_URL: \$\{N8N_PUBLIC_URL\}/);
-  assert.match(compose, /N8N_EDITOR_BASE_URL: \$\{N8N_PUBLIC_URL\}/);
-  assert.match(compose, /N8N_PROTOCOL: https/);
+  assert.match(compose, /path: \.env\.active[\s\S]*required: false/);
+  assert.doesNotMatch(compose, /WEBHOOK_URL: \$\{N8N_PUBLIC_URL\}/);
+  assert.doesNotMatch(compose, /N8N_EDITOR_BASE_URL: \$\{N8N_PUBLIC_URL\}/);
+  assert.doesNotMatch(compose, /N8N_PROTOCOL: https/);
   assert.match(compose, /N8N_PROXY_HOPS: 1/);
   assert.match(compose, /GENERIC_TIMEZONE: \$\{LOCAL_TIMEZONE:-Asia\/Singapore\}/);
   assert.match(compose, /ports:\n\s+- "127\.0\.0\.1:\$\{N8N_LOCAL_PORT:-5678\}:5678"/);
