@@ -341,7 +341,12 @@ The production menu includes:
 Back up
 ```
 
-It writes a timestamped backup folder under the private stack folder's `backups\` directory. That folder contains one complete zip package with the private secret env file inside the zip when `.env` exists.
+`Back up` opens the production backup submenu:
+
+1. `Back up now`
+2. `Set up automatic backups`
+
+`Back up now` writes a timestamped backup folder under the private stack folder's `backups\` directory. That folder contains one complete zip package with the private secret env file inside the zip when `.env` exists.
 
 The manual production backup uses the same restore-compatible database-first shape as the local stack. It includes:
 
@@ -359,7 +364,7 @@ The manual production backup uses the same restore-compatible database-first sha
 
 Backups may contain private workflows, executions, encrypted credential records, and private environment values. Keep them private. Do not commit backup zips, logs, database dumps, `SECRET-DO-NOT-COMMIT.env`, or production `.env` files.
 
-The production Cloudflare menu does not set up automatic backups. Backups run only when you choose `Back up` from the menu. Do not use Windows Task Scheduler for this production/server documentation path.
+`Set up automatic backups` uses Windows Task Scheduler for this Windows Cloudflare launcher. It prompts for cadence, retention, and destination, then schedules the same production backup zip package that `Back up now` creates. Scheduled backups require Windows, Task Scheduler, Docker Desktop, this production Cloudflare stack folder, and the local Postgres service to be available when the task fires.
 
 For a Linux server or company-server deployment such as Hostinger/Coolify, use the copy-ready [production server backup template](./templates/production-server-backups/) and schedule it with systemd or cron. That server-side template is separate from this Windows Cloudflare launcher and is designed for Linux production deployments.
 

@@ -91,14 +91,14 @@ const configs = [
     updateAfterSwitch: 'StartCloudflareAfter',
     stopStackFunction: 'Stop-ProductionStack',
     updateMode: 'production-compose',
-    backupAction: '[void](Backup-N8nProductionNow)',
+    backupAction: 'Show-ProductionBackupMenu',
     restoreAction: 'Restore-ProductionCloudflareFromBackupMenu',
     commandDescriptions: {
       start: 'Starts localhost only, or opens Start Cloudflare tunnel.',
       stop: 'Stops Cloudflare only, or stops the production stack.',
       update: 'Pulls selected images and recreates selected containers; backs up before database-impacting updates.',
       status: 'Shows service state and image details from Docker Compose.',
-      backup: 'Creates a restore-compatible zip package with private restore notes.',
+      backup: 'Opens manual and automatic production backup actions.',
       restore: 'Restores a production backup zip after pre-restore backup and approval.'
     },
     preLoop: []

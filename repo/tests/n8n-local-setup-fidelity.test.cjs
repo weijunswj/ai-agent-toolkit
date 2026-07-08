@@ -223,10 +223,8 @@ const expectedBackupMenuOptions = [
   'Back up now',
   'Change automatic backup settings',
   'Remove automatic backups',
-  'Export workflows/credentials (advanced)',
   'Back',
   'Set up automatic backups',
-  'Export workflows/credentials (advanced)',
   'Back'
 ];
 
@@ -662,21 +660,20 @@ test('Local Setup menu tables match launcher option names exactly', () => {
   assert.match(localSetup, /`Set up automatic backups`/);
   assert.match(localSetup, /`Change automatic backup settings`/);
   assert.match(localSetup, /`Remove automatic backups`/);
-  assert.match(localSetup, /`Export workflows\/credentials \(advanced\)`/);
+  assert.doesNotMatch(localSetup, /`Export workflows\/credentials \(advanced\)`/);
   assert.doesNotMatch(localSetup, /Back up Postgres database now/);
   assert.doesNotMatch(localSetup, /Configure scheduled n8n CLI backups/);
   assert.doesNotMatch(localSetup, /Run n8n CLI backup now/);
   assert.doesNotMatch(localSetup, /Show n8n CLI backup configuration/);
   assert.doesNotMatch(localSetup, /Disable scheduled n8n CLI backups/);
-  assert.match(localSetup, /n8n export:workflow --backup --output=<backup_dir>/);
-  assert.match(localSetup, /n8n export:credentials --backup --output=<backup_dir>/);
-  assert.match(localSetup, /Decrypted credential exports expose credential secrets in plain text files/);
-  assert.match(localSetup, /n8n-cli-YYYYMMDD-HHMMSS/);
+  assert.doesNotMatch(localSetup, /n8n export:workflow --backup --output=<backup_dir>/);
+  assert.doesNotMatch(localSetup, /n8n export:credentials --backup --output=<backup_dir>/);
+  assert.doesNotMatch(localSetup, /Decrypted credential exports expose credential secrets in plain text files/);
   assert.match(localSetup, /manifest\.json/);
   assert.match(localSetup, /Windows Task Scheduler/);
   assert.match(localSetup, /--run-n8n-recovery-backup/);
   assert.match(localSetup, /--run-n8n-cli-backup/);
-  assert.match(localSetup, /--show-n8n-cli-backup-config/);
+  assert.doesNotMatch(localSetup, /--show-n8n-cli-backup-config/);
   assert.match(localSetup, /--disable-n8n-cli-backups/);
   assert.match(localSetup, /n8n import:workflow --separate --input=<workflows_dir>/);
   assert.match(localSetup, /n8n import:credentials --separate --input=<credentials_dir>/);
@@ -778,8 +775,9 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(functionBody(menu, 'Write-CommandListItem'), /\$itemLabelWidth = 19[\s\S]*\$itemPrefix = \("  \{0\}\. \{1,-\$itemLabelWidth\}: " -f \$Number, \$Name\)/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens safe manual and automatic backup actions\.'/);
   assert.match(functionBody(menu, 'Show-CommandList'), /Write-CommandListItem -Number '8' -Name 'Advanced \/ Recovery: Restore local n8n from backup' -Description 'Restores a local backup zip after pre-restore backups and approval\.'/);
-  assert.match(functionBody(menu, 'Show-BackupMenu'), /Write-N8nCliBackupAutomaticStatus[\s\S]*Back up now[\s\S]*Change automatic backup settings[\s\S]*Remove automatic backups[\s\S]*Export workflows\/credentials \(advanced\)[\s\S]*Set up automatic backups/);
-  assert.match(functionBody(menu, 'Show-BackupMenu'), /Invoke-N8nRecoveryBackupNow[\s\S]*Configure-N8nCliBackupSchedule[\s\S]*Disable-N8nCliBackupSchedule[\s\S]*Invoke-N8nCliEntityExportNow/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Write-N8nCliBackupAutomaticStatus[\s\S]*Back up now[\s\S]*Change automatic backup settings[\s\S]*Remove automatic backups[\s\S]*Set up automatic backups/);
+  assert.match(functionBody(menu, 'Show-BackupMenu'), /Invoke-N8nRecoveryBackupNow[\s\S]*Configure-N8nCliBackupSchedule[\s\S]*Disable-N8nCliBackupSchedule/);
+  assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Export workflows\/credentials \(advanced\)|Invoke-N8nCliEntityExportNow/);
   assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Back up Postgres database now|Run n8n CLI backup now|Show n8n CLI backup configuration|Disable scheduled n8n CLI backups/);
   assert.doesNotMatch(functionBody(menu, 'Show-BackupMenu'), /Backup-Postgres|Show-N8nCliBackupConfiguration|Invoke-N8nCliBackupFromConfig/);
   assert.match(menu, /function Show-UpdateMenu/);
@@ -1488,10 +1486,13 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(guide, /`database\.sql` is the full n8n Postgres database backup/);
   assert.match(guide, /contains workflows, encrypted credential records, settings, users\/projects/);
   assert.match(guide, /does not create separate workflow or credential export folders by default/);
-  assert.match(guide, /Backups run only when you choose `Back up` from the menu/);
-  assert.match(guide, /does not set up automatic backups/);
+  assert.match(guide, /`Back up` opens the production backup submenu/);
+  assert.match(guide, /`Back up now`/);
+  assert.match(guide, /`Set up automatic backups`/);
+  assert.match(guide, /uses Windows Task Scheduler for this Windows Cloudflare launcher/);
+  assert.match(guide, /prompts for cadence, retention, and destination/);
+  assert.match(guide, /schedules the same production backup zip package that `Back up now` creates/);
   assert.match(guide, /Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT\.env` or `\.env` inside the selected zip/);
-  assert.match(guide, /Do not use Windows Task Scheduler for this production\/server documentation path/);
   assert.match(guide, /schedule it with systemd or cron/);
   assert.match(guide, /server-side template is separate from this Windows Cloudflare launcher/);
   assert.match(guide, /Offsite or cloud storage is intentionally not configured here/);
@@ -1530,6 +1531,11 @@ test('Production Cloudflare guide and menu use local-style database-first produc
     'Stop Cloudflare tunnel',
     'Cancel'
   ]);
+  assert.deepEqual(menuOptions(menu, 'Show-ProductionBackupMenu'), [
+    'Back up now',
+    'Set up automatic backups',
+    'Back'
+  ]);
 
   assert.match(functionBody(menu, 'Show-LaunchStatus'), /Quick service status:/);
   assert.match(functionBody(menu, 'Set-ActiveN8nUrl'), /\.env\.active[\s\S]*WEBHOOK_URL=\$activeUrl[\s\S]*N8N_EDITOR_BASE_URL=\$activeUrl[\s\S]*N8N_HOST=\$HostName[\s\S]*N8N_PROTOCOL=\$\(\$uri\.Scheme\)/);
@@ -1567,12 +1573,19 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Backup-Postgres'), /Join-Path \$BackupDir 'database\.sql'/);
   assert.doesNotMatch(functionBody(menu, 'Backup-Postgres'), /Join-Path \$BackupDir 'database'/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Backup-Postgres -Required -BackupDir \$backupDir -SkipPreflight/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /param\([\s\S]*\[switch\]\$Required[\s\S]*\[switch\]\$Scheduled/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Write-ProductionBackupSecretFile -BackupDir \$backupDir/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Convert-ProductionBackupFolderToZipPackage -BackupDir \$backupDir -ZipFileName "n8n-production-\$timestamp\.zip"/);
   assert.doesNotMatch(functionBody(menu, 'Backup-N8nProductionNow'), /export:workflow|export:credentials|Invoke-N8nCliProductionBackupExport/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-BasePreflight/);
   assert.doesNotMatch(functionBody(menu, 'Backup-N8nProductionNow'), /Invoke-SafetyPreflight/);
   assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Add-ProductionBackupLog[\s\S]*Write-ProductionBackupRestoreNotes[\s\S]*Write-ProductionBackupManifest/);
+  assert.match(functionBody(menu, 'Show-ProductionBackupMenu'), /Write-ProductionBackupAutomaticStatus[\s\S]*Back up now[\s\S]*Set up automatic backups[\s\S]*Backup-N8nProductionNow[\s\S]*Configure-ProductionBackupSchedule/);
+  assert.match(functionBody(menu, 'New-ProductionBackupConfigFromPrompts'), /Backup cadence in days[\s\S]*Retention period in days[\s\S]*Backup destination[\s\S]*backupRoot = \$backupRoot/);
+  assert.match(functionBody(menu, 'Write-ProductionBackupAutomaticStatus'), /Retention:[\s\S]*Destination:[\s\S]*Scheduled time:/);
+  assert.match(functionBody(menu, 'Backup-N8nProductionNow'), /Read-ProductionBackupConfig[\s\S]*No automatic backup config found[\s\S]*\$config\.backupRoot[\s\S]*\$config\.retentionDays/);
+  assert.match(functionBody(menu, 'Get-ProductionBackupScheduleActionArguments'), /--stack-dir[\s\S]*--run-production-backup[\s\S]*--scheduled/);
+  assert.match(menu, /Test-MenuFlag -Name 'run-production-backup'[\s\S]*Backup-N8nProductionNow -Scheduled:\(Test-MenuFlag -Name 'scheduled'\)/);
   assert.match(functionBody(menu, 'Write-ProductionBackupManifest'), /restore-manifest\.json[\s\S]*database\.sql[\s\S]*SECRET-DO-NOT-COMMIT\.env[\s\S]*backup\.log[\s\S]*HOW TO USE THIS RESTORE FOLDER\.txt/);
   assert.match(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /HOW TO USE THIS RESTORE FOLDER\.txt[\s\S]*database\.sql is the full n8n Postgres database backup/);
   assert.match(functionBody(menu, 'Write-ProductionBackupRestoreNotes'), /paste the full path to the \.zip file in this folder/);
@@ -1601,9 +1614,11 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /\^n8n-production-\\d\{8\}-\\d\{6\}\$/);
   assert.match(functionBody(menu, 'Invoke-ProductionBackupRetentionCleanup'), /Test-PathInsideDirectory[\s\S]*Remove-Item -LiteralPath \$folder\.FullName -Recurse -Force/);
   assert.match(functionBody(menu, 'Show-UpdateMenu'), /Backup-N8nProductionNow -Required/);
+  assert.match(menu, /'7' \{ Invoke-MenuAction \{ Show-ProductionBackupMenu \} \}/);
   assert.doesNotMatch(functionBody(menu, 'Show-MainMenu'), /Backup Postgres/);
   assert.doesNotMatch(menu, /--decrypted/);
-  assert.doesNotMatch(menu, /Windows Task Scheduler|Register-ScheduledTask|New-ScheduledTaskTrigger|Unregister-ScheduledTask/);
+  assert.match(menu, /Windows Task Scheduler/);
+  assert.match(functionBody(menu, 'Register-ProductionBackupSchedule'), /Register-ScheduledTask[\s\S]*New-ScheduledTaskTrigger/);
 
   assert.match(envExample, /\[ STEP 1: Fill These Before First Production Launch \]/);
   assert.match(envExample, /\[ STEP 2: Fill These After Cloudflare Tunnel Is Ready \]/);

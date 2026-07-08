@@ -3,6 +3,73 @@ $ErrorActionPreference = 'Stop'
 $script:StackRoot = (Get-Location).Path
 $script:ExitRequested = $false
 $script:Services = @('postgres', 'n8n', 'cloudflared')
+$script:MenuArguments = @($args)
+$script:ProductionBackupTaskPrefix = 'n8n-production-cloudflare-backup'
+
+function Get-MenuArgumentValue {
+  param([string]$Name)
+
+  $longName = "--$Name"
+  $dashName = "-$Name"
+  for ($index = 0; $index -lt $script:MenuArguments.Count; $index += 1) {
+    $value = [string]$script:MenuArguments[$index]
+    if ($value -eq $longName -or $value -eq $dashName) {
+      if (($index + 1) -lt $script:MenuArguments.Count) {
+        return ([string]$script:MenuArguments[$index + 1]).Trim()
+      }
+      return ''
+    }
+
+    if ($value.StartsWith("$longName=", [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $value.Substring($longName.Length + 1).Trim()
+    }
+
+    if ($value.StartsWith("$dashName=", [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $value.Substring($dashName.Length + 1).Trim()
+    }
+  }
+
+  return ''
+}
+
+function Test-MenuFlag {
+  param([string]$Name)
+
+  $longName = "--$Name"
+  $dashName = "-$Name"
+  foreach ($value in $script:MenuArguments) {
+    $text = [string]$value
+    if ($text -eq $longName -or $text -eq $dashName) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
+function Resolve-LocalPath {
+  param([string]$Path)
+
+  $value = ([string]$Path).Trim().Trim('"')
+  if (-not $value) {
+    return ''
+  }
+
+  return [System.IO.Path]::GetFullPath($value)
+}
+
+function Initialize-MenuRuntime {
+  $explicitStackDir = Get-MenuArgumentValue -Name 'stack-dir'
+  if (-not $explicitStackDir) {
+    return
+  }
+
+  $stackDir = Resolve-LocalPath -Path $explicitStackDir
+  if (Test-Path -LiteralPath $stackDir -PathType Container) {
+    $script:StackRoot = $stackDir
+    Set-Location -LiteralPath $script:StackRoot
+  }
+}
 
 function Write-Header {
   param([string]$Title)
@@ -934,6 +1001,222 @@ function Get-ProductionBackupRetentionDays {
   return $days
 }
 
+function Get-ProductionBackupDefaultRoot {
+  return (Join-Path $script:StackRoot 'backups')
+}
+
+function Get-ProductionBackupConfigPath {
+  return (Join-Path (Get-ProductionBackupDefaultRoot) 'production-cloudflare-backup-config.json')
+}
+
+function Convert-ProductionBackupDayValue {
+  param(
+    [string]$Value,
+    [string]$Name,
+    [int]$Min = 1,
+    [int]$Max = 3650
+  )
+
+  $text = ([string]$Value).Trim()
+  if (-not $text) {
+    return [pscustomobject]@{ Ok = $false; Error = "$Name is required."; Value = 0 }
+  }
+
+  $days = 0
+  if (-not [int]::TryParse($text, [ref]$days)) {
+    return [pscustomobject]@{ Ok = $false; Error = "$Name must be a whole number."; Value = 0 }
+  }
+
+  if ($days -lt $Min -or $days -gt $Max) {
+    return [pscustomobject]@{ Ok = $false; Error = "$Name must be between $Min and $Max days."; Value = 0 }
+  }
+
+  return [pscustomobject]@{ Ok = $true; Error = ''; Value = $days }
+}
+
+function Read-ProductionBackupDayInput {
+  param(
+    [string]$Prompt,
+    [int]$Default,
+    [string]$Name
+  )
+
+  while ($true) {
+    $value = (Read-Host "$Prompt [$Default]").Trim()
+    if (-not $value) {
+      $value = [string]$Default
+    }
+
+    $parsed = Convert-ProductionBackupDayValue -Value $value -Name $Name
+    if ($parsed.Ok) {
+      return $parsed.Value
+    }
+
+    Write-Warning $parsed.Error
+  }
+}
+
+function Read-ProductionBackupRecommendedInput {
+  param(
+    [string]$Prompt,
+    [string]$DefaultText
+  )
+
+  return (Read-Host "$Prompt [$DefaultText]")
+}
+
+function Get-ProductionBackupTaskName {
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes([System.IO.Path]::GetFullPath($script:StackRoot).ToLowerInvariant())
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $hash = [System.BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant()
+    return "$($script:ProductionBackupTaskPrefix)-$($hash.Substring(0, 12))"
+  } catch {
+    return $script:ProductionBackupTaskPrefix
+  }
+}
+
+function Get-ProductionBackupScriptPath {
+  return (Join-Path $script:StackRoot 'scripts\n8n-production-cloudflare-menu.ps1')
+}
+
+function Get-ProductionBackupScheduleActionArguments {
+  $scriptPath = Get-ProductionBackupScriptPath
+  return "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" --stack-dir `"$script:StackRoot`" --run-production-backup --scheduled"
+}
+
+function Read-ProductionBackupConfig {
+  $configPath = Get-ProductionBackupConfigPath
+  if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    return $null
+  }
+
+  try {
+    return (Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json)
+  } catch {
+    Write-ErrorMessage "Could not read automatic backup config: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+function Test-ProductionBackupAutomaticEnabled {
+  param([object]$Config)
+  return ($null -ne $Config -and [bool]$Config.enabled -and [string]$Config.taskName)
+}
+
+function Write-ProductionBackupAutomaticStatus {
+  param([object]$Config)
+
+  Write-Host 'Automatic backups: ' -NoNewline -ForegroundColor DarkCyan
+  if (-not (Test-ProductionBackupAutomaticEnabled -Config $Config)) {
+    Write-Host 'Not set up' -ForegroundColor Yellow
+    return
+  }
+
+  $scheduledTime = 'around 3:00 AM local time'
+  if ($Config.scheduledTime) {
+    $scheduledTime = [string]$Config.scheduledTime
+  }
+
+  Write-Host 'Enabled' -ForegroundColor Green
+  Write-Host "  Cadence: every $($Config.cadenceDays) day(s)" -ForegroundColor Cyan
+  Write-Host "  Retention: $($Config.retentionDays) day(s)" -ForegroundColor Cyan
+  Write-Host "  Task: $($Config.taskName)" -ForegroundColor Cyan
+  Write-Host "  Destination: $($Config.backupRoot)" -ForegroundColor Cyan
+  Write-Host "  Scheduled time: $scheduledTime" -ForegroundColor Cyan
+}
+
+function Save-ProductionBackupConfig {
+  param([object]$Config)
+
+  $configPath = Get-ProductionBackupConfigPath
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $configPath) | Out-Null
+  $Config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding ascii
+  Write-Success "Automatic backup config saved to: $configPath"
+}
+
+function New-ProductionBackupConfigFromPrompts {
+  Write-Header 'Automatic Backup Settings'
+  Write-Info 'Automatic production Cloudflare backups create restore-compatible zip packages.'
+  Write-Warning 'Scheduled backups only run when Windows Task Scheduler, Docker Desktop, and this production stack are available.'
+
+  $cadenceDays = Read-ProductionBackupDayInput -Prompt 'Backup cadence in days' -Default 1 -Name 'Backup cadence'
+  $defaultRetentionDays = Get-ProductionBackupRetentionDays
+  if ($null -eq $defaultRetentionDays) {
+    $defaultRetentionDays = 30
+  }
+  $retentionDays = Read-ProductionBackupDayInput -Prompt 'Retention period in days' -Default $defaultRetentionDays -Name 'Retention period'
+
+  $defaultRoot = Get-ProductionBackupDefaultRoot
+  while ($true) {
+    $backupRoot = (Read-ProductionBackupRecommendedInput -Prompt 'Backup destination' -DefaultText $defaultRoot).Trim().Trim('"')
+    if (-not $backupRoot) {
+      $backupRoot = $defaultRoot
+    }
+
+    $safeRoot = Test-ProductionBackupRoot -Path $backupRoot
+    if ($safeRoot.Ok) {
+      $backupRoot = $safeRoot.Path
+      break
+    }
+
+    Write-Warning $safeRoot.Error
+  }
+
+  $taskName = Get-ProductionBackupTaskName
+
+  return [ordered]@{
+    enabled = $true
+    scheduler = 'Windows Task Scheduler'
+    taskName = $taskName
+    cadenceDays = $cadenceDays
+    retentionDays = $retentionDays
+    backupRoot = $backupRoot
+    backupMode = 'production-cloudflare-postgres-package'
+    scheduledTime = 'around 3:00 AM local time'
+    configuredAt = (Get-Date -Format o)
+  }
+}
+
+function Register-ProductionBackupSchedule {
+  param([object]$Config)
+
+  if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+    Write-ErrorMessage 'Windows Task Scheduler cmdlets are not available in this PowerShell session.'
+    Write-Info 'The config was not scheduled. Use Back up now from this menu instead.'
+    return $false
+  }
+
+  $taskName = [string]$Config.taskName
+  if (-not $taskName) {
+    $taskName = Get-ProductionBackupTaskName
+  }
+
+  $actionArgs = Get-ProductionBackupScheduleActionArguments
+  $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $actionArgs
+  $trigger = New-ScheduledTaskTrigger -Daily -DaysInterval ([int]$Config.cadenceDays) -At 3am
+  $description = "Production Cloudflare n8n backup packages for stack: $script:StackRoot"
+
+  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Description $description -Force | Out-Null
+  Write-Success "Scheduled task created or updated: $taskName"
+  Write-Info 'Backups run around 3:00 AM local time on the configured cadence when the production stack is available.'
+  return $true
+}
+
+function Configure-ProductionBackupSchedule {
+  $config = New-ProductionBackupConfigFromPrompts
+  if ($null -eq $config) {
+    return $false
+  }
+
+  if (-not (Register-ProductionBackupSchedule -Config $config)) {
+    return $false
+  }
+
+  Save-ProductionBackupConfig -Config $config
+  return $true
+}
+
 function Test-ProductionBackupRoot {
   param([string]$Path)
 
@@ -1359,16 +1642,43 @@ function Invoke-ProductionBackupRetentionCleanup {
 }
 
 function Backup-N8nProductionNow {
-  param([switch]$Required)
+  param(
+    [switch]$Required,
+    [switch]$Scheduled
+  )
 
-  Write-Header 'Back Up Now'
+  if ($Scheduled) {
+    Write-Header 'Scheduled Back Up'
+  } else {
+    Write-Header 'Back Up Now'
+  }
   if (-not (Invoke-BasePreflight)) { return $false }
   if (-not (Test-DockerReady)) { return $false }
 
-  $retentionDays = Get-ProductionBackupRetentionDays
-  if ($null -eq $retentionDays) { return $false }
+  $config = Read-ProductionBackupConfig
+  $automaticEnabled = Test-ProductionBackupAutomaticEnabled -Config $config
+  if ($Scheduled -and -not $automaticEnabled) {
+    Write-ErrorMessage 'No automatic backup config found. Choose Back up, then Set up automatic backups.'
+    return $false
+  }
 
-  $backupRoot = Join-Path $script:StackRoot 'backups'
+  $backupRoot = Get-ProductionBackupDefaultRoot
+  if ($automaticEnabled -and [string]$config.backupRoot) {
+    $backupRoot = [string]$config.backupRoot
+  }
+
+  if ($automaticEnabled -and $config.retentionDays) {
+    $retention = Convert-ProductionBackupDayValue -Value ([string]$config.retentionDays) -Name 'Retention period'
+    if (-not $retention.Ok) {
+      Write-ErrorMessage $retention.Error
+      return $false
+    }
+    $retentionDays = $retention.Value
+  } else {
+    $retentionDays = Get-ProductionBackupRetentionDays
+    if ($null -eq $retentionDays) { return $false }
+  }
+
   $safeRoot = Test-ProductionBackupRoot -Path $backupRoot
   if (-not $safeRoot.Ok) {
     Write-ErrorMessage $safeRoot.Error
@@ -1423,6 +1733,26 @@ function Backup-N8nProductionNow {
   Write-Success 'Manifest included in zip package.'
   Write-Warning 'Keep this backup private. Do not commit backups, logs, database dumps, or production .env files.'
   return $true
+}
+
+function Show-ProductionBackupMenu {
+  Write-Header 'Back up'
+  $config = Read-ProductionBackupConfig
+  Write-ProductionBackupAutomaticStatus -Config $config
+  Write-Host ''
+  Write-Host 'Choose a backup action:' -ForegroundColor Cyan
+  Write-Host '  1. Back up now'
+  Write-Host '  2. Set up automatic backups'
+  Write-Host '  3. Back'
+  Write-Host ''
+
+  $choice = (Read-Host 'Enter a number').Trim()
+  switch ($choice) {
+    '1' { [void](Backup-N8nProductionNow) }
+    '2' { [void](Configure-ProductionBackupSchedule) }
+    '3' { return }
+    default { Write-Warning 'Choose a number from 1 to 3.' }
+  }
 }
 
 function Test-ProductionPostgresSqlBackupFile {
@@ -1896,7 +2226,7 @@ function Show-CommandList {
   Write-CommandListItem -Number '4' -Name 'Update' -Description 'Pulls selected images and recreates selected containers; backs up before database-impacting updates.'
   Write-CommandListItem -Number '5' -Name 'Show Compose status' -Description 'Shows service state and image details from Docker Compose.'
   Write-CommandListItem -Number '6' -Name 'View logs' -Description 'Shows recent logs for all services or one service.'
-  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Creates a restore-compatible zip package with private restore notes.'
+  Write-CommandListItem -Number '7' -Name 'Back up' -Description 'Opens manual and automatic production backup actions.'
   Write-CommandListItem -Number '8' -Name 'Advanced / Recovery: Restore local n8n from backup' -Description 'Restores a production backup zip after pre-restore backup and approval.'
   Write-Host ''
   Write-Host 'Updates are user-approved. After you choose what to update, selected containers are recreated automatically.' -ForegroundColor Yellow
@@ -1989,6 +2319,13 @@ function Show-MainMenu {
   Write-Host ''
 }
 
+Initialize-MenuRuntime
+
+if (Test-MenuFlag -Name 'run-production-backup') {
+  if (Backup-N8nProductionNow -Scheduled:(Test-MenuFlag -Name 'scheduled')) { exit 0 }
+  exit 1
+}
+
 while (-not $script:ExitRequested) {
   Show-MainMenu
   $choice = Read-Host 'Enter a number'
@@ -2000,7 +2337,7 @@ while (-not $script:ExitRequested) {
     '4' { Invoke-MenuAction { Show-UpdateMenu } }
     '5' { Invoke-MenuAction { Show-Status } }
     '6' { Invoke-MenuAction { View-LogsMenu } }
-    '7' { Invoke-MenuAction { [void](Backup-N8nProductionNow) } }
+    '7' { Invoke-MenuAction { Show-ProductionBackupMenu } }
     '8' { Invoke-MenuAction { Restore-ProductionCloudflareFromBackupMenu } }
     '9' { Invoke-MenuAction { Show-CommandList } }
     '10' { Clear-MenuScreen; Write-Success 'Bye.'; $script:ExitRequested = $true }

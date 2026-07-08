@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.16",
+  "version": "3.8.17",
   "version_policy": "semver",
-  "version_notes": "Packages backup env files inside backup zips and makes pre-restore backups zip-only across local and production Cloudflare launchers.",
+  "version_notes": "Removes the local advanced workflow/credential export menu option and adds production Cloudflare automatic backup setup.",
   "outputs": [
     {
       "kind": "curated",

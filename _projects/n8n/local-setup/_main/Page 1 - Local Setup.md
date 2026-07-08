@@ -589,7 +589,6 @@ When automatic backups are not set up:
 | --- | --- | --- |
 | `Back up now` | You want a restore-ready local backup immediately. | Creates a timestamped recovery folder containing a restore-compatible `.zip` package plus the private backup `.env` beside it when available. |
 | `Set up automatic backups` | You want restore-compatible backup zip packages on a cadence. | Prompts for cadence, retention, and destination, saves local config, and creates or updates a Windows Task Scheduler task. |
-| `Export workflows/credentials (advanced)` | You intentionally need n8n entity exports instead of the default recovery zip package. | Runs the n8n CLI export path with workflows and encrypted credentials selected by default; decrypted credential export stays disabled unless explicitly confirmed. |
 | `Back` | You do not want a backup action. | Returns to the main menu. |
 
 When automatic backups are enabled:
@@ -599,7 +598,6 @@ When automatic backups are enabled:
 | `Back up now` | You want a restore-ready local backup immediately. | Creates the same restore-compatible recovery zip package, using the configured automatic backup destination and retention. |
 | `Change automatic backup settings` | You want to change cadence, retention, or destination. | Prompts for automatic backup settings again, then updates the Windows Scheduled Task. |
 | `Remove automatic backups` | You want to stop automatic backups without deleting existing backup folders. | Removes the Windows Scheduled Task when present and marks the local config disabled. |
-| `Export workflows/credentials (advanced)` | You intentionally need n8n entity exports instead of the default recovery zip package. | Runs the n8n CLI export path with workflows and encrypted credentials selected by default; decrypted credential export stays disabled unless explicitly confirmed. |
 | `Back` | You do not want a backup action. | Returns to the main menu. |
 
 `Back up now` behaviour:
@@ -637,51 +635,6 @@ Each prompt names the recommended default. Press `Enter` on an empty prompt to a
 
 Automatic backups use the same recovery zip package format as `Back up now`. Workflows, saved credentials, user accounts, projects, settings, and other database-backed n8n state are included through `database.sql`, and saved credentials remain encrypted by `N8N_ENCRYPTION_KEY`.
 
-Advanced workflow/credential export prompts:
-
-Use `Export workflows/credentials (advanced)` only when you need n8n CLI entity exports for portability rather than local disaster recovery. Each prompt names the recommended default. Press `Enter` on an empty prompt to accept the displayed recommended default.
-
-1. Retention period in days. Recommended default: `30`.
-2. Export destination. Recommended default:
-
-```text
-%USERPROFILE%\.n8n-local\backups
-```
-
-3. Whether to include workflows. Recommended default: **Yes**.
-4. Whether to include credentials. Recommended default: **Yes**, encrypted credential export only.
-5. Whether to export decrypted credentials. Recommended default: **No**.
-
-Decrypted credential export warning:
-
-- The default is **No**.
-- Workflows and encrypted credentials are the recommended advanced entity export contents.
-- Decrypted credential exports expose credential secrets in plain text files.
-- If you enable decrypted credential exports, the menu shows a warning and requires you to type `EXPORT DECRYPTED CREDENTIALS`.
-- Keep decrypted backups offline/private, delete them when they are no longer needed, and never commit them.
-
-n8n CLI entity export behaviour:
-
-- Workflow backups run inside the Docker Compose `n8n` service with:
-
-```text
-n8n export:workflow --backup --output=<backup_dir>
-```
-
-- Credential backups run inside the Docker Compose `n8n` service with:
-
-```text
-n8n export:credentials --backup --output=<backup_dir>
-```
-
-- If decrypted credential export is enabled, the credentials command also adds `--decrypted`.
-- The launcher writes export files to a temporary path inside the n8n container, copies them into a local staging folder, zips the export, then removes the temporary container path.
-- Each run writes a timestamped folder named like `n8n-cli-YYYYMMDD-HHMMSS`.
-- Each run writes `n8n-cli-YYYYMMDD-HHMMSS.zip` with the exported files, `manifest.json`, and `SECRET-DO-NOT-COMMIT.env` when available.
-- Entity exports are secondary and are not the default recovery backup path.
-- The local config file is saved under `%USERPROFILE%\.n8n-local\backups\n8n-cli-backup-config.json` by default. It stores schedule settings, not secrets.
-- Older configs that point to `%USERPROFILE%\.n8n-local\backups\n8n-cli` are treated as `%USERPROFILE%\.n8n-local\backups` so new backups stay at the backup root.
-
 Retention cleanup:
 
 - The launcher deletes only timestamped child folders named like `n8n-recovery-YYYYMMDD-HHMMSS` or `n8n-cli-YYYYMMDD-HHMMSS`, plus matching old `n8n-recovery-YYYYMMDD-HHMMSS.zip` packages from earlier Toolkit versions, under the configured backup root.
@@ -702,11 +655,12 @@ Scheduling limitations:
 Advanced command-line helpers:
 
 ```powershell
-.\_n8n-local.cmd --show-n8n-cli-backup-config
 .\_n8n-local.cmd --run-n8n-recovery-backup
 .\_n8n-local.cmd --run-n8n-cli-backup
 .\_n8n-local.cmd --disable-n8n-cli-backups
 ```
+
+`--run-n8n-cli-backup` is a legacy compatibility alias for older scheduled tasks. It now creates the same restore-compatible recovery zip package as `--run-n8n-recovery-backup`.
 
 Restore:
 

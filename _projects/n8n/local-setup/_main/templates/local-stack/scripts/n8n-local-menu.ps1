@@ -3271,12 +3271,10 @@ function Show-BackupMenu {
   if ($automaticEnabled) {
     Write-Host '  2. Change automatic backup settings'
     Write-Host '  3. Remove automatic backups'
-    Write-Host '  4. Export workflows/credentials (advanced)'
-    Write-Host '  5. Back'
+    Write-Host '  4. Back'
   } else {
     Write-Host '  2. Set up automatic backups'
-    Write-Host '  3. Export workflows/credentials (advanced)'
-    Write-Host '  4. Back'
+    Write-Host '  3. Back'
   }
   Write-Host ''
 
@@ -3286,17 +3284,15 @@ function Show-BackupMenu {
       '1' { [void](Invoke-N8nRecoveryBackupNow) }
       '2' { [void](Configure-N8nCliBackupSchedule) }
       '3' { [void](Disable-N8nCliBackupSchedule) }
-      '4' { [void](Invoke-N8nCliEntityExportNow) }
-      '5' { return }
-      default { Write-Warning 'Choose a number from 1 to 5.' }
+      '4' { return }
+      default { Write-Warning 'Choose a number from 1 to 4.' }
     }
   } else {
     switch ($choice) {
       '1' { [void](Invoke-N8nRecoveryBackupNow) }
       '2' { [void](Configure-N8nCliBackupSchedule) }
-      '3' { [void](Invoke-N8nCliEntityExportNow) }
-      '4' { return }
-      default { Write-Warning 'Choose a number from 1 to 4.' }
+      '3' { return }
+      default { Write-Warning 'Choose a number from 1 to 3.' }
     }
   }
 }
