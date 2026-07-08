@@ -1610,7 +1610,8 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Pre-restore production \.env N8N_ENCRYPTION_KEY restored[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*Startup will attempt one more repair pass/);
   assert.match(functionBody(menu, 'Restore-ProductionCloudflareFromBackupMenu'), /Restore-PreviousProductionServices -PreviousServices \$preRestoreServices -StartN8nWhenNone/);
   assert.match(functionBody(menu, 'Clear-ProductionPostgresPublicSchema'), /DROP SCHEMA public CASCADE; CREATE SCHEMA public;[\s\S]*psql[\s\S]*ON_ERROR_STOP=1/);
-  assert.match(functionBody(menu, 'Test-ProductionEntityImportApplied'), /workflow_entity[\s\S]*credentials_entity[\s\S]*ENTITY_RESTORE_ROW_COUNT[\s\S]*Entity import did not leave any supported n8n rows/);
+  assert.match(functionBody(menu, 'Test-ProductionEntityImportApplied'), /pg_temp\.entity_restore_row_count[\s\S]*workflow_entity[\s\S]*credentials_entity[\s\S]*SELECT 'ENTITY_RESTORE_ROW_COUNT=' \|\| pg_temp\.entity_restore_row_count\(\)[\s\S]*Entity import did not leave any supported n8n rows/);
+  assert.doesNotMatch(functionBody(menu, 'Test-ProductionEntityImportApplied'), /RAISE NOTICE/);
   assert.match(functionBody(menu, 'Restore-ProductionPostgresSqlBackup'), /Clear-ProductionPostgresPublicSchema[\s\S]*psql[\s\S]*ON_ERROR_STOP=1[\s\S]*-f/);
   assert.match(functionBody(menu, 'Get-ProductionRestoreBackupType'), /Please select a \.zip backup package/);
   assert.doesNotMatch(functionBody(menu, 'Resolve-ProductionRestoreBackup'), /Production restore now accepts zip packages only|Production restore input must be a \.zip backup package/);

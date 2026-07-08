@@ -2568,7 +2568,10 @@ function Test-ProductionEntityImportApplied {
   )
 
   $checkSql = @'
-DO $$
+CREATE OR REPLACE FUNCTION pg_temp.entity_restore_row_count()
+RETURNS bigint
+LANGUAGE plpgsql
+AS $$
 DECLARE
   table_names text[] := ARRAY[
     'workflow_entity',
@@ -2594,11 +2597,12 @@ BEGIN
     END IF;
   END LOOP;
 
-  RAISE NOTICE 'ENTITY_RESTORE_ROW_COUNT=%', total_rows;
   IF total_rows <= 0 THEN
     RAISE EXCEPTION 'Entity import completed, but no supported n8n entity rows were found.';
   END IF;
+  RETURN total_rows;
 END $$;
+SELECT 'ENTITY_RESTORE_ROW_COUNT=' || pg_temp.entity_restore_row_count();
 '@
 
   $result = Invoke-ComposeCapture -Arguments @('exec', '-T', 'postgres', 'psql', '-U', $PostgresUser, '-d', $PostgresDb, '-v', 'ON_ERROR_STOP=1', '-c', $checkSql)

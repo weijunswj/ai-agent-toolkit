@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.22",
+  "version": "3.8.23",
   "version_policy": "semver",
-  "version_notes": "Aligns production entity restore encryption-key config repair with the local stack flow.",
+  "version_notes": "Fixes production entity restore success verification so successful imports are not rolled back.",
   "outputs": [
     {
       "kind": "curated",
