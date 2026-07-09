@@ -1506,6 +1506,8 @@ test('n8n command wrappers use framed colored retry output', () => {
     assert.match(text, /Yellow/, label);
     assert.match(text, /:status/, label);
     if (label.includes('export wrapper') || label.includes('import wrapper')) {
+      assert.match(text, /call :status Red "FAIL  (Export|Import) stopped with exit code %LAST_EXIT%."\s+call :pause_before_exit\s+exit \/b %LAST_EXIT%/, label);
+      assert.match(text, /:pause_before_exit\s+call :prompt "Press Enter to return after reviewing the error\."\s+set "AAT_PAUSE="\s+set \/p "AAT_PAUSE=> "\s+exit \/b 0/, label);
       assert.match(text, /call :read_choice "> " "RE" "E"/, label);
       assert.match(text, /if \/I "%AAT_CHOICE%"=="E" exit \/b %LAST_EXIT%/, label);
       assert.match(text, /set \/p "AAT_CHOICE=%~1"/, label);

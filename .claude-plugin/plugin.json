@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-toolkit",
-  "version": "2.3.15",
+  "version": "2.3.16",
   "description": "Source-first AI-agent toolkit with native Claude Code plugin metadata, English setup routing, Windows-safe hook repair, opt-in repo auto-update, and local bridge adapters.",
   "author": {
     "name": "weijunswj",
