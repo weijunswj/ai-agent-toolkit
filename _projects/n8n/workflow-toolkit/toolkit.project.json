@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.20",
+  "version": "1.2.21",
   "version_policy": "semver",
-  "version_notes": "Uses Read-Host for direct import/export wrapper prompts and stops before import if the restart prompt cannot read input, preventing stray keystrokes from reaching target selection.",
+  "version_notes": "Uses native CMD choice for post-run import/export R/E prompts so successful runs can reliably rerun or exit without batch subroutine label lookup failures.",
   "outputs": [
     {
       "kind": "curated",

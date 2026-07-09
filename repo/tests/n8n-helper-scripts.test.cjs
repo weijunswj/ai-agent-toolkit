@@ -1511,14 +1511,9 @@ test('n8n command wrappers use framed colored retry output', () => {
         label);
       assert.doesNotMatch(text, /Press Enter to return after reviewing the error/, label);
       assert.doesNotMatch(text, /:pause_before_exit/, label);
-      assert.match(text, /call :read_rerun_choice\s+if errorlevel 1 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
-      assert.match(text, /:read_rerun_choice\s+"%POWERSHELL_EXE%" -NoProfile -Command "\$ErrorActionPreference='Stop'; try \{ while \(\$true\) \{ \$value = Read-Host '> '/, label);
-      assert.match(text, /if \(\$choice -eq 'R'\) \{ exit 0 \}/, label);
-      assert.match(text, /if \(\$choice -eq 'E'\) \{ exit 1 \}/, label);
-      assert.match(text, /Console input unavailable; leaving this window open for review\./, label);
-      assert.match(text, /Start-Sleep -Seconds 86400/, label);
+      assert.match(text, /choice \/C RE \/N \/M "> "\s+if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
+      assert.doesNotMatch(text, /:read_rerun_choice/, label);
       assert.doesNotMatch(text, /CONIN\$/, label);
-      assert.doesNotMatch(text, /choice \/C RE/, label);
       assert.doesNotMatch(text, /set \/p "AAT_CHOICE=/, label);
       assert.doesNotMatch(text, /Click Retry/, label);
       assert.doesNotMatch(text, /System\.Windows\.Forms/, label);
@@ -1555,6 +1550,39 @@ test('n8n command wrappers use framed colored retry output', () => {
       assert.match(text, /Console input unavailable; stopping before import so typed input cannot be misrouted\./, label);
     }
   }
+});
+
+test('import command wrapper reruns on R and exits on E after successful import', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
+  const cwd = tempDir();
+  const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
+  const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
+  const countPath = path.join(cwd, 'count.txt');
+
+  fs.copyFileSync(path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd'), wrapperPath);
+  fs.writeFileSync(helperPath, `
+$counter = ${psSingleQuoted(countPath)}
+$count = 0
+if (Test-Path -LiteralPath $counter) { $count = [int](Get-Content -LiteralPath $counter -Raw) }
+$count++
+Set-Content -LiteralPath $counter -Value ([string]$count)
+Write-Host "dummy import run $count"
+exit 0
+`, 'utf8');
+
+  const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath, '-RestartContainerAfterImport'], {
+    cwd,
+    input: 'R\r\nE\r\n',
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+
+  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(countPath, 'utf8').trim(), '2');
+  assert.match(result.stdout, /dummy import run 1/);
+  assert.match(result.stdout, /dummy import run 2/);
+  assert.doesNotMatch(result.stdout + result.stderr, /cannot find the batch label/i);
+  assert.doesNotMatch(result.stdout + result.stderr, /ERROR: The file is either empty/i);
 });
 
 test('PowerShell n8n helper scripts use colored sections, status tags, and clean failure blocks', () => {
