@@ -226,7 +226,8 @@ function Resolve-LiveContainerTarget {
     & node @resolverArgs
     $resolverExitCode = $LASTEXITCODE
     if ($resolverExitCode -eq 3) {
-      $candidates = @(Get-Content -LiteralPath $candidatesJsonPath -Raw | ConvertFrom-Json)
+      $parsedCandidates = Get-Content -LiteralPath $candidatesJsonPath -Raw | ConvertFrom-Json
+      $candidates = if ($parsedCandidates -is [System.Array]) { $parsedCandidates } else { @($parsedCandidates) }
       $answer = Read-Host "Select n8n target number for this run"
       $trimmedAnswer = ([string]$answer).Trim()
       if ($trimmedAnswer -notmatch '^\d+$') {

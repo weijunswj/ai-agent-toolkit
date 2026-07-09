@@ -1743,6 +1743,9 @@ test('PowerShell n8n live helpers keep Docker target chooser attached to the con
     assert.match(text, /Read-Host "Select n8n target number for this run"/, label);
     assert.match(text, /Get-Content -LiteralPath \$targetJsonPath -Raw/, label);
     assert.match(text, /Get-Content -LiteralPath \$candidatesJsonPath -Raw/, label);
+    assert.match(text, /\$parsedCandidates = Get-Content -LiteralPath \$candidatesJsonPath -Raw \| ConvertFrom-Json/, label);
+    assert.match(text, /\$candidates = if \(\$parsedCandidates -is \[System\.Array\]\) \{ \$parsedCandidates \} else \{ @\(\$parsedCandidates\) \}/, label);
+    assert.doesNotMatch(text, /\$candidates = @\(Get-Content -LiteralPath \$candidatesJsonPath -Raw \| ConvertFrom-Json\)/, label);
     assert.doesNotMatch(text, /\$targetJson\s*=\s*& node @resolverArgs/, label);
   }
 });
