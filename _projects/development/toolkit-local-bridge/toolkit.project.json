@@ -5,7 +5,7 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.16",
+  "version": "2.3.17",
   "version_policy": "semver",
   "version_notes": "Bumps the native Toolkit package after n8n helper wrapper failure-pause handling changed in packaged helper content.",
   "outputs": [

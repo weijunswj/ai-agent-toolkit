@@ -643,7 +643,15 @@ function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
   }
 
   Save-PreviousCommand $Record $exitCode
-  Write-Step "DONE" "Command finished with exit code $exitCode."
+  if ($exitCode -eq 0) {
+    Write-Step "DONE" "Command finished with exit code $exitCode."
+  } else {
+    Write-Step "FAIL" "Command finished with exit code $exitCode."
+    if ($Record.commandKind -eq "export" -or $Record.commandKind -eq "import") {
+      Write-Host ""
+      [void](Read-Host "Press Enter to return after reviewing the error")
+    }
+  }
 }
 
 function Build-ExportCommand([bool]$DryRunMode) {

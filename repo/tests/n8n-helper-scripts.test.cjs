@@ -1954,6 +1954,10 @@ test('n8n workflow sync menus resolve helper commands from their own folder', ()
     assert.match(text, /Resolve-Path -LiteralPath/, label);
     assert.match(text, /Get-Command node -CommandType Application -ErrorAction Stop/, label);
     assert.match(text, /\$NodeCommandPath/, label);
+    assert.match(text, /Write-Step "FAIL" "Command finished with exit code \$exitCode\."/,
+      label);
+    assert.match(text, /if \(\$Record\.commandKind -eq "export" -or \$Record\.commandKind -eq "import"\) \{\s+Write-Host ""\s+\[void\]\(Read-Host "Press Enter to return after reviewing the error"\)/,
+      label);
     assert.doesNotMatch(text, /New-CommandRecord\s+[^`r`n]*"node"/, label);
     assert.doesNotMatch(text, /&\s+node\b/, label);
     assert.doesNotMatch(text, /"\.\\scripts\\export-n8n-workflows-live\.ps1"/, label);
