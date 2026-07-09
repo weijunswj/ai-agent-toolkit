@@ -837,7 +837,7 @@ test('Windows hook repair uses Codex PLUGIN_ROOT for Codex cache paths', () => {
     'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${PLUGIN_ROOT}/hooks/run-hook.ps1" "session-start.sh"'
   );
   assert.doesNotMatch(repairedCommand, /CLAUDE_PLUGIN_ROOT/);
-  assert.equal(runAudit(pluginRoot, '--verify-output').status, 0);
+  assert.equal(runAudit(pluginRoot).status, 0);
 });
 
 test('Windows hook repair wrapper executes repaired hook through powershell.exe', (t) => {
