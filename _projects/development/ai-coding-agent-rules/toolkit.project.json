@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.4.6",
+  "version": "2.4.8",
   "version_policy": "semver",
-  "version_notes": "Removes 30-minute checkpoint guidance for long validation or local processes while keeping interrupt orphan-process hygiene.",
+  "version_notes": "Clarifies passive native Toolkit startup preflight warnings should pause for check/repair/refresh or proceed choice.",
   "outputs": [
     {
       "kind": "curated",

@@ -15,6 +15,8 @@ Tiny repo-instruction bootstrap/checker for local project instruction files.
 
 This skill is not an always-on ruleset. Keep the steady-state path cheap. Use it to bootstrap or repair repo-local instructions only when they are missing, unchecked, suspected stale, structurally broken, changed since the last check, or explicitly requested.
 
+Native Toolkit plugin startup hooks may run a passive repo-local instruction preflight before ordinary work. That hook may compare only the expected `AI-AGENT-TOOLKIT` managed blocks in the required platform files against the bundled repo-local templates, then print a concise warning for missing, broken, or stale managed content. It must not back up, rewrite, repair, create files, read unrelated repo docs, or inspect unmarked user-authored content. If the hook reports a problem, pause and ask whether to run this skill with an explicit check, repair, refresh, or bootstrap request now, or proceed with the current task despite the warning.
+
 All questions that require user action or confirmation must be fully bolded. This includes target-path questions, approval questions, and same-session continuation questions.
 
 ## Cheap State Check
@@ -28,7 +30,7 @@ This works for GitHub, GitLab, Bitbucket, local git repos, and plain folders. Gi
    - Antigravity: `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
 3. Check only the required files for the selected platform.
 4. For each required file, check existence and AI-AGENT-TOOLKIT managed-marker structure.
-5. If every required file is structurally current enough and the user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions, do not read templates, do not inspect or compare managed body content beyond marker structure, do not rewrite files, and continue the original user task.
+5. If every required file is structurally current enough and the user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions, do not read templates, do not inspect or compare managed body content beyond marker structure, do not rewrite files, and continue the original user task. The only exception is the native Toolkit plugin startup preflight described above, which may compare expected managed blocks against bundled templates but still must not write files.
 
 A required file is structurally current enough only when:
 
