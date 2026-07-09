@@ -76,6 +76,7 @@ const forbiddenDefaultPromptPhrases = [
 const requiredPortablePlaybookFiles = [
   'INDEX.md',
   'baseline-workflow.md',
+  'docs-governance.md',
   'generated-files.md',
   'git-completion.md',
   'local-docs.md',

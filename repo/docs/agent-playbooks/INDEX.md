@@ -28,6 +28,12 @@ Triggers: Windows shell file inspection, PowerShell `Get-Content`, command timeo
 
 Read: `repo/docs/agent-playbooks/windows-command-hygiene.md`.
 
+## Match: Docs Governance, Maps, Checklists, Or Cleanup
+
+Triggers: docs map, repo map, documentation index, changelog, decision log, ADR, checklist ledger, checklist evidence, docs cleanup, archive/merge/delete decisions, or requests to add status/report/plan/handoff/audit docs.
+
+Read: `repo/docs/agent-playbooks/docs-governance.md`.
+
 ## Match: Repo-Local Agent Instruction Work
 
 Triggers: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed markers, agent bootstrap, repo-local templates, instruction shims, or the `ai-coding-agent-rules` project.

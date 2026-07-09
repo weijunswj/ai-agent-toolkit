@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "version_policy": "semver",
-  "version_notes": "Adds a portable Windows command hygiene playbook for bounded reads, log inspection, localhost server restarts, and timeout recovery.",
+  "version_notes": "Adds portable docs-governance routing for docs maps, checklist ledgers, decisions, changelogs, and archive/merge/delete rules.",
   "outputs": [
     {
       "kind": "curated",

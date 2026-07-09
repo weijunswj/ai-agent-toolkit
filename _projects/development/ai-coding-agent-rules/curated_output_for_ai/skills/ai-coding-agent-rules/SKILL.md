@@ -65,6 +65,7 @@ Treat `repo-local/docs/agent-playbooks/` as a folder-level install unit, not as 
 
 - `INDEX.md`
 - `baseline-workflow.md`
+- `docs-governance.md`
 - `generated-files.md`
 - `git-completion.md`
 - `local-docs.md`
