@@ -828,7 +828,7 @@ test('Windows hook repair uses Codex PLUGIN_ROOT for Codex cache paths', () => {
   });
   writeSessionStartShellHookWithNodeFallback(pluginRoot);
 
-  const result = runRepair(pluginRoot, '--plugin-id', 'n8n-skills@n8n-io');
+  const result = runRepair(pluginRoot);
   assert.equal(result.status, 0, result.stderr);
 
   const repairedCommand = readJson(path.join(pluginRoot, 'hooks', 'hooks.json')).hooks.SessionStart[0].hooks[0].command;
