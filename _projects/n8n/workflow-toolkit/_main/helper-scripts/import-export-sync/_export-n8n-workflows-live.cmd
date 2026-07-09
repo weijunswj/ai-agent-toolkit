@@ -14,8 +14,6 @@ if "%LAST_EXIT%"=="0" (
   call :status Green "DONE  Export finished successfully."
 ) else (
   call :status Red "FAIL  Export stopped with exit code %LAST_EXIT%."
-  call :pause_before_exit
-  exit /b %LAST_EXIT%
 )
 call :prompt "Press R to run again or E to exit."
 call :read_choice "> " "RE" "E"
@@ -32,12 +30,6 @@ exit /b 0
 
 :prompt
 call :status Yellow "%~1"
-exit /b 0
-
-:pause_before_exit
-call :prompt "Press Enter to return after reviewing the error."
-set "AAT_PAUSE="
-set /p "AAT_PAUSE=> "
 exit /b 0
 
 :read_choice

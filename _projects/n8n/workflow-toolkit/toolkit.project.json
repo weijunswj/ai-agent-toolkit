@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.12",
+  "version": "1.2.13",
   "version_policy": "semver",
-  "version_notes": "Pauses import/export command wrappers on failure so errors remain visible until the user acknowledges them.",
+  "version_notes": "Uses the same R/E rerun prompt after failed direct import/export command wrapper runs so errors remain visible without terminating the launcher.",
   "outputs": [
     {
       "kind": "curated",
