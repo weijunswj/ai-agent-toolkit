@@ -799,6 +799,7 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(index, /repo\/docs\/agent-playbooks\/n8n-safety-and-workflows\.md/);
   assert.match(index, /repo\/docs\/agent-playbooks\/generated-output-and-publishing\.md/);
   assert.match(index, /repo\/docs\/agent-playbooks\/pr-review-and-ci\.md/);
+  assert.match(index, /repo\/docs\/agent-playbooks\/docs-governance\.md/);
   const n8nPlaybook = readTextFile(path.join(repoRoot, 'repo', 'docs', 'agent-playbooks', 'n8n-safety-and-workflows.md'));
   assert.match(n8nPlaybook, /Stop before live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, credential, deployment, production, destructive, or privileged external actions/);
   assert.match(n8nPlaybook, /Require explicit current-turn approval naming the target and allowed operation/);
@@ -1724,6 +1725,7 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
 
   const portableIndex = readTextFile(path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'docs', 'agent-playbooks', 'INDEX.md'));
   assert.match(portableIndex, /\[Generated files\]\(generated-files\.md\) \(`docs\/agent-playbooks\/generated-files\.md`\)/);
+  assert.match(portableIndex, /\[Docs governance\]\(docs-governance\.md\) \(`docs\/agent-playbooks\/docs-governance\.md`\)/);
   assert.match(portableIndex, /\[Safety gates\]\(safety-gates\.md\) \(`docs\/agent-playbooks\/safety-gates\.md`\)/);
   assert.match(portableIndex, /\[Windows command hygiene\]\(windows-command-hygiene\.md\) \(`docs\/agent-playbooks\/windows-command-hygiene\.md`\)/);
   const portableDocsOutput = manifest.outputs.find((entry) => entry.output === 'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks');
