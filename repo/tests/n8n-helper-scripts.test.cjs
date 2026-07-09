@@ -13,6 +13,7 @@ const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repo
 const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync');
 const sourceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync');
 const {
+  parseArgs,
   resolveN8nDockerTarget,
 } = require(path.join(sourceScriptDir, 'resolve-n8n-docker-target.cjs'));
 const sanitizerDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer');
@@ -389,8 +390,14 @@ test('resolve-n8n-docker-target.cjs multiple candidates print numbered safe choo
   assert.match(output.text(), /container=n8n-1/);
   assert.match(output.text(), /container_id=222222222222/);
   assert.match(output.text(), /ports=5678:5678/);
+  assert.match(output.text(), /ports=5678:5678\n\n2\. stack=n8n-production-cloudflare/);
   assert.match(output.text(), /2\. stack=n8n-production-cloudflare/);
   assert.match(output.text(), /ports=5679:5678/);
+});
+
+test('resolve-n8n-docker-target.cjs accepts JSON output file option', () => {
+  assert.equal(parseArgs(['--json-output', 'target.json']).jsonOutput, 'target.json');
+  assert.equal(parseArgs(['--json-output=target.json']).jsonOutput, 'target.json');
 });
 
 test('resolve-n8n-docker-target.cjs valid numeric interactive selection pins target for current process only', async () => {
@@ -1685,6 +1692,23 @@ test('PowerShell n8n live helpers guard run-directory cleanup under .tmp', () =>
     assert.match(initializeBlock, /Assert-RunDirectoryPathHasNoUnsafeLinks \$resolvedPath \$tmpRoot/, label);
     assert.doesNotMatch(initializeBlock, /\$tmpPrefix\s*=\s*\$tmpRoot\s*\+\s*'\\'/, label);
     assert.doesNotMatch(initializeBlock, /TrimEnd\('\\'\)/, label);
+  }
+});
+
+test('PowerShell n8n live helpers keep Docker target chooser attached to the console', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
+    ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
+    ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
+    ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
+  ]) {
+    const text = readText(filePath);
+    assert.match(text, /\$targetJsonPath = \[System\.IO\.Path\]::GetTempFileName\(\)/, label);
+    assert.match(text, /"--json-output", \$targetJsonPath/, label);
+    assert.match(text, /Get-Content -LiteralPath \$targetJsonPath -Raw/, label);
+    assert.doesNotMatch(text, /\$targetJson\s*=\s*& node @resolverArgs/, label);
   }
 });
 

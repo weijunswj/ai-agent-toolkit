@@ -2,6 +2,7 @@
 'use strict';
 
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
 const readline = require('node:readline/promises');
 
 const N8N_IMAGES = new Set(['n8nio/n8n', 'n8nio/n8n:stable']);
@@ -20,6 +21,10 @@ function parseArgs(args = []) {
     const arg = args[index];
     if (arg === '--json') {
       options.json = true;
+    } else if (arg === '--json-output') {
+      index = readValue(index, 'jsonOutput');
+    } else if (arg.startsWith('--json-output=')) {
+      options.jsonOutput = arg.slice('--json-output='.length);
     } else if (arg === '--non-interactive') {
       options.nonInteractive = true;
     } else if (arg === '--container' || arg === '--container-name') {
@@ -179,7 +184,12 @@ function candidateLines(candidates) {
 }
 
 function formatCandidateList(candidates) {
-  return candidateLines(candidates).join('\n');
+  return candidates
+    .map((candidate, index) => candidateLines([candidate]).map((line, lineIndex) => {
+      if (lineIndex === 0) return line.replace(/^1\./, `${index + 1}.`);
+      return line;
+    }).join('\n'))
+    .join('\n\n');
 }
 
 function overrideGuidance() {
@@ -286,8 +296,15 @@ function publicTarget(candidate) {
 
 async function main() {
   try {
-    const candidate = await resolveN8nDockerTarget({ args: process.argv.slice(2) });
-    process.stdout.write(`${JSON.stringify(publicTarget(candidate), null, 2)}\n`);
+    const args = process.argv.slice(2);
+    const options = parseArgs(args);
+    const candidate = await resolveN8nDockerTarget({ args });
+    const json = `${JSON.stringify(publicTarget(candidate), null, 2)}\n`;
+    if (options.jsonOutput) {
+      fs.writeFileSync(options.jsonOutput, json, 'utf8');
+    } else {
+      process.stdout.write(json);
+    }
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

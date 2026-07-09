@@ -196,7 +196,8 @@ function Resolve-LiveContainerTarget {
     throw "Trusted n8n Docker target resolver not found: $resolverScript"
   }
 
-  $resolverArgs = @($resolverScript, "--json")
+  $targetJsonPath = [System.IO.Path]::GetTempFileName()
+  $resolverArgs = @($resolverScript, "--json-output", $targetJsonPath)
   if (-not [string]::IsNullOrWhiteSpace($ContainerId)) {
     $resolverArgs += @("--container-id", $ContainerId)
   }
@@ -212,12 +213,18 @@ function Resolve-LiveContainerTarget {
     $resolverArgs += @("--compose-service", $ComposeService)
   }
 
-  $targetJson = & node @resolverArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw "Could not resolve a running n8n Docker target. See resolver output above and rerun with an explicit target if needed."
+  try {
+    & node @resolverArgs
+    if ($LASTEXITCODE -ne 0) {
+      throw "Could not resolve a running n8n Docker target. See resolver output above and rerun with an explicit target if needed."
+    }
+
+    $targetJson = Get-Content -LiteralPath $targetJsonPath -Raw
+  } finally {
+    Remove-Item -LiteralPath $targetJsonPath -Force -ErrorAction SilentlyContinue
   }
 
-  $target = ($targetJson -join "`n") | ConvertFrom-Json
+  $target = $targetJson | ConvertFrom-Json
   if ($null -eq $target -or [string]::IsNullOrWhiteSpace([string]$target.container_id)) {
     throw "n8n Docker target resolver returned no container id."
   }
