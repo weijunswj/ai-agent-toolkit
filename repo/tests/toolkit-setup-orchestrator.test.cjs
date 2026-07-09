@@ -360,7 +360,7 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /Preference\/target writes before answers: no/);
   assert.match(result.stdout, /Codex plugin cache path:/);
   assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.10/);
-  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.9/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.10/);
   assert.match(result.stdout, /Codex plugin status: already fresh/);
   assert.match(result.stdout, /Codex plugin updated this run: no/);
   assert.match(result.stdout, /Codex restart required: no/);

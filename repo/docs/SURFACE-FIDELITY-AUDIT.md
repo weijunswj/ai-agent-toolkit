@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 150 |
+| declared_generated | 152 |
 | pack_installed_declared | 84 |
 
 Current boundary recipe classifications:
@@ -64,7 +64,7 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 172 |
+| main_full_fidelity | 174 |
 
 Known baseline context:
 

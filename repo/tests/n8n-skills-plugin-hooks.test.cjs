@@ -804,10 +804,10 @@ test('Windows hook repair wraps direct shell hook commands and is idempotent', (
 });
 
 test('Windows hook repair uses Codex PLUGIN_ROOT for Codex cache paths', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-plugin-codex-cache-'));
-  const pluginRoot = path.join(root, '.codex', 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.0');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'generic-plugin-codex-cache-'));
+  const pluginRoot = path.join(root, '.codex', 'plugins', 'cache', 'example-org', 'generic-hooks', '1.0.0');
   writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
-    name: 'n8n-skills',
+    name: 'generic-hooks',
     version: '1.0.0',
     hooks: './hooks/hooks.json'
   });
