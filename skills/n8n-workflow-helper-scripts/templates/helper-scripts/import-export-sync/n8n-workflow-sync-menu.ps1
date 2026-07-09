@@ -79,7 +79,7 @@ $TrustedValidateHelperScript = Resolve-TrustedHelperPath $ValidateHelperScript "
 $NodeCommandPath = $null
 
 $DefaultWorkflowDir = "n8n-workflows"
-$DefaultContainer = "n8n"
+$DefaultContainer = ""
 $DefaultBindingsFile = ".n8n-local\n8n-credential-bindings.json"
 $PreviousCommandFile = Join-Path $RepoRoot ".n8n-local\n8n-sync-last-command.json"
 $CommandSchemaVersion = 2
@@ -146,12 +146,12 @@ function Show-CommonSettingExplanations {
   Write-Host "- Risk level: Low. The helper scripts support only n8n-workflows."
   Write-Host "- When to use it: Keep this as n8n-workflows."
   Write-Host ""
-  Write-Host "Container"
-  Write-Host "- Meaning: Docker container name running n8n."
-  Write-Host "- Recommended default: n8n."
-  Write-Host "- Effect: Live import/export commands run inside that container."
+  Write-Host "Docker target"
+  Write-Host "- Meaning: Optional explicit Docker target for live n8n."
+  Write-Host "- Recommended default: blank, so helpers auto-detect or prompt when multiple running n8n containers exist."
+  Write-Host "- Effect: Live import/export commands run inside the resolved container for this process only."
   Write-Host "- Risk level: Medium for real import/export because the live n8n instance is touched."
-  Write-Host "- When to use it: Change when your n8n container has a different name."
+  Write-Host "- When to use it: Fill ContainerId, Container, or ComposeProject/ComposeService when auto-detection would be ambiguous."
   Write-Host ""
   Write-Host "BindingsFile"
   Write-Host "- Meaning: Local file storing credential binding metadata from live workflows."
@@ -306,7 +306,7 @@ function Read-RestartContainerAfterImport {
   Write-Section "RestartContainerAfterImport"
   Write-Host "- Meaning: Restart Docker n8n after import when active/scheduled workflows were touched."
   Write-Host "- Recommended: Yes for local Docker imports when a short n8n restart is acceptable; no for shared or production instances."
-  Write-Host "- Effect: Runs docker restart <Container> only after a successful import when restart warnings exist."
+  Write-Host "- Effect: Runs docker restart on the resolved n8n target only after a successful import when restart warnings exist."
   Write-Host "- Risk: Medium because it interrupts local n8n."
   Write-Host "- Use when: Schedule/cron trigger warning appears and this is local/staging."
   return Read-YesNo "Use -RestartContainerAfterImport?" $true
@@ -314,11 +314,17 @@ function Read-RestartContainerAfterImport {
 
 function Read-CommonSettings {
   Show-CommonSettingExplanations
-  $container = Read-Default "Container" $DefaultContainer
+  $container = Read-Default "Container name override" $DefaultContainer
+  $containerId = Read-Default "Container ID override" ""
+  $composeProject = Read-Default "Compose project override" ""
+  $composeService = Read-Default "Compose service override" ""
   $bindingsFile = Read-Default "BindingsFile" $DefaultBindingsFile
   return [PSCustomObject]@{
     WorkflowDir = $DefaultWorkflowDir
     Container = $container
+    ContainerId = $containerId
+    ComposeProject = $composeProject
+    ComposeService = $composeService
     BindingsFile = $bindingsFile
   }
 }
@@ -423,9 +429,9 @@ function Read-MenuArgs($Args, [string[]]$PairOptions, [string[]]$SwitchOptions, 
 
 function Test-ExportCommandArgs([string[]]$Args) {
   $parsed = Read-MenuArgs $Args `
-    @("-WorkflowDir", "-Container", "-BindingsFile", "-Mode", "-MissingLiveMode") `
+    @("-WorkflowDir", "-Container", "-ContainerName", "-ContainerId", "-ComposeProject", "-ComposeService", "-BindingsFile", "-Mode", "-MissingLiveMode") `
     @("-PublishedOnly", "-IncludeArchived", "-PreserveTags", "-DryRun") `
-    @("-WorkflowDir", "-Container", "-BindingsFile", "-Mode", "-MissingLiveMode") `
+    @("-WorkflowDir", "-BindingsFile", "-Mode", "-MissingLiveMode") `
     @{
       "-WorkflowDir" = @($DefaultWorkflowDir)
       "-Mode" = @("RepoTrackedOnly", "AllLive")
@@ -442,9 +448,9 @@ function Test-ExportCommandArgs([string[]]$Args) {
 
 function Test-ImportCommandArgs([string[]]$Args) {
   $parsed = Read-MenuArgs $Args `
-    @("-WorkflowDir", "-Container", "-BindingsFile", "-ArchivedByNameMode", "-ProjectId", "-UserId") `
+    @("-WorkflowDir", "-Container", "-ContainerName", "-ContainerId", "-ComposeProject", "-ComposeService", "-BindingsFile", "-ArchivedByNameMode", "-ProjectId", "-UserId") `
     @("-AllowMissingCredentialBindings", "-SkipCredentialBindingRefresh", "-RestartContainerAfterImport", "-DryRun") `
-    @("-WorkflowDir", "-Container", "-BindingsFile", "-ArchivedByNameMode") `
+    @("-WorkflowDir", "-BindingsFile", "-ArchivedByNameMode") `
     @{
       "-WorkflowDir" = @($DefaultWorkflowDir)
       "-ArchivedByNameMode" = @("CreateNew", "UpdateArchived", "Block")
@@ -637,7 +643,15 @@ function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
   }
 
   Save-PreviousCommand $Record $exitCode
-  Write-Step "DONE" "Command finished with exit code $exitCode."
+  if ($exitCode -eq 0) {
+    Write-Step "DONE" "Command finished with exit code $exitCode."
+  } else {
+    Write-Step "FAIL" "Command finished with exit code $exitCode."
+    if ($Record.commandKind -eq "export" -or $Record.commandKind -eq "import") {
+      Write-Host ""
+      [void](Read-Host "Press Enter to return after reviewing the error")
+    }
+  }
 }
 
 function Build-ExportCommand([bool]$DryRunMode) {
@@ -653,11 +667,14 @@ function Build-ExportCommand([bool]$DryRunMode) {
 
   $args = @(
     "-WorkflowDir", $common.WorkflowDir,
-    "-Container", $common.Container,
     "-BindingsFile", $common.BindingsFile,
     "-Mode", $mode,
     "-MissingLiveMode", $missingLiveMode
   )
+  if (-not [string]::IsNullOrWhiteSpace($common.Container)) { $args += @("-Container", $common.Container) }
+  if (-not [string]::IsNullOrWhiteSpace($common.ContainerId)) { $args += @("-ContainerId", $common.ContainerId) }
+  if (-not [string]::IsNullOrWhiteSpace($common.ComposeProject)) { $args += @("-ComposeProject", $common.ComposeProject) }
+  if (-not [string]::IsNullOrWhiteSpace($common.ComposeService)) { $args += @("-ComposeService", $common.ComposeService) }
   if ($publishedOnly) { $args += "-PublishedOnly" }
   if ($includeArchived) { $args += "-IncludeArchived" }
   if ($preserveTags) { $args += "-PreserveTags" }
@@ -680,10 +697,13 @@ function Build-ImportCommand([bool]$DryRunMode) {
 
   $args = @(
     "-WorkflowDir", $common.WorkflowDir,
-    "-Container", $common.Container,
     "-BindingsFile", $common.BindingsFile,
     "-ArchivedByNameMode", $archivedMode
   )
+  if (-not [string]::IsNullOrWhiteSpace($common.Container)) { $args += @("-Container", $common.Container) }
+  if (-not [string]::IsNullOrWhiteSpace($common.ContainerId)) { $args += @("-ContainerId", $common.ContainerId) }
+  if (-not [string]::IsNullOrWhiteSpace($common.ComposeProject)) { $args += @("-ComposeProject", $common.ComposeProject) }
+  if (-not [string]::IsNullOrWhiteSpace($common.ComposeService)) { $args += @("-ComposeService", $common.ComposeService) }
   if (-not [string]::IsNullOrWhiteSpace($projectId)) { $args += @("-ProjectId", $projectId) }
   if (-not [string]::IsNullOrWhiteSpace($userId)) { $args += @("-UserId", $userId) }
   if ($allowMissingBindings) { $args += "-AllowMissingCredentialBindings" }
@@ -732,7 +752,7 @@ while ($true) {
   Write-Section "n8n Workflow Sync Menu"
   Write-Host ("Repo root        : {0}" -f $RepoRoot)
   Write-Host ("Workflow dir     : {0}" -f $DefaultWorkflowDir)
-  Write-Host ("Container        : {0}" -f $DefaultContainer)
+  Write-Host "Docker target    : auto-detect or prompt unless explicitly provided"
   Write-Host ("Bindings file    : {0}" -f $DefaultBindingsFile)
   $previous = Load-PreviousCommand
   if ($null -eq $previous) {

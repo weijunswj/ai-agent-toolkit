@@ -3,6 +3,7 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { Readable, Writable } = require('node:stream');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -11,6 +12,10 @@ const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repo
 
 const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync');
 const sourceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync');
+const {
+  parseArgs,
+  resolveN8nDockerTarget,
+} = require(path.join(sourceScriptDir, 'resolve-n8n-docker-target.cjs'));
 const sanitizerDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer');
 const sourceSanitizerDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'sanitizer');
 const sourceRagTemplateDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'workflow-templates', 'chatbot-with-RAG');
@@ -78,6 +83,89 @@ function runNode(scriptPath, args = [], options = {}) {
     env: { ...process.env, ...(options.env || {}) },
     encoding: 'utf8',
   });
+}
+
+function n8nContainer({
+  id,
+  name,
+  project = '',
+  service = '',
+  image = 'n8nio/n8n:stable',
+  ports = { '5678/tcp': [{ HostPort: '5678' }] },
+  running = true,
+}) {
+  return {
+    Id: id,
+    Name: `/${name}`,
+    State: { Running: running },
+    Config: {
+      Image: image,
+      Labels: {
+        ...(project ? { 'com.docker.compose.project': project } : {}),
+        ...(service ? { 'com.docker.compose.service': service } : {}),
+      },
+    },
+    NetworkSettings: { Ports: ports },
+  };
+}
+
+function dockerMock(containers, options = {}) {
+  const calls = [];
+  const byId = new Map(containers.map((container) => [container.Id, container]));
+  const byName = new Map(containers.map((container) => [String(container.Name).replace(/^\//, ''), container]));
+  const composePs = options.composePs || {};
+  const runner = (args) => {
+    calls.push(args);
+    if (args[0] === 'inspect') {
+      const inspected = args.slice(1).flatMap((target) => {
+        const exactId = byId.get(target);
+        if (exactId) return [exactId];
+        const idMatch = containers.find((container) => container.Id.startsWith(target));
+        if (idMatch) return [idMatch];
+        const nameMatch = byName.get(target);
+        return nameMatch ? [nameMatch] : [];
+      });
+      return inspected.length
+        ? { status: 0, stdout: JSON.stringify(inspected), stderr: '' }
+        : { status: 1, stdout: '', stderr: 'not found' };
+    }
+    if (args[0] === 'ps' && args[1] === '-q') {
+      return {
+        status: 0,
+        stdout: containers.filter((container) => container.State.Running).map((container) => container.Id).join('\n'),
+        stderr: '',
+      };
+    }
+    if (args[0] === 'compose') {
+      const projectIndex = args.indexOf('-p');
+      const project = projectIndex >= 0 ? args[projectIndex + 1] : '';
+      const service = args.at(-1);
+      const ids = composePs[`${project}/${service}`] || composePs[service] || [];
+      return { status: 0, stdout: ids.join('\n'), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: `unexpected docker args: ${args.join(' ')}` };
+  };
+  runner.calls = calls;
+  return runner;
+}
+
+function captureStream() {
+  let text = '';
+  const stream = new Writable({
+    write(chunk, encoding, callback) {
+      text += chunk.toString();
+      callback();
+    },
+  });
+  stream.isTTY = true;
+  stream.text = () => text;
+  return stream;
+}
+
+function inputStream(text) {
+  const stream = Readable.from([text]);
+  stream.isTTY = true;
+  return stream;
 }
 
 function findPowerShell() {
@@ -221,6 +309,205 @@ Assert-Rejected "traversal outside .tmp" ${psSingleQuoted(traversalOutsideTmp)}
     encoding: 'utf8',
   });
 }
+
+test('resolve-n8n-docker-target.cjs explicit container override wins', async () => {
+  const target = n8nContainer({ id: 'aaaaaaaaaaaa1111', name: 'explicit-n8n', project: 'local', service: 'n8n' });
+  const other = n8nContainer({ id: 'bbbbbbbbbbbb2222', name: 'other-n8n', project: 'other', service: 'n8n' });
+  const runDocker = dockerMock([target, other], { composePs: { n8n: [other.Id] } });
+
+  const selected = await resolveN8nDockerTarget({ args: ['--container', 'explicit-n8n'], runDocker });
+
+  assert.equal(selected.id, target.Id);
+  assert.deepEqual(runDocker.calls[0], ['inspect', 'explicit-n8n']);
+});
+
+test('resolve-n8n-docker-target.cjs explicit container ID override wins', async () => {
+  const target = n8nContainer({ id: 'cccccccccccc3333', name: 'target-n8n', project: 'local', service: 'n8n' });
+  const runDocker = dockerMock([target]);
+
+  const selected = await resolveN8nDockerTarget({ args: ['--container-id', 'cccccccccccc3333'], runDocker });
+
+  assert.equal(selected.id, target.Id);
+});
+
+test('resolve-n8n-docker-target.cjs compose project and service discovery works', async () => {
+  const target = n8nContainer({ id: 'dddddddddddd4444', name: 'n8n-1', project: 'n8n-production-cloudflare', service: 'n8n', ports: { '5678/tcp': [{ HostPort: '5679' }] } });
+  const runDocker = dockerMock([target], { composePs: { 'n8n-production-cloudflare/n8n': [target.Id] } });
+
+  const selected = await resolveN8nDockerTarget({
+    args: ['--compose-project', 'n8n-production-cloudflare', '--compose-service', 'n8n'],
+    runDocker,
+  });
+
+  assert.equal(selected.id, target.Id);
+  assert.equal(selected.project, 'n8n-production-cloudflare');
+  assert.equal(selected.ports, '5679:5678');
+});
+
+test('resolve-n8n-docker-target.cjs compose label discovery works', async () => {
+  const target = n8nContainer({ id: 'eeeeeeeeeeee5555', name: 'n8n-1', project: 'n8n-local', service: 'n8n' });
+  const other = n8nContainer({ id: 'ffffffffffff6666', name: 'worker-1', project: 'n8n-local', service: 'worker', image: 'example/worker:latest' });
+  const runDocker = dockerMock([target, other], { composePs: { 'n8n-local/n8n': [] } });
+
+  const selected = await resolveN8nDockerTarget({
+    args: ['--compose-project', 'n8n-local', '--compose-service', 'n8n'],
+    runDocker,
+  });
+
+  assert.equal(selected.id, target.Id);
+});
+
+test('resolve-n8n-docker-target.cjs implicit compose singleton stays ambiguous when another n8n is running globally', async () => {
+  const composeTarget = n8nContainer({ id: '919191919191aaaa', name: 'n8n-local-1', project: 'n8n-local', service: 'n8n' });
+  const otherTarget = n8nContainer({ id: '929292929292bbbb', name: 'n8n-prod-1', project: 'n8n-production-cloudflare', service: 'n8n' });
+  const output = captureStream();
+  const runDocker = dockerMock([composeTarget, otherTarget], { composePs: { n8n: [composeTarget.Id] } });
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker, output }),
+    /Multiple running n8n candidates require an explicit target/
+  );
+
+  assert.match(output.text(), /1\. stack=n8n-local[\s\S]*container=n8n-local-1/);
+  assert.match(output.text(), /2\. stack=n8n-production-cloudflare[\s\S]*container=n8n-prod-1/);
+});
+
+test('resolve-n8n-docker-target.cjs single running n8n image fallback works', async () => {
+  const target = n8nContainer({ id: '111111111111aaaa', name: 'plain-n8n', image: 'n8nio/n8n' });
+  const runDocker = dockerMock([target]);
+
+  const selected = await resolveN8nDockerTarget({ args: [], runDocker });
+
+  assert.equal(selected.id, target.Id);
+});
+
+test('resolve-n8n-docker-target.cjs zero candidates fails helpfully', async () => {
+  const runDocker = dockerMock([]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker }),
+    /No running n8n Docker container was detected[\s\S]*--container-id[\s\S]*N8N_COMPOSE_PROJECT/
+  );
+});
+
+test('resolve-n8n-docker-target.cjs multiple candidates print numbered safe chooser list', async () => {
+  const local = n8nContainer({ id: '222222222222aaaa', name: 'n8n-1', project: 'n8n-local', service: 'n8n', ports: { '5678/tcp': [{ HostPort: '5678' }] } });
+  const production = n8nContainer({ id: '333333333333bbbb', name: 'n8n-1', project: 'n8n-production-cloudflare', service: 'n8n', ports: { '5678/tcp': [{ HostPort: '5679' }] } });
+  const output = captureStream();
+  const runDocker = dockerMock([local, production]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker, output }),
+    /Multiple running n8n candidates require an explicit target/
+  );
+
+  assert.match(output.text(), /^\nMultiple running n8n Docker candidates were detected:\n\n1\. stack=n8n-local/);
+  assert.match(output.text(), /container=n8n-1/);
+  assert.match(output.text(), /container_id=222222222222/);
+  assert.match(output.text(), /ports=5678:5678/);
+  assert.match(output.text(), /ports=5678:5678\n\n2\. stack=n8n-production-cloudflare/);
+  assert.match(output.text(), /2\. stack=n8n-production-cloudflare/);
+  assert.match(output.text(), /ports=5679:5678\n\n$/);
+});
+
+test('resolve-n8n-docker-target.cjs accepts JSON output file option', () => {
+  assert.equal(parseArgs(['--json-output', 'target.json']).jsonOutput, 'target.json');
+  assert.equal(parseArgs(['--json-output=target.json']).jsonOutput, 'target.json');
+  assert.equal(parseArgs(['--candidates-json-output', 'candidates.json']).candidatesJsonOutput, 'candidates.json');
+  assert.equal(parseArgs(['--candidates-json-output=candidates.json']).candidatesJsonOutput, 'candidates.json');
+});
+
+test('resolve-n8n-docker-target.cjs can hand multiple candidates to host prompt code', async () => {
+  const candidatesPath = path.join(tempDir(), 'candidates.json');
+  const output = captureStream();
+  const runDocker = dockerMock([
+    n8nContainer({ id: '121212121212aaaa', name: 'n8n-a', project: 'one', service: 'n8n' }),
+    n8nContainer({ id: '343434343434bbbb', name: 'n8n-b', project: 'two', service: 'n8n' }),
+  ]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--candidates-json-output', candidatesPath], runDocker, output }),
+    (error) => error.exitCode === 3
+  );
+
+  const candidates = JSON.parse(fs.readFileSync(candidatesPath, 'utf8'));
+  assert.equal(candidates.length, 2);
+  assert.equal(candidates[0].container_id_prefix, '121212121212');
+  assert.equal(candidates[1].compose_project, 'two');
+  assert.match(output.text(), /^\nMultiple running n8n Docker candidates were detected:\n\n1\. stack=one[\s\S]*\n\n2\. stack=two[\s\S]*\n\n$/);
+});
+
+test('resolve-n8n-docker-target.cjs valid numeric interactive selection pins target for current process only', async () => {
+  const local = n8nContainer({ id: '444444444444aaaa', name: 'n8n-1', project: 'n8n-local', service: 'n8n' });
+  const production = n8nContainer({ id: '555555555555bbbb', name: 'n8n-1', project: 'n8n-production-cloudflare', service: 'n8n' });
+  const output = captureStream();
+  const runDocker = dockerMock([local, production]);
+
+  const selected = await resolveN8nDockerTarget({
+    args: [],
+    runDocker,
+    input: inputStream('2\n'),
+    output,
+    interactive: true,
+  });
+
+  assert.equal(selected.id, production.Id);
+  assert.equal(output.text().includes('n8n-target.json'), false);
+});
+
+test('resolve-n8n-docker-target.cjs invalid numeric selection terminates with relaunch guidance', async () => {
+  const runDocker = dockerMock([
+    n8nContainer({ id: '666666666666aaaa', name: 'n8n-1', project: 'one', service: 'n8n' }),
+    n8nContainer({ id: '777777777777bbbb', name: 'n8n-1', project: 'two', service: 'n8n' }),
+  ]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: [], runDocker, input: inputStream('3\n'), output: captureStream(), interactive: true }),
+    /Target selection terminated\. Relaunch the helper and select a valid target number\./
+  );
+});
+
+test('resolve-n8n-docker-target.cjs non-numeric and empty selections terminate with relaunch guidance', async () => {
+  for (const value of ['abc\n', '\n']) {
+    const runDocker = dockerMock([
+      n8nContainer({ id: `888888888888${value.length}`, name: 'n8n-1', project: 'one', service: 'n8n' }),
+      n8nContainer({ id: `999999999999${value.length}`, name: 'n8n-1', project: 'two', service: 'n8n' }),
+    ]);
+
+    await assert.rejects(
+      () => resolveN8nDockerTarget({ args: [], runDocker, input: inputStream(value), output: captureStream(), interactive: true }),
+      /Target selection terminated\. Relaunch the helper and select a valid target number\./
+    );
+  }
+});
+
+test('resolve-n8n-docker-target.cjs non-interactive multiple-candidate mode fails safely with override guidance', async () => {
+  const runDocker = dockerMock([
+    n8nContainer({ id: 'abababababab1111', name: 'n8n-a', project: 'one', service: 'n8n' }),
+    n8nContainer({ id: 'bcbcbcbcbcbc2222', name: 'n8n-b', project: 'two', service: 'n8n' }),
+  ]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker }),
+    /Multiple running n8n candidates require an explicit target[\s\S]*--compose-project/
+  );
+});
+
+test('resolve-n8n-docker-target.cjs duplicate container names across Compose stacks stay ambiguous', async () => {
+  const output = captureStream();
+  const runDocker = dockerMock([
+    n8nContainer({ id: 'cdcdcdcdcdcd1111', name: 'n8n-1', project: 'n8n-local', service: 'n8n' }),
+    n8nContainer({ id: 'dededededede2222', name: 'n8n-1', project: 'n8n-production-cloudflare', service: 'n8n' }),
+  ]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker, output }),
+    /Multiple running n8n candidates require an explicit target/
+  );
+
+  assert.match(output.text(), /1\. stack=n8n-local[\s\S]*container=n8n-1/);
+  assert.match(output.text(), /2\. stack=n8n-production-cloudflare[\s\S]*container=n8n-1/);
+});
 
 function tryCreateDirectoryLink(targetPath, linkPath) {
   const linkType = process.platform === 'win32' ? 'junction' : 'dir';
@@ -1204,6 +1491,7 @@ test('Secure CI/CD n8n helper templates stay aligned with workflow toolkit sourc
     'import-n8n-workflows-live.ps1',
     'n8n-workflow-sync-menu.ps1',
     'prepare-n8n-live-import.cjs',
+    'resolve-n8n-docker-target.cjs',
     'should-import-n8n-workflow.cjs',
     'sync-n8n-live-exports.cjs',
     'validate-n8n-workflows.cjs',
@@ -1226,13 +1514,29 @@ test('n8n command wrappers use framed colored retry output', () => {
     const text = readText(filePath);
 
     assert.match(text, /call :banner /, label);
-    assert.match(text, /call :prompt "Press R to run again or E to exit\."/, label);
+    assert.match(text, /call :prompt "Press R to run again or E to exit\."/,
+      label);
     assert.match(text, /:banner/, label);
     assert.match(text, /:prompt/, label);
     assert.match(text, /DarkCyan/, label);
     assert.match(text, /Yellow/, label);
     assert.match(text, /:status/, label);
-    assert.match(text, /if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
+    if (label.includes('export wrapper') || label.includes('import wrapper')) {
+      assert.match(text, /call :status Red "FAIL  (Export|Import) stopped with exit code %LAST_EXIT%."\s+\)\s+call :prompt "Press R to run again or E to exit\."/,
+        label);
+      assert.doesNotMatch(text, /Press Enter to return after reviewing the error/, label);
+      assert.doesNotMatch(text, /:pause_before_exit/, label);
+      assert.match(text, /choice \/C RE \/N \/M "> "\s+if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
+      assert.doesNotMatch(text, /:read_rerun_choice/, label);
+      assert.doesNotMatch(text, /CONIN\$/, label);
+      assert.doesNotMatch(text, /set \/p "AAT_CHOICE=/, label);
+      assert.doesNotMatch(text, /Click Retry/, label);
+      assert.doesNotMatch(text, /System\.Windows\.Forms/, label);
+      assert.doesNotMatch(text, /RawUI\.ReadKey/, label);
+      assert.doesNotMatch(text, /findstr/i, label);
+    } else {
+      assert.match(text, /if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
+    }
     assert.match(text, /:resolve_powershell/, label);
     assert.match(text, /%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe/i, label);
     assert.match(text, /set "POWERSHELL_EXE=/, label);
@@ -1250,10 +1554,82 @@ test('n8n command wrappers use framed colored retry output', () => {
 
     if (label.includes('import wrapper')) {
       assert.match(text, /:configure_restart/, label);
+      assert.match(text, /call :configure_restart %\*\s+if errorlevel 1 \(\s+echo\.\s+call :status Red "FAIL  Import setup terminated before live import\."/,
+        label);
       assert.match(text, /RestartContainerAfterImport/, label);
       assert.match(text, /Auto-restart n8n container if restart warning is true\?/, label);
+      assert.match(text, /call :read_yes_no "\[Y\/N\] > " "N"/, label);
+      assert.match(text, /if errorlevel 2 exit \/b 1/, label);
+      assert.match(text, /:read_yes_no\s+set "AAT_CHOICE_PROMPT=%~1"\s+set "AAT_CHOICE_DEFAULT=%~2"/, label);
+      assert.match(text, /\$value = Read-Host \$prompt/, label);
+      assert.match(text, /if \(\$choice -eq 'Y'\) \{ exit 0 \}/, label);
+      assert.match(text, /if \(\$choice -eq 'N'\) \{ exit 1 \}/, label);
+      assert.match(text, /Console input unavailable; stopping before import so typed input cannot be misrouted\./, label);
     }
   }
+});
+
+test('import command wrapper reruns on R and exits on E after successful import', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
+  const cwd = tempDir();
+  const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
+  const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
+  const countPath = path.join(cwd, 'count.txt');
+
+  fs.copyFileSync(path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd'), wrapperPath);
+  fs.writeFileSync(helperPath, `
+$counter = ${psSingleQuoted(countPath)}
+$count = 0
+if (Test-Path -LiteralPath $counter) { $count = [int](Get-Content -LiteralPath $counter -Raw) }
+$count++
+Set-Content -LiteralPath $counter -Value ([string]$count)
+Write-Host "dummy import run $count"
+exit 0
+`, 'utf8');
+
+  const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath, '-RestartContainerAfterImport'], {
+    cwd,
+    input: 'R\r\nE\r\n',
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+
+  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(countPath, 'utf8').trim(), '2');
+  assert.match(result.stdout, /dummy import run 1/);
+  assert.match(result.stdout, /dummy import run 2/);
+  assert.doesNotMatch(result.stdout + result.stderr, /cannot find the batch label/i);
+  assert.doesNotMatch(result.stdout + result.stderr, /ERROR: The file is either empty/i);
+});
+
+test('import command wrapper stops before import when restart configuration fails', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
+  const cwd = tempDir();
+  const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
+  const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
+  const invokedPath = path.join(cwd, 'import-invoked.txt');
+  const wrapperText = fs.readFileSync(path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd'), 'utf8')
+    .replace(
+      /:read_yes_no\r?\n[\s\S]*?\r?\nexit \/b %ERRORLEVEL%/,
+      ':read_yes_no\r\nexit /b 2'
+    );
+
+  fs.writeFileSync(wrapperPath, wrapperText, 'utf8');
+  fs.writeFileSync(helperPath, `
+Set-Content -LiteralPath ${psSingleQuoted(invokedPath)} -Value 'import ran'
+exit 0
+`, 'utf8');
+
+  const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+
+  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal(fs.existsSync(invokedPath), false);
+  assert.match(result.stdout, /FAIL\s+Import setup terminated before live import\./);
+  assert.match(result.stdout, /Relaunch from an interactive Command Prompt and answer the restart prompt\./);
 });
 
 test('PowerShell n8n helper scripts use colored sections, status tags, and clean failure blocks', () => {
@@ -1293,6 +1669,14 @@ test('PowerShell n8n helper scripts use colored sections, status tags, and clean
     assert.match(text, /"WRITE", "SAVE"/, label);
     assert.match(text, /\^==\\s\*\(\.\+\?\)\\s\*==\$/, label);
     assert.match(text, /\^Checked\\s\+/, label);
+
+    if (label.includes('import helper')) {
+      assert.match(text, /function Read-RestartContainerChoice\(\$Prompt\)/, label);
+      assert.match(text, /Read-Host \$Prompt/, label);
+      assert.match(text, /Press R to restart n8n container now or E to skip/, label);
+      assert.match(text, /if \(Read-RestartContainerChoice "Press R to restart n8n container now or E to skip"\) \{\s+\$restartResult = Invoke-CapturedCommand "docker" @\("restart", \$Container\)/, label);
+      assert.doesNotMatch(text, /Write-Section "Container Restart"\s+\$restartResult = Invoke-CapturedCommand "docker" @\("restart", \$Container\)/, label);
+    }
   }
 
   for (const [label, filePath, title] of [
@@ -1441,6 +1825,30 @@ test('PowerShell n8n live helpers guard run-directory cleanup under .tmp', () =>
     assert.match(initializeBlock, /Assert-RunDirectoryPathHasNoUnsafeLinks \$resolvedPath \$tmpRoot/, label);
     assert.doesNotMatch(initializeBlock, /\$tmpPrefix\s*=\s*\$tmpRoot\s*\+\s*'\\'/, label);
     assert.doesNotMatch(initializeBlock, /TrimEnd\('\\'\)/, label);
+  }
+});
+
+test('PowerShell n8n live helpers keep Docker target chooser attached to the console', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
+    ['workflow toolkit import helper', path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
+    ['generated import helper', path.join(scriptDir, 'import-n8n-workflows-live.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
+    ['Secure CI/CD import helper', path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1')],
+  ]) {
+    const text = readText(filePath);
+    assert.match(text, /\$targetJsonPath = \[System\.IO\.Path\]::GetTempFileName\(\)/, label);
+    assert.match(text, /\$candidatesJsonPath = \[System\.IO\.Path\]::GetTempFileName\(\)/, label);
+    assert.match(text, /"--json-output", \$targetJsonPath, "--candidates-json-output", \$candidatesJsonPath/, label);
+    assert.match(text, /\$resolverExitCode -eq 3/, label);
+    assert.match(text, /Read-Host "Select n8n target number for this run"/, label);
+    assert.match(text, /Get-Content -LiteralPath \$targetJsonPath -Raw/, label);
+    assert.match(text, /Get-Content -LiteralPath \$candidatesJsonPath -Raw/, label);
+    assert.match(text, /\$parsedCandidates = Get-Content -LiteralPath \$candidatesJsonPath -Raw \| ConvertFrom-Json/, label);
+    assert.match(text, /\$candidates = if \(\$parsedCandidates -is \[System\.Array\]\) \{ \$parsedCandidates \} else \{ @\(\$parsedCandidates\) \}/, label);
+    assert.doesNotMatch(text, /\$candidates = @\(Get-Content -LiteralPath \$candidatesJsonPath -Raw \| ConvertFrom-Json\)/, label);
+    assert.doesNotMatch(text, /\$targetJson\s*=\s*& node @resolverArgs/, label);
   }
 });
 
@@ -1646,6 +2054,10 @@ test('n8n workflow sync menus resolve helper commands from their own folder', ()
     assert.match(text, /Resolve-Path -LiteralPath/, label);
     assert.match(text, /Get-Command node -CommandType Application -ErrorAction Stop/, label);
     assert.match(text, /\$NodeCommandPath/, label);
+    assert.match(text, /Write-Step "FAIL" "Command finished with exit code \$exitCode\."/,
+      label);
+    assert.match(text, /if \(\$Record\.commandKind -eq "export" -or \$Record\.commandKind -eq "import"\) \{\s+Write-Host ""\s+\[void\]\(Read-Host "Press Enter to return after reviewing the error"\)/,
+      label);
     assert.doesNotMatch(text, /New-CommandRecord\s+[^`r`n]*"node"/, label);
     assert.doesNotMatch(text, /&\s+node\b/, label);
     assert.doesNotMatch(text, /"\.\\scripts\\export-n8n-workflows-live\.ps1"/, label);

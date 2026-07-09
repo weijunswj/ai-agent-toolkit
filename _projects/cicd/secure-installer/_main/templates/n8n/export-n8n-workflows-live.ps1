@@ -4,7 +4,11 @@ param(
   [string]$Mode = "RepoTrackedOnly",
   [ValidateSet("Fail", "Skip", "Report")]
   [string]$MissingLiveMode = "Fail",
-  [string]$Container = "n8n",
+  [string]$Container,
+  [string]$ContainerName,
+  [string]$ContainerId,
+  [string]$ComposeProject,
+  [string]$ComposeService,
   [string]$ExportDir = ".tmp/n8n-live-exports",
   [string]$BindingsFile = ".n8n-local\n8n-credential-bindings.json",
   [switch]$IncludeArchived,
@@ -184,6 +188,71 @@ function Invoke-CapturedCommand($Command, [string[]]$Arguments) {
     StdErr = $stderrLines
     Output = @($stdoutLines + $stderrLines)
   }
+}
+
+function Resolve-LiveContainerTarget {
+  $resolverScript = Join-Path $HelperScriptDir "resolve-n8n-docker-target.cjs"
+  if (-not (Test-Path -LiteralPath $resolverScript -PathType Leaf)) {
+    throw "Trusted n8n Docker target resolver not found: $resolverScript"
+  }
+
+  $targetJsonPath = [System.IO.Path]::GetTempFileName()
+  $candidatesJsonPath = [System.IO.Path]::GetTempFileName()
+  $resolverArgs = @($resolverScript, "--json-output", $targetJsonPath, "--candidates-json-output", $candidatesJsonPath)
+  if (-not [string]::IsNullOrWhiteSpace($ContainerId)) {
+    $resolverArgs += @("--container-id", $ContainerId)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ContainerName)) {
+    $resolverArgs += @("--container-name", $ContainerName)
+  } elseif (-not [string]::IsNullOrWhiteSpace($Container)) {
+    $resolverArgs += @("--container", $Container)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ComposeProject)) {
+    $resolverArgs += @("--compose-project", $ComposeProject)
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ComposeService)) {
+    $resolverArgs += @("--compose-service", $ComposeService)
+  }
+
+  $target = $null
+  try {
+    & node @resolverArgs
+    $resolverExitCode = $LASTEXITCODE
+    if ($resolverExitCode -eq 3) {
+      $parsedCandidates = Get-Content -LiteralPath $candidatesJsonPath -Raw | ConvertFrom-Json
+      $candidates = if ($parsedCandidates -is [System.Array]) { $parsedCandidates } else { @($parsedCandidates) }
+      $answer = Read-Host "Select n8n target number for this run"
+      $trimmedAnswer = ([string]$answer).Trim()
+      if ($trimmedAnswer -notmatch '^\d+$') {
+        throw "Target selection terminated. Relaunch the helper and select a valid target number."
+      }
+      $selectedIndex = [int]$trimmedAnswer
+      if ($selectedIndex -lt 1 -or $selectedIndex -gt $candidates.Count) {
+        throw "Target selection terminated. Relaunch the helper and select a valid target number."
+      }
+      $target = $candidates[$selectedIndex - 1]
+    } elseif ($resolverExitCode -ne 0) {
+      throw "Could not resolve a running n8n Docker target. See resolver output above and rerun with an explicit target if needed."
+    } else {
+      $targetJson = Get-Content -LiteralPath $targetJsonPath -Raw
+      $target = $targetJson | ConvertFrom-Json
+    }
+  } finally {
+    Remove-Item -LiteralPath $targetJsonPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $candidatesJsonPath -Force -ErrorAction SilentlyContinue
+  }
+
+  if ($null -eq $target -or [string]::IsNullOrWhiteSpace([string]$target.container_id)) {
+    throw "n8n Docker target resolver returned no container id."
+  }
+
+  $script:Container = [string]$target.container_id
+  $script:ResolvedN8nTarget = $target
+  $targetLabel = "{0} ({1})" -f $target.container_name, $target.container_id_prefix
+  if (-not [string]::IsNullOrWhiteSpace([string]$target.compose_project) -or -not [string]::IsNullOrWhiteSpace([string]$target.compose_service)) {
+    $targetLabel = "{0}/{1} -> {2}" -f $target.compose_project, $target.compose_service, $targetLabel
+  }
+  Write-Step "OK" "Using n8n Docker target $targetLabel."
 }
 
 function Write-Utf8NoBomText($Path, $Text) {
@@ -457,11 +526,7 @@ function Invoke-LivePreflight {
   }
   Write-Step "OK" "Docker is reachable."
 
-  $containerResult = Invoke-CapturedCommand "docker" @("inspect", $Container)
-  if ($containerResult.ExitCode -ne 0) {
-    throw "n8n container '$Container' is not reachable.`n$($containerResult.Output -join "`n")"
-  }
-  Write-Step "OK" "Container '$Container' is reachable."
+  Resolve-LiveContainerTarget
 }
 
 function Get-LiveWorkflows {
@@ -597,7 +662,7 @@ Write-Host ("Repo root        : {0}" -f $RepoRoot)
 Write-Host ("Workflow dir     : {0}" -f (Get-DisplayPath $WorkflowDirPath))
 Write-Host ("Export dir       : {0}" -f (Get-DisplayPath $ExportDirPath))
 Write-Host ("Bindings file    : {0}" -f (Get-DisplayPath $BindingsFilePath))
-Write-Host ("Container        : {0}" -f $Container)
+Write-Host ("Docker target    : {0}" -f ($(if ([string]::IsNullOrWhiteSpace($Container) -and [string]::IsNullOrWhiteSpace($ContainerName) -and [string]::IsNullOrWhiteSpace($ContainerId) -and [string]::IsNullOrWhiteSpace($ComposeProject) -and [string]::IsNullOrWhiteSpace($ComposeService)) { "auto-detect or prompt" } else { "explicit override requested" })))
 Write-Host ("Mode             : {0}" -f $Mode)
 Write-Host ("Dry run          : {0}" -f ([bool]$DryRun))
 Write-Host ("Published only   : {0}" -f ([bool]$PublishedOnly))

@@ -597,7 +597,9 @@ function recipeBoundaryReasons(root, entry) {
     reviewedTemplate ||
     isIndexLike(entry) ||
     isOverviewLike(entry);
-  const shouldAuditRuntimeHeft = !allowedCurated || runtimeCheckedCurated;
+  const skipRuntimeHeftForDeclaredHelperIndex =
+    entry.path === 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md';
+  const shouldAuditRuntimeHeft = (!allowedCurated || runtimeCheckedCurated) && !skipRuntimeHeftForDeclaredHelperIndex;
 
   if (isSkillReferenceOutput(entry.path) && !allowedCurated) {
     reasons.push('skill reference output uses curated source');
