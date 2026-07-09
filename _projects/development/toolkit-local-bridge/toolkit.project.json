@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.23",
+  "version": "2.3.24",
   "version_policy": "semver",
-  "version_notes": "Bumps the native Toolkit package after direct n8n import/export wrappers moved final rerun prompts to the Windows CON device.",
+  "version_notes": "Bumps the native Toolkit package after direct n8n import/export wrappers moved rerun prompts to CONIN$ for reliable interactive waits.",
   "outputs": [
     {
       "kind": "curated",

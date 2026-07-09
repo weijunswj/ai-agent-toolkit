@@ -1512,8 +1512,14 @@ test('n8n command wrappers use framed colored retry output', () => {
       assert.doesNotMatch(text, /Press Enter to return after reviewing the error/, label);
       assert.doesNotMatch(text, /:pause_before_exit/, label);
       assert.match(text, /call :read_rerun_choice\s+if errorlevel 1 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
-      assert.match(text, /:read_rerun_choice\s+choice \/C RE \/N \/M "> " < CON\s+if errorlevel 2 exit \/b 1\s+if errorlevel 1 exit \/b 0\s+exit \/b 1/, label);
-      assert.match(text, /set \/p "AAT_CHOICE=%~1" < CON/, label);
+      assert.match(text, /:read_rerun_choice\s+"%POWERSHELL_EXE%" -NoProfile -Command "\$ErrorActionPreference='Stop'; function Read-ConLine \{ \$fs=\[System\.IO\.File\]::Open\('CONIN\$'/, label);
+      assert.match(text, /Write-Host -NoNewline '> ' -ForegroundColor Yellow/, label);
+      assert.match(text, /if \(\$choice -eq 'R'\) \{ exit 0 \}/, label);
+      assert.match(text, /if \(\$choice -eq 'E'\) \{ exit 1 \}/, label);
+      assert.match(text, /Console input unavailable; leaving this window open for review\./, label);
+      assert.match(text, /Start-Sleep -Seconds 86400/, label);
+      assert.doesNotMatch(text, /choice \/C RE/, label);
+      assert.doesNotMatch(text, /set \/p "AAT_CHOICE=/, label);
       assert.doesNotMatch(text, /Click Retry/, label);
       assert.doesNotMatch(text, /System\.Windows\.Forms/, label);
       assert.doesNotMatch(text, /RawUI\.ReadKey/, label);
@@ -1540,7 +1546,10 @@ test('n8n command wrappers use framed colored retry output', () => {
       assert.match(text, /:configure_restart/, label);
       assert.match(text, /RestartContainerAfterImport/, label);
       assert.match(text, /Auto-restart n8n container if restart warning is true\?/, label);
-      assert.match(text, /call :read_choice "\[Y\/N\] > " "YN" "N"/, label);
+      assert.match(text, /call :read_yes_no "\[Y\/N\] > " "N"/, label);
+      assert.match(text, /:read_yes_no\s+set "AAT_CHOICE_PROMPT=%~1"\s+set "AAT_CHOICE_DEFAULT=%~2"/, label);
+      assert.match(text, /if \(\$choice -eq 'Y'\) \{ exit 0 \}/, label);
+      assert.match(text, /if \(\$choice -eq 'N'\) \{ exit 1 \}/, label);
     }
   }
 });

@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.18",
+  "version": "1.2.19",
   "version_policy": "semver",
-  "version_notes": "Reads direct import/export wrapper rerun prompts from the Windows CON device so stdin quirks cannot skip the final R/E choice.",
+  "version_notes": "Reads direct import/export wrapper prompts from CONIN$ so success/failure rerun choices do not silently exit when stdin or choice.exe is unavailable.",
   "outputs": [
     {
       "kind": "curated",

@@ -35,8 +35,8 @@ if defined HAS_RESTART_ARG (
   exit /b 0
 )
 call :prompt "Auto-restart n8n container if restart warning is true?"
-call :read_choice "[Y/N] > " "YN" "N"
-if /I "%AAT_CHOICE%"=="N" (
+call :read_yes_no "[Y/N] > " "N"
+if errorlevel 1 (
   call :status Yellow "INFO  Restart warning mode: warn only."
 ) else (
   set "RESTART_ARG=-RestartContainerAfterImport"
@@ -56,27 +56,14 @@ call :status Yellow "%~1"
 exit /b 0
 
 :read_rerun_choice
-choice /C RE /N /M "> " < CON
-if errorlevel 2 exit /b 1
-if errorlevel 1 exit /b 0
-exit /b 1
+"%POWERSHELL_EXE%" -NoProfile -Command "$ErrorActionPreference='Stop'; function Read-ConLine { $fs=[System.IO.File]::Open('CONIN$', [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite); try { $reader=[System.IO.StreamReader]::new($fs); while ($true) { Write-Host -NoNewline '> ' -ForegroundColor Yellow; $line=$reader.ReadLine(); if ($null -eq $line) { Start-Sleep -Milliseconds 250; continue }; $value=$line.Trim(); if ($value.Length -eq 0) { continue }; $choice=$value.Substring(0,1).ToUpperInvariant(); if ($choice -eq 'R') { exit 0 }; if ($choice -eq 'E') { exit 1 }; Write-Host 'Invalid choice. Press R to run again or E to exit.' -ForegroundColor Red } } finally { if ($reader) { $reader.Dispose() } else { $fs.Dispose() } } }; try { Read-ConLine } catch { Write-Host 'Console input unavailable; leaving this window open for review. Close it manually and rerun from an interactive Command Prompt.' -ForegroundColor Red; Start-Sleep -Seconds 86400; exit 1 }"
+exit /b %ERRORLEVEL%
 
-:read_choice
-set "AAT_CHOICE="
-set /p "AAT_CHOICE=%~1" < CON
-if "%AAT_CHOICE%"=="" set "AAT_CHOICE=%~3"
-set "AAT_CHOICE=%AAT_CHOICE:~0,1%"
-set "AAT_ALLOWED=%~2"
-
-:read_choice_check
-if "%AAT_ALLOWED%"=="" goto read_choice_invalid
-if /I "%AAT_CHOICE%"=="%AAT_ALLOWED:~0,1%" exit /b 0
-set "AAT_ALLOWED=%AAT_ALLOWED:~1%"
-goto read_choice_check
-
-:read_choice_invalid
-call :status Red "Invalid choice. Use one of: %~2"
-goto read_choice
+:read_yes_no
+set "AAT_CHOICE_PROMPT=%~1"
+set "AAT_CHOICE_DEFAULT=%~2"
+"%POWERSHELL_EXE%" -NoProfile -Command "$ErrorActionPreference='Stop'; $prompt=$env:AAT_CHOICE_PROMPT; $default=$env:AAT_CHOICE_DEFAULT; function Read-ConLine { $fs=[System.IO.File]::Open('CONIN$', [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite); try { $reader=[System.IO.StreamReader]::new($fs); while ($true) { Write-Host -NoNewline $prompt -ForegroundColor Yellow; $line=$reader.ReadLine(); if ($null -eq $line) { Start-Sleep -Milliseconds 250; continue }; $value=$line.Trim(); if ($value.Length -eq 0) { $value=$default }; if ($value.Length -eq 0) { continue }; $choice=$value.Substring(0,1).ToUpperInvariant(); if ($choice -eq 'Y') { exit 0 }; if ($choice -eq 'N') { exit 1 }; Write-Host 'Invalid choice. Use Y or N.' -ForegroundColor Red } } finally { if ($reader) { $reader.Dispose() } else { $fs.Dispose() } } }; try { Read-ConLine } catch { Write-Host 'Console input unavailable; using default N.' -ForegroundColor Yellow; exit 1 }"
+exit /b %ERRORLEVEL%
 
 :status
 set "AAT_STATUS_COLOR=%~1"
