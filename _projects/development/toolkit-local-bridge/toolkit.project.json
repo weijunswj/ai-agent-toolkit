@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.21",
+  "version": "2.3.22",
   "version_policy": "semver",
-  "version_notes": "Bumps the native Toolkit package after direct n8n import/export wrappers changed final rerun prompts to console RawUI key input.",
+  "version_notes": "Bumps the native Toolkit package after direct n8n import/export wrappers made only explicit R return the rerun path.",
   "outputs": [
     {
       "kind": "curated",

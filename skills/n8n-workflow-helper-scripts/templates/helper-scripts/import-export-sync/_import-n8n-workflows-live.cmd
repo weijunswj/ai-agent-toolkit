@@ -18,7 +18,7 @@ if "%LAST_EXIT%"=="0" (
 )
 call :prompt "Press R to run again or E to exit."
 call :read_rerun_choice
-if errorlevel 2 exit /b %LAST_EXIT%
+if errorlevel 1 exit /b %LAST_EXIT%
 cls
 goto run_import
 
@@ -56,7 +56,7 @@ call :status Yellow "%~1"
 exit /b 0
 
 :read_rerun_choice
-"%POWERSHELL_EXE%" -NoProfile -Command "try { Write-Host '> ' -NoNewline -ForegroundColor Yellow; while ($true) { $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown'); $ch = [char]$key.Character; if ($ch -match '^[Rr]$') { Write-Host 'R'; exit 1 }; if ($ch -match '^[Ee]$') { Write-Host 'E'; exit 2 } } } catch { Write-Host ''; Write-Host 'Input unavailable; exiting without rerun.' -ForegroundColor Yellow; exit 2 }"
+"%POWERSHELL_EXE%" -NoProfile -Command "try { Write-Host '> ' -NoNewline -ForegroundColor Yellow; while ($true) { $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown'); $ch = [char]$key.Character; if ($ch -match '^[Rr]$') { Write-Host 'R'; exit 0 }; if ($ch -match '^[Ee]$') { Write-Host 'E'; exit 1 } } } catch { Write-Host ''; Write-Host 'Input unavailable; exiting without rerun.' -ForegroundColor Yellow; exit 1 }"
 exit /b %ERRORLEVEL%
 
 :read_choice
