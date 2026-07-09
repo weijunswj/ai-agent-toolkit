@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.17",
+  "version": "1.2.18",
   "version_policy": "semver",
-  "version_notes": "Uses PowerShell console RawUI key input where only explicit R returns the direct import/export wrapper rerun path; E or input errors exit without clearing.",
+  "version_notes": "Reads direct import/export wrapper rerun prompts from the Windows CON device so stdin quirks cannot skip the final R/E choice.",
   "outputs": [
     {
       "kind": "curated",

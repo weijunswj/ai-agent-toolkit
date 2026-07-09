@@ -56,12 +56,14 @@ call :status Yellow "%~1"
 exit /b 0
 
 :read_rerun_choice
-"%POWERSHELL_EXE%" -NoProfile -Command "try { Write-Host '> ' -NoNewline -ForegroundColor Yellow; while ($true) { $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown'); $ch = [char]$key.Character; if ($ch -match '^[Rr]$') { Write-Host 'R'; exit 0 }; if ($ch -match '^[Ee]$') { Write-Host 'E'; exit 1 } } } catch { Write-Host ''; Write-Host 'Input unavailable; exiting without rerun.' -ForegroundColor Yellow; exit 1 }"
-exit /b %ERRORLEVEL%
+choice /C RE /N /M "> " < CON
+if errorlevel 2 exit /b 1
+if errorlevel 1 exit /b 0
+exit /b 1
 
 :read_choice
 set "AAT_CHOICE="
-set /p "AAT_CHOICE=%~1"
+set /p "AAT_CHOICE=%~1" < CON
 if "%AAT_CHOICE%"=="" set "AAT_CHOICE=%~3"
 set "AAT_CHOICE=%AAT_CHOICE:~0,1%"
 set "AAT_ALLOWED=%~2"
