@@ -359,8 +359,8 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
   assert.match(result.stdout, /Preference\/target writes before answers: no/);
   assert.match(result.stdout, /Codex plugin cache path:/);
-  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.13/);
-  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.13/);
+  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.14/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.14/);
   assert.match(result.stdout, /Codex plugin status: already fresh/);
   assert.match(result.stdout, /Codex plugin updated this run: no/);
   assert.match(result.stdout, /Codex restart required: no/);
@@ -547,7 +547,7 @@ test('active setup command delegates to managed checkout script when it exists',
   assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.match(result.stdout, /Managed checkout commit: [0-9a-f]{40}/);
   assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
-  assert.match(result.stdout, /managed setup script version 2\.3\.13/);
+  assert.match(result.stdout, /managed setup script version 2\.3\.14/);
   assert.match(result.stdout, /# setup toolkit question bank/);
 });
 
@@ -561,7 +561,7 @@ test('active setup command does not block on stdin before delegating to the mana
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /# setup toolkit managed route/);
-  assert.match(result.stdout, /managed setup script version 2\.3\.13/);
+  assert.match(result.stdout, /managed setup script version 2\.3\.14/);
 });
 
 test('managed question-bank pause is not bypassed with active fallback', () => {
@@ -814,8 +814,8 @@ test('claude-code setup execute with instructions behavior verifies Claude plugi
   assert.match(result.stdout, /Claude Code native plugin metadata verified/);
   assert.match(result.stdout, /## Claude Code native plugin/);
   assert.match(result.stdout, /Claude plugin manifest path:/);
-  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.13/);
-  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.13/);
+  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.14/);
+  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.14/);
   assert.match(result.stdout, /Claude plugin status: metadata present/);
   assert.match(result.stdout, /Claude plugin updated this run: no/);
   assert.match(result.stdout, /Claude restart required: no/);
