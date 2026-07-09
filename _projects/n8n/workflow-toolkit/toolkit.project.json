@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.14",
+  "version": "1.2.15",
   "version_policy": "semver",
-  "version_notes": "Requires an explicit R choice before restarting the n8n container after successful imports with restart warnings.",
+  "version_notes": "Uses blocking Windows choice input for direct import/export wrapper final rerun prompts so success and failure output do not reset without an R or E keypress.",
   "outputs": [
     {
       "kind": "curated",

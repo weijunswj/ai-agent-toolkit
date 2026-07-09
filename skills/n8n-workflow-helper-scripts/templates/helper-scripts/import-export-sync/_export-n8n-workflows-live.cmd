@@ -16,8 +16,8 @@ if "%LAST_EXIT%"=="0" (
   call :status Red "FAIL  Export stopped with exit code %LAST_EXIT%."
 )
 call :prompt "Press R to run again or E to exit."
-call :read_choice "> " "RE" "E"
-if /I "%AAT_CHOICE%"=="E" exit /b %LAST_EXIT%
+call :read_rerun_choice
+if errorlevel 2 exit /b %LAST_EXIT%
 cls
 goto run_export
 
@@ -31,6 +31,10 @@ exit /b 0
 :prompt
 call :status Yellow "%~1"
 exit /b 0
+
+:read_rerun_choice
+choice /C RE /N /M "> "
+exit /b %ERRORLEVEL%
 
 :read_choice
 set "AAT_CHOICE="
