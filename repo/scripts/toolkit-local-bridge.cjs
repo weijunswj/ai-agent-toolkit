@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.8';
+const BRIDGE_VERSION = '2.3.9';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1574,6 +1574,16 @@ function agentRulesPreflightSpecs(syncSource) {
   return AGENT_RULES_PREFLIGHT_FILES[syncSource] || [];
 }
 
+function nearestGitRoot(startPath) {
+  let current = path.resolve(startPath || process.cwd());
+  while (true) {
+    if (fs.existsSync(path.join(current, '.git'))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return '';
+    current = parent;
+  }
+}
+
 function agentRulesPluginRoot(args, options = {}) {
   if (options.pluginRoot) return path.resolve(options.pluginRoot);
   if (args.syncSource === 'claude-plugin') return runtimeClaudePluginRoot();
@@ -1657,7 +1667,9 @@ function runAgentRulesPreflight(args, options = {}) {
   const specs = agentRulesPreflightSpecs(args.syncSource);
   if (!specs.length) return { status: 'not-applicable', targetRoot: '', findings: [] };
 
-  const targetRoot = path.resolve(options.targetRoot || process.cwd());
+  const startRoot = path.resolve(options.targetRoot || process.cwd());
+  const gitRoot = nearestGitRoot(startRoot);
+  const targetRoot = gitRoot || startRoot;
   const pluginRoot = agentRulesPluginRoot(args, options);
   const templateRoot = path.join(pluginRoot, AGENT_RULES_TEMPLATE_DIR);
   const findings = [];
@@ -1667,6 +1679,8 @@ function runAgentRulesPreflight(args, options = {}) {
   return {
     status: findings.length ? 'needs-attention' : 'ok',
     targetRoot,
+    gitRoot,
+    gitRepoDetected: Boolean(gitRoot),
     pluginRoot,
     templateRoot,
     findings
@@ -1677,14 +1691,19 @@ function formatAgentRulesPreflight(result) {
   const findings = result.findings || [];
   if (!findings.length) return '';
   const shown = findings.slice(0, AGENT_RULES_PREFLIGHT_MAX_FINDINGS);
+  const missingRootAgents = Boolean(result.gitRepoDetected) &&
+    findings.some((finding) => finding.file === 'AGENTS.md' && finding.kind === 'missing');
   const lines = [
     `Toolkit agent-rules preflight: repo-local instructions need attention in ${result.targetRoot}.`,
     ...shown.map((finding) => `- ${finding.file}: ${finding.detail}`)
   ];
+  if (missingRootAgents) {
+    lines.unshift('STOP: AGENTS.md is missing; repo-local ai-coding-agent-rules are not installed in this repo. Stop and ask the user whether to install/repair them now or proceed without Toolkit repo-local rules.');
+  }
   if (findings.length > shown.length) {
     lines.push(`- ${findings.length - shown.length} more issue(s) omitted.`);
   }
-  lines.push('No files were changed by this hook. Pause and ask the user whether to run `ai-coding-agent-rules` check/repair/refresh now, or proceed with the current task despite this warning.');
+  lines.push('No files were changed by this hook. Stop and ask the user whether to run `ai-coding-agent-rules` check/repair/refresh now, or proceed with the current task despite this warning.');
   return lines.join('\n');
 }
 
@@ -3125,6 +3144,7 @@ module.exports = {
   openUpdateReport,
   replaceDirectoryAtomically,
   parseManagedMarkerBlocks,
+  nearestGitRoot,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
   discoverCodexPluginHookRoots,
