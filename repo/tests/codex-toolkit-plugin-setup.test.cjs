@@ -424,7 +424,7 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
           pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
           name: 'ai-agent-toolkit',
           marketplaceName: 'ai-agent-toolkit-local',
-    version: '2.3.6',
+    version: '2.3.7',
           installed: true,
           enabled: true,
           authPolicy,

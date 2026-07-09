@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.6';
+const BRIDGE_VERSION = '2.3.7';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1849,6 +1849,12 @@ function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning }) 
   return 'none';
 }
 
+function triggeredFromTldr(syncSource) {
+  if (syncSource === 'claude-plugin') return `Claude Code plugin hook (${inlineCode('claude-plugin')})`;
+  if (syncSource === 'codex-plugin') return `Codex plugin hook (${inlineCode('codex-plugin')})`;
+  return `manual or repo run (${inlineCode(syncSource || 'repo')})`;
+}
+
 function buildUpdateReport({ args, state, checksum, context }) {
   const repo = context.repo || {};
   const targetSyncs = context.targetSyncs || [];
@@ -1867,6 +1873,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
     '',
     '## TL;DR',
     '',
+    `- Triggered from: ${triggeredFromTldr(args.syncSource)}.`,
     `- Repo: ${repoTldr(repo, previousCommit, commit, warning)}.`,
     `- Targets: ${targetsTldr(targetSyncs, targetSyncStatus)}.`,
     `- Action needed: ${actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning })}.`,
@@ -2451,9 +2458,19 @@ function shouldRunRepoAutoUpdate(args, state) {
   return args.hook || args.repoUpdateNow;
 }
 
+function downgradeRemediation(syncSource) {
+  if (syncSource === 'claude-plugin') {
+    return 'the installed Claude Code plugin cache is stale; run `claude plugin update ai-agent-toolkit@ai-agent-toolkit-local`, then restart Claude Code';
+  }
+  if (syncSource === 'codex-plugin') {
+    return 'the installed Codex plugin cache is stale; run `setup toolkit` in Codex to refresh it';
+  }
+  return 'update the Toolkit repo checkout or rerun `setup toolkit`';
+}
+
 function hookSafeWarning(args, message) {
   if (args.hook) {
-    console.error(`Toolkit local bridge hook skipped: ${message}`);
+    console.log(`Toolkit local bridge hook skipped: ${message}`);
   }
 }
 
@@ -2857,7 +2874,9 @@ function run(argv = process.argv.slice(2)) {
   }
 
   if (existingState.hub_version && compareSemver(BRIDGE_VERSION, existingState.hub_version) < 0 && !args.forceDowngrade) {
-    throw new Error(`Refusing downgrade: current bridge ${BRIDGE_VERSION} is older than hub state ${existingState.hub_version}`);
+    throw new Error(
+      `Refusing downgrade: current bridge ${BRIDGE_VERSION} is older than hub state ${existingState.hub_version}; ${downgradeRemediation(args.syncSource)}`
+    );
   }
 
   let nextState = applyRequestedState(existingState, args);
@@ -3012,7 +3031,7 @@ if (require.main === module) {
     process.exit(result.status || 0);
   } catch (error) {
     if (process.argv.includes('--hook')) {
-      console.error(`Toolkit local bridge hook skipped: ${error.message}`);
+      console.log(`Toolkit local bridge hook skipped: ${error.message}`);
       process.exit(0);
     }
     console.error(`FAIL: ${error.message}`);

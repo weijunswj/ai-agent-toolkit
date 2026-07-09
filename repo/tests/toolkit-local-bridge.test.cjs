@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.6';
+const expectedBridgeVersion = '2.3.7';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -1211,6 +1211,27 @@ test('older bridge refuses to overwrite newer hub state unless forced', () => {
   assert.equal(readJson(path.join(hub, 'state.json')).hub_version, expectedBridgeVersion);
 });
 
+test('hook mode downgrade skip exits 0 and prints host remediation on stdout', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: '9.9.9',
+    auto_sync_enabled: true,
+    targets: {}
+  });
+
+  const result = run(
+    ['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'],
+    { env: isolatedHomeEnv(root) }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit local bridge hook skipped: Refusing downgrade/);
+  assert.match(result.stdout, /claude plugin update ai-agent-toolkit@ai-agent-toolkit-local/);
+  assert.match(result.stdout, /restart Claude Code/);
+});
+
 test('fresh lock blocks manual writes and stale lock is recovered', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -1852,6 +1873,7 @@ test('legacy delegated repo sync writes an update report using stored repo updat
 
   const report = readLatestReport(fixture.hub);
   assert.match(report.text, /## TL;DR/);
+  assert.match(report.text, /Triggered from: manual or repo run \(`repo`\)\./);
   assert.match(report.text, new RegExp(`Toolkit updated to commit: \`${fixture.toCommit}\``));
   assert.match(report.text, new RegExp(`Previous commit: \`${fixture.fromCommit}\``));
   assert.match(report.text, /Source: `repo`/);
