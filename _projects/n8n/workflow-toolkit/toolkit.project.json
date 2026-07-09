@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.21",
+  "version": "1.2.22",
   "version_policy": "semver",
-  "version_notes": "Uses native CMD choice for post-run import/export R/E prompts so successful runs can reliably rerun or exit without batch subroutine label lookup failures.",
+  "version_notes": "Fails closed before import when restart prompt setup cannot complete and keeps implicit Docker target discovery ambiguous when another n8n container is running globally.",
   "outputs": [
     {
       "kind": "curated",

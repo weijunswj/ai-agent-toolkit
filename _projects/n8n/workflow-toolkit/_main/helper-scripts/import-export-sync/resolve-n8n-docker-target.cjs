@@ -287,22 +287,16 @@ async function resolveN8nDockerTarget({
     }
     return explicitCandidates[0];
   }
-  if (composeCandidates.length === 1) return composeCandidates[0];
-  if (composeCandidates.length > 1) {
-    return chooseCandidate(composeCandidates, chooserIo);
-  }
 
   const allRunning = listRunningContainers(runDockerFn);
-  const labelCandidates = dedupeCandidates(findByComposeLabels(allRunning, options));
-  if (labelCandidates.length === 1) return labelCandidates[0];
-  if (labelCandidates.length > 1) {
-    return chooseCandidate(labelCandidates, chooserIo);
-  }
-
-  const imageCandidates = dedupeCandidates(findByImageFallback(allRunning));
-  if (imageCandidates.length === 1) return imageCandidates[0];
-  if (imageCandidates.length > 1) {
-    return chooseCandidate(imageCandidates, chooserIo);
+  const implicitCandidates = dedupeCandidates([
+    ...composeCandidates,
+    ...findByComposeLabels(allRunning, options),
+    ...findByImageFallback(allRunning),
+  ]);
+  if (implicitCandidates.length === 1) return implicitCandidates[0];
+  if (implicitCandidates.length > 1) {
+    return chooseCandidate(implicitCandidates, chooserIo);
   }
 
   throw new Error(missingTargetMessage());

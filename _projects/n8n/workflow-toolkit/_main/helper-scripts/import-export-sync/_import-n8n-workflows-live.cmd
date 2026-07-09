@@ -7,6 +7,12 @@ if errorlevel 1 exit /b 1
 :run_import
 call :banner "n8n workflow import" "Runs import-n8n-workflows-live.ps1 from this helper folder."
 call :configure_restart %*
+if errorlevel 1 (
+  echo.
+  call :status Red "FAIL  Import setup terminated before live import."
+  call :status Yellow "INFO  Relaunch from an interactive Command Prompt and answer the restart prompt."
+  exit /b 1
+)
 "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0import-n8n-workflows-live.ps1" %* %RESTART_ARG%
 set "LAST_EXIT=%ERRORLEVEL%"
 

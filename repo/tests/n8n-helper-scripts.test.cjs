@@ -357,6 +357,21 @@ test('resolve-n8n-docker-target.cjs compose label discovery works', async () => 
   assert.equal(selected.id, target.Id);
 });
 
+test('resolve-n8n-docker-target.cjs implicit compose singleton stays ambiguous when another n8n is running globally', async () => {
+  const composeTarget = n8nContainer({ id: '919191919191aaaa', name: 'n8n-local-1', project: 'n8n-local', service: 'n8n' });
+  const otherTarget = n8nContainer({ id: '929292929292bbbb', name: 'n8n-prod-1', project: 'n8n-production-cloudflare', service: 'n8n' });
+  const output = captureStream();
+  const runDocker = dockerMock([composeTarget, otherTarget], { composePs: { n8n: [composeTarget.Id] } });
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker, output }),
+    /Multiple running n8n candidates require an explicit target/
+  );
+
+  assert.match(output.text(), /1\. stack=n8n-local[\s\S]*container=n8n-local-1/);
+  assert.match(output.text(), /2\. stack=n8n-production-cloudflare[\s\S]*container=n8n-prod-1/);
+});
+
 test('resolve-n8n-docker-target.cjs single running n8n image fallback works', async () => {
   const target = n8nContainer({ id: '111111111111aaaa', name: 'plain-n8n', image: 'n8nio/n8n' });
   const runDocker = dockerMock([target]);
@@ -1539,6 +1554,8 @@ test('n8n command wrappers use framed colored retry output', () => {
 
     if (label.includes('import wrapper')) {
       assert.match(text, /:configure_restart/, label);
+      assert.match(text, /call :configure_restart %\*\s+if errorlevel 1 \(\s+echo\.\s+call :status Red "FAIL  Import setup terminated before live import\."/,
+        label);
       assert.match(text, /RestartContainerAfterImport/, label);
       assert.match(text, /Auto-restart n8n container if restart warning is true\?/, label);
       assert.match(text, /call :read_yes_no "\[Y\/N\] > " "N"/, label);
@@ -1583,6 +1600,36 @@ exit 0
   assert.match(result.stdout, /dummy import run 2/);
   assert.doesNotMatch(result.stdout + result.stderr, /cannot find the batch label/i);
   assert.doesNotMatch(result.stdout + result.stderr, /ERROR: The file is either empty/i);
+});
+
+test('import command wrapper stops before import when restart configuration fails', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
+  const cwd = tempDir();
+  const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
+  const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
+  const invokedPath = path.join(cwd, 'import-invoked.txt');
+  const wrapperText = fs.readFileSync(path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd'), 'utf8')
+    .replace(
+      /:read_yes_no\r?\n[\s\S]*?\r?\nexit \/b %ERRORLEVEL%/,
+      ':read_yes_no\r\nexit /b 2'
+    );
+
+  fs.writeFileSync(wrapperPath, wrapperText, 'utf8');
+  fs.writeFileSync(helperPath, `
+Set-Content -LiteralPath ${psSingleQuoted(invokedPath)} -Value 'import ran'
+exit 0
+`, 'utf8');
+
+  const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+
+  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.equal(fs.existsSync(invokedPath), false);
+  assert.match(result.stdout, /FAIL\s+Import setup terminated before live import\./);
+  assert.match(result.stdout, /Relaunch from an interactive Command Prompt and answer the restart prompt\./);
 });
 
 test('PowerShell n8n helper scripts use colored sections, status tags, and clean failure blocks', () => {
