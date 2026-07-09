@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.5';
+const expectedBridgeVersion = '2.3.6';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -1369,7 +1369,11 @@ test('agent-rules preflight reports stale managed block content without writing 
   assert.equal(result.findings.length, 1);
   assert.equal(result.findings[0].kind, 'stale-block');
   assert.equal(result.findings[0].file, 'AGENTS.md');
-  assert.match(formatAgentRulesPreflight(result), /No files were changed by this hook/);
+  const message = formatAgentRulesPreflight(result);
+  assert.match(message, /No files were changed by this hook/);
+  assert.match(message, /run `ai-coding-agent-rules` check\/repair\/refresh now/);
+  assert.match(message, /proceed with the current task despite this warning/);
+  assert.doesNotMatch(message, /before implementation/);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
@@ -1409,6 +1413,8 @@ test('hook mode runs passive agent-rules preflight before bridge no-op return', 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /Toolkit agent-rules preflight/);
   assert.match(result.stderr, /AGENTS\.md: managed block GLOBAL-AGENTS\.MD-TEMPLATE differs from the bundled template/);
+  assert.match(result.stderr, /run `ai-coding-agent-rules` check\/repair\/refresh now/);
+  assert.match(result.stderr, /proceed with the current task despite this warning/);
   assert.doesNotMatch(result.stdout, /Toolkit updated:/);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });

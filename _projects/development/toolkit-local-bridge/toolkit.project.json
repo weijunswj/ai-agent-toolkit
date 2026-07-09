@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.5",
+  "version": "2.3.6",
   "version_policy": "semver",
-  "version_notes": "Adds passive startup repo-local instruction managed-block preflight and clearer dirty-checkout update report guidance.",
+  "version_notes": "Adds passive startup repo-local instruction managed-block preflight with pause-for-choice warning and clearer dirty-checkout update report guidance.",
   "outputs": [
     {
       "kind": "curated",

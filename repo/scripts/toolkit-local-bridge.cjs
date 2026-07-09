@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.5';
+const BRIDGE_VERSION = '2.3.6';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1661,7 +1661,7 @@ function formatAgentRulesPreflight(result) {
   if (findings.length > shown.length) {
     lines.push(`- ${findings.length - shown.length} more issue(s) omitted.`);
   }
-  lines.push('No files were changed by this hook. Ask to run `ai-coding-agent-rules` with an explicit check/repair/refresh request before implementation.');
+  lines.push('No files were changed by this hook. Pause and ask the user whether to run `ai-coding-agent-rules` check/repair/refresh now, or proceed with the current task despite this warning.');
   return lines.join('\n');
 }
 
