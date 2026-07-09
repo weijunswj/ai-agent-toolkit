@@ -25,7 +25,9 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   assert.match(readme, /\| Maintenance work \| Start with \[repo\/docs\/\]/);
 
   assert.match(agents, /This root `AGENTS\.md` is toolkit-repo-specific\./);
-  assert.match(agents, /Toolkit-specific root rules live directly after the managed execution blocks\./);
+  assert.match(agents, /Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file\./);
+  assert.match(agents, /## Toolkit Root Optimization Mandate/);
+  assert.match(agents, /Do not add hooks, docs, scripts, rules, features, or examples merely because they are comprehensive or interesting\./);
   assert.match(agents, /Portable repo installs must use \[`skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md`\]/);
   assert.match(agents, /Setup\/refresh: use \[For AI Agents\]\(repo\/docs\/FOR_AI_AGENTS\.md\); run the managed checkout setup script when it exists/);
 });

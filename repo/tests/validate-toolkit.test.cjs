@@ -765,7 +765,9 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v1/);
   assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/);
   assert.doesNotMatch(text, /toolkit-root-agent-rules\.md/);
-  assert.match(text, /Toolkit-specific root rules are maintained directly in this file after the managed execution blocks/);
+  assert.match(text, /Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file/);
+  assert.match(text, /## Toolkit Root Optimization Mandate/);
+  assert.match(text, /low token burn, efficient agent orientation, predictable setup\/update behavior, quiet validation, and no performance drift/);
   assert.match(text, /Before planning or editing, read \[Toolkit playbook index\]\(repo\/docs\/agent-playbooks\/INDEX\.md\) \(`repo\/docs\/agent-playbooks\/INDEX\.md`\)/);
   assert.match(text, /If root `MEMORY\.md` exists, read it as non-authoritative project context/);
   assert.match(text, /Final reports must include `Instruction sources used` and `MEMORY\.md changed: Yes\/No`/);

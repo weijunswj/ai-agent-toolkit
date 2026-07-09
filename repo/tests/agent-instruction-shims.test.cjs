@@ -350,7 +350,9 @@ test('root AGENTS is directly maintained while repo-local block comes from execu
   assert.equal(rootToolkit, prompt);
   assert.equal(rootN8n, n8nAdapter);
   assert.doesNotMatch(rootAgents, /toolkit-root-agent-rules\.md/);
-  assert.match(rootAgents, /Toolkit-specific root rules are maintained directly in this file after the managed execution blocks/);
+  assert.match(rootAgents, /Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file/);
+  assert.match(rootAgents, /## Toolkit Root Optimization Mandate/);
+  assert.match(rootAgents, /low token burn, efficient agent orientation, predictable setup\/update behavior, quiet validation, and no performance drift/);
   assert.match(rootAgents, /\[Toolkit playbook index\]\(repo\/docs\/agent-playbooks\/INDEX\.md\) \(`repo\/docs\/agent-playbooks\/INDEX\.md`\)/i);
   assert.match(rootAgents, /MEMORY\.md changed: Yes\/No/i);
   assert.match(rootAgents, /Source-watch is PR-notification-only/i);
