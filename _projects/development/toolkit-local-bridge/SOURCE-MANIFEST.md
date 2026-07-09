@@ -1,4 +1,4 @@
-﻿# Source Manifest: Toolkit Local Bridge
+# Source Manifest: Toolkit Local Bridge
 
 ## Preserved In `_main/`
 

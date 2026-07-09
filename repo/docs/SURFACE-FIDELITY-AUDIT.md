@@ -28,8 +28,8 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 16 |
-| publishedFiles | 234 |
-| declaredOutputFiles | 234 |
+| publishedFiles | 236 |
+| declaredOutputFiles | 236 |
 | packInstalledFiles | 84 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 234 |
+| boundaryRecipeOutputs | 236 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
