@@ -386,13 +386,13 @@ test('resolve-n8n-docker-target.cjs multiple candidates print numbered safe choo
     /Multiple running n8n candidates require an explicit target/
   );
 
-  assert.match(output.text(), /1\. stack=n8n-local/);
+  assert.match(output.text(), /^\nMultiple running n8n Docker candidates were detected:\n\n1\. stack=n8n-local/);
   assert.match(output.text(), /container=n8n-1/);
   assert.match(output.text(), /container_id=222222222222/);
   assert.match(output.text(), /ports=5678:5678/);
   assert.match(output.text(), /ports=5678:5678\n\n2\. stack=n8n-production-cloudflare/);
   assert.match(output.text(), /2\. stack=n8n-production-cloudflare/);
-  assert.match(output.text(), /ports=5679:5678/);
+  assert.match(output.text(), /ports=5679:5678\n\n$/);
 });
 
 test('resolve-n8n-docker-target.cjs accepts JSON output file option', () => {
@@ -419,7 +419,7 @@ test('resolve-n8n-docker-target.cjs can hand multiple candidates to host prompt 
   assert.equal(candidates.length, 2);
   assert.equal(candidates[0].container_id_prefix, '121212121212');
   assert.equal(candidates[1].compose_project, 'two');
-  assert.match(output.text(), /1\. stack=one[\s\S]*\n\n2\. stack=two/);
+  assert.match(output.text(), /^\nMultiple running n8n Docker candidates were detected:\n\n1\. stack=one[\s\S]*\n\n2\. stack=two[\s\S]*\n\n$/);
 });
 
 test('resolve-n8n-docker-target.cjs valid numeric interactive selection pins target for current process only', async () => {

@@ -46,13 +46,13 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.3.13',
+    version: '2.3.14',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.3.13',
+    version: '2.3.14',
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
@@ -75,7 +75,7 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.13', cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_message: 'review Codex hook trust if prompted' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.14', cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_message: 'review Codex hook trust if prompted' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -85,7 +85,7 @@ function createMinimalSetupRepo(root) {
     "const path = require('node:path');",
     "fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_HELPER_ARGS.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.13', scope: 'user' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.14', scope: 'user' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -154,7 +154,7 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createFakeManagedSetupScript(root, version = '2.3.13', options = {}) {
+function createFakeManagedSetupScript(root, version = '2.3.14', options = {}) {
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
   const emitQuestionBank = options.emitQuestionBank !== false;
@@ -532,7 +532,7 @@ test('setup final summary distinguishes fast-forwarded managed checkout', () => 
 
 test('active setup command delegates to managed checkout script when it exists', () => {
   const root = tmpRoot();
-  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.3.13');
+  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.3.14');
   const beforeStatus = runTestGit(repoRoot, ['status', '--short']);
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -553,7 +553,7 @@ test('active setup command delegates to managed checkout script when it exists',
 
 test('active setup command does not block on stdin before delegating to the managed checkout', async () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.3.13', { emitQuestionBank: false, exitCode: 0 });
+  createFakeManagedSetupScript(root, '2.3.14', { emitQuestionBank: false, exitCode: 0 });
 
   const result = await runWithUnclosedStdin(script, ['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -566,7 +566,7 @@ test('active setup command does not block on stdin before delegating to the mana
 
 test('managed question-bank pause is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.3.13');
+  createFakeManagedSetupScript(root, '2.3.14');
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
   });
@@ -580,7 +580,7 @@ test('managed question-bank pause is not bypassed with active fallback', () => {
 
 test('managed safety blocker is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.3.13', {
+  createFakeManagedSetupScript(root, '2.3.14', {
     emitQuestionBank: false,
     exitCode: 1,
     extraLines: ["console.error('managed safety blocker');"]

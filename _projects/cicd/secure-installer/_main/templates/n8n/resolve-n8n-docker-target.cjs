@@ -224,8 +224,8 @@ async function chooseCandidate(candidates, io) {
     interactive = input.isTTY && output.isTTY,
     candidatesJsonOutput = '',
   } = io;
-  output.write('Multiple running n8n Docker candidates were detected:\n');
-  output.write(`${formatCandidateList(candidates)}\n`);
+  output.write('\nMultiple running n8n Docker candidates were detected:\n\n');
+  output.write(`${formatCandidateList(candidates)}\n\n`);
 
   if (candidatesJsonOutput) {
     fs.writeFileSync(
