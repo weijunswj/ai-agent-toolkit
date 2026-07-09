@@ -5,7 +5,7 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.11",
+  "version": "2.3.12",
   "version_policy": "semver",
   "version_notes": "Bumps the native Toolkit package for Codex-safe third-party Windows hook repair commands that use PLUGIN_ROOT instead of Claude-only hook roots.",
   "outputs": [

@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.11';
+const BRIDGE_VERSION = '2.3.12';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];

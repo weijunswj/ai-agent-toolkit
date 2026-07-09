@@ -25,6 +25,10 @@ function parseArgs(args = []) {
       index = readValue(index, 'jsonOutput');
     } else if (arg.startsWith('--json-output=')) {
       options.jsonOutput = arg.slice('--json-output='.length);
+    } else if (arg === '--candidates-json-output') {
+      index = readValue(index, 'candidatesJsonOutput');
+    } else if (arg.startsWith('--candidates-json-output=')) {
+      options.candidatesJsonOutput = arg.slice('--candidates-json-output='.length);
     } else if (arg === '--non-interactive') {
       options.nonInteractive = true;
     } else if (arg === '--container' || arg === '--container-name') {
@@ -214,9 +218,25 @@ function invalidSelectionMessage() {
 }
 
 async function chooseCandidate(candidates, io) {
-  const { input = process.stdin, output = process.stderr, interactive = input.isTTY && output.isTTY } = io;
+  const {
+    input = process.stdin,
+    output = process.stderr,
+    interactive = input.isTTY && output.isTTY,
+    candidatesJsonOutput = '',
+  } = io;
   output.write('Multiple running n8n Docker candidates were detected:\n');
   output.write(`${formatCandidateList(candidates)}\n`);
+
+  if (candidatesJsonOutput) {
+    fs.writeFileSync(
+      candidatesJsonOutput,
+      `${JSON.stringify(candidates.map(publicTarget), null, 2)}\n`,
+      'utf8'
+    );
+    const error = new Error('Multiple running n8n candidates require host selection.');
+    error.exitCode = 3;
+    throw error;
+  }
 
   if (!interactive) {
     throw new Error(`Multiple running n8n candidates require an explicit target in non-interactive mode.\n${overrideGuidance()}`);
@@ -248,6 +268,12 @@ async function resolveN8nDockerTarget({
   const cliOptions = parseArgs(args);
   const options = mergeOptions(cliOptions, optionsFromEnv(env));
   const allowInteractive = interactive ?? (!cliOptions.nonInteractive && Boolean(input.isTTY && output.isTTY));
+  const chooserIo = {
+    input,
+    output,
+    interactive: allowInteractive,
+    candidatesJsonOutput: cliOptions.candidatesJsonOutput || '',
+  };
 
   const explicitContainer = findExplicitContainer(runDockerFn, options);
   if (explicitContainer) return explicitContainer;
@@ -263,20 +289,20 @@ async function resolveN8nDockerTarget({
   }
   if (composeCandidates.length === 1) return composeCandidates[0];
   if (composeCandidates.length > 1) {
-    return chooseCandidate(composeCandidates, { input, output, interactive: allowInteractive });
+    return chooseCandidate(composeCandidates, chooserIo);
   }
 
   const allRunning = listRunningContainers(runDockerFn);
   const labelCandidates = dedupeCandidates(findByComposeLabels(allRunning, options));
   if (labelCandidates.length === 1) return labelCandidates[0];
   if (labelCandidates.length > 1) {
-    return chooseCandidate(labelCandidates, { input, output, interactive: allowInteractive });
+    return chooseCandidate(labelCandidates, chooserIo);
   }
 
   const imageCandidates = dedupeCandidates(findByImageFallback(allRunning));
   if (imageCandidates.length === 1) return imageCandidates[0];
   if (imageCandidates.length > 1) {
-    return chooseCandidate(imageCandidates, { input, output, interactive: allowInteractive });
+    return chooseCandidate(imageCandidates, chooserIo);
   }
 
   throw new Error(missingTargetMessage());
@@ -306,8 +332,10 @@ async function main() {
       process.stdout.write(json);
     }
   } catch (error) {
-    process.stderr.write(`${error.message}\n`);
-    process.exitCode = 1;
+    if (error.exitCode !== 3) {
+      process.stderr.write(`${error.message}\n`);
+    }
+    process.exitCode = error.exitCode || 1;
   }
 }
 

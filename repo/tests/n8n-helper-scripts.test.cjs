@@ -398,6 +398,28 @@ test('resolve-n8n-docker-target.cjs multiple candidates print numbered safe choo
 test('resolve-n8n-docker-target.cjs accepts JSON output file option', () => {
   assert.equal(parseArgs(['--json-output', 'target.json']).jsonOutput, 'target.json');
   assert.equal(parseArgs(['--json-output=target.json']).jsonOutput, 'target.json');
+  assert.equal(parseArgs(['--candidates-json-output', 'candidates.json']).candidatesJsonOutput, 'candidates.json');
+  assert.equal(parseArgs(['--candidates-json-output=candidates.json']).candidatesJsonOutput, 'candidates.json');
+});
+
+test('resolve-n8n-docker-target.cjs can hand multiple candidates to host prompt code', async () => {
+  const candidatesPath = path.join(tempDir(), 'candidates.json');
+  const output = captureStream();
+  const runDocker = dockerMock([
+    n8nContainer({ id: '121212121212aaaa', name: 'n8n-a', project: 'one', service: 'n8n' }),
+    n8nContainer({ id: '343434343434bbbb', name: 'n8n-b', project: 'two', service: 'n8n' }),
+  ]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--candidates-json-output', candidatesPath], runDocker, output }),
+    (error) => error.exitCode === 3
+  );
+
+  const candidates = JSON.parse(fs.readFileSync(candidatesPath, 'utf8'));
+  assert.equal(candidates.length, 2);
+  assert.equal(candidates[0].container_id_prefix, '121212121212');
+  assert.equal(candidates[1].compose_project, 'two');
+  assert.match(output.text(), /1\. stack=one[\s\S]*\n\n2\. stack=two/);
 });
 
 test('resolve-n8n-docker-target.cjs valid numeric interactive selection pins target for current process only', async () => {
@@ -1706,8 +1728,12 @@ test('PowerShell n8n live helpers keep Docker target chooser attached to the con
   ]) {
     const text = readText(filePath);
     assert.match(text, /\$targetJsonPath = \[System\.IO\.Path\]::GetTempFileName\(\)/, label);
-    assert.match(text, /"--json-output", \$targetJsonPath/, label);
+    assert.match(text, /\$candidatesJsonPath = \[System\.IO\.Path\]::GetTempFileName\(\)/, label);
+    assert.match(text, /"--json-output", \$targetJsonPath, "--candidates-json-output", \$candidatesJsonPath/, label);
+    assert.match(text, /\$resolverExitCode -eq 3/, label);
+    assert.match(text, /Read-Host "Select n8n target number for this run"/, label);
     assert.match(text, /Get-Content -LiteralPath \$targetJsonPath -Raw/, label);
+    assert.match(text, /Get-Content -LiteralPath \$candidatesJsonPath -Raw/, label);
     assert.doesNotMatch(text, /\$targetJson\s*=\s*& node @resolverArgs/, label);
   }
 });

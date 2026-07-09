@@ -197,7 +197,8 @@ function Resolve-LiveContainerTarget {
   }
 
   $targetJsonPath = [System.IO.Path]::GetTempFileName()
-  $resolverArgs = @($resolverScript, "--json-output", $targetJsonPath)
+  $candidatesJsonPath = [System.IO.Path]::GetTempFileName()
+  $resolverArgs = @($resolverScript, "--json-output", $targetJsonPath, "--candidates-json-output", $candidatesJsonPath)
   if (-not [string]::IsNullOrWhiteSpace($ContainerId)) {
     $resolverArgs += @("--container-id", $ContainerId)
   }
@@ -213,18 +214,33 @@ function Resolve-LiveContainerTarget {
     $resolverArgs += @("--compose-service", $ComposeService)
   }
 
+  $target = $null
   try {
     & node @resolverArgs
-    if ($LASTEXITCODE -ne 0) {
+    $resolverExitCode = $LASTEXITCODE
+    if ($resolverExitCode -eq 3) {
+      $candidates = @(Get-Content -LiteralPath $candidatesJsonPath -Raw | ConvertFrom-Json)
+      $answer = Read-Host "Select n8n target number for this run"
+      $trimmedAnswer = ([string]$answer).Trim()
+      if ($trimmedAnswer -notmatch '^\d+$') {
+        throw "Target selection terminated. Relaunch the helper and select a valid target number."
+      }
+      $selectedIndex = [int]$trimmedAnswer
+      if ($selectedIndex -lt 1 -or $selectedIndex -gt $candidates.Count) {
+        throw "Target selection terminated. Relaunch the helper and select a valid target number."
+      }
+      $target = $candidates[$selectedIndex - 1]
+    } elseif ($resolverExitCode -ne 0) {
       throw "Could not resolve a running n8n Docker target. See resolver output above and rerun with an explicit target if needed."
+    } else {
+      $targetJson = Get-Content -LiteralPath $targetJsonPath -Raw
+      $target = $targetJson | ConvertFrom-Json
     }
-
-    $targetJson = Get-Content -LiteralPath $targetJsonPath -Raw
   } finally {
     Remove-Item -LiteralPath $targetJsonPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $candidatesJsonPath -Force -ErrorAction SilentlyContinue
   }
 
-  $target = $targetJson | ConvertFrom-Json
   if ($null -eq $target -or [string]::IsNullOrWhiteSpace([string]$target.container_id)) {
     throw "n8n Docker target resolver returned no container id."
   }

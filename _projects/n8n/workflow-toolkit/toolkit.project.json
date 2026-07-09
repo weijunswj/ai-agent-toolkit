@@ -5,7 +5,7 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "version_policy": "semver",
   "version_notes": "Adds root n8n-workflows layout guidance, helper-script sync convention, and dynamic Docker target selection for live import/export helpers.",
   "outputs": [
