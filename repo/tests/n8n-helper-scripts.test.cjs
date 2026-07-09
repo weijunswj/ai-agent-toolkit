@@ -1505,7 +1505,15 @@ test('n8n command wrappers use framed colored retry output', () => {
     assert.match(text, /DarkCyan/, label);
     assert.match(text, /Yellow/, label);
     assert.match(text, /:status/, label);
-    assert.match(text, /if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
+    if (label.includes('export wrapper') || label.includes('import wrapper')) {
+      assert.match(text, /call :read_choice "> " "RE" "E"/, label);
+      assert.match(text, /if \/I "%AAT_CHOICE%"=="E" exit \/b %LAST_EXIT%/, label);
+      assert.match(text, /set \/p "AAT_CHOICE=%~1"/, label);
+      assert.doesNotMatch(text, /choice \/C/, label);
+      assert.doesNotMatch(text, /findstr/i, label);
+    } else {
+      assert.match(text, /if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
+    }
     assert.match(text, /:resolve_powershell/, label);
     assert.match(text, /%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe/i, label);
     assert.match(text, /set "POWERSHELL_EXE=/, label);
@@ -1525,6 +1533,7 @@ test('n8n command wrappers use framed colored retry output', () => {
       assert.match(text, /:configure_restart/, label);
       assert.match(text, /RestartContainerAfterImport/, label);
       assert.match(text, /Auto-restart n8n container if restart warning is true\?/, label);
+      assert.match(text, /call :read_choice "\[Y\/N\] > " "YN" "N"/, label);
     }
   }
 });

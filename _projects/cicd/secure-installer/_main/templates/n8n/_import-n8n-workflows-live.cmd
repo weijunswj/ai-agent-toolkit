@@ -17,8 +17,8 @@ if "%LAST_EXIT%"=="0" (
   call :status Red "FAIL  Import stopped with exit code %LAST_EXIT%."
 )
 call :prompt "Press R to run again or E to exit."
-choice /C RE /N /M "> "
-if errorlevel 2 exit /b %LAST_EXIT%
+call :read_choice "> " "RE" "E"
+if /I "%AAT_CHOICE%"=="E" exit /b %LAST_EXIT%
 cls
 goto run_import
 
@@ -35,8 +35,8 @@ if defined HAS_RESTART_ARG (
   exit /b 0
 )
 call :prompt "Auto-restart n8n container if restart warning is true?"
-choice /C YN /N /M "[Y/N] > "
-if errorlevel 2 (
+call :read_choice "[Y/N] > " "YN" "N"
+if /I "%AAT_CHOICE%"=="N" (
   call :status Yellow "INFO  Restart warning mode: warn only."
 ) else (
   set "RESTART_ARG=-RestartContainerAfterImport"
@@ -54,6 +54,23 @@ exit /b 0
 :prompt
 call :status Yellow "%~1"
 exit /b 0
+
+:read_choice
+set "AAT_CHOICE="
+set /p "AAT_CHOICE=%~1"
+if "%AAT_CHOICE%"=="" set "AAT_CHOICE=%~3"
+set "AAT_CHOICE=%AAT_CHOICE:~0,1%"
+set "AAT_ALLOWED=%~2"
+
+:read_choice_check
+if "%AAT_ALLOWED%"=="" goto read_choice_invalid
+if /I "%AAT_CHOICE%"=="%AAT_ALLOWED:~0,1%" exit /b 0
+set "AAT_ALLOWED=%AAT_ALLOWED:~1%"
+goto read_choice_check
+
+:read_choice_invalid
+call :status Red "Invalid choice. Use one of: %~2"
+goto read_choice
 
 :status
 set "AAT_STATUS_COLOR=%~1"
