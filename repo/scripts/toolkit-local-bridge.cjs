@@ -2494,7 +2494,7 @@ function shouldRunRepoAutoUpdate(args, state) {
 
 function downgradeRemediation(syncSource) {
   if (syncSource === 'claude-plugin') {
-    return 'the installed Claude Code plugin cache is stale; run `claude plugin update ai-agent-toolkit@ai-agent-toolkit-local`, then restart Claude Code';
+    return 'the installed Claude Code plugin cache is stale; run `setup toolkit --host claude-code` (or `setup toolkit` from Claude Code), then restart Claude Code. If using the raw native command, run `claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user`; if it still reports stale, rerun setup so it can reinstall through the supported Claude Code marketplace path';
   }
   if (syncSource === 'codex-plugin') {
     return 'the installed Codex plugin cache is stale; run `setup toolkit` in Codex to refresh it';

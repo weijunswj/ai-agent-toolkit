@@ -1228,8 +1228,11 @@ test('hook mode downgrade skip exits 0 and prints host remediation on stdout', (
   );
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Toolkit local bridge hook skipped: Refusing downgrade/);
-  assert.match(result.stdout, /claude plugin update ai-agent-toolkit@ai-agent-toolkit-local/);
+  assert.match(result.stdout, /setup toolkit --host claude-code/);
+  assert.match(result.stdout, /or `setup toolkit` from Claude Code/);
   assert.match(result.stdout, /restart Claude Code/);
+  assert.match(result.stdout, /claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user/);
+  assert.match(result.stdout, /reinstall through the supported Claude Code marketplace path/);
 });
 
 test('fresh lock blocks manual writes and stale lock is recovered', () => {
@@ -2457,7 +2460,7 @@ test('update report cleanup deletes only old Toolkit-managed reports inside the 
   assert.equal(fs.existsSync(unrelated), true);
 });
 
-test('update report cleanup caps same-day Toolkit report floods', () => {
+test('update report cleanup caps newest Toolkit reports inside the retention window', () => {
   const root = tmpRoot();
   const reportDir = path.join(root, 'reports');
   fs.mkdirSync(reportDir, { recursive: true });
