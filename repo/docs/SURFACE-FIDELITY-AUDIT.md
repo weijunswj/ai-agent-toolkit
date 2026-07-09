@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-06 (adds n8n production backup templates, production Cloudflare runtime ignore output, and matching generated skill pack references)
+Latest update: 2026-07-09 (adds the portable Windows command hygiene playbook to the generated ai-coding-agent-rules repo-local playbook set)
 
 ## Current state
 
@@ -28,8 +28,8 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 16 |
-| publishedFiles | 232 |
-| declaredOutputFiles | 232 |
+| publishedFiles | 233 |
+| declaredOutputFiles | 233 |
 | packInstalledFiles | 84 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 232 |
+| boundaryRecipeOutputs | 233 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 148 |
+| declared_generated | 149 |
 | pack_installed_declared | 84 |
 
 Current boundary recipe classifications:
@@ -64,7 +64,7 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 170 |
+| main_full_fidelity | 171 |
 
 Known baseline context:
 

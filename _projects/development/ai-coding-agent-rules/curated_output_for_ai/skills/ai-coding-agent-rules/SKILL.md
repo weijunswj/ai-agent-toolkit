@@ -70,6 +70,7 @@ Treat `repo-local/docs/agent-playbooks/` as a folder-level install unit, not as 
 - `local-docs.md`
 - `managed-memory.md`
 - `safety-gates.md`
+- `windows-command-hygiene.md`
 
 Before modifying repo-local instruction files, record enough state to preserve user work: target path, whether git metadata exists, branch/HEAD and dirty state when available, existing required files, and whether affected instruction files were already dirty or manually edited. For plain folders without git metadata, treat existing instruction files as user-authored unless complete managed markers identify toolkit-owned content.
 

@@ -22,6 +22,12 @@ For a normal small code or docs task with no special match, do not read `baselin
 
 Read `repo/docs/agent-playbooks/baseline-workflow.md` only when the task is broad, ambiguous, high-blast-radius, or explicitly asks for detailed workflow guidance.
 
+## Match: Windows Command, Log, Or Localhost Hygiene
+
+Triggers: Windows shell file inspection, PowerShell `Get-Content`, command timeouts or stalls, log reads or live tails, localhost dev-server restarts, duplicate watchers, occupied ports, or foreground server commands that should have completed.
+
+Read: `repo/docs/agent-playbooks/windows-command-hygiene.md`.
+
 ## Match: Repo-Local Agent Instruction Work
 
 Triggers: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed markers, agent bootstrap, repo-local templates, instruction shims, or the `ai-coding-agent-rules` project.

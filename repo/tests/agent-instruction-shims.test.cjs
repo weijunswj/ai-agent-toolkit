@@ -80,7 +80,8 @@ const requiredPortablePlaybookFiles = [
   'git-completion.md',
   'local-docs.md',
   'managed-memory.md',
-  'safety-gates.md'
+  'safety-gates.md',
+  'windows-command-hygiene.md'
 ];
 
 function readText(relPath) {

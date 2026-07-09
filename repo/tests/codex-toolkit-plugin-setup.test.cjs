@@ -316,7 +316,7 @@ test('Codex Toolkit plugin setup verifier rejects stale, disabled, or hookless i
     repoRoot
   });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /expected version 2\.3\.7/i);
+  assert.match(state.errors.join('\n'), /expected version 2\.3\.8/i);
 
   codexHome = tmpRoot();
   writeInstalledCache(codexHome);
@@ -424,7 +424,7 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
           pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
           name: 'ai-agent-toolkit',
           marketplaceName: 'ai-agent-toolkit-local',
-    version: '2.3.7',
+    version: '2.3.8',
           installed: true,
           enabled: true,
           authPolicy,
