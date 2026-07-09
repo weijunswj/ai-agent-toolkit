@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.6';
+const expectedBridgeVersion = '2.3.7';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -1211,6 +1211,30 @@ test('older bridge refuses to overwrite newer hub state unless forced', () => {
   assert.equal(readJson(path.join(hub, 'state.json')).hub_version, expectedBridgeVersion);
 });
 
+test('hook mode downgrade skip exits 0 and prints host remediation on stdout', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: '9.9.9',
+    auto_sync_enabled: true,
+    targets: {}
+  });
+
+  const result = run(
+    ['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'],
+    { env: isolatedHomeEnv(root) }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit local bridge hook skipped: Refusing downgrade/);
+  assert.match(result.stdout, /setup toolkit --host claude-code/);
+  assert.match(result.stdout, /or `setup toolkit` from Claude Code/);
+  assert.match(result.stdout, /restart Claude Code/);
+  assert.match(result.stdout, /claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user/);
+  assert.match(result.stdout, /reinstall through the supported Claude Code marketplace path/);
+});
+
 test('fresh lock blocks manual writes and stale lock is recovered', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -1685,6 +1709,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Codex native plugin cache: `stale`/);
+  assert.match(report.text, /Action needed: enable Codex plugin auto-refresh in setup, or run `setup toolkit`\./);
   assert.match(report.text, /Enable Codex plugin auto-refresh|run `setup toolkit`/);
   assert.match(report.text, /target sync status: `not needed`/);
   assert.equal(report.state.targets.ag2.synced_version, expectedBridgeVersion);
@@ -1701,6 +1726,43 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
   const repeatedState = readJson(path.join(hub, 'state.json'));
   assert.equal(repeatedState.last_update_report_path, report.reportPath);
   assert.equal(repeatedState.last_update_report_signature, report.state.last_update_report_signature);
+});
+
+test('hook report does not ask to enable Codex auto-refresh when it is already enabled', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const root = fixture.root;
+  const sourceRepo = fixture.repo;
+  const stalePluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
+  const hub = path.join(root, 'hub', 'current');
+
+  writeCodexPluginRefreshFixture(sourceRepo);
+  writeFile(path.join(stalePluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
+  let result = run([
+    '--hub', hub,
+    '--repo-path', sourceRepo,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-codex-plugin-auto-refresh',
+    '--enable-target', 'ag2',
+    '--sync-source', 'codex-plugin'
+  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, {
+      PATH: process.env.PATH,
+      PLUGIN_ROOT: stalePluginRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit updated:/);
+
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Action needed: none\./);
+  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
+  assert.doesNotMatch(report.text, /Enable Codex plugin auto-refresh/);
+  assert.doesNotMatch(report.text, /run `setup toolkit`/);
 });
 
 test('Claude hook reports host-local manual native cache action and never runs Codex refresh', () => {
@@ -1779,6 +1841,58 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
   assert.equal(state.codex_plugin_auto_refresh_enabled, true);
 });
 
+test('Codex auto-refresh runs before delegated target sync failure', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const stalePluginRoot = path.join(fixture.root, 'codex-cache', 'ai-agent-toolkit');
+  writeFile(path.join(stalePluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), '// stale bridge cache\n');
+
+  let result = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--enable-codex-plugin-auto-refresh',
+    '--write'
+  ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  writeCodexPluginRefreshFixture(fixture.upstream);
+  writeFile(path.join(fixture.upstream, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
+    '#!/usr/bin/env node',
+    "'use strict';",
+    "console.error('Refusing downgrade: delegated fixture is intentionally older than hub state');",
+    'process.exit(42);',
+    ''
+  ].join('\n'));
+  git(fixture.upstream, ['add', '.']);
+  git(fixture.upstream, ['commit', '-m', 'refresh codex cache but fail delegated sync']);
+  git(fixture.upstream, ['push', 'origin', 'main']);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(fixture.root, {
+      PATH: process.env.PATH,
+      PLUGIN_ROOT: stalePluginRoot
+    })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /delegated repo sync failed/);
+  assert.deepEqual(
+    verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
+    [],
+    'auto-refresh should still update the Codex plugin cache before delegated sync failure is reported'
+  );
+
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
+  assert.match(report.text, /target sync status: `failed`/);
+  assert.match(report.text, /warning\/error: `delegated repo sync failed:/);
+});
+
 test('hook report records removed stale managed skill folders during target sync', () => {
   const root = tmpRoot();
   const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha v1\n', beta: 'beta v1\n' });
@@ -1852,6 +1966,7 @@ test('legacy delegated repo sync writes an update report using stored repo updat
 
   const report = readLatestReport(fixture.hub);
   assert.match(report.text, /## TL;DR/);
+  assert.match(report.text, /Triggered from: manual or repo run \(`repo`\)\./);
   assert.match(report.text, new RegExp(`Toolkit updated to commit: \`${fixture.toCommit}\``));
   assert.match(report.text, new RegExp(`Previous commit: \`${fixture.fromCommit}\``));
   assert.match(report.text, /Source: `repo`/);
@@ -2234,12 +2349,14 @@ test('audit output includes latest update report path', () => {
 
 test('update report opening is Windows-only notepad and rejects non-report paths', () => {
   const calls = [];
-  const reportDir = updateReportDir();
+  const root = tmpRoot();
+  const reportDir = path.join(root, 'reports');
   const reportPath = path.join(reportDir, 'toolkit-update-20990101-010203.md');
   fs.mkdirSync(reportDir, { recursive: true });
   fs.writeFileSync(reportPath, '# report\n', 'utf8');
   const fakeChild = { unref() { calls.push(['unref']); } };
   const opened = openUpdateReport(reportPath, {
+    reportDir,
     platform: 'win32',
     spawnImpl(command, args, options) {
       calls.push([command, args, options]);
@@ -2255,12 +2372,14 @@ test('update report opening is Windows-only notepad and rejects non-report paths
   assert.deepEqual(calls[1], ['unref']);
 
   assert.equal(openUpdateReport(path.join(os.tmpdir(), 'not-a-toolkit-report.md'), {
+    reportDir,
     platform: 'win32',
     spawnImpl() {
       throw new Error('must not spawn for unsafe paths');
     }
   }).ok, false);
   assert.equal(openUpdateReport(reportPath, {
+    reportDir,
     platform: 'linux',
     spawnImpl() {
       throw new Error('must not spawn on non-Windows');
@@ -2338,6 +2457,45 @@ test('update report cleanup deletes only old Toolkit-managed reports inside the 
   assert.equal(result.error_count, 0);
   assert.equal(fs.existsSync(oldReport), false);
   assert.equal(fs.existsSync(newReport), true);
+  assert.equal(fs.existsSync(unrelated), true);
+});
+
+test('update report cleanup caps newest Toolkit reports inside the retention window', () => {
+  const root = tmpRoot();
+  const reportDir = path.join(root, 'reports');
+  fs.mkdirSync(reportDir, { recursive: true });
+  const names = [
+    'toolkit-update-20200120-010101.md',
+    'toolkit-update-20200120-010102.md',
+    'toolkit-update-20200120-010103.md',
+    'toolkit-update-20200120-010104.md',
+    'toolkit-update-20200120-010105.md'
+  ];
+  names.forEach((name, index) => {
+    const filePath = path.join(reportDir, name);
+    writeFile(filePath, `# report ${index}\n`);
+    const date = new Date(`2020-01-20T00:00:0${index}Z`);
+    fs.utimesSync(filePath, date, date);
+  });
+  const unrelated = path.join(reportDir, 'user-note.md');
+  writeFile(unrelated, '# user\n');
+
+  const result = cleanupUpdateReports({
+    reportDir,
+    expectedDir: reportDir,
+    retentionDays: 7,
+    maxReports: 2,
+    nowMs: new Date('2020-01-20T00:00:10Z').getTime()
+  });
+
+  assert.equal(result.deleted_count, 3);
+  assert.equal(result.skipped_count, 3);
+  assert.equal(result.error_count, 0);
+  assert.equal(fs.existsSync(path.join(reportDir, names[0])), false);
+  assert.equal(fs.existsSync(path.join(reportDir, names[1])), false);
+  assert.equal(fs.existsSync(path.join(reportDir, names[2])), false);
+  assert.equal(fs.existsSync(path.join(reportDir, names[3])), true);
+  assert.equal(fs.existsSync(path.join(reportDir, names[4])), true);
   assert.equal(fs.existsSync(unrelated), true);
 });
 

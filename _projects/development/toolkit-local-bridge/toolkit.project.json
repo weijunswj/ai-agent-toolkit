@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.6",
+  "version": "2.3.7",
   "version_policy": "semver",
-  "version_notes": "Adds passive startup repo-local instruction managed-block preflight with pause-for-choice warning and clearer dirty-checkout update report guidance.",
+  "version_notes": "Adds a Triggered-from line to the update report TL;DR, prints hook-mode skips to stdout, and appends host-native refresh remediation to the downgrade refusal message.",
   "outputs": [
     {
       "kind": "curated",
