@@ -516,13 +516,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.3.7';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.3.8';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.3\.7/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.3\.8/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -1723,6 +1723,7 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
   const portableIndex = readTextFile(path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'docs', 'agent-playbooks', 'INDEX.md'));
   assert.match(portableIndex, /\[Generated files\]\(generated-files\.md\) \(`docs\/agent-playbooks\/generated-files\.md`\)/);
   assert.match(portableIndex, /\[Safety gates\]\(safety-gates\.md\) \(`docs\/agent-playbooks\/safety-gates\.md`\)/);
+  assert.match(portableIndex, /\[Windows command hygiene\]\(windows-command-hygiene\.md\) \(`docs\/agent-playbooks\/windows-command-hygiene\.md`\)/);
   const portableDocsOutput = manifest.outputs.find((entry) => entry.output === 'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks');
   assert.equal(portableDocsOutput?.kind, 'copy');
   assert.equal(manifest.writes.allowed.includes('skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks'), true);

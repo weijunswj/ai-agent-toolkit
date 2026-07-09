@@ -14,7 +14,7 @@ The copied skill folder includes bare repo-local bootstrap payload templates. Th
 - [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) is copied to target repo `CLAUDE.md` only when Claude Code support is requested or the target platform is Claude Code.
 - [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) is copied to target repo `GEMINI.md` for Antigravity.
 - [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) is copied to target repo `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
-- [repo-local/docs/agent-playbooks/](repo-local/docs/agent-playbooks/) is copied as a complete folder to target repo `docs/agent-playbooks/` so the portable `AGENTS.md` links are live. Copy every Markdown file: `INDEX.md`, `baseline-workflow.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `managed-memory.md`, and `safety-gates.md`.
+- [repo-local/docs/agent-playbooks/](repo-local/docs/agent-playbooks/) is copied as a complete folder to target repo `docs/agent-playbooks/` so the portable `AGENTS.md` links are live. Copy every Markdown file: `INDEX.md`, `baseline-workflow.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `managed-memory.md`, `safety-gates.md`, and `windows-command-hygiene.md`.
 
 Install only the current target platform shim unless the user explicitly requests all platform shims. Repo-local installs require a selected/open target repo or an explicit target path; standalone/no-workspace chats cannot safely infer where to install repo-local files.
 

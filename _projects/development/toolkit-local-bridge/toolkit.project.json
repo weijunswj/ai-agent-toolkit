@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.7",
+  "version": "2.3.8",
   "version_policy": "semver",
-  "version_notes": "Adds a Triggered-from line to the update report TL;DR, prints hook-mode skips to stdout, and appends host-native refresh remediation to the downgrade refusal message.",
+  "version_notes": "Bumps the native Toolkit package for the new Windows command hygiene playbook in the packaged ai-coding-agent-rules skill.",
   "outputs": [
     {
       "kind": "curated",
