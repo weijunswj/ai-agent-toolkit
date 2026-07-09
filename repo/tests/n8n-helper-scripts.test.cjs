@@ -3,6 +3,7 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { Readable, Writable } = require('node:stream');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -11,6 +12,9 @@ const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repo
 
 const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync');
 const sourceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync');
+const {
+  resolveN8nDockerTarget,
+} = require(path.join(sourceScriptDir, 'resolve-n8n-docker-target.cjs'));
 const sanitizerDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer');
 const sourceSanitizerDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'sanitizer');
 const sourceRagTemplateDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'workflow-templates', 'chatbot-with-RAG');
@@ -78,6 +82,89 @@ function runNode(scriptPath, args = [], options = {}) {
     env: { ...process.env, ...(options.env || {}) },
     encoding: 'utf8',
   });
+}
+
+function n8nContainer({
+  id,
+  name,
+  project = '',
+  service = '',
+  image = 'n8nio/n8n:stable',
+  ports = { '5678/tcp': [{ HostPort: '5678' }] },
+  running = true,
+}) {
+  return {
+    Id: id,
+    Name: `/${name}`,
+    State: { Running: running },
+    Config: {
+      Image: image,
+      Labels: {
+        ...(project ? { 'com.docker.compose.project': project } : {}),
+        ...(service ? { 'com.docker.compose.service': service } : {}),
+      },
+    },
+    NetworkSettings: { Ports: ports },
+  };
+}
+
+function dockerMock(containers, options = {}) {
+  const calls = [];
+  const byId = new Map(containers.map((container) => [container.Id, container]));
+  const byName = new Map(containers.map((container) => [String(container.Name).replace(/^\//, ''), container]));
+  const composePs = options.composePs || {};
+  const runner = (args) => {
+    calls.push(args);
+    if (args[0] === 'inspect') {
+      const inspected = args.slice(1).flatMap((target) => {
+        const exactId = byId.get(target);
+        if (exactId) return [exactId];
+        const idMatch = containers.find((container) => container.Id.startsWith(target));
+        if (idMatch) return [idMatch];
+        const nameMatch = byName.get(target);
+        return nameMatch ? [nameMatch] : [];
+      });
+      return inspected.length
+        ? { status: 0, stdout: JSON.stringify(inspected), stderr: '' }
+        : { status: 1, stdout: '', stderr: 'not found' };
+    }
+    if (args[0] === 'ps' && args[1] === '-q') {
+      return {
+        status: 0,
+        stdout: containers.filter((container) => container.State.Running).map((container) => container.Id).join('\n'),
+        stderr: '',
+      };
+    }
+    if (args[0] === 'compose') {
+      const projectIndex = args.indexOf('-p');
+      const project = projectIndex >= 0 ? args[projectIndex + 1] : '';
+      const service = args.at(-1);
+      const ids = composePs[`${project}/${service}`] || composePs[service] || [];
+      return { status: 0, stdout: ids.join('\n'), stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: `unexpected docker args: ${args.join(' ')}` };
+  };
+  runner.calls = calls;
+  return runner;
+}
+
+function captureStream() {
+  let text = '';
+  const stream = new Writable({
+    write(chunk, encoding, callback) {
+      text += chunk.toString();
+      callback();
+    },
+  });
+  stream.isTTY = true;
+  stream.text = () => text;
+  return stream;
+}
+
+function inputStream(text) {
+  const stream = Readable.from([text]);
+  stream.isTTY = true;
+  return stream;
 }
 
 function findPowerShell() {
@@ -221,6 +308,162 @@ Assert-Rejected "traversal outside .tmp" ${psSingleQuoted(traversalOutsideTmp)}
     encoding: 'utf8',
   });
 }
+
+test('resolve-n8n-docker-target.cjs explicit container override wins', async () => {
+  const target = n8nContainer({ id: 'aaaaaaaaaaaa1111', name: 'explicit-n8n', project: 'local', service: 'n8n' });
+  const other = n8nContainer({ id: 'bbbbbbbbbbbb2222', name: 'other-n8n', project: 'other', service: 'n8n' });
+  const runDocker = dockerMock([target, other], { composePs: { n8n: [other.Id] } });
+
+  const selected = await resolveN8nDockerTarget({ args: ['--container', 'explicit-n8n'], runDocker });
+
+  assert.equal(selected.id, target.Id);
+  assert.deepEqual(runDocker.calls[0], ['inspect', 'explicit-n8n']);
+});
+
+test('resolve-n8n-docker-target.cjs explicit container ID override wins', async () => {
+  const target = n8nContainer({ id: 'cccccccccccc3333', name: 'target-n8n', project: 'local', service: 'n8n' });
+  const runDocker = dockerMock([target]);
+
+  const selected = await resolveN8nDockerTarget({ args: ['--container-id', 'cccccccccccc3333'], runDocker });
+
+  assert.equal(selected.id, target.Id);
+});
+
+test('resolve-n8n-docker-target.cjs compose project and service discovery works', async () => {
+  const target = n8nContainer({ id: 'dddddddddddd4444', name: 'n8n-1', project: 'n8n-production-cloudflare', service: 'n8n', ports: { '5678/tcp': [{ HostPort: '5679' }] } });
+  const runDocker = dockerMock([target], { composePs: { 'n8n-production-cloudflare/n8n': [target.Id] } });
+
+  const selected = await resolveN8nDockerTarget({
+    args: ['--compose-project', 'n8n-production-cloudflare', '--compose-service', 'n8n'],
+    runDocker,
+  });
+
+  assert.equal(selected.id, target.Id);
+  assert.equal(selected.project, 'n8n-production-cloudflare');
+  assert.equal(selected.ports, '5679:5678');
+});
+
+test('resolve-n8n-docker-target.cjs compose label discovery works', async () => {
+  const target = n8nContainer({ id: 'eeeeeeeeeeee5555', name: 'n8n-1', project: 'n8n-local', service: 'n8n' });
+  const other = n8nContainer({ id: 'ffffffffffff6666', name: 'worker-1', project: 'n8n-local', service: 'worker', image: 'example/worker:latest' });
+  const runDocker = dockerMock([target, other], { composePs: { 'n8n-local/n8n': [] } });
+
+  const selected = await resolveN8nDockerTarget({
+    args: ['--compose-project', 'n8n-local', '--compose-service', 'n8n'],
+    runDocker,
+  });
+
+  assert.equal(selected.id, target.Id);
+});
+
+test('resolve-n8n-docker-target.cjs single running n8n image fallback works', async () => {
+  const target = n8nContainer({ id: '111111111111aaaa', name: 'plain-n8n', image: 'n8nio/n8n' });
+  const runDocker = dockerMock([target]);
+
+  const selected = await resolveN8nDockerTarget({ args: [], runDocker });
+
+  assert.equal(selected.id, target.Id);
+});
+
+test('resolve-n8n-docker-target.cjs zero candidates fails helpfully', async () => {
+  const runDocker = dockerMock([]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker }),
+    /No running n8n Docker container was detected[\s\S]*--container-id[\s\S]*N8N_COMPOSE_PROJECT/
+  );
+});
+
+test('resolve-n8n-docker-target.cjs multiple candidates print numbered safe chooser list', async () => {
+  const local = n8nContainer({ id: '222222222222aaaa', name: 'n8n-1', project: 'n8n-local', service: 'n8n', ports: { '5678/tcp': [{ HostPort: '5678' }] } });
+  const production = n8nContainer({ id: '333333333333bbbb', name: 'n8n-1', project: 'n8n-production-cloudflare', service: 'n8n', ports: { '5678/tcp': [{ HostPort: '5679' }] } });
+  const output = captureStream();
+  const runDocker = dockerMock([local, production]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker, output }),
+    /Multiple running n8n candidates require an explicit target/
+  );
+
+  assert.match(output.text(), /1\. stack=n8n-local/);
+  assert.match(output.text(), /container=n8n-1/);
+  assert.match(output.text(), /container_id=222222222222/);
+  assert.match(output.text(), /ports=5678:5678/);
+  assert.match(output.text(), /2\. stack=n8n-production-cloudflare/);
+  assert.match(output.text(), /ports=5679:5678/);
+});
+
+test('resolve-n8n-docker-target.cjs valid numeric interactive selection pins target for current process only', async () => {
+  const local = n8nContainer({ id: '444444444444aaaa', name: 'n8n-1', project: 'n8n-local', service: 'n8n' });
+  const production = n8nContainer({ id: '555555555555bbbb', name: 'n8n-1', project: 'n8n-production-cloudflare', service: 'n8n' });
+  const output = captureStream();
+  const runDocker = dockerMock([local, production]);
+
+  const selected = await resolveN8nDockerTarget({
+    args: [],
+    runDocker,
+    input: inputStream('2\n'),
+    output,
+    interactive: true,
+  });
+
+  assert.equal(selected.id, production.Id);
+  assert.equal(output.text().includes('n8n-target.json'), false);
+});
+
+test('resolve-n8n-docker-target.cjs invalid numeric selection terminates with relaunch guidance', async () => {
+  const runDocker = dockerMock([
+    n8nContainer({ id: '666666666666aaaa', name: 'n8n-1', project: 'one', service: 'n8n' }),
+    n8nContainer({ id: '777777777777bbbb', name: 'n8n-1', project: 'two', service: 'n8n' }),
+  ]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: [], runDocker, input: inputStream('3\n'), output: captureStream(), interactive: true }),
+    /Target selection terminated\. Relaunch the helper and select a valid target number\./
+  );
+});
+
+test('resolve-n8n-docker-target.cjs non-numeric and empty selections terminate with relaunch guidance', async () => {
+  for (const value of ['abc\n', '\n']) {
+    const runDocker = dockerMock([
+      n8nContainer({ id: `888888888888${value.length}`, name: 'n8n-1', project: 'one', service: 'n8n' }),
+      n8nContainer({ id: `999999999999${value.length}`, name: 'n8n-1', project: 'two', service: 'n8n' }),
+    ]);
+
+    await assert.rejects(
+      () => resolveN8nDockerTarget({ args: [], runDocker, input: inputStream(value), output: captureStream(), interactive: true }),
+      /Target selection terminated\. Relaunch the helper and select a valid target number\./
+    );
+  }
+});
+
+test('resolve-n8n-docker-target.cjs non-interactive multiple-candidate mode fails safely with override guidance', async () => {
+  const runDocker = dockerMock([
+    n8nContainer({ id: 'abababababab1111', name: 'n8n-a', project: 'one', service: 'n8n' }),
+    n8nContainer({ id: 'bcbcbcbcbcbc2222', name: 'n8n-b', project: 'two', service: 'n8n' }),
+  ]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker }),
+    /Multiple running n8n candidates require an explicit target[\s\S]*--compose-project/
+  );
+});
+
+test('resolve-n8n-docker-target.cjs duplicate container names across Compose stacks stay ambiguous', async () => {
+  const output = captureStream();
+  const runDocker = dockerMock([
+    n8nContainer({ id: 'cdcdcdcdcdcd1111', name: 'n8n-1', project: 'n8n-local', service: 'n8n' }),
+    n8nContainer({ id: 'dededededede2222', name: 'n8n-1', project: 'n8n-production-cloudflare', service: 'n8n' }),
+  ]);
+
+  await assert.rejects(
+    () => resolveN8nDockerTarget({ args: ['--non-interactive'], runDocker, output }),
+    /Multiple running n8n candidates require an explicit target/
+  );
+
+  assert.match(output.text(), /1\. stack=n8n-local[\s\S]*container=n8n-1/);
+  assert.match(output.text(), /2\. stack=n8n-production-cloudflare[\s\S]*container=n8n-1/);
+});
 
 function tryCreateDirectoryLink(targetPath, linkPath) {
   const linkType = process.platform === 'win32' ? 'junction' : 'dir';
@@ -1204,6 +1447,7 @@ test('Secure CI/CD n8n helper templates stay aligned with workflow toolkit sourc
     'import-n8n-workflows-live.ps1',
     'n8n-workflow-sync-menu.ps1',
     'prepare-n8n-live-import.cjs',
+    'resolve-n8n-docker-target.cjs',
     'should-import-n8n-workflow.cjs',
     'sync-n8n-live-exports.cjs',
     'validate-n8n-workflows.cjs',

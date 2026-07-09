@@ -786,7 +786,7 @@ test('Windows hook repair wraps direct shell hook commands and is idempotent', (
   const command = repairedHooks.hooks.SessionStart[0].hooks[0].command;
   assert.equal(
     command,
-    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.ps1" "session-start.sh"'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${PLUGIN_ROOT}/hooks/run-hook.ps1" "session-start.sh"'
   );
   assert.equal(fs.existsSync(wrapperPath), true);
   assert.match(fs.readFileSync(wrapperPath, 'utf8'), /Program Files\\Git\\bin\\bash\.exe/);
@@ -801,6 +801,43 @@ test('Windows hook repair wraps direct shell hook commands and is idempotent', (
 
   const audit = runAudit(pluginRoot);
   assert.equal(audit.status, 0, audit.stderr);
+});
+
+test('Windows hook repair uses Codex PLUGIN_ROOT for Codex cache paths', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-plugin-codex-cache-'));
+  const pluginRoot = path.join(root, '.codex', 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.0');
+  writeJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), {
+    name: 'n8n-skills',
+    version: '1.0.0',
+    hooks: './hooks/hooks.json'
+  });
+  writeJson(path.join(pluginRoot, 'hooks', 'hooks.json'), {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: 'startup',
+          hooks: [
+            {
+              type: 'command',
+              command: '${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh'
+            }
+          ]
+        }
+      ]
+    }
+  });
+  writeSessionStartShellHookWithNodeFallback(pluginRoot);
+
+  const result = runRepair(pluginRoot, '--plugin-id', 'n8n-skills@n8n-io');
+  assert.equal(result.status, 0, result.stderr);
+
+  const repairedCommand = readJson(path.join(pluginRoot, 'hooks', 'hooks.json')).hooks.SessionStart[0].hooks[0].command;
+  assert.equal(
+    repairedCommand,
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${PLUGIN_ROOT}/hooks/run-hook.ps1" "session-start.sh"'
+  );
+  assert.doesNotMatch(repairedCommand, /CLAUDE_PLUGIN_ROOT/);
+  assert.equal(runAudit(pluginRoot, '--verify-output').status, 0);
 });
 
 test('Windows hook repair wrapper executes repaired hook through powershell.exe', (t) => {

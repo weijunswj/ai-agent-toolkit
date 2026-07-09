@@ -148,7 +148,7 @@ function shellScriptCommandRefs(command) {
 
 function shellScriptRefToPluginRelPath(rawRef) {
   let ref = normalizeRelPath(stripOuterQuotes(rawRef).trim()).replace(/^\.\//, '');
-  const pluginRootMatch = ref.match(/^\$\{CLAUDE_PLUGIN_ROOT\}\/+(.+)$/i);
+  const pluginRootMatch = ref.match(/^\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}\/+(.+)$/i);
   if (pluginRootMatch) return normalizeRelPath(pluginRootMatch[1]);
 
   if (/^[A-Za-z]:\//.test(ref) || ref.startsWith('/')) return null;

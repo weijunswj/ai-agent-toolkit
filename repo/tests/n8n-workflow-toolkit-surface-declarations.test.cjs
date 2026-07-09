@@ -102,6 +102,7 @@ const helperScriptOutputs = [
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/n8n-workflow-sync-menu.ps1',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/prepare-n8n-live-import.cjs',
+  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/resolve-n8n-docker-target.cjs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/should-import-n8n-workflow.cjs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/sync-n8n-live-exports.cjs',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs',

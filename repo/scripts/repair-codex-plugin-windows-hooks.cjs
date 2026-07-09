@@ -149,7 +149,7 @@ function isToolkitWrapperCommand(command) {
   const first = commandPathToken(tokens[0]);
   return (
     (first === 'powershell.exe' || first === 'powershell') &&
-    command.includes('${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.ps1')
+    /\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}\/hooks\/run-hook\.ps1/i.test(command)
   );
 }
 
@@ -159,8 +159,15 @@ function shellScriptRefsInTokens(tokens) {
     .filter(Boolean);
 }
 
-function repairCommandForHookRel(hookRel) {
-  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "\${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.ps1" "${hookRel}"`;
+function preferredPluginRootVariable(pluginRoot) {
+  const normalized = normalizeRelPath(path.resolve(pluginRoot)).toLowerCase();
+  if (normalized.includes('/.claude/') || normalized.includes('/claude-home/')) return 'CLAUDE_PLUGIN_ROOT';
+  return 'PLUGIN_ROOT';
+}
+
+function repairCommandForHookRel(hookRel, pluginRoot) {
+  const rootVariable = preferredPluginRootVariable(pluginRoot);
+  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "\${${rootVariable}}/hooks/run-hook.ps1" "${hookRel}"`;
 }
 
 function classifyHookCommand(entry, pluginRoot) {
@@ -193,7 +200,7 @@ function classifyHookCommand(entry, pluginRoot) {
           error: `${entry.path} references missing hook script ${relPath}; cannot repair ${entry.command}`
         };
       }
-      return { repairTo: repairCommandForHookRel(hookArg), relPath };
+      return { repairTo: repairCommandForHookRel(hookArg, pluginRoot), relPath };
     }
     return {
       error: `${entry.path} uses bare bash on Windows and cannot be repaired safely. Use Git Bash explicitly or a Toolkit wrapper: ${entry.command}`
@@ -214,7 +221,7 @@ function classifyHookCommand(entry, pluginRoot) {
         error: `${entry.path} references missing hook script ${directRelPath}; cannot repair ${entry.command}`
       };
     }
-    return { repairTo: repairCommandForHookRel(directHookArg), relPath: directRelPath };
+    return { repairTo: repairCommandForHookRel(directHookArg, pluginRoot), relPath: directRelPath };
   }
 
   const shellRefs = shellScriptRefsInTokens(tokens);

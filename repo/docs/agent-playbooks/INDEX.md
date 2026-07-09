@@ -58,6 +58,8 @@ Read: `repo/docs/agent-playbooks/n8n-safety-and-workflows.md`.
 
 Stop before live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, production, destructive, or privileged external actions. Require explicit current-turn approval naming the target and operation.
 
+Committed n8n workflow export JSON belongs under root `n8n-workflows/`; if Toolkit creates or manages that folder, keep `n8n-workflows/README.md` and sync the approved helper scripts under `n8n-workflows/scripts/`.
+
 ## Match: Hostinger, Coolify, VPS, SSH, Or Deployment Work
 
 Triggers: Hostinger, Coolify, VPS, SSH, production deployment, reverse proxy, Docker Compose, firewall, server backups, service restart, DNS/TLS, secrets, or production security checks.

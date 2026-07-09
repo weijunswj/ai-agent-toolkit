@@ -44,6 +44,8 @@ Apply `n8n-agent-rules` first for the full n8n operating contract. A generated l
 - Do not run live n8n import/export in CI.
 - Do not commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, live import/export JSON, credentials, credential bindings, private keys, or `.env` files.
 - Keep consumer-repo workflow JSON inactive unless the user explicitly confirms activation in the target live instance.
+- Committed n8n workflow export JSON belongs under the consumer repo root `n8n-workflows/`; if that folder exists, keep `n8n-workflows/README.md` beside it.
+- When creating or managing root `n8n-workflows/`, copy or sync the approved import/export helper scripts from `templates/helper-scripts/import-export-sync/` into `n8n-workflows/scripts/`. Do not create duplicate helper families elsewhere.
 - Review workflow diffs before committing `n8n-workflows/*.json` in a consumer repo.
 
 ## Approval Boundary
@@ -80,6 +82,8 @@ Stop and ask again if approval does not name the target repo; live approval does
 
 - `templates/helper-scripts/sanitizer/`: sanitizer helper scripts.
 - `templates/helper-scripts/import-export-sync/`: import/export, validation, compare, prepare, and sync helper scripts.
+
+In consumer repos, install the import/export sync helper folder under `n8n-workflows/scripts/` when Toolkit creates or manages `n8n-workflows/`. These scripts are manual helpers only; they must not run automatically.
 
 ## Output
 
