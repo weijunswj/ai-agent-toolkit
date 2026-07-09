@@ -33,7 +33,7 @@ call :status Yellow "%~1"
 exit /b 0
 
 :read_rerun_choice
-choice /C RE /N /M "> "
+"%POWERSHELL_EXE%" -NoProfile -Command "try { Write-Host '> ' -NoNewline -ForegroundColor Yellow; while ($true) { $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown'); $ch = [char]$key.Character; if ($ch -match '^[Rr]$') { Write-Host 'R'; exit 1 }; if ($ch -match '^[Ee]$') { Write-Host 'E'; exit 2 } } } catch { Write-Host ''; Write-Host 'Input unavailable; exiting without rerun.' -ForegroundColor Yellow; exit 2 }"
 exit /b %ERRORLEVEL%
 
 :read_choice

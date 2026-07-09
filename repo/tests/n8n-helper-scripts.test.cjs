@@ -1511,8 +1511,10 @@ test('n8n command wrappers use framed colored retry output', () => {
       assert.doesNotMatch(text, /Press Enter to return after reviewing the error/, label);
       assert.doesNotMatch(text, /:pause_before_exit/, label);
       assert.match(text, /call :read_rerun_choice\s+if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);
-      assert.match(text, /:read_rerun_choice\s+choice \/C RE \/N \/M "> "\s+exit \/b %ERRORLEVEL%/, label);
+      assert.match(text, /:read_rerun_choice\s+"%POWERSHELL_EXE%" -NoProfile -Command "try \{ Write-Host '> ' -NoNewline -ForegroundColor Yellow; while \(\$true\) \{ \$key = \$Host\.UI\.RawUI\.ReadKey\('NoEcho,IncludeKeyDown'\)/, label);
+      assert.match(text, /Input unavailable; exiting without rerun\./, label);
       assert.match(text, /set \/p "AAT_CHOICE=%~1"/, label);
+      assert.doesNotMatch(text, /choice \/C RE/, label);
       assert.doesNotMatch(text, /findstr/i, label);
     } else {
       assert.match(text, /if errorlevel 2 exit \/b %LAST_EXIT%\s+cls\s+goto run_/, label);

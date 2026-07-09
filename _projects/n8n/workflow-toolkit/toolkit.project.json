@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.15",
+  "version": "1.2.16",
   "version_policy": "semver",
-  "version_notes": "Uses blocking Windows choice input for direct import/export wrapper final rerun prompts so success and failure output do not reset without an R or E keypress.",
+  "version_notes": "Uses PowerShell console RawUI key input for direct import/export wrapper final rerun prompts so success and failure output do not reset from stdin quirks.",
   "outputs": [
     {
       "kind": "curated",
