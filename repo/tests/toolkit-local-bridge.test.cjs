@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.8';
+const expectedBridgeVersion = '2.3.9';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -1353,6 +1353,9 @@ test('hook mode validation uses hook-light smoke validation and skips full bridg
 
 test('agent-rules preflight accepts current managed blocks and ignores literal marker examples', () => {
   const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  const nested = path.join(root, 'nested');
+  fs.mkdirSync(nested, { recursive: true });
   const agentsTemplate = fs.readFileSync(
     path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
     'utf8'
@@ -1368,10 +1371,40 @@ test('agent-rules preflight accepts current managed blocks and ignores literal m
 
   const result = runAgentRulesPreflight(
     { hook: true, syncSource: 'codex-plugin' },
-    { targetRoot: root, pluginRoot: repoRoot }
+    { targetRoot: nested, pluginRoot: repoRoot }
   );
   assert.equal(result.status, 'ok');
+  assert.equal(result.targetRoot, root);
   assert.deepEqual(result.findings, []);
+});
+
+test('agent-rules preflight stops loudly when a git repo is missing root AGENTS without writing files', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  const nested = path.join(root, 'packages', 'app');
+  writeFile(path.join(nested, 'README.md'), '# app\n');
+  const before = fs.readdirSync(root).sort();
+
+  const result = runAgentRulesPreflight(
+    { hook: true, syncSource: 'codex-plugin' },
+    { targetRoot: nested, pluginRoot: repoRoot }
+  );
+
+  assert.equal(result.status, 'needs-attention');
+  assert.equal(result.targetRoot, root);
+  assert.equal(result.gitRepoDetected, true);
+  assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), ['AGENTS.md:missing']);
+  const message = formatAgentRulesPreflight(result);
+  assert.match(message, /STOP/);
+  assert.match(message, /AGENTS\.md is missing/);
+  assert.match(message, /repo-local ai-coding-agent-rules are not installed/);
+  assert.match(message, /ask the user whether to install\/repair/);
+  assert.match(message, /proceed without Toolkit repo-local rules/);
+  assert.match(message, /No files were changed by this hook/);
+  assert.deepEqual(fs.readdirSync(root).sort(), before);
+  assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), false);
+  assert.equal(fs.existsSync(path.join(root, 'docs', 'agent-playbooks')), false);
+  assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
 test('agent-rules preflight reports stale managed block content without writing files', () => {
@@ -1398,6 +1431,27 @@ test('agent-rules preflight reports stale managed block content without writing 
   assert.match(message, /run `ai-coding-agent-rules` check\/repair\/refresh now/);
   assert.match(message, /proceed with the current task despite this warning/);
   assert.doesNotMatch(message, /before implementation/);
+  assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
+});
+
+test('agent-rules preflight keeps broken managed-block warnings as stop-and-ask only', () => {
+  const root = tmpRoot();
+  writeFile(path.join(root, 'AGENTS.md'), [
+    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->',
+    '# broken managed block',
+    ''
+  ].join('\n'));
+
+  const result = runAgentRulesPreflight(
+    { hook: true, syncSource: 'codex-plugin' },
+    { targetRoot: root, pluginRoot: repoRoot }
+  );
+  assert.equal(result.status, 'needs-attention');
+  assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), ['AGENTS.md:broken-marker']);
+  const message = formatAgentRulesPreflight(result);
+  assert.match(message, /No files were changed by this hook/);
+  assert.match(message, /Stop and ask the user whether to run `ai-coding-agent-rules` check\/repair\/refresh now/);
+  assert.match(message, /proceed with the current task despite this warning/);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
