@@ -1579,6 +1579,14 @@ test('PowerShell n8n helper scripts use colored sections, status tags, and clean
     assert.match(text, /"WRITE", "SAVE"/, label);
     assert.match(text, /\^==\\s\*\(\.\+\?\)\\s\*==\$/, label);
     assert.match(text, /\^Checked\\s\+/, label);
+
+    if (label.includes('import helper')) {
+      assert.match(text, /function Read-RestartContainerChoice\(\$Prompt\)/, label);
+      assert.match(text, /Read-Host \$Prompt/, label);
+      assert.match(text, /Press R to restart n8n container now or E to skip/, label);
+      assert.match(text, /if \(Read-RestartContainerChoice "Press R to restart n8n container now or E to skip"\) \{\s+\$restartResult = Invoke-CapturedCommand "docker" @\("restart", \$Container\)/, label);
+      assert.doesNotMatch(text, /Write-Section "Container Restart"\s+\$restartResult = Invoke-CapturedCommand "docker" @\("restart", \$Container\)/, label);
+    }
   }
 
   for (const [label, filePath, title] of [

@@ -163,6 +163,25 @@ function Write-CommandOutput($Lines, [string]$DefaultStatus = "INFO") {
   }
 }
 
+function Read-RestartContainerChoice($Prompt) {
+  if ([Console]::IsInputRedirected) {
+    Write-Step "WARN" "Input is non-interactive; skipping container restart. Rerun interactively and choose R if a restart is needed."
+    return $false
+  }
+
+  while ($true) {
+    $choice = Read-Host $Prompt
+    if ([string]::IsNullOrWhiteSpace($choice)) {
+      return $false
+    }
+
+    $normalized = $choice.Trim().Substring(0, 1).ToUpperInvariant()
+    if ($normalized -eq "R") { return $true }
+    if ($normalized -eq "E") { return $false }
+    Write-Step "WARN" "Invalid choice. Press R to restart now or E to skip restart."
+  }
+}
+
 function Invoke-CapturedCommand($Command, [string[]]$Arguments) {
   $process = [System.Diagnostics.Process]::new()
   $process.StartInfo.FileName = $Command
@@ -1154,11 +1173,17 @@ $warningImports = @($preflight.PlannedImports | Where-Object { $_.RequiresRestar
 if ($importedCount -gt 0 -and $warningImports.Count -gt 0) {
   if ($RestartContainerAfterImport) {
     Write-Section "Container Restart"
-    $restartResult = Invoke-CapturedCommand "docker" @("restart", $Container)
-    if ($restartResult.ExitCode -ne 0) {
-      throw "Imports succeeded, but docker restart $Container failed.`n$($restartResult.Output -join "`n")"
+    Write-Step "WARN" "$($warningImports.Count) imported workflow(s) were previously active or scheduled."
+    Write-Step "WARN" "Restart the n8n container before trusting activation state."
+    if (Read-RestartContainerChoice "Press R to restart n8n container now or E to skip") {
+      $restartResult = Invoke-CapturedCommand "docker" @("restart", $Container)
+      if ($restartResult.ExitCode -ne 0) {
+        throw "Imports succeeded, but docker restart $Container failed.`n$($restartResult.Output -join "`n")"
+      }
+      Write-Step "RESTART" "Ran docker restart $Container because $($warningImports.Count) imported workflow(s) were previously active or scheduled."
+    } else {
+      Write-Step "WARN" "Skipped container restart. Restart n8n manually before trusting activation state."
     }
-    Write-Step "RESTART" "Ran docker restart $Container because $($warningImports.Count) imported workflow(s) were previously active or scheduled."
   } else {
     Write-Step "WARN" "$($warningImports.Count) imported workflow(s) were previously active or scheduled. Restart the n8n container before trusting activation state."
   }
