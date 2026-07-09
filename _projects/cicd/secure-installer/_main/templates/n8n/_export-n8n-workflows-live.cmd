@@ -33,7 +33,7 @@ call :status Yellow "%~1"
 exit /b 0
 
 :read_rerun_choice
-"%POWERSHELL_EXE%" -NoProfile -Command "$ErrorActionPreference='Stop'; function Read-ConLine { $fs=[System.IO.File]::Open('CONIN$', [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite); try { $reader=[System.IO.StreamReader]::new($fs); while ($true) { Write-Host -NoNewline '> ' -ForegroundColor Yellow; $line=$reader.ReadLine(); if ($null -eq $line) { Start-Sleep -Milliseconds 250; continue }; $value=$line.Trim(); if ($value.Length -eq 0) { continue }; $choice=$value.Substring(0,1).ToUpperInvariant(); if ($choice -eq 'R') { exit 0 }; if ($choice -eq 'E') { exit 1 }; Write-Host 'Invalid choice. Press R to run again or E to exit.' -ForegroundColor Red } } finally { if ($reader) { $reader.Dispose() } else { $fs.Dispose() } } }; try { Read-ConLine } catch { Write-Host 'Console input unavailable; leaving this window open for review. Close it manually and rerun from an interactive Command Prompt.' -ForegroundColor Red; Start-Sleep -Seconds 86400; exit 1 }"
+"%POWERSHELL_EXE%" -NoProfile -Command "$ErrorActionPreference='Stop'; try { while ($true) { $value = Read-Host '> '; if ([string]::IsNullOrWhiteSpace($value)) { continue }; $choice = $value.Trim().Substring(0,1).ToUpperInvariant(); if ($choice -eq 'R') { exit 0 }; if ($choice -eq 'E') { exit 1 }; Write-Host 'Invalid choice. Press R to run again or E to exit.' -ForegroundColor Red } } catch { Write-Host 'Console input unavailable; leaving this window open for review. Close it manually and rerun from an interactive Command Prompt.' -ForegroundColor Red; Start-Sleep -Seconds 86400; exit 1 }"
 exit /b %ERRORLEVEL%
 
 :status
