@@ -316,7 +316,7 @@ test('Codex Toolkit plugin setup verifier rejects stale, disabled, or hookless i
     repoRoot
   });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /expected version 2\.3\.6/i);
+  assert.match(state.errors.join('\n'), /expected version 2\.3\.7/i);
 
   codexHome = tmpRoot();
   writeInstalledCache(codexHome);

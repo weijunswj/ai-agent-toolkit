@@ -22,6 +22,7 @@ const TARGET_MANIFEST_MARKER = 'ai-agent-toolkit-local-bridge';
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UPDATE_REPORT_ROOT = path.join('ai-agent-toolkit', 'update-reports');
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
+const DEFAULT_UPDATE_REPORT_MAX_FILES = 200;
 const FULL_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge.test.cjs');
 const HOOK_LIGHT_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs');
 const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
@@ -1353,12 +1354,16 @@ function cleanupUpdateReports(options = {}) {
   const retentionDays = Number.isInteger(options.retentionDays) && options.retentionDays > 0
     ? options.retentionDays
     : DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
+  const maxReports = Number.isInteger(options.maxReports) && options.maxReports > 0
+    ? options.maxReports
+    : DEFAULT_UPDATE_REPORT_MAX_FILES;
   const nowMs = options.nowMs || Date.now();
   const cutoffMs = nowMs - (retentionDays * 24 * 60 * 60 * 1000);
   const currentRunPath = options.currentRunPath ? path.resolve(options.currentRunPath) : '';
   const result = {
     retention_days: retentionDays,
     report_log_directory: reportDir,
+    max_report_files: maxReports,
     deleted_count: 0,
     skipped_count: 0,
     error_count: 0,
@@ -1381,6 +1386,7 @@ function cleanupUpdateReports(options = {}) {
     return result;
   }
 
+  const retainedReports = [];
   for (const entry of entries) {
     const filePath = path.join(reportDir, entry.name);
     if (!entry.isFile() || !/^toolkit-update-\d{8}-\d{6}(?:-\d+)?\.md$/.test(entry.name)) {
@@ -1393,17 +1399,34 @@ function cleanupUpdateReports(options = {}) {
     }
     try {
       const stat = fs.statSync(filePath);
-      if (stat.mtimeMs >= cutoffMs) {
-        result.skipped_count += 1;
-        continue;
+      if (stat.mtimeMs >= cutoffMs) retainedReports.push({ filePath, mtimeMs: stat.mtimeMs });
+      else {
+        fs.rmSync(filePath);
+        result.deleted_count += 1;
       }
-      fs.rmSync(filePath);
-      result.deleted_count += 1;
     } catch (error) {
       result.error_count += 1;
       result.errors.push(`${filePath}: ${error.message}`);
     }
   }
+
+  retainedReports.sort((left, right) => (
+    right.mtimeMs - left.mtimeMs ||
+    right.filePath.localeCompare(left.filePath)
+  ));
+  retainedReports.forEach((entry, index) => {
+    if (index < maxReports) {
+      result.skipped_count += 1;
+      return;
+    }
+    try {
+      fs.rmSync(entry.filePath);
+      result.deleted_count += 1;
+    } catch (error) {
+      result.error_count += 1;
+      result.errors.push(`${entry.filePath}: ${error.message}`);
+    }
+  });
 
   return result;
 }
@@ -1433,9 +1456,9 @@ function nextUpdateReportPath(date = new Date()) {
   return candidate;
 }
 
-function isUpdateReportPath(reportPath) {
+function isUpdateReportPath(reportPath, options = {}) {
   const resolved = path.resolve(reportPath || '');
-  const reportDir = path.resolve(updateReportDir());
+  const reportDir = path.resolve(options.reportDir || updateReportDir());
   const fileName = path.basename(resolved);
   return (
     isInside(reportDir, resolved) &&
@@ -1450,7 +1473,7 @@ function openUpdateReport(reportPath, options = {}) {
   const spawnImpl = options.spawnImpl || spawn;
   const resolved = path.resolve(reportPath || '');
   if (platform !== 'win32') return { ok: false, skipped: 'not-windows' };
-  if (!isUpdateReportPath(resolved)) return { ok: false, skipped: 'unsafe-report-path' };
+  if (!isUpdateReportPath(resolved, { reportDir: options.reportDir })) return { ok: false, skipped: 'unsafe-report-path' };
   try {
     const child = spawnImpl('notepad.exe', [resolved], {
       detached: true,
@@ -1837,8 +1860,13 @@ function warningSuggestion(warning) {
   return branchMismatchSuggestion(warning) || dirtyWorkingTreeSuggestion(warning);
 }
 
-function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning }) {
-  if (nativePluginCache.status === 'stale') return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
+function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning, state }) {
+  if (nativePluginCache.status === 'stale') {
+    if (state.codex_plugin_auto_refresh_enabled) {
+      return 'Codex auto-refresh is enabled and will retry on the next hook run';
+    }
+    return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
+  }
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
   if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check third-party Codex plugin hook repair';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
@@ -1876,7 +1904,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
     `- Triggered from: ${triggeredFromTldr(args.syncSource)}.`,
     `- Repo: ${repoTldr(repo, previousCommit, commit, warning)}.`,
     `- Targets: ${targetsTldr(targetSyncs, targetSyncStatus)}.`,
-    `- Action needed: ${actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning })}.`,
+    `- Action needed: ${actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning, state })}.`,
     '',
     '## Details',
     '',
@@ -1946,7 +1974,11 @@ function buildUpdateReport({ args, state, checksum, context }) {
   } else if (nativePluginCache.status === 'refresh-failed') {
     lines.push('- Codex native plugin cache auto-refresh failed. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata manually.');
   } else if (nativePluginCache.status === 'stale') {
-    lines.push('- Codex native plugin cache is stale. Enable Codex plugin auto-refresh during setup or run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata.');
+    if (state.codex_plugin_auto_refresh_enabled) {
+      lines.push('- Codex native plugin cache is stale even though auto-refresh is enabled. The hook will retry automatic refresh on the next run; use `setup toolkit` only if this persists.');
+    } else {
+      lines.push('- Codex native plugin cache is stale. Enable Codex plugin auto-refresh during setup or run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata.');
+    }
   } else if (nativePluginCache.status === 'check-only' && nativePluginCache.manual_action) {
     lines.push(`- Claude Code native plugin cache: ${nativePluginCache.manual_action}`);
   }
@@ -1965,6 +1997,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
   lines.push('', '## Update Report And Log Cleanup', '');
   lines.push(`- directory: ${inlineCode(cleanup.report_log_directory || updateReportDir())}`);
   lines.push(`- retention days: ${inlineCode(cleanup.retention_days || state.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS)}`);
+  lines.push(`- max retained reports: ${inlineCode(cleanup.max_report_files || DEFAULT_UPDATE_REPORT_MAX_FILES)}`);
   lines.push(`- deleted: ${inlineCode(cleanup.deleted_count || 0)}`);
   lines.push(`- skipped: ${inlineCode(cleanup.skipped_count || 0)}`);
   lines.push(`- errors: ${inlineCode(cleanup.error_count || 0)}`);
@@ -2037,7 +2070,7 @@ function updateReportSignature({ args, checksum, context }) {
     },
     cleanup: {
       retentionDays: cleanup.retention_days || '',
-      deletedCount: cleanup.deleted_count || 0,
+      maxReportFiles: cleanup.max_report_files || DEFAULT_UPDATE_REPORT_MAX_FILES,
       errorCount: cleanup.error_count || 0
     },
     targetSyncStatus: context.targetSyncStatus || '',
@@ -2398,6 +2431,7 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     update_report_cleanup: state.last_update_report_cleanup || {
       retention_days: state.update_report_retention_days,
       report_log_directory: updateReportDir(),
+      max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
       deleted_count: 0,
       skipped_count: 0,
       error_count: 0,
@@ -2618,11 +2652,23 @@ function maybeRepairThirdPartyCodexPluginHooks(args, state) {
   });
 }
 
-function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath }) {
+function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false }) {
   const before = codexNativePluginCacheStatus(args, state);
   if (before.status !== 'stale') return before;
   if (!state.codex_plugin_auto_refresh_enabled) return before;
-  const setupScript = path.join(repoPath, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs');
+  const resolvedRepoPath = path.resolve(repoPath || state.repo_path || '');
+  if (validateRepo) {
+    try {
+      runRepoValidation(resolvedRepoPath, { hookMode: true });
+    } catch (error) {
+      return {
+        ...before,
+        status: 'refresh-failed',
+        errors: [`Codex plugin cache auto-refresh skipped because trusted repo validation failed: ${error.message}`]
+      };
+    }
+  }
+  const setupScript = path.join(resolvedRepoPath, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs');
   if (!fs.existsSync(setupScript)) {
     return {
       ...before,
@@ -2636,9 +2682,9 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath }) {
     '--write',
     '--json',
     '--repo-root',
-    repoPath
+    resolvedRepoPath
   ], {
-    cwd: repoPath,
+    cwd: resolvedRepoPath,
     timeout: 180000
   });
   if (!result.ok) {
@@ -2649,7 +2695,7 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath }) {
     };
   }
 
-  const afterErrors = verifyInstalledCacheFreshness(before.plugin_root, repoPath);
+  const afterErrors = verifyInstalledCacheFreshness(before.plugin_root, resolvedRepoPath);
   if (afterErrors.length) {
     return {
       ...before,
@@ -2662,6 +2708,18 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath }) {
     status: 'refreshed',
     errors: []
   };
+}
+
+function nativePluginCacheStatusForReport(args, state, options = {}) {
+  if (args.syncSource === 'codex-plugin') {
+    return refreshCodexNativePluginCacheFromRepo({
+      args,
+      state,
+      repoPath: options.repoPath || state.repo_path,
+      validateRepo: options.validateRepo === true
+    });
+  }
+  return nativePluginCacheStatus(args, state);
 }
 
 function runDelegatedRepoSync({ args, hubPath, repoPath }) {
@@ -2706,6 +2764,8 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   let updatedChecksum = checksum;
   let plannedTargetSyncs = [];
   let skippedTargets = [];
+  let nativePluginCache = { status: '' };
+  let thirdPartyHookRepair = { status: '' };
   const previousObservedRepoCommit = state.last_repo_update_to_commit || '';
   try {
     try {
@@ -2781,6 +2841,11 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     releaseLock(refreshLock);
   }
 
+  nativePluginCache = nativePluginCacheStatusForReport(args, statusState, {
+    repoPath: updateResult.repoPath
+  });
+  thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, statusState);
+
   try {
     runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath });
   } catch (error) {
@@ -2813,7 +2878,8 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
           error: error.message
         },
         skippedTargets,
-        nativePluginCache: nativePluginCacheStatus(args, failedState),
+        nativePluginCache,
+        thirdPartyHookRepair,
         targetSyncStatus: 'failed'
       }
     });
@@ -2829,12 +2895,6 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   const completedTargetSyncs = plannedTargetSyncs.filter((sync) => (
     targetIsSynced(sync.target, finalState.targets[sync.target], updatedChecksum, updatedDiscoveries[sync.target], updatedPayloads)
   ));
-  const nativePluginCache = refreshCodexNativePluginCacheFromRepo({
-    args,
-    state: finalState,
-    repoPath: updateResult.repoPath
-  });
-  const thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, finalState);
   const report = maybeWriteUpdateReport({
     args,
     hubPath,
@@ -2866,17 +2926,17 @@ function run(argv = process.argv.slice(2)) {
   const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
   maybePrintAgentRulesPreflight(args);
 
+  if (existingState.hub_version && compareSemver(BRIDGE_VERSION, existingState.hub_version) < 0 && !args.forceDowngrade) {
+    throw new Error(
+      `Refusing downgrade: current bridge ${BRIDGE_VERSION} is older than hub state ${existingState.hub_version}; ${downgradeRemediation(args.syncSource)}`
+    );
+  }
+
   if (isHookNoop(args, existingState)) {
     if (existingState?.hub_version && !existingState.auto_sync_enabled) {
       console.log('Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.');
     }
     return { status: 0, audit: null };
-  }
-
-  if (existingState.hub_version && compareSemver(BRIDGE_VERSION, existingState.hub_version) < 0 && !args.forceDowngrade) {
-    throw new Error(
-      `Refusing downgrade: current bridge ${BRIDGE_VERSION} is older than hub state ${existingState.hub_version}; ${downgradeRemediation(args.syncSource)}`
-    );
   }
 
   let nextState = applyRequestedState(existingState, args);
@@ -2885,6 +2945,7 @@ function run(argv = process.argv.slice(2)) {
     : (nextState.last_update_report_cleanup || {
         retention_days: nextState.update_report_retention_days,
         report_log_directory: updateReportDir(),
+        max_report_files: DEFAULT_UPDATE_REPORT_MAX_FILES,
         deleted_count: 0,
         skipped_count: 0,
         error_count: 0,
@@ -2933,7 +2994,10 @@ function run(argv = process.argv.slice(2)) {
       checksum,
       context: {
         repo: repoReportContextFromState(nextState, args),
-        nativePluginCache: nativePluginCacheStatus(args, nextState),
+        nativePluginCache: nativePluginCacheStatusForReport(args, nextState, {
+          repoPath: nextState.repo_path,
+          validateRepo: true
+        }),
         thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, nextState),
         targetSyncStatus: 'not needed'
       }
@@ -2952,7 +3016,10 @@ function run(argv = process.argv.slice(2)) {
       checksum,
       context: {
         repo: repoReportContextFromState(nextState, args),
-        nativePluginCache: nativePluginCacheStatus(args, nextState),
+        nativePluginCache: nativePluginCacheStatusForReport(args, nextState, {
+          repoPath: nextState.repo_path,
+          validateRepo: true
+        }),
         thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, nextState),
         targetSyncStatus: 'not needed'
       }
@@ -3008,7 +3075,10 @@ function run(argv = process.argv.slice(2)) {
         repo: repoReportContextFromState(nextState, args),
         targetSyncs,
         skippedTargets: SUPPORTED_TARGETS.filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled),
-        nativePluginCache: nativePluginCacheStatus(args, nextState),
+        nativePluginCache: nativePluginCacheStatusForReport(args, nextState, {
+          repoPath: nextState.repo_path,
+          validateRepo: true
+        }),
         thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, nextState),
         targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
       }
