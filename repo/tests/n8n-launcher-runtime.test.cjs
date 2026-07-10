@@ -60,6 +60,10 @@ function removeLauncherFixture(root) {
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
+function assertPrintedDockerWindowsInstallUrl(output, message) {
+  assert.ok(output.split(/\r?\n/).some((line) => line.trim() === dockerWindowsInstallUrl), message);
+}
+
 function windowsLauncherPath(extraPaths = []) {
   const windowsRoot = process.env.SystemRoot || 'C:\\Windows';
   return [...extraPaths,
@@ -93,7 +97,7 @@ test('both menus use official manual Docker guidance without installer, browser,
     const end = source.indexOf('# END SHARED DOCKER LAUNCH PREFLIGHT', start);
     assert.ok(start >= 0 && end > start, launcher.id);
     const preflight = source.slice(start, end);
-    assert.ok(preflight.includes(dockerWindowsInstallUrl), launcher.id);
+    assert.match(preflight, /Write-Host 'https:\/\/docs\.docker\.com\/desktop\/setup\/install\/windows-install\/'/, launcher.id);
     assert.match(preflight, /Docker CLI was not found/, launcher.id);
     assert.match(preflight, /Docker Desktop, Docker CLI, and Docker Compose/, launcher.id);
     assert.match(preflight, /downloads, Windows requirements, and WSL verification\/setup instructions/, launcher.id);
@@ -147,7 +151,7 @@ test('Docker CLI missing exits both CMD launchers after one Enter with identical
         assert.equal(result.status, 0, `${launcher.id}/${scenario}\n${result.stdout}\n${result.stderr}`);
         assert.match(result.stdout, /Docker CLI was not found/i, scenario);
         assert.match(result.stdout, /Docker Desktop, Docker CLI, and Docker Compose/i, scenario);
-        assert.ok(result.stdout.includes(dockerWindowsInstallUrl), scenario);
+        assertPrintedDockerWindowsInstallUrl(result.stdout, scenario);
         assert.match(result.stdout, /downloads, Windows requirements, and WSL verification\/setup instructions/i, scenario);
         assert.match(result.stdout, /Run this launcher again after Docker Desktop and WSL are working/i, scenario);
         assert.doesNotMatch(result.stdout, /Choose an action:/i, scenario);
@@ -193,7 +197,7 @@ test('Docker Compose missing exits both CMD launchers after one Enter without op
       assert.match(result.stdout, /Docker CLI exists/i, launcher.id);
       assert.match(result.stdout, /Docker Compose is unavailable/i, launcher.id);
       assert.match(result.stdout, /manually repair or reinstall Docker Desktop/i, launcher.id);
-      assert.ok(result.stdout.includes(dockerWindowsInstallUrl), launcher.id);
+      assertPrintedDockerWindowsInstallUrl(result.stdout, launcher.id);
       assert.doesNotMatch(result.stdout, /Choose an action:/i, launcher.id);
       assert.equal((result.stdout.match(/Press Enter/gi) || []).length, 1, `${launcher.id}: exactly one outer pause`);
       assert.match(fs.readFileSync(dockerLog, 'utf8'), /^compose version\s*$/m, launcher.id);
