@@ -24,7 +24,7 @@ Use [Page 3 - Production Self-Hosting With Cloudflare Tunnel](production-cloudfl
 
 | Step | What to do | Where | Result |
 | --- | --- | --- | --- |
-| 1. | Install Docker Desktop, or let the launcher offer the winget install if Docker is missing. | Your Windows computer. | Docker Compose is available. |
+| 1. | Install Docker Desktop manually from the [official Docker Desktop Windows installation page](https://docs.docker.com/desktop/setup/install/windows-install/). | Your Windows computer. | Docker CLI, Docker Compose, and WSL are available. |
 | 2. | Create the local stack folder at `%USERPROFILE%\.n8n-local`. | Windows Explorer. | Local runtime files stay outside this repo and outside OneDrive Desktop. |
 | 3. | Copy everything inside [templates/.n8n-local/](../../templates/.n8n-local/) into your local stack folder. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, `_n8n-local.cmd`, and `scripts\`. |
 | 4. | Copy `.env.example` to `.env`. | `<LOCAL_STACK_FOLDER>`. | You have a private local settings file. |
@@ -50,7 +50,7 @@ Do not ask for ngrok or public URL values before local n8n works. The order is:
 
 | Need | Install or open | Quick check |
 | --- | --- | --- |
-| Docker runtime | [Docker Desktop](https://www.docker.com/products/docker-desktop/) | `_n8n-local.cmd` can offer to install it with winget if it is missing, then starts Docker Desktop automatically when installed but stopped. |
+| Docker runtime | [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/) | Install or repair Docker Desktop manually. The launcher verifies Docker CLI, Docker Compose, and engine readiness, and can start an already-installed Docker Desktop when its engine is stopped. |
 | Local stack folder | `%USERPROFILE%\.n8n-local`. | It is outside this repo, outside Git tracking, and not on OneDrive Desktop by default. |
 | ngrok account | [ngrok dashboard](https://dashboard.ngrok.com) | Needed only when you need a public tunnel. |
 
@@ -61,7 +61,9 @@ docker --version
 docker compose version
 ```
 
-If Docker is installed but not running, `_n8n-local.cmd` starts Docker Desktop and waits for the engine before it shows the main menu. If Docker or Docker Compose is missing, the launcher offers a winget-based Docker Desktop install. The install still asks first because it downloads software, may show Windows approval prompts, and may require a Windows restart. After a successful winget install, press Enter when prompted: the CMD launcher preserves its arguments, refreshes the Windows PATH, performs one controlled relaunch, and reruns Docker CLI, Compose, and engine preflight before any stack action can run.
+Toolkit does not install Docker Desktop. The launcher only verifies Docker CLI, Docker Compose, and engine readiness. If Docker CLI or Compose is missing, it names the missing prerequisite, prints the [official Docker Desktop Windows installation page](https://docs.docker.com/desktop/setup/install/windows-install/), waits for one Enter press, and exits without opening the n8n menu. That page includes current downloads, Windows requirements, and WSL verification/setup instructions. Docker and WSL setup remain owner-controlled system operations.
+
+If Docker is already installed but its engine is stopped, `_n8n-local.cmd` starts the installed Docker Desktop application and performs the existing bounded readiness wait. Repository changes do not automatically overwrite an existing copied `%USERPROFILE%\.n8n-local` runtime folder; copy approved launcher updates into that folder manually when you choose to adopt them.
 
 ---
 
@@ -327,7 +329,7 @@ It reads `N8N_LOCAL_PORT` from `.env` automatically. If `.env` says `N8N_LOCAL_P
 1. Open `<LOCAL_STACK_FOLDER>`.
 2. Double-click `_n8n-local.cmd`.
 3. Let the launch preflight finish. It checks Docker Desktop and Docker Compose before the main menu appears.
-4. If Docker Desktop is missing, approve the winget install only when you want this launcher to download and install Docker Desktop for you. After installation succeeds, press Enter so the launcher can restart once and rerun preflight.
+4. If Docker CLI or Docker Compose is missing, read the official manual-install guidance, press Enter once to exit, install or repair Docker Desktop and verify WSL manually, then run the launcher again.
 5. Do not launch n8n directly from Docker Desktop. Launch it from `_n8n-local.cmd` instead because the launcher shows status, checks for missing files, keeps update choices guided, and gives you backup/log/help options.
 6. Choose `Start n8n`, then `Localhost only`.
 7. Open a web browser.
@@ -454,12 +456,13 @@ If you copied `n8n-local-desktop-shortcut.cmd` to your Desktop, you can double-c
 
 Before the main menu appears, the launcher runs a launch preflight:
 
-- If Docker Desktop or Docker Compose is missing and `winget` is available, it offers to install Docker Desktop; Enter/no remains the safe default.
-- After an approved install succeeds, it waits for Enter, preserves the launcher arguments, refreshes PATH, and performs one controlled relaunch before rerunning preflight.
-- If `winget` is unavailable, it stops with manual Docker Desktop installation guidance.
-- CI and explicit launcher test mode disable the installation path before any prompt or winget command can run.
+- Toolkit does not install or repair Docker Desktop and does not invoke a package manager or open a browser.
+- If Docker CLI is missing, the launcher names it, explains the full Docker requirement, prints the official Windows installation URL, waits for one Enter press, and exits without opening the menu.
+- If Docker CLI exists but Docker Compose is unavailable, the launcher gives equivalent manual repair/reinstall guidance, waits for one Enter press, and exits without opening the menu.
 - If Docker Desktop is installed but stopped, it starts Docker Desktop when the supported CLI is available and waits for the engine with a bounded timeout.
-- If Docker is still unavailable after the controlled relaunch, it stops with honest sign-out, reboot, or PATH-refresh guidance instead of looping or starting the stack.
+- Docker and WSL setup remain owner-controlled system operations.
+
+The launcher prints `https://docs.docker.com/desktop/setup/install/windows-install/` as copyable console text. It does not open that page automatically. Existing copied runtime folders are not automatically overwritten by this repository.
 
 Use `--skip-launch-preflight` only when you want to open the menu without the startup requirement checks:
 
@@ -777,10 +780,10 @@ Use this table only when you want an AI coding agent to work with n8n workflows 
 
 ### Docker Desktop Or Compose Is Missing
 
-1. Relaunch `_n8n-local.cmd`.
-2. If the launch preflight offers a winget install, approve it only when you want this launcher to download and install Docker Desktop for you.
-3. After an approved winget install succeeds, press Enter so the launcher can restart once and rerun all Docker checks automatically.
-4. If winget is unavailable, or Docker is still not detected after that controlled relaunch, install Docker Desktop manually from [Docker Desktop](https://www.docker.com/products/docker-desktop/) and follow the launcher guidance for a PATH refresh, sign-out, or reboot before reopening `_n8n-local.cmd`.
+1. Read which prerequisite the launcher reports: Docker CLI or Docker Compose.
+2. Copy the displayed [official Docker Desktop Windows installation URL](https://docs.docker.com/desktop/setup/install/windows-install/), then press Enter once so the launcher exits cleanly.
+3. Install, repair, or reinstall Docker Desktop manually and follow the official page's current Windows requirements and WSL verification/setup instructions.
+4. After Docker Desktop, Docker CLI, Docker Compose, and WSL are working, run `_n8n-local.cmd` again.
 
 ### `.env` Is Missing
 

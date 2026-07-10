@@ -474,6 +474,50 @@ test('local and production launchers share the generated menu flow model', () =>
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
+test('active n8n launcher surfaces use manual Docker prerequisites with no installer or relaunch text', () => {
+  const activeFiles = [
+    'repo/scripts/generate-n8n-stack-launcher-flow.cjs',
+    '_projects/n8n/local-setup/SOURCE-MANIFEST.md',
+    '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md',
+    '_projects/n8n/local-setup/_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/SKILL.md',
+    '_projects/n8n/local-setup/_main/templates/.n8n-local/_n8n-local.cmd',
+    '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1',
+    '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd',
+    '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1',
+    'skills/n8n-local-setup/SKILL.md',
+    'skills/n8n-local-setup/references/n8n/local-setup.md',
+    'skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md',
+    'skills/n8n-local-setup/templates/.n8n-local/_n8n-local.cmd',
+    'skills/n8n-local-setup/templates/.n8n-local/scripts/n8n-local-menu.ps1',
+    'skills/n8n-local-setup/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd',
+    'skills/n8n-local-setup/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1'
+  ];
+  const combined = activeFiles.map((relPath) => readText(repoRoot, relPath)).join('\n');
+
+  assert.match(combined, /Toolkit does not install Docker Desktop/);
+  assert.match(combined, /only verifies Docker CLI, Docker Compose, and engine readiness/);
+  assert.match(combined, /https:\/\/docs\.docker\.com\/desktop\/setup\/install\/windows-install\//);
+  assert.match(combined, /current Docker Desktop downloads, Windows requirements, and WSL verification\/setup instructions/);
+  assert.match(combined, /Press Enter to exit this launcher/);
+  assert.match(combined, /Existing copied .*runtime folder.*not automatically overwritten/i);
+
+  for (const stale of [
+    'Test-' + 'WingetCli',
+    'Test-DockerInstallBlockedBy' + 'Automation',
+    'Invoke-DockerDesktop' + 'Install',
+    'Request-Launcher' + 'Relaunch',
+    'Docker.Docker' + 'Desktop',
+    '--accept-package-' + 'agreements',
+    '--accept-source-' + 'agreements',
+    'N8N_LAUNCHER_RELAUNCH_' + 'COUNT',
+    'controlled launcher ' + 'relaunch',
+    'guided Docker Desktop ' + 'install'
+  ]) {
+    assert.equal(combined.includes(stale), false, stale);
+  }
+});
+
 test('obsolete n8n local setup pages and launchers are removed', () => {
   for (const relPath of obsoletePaths) {
     assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
@@ -774,7 +818,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /\[Console\]::Clear\(\)/);
   assert.match(menu, /\[Console\]::SetBufferSize\(\[Console\]::BufferWidth, \[Console\]::WindowHeight\)/);
   assert.match(menu, /Press Enter to clear completed output and return to the menu/);
-  assert.match(menu, /function Pause-Menu \{[\s\S]*Clear-MenuScreen[\s\S]*\}/);
+  assert.match(menu, /Press Enter to exit this launcher/);
+  assert.match(menu, /function Pause-Menu \{[\s\S]*param\(\[switch\]\$Exit\)[\s\S]*if \(-not \$Exit\) \{ Clear-MenuScreen \}[\s\S]*\}/);
   assert.match(menu, /function Invoke-MenuAction/);
   assert.match(menu, /function Invoke-NativeCommand/);
   assert.match(menu, /function Show-CommandList/);
