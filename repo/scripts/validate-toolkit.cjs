@@ -277,6 +277,7 @@ const allowedRootEntries = new Set([
 
 const ignoredLocalDirs = new Set([
   '.n8n-local',
+  '.n8n-production-cloudflare',
   '.claude',
   '.tmp',
   'n8n-workflows',
@@ -284,6 +285,13 @@ const ignoredLocalDirs = new Set([
   '.sanitised',
   '.n8n-workflow-backups'
 ]);
+
+const allowedTrackedRuntimeTemplatePrefixes = [
+  '_projects/n8n/local-setup/_main/templates/.n8n-local/',
+  '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/',
+  'skills/n8n-local-setup/templates/.n8n-local/',
+  'skills/n8n-local-setup/templates/.n8n-production-cloudflare/'
+];
 
 const staleReferenceRoots = [
   'README.md',
@@ -312,8 +320,8 @@ const allowedExecutablePrefixes = [
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/',
   'skills/n8n-agent-rules/scripts/',
-  'skills/n8n-local-setup/templates/local-stack/',
-  'skills/n8n-local-setup/templates/production-cloudflare-stack/',
+  'skills/n8n-local-setup/templates/.n8n-local/',
+  'skills/n8n-local-setup/templates/.n8n-production-cloudflare/',
   'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/'
 ];
 
@@ -519,6 +527,7 @@ function listGitTrackedFiles() {
 
 function validateTrackedLocalRuntimeFiles(errors) {
   for (const rel of listGitTrackedFiles()) {
+    if (allowedTrackedRuntimeTemplatePrefixes.some((prefix) => rel.startsWith(prefix))) continue;
     const segments = rel.split('/');
     if (segments.some((segment) => ignoredLocalDirs.has(segment))) {
       fail(errors, `Tracked local runtime file is not allowed: ${rel}`);

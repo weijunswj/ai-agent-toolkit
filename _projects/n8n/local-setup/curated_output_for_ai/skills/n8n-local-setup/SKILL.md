@@ -28,11 +28,11 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - Treat the Compose ngrok service as the supported dev tunnel path for local webhook testing.
 - Treat the production Cloudflare Tunnel stack as the production self-hosting path for local/CGNAT machines. Keep it separate from the local dev stack and menu.
 - Do not treat TryCloudflare or Quick Tunnel as production hosting. If a quick tunnel smoke test is ever useful, keep it as a separate future smoke-test-only follow-up.
-- Use the local stack templates in [templates/local-stack/](templates/local-stack/) for local `n8n + postgres`.
-- Treat [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd) as the recommended local stack entrypoint for guided start, update checks, logs, status, URLs, Postgres backup packages, and local backup restore actions.
+- Use the local stack templates in [templates/.n8n-local/](templates/.n8n-local/) for local `n8n + postgres`.
+- Treat [templates/.n8n-local/_n8n-local.cmd](templates/.n8n-local/_n8n-local.cmd) as the recommended local stack entrypoint for explicit Docker install approval, one bounded argument-preserving relaunch, fail-closed Docker CLI/Compose/engine preflight, guided start, updates, logs, status, URLs, Postgres backup packages, and local backup restore actions.
 - Local automatic backup prompts must say that pressing Enter accepts the recommended default. Recommended local contents are workflows plus encrypted credential exports; decrypted credential export stays disabled by default and still requires the exact `EXPORT DECRYPTED CREDENTIALS` confirmation phrase.
-- Use [templates/production-cloudflare-stack/](templates/production-cloudflare-stack/) for production self-hosting from a local/CGNAT machine through Cloudflare Tunnel.
-- Treat [templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd](templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd) as the production Cloudflare stack entrypoint for preflight, start/stop, restart, status, logs, restore-compatible Postgres manual backup zip packages, image updates, and production URL display.
+- Use [templates/.n8n-production-cloudflare/](templates/.n8n-production-cloudflare/) for production self-hosting from a local/CGNAT machine through Cloudflare Tunnel.
+- Treat [templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd](templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd) as the production Cloudflare stack entrypoint with the same Docker install/relaunch preflight as local. Production actions that start or recreate n8n must wait for stable configured-loopback readiness or report a bounded diagnostic timeout; intentional stop/down stays unwaited, and local readiness is distinct from tunnel health.
 - Use [templates/production-server-backups/](templates/production-server-backups/) for Linux server backups on Hostinger/Coolify or company-server n8n deployments. That path uses n8n CLI workflow and credential exports, database backup where applicable, decrypted credential export disabled by default, manifest/log/restore notes, retention cleanup, and systemd timer or cron scheduling.
 - Use [references/ai-agent-platforms/](references/ai-agent-platforms/) for Codex, Claude Code, OpenCode, Antigravity, ChatGPT web, Claude web routing, [official n8n Skills](https://github.com/n8n-io/skills) installation notes, and official instance-level MCP references.
 - Use the official [`n8n-io/skills`](https://github.com/n8n-io/skills) plugin instructions for Codex and Claude Code where plugin hooks are supported. Marketplace registration alone is not installation: before reporting setup complete, verify `n8n-skills@n8n-io` is installed and enabled in the host plugin list, not merely available. On Windows, immediately run `node repo/scripts/repair-codex-plugin-windows-hooks.cjs --plugin-root "<installed-plugin-cache-path>" --windows --write --plugin-id n8n-skills@n8n-io`, then `node repo/scripts/audit-n8n-skills-plugin-hooks.cjs --plugin-root "<installed-plugin-cache-path>" --windows --verify-output`, before approving or trusting hooks. Do not treat a temporary marketplace checkout such as `.tmp\marketplaces\n8n-io\plugins\n8n-skills` as the installed plugin cache.
@@ -56,16 +56,16 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - n8n rules skill: `skills/n8n-agent-rules`
 - n8n rules local reference: [references/n8n-agent-rules.md](references/n8n-agent-rules.md)
 - [Official n8n Skills](https://github.com/n8n-io/skills) and agent guidance: [references/ai-agent-platforms/](references/ai-agent-platforms/)
-- Docker Compose local stack: [templates/local-stack/docker-compose.yml](templates/local-stack/docker-compose.yml)
-- Placeholder environment template: [templates/local-stack/.env.example](templates/local-stack/.env.example)
-- Guided local stack launcher: [templates/local-stack/_n8n-local.cmd](templates/local-stack/_n8n-local.cmd)
-- PowerShell local stack menu: [templates/local-stack/scripts/n8n-local-menu.ps1](templates/local-stack/scripts/n8n-local-menu.ps1), including local-only backup zip package and restore recovery actions.
-- Production Cloudflare stack: [templates/production-cloudflare-stack/docker-compose.yml](templates/production-cloudflare-stack/docker-compose.yml)
-- Production Cloudflare environment template: [templates/production-cloudflare-stack/.env.example](templates/production-cloudflare-stack/.env.example)
-- Production Cloudflare runtime ignore template: [templates/production-cloudflare-stack/.gitignore](templates/production-cloudflare-stack/.gitignore)
-- Guided production Cloudflare launcher: [templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd](templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd)
-- Production Cloudflare desktop shortcut launcher: [templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd](templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd)
-- PowerShell production Cloudflare menu: [templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1](templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1), including production preflight, logs, status, restore-compatible Postgres manual backup zip package, and image update actions.
+- Docker Compose local stack: [templates/.n8n-local/docker-compose.yml](templates/.n8n-local/docker-compose.yml)
+- Placeholder environment template: [templates/.n8n-local/.env.example](templates/.n8n-local/.env.example)
+- Guided local stack launcher: [templates/.n8n-local/_n8n-local.cmd](templates/.n8n-local/_n8n-local.cmd)
+- PowerShell local stack menu: [templates/.n8n-local/scripts/n8n-local-menu.ps1](templates/.n8n-local/scripts/n8n-local-menu.ps1), including local-only backup zip package and restore recovery actions.
+- Production Cloudflare stack: [templates/.n8n-production-cloudflare/docker-compose.yml](templates/.n8n-production-cloudflare/docker-compose.yml)
+- Production Cloudflare environment template: [templates/.n8n-production-cloudflare/.env.example](templates/.n8n-production-cloudflare/.env.example)
+- Production Cloudflare runtime ignore template: [templates/.n8n-production-cloudflare/.gitignore](templates/.n8n-production-cloudflare/.gitignore)
+- Guided production Cloudflare launcher: [templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd](templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd)
+- Production Cloudflare desktop shortcut launcher: [templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd](templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd)
+- PowerShell production Cloudflare menu: [templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1](templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1), including production preflight, logs, status, restore-compatible Postgres manual backup zip package, and image update actions.
 - Linux production server backup guide: [templates/production-server-backups/README.md](templates/production-server-backups/README.md)
 - Linux production server backup shell template: [templates/production-server-backups/n8n-production-backup.sh.template](templates/production-server-backups/n8n-production-backup.sh.template)
 - Official instance-level MCP config templates: [templates/mcp-configs/](templates/mcp-configs/)

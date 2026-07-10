@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "3.8.24",
+  "version": "4.0.0",
   "version_policy": "semver",
-  "version_notes": "Applies production restart readiness/self-heal gating and corrects local backup zip docs.",
+  "version_notes": "Renames public stack template directories to their runtime folder names and aligns guided Docker relaunch plus production readiness gating.",
   "outputs": [
     {
       "kind": "curated",
@@ -31,28 +31,28 @@
       "fidelity": "exact",
       "text_rewrites": [
         {
-          "from": "./templates/local-stack/docker-compose.yml",
-          "to": "../../templates/local-stack/docker-compose.yml"
+          "from": "./templates/.n8n-local/docker-compose.yml",
+          "to": "../../templates/.n8n-local/docker-compose.yml"
         },
         {
-          "from": "./templates/local-stack/.env.example",
-          "to": "../../templates/local-stack/.env.example"
+          "from": "./templates/.n8n-local/.env.example",
+          "to": "../../templates/.n8n-local/.env.example"
         },
         {
-          "from": "./templates/local-stack/_n8n-local.cmd",
-          "to": "../../templates/local-stack/_n8n-local.cmd"
+          "from": "./templates/.n8n-local/_n8n-local.cmd",
+          "to": "../../templates/.n8n-local/_n8n-local.cmd"
         },
         {
-          "from": "./templates/local-stack/n8n-local-desktop-shortcut.cmd",
-          "to": "../../templates/local-stack/n8n-local-desktop-shortcut.cmd"
+          "from": "./templates/.n8n-local/n8n-local-desktop-shortcut.cmd",
+          "to": "../../templates/.n8n-local/n8n-local-desktop-shortcut.cmd"
         },
         {
-          "from": "./templates/local-stack/scripts/n8n-local-menu.ps1",
-          "to": "../../templates/local-stack/scripts/n8n-local-menu.ps1"
+          "from": "./templates/.n8n-local/scripts/n8n-local-menu.ps1",
+          "to": "../../templates/.n8n-local/scripts/n8n-local-menu.ps1"
         },
         {
-          "from": "](./templates/local-stack/)",
-          "to": "](../../templates/local-stack/)"
+          "from": "](./templates/.n8n-local/)",
+          "to": "](../../templates/.n8n-local/)"
         },
         {
           "from": "./Page%202%20-%20Hostinger%20VPS.md",
@@ -105,32 +105,32 @@
           "to": "hostinger-vps.md"
         },
         {
-          "from": "./templates/production-cloudflare-stack/docker-compose.yml",
-          "to": "../../templates/production-cloudflare-stack/docker-compose.yml"
+          "from": "./templates/.n8n-production-cloudflare/docker-compose.yml",
+          "to": "../../templates/.n8n-production-cloudflare/docker-compose.yml"
         },
         {
-          "from": "./templates/production-cloudflare-stack/.env.example",
-          "to": "../../templates/production-cloudflare-stack/.env.example"
+          "from": "./templates/.n8n-production-cloudflare/.env.example",
+          "to": "../../templates/.n8n-production-cloudflare/.env.example"
         },
         {
-          "from": "./templates/production-cloudflare-stack/.gitignore",
-          "to": "../../templates/production-cloudflare-stack/.gitignore"
+          "from": "./templates/.n8n-production-cloudflare/.gitignore",
+          "to": "../../templates/.n8n-production-cloudflare/.gitignore"
         },
         {
-          "from": "./templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
-          "to": "../../templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd"
+          "from": "./templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd",
+          "to": "../../templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd"
         },
         {
-          "from": "./templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd",
-          "to": "../../templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd"
+          "from": "./templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd",
+          "to": "../../templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd"
         },
         {
-          "from": "./templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
-          "to": "../../templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1"
+          "from": "./templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1",
+          "to": "../../templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1"
         },
         {
-          "from": "](./templates/production-cloudflare-stack/)",
-          "to": "](../../templates/production-cloudflare-stack/)"
+          "from": "](./templates/.n8n-production-cloudflare/)",
+          "to": "](../../templates/.n8n-production-cloudflare/)"
         },
         {
           "from": "./templates/production-server-backups/",
@@ -236,85 +236,85 @@
     },
     {
       "kind": "copy",
-      "source": "_main/templates/local-stack/docker-compose.yml",
-      "output": "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
+      "source": "_main/templates/.n8n-local/docker-compose.yml",
+      "output": "skills/n8n-local-setup/templates/.n8n-local/docker-compose.yml",
       "notes": "Copy-ready local Docker Compose stack for n8n, Postgres, and Compose ngrok.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/local-stack/.env.example",
-      "output": "skills/n8n-local-setup/templates/local-stack/.env.example",
+      "source": "_main/templates/.n8n-local/.env.example",
+      "output": "skills/n8n-local-setup/templates/.n8n-local/.env.example",
       "notes": "Placeholder-only local stack environment template.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/local-stack/.gitignore",
-      "output": "skills/n8n-local-setup/templates/local-stack/.gitignore",
+      "source": "_main/templates/.n8n-local/.gitignore",
+      "output": "skills/n8n-local-setup/templates/.n8n-local/.gitignore",
       "notes": "Local stack runtime ignore template for private env, backups, imports, and credential export artifacts.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/local-stack/_n8n-local.cmd",
-      "output": "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
+      "source": "_main/templates/.n8n-local/_n8n-local.cmd",
+      "output": "skills/n8n-local-setup/templates/.n8n-local/_n8n-local.cmd",
       "notes": "Windows launcher for the guided local n8n stack menu.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/local-stack/n8n-local-desktop-shortcut.cmd",
-      "output": "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
+      "source": "_main/templates/.n8n-local/n8n-local-desktop-shortcut.cmd",
+      "output": "skills/n8n-local-setup/templates/.n8n-local/n8n-local-desktop-shortcut.cmd",
       "notes": "Desktop shortcut launcher that delegates to %USERPROFILE%\\.n8n-local\\_n8n-local.cmd.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/local-stack/scripts/n8n-local-menu.ps1",
-      "output": "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
+      "source": "_main/templates/.n8n-local/scripts/n8n-local-menu.ps1",
+      "output": "skills/n8n-local-setup/templates/.n8n-local/scripts/n8n-local-menu.ps1",
       "notes": "PowerShell menu for guided local stack start/stop, Compose ngrok tunnel, update, logs, status, browser launch, and backup actions.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/production-cloudflare-stack/docker-compose.yml",
-      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml",
+      "source": "_main/templates/.n8n-production-cloudflare/docker-compose.yml",
+      "output": "skills/n8n-local-setup/templates/.n8n-production-cloudflare/docker-compose.yml",
       "notes": "Copy-ready production Cloudflare Tunnel Docker Compose stack for n8n, Postgres, and cloudflared.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/production-cloudflare-stack/.env.example",
-      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
+      "source": "_main/templates/.n8n-production-cloudflare/.env.example",
+      "output": "skills/n8n-local-setup/templates/.n8n-production-cloudflare/.env.example",
       "notes": "Placeholder-only production Cloudflare Tunnel stack environment template.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/production-cloudflare-stack/.gitignore",
-      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore",
+      "source": "_main/templates/.n8n-production-cloudflare/.gitignore",
+      "output": "skills/n8n-local-setup/templates/.n8n-production-cloudflare/.gitignore",
       "notes": "Production Cloudflare stack runtime ignore template for private env, backups, logs, dumps, archives, and restore secret files.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
-      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
+      "source": "_main/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd",
+      "output": "skills/n8n-local-setup/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd",
       "notes": "Windows launcher for the guided production Cloudflare Tunnel stack menu.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd",
-      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd",
+      "source": "_main/templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd",
+      "output": "skills/n8n-local-setup/templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd",
       "notes": "Desktop shortcut launcher that delegates to %USERPROFILE%\\.n8n-production-cloudflare\\_n8n-production-cloudflare.cmd.",
       "fidelity": "exact"
     },
     {
       "kind": "copy",
-      "source": "_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
-      "output": "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
+      "source": "_main/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1",
+      "output": "skills/n8n-local-setup/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1",
       "notes": "PowerShell menu for production Cloudflare Tunnel preflight, start/stop, restart, status, logs, restore-compatible Postgres manual backup zip packages, image updates, and production URL display.",
       "fidelity": "exact"
     },
@@ -418,18 +418,18 @@
       "skills/n8n-local-setup/references/ai-agent-platforms/README.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/chatgpt-web.md",
       "skills/n8n-local-setup/references/ai-agent-platforms/claude-web.md",
-      "skills/n8n-local-setup/templates/local-stack/docker-compose.yml",
-      "skills/n8n-local-setup/templates/local-stack/.env.example",
-      "skills/n8n-local-setup/templates/local-stack/.gitignore",
-      "skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd",
-      "skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd",
-      "skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1",
-      "skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml",
-      "skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example",
-      "skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore",
-      "skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd",
-      "skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd",
-      "skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1",
+      "skills/n8n-local-setup/templates/.n8n-local/docker-compose.yml",
+      "skills/n8n-local-setup/templates/.n8n-local/.env.example",
+      "skills/n8n-local-setup/templates/.n8n-local/.gitignore",
+      "skills/n8n-local-setup/templates/.n8n-local/_n8n-local.cmd",
+      "skills/n8n-local-setup/templates/.n8n-local/n8n-local-desktop-shortcut.cmd",
+      "skills/n8n-local-setup/templates/.n8n-local/scripts/n8n-local-menu.ps1",
+      "skills/n8n-local-setup/templates/.n8n-production-cloudflare/docker-compose.yml",
+      "skills/n8n-local-setup/templates/.n8n-production-cloudflare/.env.example",
+      "skills/n8n-local-setup/templates/.n8n-production-cloudflare/.gitignore",
+      "skills/n8n-local-setup/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd",
+      "skills/n8n-local-setup/templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd",
+      "skills/n8n-local-setup/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1",
       "skills/n8n-local-setup/templates/production-server-backups/README.md",
       "skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template",
       "skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md",

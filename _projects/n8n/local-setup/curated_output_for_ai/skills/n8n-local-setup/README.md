@@ -17,8 +17,8 @@ Instruction-only skill for safe n8n environment setup: local dev, production Clo
 | Production Cloudflare Tunnel self-hosting guide | [references/n8n/production-cloudflare-tunnel.md](references/n8n/production-cloudflare-tunnel.md) |
 | n8n reference index | [references/n8n/](references/n8n/) |
 | [Official n8n Skills](https://github.com/n8n-io/skills) and agent routing | [references/ai-agent-platforms/](references/ai-agent-platforms/) |
-| Local stack templates | [templates/local-stack/](templates/local-stack/) |
-| Production Cloudflare stack templates | [templates/production-cloudflare-stack/](templates/production-cloudflare-stack/) |
+| Local stack templates | [templates/.n8n-local/](templates/.n8n-local/) |
+| Production Cloudflare stack templates | [templates/.n8n-production-cloudflare/](templates/.n8n-production-cloudflare/) |
 | Production server backup templates | [templates/production-server-backups/](templates/production-server-backups/) |
 | Official MCP config templates | [templates/mcp-configs/](templates/mcp-configs/) |
 

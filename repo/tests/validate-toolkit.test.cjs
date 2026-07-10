@@ -516,13 +516,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.3.25';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.3.26';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.3\.25/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.3\.26/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -2307,9 +2307,9 @@ test('internal AI-facing surfaces are generated from declared project output', (
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md', '_main/mcp setup - claude code.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md', '_main/mcp setup - opencode.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md', '_main/mcp setup - antigravity.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd', '_main/templates/local-stack/_n8n-local.cmd'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd', '_main/templates/local-stack/n8n-local-desktop-shortcut.cmd'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore', '_main/templates/production-cloudflare-stack/.gitignore'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/templates/.n8n-local/_n8n-local.cmd', '_main/templates/.n8n-local/_n8n-local.cmd'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/templates/.n8n-local/n8n-local-desktop-shortcut.cmd', '_main/templates/.n8n-local/n8n-local-desktop-shortcut.cmd'],
+    ['n8n.local-setup', 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/.gitignore', '_main/templates/.n8n-production-cloudflare/.gitignore'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/production-server-backups/README.md', '_main/templates/production-server-backups/README.md'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template', '_main/templates/production-server-backups/n8n-production-backup.sh.template'],
     ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md', '_main/templates/mcp-configs/antigravity-mcp-config.md'],
@@ -2962,6 +2962,40 @@ test('validator rejects pack YAML files in temp dirs', () => {
   assert.match(result.stderr, /not allowed/);
 });
 
+test('validator allows only approved runtime-named n8n template paths to be tracked', () => {
+  const cwd = tempCopy();
+  const init = spawnSync('git', ['init', '--quiet'], { cwd, encoding: 'utf8' });
+  assert.equal(init.status, 0, init.stderr);
+
+  const approved = [
+    '_projects/n8n/local-setup/_main/templates/.n8n-local/.env.example',
+    '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/.env.example',
+    'skills/n8n-local-setup/templates/.n8n-local/.env.example',
+    'skills/n8n-local-setup/templates/.n8n-production-cloudflare/.env.example'
+  ];
+  const addApproved = spawnSync('git', ['add', '--force', '--', ...approved], { cwd, encoding: 'utf8' });
+  assert.equal(addApproved.status, 0, addApproved.stderr);
+
+  const approvedResult = runValidate(cwd);
+  assert.equal(approvedResult.status, 0, approvedResult.stderr);
+
+  const roguePaths = [
+    'repo/fixtures/.n8n-local/state.txt',
+    'repo/fixtures/.n8n-production-cloudflare/state.txt'
+  ];
+  for (const rogue of roguePaths) {
+    const absolute = path.join(cwd, ...rogue.split('/'));
+    fs.mkdirSync(path.dirname(absolute), { recursive: true });
+    fs.writeFileSync(absolute, 'runtime state must not be tracked\n');
+  }
+  const addRogue = spawnSync('git', ['add', '--force', '--', ...roguePaths], { cwd, encoding: 'utf8' });
+  assert.equal(addRogue.status, 0, addRogue.stderr);
+
+  const rogueResult = runValidate(cwd);
+  assert.notEqual(rogueResult.status, 0);
+  assert.match(rogueResult.stderr, /Tracked local runtime file is not allowed: repo\/fixtures\/\.n8n-local\/state\.txt/);
+  assert.match(rogueResult.stderr, /Tracked local runtime file is not allowed: repo\/fixtures\/\.n8n-production-cloudflare\/state\.txt/);
+});
 test('validator rejects forbidden files but tolerates ignored local runtime folders', () => {
   const cwd = tempCopy();
   fs.writeFileSync(path.join(cwd, '.env'), 'EXAMPLE=unsafe\n');

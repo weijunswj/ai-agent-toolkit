@@ -90,55 +90,55 @@ const officialN8nSkillsTitleLink = `[Official n8n Skills](${officialN8nSkillsUrl
 
 const localStackOutputs = [
   {
-    source: '_main/templates/local-stack/docker-compose.yml',
-    output: 'skills/n8n-local-setup/templates/local-stack/docker-compose.yml'
+    source: '_main/templates/.n8n-local/docker-compose.yml',
+    output: 'skills/n8n-local-setup/templates/.n8n-local/docker-compose.yml'
   },
   {
-    source: '_main/templates/local-stack/.env.example',
-    output: 'skills/n8n-local-setup/templates/local-stack/.env.example'
+    source: '_main/templates/.n8n-local/.env.example',
+    output: 'skills/n8n-local-setup/templates/.n8n-local/.env.example'
   },
   {
-    source: '_main/templates/local-stack/.gitignore',
-    output: 'skills/n8n-local-setup/templates/local-stack/.gitignore'
+    source: '_main/templates/.n8n-local/.gitignore',
+    output: 'skills/n8n-local-setup/templates/.n8n-local/.gitignore'
   },
   {
-    source: '_main/templates/local-stack/_n8n-local.cmd',
-    output: 'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd'
+    source: '_main/templates/.n8n-local/_n8n-local.cmd',
+    output: 'skills/n8n-local-setup/templates/.n8n-local/_n8n-local.cmd'
   },
   {
-    source: '_main/templates/local-stack/n8n-local-desktop-shortcut.cmd',
-    output: 'skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd'
+    source: '_main/templates/.n8n-local/n8n-local-desktop-shortcut.cmd',
+    output: 'skills/n8n-local-setup/templates/.n8n-local/n8n-local-desktop-shortcut.cmd'
   },
   {
-    source: '_main/templates/local-stack/scripts/n8n-local-menu.ps1',
-    output: 'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1'
+    source: '_main/templates/.n8n-local/scripts/n8n-local-menu.ps1',
+    output: 'skills/n8n-local-setup/templates/.n8n-local/scripts/n8n-local-menu.ps1'
   }
 ];
 
 const productionStackOutputs = [
   {
-    source: '_main/templates/production-cloudflare-stack/docker-compose.yml',
-    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml'
+    source: '_main/templates/.n8n-production-cloudflare/docker-compose.yml',
+    output: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/docker-compose.yml'
   },
   {
-    source: '_main/templates/production-cloudflare-stack/.env.example',
-    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example'
+    source: '_main/templates/.n8n-production-cloudflare/.env.example',
+    output: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/.env.example'
   },
   {
-    source: '_main/templates/production-cloudflare-stack/.gitignore',
-    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore'
+    source: '_main/templates/.n8n-production-cloudflare/.gitignore',
+    output: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/.gitignore'
   },
   {
-    source: '_main/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd',
-    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd'
+    source: '_main/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd',
+    output: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd'
   },
   {
-    source: '_main/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd',
-    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd'
+    source: '_main/templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd',
+    output: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd'
   },
   {
-    source: '_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1',
-    output: 'skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1'
+    source: '_main/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1',
+    output: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1'
   }
 ];
 
@@ -169,13 +169,13 @@ const obsoletePaths = [
   '_projects/n8n/local-setup/_main/antigravity-mcp-config.md',
   '_projects/n8n/local-setup/curated_output_for_ai/mcp/n8n-local-setup.md',
   'mcp/projects/n8n-local-setup.md',
-  '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local.cmd',
+  '_projects/n8n/local-setup/_main/templates/.n8n-local/n8n-local.cmd',
   '_projects/n8n/local-setup/_main/scripts/windows/start-n8n-ngrok.bat',
   'skills/n8n-local-setup/references/n8n/upgrading.md',
   'skills/n8n-local-setup/references/n8n/tunnelling.md',
   'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md',
   'skills/n8n-local-setup/references/n8n/vps-hosting.md',
-  'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd',
+  'skills/n8n-local-setup/templates/.n8n-local/n8n-local.cmd',
   'skills/n8n-local-setup/references/n8n/1. local setup.md',
   'skills/n8n-local-setup/references/n8n/3. tunneling guide.md',
   'skills/n8n-local-setup/references/n8n/3a. docker compose + ngrok.md',
@@ -335,6 +335,69 @@ function powerShellSingleQuoted(value) {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+test('n8n stack template directories match their recommended runtime folder names', () => {
+  const expectedDirectories = [
+    '_projects/n8n/local-setup/_main/templates/.n8n-local',
+    '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare',
+    'skills/n8n-local-setup/templates/.n8n-local',
+    'skills/n8n-local-setup/templates/.n8n-production-cloudflare'
+  ];
+  const retiredTemplateNames = [
+    ['local', 'stack'].join('-'),
+    ['production', 'cloudflare', 'stack'].join('-')
+  ];
+  const retiredDirectories = retiredTemplateNames.flatMap((name) => [
+    `_projects/n8n/local-setup/_main/templates/${name}`,
+    `skills/n8n-local-setup/templates/${name}`
+  ]);
+
+  for (const relPath of expectedDirectories) {
+    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), true, `${relPath} exists`);
+  }
+  for (const relPath of retiredDirectories) {
+    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, `${relPath} is absent`);
+  }
+
+  const activeContractFiles = [
+    '_projects/n8n/local-setup/toolkit.project.json',
+    '_projects/n8n/local-setup/SOURCE-MANIFEST.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/SKILL.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md',
+    '_projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/pack.json',
+    '_projects/n8n/local-setup/curated_output_for_ai/packs/claude-code-n8n-local/pack.json',
+    'repo/scripts/generate-n8n-stack-launcher-flow.cjs'
+  ];
+  const activeContract = activeContractFiles.map((relPath) => readText(repoRoot, relPath)).join('\n');
+  for (const name of retiredTemplateNames) {
+    assert.equal(activeContract.includes(`templates/${name}`), false, `active contract excludes ${name}`);
+  }
+});
+
+test('runtime folder ignore rules stay root-scoped while packaged templates remain trackable', () => {
+  const cases = [
+    { rootRuntime: '.n8n-local/example.txt', template: 'skills/n8n-local-setup/templates/.n8n-local/docker-compose.yml' },
+    { rootRuntime: '.n8n-production-cloudflare/example.txt', template: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/docker-compose.yml' }
+  ];
+  for (const entry of cases) {
+    const rootResult = spawnSync('git', ['check-ignore', '--no-index', '--quiet', entry.rootRuntime], { cwd: repoRoot });
+    assert.equal(rootResult.status, 0, `${entry.rootRuntime} remains ignored`);
+    const templateResult = spawnSync('git', ['check-ignore', '--no-index', '--quiet', entry.template], { cwd: repoRoot });
+    assert.notEqual(templateResult.status, 0, `${entry.template} remains trackable`);
+  }
+});
+
+test('sync allows only the approved runtime-named n8n template directories', () => {
+  const cwd = tempCopy();
+  const allowed = spawnSync(process.execPath, [syncScript, '--write'], { cwd, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+  assert.equal(allowed.status, 0, allowed.stderr || allowed.stdout);
+
+  const rogueRuntimeDir = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', '.n8n-local');
+  fs.mkdirSync(rogueRuntimeDir, { recursive: true });
+  fs.writeFileSync(path.join(rogueRuntimeDir, 'private.txt'), 'must stay forbidden\n', 'utf8');
+  const rejected = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /forbidden directory in _main\/.*\.n8n-local/);
+});
 test('n8n local setup final source and generated surfaces are declared', () => {
   const manifest = localSetupManifest();
   for (const expected of [...guideOutputs, ...localStackOutputs, ...productionStackOutputs, ...productionServerBackupOutputs, ...platformOutputs, ...mcpConfigOutputs]) {
@@ -359,7 +422,7 @@ test('n8n local setup final source and generated surfaces are declared', () => {
     'skills/n8n-local-setup/references/n8n/tunnelling.md',
     'skills/n8n-local-setup/references/n8n/docker-compose-ngrok.md',
     'skills/n8n-local-setup/references/n8n/vps-hosting.md',
-    'skills/n8n-local-setup/templates/local-stack/n8n-local.cmd'
+    'skills/n8n-local-setup/templates/.n8n-local/n8n-local.cmd'
   ]) {
     assert.equal(manifest.outputs.some((entry) => entry.output === removed), false, removed);
     assert.equal(manifest.writes.allowed.includes(removed), false, removed);
@@ -422,7 +485,7 @@ test('obsolete n8n local setup pages and launchers are removed', () => {
   const publishedIndex = readText(repoRoot, 'skills/n8n-local-setup/references/n8n/README.md');
   const combined = `${manifestText}\n${sourceManifest}\n${n8nIndex}\n${publishedIndex}`;
 
-  for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'templates/local-stack/n8n-local.cmd', 'start-n8n-ngrok.bat']) {
+  for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'templates/.n8n-local/n8n-local.cmd', 'start-n8n-ngrok.bat']) {
     assert.doesNotMatch(combined, new RegExp(escapeRegExp(stale)), stale);
   }
   assert.doesNotMatch(combined, /mcp\/projects\/n8n-local-setup\.md/);
@@ -514,7 +577,7 @@ test('Local Setup keeps the corrected beginner flow', () => {
 
 test('Local Setup separates .env and public URL values without MCP setup values', () => {
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
-  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
+  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/.env.example');
 
   assert.match(localSetup, /Copy `\.env\.example` to `\.env`/);
   assert.match(localSetup, /Do not edit `\.env\.example`/);
@@ -626,7 +689,7 @@ test('Local Setup keeps skills-first guidance and official n8n setup table', () 
 
 test('Local Setup menu tables match launcher option names exactly', () => {
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
-  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1');
 
   assert.deepEqual(menuOptions(menu, 'Show-MainMenu'), expectedMainMenuOptions);
   assert.deepEqual(menuOptions(menu, 'Show-StartMenu'), expectedStartMenuOptions);
@@ -693,8 +756,8 @@ test('Local Setup menu tables match launcher option names exactly', () => {
 });
 
 test('local launcher and menu keep the console open until Exit', () => {
-  const cmd = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/_n8n-local.cmd');
-  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const cmd = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/_n8n-local.cmd');
+  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1');
 
   assert.match(cmd, /n8n-local-menu\.ps1/);
   assert.match(cmd, /-ExecutionPolicy Bypass/);
@@ -809,15 +872,15 @@ test('local launcher and menu keep the console open until Exit', () => {
 
 test('local backup folders and restore flow protect n8n encryption keys', () => {
   const localSetup = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 1 - Local Setup.md');
-  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
-  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/.env.example');
+  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1');
   const gitignore = readText(repoRoot, '.gitignore');
 
   assert.match(envExample, /DO NOT CHANGE THIS VALUE AFTER STARTING LOCAL n8n FOR THE FIRST TIME\./);
   assert.match(envExample, /This key is needed to decrypt saved n8n credentials in the database\./);
   assert.match(envExample, /If you restore from a backup, use the N8N_ENCRYPTION_KEY that came with that backup\./);
 
-  for (const ignored of ['.n8n-local/backups/', '.n8n-local/backups/n8n-cli/', '.n8n-local/import/', '**/SECRET-DO-NOT-COMMIT.env']) {
+  for (const ignored of ['/.n8n-local/backups/', '/.n8n-local/backups/n8n-cli/', '/.n8n-local/import/', '**/SECRET-DO-NOT-COMMIT.env']) {
     assert.match(gitignore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
   }
 
@@ -1055,8 +1118,8 @@ test('local backup folders and restore flow protect n8n encryption keys', () => 
 });
 
 test('local menu PowerShell script stays parseable', (t) => {
-  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
-  const generatedScript = path.join(repoRoot, 'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1');
+  const generatedScript = path.join(repoRoot, 'skills/n8n-local-setup/templates/.n8n-local/scripts/n8n-local-menu.ps1');
   const sourceMenu = fs.readFileSync(sourceScript, 'utf8');
 
   assert.doesNotMatch(sourceMenu, /\$Name:/);
@@ -1093,7 +1156,7 @@ test('local menu PowerShell script stays parseable', (t) => {
 });
 
 test('local menu native command helper returns only the process exit code', (t) => {
-  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1');
   const powerShell = findPowerShell();
   if (!powerShell) {
     t.skip('PowerShell is not available in this environment');
@@ -1118,7 +1181,7 @@ test('local menu native command helper returns only the process exit code', (t) 
 });
 
 test('local n8n CLI backup helpers validate config and generate safe commands', (t) => {
-  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1');
   const powerShell = findPowerShell();
   if (!powerShell) {
     t.skip('PowerShell is not available in this environment');
@@ -1252,7 +1315,7 @@ test('local n8n CLI backup helpers validate config and generate safe commands', 
 });
 
 test('local n8n backup setup prompts make recommended defaults explicit and safe', (t) => {
-  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1');
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1');
   const powerShell = findPowerShell();
   if (!powerShell) {
     t.skip('PowerShell is not available in this environment');
@@ -1322,10 +1385,10 @@ test('local n8n backup setup prompts make recommended defaults explicit and safe
 });
 
 test('local stack templates stay placeholder-only and local-first', () => {
-  const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/docker-compose.yml');
-  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.env.example');
-  const localGitignore = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/.gitignore');
-  const shortcut = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/local-stack/n8n-local-desktop-shortcut.cmd');
+  const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/docker-compose.yml');
+  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/.env.example');
+  const localGitignore = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/.gitignore');
+  const shortcut = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-local/n8n-local-desktop-shortcut.cmd');
 
   assert.match(compose, /^\s{2}postgres:/m);
   assert.match(compose, /^\s{2}n8n:/m);
@@ -1466,11 +1529,11 @@ test('Hostinger Coolify VPS page keeps Coolify-specific hosted n8n content only'
 
 test('Production Cloudflare guide and menu use local-style database-first production backups', () => {
   const guide = readText(repoRoot, '_projects/n8n/local-setup/_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md');
-  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1');
-  const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/docker-compose.yml');
-  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.env.example');
-  const runtimeIgnore = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/.gitignore');
-  const shortcut = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd');
+  const menu = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1');
+  const compose = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/docker-compose.yml');
+  const envExample = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/.env.example');
+  const runtimeIgnore = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/.gitignore');
+  const shortcut = readText(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd');
 
   assert.match(guide, /Private runtime ignore template/);
   assert.match(guide, /Linux server backup template/);
@@ -1497,7 +1560,11 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(guide, /Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT\.env` or `\.env` inside the selected zip/);
   assert.match(guide, /Older n8n entity export zips are accepted as an advanced compatibility path/);
   assert.match(guide, /Entity zip restore uses `n8n import:entities`, requires `migrations\.jsonl`, verifies that supported n8n rows were actually imported before reporting success, may require the source `N8N_IMAGE`/);
-  assert.match(guide, /After any production start or restore restart, the menu waits until the localhost n8n editor responds and stays reachable/);
+  assert.match(guide, /After any production action that starts, restarts, or recreates n8n/);
+  assert.match(guide, /configured local loopback port and requires consecutive successful responses/);
+  assert.match(guide, /bounded timeout shows redacted recent n8n logs and next actions/);
+  assert.match(guide, /Intentional stop\/down actions do not wait for recovery/);
+  assert.match(guide, /local n8n readiness never claims that the public Cloudflare tunnel is healthy/);
   assert.match(guide, /schedule it with systemd or cron/);
   assert.match(guide, /server-side template is separate from this Windows Cloudflare launcher/);
   assert.match(guide, /Offsite or cloud storage is intentionally not configured here/);
@@ -1575,7 +1642,13 @@ test('Production Cloudflare guide and menu use local-style database-first produc
   assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /Invoke-SafetyPreflight[\s\S]*Set-ActiveN8nUrl -Url \$publicUrl -Mode 'cloudflare' -HostName \$publicHost[\s\S]*cloudflared/);
   assert.match(functionBody(menu, 'Start-CloudflareTunnel'), /--force-recreate', 'n8n', 'cloudflared'[\s\S]*Wait-ForProductionN8nReady -Context 'Production Cloudflare n8n start' -AllowSelfHeal/);
   assert.match(functionBody(menu, 'Restart-N8n'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Invoke-Compose -Arguments @\('up', '-d', '--force-recreate', 'n8n'\)\) -ne 0\) \{ return \}[\s\S]*Wait-ForProductionN8nReady -Context 'Production n8n restart' -AllowSelfHeal/);
-  assert.match(functionBody(menu, 'Wait-ForProductionN8nReady'), /Test-ProductionN8nHttpReady[\s\S]*n8n editor is responding and stayed reachable[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*n8n editor is responding after self-heal and stayed reachable[\s\S]*Recent logs show mismatching encryption keys[\s\S]*database schema \/ n8n image version mismatch/);
+  assert.match(functionBody(menu, 'Test-ProductionN8nStableReadiness'), /Readiness check \$attempt\/\$MaxAttempts[\s\S]*Test-ProductionN8nHttpReady[\s\S]*\$readyStreak -ge \$RequiredSuccesses/);
+  assert.match(functionBody(menu, 'Wait-ForProductionN8nReady'), /Test-ProductionN8nStableReadiness[\s\S]*Local n8n editor is responding and stayed reachable[\s\S]*Repair-ProductionN8nConfigEncryptionKey[\s\S]*Local n8n editor is responding after self-heal and stayed reachable[\s\S]*Recent logs show mismatching encryption keys[\s\S]*database schema \/ n8n image version mismatch[\s\S]*Write-ProductionN8nTimeoutDiagnostics/);
+  assert.match(functionBody(menu, 'Protect-ProductionN8nDiagnosticLogLine'), /authorization[\s\S]*token[\s\S]*secret[\s\S]*password[\s\S]*redacted potentially sensitive n8n log line/);
+  assert.match(functionBody(menu, 'Write-ProductionN8nTimeoutDiagnostics'), /Recent n8n logs[\s\S]*Protect-ProductionN8nDiagnosticLogLine[\s\S]*Next actions: use View logs/);
+  assert.match(functionBody(menu, 'Stop-CloudflareTunnel'), /--force-recreate', 'n8n'[\s\S]*Wait-ForProductionN8nReady -Context 'Production n8n localhost recovery after Cloudflare stop'/);
+  assert.doesNotMatch(functionBody(menu, 'Stop-ProductionStack'), /Wait-ForProductionN8nReady/);
+  assert.match(functionBody(menu, 'Show-UpdateMenu'), /\$selected -contains 'n8n'[\s\S]*Wait-ForProductionN8nReady -Context 'Production n8n image update\/recreate'/);
   assert.match(functionBody(menu, 'Stop-CloudflareTunnel'), /Set-ActiveN8nUrl -Url \(Get-LocalN8nUrl -Values \$values\) -Mode 'localhost' -HostName 'localhost'[\s\S]*Recreating n8n so WEBHOOK_URL is now local/);
   assert.doesNotMatch(menu, /function Get-N8nCliProductionBackupSpecs|function Invoke-N8nCliProductionBackupExport/);
   assert.match(functionBody(menu, 'Backup-Postgres'), /Join-Path \$BackupDir 'database\.sql'/);
@@ -1676,7 +1749,7 @@ test('Production Cloudflare guide and menu use local-style database-first produc
 });
 
 test('production Cloudflare restore resolver accepts legacy entity zip packages', (t) => {
-  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1');
+  const sourceScript = path.join(repoRoot, '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1');
   const powerShell = findPowerShell();
   if (!powerShell) {
     t.skip('PowerShell is not available in this environment');
@@ -1788,7 +1861,7 @@ test('production server backup template uses Linux scheduling and guarded creden
   assert.match(script, /Refusing backup root that begins with dash/);
   assert.doesNotMatch(script, /Register-ScheduledTask|schtasks|Windows Task Scheduler|powershell\.exe/i);
 
-  for (const ignored of ['.n8n-production-cloudflare/', '.n8n-production-cloudflare/backups/', '**/n8n-production-*/', '*.log', '*.sql', '*.dump', '*.backup', '*.tar']) {
+  for (const ignored of ['/.n8n-production-cloudflare/', '/.n8n-production-cloudflare/backups/', '**/n8n-production-*/', '*.log', '*.sql', '*.dump', '*.backup', '*.tar']) {
     assert.match(rootIgnore, new RegExp(`^${escapeRegExp(ignored)}$`, 'm'), ignored);
   }
 });
@@ -1913,7 +1986,7 @@ test('curated indexes, skill metadata, and packs point to current skills-first s
   assert.match(combined, /templates\/mcp-configs\/codex-mcp-config\.md|codex-mcp-config\.md/);
   assertWindowsHookRecoveryGuidance(combined, 'curated n8n local setup recovery guidance');
 
-  for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'mcp/projects/n8n-local-setup.md']) {
+  for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/.n8n-local/n8n-local.cmd', 'mcp/projects/n8n-local-setup.md']) {
     assert.doesNotMatch(combined, new RegExp(escapeRegExp(stale)), stale);
   }
 });
@@ -1928,7 +2001,7 @@ test('repo README and usage docs route to n8n skills-first local setup surfaces'
   for (const expected of [
     'skills/n8n-local-setup/references/n8n/local-setup.md',
     'skills/n8n-local-setup/references/n8n/hostinger-vps.md',
-    'skills/n8n-local-setup/templates/local-stack/',
+    'skills/n8n-local-setup/templates/.n8n-local/',
     'skills/n8n-local-setup/references/ai-agent-platforms/',
     'skills/n8n-local-setup/templates/mcp-configs/',
     'skills/n8n-agent-rules/'
@@ -1966,17 +2039,17 @@ test('n8n local setup packs install current files only', () => {
     for (const expected of [
       'skills/n8n-local-setup/references/n8n/local-setup.md',
       'skills/n8n-local-setup/references/n8n/hostinger-vps.md',
-      'skills/n8n-local-setup/templates/local-stack/docker-compose.yml',
-      'skills/n8n-local-setup/templates/local-stack/.env.example',
-      'skills/n8n-local-setup/templates/local-stack/_n8n-local.cmd',
-      'skills/n8n-local-setup/templates/local-stack/n8n-local-desktop-shortcut.cmd',
-      'skills/n8n-local-setup/templates/local-stack/scripts/n8n-local-menu.ps1',
-      'skills/n8n-local-setup/templates/production-cloudflare-stack/docker-compose.yml',
-      'skills/n8n-local-setup/templates/production-cloudflare-stack/.env.example',
-      'skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore',
-      'skills/n8n-local-setup/templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd',
-      'skills/n8n-local-setup/templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd',
-      'skills/n8n-local-setup/templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1',
+      'skills/n8n-local-setup/templates/.n8n-local/docker-compose.yml',
+      'skills/n8n-local-setup/templates/.n8n-local/.env.example',
+      'skills/n8n-local-setup/templates/.n8n-local/_n8n-local.cmd',
+      'skills/n8n-local-setup/templates/.n8n-local/n8n-local-desktop-shortcut.cmd',
+      'skills/n8n-local-setup/templates/.n8n-local/scripts/n8n-local-menu.ps1',
+      'skills/n8n-local-setup/templates/.n8n-production-cloudflare/docker-compose.yml',
+      'skills/n8n-local-setup/templates/.n8n-production-cloudflare/.env.example',
+      'skills/n8n-local-setup/templates/.n8n-production-cloudflare/.gitignore',
+      'skills/n8n-local-setup/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd',
+      'skills/n8n-local-setup/templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd',
+      'skills/n8n-local-setup/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1',
       'skills/n8n-local-setup/templates/production-server-backups/README.md',
       'skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template',
       'skills/n8n-agent-rules/SKILL.md',
@@ -1988,12 +2061,12 @@ test('n8n local setup packs install current files only', () => {
       assert.ok(pack.installs.includes(expected), `${pack.id}: ${expected}`);
     }
 
-    for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/local-stack/n8n-local.cmd', 'N8N_MCP']) {
+    for (const stale of ['upgrading.md', 'tunnelling.md', 'docker-compose-ngrok.md', 'vps-hosting.md', 'templates/.n8n-local/n8n-local.cmd', 'N8N_MCP']) {
       assert.equal(pack.installs.some((entry) => entry.includes(stale)), false, `${pack.id}: ${stale}`);
       assert.equal((pack.source_refs || []).some((entry) => entry.includes(stale)), false, `${pack.id}: ${stale} source_refs`);
     }
 
-    assert.ok(pack.source_refs.includes('skills/n8n-local-setup/templates/production-cloudflare-stack/.gitignore'), `${pack.id}: production .gitignore source ref`);
+    assert.ok(pack.source_refs.includes('skills/n8n-local-setup/templates/.n8n-production-cloudflare/.gitignore'), `${pack.id}: production .gitignore source ref`);
     assert.ok(pack.source_refs.includes('skills/n8n-local-setup/templates/production-server-backups/README.md'), `${pack.id}: production backup README source ref`);
     assert.ok(pack.source_refs.includes('skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template'), `${pack.id}: production backup script source ref`);
     assert.ok((pack.notes || []).some((entry) => /systemd timer or cron scheduling/.test(entry)), `${pack.id}: production scheduling note`);

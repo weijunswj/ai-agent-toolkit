@@ -39,7 +39,7 @@ If plugin hooks are unavailable or cannot be repaired, use the plain skill insta
 ## Local Routes
 
 - Use [local setup](../n8n/local-setup.md) for the full local n8n setup guide.
-- Use [local stack templates](../../templates/local-stack/) for `n8n + postgres + ngrok`.
+- Use [local stack templates](../../templates/.n8n-local/) for `n8n + postgres + ngrok`.
 - Use [skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md](../../../ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for generic agent rules.
 - Use [skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md](../../../ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md) when the target repo needs a Claude Code shim.
 - Use `skills/n8n-agent-rules` or [n8n-agent-rules.md](../n8n-agent-rules.md) before workflow, helper-script, or live n8n work.

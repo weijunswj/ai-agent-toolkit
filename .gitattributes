@@ -25,7 +25,6 @@ _projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-codi
 skills/ai-coding-agent-rules/**/*.md text eol=lf
 skills/knowledge-index-updater/agents/openai.yaml text eol=lf
 skills/n8n-local-setup/** text eol=lf
-skills/n8n-local-setup/templates/local-stack/** text eol=lf
 skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs text eol=lf
 skills/toolkit-setup/** text eol=lf
 skills/windows-localhost-workflows/agents/openai.yaml text eol=lf
