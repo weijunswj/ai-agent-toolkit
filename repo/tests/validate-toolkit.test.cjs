@@ -800,6 +800,12 @@ test('AGENTS.md gives future agents unambiguous source routing rules', () => {
   assert.match(index, /repo\/docs\/agent-playbooks\/generated-output-and-publishing\.md/);
   assert.match(index, /repo\/docs\/agent-playbooks\/pr-review-and-ci\.md/);
   assert.match(index, /repo\/docs\/agent-playbooks\/docs-governance\.md/);
+  assert.match(index, /continues a multi-PR programme/);
+  const baselinePlaybook = readTextFile(path.join(repoRoot, 'repo', 'docs', 'agent-playbooks', 'baseline-workflow.md'));
+  assert.match(baselinePlaybook, /Default to one fresh Codex chat per focused PR/);
+  assert.match(baselinePlaybook, /many files \(roughly more than 15\)/);
+  assert.match(baselinePlaybook, /Keep compact continuation state in the PR body and final response/);
+  assert.match(baselinePlaybook, /the current next PR, operating constraints, and acceptance criteria/);
   const n8nPlaybook = readTextFile(path.join(repoRoot, 'repo', 'docs', 'agent-playbooks', 'n8n-safety-and-workflows.md'));
   assert.match(n8nPlaybook, /Stop before live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, credential, deployment, production, destructive, or privileged external actions/);
   assert.match(n8nPlaybook, /Require explicit current-turn approval naming the target and allowed operation/);

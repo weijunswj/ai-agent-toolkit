@@ -20,7 +20,7 @@ Final reports must list `Instruction sources used`, including `MEMORY.md` when i
 
 For a normal small code or docs task with no special match, do not read `baseline-workflow.md` by default. Continue baseline-only.
 
-Read `repo/docs/agent-playbooks/baseline-workflow.md` only when the task is broad, ambiguous, high-blast-radius, or explicitly asks for detailed workflow guidance.
+Read `repo/docs/agent-playbooks/baseline-workflow.md` only when the task is broad, ambiguous, high-blast-radius, explicitly asks for detailed workflow guidance, or continues a multi-PR programme.
 
 ## Match: Windows Command, Log, Or Localhost Hygiene
 
