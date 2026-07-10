@@ -66,7 +66,7 @@ const configs = [
       '  exit 1',
       '}',
       '',
-      'if (-not (Invoke-LaunchPreflight)) { Pause-Menu; exit 0 }'
+      'if (-not (Invoke-LaunchPreflight)) { Pause-Menu -Exit; exit 0 }'
     ]
   },
   {
@@ -119,7 +119,7 @@ const configs = [
       '  exit 1',
       '}',
       '',
-      'if (-not (Invoke-LaunchPreflight)) { Pause-Menu; exit 0 }'
+      'if (-not (Invoke-LaunchPreflight)) { Pause-Menu -Exit; exit 0 }'
     ]
   }
 ];
@@ -169,6 +169,20 @@ goto run_menu
 popd >nul
 exit /b 0
 `;
+}
+
+function pauseMenu() {
+  return functionBlock('Pause-Menu', [
+    '  param([switch]$Exit)',
+    "  Write-Host ''",
+    '  if ($Exit) {',
+    "    Write-Host 'Press Enter to exit this launcher...' -ForegroundColor DarkCyan",
+    '  } else {',
+    "    Write-Host 'Press Enter to clear completed output and return to the menu...' -ForegroundColor DarkCyan",
+    '  }',
+    '  [void](Read-Host)',
+    '  if (-not $Exit) { Clear-MenuScreen }'
+  ]);
 }
 
 function dockerPreflightBlock() {
@@ -599,6 +613,7 @@ function replaceDockerPreflight(text) {
 function generate(config, input) {
   let text = input.replace(/\r\n/g, '\n');
   text = replaceDockerPreflight(text);
+  text = replaceFunction(text, 'Pause-Menu', pauseMenu());
   text = replaceFunction(text, 'Show-StartMenu', startMenu(config));
   text = replaceFunction(text, 'Show-StopMenu', stopMenu(config));
   text = replaceFunction(text, 'Show-UpdateMenu', updateMenu(config));

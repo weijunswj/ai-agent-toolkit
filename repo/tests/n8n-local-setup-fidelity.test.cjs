@@ -499,6 +499,7 @@ test('active n8n launcher surfaces use manual Docker prerequisites with no insta
   assert.match(combined, /only verifies Docker CLI, Docker Compose, and engine readiness/);
   assert.match(combined, /https:\/\/docs\.docker\.com\/desktop\/setup\/install\/windows-install\//);
   assert.match(combined, /current Docker Desktop downloads, Windows requirements, and WSL verification\/setup instructions/);
+  assert.match(combined, /Press Enter to exit this launcher/);
   assert.match(combined, /Existing copied .*runtime folder.*not automatically overwritten/i);
 
   for (const stale of [
@@ -817,7 +818,8 @@ test('local launcher and menu keep the console open until Exit', () => {
   assert.match(menu, /\[Console\]::Clear\(\)/);
   assert.match(menu, /\[Console\]::SetBufferSize\(\[Console\]::BufferWidth, \[Console\]::WindowHeight\)/);
   assert.match(menu, /Press Enter to clear completed output and return to the menu/);
-  assert.match(menu, /function Pause-Menu \{[\s\S]*Clear-MenuScreen[\s\S]*\}/);
+  assert.match(menu, /Press Enter to exit this launcher/);
+  assert.match(menu, /function Pause-Menu \{[\s\S]*param\(\[switch\]\$Exit\)[\s\S]*if \(-not \$Exit\) \{ Clear-MenuScreen \}[\s\S]*\}/);
   assert.match(menu, /function Invoke-MenuAction/);
   assert.match(menu, /function Invoke-NativeCommand/);
   assert.match(menu, /function Show-CommandList/);

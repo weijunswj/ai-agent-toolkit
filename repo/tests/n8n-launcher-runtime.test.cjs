@@ -105,6 +105,7 @@ test('both menus use official manual Docker guidance without installer, browser,
     assert.match(preflight, /Docker CLI exists/, launcher.id);
     assert.match(preflight, /Docker Compose is unavailable/, launcher.id);
     assert.match(preflight, /manually repair or reinstall Docker Desktop/, launcher.id);
+    assert.match(source, /function Pause-Menu[\s\S]*Press Enter to exit this launcher[\s\S]*Press Enter to clear completed output and return to the menu[\s\S]*if \(-not \$Exit\) \{ Clear-MenuScreen \}/, launcher.id);
     assert.doesNotMatch(preflight, /winget|Invoke-DockerDesktopInstall|Request-LauncherRelaunch|Read-Host/i, launcher.id);
     assert.doesNotMatch(preflight, /Start-Process|Invoke-Item|explorer\.exe|desktop\.docker\.com|docker\.com\/products\/docker-desktop/i, launcher.id);
     assert.doesNotMatch(preflight, /N8N_LAUNCHER_RELAUNCH_COUNT|LauncherRelaunch|controlled launcher relaunch/i, launcher.id);
@@ -154,6 +155,8 @@ test('Docker CLI missing exits both CMD launchers after one Enter with identical
         assertPrintedDockerWindowsInstallUrl(result.stdout, scenario);
         assert.match(result.stdout, /downloads, Windows requirements, and WSL verification\/setup instructions/i, scenario);
         assert.match(result.stdout, /Run this launcher again after Docker Desktop and WSL are working/i, scenario);
+        assert.match(result.stdout, /Press Enter to exit this launcher/i, scenario);
+        assert.doesNotMatch(result.stdout, /return to the menu/i, scenario);
         assert.doesNotMatch(result.stdout, /Choose an action:/i, scenario);
         assert.doesNotMatch(result.stdout, /stopped unexpectedly|Restarting the launcher/i, scenario);
         assert.equal((result.stdout.match(/Press Enter/gi) || []).length, 1, `${scenario}: exactly one outer pause`);
@@ -198,6 +201,8 @@ test('Docker Compose missing exits both CMD launchers after one Enter without op
       assert.match(result.stdout, /Docker Compose is unavailable/i, launcher.id);
       assert.match(result.stdout, /manually repair or reinstall Docker Desktop/i, launcher.id);
       assertPrintedDockerWindowsInstallUrl(result.stdout, launcher.id);
+      assert.match(result.stdout, /Press Enter to exit this launcher/i, launcher.id);
+      assert.doesNotMatch(result.stdout, /return to the menu/i, launcher.id);
       assert.doesNotMatch(result.stdout, /Choose an action:/i, launcher.id);
       assert.equal((result.stdout.match(/Press Enter/gi) || []).length, 1, `${launcher.id}: exactly one outer pause`);
       assert.match(fs.readFileSync(dockerLog, 'utf8'), /^compose version\s*$/m, launcher.id);
@@ -229,12 +234,15 @@ test('Docker ready opens both local and production CMD launcher menus normally',
       const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath], {
         cwd: root,
         env: launcherEnv([binDir], { N8N_DOCKER_LOG: dockerLog }),
-        input: '10\r\n',
+        input: '5\r\n\r\n10\r\n',
         encoding: 'utf8',
         timeout: 15000
       });
       assert.equal(result.status, 0, `${launcher.id}\n${result.stdout}\n${result.stderr}`);
       assert.match(result.stdout, /Choose an action:/i, launcher.id);
+      assert.equal((result.stdout.match(/Choose an action:/gi) || []).length, 2, `${launcher.id}: menu returned after a completed action`);
+      assert.match(result.stdout, /Press Enter to clear completed output and return to the menu/i, launcher.id);
+      assert.doesNotMatch(result.stdout, /Press Enter to exit this launcher/i, launcher.id);
       assert.match(result.stdout, /Bye\./i, launcher.id);
       assert.doesNotMatch(result.stdout, /stopped unexpectedly/i, launcher.id);
       const dockerCalls = fs.readFileSync(dockerLog, 'utf8');
@@ -261,7 +269,7 @@ test('both menus fail closed until Docker CLI, Compose, and engine preflight suc
     const loopIndex = source.indexOf('while (-not $script:ExitRequested)', initializeIndex);
     assert.ok(initializeIndex >= 0 && loopIndex > initializeIndex, launcher.id);
     const preLoop = source.slice(initializeIndex, loopIndex);
-    assert.match(preLoop, /if \(-not \(Invoke-LaunchPreflight\)\) \{ Pause-Menu; exit 0 \}/, launcher.id);
+    assert.match(preLoop, /if \(-not \(Invoke-LaunchPreflight\)\) \{ Pause-Menu -Exit; exit 0 \}/, launcher.id);
 
     const command = [
       '$ErrorActionPreference = "Stop"',

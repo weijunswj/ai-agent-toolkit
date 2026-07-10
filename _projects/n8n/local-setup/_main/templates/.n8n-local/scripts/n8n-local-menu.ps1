@@ -191,10 +191,15 @@ function Clear-MenuScreen {
 }
 
 function Pause-Menu {
+  param([switch]$Exit)
   Write-Host ''
-  Write-Host 'Press Enter to clear completed output and return to the menu...' -ForegroundColor DarkCyan
+  if ($Exit) {
+    Write-Host 'Press Enter to exit this launcher...' -ForegroundColor DarkCyan
+  } else {
+    Write-Host 'Press Enter to clear completed output and return to the menu...' -ForegroundColor DarkCyan
+  }
   [void](Read-Host)
-  Clear-MenuScreen
+  if (-not $Exit) { Clear-MenuScreen }
 }
 
 function Invoke-MenuAction {
@@ -4683,7 +4688,7 @@ if ((Test-MenuFlag -Name 'run-n8n-recovery-backup') -or (Test-MenuFlag -Name 'ru
   exit 1
 }
 
-if (-not (Invoke-LaunchPreflight)) { Pause-Menu; exit 0 }
+if (-not (Invoke-LaunchPreflight)) { Pause-Menu -Exit; exit 0 }
 
 while (-not $script:ExitRequested) {
   Show-MainMenu

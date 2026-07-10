@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.30",
+  "version": "2.3.31",
   "version_policy": "semver",
-  "version_notes": "Bumps the native Toolkit package for updated n8n local-setup launcher and documentation content that removes automatic Docker Desktop installation.",
+  "version_notes": "Bumps the native Toolkit package for the n8n local-setup launcher amendment that removes automatic Docker Desktop installation and uses an explicit prerequisite exit pause.",
   "outputs": [
     {
       "kind": "curated",
