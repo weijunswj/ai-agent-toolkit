@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.31';
+const BRIDGE_VERSION = '2.3.32';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -2225,25 +2225,90 @@ function validateStagedHub(stagePath, checksum) {
   }
 }
 
+// Classify the recorded lock owner without ever signalling it for real.
+// `alive` is proof a process with that PID exists and must be respected.
+// `dead` is proof no such process exists, so the lock is recoverable even
+// while fresh. `indeterminate` (for example EPERM) is not proof of death and
+// falls back to the age rule. `unknown` covers missing or malformed PIDs.
+function lockOwnerLiveness(pid, killFn = process.kill) {
+  const parsed = Number(pid);
+  if (!Number.isInteger(parsed) || parsed <= 0) return 'unknown';
+  // A lock recording this process's own PID cannot belong to a concurrent
+  // run of this single-threaded process; treat it as recoverable leftover.
+  if (parsed === process.pid) return 'dead';
+  try {
+    killFn(parsed, 0);
+    return 'alive';
+  } catch (error) {
+    if (error && error.code === 'ESRCH') return 'dead';
+    return 'indeterminate';
+  }
+}
+
+// Age of the lock for the stale-age fallback. A malformed or partially
+// written lock file (unreadable JSON, unparsable created_at) falls back to
+// the file mtime so a mid-write lock from another process is not treated as
+// instantly stale and recklessly removed.
+function lockAgeMs(lockPath, lock) {
+  const created = Date.parse(lock?.created_at || '');
+  if (Number.isFinite(created)) return Date.now() - created;
+  try {
+    return Date.now() - fs.statSync(lockPath).mtimeMs;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
 function acquireLock(hubRoot, args) {
   fs.mkdirSync(hubRoot, { recursive: true });
   const lockPath = path.join(hubRoot, 'update.lock');
   if (fs.existsSync(lockPath)) {
-    const lock = readJsonIfExists(lockPath) || {};
-    const age = Date.now() - Date.parse(lock.created_at || 0);
-    if (Number.isFinite(age) && age < LOCK_STALE_MS) {
-      const message = `fresh Toolkit bridge lock exists at ${lockPath}`;
+    let lock = {};
+    try {
+      lock = readJsonIfExists(lockPath) || {};
+    } catch {
+      // Malformed lock JSON: no owner can be determined; the mtime-based age
+      // fallback below decides freshness.
+    }
+    const liveness = lockOwnerLiveness(lock.pid);
+    if (liveness === 'alive') {
+      // Never delete a lock whose recorded owner is a live process, no
+      // matter how old the lock file is.
+      const message = `Toolkit bridge lock at ${lockPath} is held by live process ${lock.pid}`;
       if (args.hook) return { acquired: false, lockPath, skipReason: message };
       throw new Error(message);
     }
+    if (liveness !== 'dead') {
+      // Unknown or indeterminate owner: fall back to the age rule that
+      // predates owner-aware locks. A fresh lock is respected; a stale one
+      // is recovered. A dead owner skips this and is recovered immediately.
+      const age = lockAgeMs(lockPath, lock);
+      if (Number.isFinite(age) && age < LOCK_STALE_MS) {
+        const message = `fresh Toolkit bridge lock exists at ${lockPath}`;
+        if (args.hook) return { acquired: false, lockPath, skipReason: message };
+        throw new Error(message);
+      }
+    }
     fs.rmSync(lockPath, { force: true });
   }
-  writeJson(lockPath, {
+  const lockBody = `${JSON.stringify({
     created_at: timestamp(),
     pid: process.pid,
     bridge_version: BRIDGE_VERSION,
     sync_source: args.syncSource
-  });
+  }, null, 2)}\n`;
+  try {
+    // Exclusive create: if another process re-created the lock between our
+    // recovery and this write, do not clobber it -- treat the race as lost.
+    fs.writeFileSync(lockPath, lockBody, { encoding: 'utf8', flag: 'wx' });
+  } catch (error) {
+    if (error && error.code === 'EEXIST') {
+      const message = `Toolkit bridge lock at ${lockPath} was re-created by another process`;
+      if (args.hook) return { acquired: false, lockPath, skipReason: message };
+      throw new Error(message);
+    }
+    throw error;
+  }
   return { acquired: true, lockPath };
 }
 
@@ -3143,6 +3208,7 @@ module.exports = {
   ARCHITECTURE_VERSION,
   BRIDGE_VERSION,
   defaultHubPath,
+  lockOwnerLiveness,
   parseArgs,
   run,
   adapterPayloads,

@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.31';
+const expectedBridgeVersion = '2.3.32';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -43,7 +43,7 @@ function run(args, options = {}) {
     cwd: options.cwd || repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },
-    timeout: 90000
+    timeout: options.timeout || 90000
   });
 }
 
@@ -1274,20 +1274,161 @@ test('hook mode downgrade skip exits 0 and prints host remediation on stdout', (
   assert.match(result.stdout, /reinstall through the supported Claude Code marketplace path/);
 });
 
-test('fresh lock blocks manual writes and stale lock is recovered', () => {
+function deadTestPid() {
+  // A short-lived child that has already exited gives a PID that is
+  // definitely not alive when the bridge checks it.
+  const child = spawnSync(process.execPath, ['-e', ''], { windowsHide: true });
+  assert.ok(child.pid > 0, 'fixture child must have spawned');
+  return child.pid;
+}
+
+test('fresh lock owned by a live process blocks manual writes and is not deleted', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const lockPath = path.join(root, 'hub', 'update.lock');
-  writeJson(lockPath, { created_at: new Date().toISOString(), pid: 123 });
+  // This test process is alive for the whole bridge child run.
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid });
 
+  const result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /held by live process/);
+  assert.equal(fs.existsSync(lockPath), true, 'a live-owner lock must never be deleted');
+});
+
+test('fresh lock owned by a dead process is recovered immediately without waiting for the stale age', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const lockPath = path.join(root, 'hub', 'update.lock');
+  const unrelatedPath = path.join(root, 'hub', 'unrelated-user-file.txt');
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: deadTestPid() });
+  fs.writeFileSync(unrelatedPath, 'keep me\n', 'utf8');
+
+  const result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], {
+    env: isolatedHomeEnv(root),
+    timeout: 480000
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(lockPath), false, 'recovered lock is released after successful sync');
+  assert.equal(fs.readFileSync(unrelatedPath, 'utf8'), 'keep me\n', 'unrelated files are untouched');
+});
+
+test('fresh lock without a usable owner PID keeps the age-based fallback and stale lock is recovered', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const lockPath = path.join(root, 'hub', 'update.lock');
+
+  // Missing PID, fresh created_at: age fallback blocks the write.
+  writeJson(lockPath, { created_at: new Date().toISOString() });
   let result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /fresh Toolkit bridge lock/);
 
-  writeJson(lockPath, { created_at: '2000-01-01T00:00:00.000Z', pid: 123 });
+  // Malformed PID, fresh created_at: same safe age fallback.
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: 'not-a-pid' });
   result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /fresh Toolkit bridge lock/);
+
+  // Legacy stale lock without a live owner is still recovered by age.
+  writeJson(lockPath, { created_at: '2000-01-01T00:00:00.000Z', pid: 'not-a-pid' });
+  result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], {
+    env: isolatedHomeEnv(root),
+    timeout: 480000
+  });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(lockPath), false, 'lock is released after successful sync');
+});
+
+test('malformed lock JSON falls back to file mtime: fresh is respected, old is recovered', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const lockPath = path.join(root, 'hub', 'update.lock');
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+
+  // Freshly written malformed lock (for example a partial write from another
+  // process) must not be recklessly removed.
+  fs.writeFileSync(lockPath, '{ this is not json', 'utf8');
+  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /fresh Toolkit bridge lock/);
+  assert.equal(fs.existsSync(lockPath), true, 'fresh unverifiable lock is not removed');
+
+  // The same malformed lock with an old mtime is recoverable.
+  const oldTime = new Date(Date.now() - 60 * 60 * 1000);
+  fs.utimesSync(lockPath, oldTime, oldTime);
+  result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], {
+    env: isolatedHomeEnv(root),
+    timeout: 480000
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(lockPath), false, 'lock is released after successful sync');
+});
+
+test('hook mode skips instead of failing when the lock owner is alive', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const lockPath = path.join(root, 'hub', 'update.lock');
+  // An enabled stale target with auto-sync on makes the hook reach the sync
+  // lock; the live lock must then produce a skip, not a failure, and must
+  // survive untouched.
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: '1.0.0',
+    auto_sync_enabled: true,
+    targets: {
+      ag2: {
+        enabled: true,
+        explicitly_disabled: false,
+        synced_version: '1.0.0',
+        synced_checksum: 'old'
+      }
+    }
+  });
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid });
+
+  const result = run(
+    ['--hub', hub, '--hook', '--write', '--sync-source', 'claude-plugin'],
+    { env: isolatedHomeEnv(root) }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /held by live process/);
+  assert.equal(fs.existsSync(lockPath), true, 'a live-owner lock must never be deleted');
+});
+
+test('lockOwnerLiveness classifies alive, dead, indeterminate, and unusable PIDs safely', () => {
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+
+  assert.equal(bridge.lockOwnerLiveness(undefined), 'unknown');
+  assert.equal(bridge.lockOwnerLiveness(null), 'unknown');
+  assert.equal(bridge.lockOwnerLiveness('not-a-pid'), 'unknown');
+  assert.equal(bridge.lockOwnerLiveness(-5), 'unknown');
+  assert.equal(bridge.lockOwnerLiveness(0), 'unknown');
+  assert.equal(bridge.lockOwnerLiveness(1.5), 'unknown');
+
+  // A lock recording this process's own PID is recoverable leftover state.
+  assert.equal(bridge.lockOwnerLiveness(process.pid), 'dead');
+
+  // Injected probes prove each classification without real signals.
+  assert.equal(bridge.lockOwnerLiveness(4242, () => {}), 'alive');
+  assert.equal(
+    bridge.lockOwnerLiveness(4242, () => {
+      const error = new Error('no such process');
+      error.code = 'ESRCH';
+      throw error;
+    }),
+    'dead'
+  );
+  // Permission denied is not proof of death: the owner may be alive.
+  assert.equal(
+    bridge.lockOwnerLiveness(4242, () => {
+      const error = new Error('permission denied');
+      error.code = 'EPERM';
+      throw error;
+    }),
+    'indeterminate'
+  );
+  assert.equal(bridge.lockOwnerLiveness(deadTestPid()), 'dead');
 });
 
 test('hook mode does not create bridge state before setup', () => {

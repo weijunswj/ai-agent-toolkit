@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.31",
+  "version": "2.3.32",
   "version_policy": "semver",
-  "version_notes": "Bumps the native Toolkit package for the n8n local-setup launcher amendment that removes automatic Docker Desktop installation and uses an explicit prerequisite exit pause.",
+  "version_notes": "Makes Claude Code plugin update/install verification-driven with bounded state polling instead of process-exit waiting, derives the setup orchestrator's outer Claude timeouts from the helper budgets, and adds owner-aware bridge lock recovery so a lock whose recorded process is dead cannot wedge later setup or hook runs.",
   "outputs": [
     {
       "kind": "curated",

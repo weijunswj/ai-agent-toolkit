@@ -45,12 +45,24 @@ function writeFakeClaude(stateDir, options = {}) {
     repoRoot: options.initialInstalled ? (options.initialRepoRoot || repoRoot) : '',
     installed: Boolean(options.initialInstalled),
     scope: options.initialInstalled ? 'user' : '',
-    version: initialVersion
+    version: initialVersion,
+    failListRemaining: options.failListTimes || 0,
+    marketplaceAddCount: 0,
+    installCount: 0,
+    updateCount: 0,
+    uninstallCount: 0
   });
   const failMarketplaceAdd = Boolean(options.failMarketplaceAdd);
   const failInstall = Boolean(options.failInstall);
   const failUpdate = Boolean(options.failUpdate);
   const failUninstall = Boolean(options.failUninstall);
+  // Lingering fakes finish (or skip) their real work and then stay alive on
+  // a timer instead of exiting, exactly like a CLI that has landed its
+  // mutation but does not exit cleanly.
+  const lingerAfterInstall = Boolean(options.lingerAfterInstall);
+  const lingerAfterUpdate = Boolean(options.lingerAfterUpdate);
+  const installNeverLands = Boolean(options.installNeverLands);
+  const updateSilentNoop = Boolean(options.updateSilentNoop);
   const updatedVersion = options.updatedVersion || expectedVersion();
   fs.writeFileSync(fakeClaudeScript, `
 'use strict';
@@ -68,6 +80,10 @@ function writeState(state) {
   fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\\n');
 }
 
+function linger() {
+  setInterval(() => {}, 1000);
+}
+
 if (args[0] === '--version') {
   process.stdout.write('claude 1.0.0 (fake)\\n');
   process.exit(0);
@@ -80,6 +96,7 @@ if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
   }
   const state = readState();
   state.repoRoot = args[3];
+  state.marketplaceAddCount += 1;
   writeState(state);
   process.exit(0);
 }
@@ -90,11 +107,21 @@ if (args[0] === 'plugin' && args[1] === 'install') {
     process.exit(1);
   }
   const state = readState();
+  state.installCount += 1;
+  if (${JSON.stringify(installNeverLands)}) {
+    writeState(state);
+    linger();
+    return;
+  }
   state.installed = true;
   state.version = ${JSON.stringify(updatedVersion)};
   const scopeIndex = args.indexOf('--scope');
   state.scope = scopeIndex !== -1 ? args[scopeIndex + 1] : 'user';
   writeState(state);
+  if (${JSON.stringify(lingerAfterInstall)}) {
+    linger();
+    return;
+  }
   process.exit(0);
 }
 
@@ -104,6 +131,11 @@ if (args[0] === 'plugin' && args[1] === 'update') {
     process.exit(1);
   }
   const state = readState();
+  state.updateCount += 1;
+  if (${JSON.stringify(updateSilentNoop)}) {
+    writeState(state);
+    process.exit(0);
+  }
   if (!state.installed) {
     process.stderr.write('fake update failure: not installed\\n');
     process.exit(1);
@@ -112,6 +144,10 @@ if (args[0] === 'plugin' && args[1] === 'update') {
   const scopeIndex = args.indexOf('--scope');
   if (scopeIndex !== -1) state.scope = args[scopeIndex + 1];
   writeState(state);
+  if (${JSON.stringify(lingerAfterUpdate)}) {
+    linger();
+    return;
+  }
   process.exit(0);
 }
 
@@ -122,12 +158,22 @@ if (args[0] === 'plugin' && (args[1] === 'uninstall' || args[1] === 'remove')) {
   }
   const state = readState();
   state.installed = false;
+  state.uninstallCount += 1;
   writeState(state);
   process.exit(0);
 }
 
 if (args[0] === 'plugin' && args[1] === 'list') {
   const state = readState();
+  // Transient list failures arm only after a mutation was invoked, so they
+  // land inside the verification polling loop rather than failing the
+  // initial pre-mutation state read.
+  if (state.failListRemaining > 0 && (state.updateCount + state.installCount) > 0) {
+    state.failListRemaining -= 1;
+    writeState(state);
+    process.stderr.write('fake transient plugin list failure\\n');
+    process.exit(1);
+  }
   const installed = state.installed ? [
     {
       name: ${JSON.stringify(setup.TOOLKIT_PLUGIN_NAME)},
@@ -153,6 +199,13 @@ function readFakeClaudeState(stateDir) {
 }
 
 function runSetup(mode, fakeClaudePath, extraArgs = [], options = {}) {
+  // Short fixture-specific mutation deadlines and fast polling keep the
+  // verification-driven install/update loops from waiting real minutes.
+  const env = {
+    CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS: '8000',
+    CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS: '50',
+    ...(options.env || process.env)
+  };
   return spawnSync(process.execPath, [
     path.join(repoRoot, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'),
     mode,
@@ -165,9 +218,9 @@ function runSetup(mode, fakeClaudePath, extraArgs = [], options = {}) {
   ], {
     cwd: repoRoot,
     encoding: 'utf8',
-    timeout: 10000,
+    timeout: 30000,
     windowsHide: true,
-    env: options.env || process.env
+    env
   });
 }
 
@@ -440,6 +493,161 @@ test('Claude Toolkit plugin setup write falls back to uninstall and reinstall wh
   const state = readFakeClaudeState(stateDir);
   assert.equal(state.version, expectedVersion());
   assert.equal(state.installed, true);
+});
+
+test('Claude Toolkit plugin install that lands in state succeeds with a warning when the CLI process lingers', () => {
+  const stateDir = tmpRoot();
+  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, lingerAfterInstall: true });
+
+  const writeResult = runSetup('--write', fakeClaude);
+  assert.equal(writeResult.status, 0, writeResult.stderr);
+  const summary = JSON.parse(writeResult.stdout);
+  assert.equal(summary.ok, true);
+  assert.equal(summary.version, expectedVersion());
+  assert.ok(
+    summary.warnings.some((warning) => /plugin install .* did not exit cleanly, but installed-state verification passed/i.test(warning)),
+    summary.warnings.join('\n')
+  );
+
+  const state = readFakeClaudeState(stateDir);
+  assert.equal(state.installed, true);
+  assert.equal(state.version, expectedVersion());
+
+  const verifyResult = runSetup('--verify', fakeClaude);
+  assert.equal(verifyResult.status, 0, verifyResult.stderr);
+});
+
+test('Claude Toolkit plugin install that never lands fails within the bounded deadline with state errors', () => {
+  const stateDir = tmpRoot();
+  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, installNeverLands: true });
+
+  const env = { ...process.env, CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS: '1500', CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS: '50' };
+  const started = Date.now();
+  const writeResult = runSetup('--write', fakeClaude, [], { env });
+  const elapsed = Date.now() - started;
+
+  assert.notEqual(writeResult.status, 0);
+  assert.match(writeResult.stderr, /did not produce a verified install within 1500ms/);
+  assert.match(writeResult.stderr, /is not installed/i, 'failure must carry the final state errors');
+  // Bounded: spawn overhead on a slow machine is tolerated, but the run must
+  // not wait anywhere near the old unbounded/process-exit behavior.
+  assert.ok(elapsed < 25000, `write took ${elapsed}ms`);
+});
+
+test('Claude Toolkit plugin update that verifies current despite a lingering process does not fall back to reinstall', () => {
+  const stateDir = tmpRoot();
+  const fakeClaude = writeFakeClaude(stateDir, {
+    initialInstalled: true,
+    installedVersion: '2.3.0',
+    lingerAfterUpdate: true
+  });
+
+  const writeResult = runSetup('--write', fakeClaude);
+  assert.equal(writeResult.status, 0, writeResult.stderr);
+  const summary = JSON.parse(writeResult.stdout);
+  assert.equal(summary.ok, true);
+  assert.equal(summary.version, expectedVersion());
+  assert.ok(
+    summary.warnings.some((warning) => /plugin update .* did not exit cleanly, but installed-state verification passed/i.test(warning)),
+    summary.warnings.join('\n')
+  );
+
+  const state = readFakeClaudeState(stateDir);
+  assert.equal(state.version, expectedVersion());
+  assert.equal(state.updateCount, 1);
+  assert.equal(state.uninstallCount, 0, 'a verified update must not trigger uninstall');
+  assert.equal(state.marketplaceAddCount, 0, 'a verified update must not trigger marketplace re-add');
+  assert.equal(state.installCount, 0, 'a verified update must not trigger reinstall');
+});
+
+test('Claude Toolkit plugin update that exits but never verifies falls back to reinstall with a deadline warning', () => {
+  const stateDir = tmpRoot();
+  const fakeClaude = writeFakeClaude(stateDir, {
+    initialInstalled: true,
+    installedVersion: '2.3.0',
+    updateSilentNoop: true
+  });
+
+  const env = { ...process.env, CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS: '1500', CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS: '50' };
+  const writeResult = runSetup('--write', fakeClaude, [], { env });
+  assert.equal(writeResult.status, 0, writeResult.stderr);
+  const summary = JSON.parse(writeResult.stdout);
+  assert.equal(summary.ok, true);
+  assert.equal(summary.version, expectedVersion());
+  assert.ok(
+    summary.warnings.some((warning) => /plugin update did not produce a verified current install before its deadline, falling back to uninstall \+ reinstall/i.test(warning)),
+    summary.warnings.join('\n')
+  );
+
+  const state = readFakeClaudeState(stateDir);
+  assert.equal(state.version, expectedVersion());
+  assert.equal(state.installed, true);
+  assert.ok(state.uninstallCount >= 1, 'fallback must uninstall the stale install first');
+  assert.ok(state.installCount >= 1, 'fallback must reinstall through the marketplace path');
+});
+
+test('Claude Toolkit plugin mutation polling tolerates transient plugin list failures until verification succeeds', () => {
+  const stateDir = tmpRoot();
+  // The lingering update never exits, so verification can only succeed by
+  // polling through the two transient list failures to a later valid list.
+  const fakeClaude = writeFakeClaude(stateDir, {
+    initialInstalled: true,
+    installedVersion: '2.3.0',
+    lingerAfterUpdate: true,
+    failListTimes: 2
+  });
+
+  const writeResult = runSetup('--write', fakeClaude);
+  assert.equal(writeResult.status, 0, writeResult.stderr);
+  const summary = JSON.parse(writeResult.stdout);
+  assert.equal(summary.ok, true);
+  assert.equal(summary.version, expectedVersion());
+
+  const state = readFakeClaudeState(stateDir);
+  assert.equal(state.version, expectedVersion());
+  assert.equal(state.failListRemaining, 0, 'transient list failures were consumed during polling');
+  assert.equal(state.uninstallCount, 0, 'transient failures must not trigger the reinstall fallback');
+});
+
+test('setup orchestrator outer Claude timeouts cover the helper verification budgets with cleanup grace', () => {
+  const orchestrator = require('../scripts/setup-toolkit.cjs');
+  const budgets = orchestrator.claudeSetupBudgets();
+
+  // The outer timeout must never undercut the helper's own bounded budgets:
+  // resolve probe + plugin list for verify; the full mutation sequence with
+  // both mutation phases for write. Both remain finite backstops.
+  assert.equal(budgets.verify, setup.verifyBudgetMs());
+  assert.equal(budgets.write, setup.writeBudgetMs());
+  assert.ok(budgets.verify >= 10000 + 120000, 'verify budget covers probe + one plugin list');
+  assert.ok(
+    budgets.write >= setup.mutationDeadlineMs() * 2 + 120000 * 4 + 10000,
+    'write budget covers both mutation phases plus the sync command steps'
+  );
+  assert.ok(Number.isFinite(budgets.write) && budgets.write < 60 * 60 * 1000, 'write budget stays bounded');
+});
+
+test('Claude Toolkit plugin mutation deadline and poll env controls reject malformed or unsafe values', () => {
+  const savedDeadline = process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS;
+  const savedPoll = process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS;
+  try {
+    for (const bad of ['abc', '0', '-100', String(2 * 60 * 60 * 1000)]) {
+      process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS = bad;
+      assert.equal(setup.mutationDeadlineMs(), 120000, `deadline fallback for ${JSON.stringify(bad)}`);
+    }
+    for (const bad of ['abc', '0', '-5', '1']) {
+      process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS = bad;
+      assert.equal(setup.mutationPollMs(), 500, `poll fallback for ${JSON.stringify(bad)}`);
+    }
+    process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS = '2000';
+    process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS = '50';
+    assert.equal(setup.mutationDeadlineMs(), 2000);
+    assert.equal(setup.mutationPollMs(), 50);
+  } finally {
+    if (savedDeadline === undefined) delete process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS;
+    else process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS = savedDeadline;
+    if (savedPoll === undefined) delete process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS;
+    else process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS = savedPoll;
+  }
 });
 
 test('Claude Toolkit plugin setup rejects an unusable Claude CLI', () => {
