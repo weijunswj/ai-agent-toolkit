@@ -16,8 +16,8 @@ Start with Local Setup for Docker Desktop on your own computer. Use Page 1's ngr
 
 | Need | Open |
 | --- | --- |
-| Local stack templates | [templates/local-stack/](./templates/local-stack/) |
-| Production Cloudflare stack templates | [templates/production-cloudflare-stack/](./templates/production-cloudflare-stack/) |
+| Local stack templates | [templates/.n8n-local/](./templates/.n8n-local/) |
+| Production Cloudflare stack templates | [templates/.n8n-production-cloudflare/](./templates/.n8n-production-cloudflare/) |
 
 ## Skills-First Routing
 

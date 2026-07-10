@@ -20,7 +20,7 @@ Review [pack.json](pack.json) before copying files.
 
 - [AI Coding Agent Rules](../../../ai-coding-agent-rules/), the repo-local `AGENTS.md` template, and the Claude Code `CLAUDE.md` shim.
 - [n8n Agent Rules](../../../n8n-agent-rules/) and the optional [Claude n8n adapter](../../../n8n-agent-rules/adapters/CLAUDE.n8n-brief.template.md).
-- [Local stack templates](../../templates/local-stack/), [production Cloudflare stack templates](../../templates/production-cloudflare-stack/), [production server backup templates](../../templates/production-server-backups/), Claude Code [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup references, and the local/production n8n guides.
+- [Local stack templates](../../templates/.n8n-local/), [production Cloudflare stack templates](../../templates/.n8n-production-cloudflare/), [production server backup templates](../../templates/production-server-backups/), Claude Code [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup references, and the local/production n8n guides.
 
 ## Review Notes
 

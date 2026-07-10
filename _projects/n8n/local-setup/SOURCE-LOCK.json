@@ -86,37 +86,37 @@
     {
       "mode": "adapted",
       "source_path": "templates/local-stack/docker-compose.yml",
-      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/docker-compose.yml",
+      "project_path": "_projects/n8n/local-setup/_main/templates/.n8n-local/docker-compose.yml",
       "notes": "Local Compose stack remains source-owned here. It is local-first with Postgres and n8n; the ngrok service is the supported Compose tunnel path."
     },
     {
       "mode": "adapted",
       "source_path": "templates/local-stack/.env.example",
-      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/.env.example",
+      "project_path": "_projects/n8n/local-setup/_main/templates/.n8n-local/.env.example",
       "notes": "Placeholder-only environment template updated to separate local runtime values from optional public URL values."
     },
     {
       "mode": "adapted",
       "source_path": "templates/local-stack/.gitignore",
-      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/.gitignore",
+      "project_path": "_projects/n8n/local-setup/_main/templates/.n8n-local/.gitignore",
       "notes": "Toolkit-authored local stack ignore template for private env files, backup folders, import staging, and credential export artifacts."
     },
     {
       "mode": "adapted",
       "source_path": "templates/local-stack/n8n-local.cmd",
-      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/_n8n-local.cmd",
+      "project_path": "_projects/n8n/local-setup/_main/templates/.n8n-local/_n8n-local.cmd",
       "notes": "Renamed by adding an underscore prefix. _n8n-local.cmd is now the supported launcher entrypoint."
     },
     {
       "mode": "adapted",
       "source_path": "templates/local-stack/n8n-local-desktop-shortcut.cmd",
-      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/n8n-local-desktop-shortcut.cmd",
+      "project_path": "_projects/n8n/local-setup/_main/templates/.n8n-local/n8n-local-desktop-shortcut.cmd",
       "notes": "Desktop convenience launcher added. It delegates to %USERPROFILE%\\.n8n-local\\_n8n-local.cmd so runtime files stay out of OneDrive Desktop."
     },
     {
       "mode": "adapted",
       "source_path": "templates/local-stack/scripts/n8n-local-menu.ps1",
-      "project_path": "_projects/n8n/local-setup/_main/templates/local-stack/scripts/n8n-local-menu.ps1",
+      "project_path": "_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1",
       "notes": "Clean-rebuilt menu with exact guide option names. The menu loops after actions and closes only when the user selects Exit or closes the window. It includes Postgres backup/restore plus local-only n8n CLI workflow/credential backup configuration, immediate runs, schedule disable, manifests, and retention cleanup."
     },
     {

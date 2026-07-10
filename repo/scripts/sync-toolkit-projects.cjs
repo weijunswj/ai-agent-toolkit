@@ -23,6 +23,7 @@ const approvedOutputPrefixes = ['skills/', '.codex-plugin/', '.claude-plugin/'];
 const rootSurfacePrefixes = ['skills/', '.codex-plugin/', '.claude-plugin/'];
 const forbiddenNames = new Set([
   '.n8n-local',
+  '.n8n-production-cloudflare',
   '.tmp',
   '.to-sanitise',
   '.sanitised',
@@ -36,6 +37,10 @@ const forbiddenNames = new Set([
   'derived'
 ]);
 const forbiddenDeniedPolicy = ['.env*', '**/*credential*', '**/*.key', '**/*.pem'];
+const allowedRuntimeNamedTemplateDirs = new Set([
+  '_projects/n8n/local-setup/_main/templates/.n8n-local',
+  '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare'
+]);
 const supportedKinds = new Set(['copy', 'concat', 'curated', 'extract', 'json', 'linked']);
 const textOutputExtensions = new Set(['.md', '.json', '.ps1', '.yaml', '.yml']);
 const supportedPublishSurfaces = new Set(['skill', 'source_only']);
@@ -248,7 +253,9 @@ function validateForbiddenFiles(errors, project) {
     const lower = rel.toLowerCase();
 
     if (entry.dirent.isDirectory()) {
-      if (forbiddenNames.has(name)) fail(errors, `${project.id} forbidden directory in _main/: ${rel}`);
+      if (forbiddenNames.has(name) && !allowedRuntimeNamedTemplateDirs.has(slash(rel))) {
+        fail(errors, `${project.id} forbidden directory in _main/: ${rel}`);
+      }
       continue;
     }
 

@@ -195,30 +195,228 @@ function Invoke-ComposeCapture {
   }
 }
 
-function Test-DockerReady {
-  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    Write-ErrorMessage 'Docker CLI was not found. Install Docker Desktop or Docker Engine before running this stack.'
+# BEGIN SHARED DOCKER LAUNCH PREFLIGHT
+$script:LauncherRelaunchExitCode = 75
+$script:LauncherMaxRelaunches = 1
+
+function Get-LauncherRelaunchCount {
+  $raw = [string]$env:N8N_LAUNCHER_RELAUNCH_COUNT
+  if (-not $raw) { return 0 }
+  if ($raw -notmatch '^(0|[1-9][0-9]*)$') {
+    return $script:LauncherMaxRelaunches
+  }
+
+  [int]$count = 0
+  if (-not [int]::TryParse($raw, [ref]$count)) {
+    return $script:LauncherMaxRelaunches
+  }
+  return $count
+}
+
+function Test-LauncherRelaunchAlreadyAttempted {
+  return ((Get-LauncherRelaunchCount) -ge $script:LauncherMaxRelaunches)
+}
+
+function Write-PostRelaunchDockerGuidance {
+  param([string]$RequirementName)
+
+  Write-ErrorMessage "$RequirementName is still unavailable after one controlled launcher relaunch."
+  Write-Info 'Docker Desktop was installed or an installation was attempted, but the refreshed Windows PATH still does not expose the required command.'
+  Write-Info 'Refresh PATH manually, sign out of Windows, or reboot Windows, then run this launcher again.'
+}
+
+function Test-DockerCli {
+  return [bool](Get-Command docker -ErrorAction SilentlyContinue)
+}
+
+function Test-DockerDesktopCli {
+  if (-not (Test-DockerCli)) { return $false }
+  try {
+    & docker desktop --help *> $null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  }
+}
+
+function Test-WingetCli {
+  return [bool](Get-Command winget -ErrorAction SilentlyContinue)
+}
+
+function Test-DockerInstallBlockedByAutomation {
+  foreach ($name in @('CI', 'GITHUB_ACTIONS', 'TF_BUILD', 'BUILD_BUILDID', 'N8N_LAUNCHER_TEST_MODE')) {
+    $value = [string](Get-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue).Value
+    if ($value -match '^(1|true|yes|on)$') { return $true }
+    if ($name -eq 'BUILD_BUILDID' -and $value) { return $true }
+  }
+  return $false
+}
+
+function Test-DockerComposeCli {
+  if (-not (Test-DockerCli)) { return $false }
+  try {
+    & docker compose version *> $null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  }
+}
+
+function Wait-ForDockerReady {
+  param(
+    [int]$MaxAttempts = 60,
+    [int]$DelaySeconds = 2
+  )
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) {
+      Write-Host ''
+      return $true
+    }
+    Write-Host '.' -NoNewline -ForegroundColor DarkGray
+    if ($attempt -lt $MaxAttempts) { Start-Sleep -Seconds $DelaySeconds }
+  }
+  Write-Host ''
+  return $false
+}
+
+function Request-LauncherRelaunch {
+  Write-Success 'Docker Desktop installation completed.'
+  Write-Info 'The launcher must restart before it can detect the new Docker CLI and Docker Compose installation.'
+  [void](Read-Host 'Press Enter to restart the launcher')
+  exit $script:LauncherRelaunchExitCode
+}
+
+function Invoke-DockerDesktopInstall {
+  param([string]$RequirementName = 'Docker Desktop')
+
+  if (Test-DockerInstallBlockedByAutomation) {
+    Write-ErrorMessage 'Docker Desktop installation is disabled in CI or test execution.'
+    Write-Info 'Install Docker Desktop manually in an interactive Windows session, then run this launcher again.'
     return $false
   }
 
-  try {
-    & docker compose version *> $null
-    if ($LASTEXITCODE -ne 0) {
-      Write-ErrorMessage 'Docker Compose was not found or did not answer.'
+  if (-not (Test-WingetCli)) {
+    Write-ErrorMessage "$RequirementName is missing, and winget was not found."
+    Write-Info 'Install Docker Desktop manually from https://www.docker.com/products/docker-desktop/, then run this launcher again.'
+    return $false
+  }
+
+  Write-Warning "$RequirementName is missing."
+  Write-Info 'Docker Desktop is required because this stack needs the Docker CLI, Docker Compose, and a running Docker engine.'
+  Write-Info 'The launcher can install Docker Desktop with the reviewed Windows winget package.'
+  Write-Warning 'This downloads software, may show Windows approval prompts, and may require a sign-out or reboot.'
+  $choice = Read-Host 'Install Docker Desktop now with winget? (y/N)'
+  if ($choice -notmatch '^(y|yes)$') {
+    Write-Info 'Install skipped. Install Docker Desktop manually, then run this launcher again.'
+    return $false
+  }
+
+  $installArgs = @(
+    'install',
+    '--id', 'Docker.DockerDesktop',
+    '--exact',
+    '--source', 'winget',
+    '--accept-package-agreements',
+    '--accept-source-agreements'
+  )
+
+  Write-Info 'Installing Docker Desktop with winget...'
+  $exitCode = Invoke-NativeCommand -Command { & winget @installArgs }
+  if ($exitCode -ne 0) {
+    Write-ErrorMessage "Docker Desktop install command failed with exit code $exitCode."
+    return $false
+  }
+
+  Request-LauncherRelaunch
+  return $false
+}
+
+function Start-DockerDesktopAndWait {
+  param(
+    [int]$MaxAttempts = 60,
+    [int]$DelaySeconds = 2
+  )
+
+  if (-not (Test-DockerCli)) {
+    Write-ErrorMessage 'Docker CLI was not found.'
+    return $false
+  }
+  if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) { return $true }
+
+  if (-not (Test-DockerDesktopCli)) {
+    Write-Info 'Start Docker Desktop manually, wait for it to finish starting, then run this launcher again.'
+    return $false
+  }
+
+  Write-Info 'Starting Docker Desktop...'
+  $startExit = Invoke-NativeCommand -Command { & docker desktop start }
+  if ($startExit -ne 0) {
+    Write-Warning "Docker Desktop start command exited with code $startExit; waiting anyway in case the app is opening."
+  }
+
+  Write-Info 'Waiting for the Docker engine to become ready...'
+  if (Wait-ForDockerReady -MaxAttempts $MaxAttempts -DelaySeconds $DelaySeconds) {
+    Write-Success 'Docker Desktop is running.'
+    return $true
+  }
+
+  Write-Warning 'Docker Desktop did not become ready before the bounded wait timed out.'
+  Write-Info 'Leave Docker Desktop open until it finishes starting, then run this launcher again.'
+  return $false
+}
+
+function Invoke-LaunchPreflight {
+  if (Test-MenuFlag -Name 'skip-launch-preflight') { return $true }
+
+  if (-not (Test-DockerCli)) {
+    Clear-MenuScreen
+    Write-Header 'Launch Preflight'
+    Write-Info 'Docker Desktop is required because this stack needs the Docker CLI, Docker Compose, and a running Docker engine.'
+    if (Test-LauncherRelaunchAlreadyAttempted) {
+      Write-PostRelaunchDockerGuidance -RequirementName 'Docker CLI'
       return $false
     }
-  } catch {
-    Write-ErrorMessage 'Docker Compose was not found or did not answer.'
+    [void](Invoke-DockerDesktopInstall -RequirementName 'Docker CLI')
+    return $false
+  }
+
+  if (-not (Test-DockerComposeCli)) {
+    Clear-MenuScreen
+    Write-Header 'Launch Preflight'
+    Write-Info 'Docker CLI was found, but Docker Compose is unavailable, so the stack is not ready.'
+    if (Test-LauncherRelaunchAlreadyAttempted) {
+      Write-PostRelaunchDockerGuidance -RequirementName 'Docker Compose'
+      return $false
+    }
+    [void](Invoke-DockerDesktopInstall -RequirementName 'Docker Compose')
     return $false
   }
 
   if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -ne 0) {
-    Write-ErrorMessage 'Docker is installed, but the Docker engine is not running.'
-    return $false
+    Clear-MenuScreen
+    Write-Header 'Launch Preflight'
+    return (Start-DockerDesktopAndWait)
   }
 
   return $true
 }
+
+function Test-DockerReady {
+  if (-not (Test-DockerCli)) {
+    Write-ErrorMessage 'Docker CLI was not found. Run this launcher again to use the guided Docker Desktop install.'
+    return $false
+  }
+  if (-not (Test-DockerComposeCli)) {
+    Write-ErrorMessage 'Docker Compose was not found. Run this launcher again to install or repair Docker Desktop.'
+    return $false
+  }
+  if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) { return $true }
+
+  Write-Warning 'Docker is installed, but its engine is not running.'
+  return (Start-DockerDesktopAndWait)
+}
+# END SHARED DOCKER LAUNCH PREFLIGHT
 
 function Get-RunningServices {
   if (-not (Test-Path -LiteralPath (Join-Path $script:StackRoot 'docker-compose.yml') -PathType Leaf)) {
@@ -547,7 +745,8 @@ function Test-ProductionN8nHttpReady {
         return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
       } catch {
         if ($_.Exception.Response) {
-          return $true
+          $statusCode = [int]$_.Exception.Response.StatusCode
+          return ($statusCode -ge 200 -and $statusCode -lt 500)
         }
       }
     }
@@ -580,29 +779,82 @@ function Test-ProductionN8nDatabaseImageMismatchLog {
   return ($text -match 'McpRegistryServerEntity\.id does not exist' -or $text -match 'different migration states' -or $text -match 'Migration timestamp mismatch')
 }
 
-function Wait-ForProductionN8nReady {
+function Protect-ProductionN8nDiagnosticLogLine {
+  param([string]$Line)
+
+  $safe = ([string]$Line).TrimEnd()
+  if (-not $safe) { return '' }
+  if ($safe -match '(?i)(authorization|bearer\s+\S+|basic\s+\S+|token|secret|password|api[_ -]?key|credential|://[^/@\s]+:[^/@\s]+@)') {
+    return '[redacted potentially sensitive n8n log line]'
+  }
+  if ($safe.Length -gt 300) {
+    return ($safe.Substring(0, 300) + ' ... [truncated]')
+  }
+  return $safe
+}
+
+function Write-ProductionN8nTimeoutDiagnostics {
+  param([string[]]$LogLines)
+
+  Write-Warning 'Recent n8n logs (sensitive-looking lines are redacted):'
+  $recent = @($LogLines | Select-Object -Last 20)
+  if ($recent.Count -eq 0) {
+    Write-Info '  No recent n8n log lines were returned.'
+  } else {
+    foreach ($line in $recent) {
+      Write-Info "  $(Protect-ProductionN8nDiagnosticLogLine -Line $line)"
+    }
+  }
+  Write-Info 'Next actions: use View logs for more detail, confirm the local port and .env values, then retry after n8n finishes starting.'
+}
+
+function Test-ProductionN8nStableReadiness {
   param(
-    [string]$Context = 'production n8n startup',
-    [switch]$AllowSelfHeal
+    [int]$MaxAttempts,
+    [int]$RequiredSuccesses,
+    [int]$DelaySeconds
   )
 
-  Write-Info "Waiting for n8n editor to respond at $(Get-LocalN8nUrl)."
   $readyStreak = 0
-  for ($attempt = 1; $attempt -le 20; $attempt += 1) {
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+    Write-Info "Readiness check $attempt/$MaxAttempts at $(Get-LocalN8nUrl) (stable responses: $readyStreak/$RequiredSuccesses)."
     if (Test-ProductionN8nHttpReady) {
       $readyStreak += 1
-      if ($readyStreak -ge 3) {
+      if ($readyStreak -ge $RequiredSuccesses) {
         $logs = @(Get-ProductionN8nRecentLogLines -Tail 60)
         if (-not (Test-ProductionN8nDatabaseImageMismatchLog -LogLines $logs) -and -not (Test-ProductionN8nEncryptionKeyMismatchLog -LogLines $logs)) {
-          Write-Success 'n8n editor is responding and stayed reachable.'
           return $true
         }
-        break
+        return $false
       }
     } else {
       $readyStreak = 0
     }
-    Start-Sleep -Seconds 2
+    if ($attempt -lt $MaxAttempts -and $DelaySeconds -gt 0) {
+      Start-Sleep -Seconds $DelaySeconds
+    }
+  }
+  return $false
+}
+
+function Wait-ForProductionN8nReady {
+  param(
+    [string]$Context = 'production n8n startup',
+    [switch]$AllowSelfHeal,
+    [int]$MaxAttempts = 20,
+    [int]$RequiredSuccesses = 3,
+    [int]$DelaySeconds = 2
+  )
+
+  if ($MaxAttempts -lt 1) { throw 'MaxAttempts must be at least 1.' }
+  if ($RequiredSuccesses -lt 2) { throw 'RequiredSuccesses must be at least 2.' }
+  if ($RequiredSuccesses -gt $MaxAttempts) { throw 'RequiredSuccesses cannot exceed MaxAttempts.' }
+  if ($DelaySeconds -lt 0) { throw 'DelaySeconds cannot be negative.' }
+
+  Write-Info "Waiting for the local n8n editor to recover at $(Get-LocalN8nUrl). This does not verify Cloudflare tunnel health."
+  if (Test-ProductionN8nStableReadiness -MaxAttempts $MaxAttempts -RequiredSuccesses $RequiredSuccesses -DelaySeconds $DelaySeconds) {
+    Write-Success 'Local n8n editor is responding and stayed reachable.'
+    return $true
   }
 
   $logs = @(Get-ProductionN8nRecentLogLines)
@@ -612,40 +864,26 @@ function Wait-ForProductionN8nReady {
       if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n')) -ne 0) {
         return $false
       }
-      $readyStreak = 0
-      for ($attempt = 1; $attempt -le 20; $attempt += 1) {
-        if (Test-ProductionN8nHttpReady) {
-          $readyStreak += 1
-          if ($readyStreak -ge 3) {
-            $logs = @(Get-ProductionN8nRecentLogLines -Tail 60)
-            if (-not (Test-ProductionN8nDatabaseImageMismatchLog -LogLines $logs) -and -not (Test-ProductionN8nEncryptionKeyMismatchLog -LogLines $logs)) {
-              Write-Success 'n8n editor is responding after self-heal and stayed reachable.'
-              return $true
-            }
-            break
-          }
-        } else {
-          $readyStreak = 0
-        }
-        Start-Sleep -Seconds 2
+      if (Test-ProductionN8nStableReadiness -MaxAttempts $MaxAttempts -RequiredSuccesses $RequiredSuccesses -DelaySeconds $DelaySeconds) {
+        Write-Success 'Local n8n editor is responding after self-heal and stayed reachable.'
+        return $true
       }
+      $logs = @(Get-ProductionN8nRecentLogLines)
     }
   }
 
-  Write-ErrorMessage "$Context did not produce a reachable n8n editor at $(Get-LocalN8nUrl)."
+  Write-ErrorMessage "$Context did not produce a stably reachable local n8n editor at $(Get-LocalN8nUrl)."
   if (Test-ProductionN8nEncryptionKeyMismatchLog -LogLines $logs) {
     Write-ErrorMessage 'Recent logs show mismatching encryption keys between /home/node/.n8n/config and N8N_ENCRYPTION_KEY.'
-    Write-Info 'Use View logs for details. If this continues, the restored data likely belongs to a different N8N_ENCRYPTION_KEY than the active .env.'
+    Write-Info 'If this continues, the restored data likely belongs to a different N8N_ENCRYPTION_KEY than the active .env.'
   } elseif (Test-ProductionN8nDatabaseImageMismatchLog -LogLines $logs) {
     Write-ErrorMessage 'Recent logs show a database schema / n8n image version mismatch.'
     Write-Info 'Restore can auto-apply N8N_IMAGE only when the backup .env includes it.'
     Write-Info 'Use a backup zip that includes SECRET-DO-NOT-COMMIT.env / .env with the source N8N_IMAGE, or set N8N_IMAGE manually to the source n8n image and retry.'
-  } else {
-    Write-Info 'Use View logs to inspect the n8n startup error.'
   }
+  Write-ProductionN8nTimeoutDiagnostics -LogLines $logs
   return $false
 }
-
 function Normalize-N8nUrl {
   param([string]$Url)
 
@@ -1031,7 +1269,7 @@ function Stop-CloudflareTunnel {
   if (-not (Test-DockerReady)) { return }
 
   $wasN8nRunning = (Get-RunningServices) -contains 'n8n'
-  [void](Invoke-Compose -Arguments @('stop', 'cloudflared'))
+  if ((Invoke-Compose -Arguments @('stop', 'cloudflared')) -ne 0) { return }
 
   $values = Read-EnvFile
   if (-not (Set-ActiveN8nUrl -Url (Get-LocalN8nUrl -Values $values) -Mode 'localhost' -HostName 'localhost')) {
@@ -1040,7 +1278,8 @@ function Stop-CloudflareTunnel {
 
   if ($wasN8nRunning) {
     Write-Info 'Recreating n8n so WEBHOOK_URL is now local.'
-    [void](Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n'))
+    if ((Invoke-Compose -Arguments @('up', '-d', '--pull', 'never', '--force-recreate', 'n8n')) -ne 0) { return }
+    if (-not (Wait-ForProductionN8nReady -Context 'Production n8n localhost recovery after Cloudflare stop' -AllowSelfHeal)) { return }
   }
 
   Write-Success 'Cloudflare tunnel stopped. Your Cloudflare tunnel and DNS route were not deleted.'
@@ -2943,9 +3182,19 @@ function Show-UpdateMenu {
     }
   }
 
-  [void](Invoke-Compose -Arguments (@('pull') + $selected))
-  [void](Invoke-Compose -Arguments (@('up', '-d', '--force-recreate') + $selected))
+  if ((Invoke-Compose -Arguments (@('pull') + $selected)) -ne 0) {
+    Write-ErrorMessage 'Image pull failed. Selected services were not recreated.'
+    return
+  }
+  if ((Invoke-Compose -Arguments (@('up', '-d', '--force-recreate') + $selected)) -ne 0) {
+    Write-ErrorMessage 'Selected service recreation failed.'
+    return
+  }
   [void](Invoke-Compose -Arguments @('ps'))
+
+  if ($selected -contains 'n8n') {
+    if (-not (Wait-ForProductionN8nReady -Context 'Production n8n image update/recreate' -AllowSelfHeal)) { return }
+  }
 
   if ($StartCloudflareAfter) {
     Start-N8nWithCloudflare
@@ -3137,10 +3386,16 @@ function Show-MainMenu {
 
 Initialize-MenuRuntime
 
+if (Test-MenuFlag -Name 'library') {
+  return
+}
+
 if (Test-MenuFlag -Name 'run-production-backup') {
   if (Backup-N8nProductionNow -Scheduled:(Test-MenuFlag -Name 'scheduled')) { exit 0 }
   exit 1
 }
+
+if (-not (Invoke-LaunchPreflight)) { Pause-Menu; exit 0 }
 
 while (-not $script:ExitRequested) {
   Show-MainMenu

@@ -20,7 +20,7 @@ Use [Page 3 - Production Self-Hosting With Cloudflare Tunnel](./Page%203%20-%20P
 | --- | --- | --- | --- |
 | 1. | Install Docker Desktop, or let the launcher offer the winget install if Docker is missing. | Your Windows computer. | Docker Compose is available. |
 | 2. | Create the local stack folder at `%USERPROFILE%\.n8n-local`. | Windows Explorer. | Local runtime files stay outside this repo and outside OneDrive Desktop. |
-| 3. | Copy everything inside [templates/local-stack/](./templates/local-stack/) into your local stack folder. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, `_n8n-local.cmd`, and `scripts\`. |
+| 3. | Copy everything inside [templates/.n8n-local/](./templates/.n8n-local/) into your local stack folder. | Toolkit repo or copied skill folder. | The folder has Compose, `.env.example`, `_n8n-local.cmd`, and `scripts\`. |
 | 4. | Copy `.env.example` to `.env`. | `<LOCAL_STACK_FOLDER>`. | You have a private local settings file. |
 | 5. | Fill only local runtime values first. | `.env`. | Local n8n and Postgres can start. |
 | 6. | Optional: copy `n8n-local-desktop-shortcut.cmd` to your Desktop. | Desktop. | You get a convenient button without putting the runtime folder on the Desktop. |
@@ -55,7 +55,7 @@ docker --version
 docker compose version
 ```
 
-If Docker is installed but not running, `_n8n-local.cmd` starts Docker Desktop and waits for the engine before it shows the main menu. If Docker or Docker Compose is missing, the launcher offers a winget-based Docker Desktop install. The install still asks first because it downloads software, may show Windows approval prompts, and may require a restart.
+If Docker is installed but not running, `_n8n-local.cmd` starts Docker Desktop and waits for the engine before it shows the main menu. If Docker or Docker Compose is missing, the launcher offers a winget-based Docker Desktop install. The install still asks first because it downloads software, may show Windows approval prompts, and may require a Windows restart. After a successful winget install, press Enter when prompted: the CMD launcher preserves its arguments, refreshes the Windows PATH, performs one controlled relaunch, and reruns Docker CLI, Compose, and engine preflight before any stack action can run.
 
 ---
 
@@ -110,17 +110,17 @@ New-Item -ItemType Directory -Force "$env:USERPROFILE\.n8n-local"
 
 ## 4. Copy The Local Stack Templates
 
-The local stack template folder is [templates/local-stack/](./templates/local-stack/).
+The local stack template folder is [templates/.n8n-local/](./templates/.n8n-local/).
 
 | File or folder | Link |
 | --- | --- |
-| Docker Compose template | [docker-compose.yml](./templates/local-stack/docker-compose.yml) |
-| Environment template | [.env.example](./templates/local-stack/.env.example) |
-| Windows launcher | [_n8n-local.cmd](./templates/local-stack/_n8n-local.cmd) |
-| Desktop shortcut launcher | [n8n-local-desktop-shortcut.cmd](./templates/local-stack/n8n-local-desktop-shortcut.cmd) |
-| Menu script | [n8n-local-menu.ps1](./templates/local-stack/scripts/n8n-local-menu.ps1) |
+| Docker Compose template | [docker-compose.yml](./templates/.n8n-local/docker-compose.yml) |
+| Environment template | [.env.example](./templates/.n8n-local/.env.example) |
+| Windows launcher | [_n8n-local.cmd](./templates/.n8n-local/_n8n-local.cmd) |
+| Desktop shortcut launcher | [n8n-local-desktop-shortcut.cmd](./templates/.n8n-local/n8n-local-desktop-shortcut.cmd) |
+| Menu script | [n8n-local-menu.ps1](./templates/.n8n-local/scripts/n8n-local-menu.ps1) |
 
-1. Open [templates/local-stack/](./templates/local-stack/).
+1. Open [templates/.n8n-local/](./templates/.n8n-local/).
 2. Select everything inside that folder.
 3. Copy the selected files and folders.
 4. Paste them into `<LOCAL_STACK_FOLDER>`.
@@ -321,7 +321,7 @@ It reads `N8N_LOCAL_PORT` from `.env` automatically. If `.env` says `N8N_LOCAL_P
 1. Open `<LOCAL_STACK_FOLDER>`.
 2. Double-click `_n8n-local.cmd`.
 3. Let the launch preflight finish. It checks Docker Desktop and Docker Compose before the main menu appears.
-4. If Docker Desktop is missing, approve the winget install only when you want this launcher to download and install Docker Desktop for you.
+4. If Docker Desktop is missing, approve the winget install only when you want this launcher to download and install Docker Desktop for you. After installation succeeds, press Enter so the launcher can restart once and rerun preflight.
 5. Do not launch n8n directly from Docker Desktop. Launch it from `_n8n-local.cmd` instead because the launcher shows status, checks for missing files, keeps update choices guided, and gives you backup/log/help options.
 6. Choose `Start n8n`, then `Localhost only`.
 7. Open a web browser.
@@ -448,9 +448,12 @@ If you copied `n8n-local-desktop-shortcut.cmd` to your Desktop, you can double-c
 
 Before the main menu appears, the launcher runs a launch preflight:
 
-- If Docker Desktop or Docker Compose is missing and `winget` is available, it offers to install Docker Desktop.
-- If Docker Desktop is installed but stopped, it starts Docker Desktop and waits for the engine.
-- If Docker still cannot become ready, it returns to the menu with the current status so you can troubleshoot.
+- If Docker Desktop or Docker Compose is missing and `winget` is available, it offers to install Docker Desktop; Enter/no remains the safe default.
+- After an approved install succeeds, it waits for Enter, preserves the launcher arguments, refreshes PATH, and performs one controlled relaunch before rerunning preflight.
+- If `winget` is unavailable, it stops with manual Docker Desktop installation guidance.
+- CI and explicit launcher test mode disable the installation path before any prompt or winget command can run.
+- If Docker Desktop is installed but stopped, it starts Docker Desktop when the supported CLI is available and waits for the engine with a bounded timeout.
+- If Docker is still unavailable after the controlled relaunch, it stops with honest sign-out, reboot, or PATH-refresh guidance instead of looping or starting the stack.
 
 Use `--skip-launch-preflight` only when you want to open the menu without the startup requirement checks:
 
@@ -770,7 +773,8 @@ Use this table only when you want an AI coding agent to work with n8n workflows 
 
 1. Relaunch `_n8n-local.cmd`.
 2. If the launch preflight offers a winget install, approve it only when you want this launcher to download and install Docker Desktop for you.
-3. If winget is unavailable or Windows needs a restart, install Docker Desktop manually from [Docker Desktop](https://www.docker.com/products/docker-desktop/), then reopen `_n8n-local.cmd`.
+3. After an approved winget install succeeds, press Enter so the launcher can restart once and rerun all Docker checks automatically.
+4. If winget is unavailable, or Docker is still not detected after that controlled relaunch, install Docker Desktop manually from [Docker Desktop](https://www.docker.com/products/docker-desktop/) and follow the launcher guidance for a PATH refresh, sign-out, or reboot before reopening `_n8n-local.cmd`.
 
 ### `.env` Is Missing
 
@@ -859,5 +863,5 @@ Do not add Redis or workers to the default local setup. Use queue mode later whe
 | --- | --- |
 | [Page 2 - Hostinger Coolify VPS n8n](./Page%202%20-%20Hostinger%20VPS.md) | You need always-on public n8n hosting on Hostinger with Coolify already set up. |
 | [Page 3 - Production Self-Hosting With Cloudflare Tunnel](./Page%203%20-%20Production%20Self-Hosting%20With%20Cloudflare%20Tunnel.md) | You need production self-hosting from a local/CGNAT machine through Cloudflare Tunnel. |
-| [Local stack templates](./templates/local-stack/) | You need the Docker Compose, environment template, launcher, and menu script. |
+| [Local stack templates](./templates/.n8n-local/) | You need the Docker Compose, environment template, launcher, and menu script. |
 | [n8n Agent Rules](../../../../skills/n8n-agent-rules/) | You need the full n8n operating rules before workflow/live n8n work. |

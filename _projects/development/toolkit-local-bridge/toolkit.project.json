@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.25",
+  "version": "2.3.27",
   "version_policy": "semver",
-  "version_notes": "Bumps the native Toolkit package after direct n8n import/export wrappers moved prompts back to Read-Host with fail-closed restart input handling.",
+  "version_notes": "Bumps the native Toolkit package for the corrected one-relaunch Docker preflight bound in both n8n stack launchers.",
   "outputs": [
     {
       "kind": "curated",

@@ -444,7 +444,42 @@ function Test-StackFiles {
   return ($composeExists -and $envExists -and $configValid)
 }
 
+# BEGIN SHARED DOCKER LAUNCH PREFLIGHT
+$script:LauncherRelaunchExitCode = 75
+$script:LauncherMaxRelaunches = 1
+
+function Get-LauncherRelaunchCount {
+  $raw = [string]$env:N8N_LAUNCHER_RELAUNCH_COUNT
+  if (-not $raw) { return 0 }
+  if ($raw -notmatch '^(0|[1-9][0-9]*)$') {
+    return $script:LauncherMaxRelaunches
+  }
+
+  [int]$count = 0
+  if (-not [int]::TryParse($raw, [ref]$count)) {
+    return $script:LauncherMaxRelaunches
+  }
+  return $count
+}
+
+function Test-LauncherRelaunchAlreadyAttempted {
+  return ((Get-LauncherRelaunchCount) -ge $script:LauncherMaxRelaunches)
+}
+
+function Write-PostRelaunchDockerGuidance {
+  param([string]$RequirementName)
+
+  Write-ErrorMessage "$RequirementName is still unavailable after one controlled launcher relaunch."
+  Write-Info 'Docker Desktop was installed or an installation was attempted, but the refreshed Windows PATH still does not expose the required command.'
+  Write-Info 'Refresh PATH manually, sign out of Windows, or reboot Windows, then run this launcher again.'
+}
+
+function Test-DockerCli {
+  return [bool](Get-Command docker -ErrorAction SilentlyContinue)
+}
+
 function Test-DockerDesktopCli {
+  if (-not (Test-DockerCli)) { return $false }
   try {
     & docker desktop --help *> $null
     return ($LASTEXITCODE -eq 0)
@@ -457,11 +492,17 @@ function Test-WingetCli {
   return [bool](Get-Command winget -ErrorAction SilentlyContinue)
 }
 
-function Test-DockerComposeCli {
-  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    return $false
+function Test-DockerInstallBlockedByAutomation {
+  foreach ($name in @('CI', 'GITHUB_ACTIONS', 'TF_BUILD', 'BUILD_BUILDID', 'N8N_LAUNCHER_TEST_MODE')) {
+    $value = [string](Get-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue).Value
+    if ($value -match '^(1|true|yes|on)$') { return $true }
+    if ($name -eq 'BUILD_BUILDID' -and $value) { return $true }
   }
+  return $false
+}
 
+function Test-DockerComposeCli {
+  if (-not (Test-DockerCli)) { return $false }
   try {
     & docker compose version *> $null
     return ($LASTEXITCODE -eq 0)
@@ -478,32 +519,45 @@ function Wait-ForDockerReady {
 
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
     if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) {
+      Write-Host ''
       return $true
     }
-
-    if ($attempt -lt $MaxAttempts) {
-      Start-Sleep -Seconds $DelaySeconds
-    }
+    Write-Host '.' -NoNewline -ForegroundColor DarkGray
+    if ($attempt -lt $MaxAttempts) { Start-Sleep -Seconds $DelaySeconds }
   }
-
+  Write-Host ''
   return $false
+}
+
+function Request-LauncherRelaunch {
+  Write-Success 'Docker Desktop installation completed.'
+  Write-Info 'The launcher must restart before it can detect the new Docker CLI and Docker Compose installation.'
+  [void](Read-Host 'Press Enter to restart the launcher')
+  exit $script:LauncherRelaunchExitCode
 }
 
 function Invoke-DockerDesktopInstall {
   param([string]$RequirementName = 'Docker Desktop')
 
+  if (Test-DockerInstallBlockedByAutomation) {
+    Write-ErrorMessage 'Docker Desktop installation is disabled in CI or test execution.'
+    Write-Info 'Install Docker Desktop manually in an interactive Windows session, then run this launcher again.'
+    return $false
+  }
+
   if (-not (Test-WingetCli)) {
     Write-ErrorMessage "$RequirementName is missing, and winget was not found."
-    Write-Info 'Install Docker Desktop manually from https://www.docker.com/products/docker-desktop/, then reopen this launcher.'
+    Write-Info 'Install Docker Desktop manually from https://www.docker.com/products/docker-desktop/, then run this launcher again.'
     return $false
   }
 
   Write-Warning "$RequirementName is missing."
-  Write-Info 'The launcher can install Docker Desktop with winget.'
-  Write-Warning 'This downloads software, may show Windows approval prompts, and may require a restart.'
+  Write-Info 'Docker Desktop is required because this stack needs the Docker CLI, Docker Compose, and a running Docker engine.'
+  Write-Info 'The launcher can install Docker Desktop with the reviewed Windows winget package.'
+  Write-Warning 'This downloads software, may show Windows approval prompts, and may require a sign-out or reboot.'
   $choice = Read-Host 'Install Docker Desktop now with winget? (y/N)'
   if ($choice -notmatch '^(y|yes)$') {
-    Write-Info 'Install skipped. Install Docker Desktop manually, then reopen this launcher.'
+    Write-Info 'Install skipped. Install Docker Desktop manually, then run this launcher again.'
     return $false
   }
 
@@ -523,9 +577,8 @@ function Invoke-DockerDesktopInstall {
     return $false
   }
 
-  Write-Success 'Docker Desktop install command finished.'
-  Write-Info 'If Docker is still not found, close and reopen this launcher so Windows refreshes PATH.'
-  return $true
+  Request-LauncherRelaunch
+  return $false
 }
 
 function Start-DockerDesktopAndWait {
@@ -534,17 +587,14 @@ function Start-DockerDesktopAndWait {
     [int]$DelaySeconds = 2
   )
 
-  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+  if (-not (Test-DockerCli)) {
     Write-ErrorMessage 'Docker CLI was not found.'
     return $false
   }
-
-  if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) {
-    return $true
-  }
+  if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) { return $true }
 
   if (-not (Test-DockerDesktopCli)) {
-    Write-Info 'Start Docker Desktop manually, then rerun this launcher.'
+    Write-Info 'Start Docker Desktop manually, wait for it to finish starting, then run this launcher again.'
     return $false
   }
 
@@ -560,74 +610,62 @@ function Start-DockerDesktopAndWait {
     return $true
   }
 
-  Write-Warning 'Docker Desktop did not become ready before the wait timed out.'
-  Write-Info 'Leave Docker Desktop open until it finishes starting, then use the menu again.'
+  Write-Warning 'Docker Desktop did not become ready before the bounded wait timed out.'
+  Write-Info 'Leave Docker Desktop open until it finishes starting, then run this launcher again.'
   return $false
 }
 
 function Invoke-LaunchPreflight {
-  if (Test-MenuFlag -Name 'skip-launch-preflight') {
-    return
-  }
+  if (Test-MenuFlag -Name 'skip-launch-preflight') { return $true }
 
-  $showedPreflight = $false
-  $needsPause = $false
-
-  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+  if (-not (Test-DockerCli)) {
     Clear-MenuScreen
     Write-Header 'Launch Preflight'
-    $showedPreflight = $true
-    [void](Invoke-DockerDesktopInstall -RequirementName 'Docker Desktop')
-    $needsPause = $true
-  } elseif (-not (Test-DockerComposeCli)) {
-    Clear-MenuScreen
-    Write-Header 'Launch Preflight'
-    $showedPreflight = $true
-    [void](Invoke-DockerDesktopInstall -RequirementName 'Docker Compose')
-    $needsPause = $true
-  }
-
-  if (Get-Command docker -ErrorAction SilentlyContinue) {
-    if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -ne 0) {
-      if (-not $showedPreflight) {
-        Clear-MenuScreen
-        Write-Header 'Launch Preflight'
-        $showedPreflight = $true
-      }
-
-      if (-not (Start-DockerDesktopAndWait)) {
-        $needsPause = $true
-      }
+    Write-Info 'Docker Desktop is required because this stack needs the Docker CLI, Docker Compose, and a running Docker engine.'
+    if (Test-LauncherRelaunchAlreadyAttempted) {
+      Write-PostRelaunchDockerGuidance -RequirementName 'Docker CLI'
+      return $false
     }
-  }
-
-  if ($needsPause) {
-    Pause-Menu
-  }
-}
-
-function Test-DockerReady {
-  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    Write-ErrorMessage 'Docker CLI was not found. Install Docker Desktop, then reopen this menu.'
+    [void](Invoke-DockerDesktopInstall -RequirementName 'Docker CLI')
     return $false
   }
 
   if (-not (Test-DockerComposeCli)) {
-    Write-ErrorMessage 'Docker Compose was not found. Install or repair Docker Desktop, then reopen this menu.'
+    Clear-MenuScreen
+    Write-Header 'Launch Preflight'
+    Write-Info 'Docker CLI was found, but Docker Compose is unavailable, so the stack is not ready.'
+    if (Test-LauncherRelaunchAlreadyAttempted) {
+      Write-PostRelaunchDockerGuidance -RequirementName 'Docker Compose'
+      return $false
+    }
+    [void](Invoke-DockerDesktopInstall -RequirementName 'Docker Compose')
     return $false
   }
 
-  if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) {
-    return $true
+  if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -ne 0) {
+    Clear-MenuScreen
+    Write-Header 'Launch Preflight'
+    return (Start-DockerDesktopAndWait)
   }
 
-  Write-Warning 'Docker is installed, but it does not appear to be running.'
-  if (Start-DockerDesktopAndWait) {
-    return $true
-  }
-
-  return $false
+  return $true
 }
+
+function Test-DockerReady {
+  if (-not (Test-DockerCli)) {
+    Write-ErrorMessage 'Docker CLI was not found. Run this launcher again to use the guided Docker Desktop install.'
+    return $false
+  }
+  if (-not (Test-DockerComposeCli)) {
+    Write-ErrorMessage 'Docker Compose was not found. Run this launcher again to install or repair Docker Desktop.'
+    return $false
+  }
+  if ((Invoke-NativeCommand -Quiet -Command { & docker info *> $null }) -eq 0) { return $true }
+
+  Write-Warning 'Docker is installed, but its engine is not running.'
+  return (Start-DockerDesktopAndWait)
+}
+# END SHARED DOCKER LAUNCH PREFLIGHT
 
 function Get-RunningServices {
   param([string]$EnvPath = '')
@@ -4728,7 +4766,7 @@ if ((Test-MenuFlag -Name 'run-n8n-recovery-backup') -or (Test-MenuFlag -Name 'ru
   exit 1
 }
 
-Invoke-LaunchPreflight
+if (-not (Invoke-LaunchPreflight)) { Pause-Menu; exit 0 }
 
 while (-not $script:ExitRequested) {
   Show-MainMenu

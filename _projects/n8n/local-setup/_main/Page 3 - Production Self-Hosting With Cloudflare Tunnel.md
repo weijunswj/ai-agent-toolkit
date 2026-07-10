@@ -79,16 +79,16 @@ References:
 
 ## 3. Production Stack Files
 
-The production stack template folder is [templates/production-cloudflare-stack/](./templates/production-cloudflare-stack/).
+The production stack template folder is [templates/.n8n-production-cloudflare/](./templates/.n8n-production-cloudflare/).
 
 | File or folder | Link |
 | --- | --- |
-| Production Docker Compose template | [docker-compose.yml](./templates/production-cloudflare-stack/docker-compose.yml) |
-| Placeholder environment template | [.env.example](./templates/production-cloudflare-stack/.env.example) |
-| Private runtime ignore template | [.gitignore](./templates/production-cloudflare-stack/.gitignore) |
-| Windows production launcher | [_n8n-production-cloudflare.cmd](./templates/production-cloudflare-stack/_n8n-production-cloudflare.cmd) |
-| Desktop shortcut launcher | [n8n-production-cloudflare-desktop-shortcut.cmd](./templates/production-cloudflare-stack/n8n-production-cloudflare-desktop-shortcut.cmd) |
-| PowerShell production menu | [scripts/n8n-production-cloudflare-menu.ps1](./templates/production-cloudflare-stack/scripts/n8n-production-cloudflare-menu.ps1) |
+| Production Docker Compose template | [docker-compose.yml](./templates/.n8n-production-cloudflare/docker-compose.yml) |
+| Placeholder environment template | [.env.example](./templates/.n8n-production-cloudflare/.env.example) |
+| Private runtime ignore template | [.gitignore](./templates/.n8n-production-cloudflare/.gitignore) |
+| Windows production launcher | [_n8n-production-cloudflare.cmd](./templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd) |
+| Desktop shortcut launcher | [n8n-production-cloudflare-desktop-shortcut.cmd](./templates/.n8n-production-cloudflare/n8n-production-cloudflare-desktop-shortcut.cmd) |
+| PowerShell production menu | [scripts/n8n-production-cloudflare-menu.ps1](./templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1) |
 | Linux server backup template | [templates/production-server-backups/](./templates/production-server-backups/) |
 
 The production Compose stack includes:
@@ -122,7 +122,7 @@ or:
 Do not put the production runtime folder inside this toolkit repo. Do not put it on a synced Desktop if `.env` or backups could be synced to a personal cloud account.
 
 1. Create the private production stack folder.
-2. Copy everything inside [templates/production-cloudflare-stack/](./templates/production-cloudflare-stack/) into that folder.
+2. Copy everything inside [templates/.n8n-production-cloudflare/](./templates/.n8n-production-cloudflare/) into that folder.
 3. Copy `.env.example` to `.env`.
 4. Fill `.env` privately.
 5. Do not commit `.env`.
@@ -226,6 +226,8 @@ Open the private production stack folder and run:
 ```powershell
 .\_n8n-production-cloudflare.cmd
 ```
+
+The production launcher uses the same Docker launch preflight as the local launcher. Missing Docker CLI or Compose can trigger the explicit y/yes-only winget offer; a successful install waits for Enter, preserves arguments, refreshes PATH, and performs one controlled relaunch before preflight runs again. Missing winget stops with manual guidance, CI/test execution disables installation before prompting, and a stopped engine is started and checked with a bounded wait when the supported Docker Desktop CLI is available.
 
 Choose:
 
@@ -422,11 +424,11 @@ Restore reads `N8N_ENCRYPTION_KEY` from `SECRET-DO-NOT-COMMIT.env` or `.env` ins
 
 The preferred production restore input is a full backup zip containing `database.sql`. Older n8n entity export zips are accepted as an advanced compatibility path, including nested entity zips inside a newer backup package. Entity zip restore uses `n8n import:entities`, requires `migrations.jsonl`, verifies that supported n8n rows were actually imported before reporting success, may require the source `N8N_IMAGE`, and cannot restore account/login state as completely as `database.sql`.
 
-After any production start or restore restart, the menu waits until the localhost n8n editor responds and stays reachable before returning to the next prompt.
+After any production action that starts, restarts, or recreates n8n, the menu checks the configured local loopback port and requires consecutive successful responses before returning to the next prompt. This includes initial start, n8n or full-stack image update, restore restart, self-heal recreation, and stopping Cloudflare when n8n must be recreated with a localhost URL. A bounded timeout shows redacted recent n8n logs and next actions. Intentional stop/down actions do not wait for recovery, and local n8n readiness never claims that the public Cloudflare tunnel is healthy.
 
 If startup logs show that `/home/node/.n8n/config` has an encryption key that does not match the active `.env`, the launcher attempts the same key-sync repair before recreating n8n one more time. Restore rollback also syncs the config file back to the pre-restore key before restarting services.
 
-Preflight is automatic on the launch, tunnel, backup, and update paths that need it. Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, backups, logs, status, recovery, and update choices stay visible.
+Preflight is automatic before the main production menu and on tunnel, backup, restore, and update paths that need it. It verifies Docker CLI, Docker Compose, and the running engine before stack actions can run. Do not run Docker Desktop's direct container buttons as the normal production control path. Use the production menu so preflight, readiness, backups, logs, status, recovery, and update choices stay visible.
 
 ---
 
@@ -479,7 +481,7 @@ That is internal Docker networking, not public host exposure.
 
 - [Page 1 - Local Setup](./Page%201%20-%20Local%20Setup.md)
 - [Page 2 - Hostinger Coolify VPS n8n](./Page%202%20-%20Hostinger%20VPS.md)
-- [Production Cloudflare stack templates](./templates/production-cloudflare-stack/)
+- [Production Cloudflare stack templates](./templates/.n8n-production-cloudflare/)
 - [Cloudflare create a tunnel guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/)
 - [Cloudflare Tunnel published applications](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/)
 - [Cloudflare Tunnel DNS records](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/dns/)
