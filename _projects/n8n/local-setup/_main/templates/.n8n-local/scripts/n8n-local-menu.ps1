@@ -446,6 +446,33 @@ function Test-StackFiles {
 
 # BEGIN SHARED DOCKER LAUNCH PREFLIGHT
 $script:LauncherRelaunchExitCode = 75
+$script:LauncherMaxRelaunches = 1
+
+function Get-LauncherRelaunchCount {
+  $raw = [string]$env:N8N_LAUNCHER_RELAUNCH_COUNT
+  if (-not $raw) { return 0 }
+  if ($raw -notmatch '^(0|[1-9][0-9]*)$') {
+    return $script:LauncherMaxRelaunches
+  }
+
+  [int]$count = 0
+  if (-not [int]::TryParse($raw, [ref]$count)) {
+    return $script:LauncherMaxRelaunches
+  }
+  return $count
+}
+
+function Test-LauncherRelaunchAlreadyAttempted {
+  return ((Get-LauncherRelaunchCount) -ge $script:LauncherMaxRelaunches)
+}
+
+function Write-PostRelaunchDockerGuidance {
+  param([string]$RequirementName)
+
+  Write-ErrorMessage "$RequirementName is still unavailable after one controlled launcher relaunch."
+  Write-Info 'Docker Desktop was installed or an installation was attempted, but the refreshed Windows PATH still does not expose the required command.'
+  Write-Info 'Refresh PATH manually, sign out of Windows, or reboot Windows, then run this launcher again.'
+}
 
 function Test-DockerCli {
   return [bool](Get-Command docker -ErrorAction SilentlyContinue)
@@ -595,6 +622,10 @@ function Invoke-LaunchPreflight {
     Clear-MenuScreen
     Write-Header 'Launch Preflight'
     Write-Info 'Docker Desktop is required because this stack needs the Docker CLI, Docker Compose, and a running Docker engine.'
+    if (Test-LauncherRelaunchAlreadyAttempted) {
+      Write-PostRelaunchDockerGuidance -RequirementName 'Docker CLI'
+      return $false
+    }
     [void](Invoke-DockerDesktopInstall -RequirementName 'Docker CLI')
     return $false
   }
@@ -603,6 +634,10 @@ function Invoke-LaunchPreflight {
     Clear-MenuScreen
     Write-Header 'Launch Preflight'
     Write-Info 'Docker CLI was found, but Docker Compose is unavailable, so the stack is not ready.'
+    if (Test-LauncherRelaunchAlreadyAttempted) {
+      Write-PostRelaunchDockerGuidance -RequirementName 'Docker Compose'
+      return $false
+    }
     [void](Invoke-DockerDesktopInstall -RequirementName 'Docker Compose')
     return $false
   }

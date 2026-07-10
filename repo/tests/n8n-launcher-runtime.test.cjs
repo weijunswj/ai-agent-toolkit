@@ -84,7 +84,8 @@ test('both CMD launchers preserve arguments across one intentional relaunch', (t
         ''
       ].join('\r\n'), 'utf8');
 
-      const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath, '--alpha', 'beta', '--gamma=delta'], {
+      const spacedStackDir = 'C:\\Temp Folder\\n8n stack';
+      const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath, '--alpha', 'beta', '--gamma=delta', '--stack-dir', spacedStackDir], {
         cwd: root,
         env: { ...process.env, N8N_LAUNCHER_TEST_LOG: logPath, N8N_LAUNCHER_TEST_COUNT: countPath },
         input: 'x\r\n',
@@ -95,8 +96,8 @@ test('both CMD launchers preserve arguments across one intentional relaunch', (t
       assert.doesNotMatch(result.stdout, /stopped unexpectedly/i, launcher.id);
       const lines = fs.readFileSync(logPath, 'utf8').trim().split(/\r?\n/);
       assert.deepEqual(lines, [
-        '0|--alpha|beta|--gamma=delta',
-        '1|--alpha|beta|--gamma=delta'
+        `0|--alpha|beta|--gamma=delta|--stack-dir|${spacedStackDir}`,
+        `1|--alpha|beta|--gamma=delta|--stack-dir|${spacedStackDir}`
       ], launcher.id);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -160,6 +161,72 @@ test('both PowerShell menus use explicit safe Docker Desktop install approval an
       'if ($wingetText -notmatch "install --id Docker.DockerDesktop --exact --source winget --accept-package-agreements --accept-source-agreements") { throw "winget arguments changed: $wingetText" }',
       'Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue',
       'Remove-Item Function:\winget -ErrorAction SilentlyContinue'
+    ].join('; ');
+
+    const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      timeout: 30000
+    });
+    assert.equal(result.status, 0, `${launcher.id}\n${result.stdout}\n${result.stderr}`);
+  }
+});
+
+test('both menus block a second Docker install attempt after the controlled relaunch', (t) => {
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    t.skip('PowerShell is not available in this environment');
+    return;
+  }
+
+  for (const launcher of launcherCases) {
+    const menuPath = path.join(repoRoot, launcher.menu);
+    const command = [
+      '$ErrorActionPreference = "Stop"',
+      `$menu = Get-Content -LiteralPath ${powerShellSingleQuoted(menuPath)} -Raw`,
+      '$end = $menu.LastIndexOf("`nInitialize-MenuRuntime")',
+      'if ($end -lt 0) { throw "could not find menu pre-loop marker" }',
+      '. ([scriptblock]::Create($menu.Substring(0, $end)))',
+      '$script:Messages = New-Object System.Collections.Generic.List[string]',
+      'function Clear-MenuScreen {}',
+      'function Write-Header { param([string]$Message) $script:Messages.Add($Message) }',
+      'function Write-Info { param([string]$Message) $script:Messages.Add($Message) }',
+      'function Write-Warning { param([string]$Message) $script:Messages.Add($Message) }',
+      'function Write-ErrorMessage { param([string]$Message) $script:Messages.Add($Message) }',
+      'function Test-MenuFlag { param([string]$Name) return $false }',
+      'Remove-Item Env:N8N_LAUNCHER_RELAUNCH_COUNT -ErrorAction SilentlyContinue',
+      'if ((Get-LauncherRelaunchCount) -ne 0) { throw "missing relaunch count was not parsed as zero" }',
+      '$env:N8N_LAUNCHER_RELAUNCH_COUNT = "0"',
+      'if ((Get-LauncherRelaunchCount) -ne 0) { throw "zero relaunch count was not parsed" }',
+      'foreach ($malformed in @("-1", "1.0", " 1", "999999999999999999999")) { $env:N8N_LAUNCHER_RELAUNCH_COUNT = $malformed; if ((Get-LauncherRelaunchCount) -ne $script:LauncherMaxRelaunches) { throw "malformed relaunch count weakened bound: $malformed" } }',
+      'function global:Read-Host { throw "second launch reached an installation prompt" }',
+      'function global:winget { throw "second launch invoked winget" }',
+      'function Invoke-DockerDesktopInstall { throw "second launch called the installer" }',
+      '$env:N8N_LAUNCHER_RELAUNCH_COUNT = "1"',
+      'function Test-DockerCli { return $false }',
+      'function Test-DockerComposeCli { throw "Compose check ran without Docker CLI" }',
+      'if (Invoke-LaunchPreflight) { throw "second launch with missing Docker CLI passed preflight" }',
+      '$guidance = $script:Messages -join "`n"',
+      'if ($guidance -notmatch "controlled (launcher )?relaunch|controlled launcher restart") { throw "post-relaunch guidance did not explain the controlled relaunch" }',
+      'if ($guidance -notmatch "PATH") { throw "post-relaunch PATH guidance missing" }',
+      'if ($guidance -notmatch "sign-out|sign out") { throw "post-relaunch sign-out guidance missing" }',
+      'if ($guidance -notmatch "reboot") { throw "post-relaunch reboot guidance missing" }',
+      'if ($guidance -notmatch "run this launcher again|rerun the launcher") { throw "post-relaunch rerun guidance missing" }',
+      '$script:Messages.Clear()',
+      'function Test-DockerCli { return $true }',
+      'function Test-DockerComposeCli { return $false }',
+      'if (Invoke-LaunchPreflight) { throw "second launch with missing Docker Compose passed preflight" }',
+      '$guidance = $script:Messages -join "`n"',
+      'if ($guidance -notmatch "PATH" -or $guidance -notmatch "sign-out|sign out" -or $guidance -notmatch "reboot") { throw "missing Compose did not emit post-relaunch recovery guidance" }',
+      '$script:Messages.Clear()',
+      '$env:N8N_LAUNCHER_RELAUNCH_COUNT = "malformed"',
+      'function Test-DockerCli { return $false }',
+      'function Test-DockerComposeCli { throw "Compose check ran without Docker CLI" }',
+      'if (Invoke-LaunchPreflight) { throw "malformed relaunch count passed preflight" }',
+      'if (-not (Test-LauncherRelaunchAlreadyAttempted)) { throw "malformed relaunch count weakened the relaunch bound" }',
+      'Remove-Item Env:N8N_LAUNCHER_RELAUNCH_COUNT -ErrorAction SilentlyContinue',
+      'Remove-Item Function:\\Read-Host -ErrorAction SilentlyContinue',
+      'Remove-Item Function:\\winget -ErrorAction SilentlyContinue'
     ].join('; ');
 
     const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
