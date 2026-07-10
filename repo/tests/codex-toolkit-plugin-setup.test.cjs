@@ -316,7 +316,7 @@ test('Codex Toolkit plugin setup verifier rejects stale, disabled, or hookless i
     repoRoot
   });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /expected version 2\.3\.27/i);
+  assert.match(state.errors.join('\n'), /expected version 2\.3\.28/i);
 
   codexHome = tmpRoot();
   writeInstalledCache(codexHome);
@@ -424,7 +424,7 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
           pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
           name: 'ai-agent-toolkit',
           marketplaceName: 'ai-agent-toolkit-local',
-          version: '2.3.27',
+          version: '2.3.28',
           installed: true,
           enabled: true,
           authPolicy,
@@ -458,7 +458,9 @@ test('Codex Toolkit verifier falls back to config and cache when CLI list omits 
 
   assert.equal(state.ok, true);
   assert.equal(state.verificationMethod, 'config-cache-fallback');
-  assert.equal(state.hookTrustStatus, 'trusted');
+  assert.equal(state.hookTrustStatus, 'verification-unavailable');
+  assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
+  assert.match(state.hookTrustMessage, /review and trust the current Toolkit `SessionStart` hook/);
   assert.equal(state.installed.enabled, true);
   assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
   assert.equal(path.resolve(state.cacheRoot), path.resolve(cacheRoot));
@@ -519,7 +521,7 @@ test('Codex Toolkit fallback accepts a verbatim-prefixed marketplace source for 
   assert.deepEqual(state.errors, []);
 });
 
-test('Codex Toolkit fallback reports pending hook trust without rejecting the config and cache proof', () => {
+test('Codex Toolkit fallback does not infer hook trust from config text', () => {
   const codexHome = tmpRoot();
   writeInstalledCache(codexHome);
   writeCodexConfig(codexHome, { trustedHook: false });
@@ -532,8 +534,9 @@ test('Codex Toolkit fallback reports pending hook trust without rejecting the co
 
   assert.equal(state.ok, true);
   assert.equal(state.verificationMethod, 'config-cache-fallback');
-  assert.equal(state.hookTrustStatus, 'pending');
-  assert.match(state.hookTrustMessage, /pending/i);
+  assert.equal(state.hookTrustStatus, 'verification-unavailable');
+  assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
+  assert.match(state.hookTrustMessage, /verification (?:is )?unavailable/i);
 });
 
 test('Codex Toolkit setup reports bare Windows codex access denied as a known WindowsApps fallback', { skip: process.platform !== 'win32' }, () => {
@@ -570,9 +573,11 @@ test('Codex Toolkit setup output includes Codex-only hook approval next steps', 
 
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /\*\*Next Steps:\*\*/);
-  assert.match(result.stdout, /Trust the `SessionStart` hook only if it runs:/);
+  assert.match(result.stdout, /Review and trust the current Toolkit `SessionStart` hook only if it runs:/);
   assert.match(result.stdout, /toolkit-local-bridge\.cjs" --hook --sync-enabled --write --sync-source codex-plugin/);
-  assert.match(result.stdout, /Hook trust is still pending/i);
+  assert.match(result.stdout, /Hook trust verification is unavailable from supported non-interactive Codex inspection/i);
+  assert.match(result.stdout, /Open `\/hooks` in Codex/i);
+  assert.match(result.stdout, /review and trust the current Toolkit `SessionStart` hook/i);
   assert.match(result.stdout, /applies to Codex only/i);
   assert.match(result.stdout, /Claude Code does not need Codex hook approval/i);
   assert.match(result.stdout, /Codex must not install or update Claude Code/i);
@@ -588,6 +593,10 @@ test('Codex Toolkit isolated CODEX_HOME smoke command is documented', () => {
   assert.match(bridgeDoc, /codex plugin list --available --json/);
   assert.match(bridgeDoc, /plugins\/cache\/ai-agent-toolkit-local\/ai-agent-toolkit\/<version>/);
   assert.match(bridgeDoc, /SessionStart/);
+  assert.match(bridgeDoc, /Real Codex Host UAT/i);
+  assert.match(bridgeDoc, /list the branches/i);
+  assert.match(bridgeDoc, /proceed without Toolkit repo-local rules/i);
+  assert.match(bridgeDoc, /alter a managed block/i);
 });
 
 test('Codex Toolkit --write succeeds when plugin add installs then times out', () => {
@@ -597,7 +606,12 @@ test('Codex Toolkit --write succeeds when plugin add installs then times out', (
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.ok, true);
+  assert.equal(summary.installed, true);
   assert.equal(summary.enabled, true);
+  assert.equal(summary.current, true);
+  assert.equal(summary.hook_trust_status, 'pending-review');
+  assert.equal(summary.hook_execution_status, 'skipped until the current hook is reviewed and trusted');
+  assert.match(summary.hook_trust_message, /Open `\/hooks` in Codex/);
   assert.deepEqual(summary.warnings, [
     'codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json did not exit cleanly, but installed-state verification passed'
   ]);

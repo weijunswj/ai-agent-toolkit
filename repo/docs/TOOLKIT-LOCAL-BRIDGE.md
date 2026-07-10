@@ -190,15 +190,15 @@ The setup helper checks `codex plugin list --available --json` after `codex plug
 
 If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms the enabled current Toolkit manifest version, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
 
-After install, update, or verify, the helper prints or returns a `**Next Steps:**` section. It tells the user to restart Codex if installation changed anything, open Codex hook review when prompted, and trust the Codex `SessionStart` hook only if it runs:
+After install, update, or verify, the helper prints or returns a `**Next Steps:**` section. It tells the user to restart Codex if installation changed anything, open `/hooks` in Codex, and trust the current Codex `SessionStart` hook only if it runs:
 
 ```powershell
 node ".../repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source codex-plugin
 ```
 
-If no hook prompt appears, report whether hook trust is already recorded, still pending, or likely waiting for Codex to refresh plugin hooks. This hook approval step applies to Codex only. Claude Code does not need Codex hook approval. Codex must not install or update Claude Code, and Claude Code must not install or update Codex.
+Supported non-interactive Codex plugin inspection verifies whether the Toolkit plugin is installed, enabled, current, and contains the expected hook definition. It does not expose the current hook-hash trust decision. Do not infer trust by reading or editing Codex config files. When trust cannot be verified, report `verification unavailable`, tell the user to open `/hooks` in Codex, and ask them to review and trust the current Toolkit `SessionStart` hook. If the hook changed during the current setup run, report it as `pending review` and `skipped until trusted`; Codex skips new or changed plugin hooks until their current definition is reviewed and trusted. This approval step applies to Codex only. Claude Code does not need Codex hook approval. Codex must not install or update Claude Code, and Claude Code must not install or update Codex.
 
-After a fresh Codex plugin install or update, the user must manually approve or trust the startup hook when Codex prompts. Verification can confirm the installed cache contains a `SessionStart` hook, but it cannot approve that hook on the user's behalf.
+After a fresh Codex plugin install or update, the user must manually approve or trust the startup hook through `/hooks`. Verification can confirm the installed cache contains a `SessionStart` hook, but it cannot approve that hook on the user's behalf.
 
 Codex setup must never install or update Claude Code. Claude Code setup must never install or update Codex. The shared `setup-toolkit.cjs` orchestrator selects the correct native step with `--host`.
 
@@ -486,6 +486,34 @@ The shared updater may run a passive repo-local instruction preflight from the h
 OpenCode and Antigravity 2 do not need Codex or Claude hooks to receive core policy because the policy remains in portable docs, validators, and generated adapter content.
 
 The packaged Toolkit hooks remain startup-only. The bridge uses `SessionStart` because update and sync work is most useful before the agent starts relying on local skills. Claude Code documents a `SessionEnd` event, but the Toolkit does not add a Claude-only exit hook because app exit hooks can be skipped or killed and Codex plugin `SessionEnd` support is not validated in this repo. Do not add unsupported hook event names such as `Stop` or `SessionEnd` to the packaged Codex or Claude plugin manifests without a current platform-supported, safe, fast implementation and matching tests.
+
+## Codex SessionStart Output Contract
+
+The current official [Codex hooks documentation](https://developers.openai.com/codex/hooks) is the behavior source of truth:
+
+- Plain text written to `stdout` by a `SessionStart` hook is added as extra developer context.
+- JSON `stdout` may instead use `hookSpecificOutput.hookEventName: "SessionStart"` plus `hookSpecificOutput.additionalContext`. Do not mix JSON and plain text.
+- `systemMessage` is surfaced as a UI or event-stream warning; it is not a substitute for model-visible `additionalContext` or plain-text `stdout`.
+- Command hooks receive one JSON object on `stdin`, including `cwd`, and run with the session `cwd` as their working directory.
+- Plugin hooks use the normal hook trust flow. Installing or enabling a plugin does not trust its hooks; new or changed hook definitions are skipped until reviewed and trusted through `/hooks`.
+- Only command handlers run today. Async command hooks and prompt/agent handlers are parsed but skipped, and `suppressOutput` is parsed but not implemented.
+
+The Toolkit bridge already emits concise bridge status text on hook `stdout`, so its passive agent-rules preflight uses documented plain-text `stdout` rather than trying to combine status text with a JSON response. The preflight runs before bridge no-op handling, resolves the nearest Git root from the documented session working directory, and never creates, repairs, backs up, or writes repo-local instruction files.
+
+## Real Codex Host UAT
+
+Run this acceptance test only in a disposable Git repo outside the Toolkit checkout. Do not alter a real downstream repo.
+
+1. Create a temporary Git repo with no `AGENTS.md` and at least one harmless branch.
+2. Run the normal approved `setup toolkit` flow so the current Toolkit plugin cache is installed, enabled, and current. Confirm setup reports the corrected package version. Do not treat the presence of `hooks.json` as proof that the hook can run.
+3. In Codex, open `/hooks`. Locate the exact Toolkit `SessionStart` command, review its current definition, and trust it. If trust verification remains unavailable, stop and record that UAT is pending.
+4. Open a fresh Codex task in the temporary repo and submit `list the branches`.
+5. Verify Codex asks whether to install/repair Toolkit repo-local rules or proceed without Toolkit repo-local rules before it lists branches or performs other repository work.
+6. Choose `proceed without Toolkit repo-local rules`. Verify Codex continues with the harmless request and does not create `AGENTS.md`, `docs/agent-playbooks/`, `.agent-toolkit-backups/`, or any other repo file.
+7. Install the correct repo-local instructions through the normal user-approved `ai-coding-agent-rules` flow. Open another fresh task and verify the missing-rule warning no longer appears.
+8. In another disposable copy, alter a managed block in `AGENTS.md`. Open a fresh task and verify Codex asks whether to repair/refresh or proceed without current Toolkit repo-local rules, and does not repair or create a backup before the user decides.
+
+Record the Toolkit plugin version, exact hook command, `/hooks` trust result, whether each fresh task asked before work, and whether the repo tree remained unchanged before the user's decision. If an actual Codex host cannot be exercised with the corrected plugin build, mark real-host UAT as pending and include these exact steps in the PR body; do not claim end-to-end verification.
 
 ## Portable Policy-First Layering
 

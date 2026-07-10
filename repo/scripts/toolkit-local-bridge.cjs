@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.27';
+const BRIDGE_VERSION = '2.3.28';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1693,24 +1693,35 @@ function formatAgentRulesPreflight(result) {
   const shown = findings.slice(0, AGENT_RULES_PREFLIGHT_MAX_FINDINGS);
   const missingRootAgents = Boolean(result.gitRepoDetected) &&
     findings.some((finding) => finding.file === 'AGENTS.md' && finding.kind === 'missing');
+  const staleOrBrokenManagedContent = findings.some((finding) => [
+    'broken-marker',
+    'missing-block',
+    'stale-block',
+    'template-broken',
+    'unmanaged'
+  ].includes(finding.kind));
   const lines = [
     `Toolkit agent-rules preflight: repo-local instructions need attention in ${result.targetRoot}.`,
     ...shown.map((finding) => `- ${finding.file}: ${finding.detail}`)
   ];
   if (missingRootAgents) {
-    lines.unshift('STOP: AGENTS.md is missing; repo-local ai-coding-agent-rules are not installed in this repo. Stop and ask the user whether to install/repair them now or proceed without Toolkit repo-local rules.');
+    lines.unshift("STOP: Root AGENTS.md is missing. Toolkit repo-local ai-coding-agent-rules are not installed in this Git repository. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without Toolkit repo-local rules. Do not install, repair, create, or write anything without the user's decision.");
+  } else if (staleOrBrokenManagedContent) {
+    lines.unshift("STOP: Toolkit-managed repo-local instruction blocks are stale or broken. Stop before repository work. Ask the user whether to repair/refresh Toolkit repo-local rules now or proceed without current Toolkit repo-local rules. Do not repair, refresh, create backups, or write anything without the user's decision.");
+  } else {
+    lines.unshift("STOP: Toolkit repo-local instructions need attention. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without current Toolkit repo-local rules. Do not install, repair, create backups, or write anything without the user's decision.");
   }
   if (findings.length > shown.length) {
     lines.push(`- ${findings.length - shown.length} more issue(s) omitted.`);
   }
-  lines.push('No files were changed by this hook. Stop and ask the user whether to run `ai-coding-agent-rules` check/repair/refresh now, or proceed with the current task despite this warning.');
+  lines.push('No files were changed by this hook.');
   return lines.join('\n');
 }
 
 function maybePrintAgentRulesPreflight(args) {
   const result = runAgentRulesPreflight(args);
   const message = formatAgentRulesPreflight(result);
-  if (message) console.error(message);
+  if (message) console.log(message);
   return result;
 }
 

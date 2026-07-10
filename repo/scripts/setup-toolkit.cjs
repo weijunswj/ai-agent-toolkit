@@ -1224,12 +1224,17 @@ function runCodexNativePluginSetup(args) {
     const summary = parseJsonFromOutput(verify.stdout);
     return {
       status: 'already fresh',
+      installed: summary.installed === true,
+      enabled: summary.enabled === true,
+      current: summary.current === true,
       cache_path: summary.cache_root || defaultCodexPluginCachePath(summary.version || expectedVersion),
       expected_version: expectedVersion,
       installed_version: summary.version || expectedVersion,
       updated_this_run: false,
       restart_required: false,
-      hook_trust_action: summary.hook_trust_message || 'review Codex hook trust if prompted'
+      hook_trust_status: summary.hook_trust_status || 'verification-unavailable',
+      hook_execution_status: summary.hook_execution_status || 'verification unavailable; open `/hooks` in Codex',
+      hook_trust_action: summary.hook_trust_message || 'Open `/hooks` in Codex and review the current Toolkit SessionStart hook'
     };
   }
   process.stderr.write(verify.stderr || '');
@@ -1250,12 +1255,17 @@ function runCodexNativePluginSetup(args) {
   const summary = parseJsonFromOutput(finalVerify.stdout);
   return {
     status: 'refreshed',
+    installed: summary.installed === true,
+    enabled: summary.enabled === true,
+    current: summary.current === true,
     cache_path: summary.cache_root || defaultCodexPluginCachePath(summary.version || expectedVersion),
     expected_version: expectedVersion,
     installed_version: summary.version || expectedVersion,
     updated_this_run: true,
     restart_required: true,
-    hook_trust_action: summary.hook_trust_message || 'approve the Codex SessionStart hook when Codex prompts'
+    hook_trust_status: 'pending-review',
+    hook_execution_status: 'skipped until the current hook is reviewed and trusted',
+    hook_trust_action: 'Open `/hooks` in Codex, review and trust the current Toolkit SessionStart hook'
   };
 }
 
@@ -1618,10 +1628,15 @@ function printFinalSummary({ args, current, managed, nativeCache, audit, questio
     console.log(`Codex plugin cache path: ${unknown(nativeCache.cache_path)}`);
     console.log(`Codex expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Codex installed Toolkit version: ${unknown(nativeCache.installed_version)}`);
+    console.log(`Codex plugin installed: ${yesNo(nativeCache.installed === true)}`);
+    console.log(`Codex plugin enabled: ${yesNo(nativeCache.enabled === true)}`);
+    console.log(`Codex plugin current: ${yesNo(nativeCache.current === true)}`);
     console.log(`Codex plugin status: ${unknown(nativeCache.status)}`);
     console.log(`Codex plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
     console.log(`Codex restart required: ${yesNo(nativeCache.restart_required === true)}`);
-    console.log(`Codex hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
+    console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status || 'verification-unavailable')}`);
+    console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status || 'verification unavailable; open /hooks in Codex')}`);
+    console.log(`Codex hook trust action: ${unknown(nativeCache.hook_trust_action || 'Open /hooks in Codex')}`);
   } else {
     console.log('Codex plugin status: not checked for this host');
     console.log('Codex plugin mutation: no');
