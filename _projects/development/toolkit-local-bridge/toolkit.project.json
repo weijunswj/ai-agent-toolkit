@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.27",
+  "version": "2.3.29",
   "version_policy": "semver",
-  "version_notes": "Bumps the native Toolkit package for the corrected one-relaunch Docker preflight bound in both n8n stack launchers.",
+  "version_notes": "Aligns direct human-readable Codex setup output with JSON by reporting the final pending-review or verification-unavailable hook state without unsupported trust inference.",
   "outputs": [
     {
       "kind": "curated",

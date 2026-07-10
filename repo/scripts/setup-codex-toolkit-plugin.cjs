@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.3.27';
+const EXPECTED_TOOLKIT_VERSION = '2.3.29';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
@@ -367,32 +367,10 @@ function verifyLocalMarketplaceConfig(configText, repoRoot) {
   return { sourcePath, errors };
 }
 
-function detectHookTrustStatus(codexHome, cacheRoot) {
-  const configPath = codexConfigPath(codexHome);
-  if (!fs.existsSync(configPath)) {
-    return {
-      status: 'pending',
-      message: `Hook trust is still pending because Codex config was not found at ${configPath}.`
-    };
-  }
-  const configText = fs.readFileSync(configPath, 'utf8');
-  const normalized = slash(configText).toLowerCase();
-  const hookNeedles = [
-    '.codex-plugin/hooks/hooks.json',
-    slash(path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json')).toLowerCase()
-  ];
-  const hookLines = normalized
-    .split(/\r?\n/)
-    .filter((line) => hookNeedles.some((needle) => line.includes(needle)));
-  if (hookLines.some((line) => !/\bfalse\b|\bdeny|\breject|\bpending\b/.test(line))) {
-    return {
-      status: 'trusted',
-      message: 'Hook trust is already recorded in Codex config for .codex-plugin/hooks/hooks.json.'
-    };
-  }
+function detectHookTrustStatus() {
   return {
-    status: 'pending',
-    message: 'Hook trust is still pending; Codex config does not yet record trust for .codex-plugin/hooks/hooks.json.'
+    status: 'verification-unavailable',
+    message: 'Hook trust verification is unavailable from supported non-interactive Codex inspection. Open `/hooks` in Codex, review and trust the current Toolkit `SessionStart` hook. Until it is trusted, Codex skips the hook.'
   };
 }
 
@@ -683,16 +661,13 @@ function codexHookCommand(repoRoot) {
 }
 
 function nextStepsForState(state, options = {}) {
-  const hookTrustLine = state.hookTrustStatus === 'trusted'
-    ? 'Hook trust is already recorded for the Toolkit `SessionStart` hook.'
-    : 'Hook trust is still pending; Codex may not have refreshed plugin hooks yet, or the hook review has not been approved.';
   return [
     '**Next Steps:**',
     '1. Restart Codex if the plugin install changed anything.',
-    '2. Open Codex hook review when Codex shows it.',
-    '3. Trust the `SessionStart` hook only if it runs:',
+    '2. Open `/hooks` in Codex.',
+    '3. Review and trust the current Toolkit `SessionStart` hook only if it runs:',
     `   \`${codexHookCommand(options.repoRoot || repoRootFromScript())}\``,
-    `4. If no hook prompt appears, ${hookTrustLine}`,
+    `4. ${state.hookTrustMessage}`,
     '',
     'This hook approval step applies to Codex only. Claude Code does not need Codex hook approval.',
     'Codex must not install or update Claude Code. Claude Code must not install or update Codex.'
@@ -836,6 +811,7 @@ async function main(argv = process.argv.slice(2)) {
   const warnings = [];
   let pluginList;
   let state;
+  let pluginChanged = false;
 
   try {
     pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
@@ -860,6 +836,7 @@ async function main(argv = process.argv.slice(2)) {
       });
 
       if (!state.ok) {
+        pluginChanged = true;
         if (shouldRemoveBeforeInstall(state)) {
           runCodexJson(resolved.command, ['plugin', 'remove', pluginId(), '--json']);
         }
@@ -884,17 +861,25 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
+  const hookTrustStatus = pluginChanged ? 'pending-review' : state.hookTrustStatus;
+  const hookTrustMessage = pluginChanged
+    ? 'The exact current Toolkit `SessionStart` hook changed and is pending review. Open `/hooks` in Codex; the exact current Toolkit `SessionStart` hook must be reviewed and trusted. Codex skips the hook until it is trusted.'
+    : state.hookTrustMessage;
+  const reportedState = { ...state, hookTrustStatus, hookTrustMessage };
   const summary = {
     ok: true,
     plugin_id: pluginId(),
     version: EXPECTED_TOOLKIT_VERSION,
+    installed: true,
     enabled: true,
+    current: true,
     cache_root: state.cacheRoot,
     verification_method: state.verificationMethod,
-    hook_trust_status: state.hookTrustStatus,
-    hook_trust_message: state.hookTrustMessage,
+    hook_trust_status: hookTrustStatus,
+    hook_trust_message: hookTrustMessage,
+    hook_execution_status: pluginChanged ? 'skipped until the current hook is reviewed and trusted' : 'verification unavailable; open `/hooks` in Codex',
     install_path: codexToolkitInstallCommands(options.repoRoot),
-    next_steps: nextStepsForState(state, options),
+    next_steps: nextStepsForState(reportedState, options),
     warnings
   };
   for (const warning of warnings) console.error(`WARN: ${warning}`);
@@ -904,8 +889,10 @@ async function main(argv = process.argv.slice(2)) {
       ? 'verified by config/cache fallback because Codex CLI list did not report the plugin'
       : 'verified by Codex CLI plugin list and cache';
     console.log(`OK: ${pluginId()} is installed, enabled, version ${EXPECTED_TOOLKIT_VERSION}, and has a SessionStart hook in ${state.cacheRoot} (${method}).`);
+    console.log(`Hook trust status: ${summary.hook_trust_status}`);
+    console.log(`Hook execution status: ${summary.hook_execution_status}`);
     console.log('');
-    console.log(nextStepsForState(state, options).join('\n'));
+    console.log(nextStepsForState(reportedState, options).join('\n'));
   }
   return 0;
 }
