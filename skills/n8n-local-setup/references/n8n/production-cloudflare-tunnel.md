@@ -233,7 +233,9 @@ Open the private production stack folder and run:
 .\_n8n-production-cloudflare.cmd
 ```
 
-The production launcher uses the same Docker launch preflight as the local launcher. Missing Docker CLI or Compose can trigger the explicit y/yes-only winget offer; a successful install waits for Enter, preserves arguments, refreshes PATH, and performs one controlled relaunch before preflight runs again. Missing winget stops with manual guidance, CI/test execution disables installation before prompting, and a stopped engine is started and checked with a bounded wait when the supported Docker Desktop CLI is available.
+The production launcher uses the same Docker launch preflight as the local launcher. Toolkit does not install or repair Docker Desktop. Missing Docker CLI or Compose produces manual installation or repair guidance using the [official Docker Desktop Windows installation page](https://docs.docker.com/desktop/setup/install/windows-install/), waits for one Enter press, and exits without opening the production menu. The URL is printed for copying and is not opened automatically. The official page includes current Docker Desktop downloads, Windows requirements, and WSL verification/setup instructions.
+
+The launcher only verifies Docker CLI, Docker Compose, and engine readiness. Docker and WSL setup remain owner-controlled system operations. An already-installed but stopped Docker Desktop application is still started and checked with the existing bounded wait when the supported CLI is available. Existing copied `.n8n-production-cloudflare` runtime folders are not automatically overwritten by this repository.
 
 Choose:
 

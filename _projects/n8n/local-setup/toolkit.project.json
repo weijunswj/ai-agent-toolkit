@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "version_policy": "semver",
-  "version_notes": "Corrects the one-relaunch Docker preflight bound while retaining runtime-named stack templates and production readiness gating.",
+  "version_notes": "Removes automatic Docker Desktop installation and relaunch machinery while retaining manual prerequisite guidance, installed-Docker startup, and production readiness gating.",
   "outputs": [
     {
       "kind": "curated",
