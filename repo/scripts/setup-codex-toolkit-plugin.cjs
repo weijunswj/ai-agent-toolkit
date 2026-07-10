@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.3.28';
+const EXPECTED_TOOLKIT_VERSION = '2.3.29';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
@@ -863,7 +863,7 @@ async function main(argv = process.argv.slice(2)) {
 
   const hookTrustStatus = pluginChanged ? 'pending-review' : state.hookTrustStatus;
   const hookTrustMessage = pluginChanged
-    ? 'The current Toolkit `SessionStart` hook changed and is pending review. Open `/hooks` in Codex, review and trust the current hook. Until it is trusted, Codex skips the hook.'
+    ? 'The exact current Toolkit `SessionStart` hook changed and is pending review. Open `/hooks` in Codex; the exact current Toolkit `SessionStart` hook must be reviewed and trusted. Codex skips the hook until it is trusted.'
     : state.hookTrustMessage;
   const reportedState = { ...state, hookTrustStatus, hookTrustMessage };
   const summary = {
@@ -889,8 +889,10 @@ async function main(argv = process.argv.slice(2)) {
       ? 'verified by config/cache fallback because Codex CLI list did not report the plugin'
       : 'verified by Codex CLI plugin list and cache';
     console.log(`OK: ${pluginId()} is installed, enabled, version ${EXPECTED_TOOLKIT_VERSION}, and has a SessionStart hook in ${state.cacheRoot} (${method}).`);
+    console.log(`Hook trust status: ${summary.hook_trust_status}`);
+    console.log(`Hook execution status: ${summary.hook_execution_status}`);
     console.log('');
-    console.log(nextStepsForState(state, options).join('\n'));
+    console.log(nextStepsForState(reportedState, options).join('\n'));
   }
   return 0;
 }
