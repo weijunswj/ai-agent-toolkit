@@ -3,7 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
@@ -217,6 +217,81 @@ function commandTimeoutMs() {
   return positiveIntEnv('CLAUDE_TOOLKIT_CLAUDE_CLI_TIMEOUT_MS', 120000);
 }
 
+const MUTATION_DEADLINE_DEFAULT_MS = 120000;
+const MUTATION_POLL_DEFAULT_MS = 500;
+// Reject unreasonably large overrides (over one hour) so a typo cannot make
+// setup wait effectively forever; reject sub-25ms polling so a typo cannot
+// turn the verification loop into a busy loop.
+const MUTATION_DEADLINE_MAX_MS = 60 * 60 * 1000;
+const MUTATION_POLL_MIN_MS = 25;
+
+// Strict decimal-integer override parsing: only a trimmed string of decimal
+// digits within [min, max] is accepted. Partial-number forms that parseInt
+// would silently truncate ('100junk', '100.5', '1e3'), signs, empty or
+// whitespace-only input, zero/negative values (below min), and values above
+// the documented maximum all fall back to the default.
+function boundedIntEnv(name, fallback, min, max) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null) return fallback;
+  const trimmed = String(raw).trim();
+  if (!/^\d+$/.test(trimmed)) return fallback;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) return fallback;
+  return parsed;
+}
+
+// One mutation helper owns both `plugin update` and `plugin install`, so the
+// controls use the general MUTATION name rather than per-command names.
+function mutationDeadlineMs() {
+  return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS', MUTATION_DEADLINE_DEFAULT_MS, 1, MUTATION_DEADLINE_MAX_MS);
+}
+
+function mutationPollMs() {
+  return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS', MUTATION_POLL_DEFAULT_MS, MUTATION_POLL_MIN_MS, MUTATION_DEADLINE_MAX_MS);
+}
+
+const PROBE_TIMEOUT_DEFAULT_MS = 10000;
+const PROBE_TIMEOUT_MAX_MS = 60000;
+
+function probeTimeoutMs() {
+  return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS', PROBE_TIMEOUT_DEFAULT_MS, 1, PROBE_TIMEOUT_MAX_MS);
+}
+
+// Full worst-case CLI resolution budget. resolveClaudeCommand may probe
+// every distinct candidate -- the explicit --claude-cli argument, the
+// CLAUDE_TOOLKIT_CLAUDE_CLI and CLAUDE_CLI_PATH overrides, and bare
+// `claude` -- and each probe may consume one full probe timeout. The count
+// comes from commandCandidates itself so deduplication semantics can never
+// drift from the resolver.
+function resolutionBudgetMs(explicitCommand = '') {
+  return commandCandidates(explicitCommand).length * probeTimeoutMs();
+}
+
+// Worst-case wall-clock budget for one `--verify` run: the full CLI
+// resolution sequence, one plugin list, plus spawn/report grace. The setup
+// orchestrator derives its outer timeout from this (passing the exact same
+// explicit CLI argument and environment the child helper receives) so it
+// cannot kill a verify that is still within this helper's own supported
+// per-command budgets.
+function verifyBudgetMs(explicitCommand = '') {
+  return resolutionBudgetMs(explicitCommand) + commandTimeoutMs() + 15000;
+}
+
+// Worst-case wall-clock budget for one full `--write` run. Each mutation
+// phase may take its verification deadline plus one in-flight plugin list
+// call that started just before the deadline expired. This is a ceiling for
+// the orchestrator's outer timeout, not an expected duration.
+function writeBudgetMs(explicitCommand = '') {
+  const mutationPhase = mutationDeadlineMs() + commandTimeoutMs();
+  return resolutionBudgetMs(explicitCommand) // full CLI candidate resolution
+    + commandTimeoutMs() // initial plugin list
+    + mutationPhase // in-place plugin update + state polling
+    + commandTimeoutMs() // plugin uninstall fallback
+    + commandTimeoutMs() // plugin marketplace add
+    + mutationPhase // plugin install + state polling
+    + 15000; // spawn/cleanup/JSON-report grace
+}
+
 function commandCandidates(explicitCommand) {
   const candidates = [];
   if (explicitCommand) candidates.push(explicitCommand);
@@ -229,7 +304,7 @@ function commandCandidates(explicitCommand) {
 function resolveClaudeCommand(explicitCommand) {
   const failures = [];
   for (const command of commandCandidates(explicitCommand)) {
-    const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: 10000 });
+    const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs() });
     if (result.status === 0) return { command, failures };
     failures.push(`${command}: ${commandOutput(result) || `exit ${result.status}`}`);
   }
@@ -251,6 +326,153 @@ function runClaudeJson(command, args) {
 
 function runClaudeCommand(command, args, options = {}) {
   return spawnClaude(command, args, { encoding: 'utf8', timeout: commandTimeoutMs(), ...options });
+}
+
+function spawnClaudeProcess(command, args) {
+  const parts = claudeSpawnParts(command, args);
+  // stdio is ignored on purpose: the mutation's completion signal is the
+  // supported plugin-state verification below, never captured output, and an
+  // inherited or piped handle must not be able to keep this parent waiting
+  // on a child that has already finished its real work.
+  return spawn(parts.command, parts.args, {
+    shell: parts.shell,
+    stdio: 'ignore',
+    windowsHide: true
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function terminateChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null || child.killed) return;
+  try {
+    child.kill();
+  } catch {
+    // The child may already be gone; verification state is the source of truth here.
+  }
+}
+
+function formatStateErrors(state, listError) {
+  if (state?.errors?.length) return state.errors.join('; ');
+  if (listError) return listError.message;
+  return 'no installed-state verification was available';
+}
+
+function mutationLingerWarning(args) {
+  return `claude ${args.join(' ')} did not exit cleanly, but installed-state verification passed`;
+}
+
+// Launch a mutating `claude plugin ...` command asynchronously and treat the
+// supported installed-state verification (`claude plugin list --json` fed
+// through evaluateClaudeToolkitPluginState) as the completion signal instead
+// of the process exit. Waiting on process exit can report failure even after
+// the mutation has landed -- for example when the CLI lingers after finishing
+// its real work -- while the plugin list state is the authoritative success
+// signal. A non-zero exit or a timeout is never treated as success unless the
+// final supported state verification passes.
+async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
+  const deadlineMs = options.deadlineMs || mutationDeadlineMs();
+  const pollMs = options.pollMs || mutationPollMs();
+  const startedAt = Date.now();
+  let child;
+  let childExit = null;
+  let childError = null;
+  let lastState = null;
+  let lastListError = null;
+
+  try {
+    child = spawnClaudeProcess(command, mutationArgs);
+    child.on('exit', (code, signal) => {
+      childExit = { code, signal };
+    });
+    child.on('error', (error) => {
+      childError = error;
+    });
+    child.unref();
+  } catch (error) {
+    return {
+      ok: false,
+      state: null,
+      warning: '',
+      childFailed: true,
+      failure: `claude ${mutationArgs.join(' ')} failed to start: ${error.message}`
+    };
+  }
+
+  for (;;) {
+    try {
+      const pluginList = runClaudeJson(command, ['plugin', 'list', '--json']);
+      lastListError = null;
+      lastState = evaluateClaudeToolkitPluginState(pluginList, {
+        repoRoot: options.repoRoot,
+        expectedVersion: options.expectedVersion
+      });
+      if (lastState.ok) {
+        // The synchronous state poll starves the event loop, so a child that
+        // already exited cleanly may not have had its exit event processed
+        // yet. Give it a short bounded settle window before deciding whether
+        // to report it as lingering.
+        const settleDeadline = Date.now() + 250;
+        while (!childExit && !childError && Date.now() < settleDeadline) {
+          await sleep(10);
+        }
+        const lingered = !childExit || childExit.code !== 0;
+        terminateChild(child);
+        return {
+          ok: true,
+          state: lastState,
+          warning: lingered ? mutationLingerWarning(mutationArgs) : '',
+          childFailed: false,
+          failure: ''
+        };
+      }
+    } catch (error) {
+      // Transient plugin list failures are tolerated until the deadline; the
+      // last one is preserved for the final failure report.
+      lastListError = error;
+    }
+
+    if (childError) {
+      terminateChild(child);
+      return {
+        ok: false,
+        state: lastState,
+        warning: '',
+        childFailed: true,
+        failure: `claude ${mutationArgs.join(' ')} failed: ${childError.message}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`
+      };
+    }
+
+    if (childExit && childExit.code !== 0) {
+      terminateChild(child);
+      return {
+        ok: false,
+        state: lastState,
+        warning: '',
+        childFailed: true,
+        failure: `claude ${mutationArgs.join(' ')} exited with ${childExit.code}${childExit.signal ? ` signal ${childExit.signal}` : ''}; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`
+      };
+    }
+
+    const remainingMs = deadlineMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) break;
+    // Every wait is capped to the remaining deadline so an oversized poll
+    // interval can never keep this helper asleep past its advertised
+    // deadline; after the last partial wait the loop performs one final
+    // verification poll at the deadline before giving up.
+    await sleep(Math.min(pollMs, remainingMs));
+  }
+
+  terminateChild(child);
+  return {
+    ok: false,
+    state: lastState,
+    warning: '',
+    childFailed: false,
+    failure: `claude ${mutationArgs.join(' ')} did not produce a verified install within ${deadlineMs}ms; installed-state verification failed: ${formatStateErrors(lastState, lastListError)}`
+  };
 }
 
 // `claude plugin list --json` returns a flat array of entries shaped like
@@ -430,17 +652,22 @@ async function main(argv = process.argv.slice(2)) {
 
   if (!state.ok && options.write && !state.refusesDowngrade) {
     if (state.canUpdateInPlace) {
-      const update = runClaudeCommand(resolved.command, ['plugin', 'update', pluginId(), '--scope', options.scope]);
-      if (update.status !== 0) {
-        warnings.push(`claude plugin update did not exit cleanly, falling back to uninstall + reinstall: ${commandOutput(update)}`);
+      // Verification-driven update: success means the supported plugin list
+      // state became current, not that the update process exited. A verified
+      // update with a lingering process succeeds with a warning and must not
+      // trigger an unnecessary uninstall + reinstall.
+      const updateOutcome = await runClaudeMutationAndVerify(
+        resolved.command,
+        ['plugin', 'update', pluginId(), '--scope', options.scope],
+        { repoRoot: options.repoRoot, expectedVersion }
+      );
+      if (updateOutcome.ok) {
+        state = updateOutcome.state;
+        if (updateOutcome.warning) warnings.push(updateOutcome.warning);
+      } else if (updateOutcome.childFailed) {
+        warnings.push(`claude plugin update did not exit cleanly, falling back to uninstall + reinstall: ${updateOutcome.failure}`);
       } else {
-        try {
-          const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json']);
-          state = evaluateClaudeToolkitPluginState(pluginList, { repoRoot: options.repoRoot, expectedVersion });
-        } catch (error) {
-          console.error(`FAIL: ${error.message}`);
-          return 1;
-        }
+        warnings.push(`claude plugin update did not produce a verified current install before its deadline, falling back to uninstall + reinstall: ${updateOutcome.failure}`);
       }
     }
 
@@ -460,15 +687,18 @@ async function main(argv = process.argv.slice(2)) {
       if (marketplaceAdd.status !== 0) {
         warnings.push(`claude plugin marketplace add did not exit cleanly: ${commandOutput(marketplaceAdd)}`);
       }
-      const install = runClaudeCommand(resolved.command, ['plugin', 'install', pluginId(), '--scope', options.scope]);
-      if (install.status !== 0) {
-        warnings.push(`claude plugin install did not exit cleanly: ${commandOutput(install)}`);
-      }
-      try {
-        const pluginList = runClaudeJson(resolved.command, ['plugin', 'list', '--json']);
-        state = evaluateClaudeToolkitPluginState(pluginList, { repoRoot: options.repoRoot, expectedVersion });
-      } catch (error) {
-        console.error(`FAIL: ${error.message}`);
+      const installOutcome = await runClaudeMutationAndVerify(
+        resolved.command,
+        ['plugin', 'install', pluginId(), '--scope', options.scope],
+        { repoRoot: options.repoRoot, expectedVersion }
+      );
+      if (installOutcome.ok) {
+        state = installOutcome.state;
+        if (installOutcome.warning) warnings.push(installOutcome.warning);
+      } else {
+        for (const warning of warnings) console.error(`WARN: ${warning}`);
+        console.error(`FAIL: ${installOutcome.failure}`);
+        console.error(`Expected commands: ${claudeToolkitInstallCommands(options.repoRoot, options.scope).map((args) => `claude ${args.join(' ')}`).join(' ; ')}`);
         return 1;
       }
     }
@@ -520,12 +750,20 @@ module.exports = {
   VALID_SCOPES,
   claudeToolkitInstallCommands,
   claudeSpawnParts,
+  commandCandidates,
   evaluateClaudeToolkitPluginState,
   findPluginEntries,
+  mutationDeadlineMs,
+  mutationPollMs,
+  probeTimeoutMs,
   readExpectedToolkitVersion,
+  resolutionBudgetMs,
+  runClaudeMutationAndVerify,
   quoteWindowsArg,
   validateMarketplaceWrapper,
   validateRepoPluginSource,
+  verifyBudgetMs,
   verifySessionStartHook,
+  writeBudgetMs,
   pluginId
 };
