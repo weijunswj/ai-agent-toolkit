@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.35",
+  "version": "2.3.36",
   "version_policy": "semver",
-  "version_notes": "Makes displaced-lock evidence a persistent fail-closed acquisition barrier: every acquisition inspects preserved displaced evidence before creating anything, a live or liveness-indeterminate displaced owner blocks all later contenders and is never deleted by age-based cleanup, and provably dead evidence is retired through the same atomic identity-safe tombstone protocol as marker reclaim so the barrier cannot outlive its owner.",
+  "version_notes": "Makes displaced-evidence validation and main-lock ownership commitment one recovery-marker-serialized protocol, so a contender that scanned before failed-restoration evidence appeared must recheck it before creating a lock. Evidence enumeration and reads now fail closed on every error except genuine ENOENT, including retirement verification, while preserving identity-safe retirement, restoration, ownership-token, and tombstone guarantees.",
   "outputs": [
     {
       "kind": "curated",

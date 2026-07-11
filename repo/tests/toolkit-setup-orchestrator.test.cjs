@@ -46,13 +46,13 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.3.35',
+    version: '2.3.36',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.3.35',
+    version: '2.3.36',
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
@@ -75,7 +75,7 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.35', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.36', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -85,7 +85,7 @@ function createMinimalSetupRepo(root) {
     "const path = require('node:path');",
     "fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_HELPER_ARGS.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.35', scope: 'user' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.36', scope: 'user' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -154,7 +154,7 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createFakeManagedSetupScript(root, version = '2.3.35', options = {}) {
+function createFakeManagedSetupScript(root, version = '2.3.36', options = {}) {
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
   const emitQuestionBank = options.emitQuestionBank !== false;
@@ -359,8 +359,8 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
   assert.match(result.stdout, /Preference\/target writes before answers: no/);
   assert.match(result.stdout, /Codex plugin cache path:/);
-  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.35/);
-  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.35/);
+  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.36/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.36/);
   assert.match(result.stdout, /Codex plugin installed: yes/);
   assert.match(result.stdout, /Codex plugin enabled: yes/);
   assert.match(result.stdout, /Codex plugin current: yes/);
@@ -537,7 +537,7 @@ test('setup final summary distinguishes fast-forwarded managed checkout', () => 
 
 test('active setup command delegates to managed checkout script when it exists', () => {
   const root = tmpRoot();
-  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.3.35');
+  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.3.36');
   const beforeStatus = runTestGit(repoRoot, ['status', '--short']);
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -552,13 +552,13 @@ test('active setup command delegates to managed checkout script when it exists',
   assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.match(result.stdout, /Managed checkout commit: [0-9a-f]{40}/);
   assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
-  assert.match(result.stdout, /managed setup script version 2\.3\.35/);
+  assert.match(result.stdout, /managed setup script version 2\.3\.36/);
   assert.match(result.stdout, /# setup toolkit question bank/);
 });
 
 test('active setup command does not block on stdin before delegating to the managed checkout', async () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.3.35', { emitQuestionBank: false, exitCode: 0 });
+  createFakeManagedSetupScript(root, '2.3.36', { emitQuestionBank: false, exitCode: 0 });
 
   const result = await runWithUnclosedStdin(script, ['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -566,12 +566,12 @@ test('active setup command does not block on stdin before delegating to the mana
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /# setup toolkit managed route/);
-  assert.match(result.stdout, /managed setup script version 2\.3\.35/);
+  assert.match(result.stdout, /managed setup script version 2\.3\.36/);
 });
 
 test('managed question-bank pause is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.3.35');
+  createFakeManagedSetupScript(root, '2.3.36');
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
   });
@@ -585,7 +585,7 @@ test('managed question-bank pause is not bypassed with active fallback', () => {
 
 test('managed safety blocker is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.3.35', {
+  createFakeManagedSetupScript(root, '2.3.36', {
     emitQuestionBank: false,
     exitCode: 1,
     extraLines: ["console.error('managed safety blocker');"]
@@ -819,8 +819,8 @@ test('claude-code setup execute with instructions behavior verifies Claude plugi
   assert.match(result.stdout, /Claude Code native plugin metadata verified/);
   assert.match(result.stdout, /## Claude Code native plugin/);
   assert.match(result.stdout, /Claude plugin manifest path:/);
-  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.35/);
-  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.35/);
+  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.36/);
+  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.36/);
   assert.match(result.stdout, /Claude plugin status: metadata present/);
   assert.match(result.stdout, /Claude plugin updated this run: no/);
   assert.match(result.stdout, /Claude restart required: no/);

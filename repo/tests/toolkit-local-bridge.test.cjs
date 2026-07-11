@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.35';
+const expectedBridgeVersion = '2.3.36';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -1282,6 +1282,12 @@ function deadTestPid() {
   return child.pid;
 }
 
+function fsError(code) {
+  const error = new Error(`injected ${code}`);
+  error.code = code;
+  return error;
+}
+
 test('fresh lock owned by a live process blocks manual writes and is not deleted', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -1656,6 +1662,62 @@ function buildFailClosedDisplacedEvidence(bridge, hubRoot, lockPath, liveness) {
   return path.join(hubRoot, evidenceFiles[0]);
 }
 
+test('a contender that scanned before failed-restoration evidence existed is blocked by the under-marker recheck', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const markerPath = `${lockPath}.recovery`;
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: 999999 });
+
+  const liveness = (pid) => (Number(pid) === 777777 ? 'alive' : 'dead');
+  let failedRecovery = null;
+  let evidencePath = null;
+  let evidenceRaw = null;
+
+  // C completes its initial evidence scan while none exists. During the
+  // injected pause, R displaces a live replacement, cannot restore it because
+  // an intruder occupies the main path, preserves evidence, releases its
+  // marker, and declines acquisition. The intruder then exits before C resumes.
+  const contender = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+    liveness,
+    afterInitialEvidenceInspect: () => {
+      failedRecovery = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+        liveness,
+        beforeDisplace: () => {
+          writeJson(lockPath, { created_at: new Date().toISOString(), pid: 777777, token: 'live-displaced-owner' });
+        },
+        afterDisplace: () => {
+          writeJson(lockPath, { created_at: new Date().toISOString(), pid: 424242, token: 'intruder' });
+        }
+      });
+      assert.equal(failedRecovery.acquired, false, 'R must not acquire after failed restoration');
+      assert.equal(fs.existsSync(markerPath), false, 'R releases its recovery marker');
+      const evidenceFiles = fs.readdirSync(hubRoot).filter((entry) => /^update\.lock\.displaced\.[0-9a-f-]+$/i.test(entry));
+      assert.equal(evidenceFiles.length, 1, 'R preserves exactly one evidence generation');
+      evidencePath = path.join(hubRoot, evidenceFiles[0]);
+      evidenceRaw = fs.readFileSync(evidencePath, 'utf8');
+      fs.rmSync(lockPath, { force: true });
+    }
+  });
+
+  assert.equal(contender.acquired, false, 'C must not acquire from its stale initial scan');
+  assert.match(contender.skipReason, /displaced lock evidence at .* belongs to live process 777777/);
+  assert.equal(fs.existsSync(lockPath), false, 'C does not create the main lock');
+  assert.equal(fs.readFileSync(evidencePath, 'utf8'), evidenceRaw, 'C does not alter the evidence');
+
+  assert.throws(
+    () => bridge.acquireLock(hubRoot, { hook: false, syncSource: 'repo' }, { liveness }),
+    /displaced lock evidence at .* belongs to live process 777777/,
+    'manual acquisition fails clearly behind the same evidence'
+  );
+  const later = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, { liveness });
+  assert.equal(later.acquired, false, 'a later contender remains blocked while the displaced owner lives');
+  assert.equal(fs.existsSync(lockPath), false);
+  assert.equal(fs.readFileSync(evidencePath, 'utf8'), evidenceRaw);
+});
+
 test('displaced live evidence blocks later contenders after the marker and intruder are gone', () => {
   const root = tmpRoot();
   const hubRoot = path.join(root, 'hub');
@@ -1735,7 +1797,204 @@ test('displaced evidence with an indeterminate owner fails closed', () => {
   );
 });
 
-test('dead-owner displaced evidence is retired by exactly one contender before acquisition', () => {
+test('evidence that vanishes with ENOENT after enumeration does not create a false barrier', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const evidencePath = path.join(hubRoot, 'update.lock.displaced.aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  writeJson(evidencePath, { created_at: new Date().toISOString(), pid: 999999, token: 'vanishing' });
+
+  let injected = false;
+  const result = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+    liveness: () => 'dead',
+    readDisplacedEvidence: (fullPath, phase) => {
+      if (phase === 'initial' && !injected) {
+        injected = true;
+        fs.rmSync(fullPath);
+        throw fsError('ENOENT');
+      }
+      return fs.readFileSync(fullPath, 'utf8');
+    }
+  });
+
+  assert.equal(result.acquired, true, 'genuine ENOENT means the enumerated evidence vanished');
+  assert.equal(fs.existsSync(evidencePath), false);
+  bridge.releaseLock(result);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('initial unreadable evidence fails closed in hook and manual modes', () => {
+  for (const code of ['EACCES', 'EPERM']) {
+    const root = tmpRoot();
+    const hubRoot = path.join(root, 'hub');
+    const lockPath = path.join(hubRoot, 'update.lock');
+    const evidencePath = path.join(hubRoot, `update.lock.displaced.${code === 'EACCES' ? 'aaaaaaaa' : 'bbbbbbbb'}-1111-4222-8333-444444444444`);
+    const bridge = require('../scripts/toolkit-local-bridge.cjs');
+    fs.mkdirSync(hubRoot, { recursive: true });
+    writeJson(evidencePath, { created_at: new Date().toISOString(), pid: 777777, token: code });
+    const original = fs.readFileSync(evidencePath, 'utf8');
+    const testHooks = {
+      liveness: () => 'alive',
+      readDisplacedEvidence: () => { throw fsError(code); }
+    };
+
+    const hookRun = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, testHooks);
+    assert.equal(hookRun.acquired, false);
+    assert.match(hookRun.skipReason, new RegExp(`evidence at .* is unreadable \\(${code}\\); failing closed`));
+    assert.equal(fs.existsSync(lockPath), false, `${code}: hook mode must not create a main lock`);
+    assert.equal(fs.readFileSync(evidencePath, 'utf8'), original, `${code}: hook mode leaves evidence untouched`);
+
+    assert.throws(
+      () => bridge.acquireLock(hubRoot, { hook: false, syncSource: 'repo' }, testHooks),
+      new RegExp(`evidence at .* is unreadable \\(${code}\\); failing closed`),
+      `${code}: manual mode fails with the precise unreadable-evidence reason`
+    );
+    assert.equal(fs.existsSync(lockPath), false, `${code}: manual mode must not create a main lock`);
+    assert.equal(fs.readFileSync(evidencePath, 'utf8'), original, `${code}: manual mode leaves evidence untouched`);
+  }
+});
+
+test('evidence that becomes unreadable under marker ownership still blocks creation', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const evidencePath = path.join(hubRoot, 'update.lock.displaced.bbbbbbbb-2222-4333-8444-555555555555');
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  writeJson(evidencePath, { created_at: new Date().toISOString(), pid: 999999, token: 'under-marker' });
+  const original = fs.readFileSync(evidencePath, 'utf8');
+  let underMarkerUnreadable = false;
+
+  const result = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+    liveness: () => 'dead',
+    afterInitialEvidenceInspect: () => { underMarkerUnreadable = true; },
+    readDisplacedEvidence: (fullPath, phase) => {
+      if (phase === 'under-marker' && underMarkerUnreadable) throw fsError('EACCES');
+      return fs.readFileSync(fullPath, 'utf8');
+    }
+  });
+
+  assert.equal(result.acquired, false);
+  assert.match(result.skipReason, /evidence at .* is unreadable \(EACCES\); failing closed/);
+  assert.equal(fs.existsSync(lockPath), false, 'the authoritative under-marker read cannot fail open');
+  assert.equal(fs.readFileSync(evidencePath, 'utf8'), original, 'the unreadable evidence remains untouched');
+});
+
+test('retirement verification ENOENT permits acquisition only after the evidence genuinely vanished', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const evidencePath = path.join(hubRoot, 'update.lock.displaced.cccccccc-1111-4222-8333-444444444444');
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  writeJson(evidencePath, { created_at: new Date().toISOString(), pid: 999999, token: 'dead-owner' });
+
+  const result = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+    liveness: () => 'dead',
+    readDisplacedEvidence: (fullPath, phase) => {
+      if (phase === 'retirement-verification') {
+        fs.rmSync(fullPath);
+        throw fsError('ENOENT');
+      }
+      return fs.readFileSync(fullPath, 'utf8');
+    }
+  });
+
+  assert.equal(result.acquired, true);
+  assert.equal(fs.existsSync(evidencePath), false, 'ENOENT corresponds to genuinely absent evidence');
+  bridge.releaseLock(result);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('unreadable retirement verification fails closed and preserves evidence', () => {
+  for (const code of ['EACCES', 'EPERM']) {
+    const root = tmpRoot();
+    const hubRoot = path.join(root, 'hub');
+    const lockPath = path.join(hubRoot, 'update.lock');
+    const evidencePath = path.join(hubRoot, `update.lock.displaced.${code === 'EACCES' ? 'dddddddd' : 'eeeeeeee'}-1111-4222-8333-444444444444`);
+    const bridge = require('../scripts/toolkit-local-bridge.cjs');
+    fs.mkdirSync(hubRoot, { recursive: true });
+    writeJson(evidencePath, { created_at: new Date().toISOString(), pid: 999999, token: code });
+    const original = fs.readFileSync(evidencePath, 'utf8');
+
+    const result = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+      liveness: () => 'dead',
+      readDisplacedEvidence: (fullPath, phase) => {
+        if (phase === 'retirement-verification') throw fsError(code);
+        return fs.readFileSync(fullPath, 'utf8');
+      }
+    });
+
+    assert.equal(result.acquired, false);
+    assert.match(result.skipReason, new RegExp(`became unreadable during retirement verification \\(${code}\\)`));
+    assert.equal(fs.existsSync(lockPath), false, `${code}: no main lock is created`);
+    assert.equal(fs.readFileSync(evidencePath, 'utf8'), original, `${code}: evidence remains untouched`);
+  }
+});
+
+test('post-rename unreadable evidence is preserved without creating an owned main lock', () => {
+  for (const code of ['EACCES', 'EPERM']) {
+    const root = tmpRoot();
+    const hubRoot = path.join(root, 'hub');
+    const lockPath = path.join(hubRoot, 'update.lock');
+    const bridge = require('../scripts/toolkit-local-bridge.cjs');
+    fs.mkdirSync(hubRoot, { recursive: true });
+    writeJson(lockPath, { created_at: new Date().toISOString(), pid: 999999, token: `recoverable-${code}` });
+    const original = fs.readFileSync(lockPath, 'utf8');
+
+    const result = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+      liveness: () => 'dead',
+      afterDisplace: () => {
+        writeJson(lockPath, { created_at: new Date().toISOString(), pid: 424242, token: 'intruder' });
+      },
+      readDisplacedEvidence: (fullPath, phase) => {
+        if (phase === 'post-displacement') throw fsError(code);
+        return fs.readFileSync(fullPath, 'utf8');
+      }
+    });
+
+    assert.equal(result.acquired, false);
+    assert.match(result.skipReason, new RegExp(`evidence at .* is unreadable \\(${code}\\); failing closed`));
+    assert.equal(readJson(lockPath).token, 'intruder', `${code}: the intruding main lock is not replaced`);
+    const evidenceFiles = fs.readdirSync(hubRoot).filter((entry) => /^update\.lock\.displaced\.[0-9a-f-]+$/i.test(entry));
+    assert.equal(evidenceFiles.length, 1, `${code}: the unreadable displaced path is preserved`);
+    assert.equal(fs.readFileSync(path.join(hubRoot, evidenceFiles[0]), 'utf8'), original, `${code}: evidence bytes are untouched`);
+  }
+});
+
+test('unreadable evidence directory enumeration fails closed', () => {
+  for (const mode of ['hook', 'manual']) {
+    const root = tmpRoot();
+    const hubRoot = path.join(root, 'hub');
+    const lockPath = path.join(hubRoot, 'update.lock');
+    const evidencePath = path.join(hubRoot, 'update.lock.displaced.ffffffff-1111-4222-8333-444444444444');
+    const bridge = require('../scripts/toolkit-local-bridge.cjs');
+    fs.mkdirSync(hubRoot, { recursive: true });
+    writeJson(evidencePath, { created_at: new Date().toISOString(), pid: 777777, token: mode });
+    const original = fs.readFileSync(evidencePath, 'utf8');
+    const testHooks = {
+      liveness: () => 'alive',
+      listDisplacedEvidence: () => { throw fsError('EACCES'); }
+    };
+
+    if (mode === 'hook') {
+      const result = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, testHooks);
+      assert.equal(result.acquired, false);
+      assert.match(result.skipReason, /evidence cannot be enumerated .* \(EACCES\); failing closed/);
+    } else {
+      assert.throws(
+        () => bridge.acquireLock(hubRoot, { hook: false, syncSource: 'repo' }, testHooks),
+        /evidence cannot be enumerated .* \(EACCES\); failing closed/
+      );
+    }
+    assert.equal(fs.existsSync(lockPath), false, `${mode}: enumeration failure must not create a main lock`);
+    assert.equal(fs.readFileSync(evidencePath, 'utf8'), original, `${mode}: enumeration failure leaves evidence untouched`);
+  }
+});
+
+test('dead-owner displaced evidence is retired by exactly one marker owner before acquisition', () => {
   const root = tmpRoot();
   const hubRoot = path.join(root, 'hub');
   const lockPath = path.join(hubRoot, 'update.lock');
@@ -1746,22 +2005,22 @@ test('dead-owner displaced evidence is retired by exactly one contender before a
   const evidencePath = buildFailClosedDisplacedEvidence(bridge, hubRoot, lockPath, buildLiveness);
   fs.rmSync(lockPath, { force: true });
 
-  // The displaced owner has since provably died. Two contenders race the
-  // retirement: the seam runs B's complete acquisition between A's evidence
-  // inspection and A's retirement tombstone attempt.
+  // The displaced owner has since provably died. A owns the marker before its
+  // retirement seam runs B, so B must yield to that marker and A alone may
+  // retire the generation and acquire.
   const liveness = (pid) => (Number(pid) === process.pid ? 'alive' : 'dead');
-  let winner = null;
-  const loser = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+  let loser = null;
+  const winner = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
     liveness,
     afterEvidenceInspect: () => {
-      if (winner) return;
-      winner = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, { liveness });
+      if (loser) return;
+      loser = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, { liveness });
     }
   });
 
-  assert.equal(winner.acquired, true, 'exactly one contender retires the evidence and acquires');
-  assert.equal(loser.acquired, false, 'the racing contender serializes on the retirement tombstone');
-  assert.match(loser.skipReason, /being retired by another process|created by another process|held by live process/);
+  assert.equal(winner.acquired, true, 'the marker owner retires the evidence and acquires');
+  assert.equal(loser.acquired, false, 'the racing contender serializes on the recovery marker');
+  assert.match(loser.skipReason, /recovery .* is in progress by live process/);
   assert.equal(fs.existsSync(evidencePath), false, 'the dead-owner evidence generation was retired');
   assert.equal(readJson(lockPath).token, winner.token, 'one final main-lock owner emerges');
 
