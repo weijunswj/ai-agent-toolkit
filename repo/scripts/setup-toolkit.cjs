@@ -1326,22 +1326,27 @@ function setupClaudeArgs(args, mode) {
   return nodeScriptArgs('repo/scripts/setup-claude-toolkit-plugin.cjs', extra);
 }
 
-// Static fallbacks matching the helper's default budgets, used only when the
-// sibling helper module cannot be loaded for derived budgets.
-const CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS = 145000;
-const CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS = 865000;
+// Static fallbacks matching the helper's default worst-case budgets with the
+// maximum supported CLI candidate count (explicit --claude-cli, two env
+// overrides, bare `claude` = 4 candidates x 10s default probe), used only
+// when the sibling helper module cannot be loaded for derived budgets.
+const CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS = 175000;
+const CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS = 895000;
 
 // Derive the outer spawnSync timeouts for the Claude native plugin helper
 // from the helper's own exported budgets so this orchestrator can never kill
 // the helper while it is still inside its own supported verification
-// deadlines. The helper bounds itself (per-command timeouts plus mutation
-// deadlines); these outer timeouts are only a backstop against a truly hung
-// helper, and both respect the same environment overrides the helper reads.
-function claudeSetupBudgets() {
+// deadlines. The budgets are computed with the exact explicit CLI argument
+// the child helper receives, in the same environment it inherits, so the
+// full CLI candidate-resolution sequence is accounted identically on both
+// sides. The helper bounds itself (per-candidate probes, per-command
+// timeouts, mutation deadlines); these outer timeouts are only a backstop
+// against a truly hung helper.
+function claudeSetupBudgets(claudeCli = '') {
   try {
     const helper = require(path.join(__dirname, 'setup-claude-toolkit-plugin.cjs'));
     if (typeof helper.verifyBudgetMs === 'function' && typeof helper.writeBudgetMs === 'function') {
-      return { verify: helper.verifyBudgetMs(), write: helper.writeBudgetMs() };
+      return { verify: helper.verifyBudgetMs(claudeCli), write: helper.writeBudgetMs(claudeCli) };
     }
   } catch {
     // Fall through to the static fallback budgets below.
@@ -1350,7 +1355,7 @@ function claudeSetupBudgets() {
 }
 
 function runClaudeNativePluginSetup(args) {
-  const budgets = claudeSetupBudgets();
+  const budgets = claudeSetupBudgets(args.claudeCli);
   const verify = runCommand(
     'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
     process.execPath,
@@ -1408,7 +1413,7 @@ function runClaudeNativePluginVerify(args) {
     'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
     process.execPath,
     setupClaudeArgs(args, '--verify'),
-    { cwd: args.repoRoot, capture: true, timeout: claudeSetupBudgets().verify }
+    { cwd: args.repoRoot, capture: true, timeout: claudeSetupBudgets(args.claudeCli).verify }
   );
   process.stdout.write(result.stdout || '');
   return parseJsonFromOutput(result.stdout);
@@ -1768,6 +1773,8 @@ module.exports = {
   SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL,
   SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL,
   SETUP_PAUSED_FOR_QUESTION_BANK,
+  CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS,
+  CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS,
   claudeSetupBudgets,
   defaultManagedSourcePath,
   parseArgs,

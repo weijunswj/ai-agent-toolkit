@@ -669,6 +669,93 @@ test('Claude Toolkit plugin mutation deadline and poll env controls reject malfo
   }
 });
 
+test('CLI resolution is fully budgeted for every distinct candidate with dedupe aligned to the resolver', () => {
+  const saved = {
+    envCli: process.env.CLAUDE_TOOLKIT_CLAUDE_CLI,
+    cliPath: process.env.CLAUDE_CLI_PATH,
+    probe: process.env.CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS
+  };
+  try {
+    delete process.env.CLAUDE_TOOLKIT_CLAUDE_CLI;
+    delete process.env.CLAUDE_CLI_PATH;
+    delete process.env.CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS;
+
+    // One valid first candidate: with no explicit CLI and no env overrides
+    // only bare `claude` is probed, and the budget stays at one probe.
+    assert.deepEqual(setup.commandCandidates(''), ['claude']);
+    assert.equal(setup.resolutionBudgetMs(''), 10000);
+    assert.equal(setup.verifyBudgetMs(''), 10000 + 120000 + 15000);
+
+    // Four distinct candidates are fully budgeted.
+    process.env.CLAUDE_TOOLKIT_CLAUDE_CLI = 'env-cli-one';
+    process.env.CLAUDE_CLI_PATH = 'env-cli-two';
+    assert.equal(setup.commandCandidates('explicit-cli').length, 4);
+    assert.equal(setup.resolutionBudgetMs('explicit-cli'), 4 * 10000);
+
+    // Deduplicated candidates are not double-counted: the accounting reuses
+    // commandCandidates itself.
+    assert.equal(setup.commandCandidates('env-cli-one').length, 3);
+    assert.equal(setup.resolutionBudgetMs('env-cli-one'), 3 * 10000);
+
+    // The orchestrator derives identical budgets for the same explicit
+    // argument and environment, and stays finite.
+    const orchestrator = require('../scripts/setup-toolkit.cjs');
+    const budgets = orchestrator.claudeSetupBudgets('explicit-cli');
+    assert.equal(budgets.verify, setup.verifyBudgetMs('explicit-cli'));
+    assert.equal(budgets.write, setup.writeBudgetMs('explicit-cli'));
+    assert.ok(Number.isFinite(budgets.verify) && Number.isFinite(budgets.write));
+
+    // Static fallbacks match the corrected default worst case: the maximum
+    // supported candidate count at the default probe timeout.
+    assert.equal(orchestrator.CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS, setup.verifyBudgetMs('explicit-cli'));
+    assert.equal(orchestrator.CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS, setup.writeBudgetMs('explicit-cli'));
+
+    // The probe timeout override flows into the budget and is strict-parsed.
+    process.env.CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS = '3000';
+    assert.equal(setup.probeTimeoutMs(), 3000);
+    assert.equal(setup.resolutionBudgetMs('explicit-cli'), 4 * 3000);
+    for (const bad of ['abc', '0', '-5', '10junk', '1e3', String(2 * 60 * 60 * 1000)]) {
+      process.env.CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS = bad;
+      assert.equal(setup.probeTimeoutMs(), 10000, `probe fallback for ${JSON.stringify(bad)}`);
+    }
+  } finally {
+    for (const [key, value] of [
+      ['CLAUDE_TOOLKIT_CLAUDE_CLI', saved.envCli],
+      ['CLAUDE_CLI_PATH', saved.cliPath],
+      ['CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS', saved.probe]
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('failed CLI candidates followed by a valid final candidate resolve within the budgeted sequence', () => {
+  const stateDir = tmpRoot();
+  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: true });
+  const brokenClaude = path.join(stateDir, 'broken-claude.cjs');
+  fs.writeFileSync(brokenClaude, 'process.exit(1);\n', 'utf8');
+
+  // Candidate order: the explicit broken CLI fails first, then the env
+  // override resolves to the valid fake CLI. The run must succeed and stay
+  // inside the budget computed for this exact candidate sequence.
+  const env = {
+    ...process.env,
+    CLAUDE_TOOLKIT_CLAUDE_CLI: fakeClaude,
+    CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS: '3000',
+    CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS: '8000',
+    CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS: '50'
+  };
+  const started = Date.now();
+  const result = runSetup('--verify', brokenClaude, [], { env });
+  const elapsed = Date.now() - started;
+
+  assert.equal(result.status, 0, result.stderr);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.ok, true);
+  assert.ok(elapsed < 60000, `resolution sequence took ${elapsed}ms`);
+});
+
 test('mutation polling caps every wait to the remaining deadline even with an extreme poll interval', async () => {
   const stateDir = tmpRoot();
   const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, installNeverLands: true });

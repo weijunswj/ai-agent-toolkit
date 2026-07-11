@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.33';
+const BRIDGE_VERSION = '2.3.34';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -2286,40 +2286,137 @@ function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
   return { respected: false, message: '' };
 }
 
+// Best-effort cleanup of long-spent recovery artifacts (reclaim tombstones
+// and orphaned displaced-lock files). A generous age floor keeps cleanup far
+// away from any live acquisition: a contender's inspect-to-claim window is
+// one acquireLock call, and tombstones only need to outlive stale knowledge
+// of a marker generation, not accumulate forever.
+const LOCK_ARTIFACT_GC_MS = 24 * 60 * 60 * 1000;
+
+function cleanupSpentLockArtifacts(hubRoot) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(hubRoot);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!/^update\.lock\.recovery\.claim-/.test(entry) && !/^update\.lock\.displaced\./.test(entry)) continue;
+    const fullPath = path.join(hubRoot, entry);
+    try {
+      if (Date.now() - fs.statSync(fullPath).mtimeMs > LOCK_ARTIFACT_GC_MS) {
+        fs.rmSync(fullPath, { force: true });
+      }
+    } catch {
+      // Best-effort only; a busy or vanished artifact is left alone.
+    }
+  }
+}
+
+function lockGenerationIdentity(rawBytes) {
+  return crypto.createHash('sha256').update(rawBytes, 'utf8').digest('hex').slice(0, 16);
+}
+
+// Inspect the recovery marker without mutating anything. Used both by the
+// reclaim path and by the no-lock acquisition path, which must respect an
+// active recovery claim while the main lock is temporarily displaced.
+function inspectRecoveryMarker(markerPath, liveness = lockOwnerLiveness) {
+  let raw = null;
+  try {
+    raw = fs.readFileSync(markerPath, 'utf8');
+  } catch {
+    return { present: false };
+  }
+  let marker = {};
+  try {
+    marker = JSON.parse(raw.replace(/^﻿/, ''));
+  } catch {
+    // Malformed marker content: liveness is unknown and the age fallback
+    // (file mtime) decides below.
+  }
+  const owner = liveness(marker.pid);
+  if (owner === 'alive') {
+    return { present: true, active: true, raw, marker, message: `Toolkit bridge lock recovery at ${markerPath} is in progress by live process ${marker.pid}` };
+  }
+  if (owner !== 'dead') {
+    const age = lockAgeMs(markerPath, marker);
+    if (Number.isFinite(age) && age < LOCK_STALE_MS) {
+      return { present: true, active: true, raw, marker, message: `fresh Toolkit bridge lock recovery marker exists at ${markerPath}` };
+    }
+  }
+  return { present: true, active: false, raw, marker };
+}
+
 // Atomic recovery claim: only the process that exclusively created the
 // recovery marker may displace a recoverable lock and write a replacement.
 // The exclusive create is the atomic ownership primitive; the loser of the
-// race never deletes anything. A marker owned by a live process is
-// respected; a marker left by a dead or stale recovery is cleared once and
-// the claim retried.
-function claimRecoveryMarker(markerPath, token, liveness = lockOwnerLiveness) {
+// race never deletes anything.
+//
+// Reclaiming a marker left by a dead or stale recovery is itself atomic and
+// identity-safe: the reclaimer must first exclusively create a tombstone
+// whose name is derived from a hash of the exact marker bytes it inspected.
+// Contenders that inspected the same marker generation compute the same
+// tombstone path, so exactly one wins the exclusive create; the tombstone is
+// never deleted by the protocol (only aged out long after any contender's
+// knowledge of that generation could survive), so a loser acting on stale
+// knowledge can never reclaim that generation later. The winner then
+// re-reads the marker under its tombstone and proceeds only when the bytes
+// are still the inspected generation.
+function claimRecoveryMarker(markerPath, token, liveness = lockOwnerLiveness, testHooks = {}) {
   const markerBody = `${JSON.stringify({ created_at: timestamp(), pid: process.pid, token }, null, 2)}\n`;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const tryCreateMarker = () => {
     try {
       fs.writeFileSync(markerPath, markerBody, { encoding: 'utf8', flag: 'wx' });
-      return { claimed: true };
+      return true;
     } catch (error) {
-      if (!error || error.code !== 'EEXIST') throw error;
+      if (error && error.code === 'EEXIST') return false;
+      throw error;
     }
-    let marker = {};
-    try {
-      marker = readJsonIfExists(markerPath) || {};
-    } catch {
-      // Malformed marker JSON falls through to the age check below.
-    }
-    const owner = liveness(marker.pid);
-    if (owner === 'alive') {
-      return { claimed: false, message: `Toolkit bridge lock recovery at ${markerPath} is in progress by live process ${marker.pid}` };
-    }
-    if (owner !== 'dead') {
-      const age = lockAgeMs(markerPath, marker);
-      if (Number.isFinite(age) && age < LOCK_STALE_MS) {
-        return { claimed: false, message: `fresh Toolkit bridge lock recovery marker exists at ${markerPath}` };
-      }
-    }
-    fs.rmSync(markerPath, { force: true });
+  };
+
+  if (tryCreateMarker()) return { claimed: true };
+
+  const inspection = inspectRecoveryMarker(markerPath, liveness);
+  if (!inspection.present) {
+    // The marker vanished between the exclusive create and the read; one
+    // bounded retry decides ownership without any deletion.
+    if (tryCreateMarker()) return { claimed: true };
+    return { claimed: false, message: `Toolkit bridge lock recovery marker at ${markerPath} was re-created by another process` };
   }
-  return { claimed: false, message: `Toolkit bridge lock recovery marker at ${markerPath} could not be claimed` };
+  if (inspection.active) return { claimed: false, message: inspection.message };
+  if (testHooks.afterMarkerInspect) testHooks.afterMarkerInspect();
+
+  const identity = lockGenerationIdentity(inspection.raw);
+  const tombstonePath = `${markerPath}.claim-${identity}`;
+  try {
+    fs.writeFileSync(
+      tombstonePath,
+      `${JSON.stringify({ created_at: timestamp(), pid: process.pid, token, reclaimed_marker_identity: identity }, null, 2)}\n`,
+      { encoding: 'utf8', flag: 'wx' }
+    );
+  } catch (error) {
+    if (error && error.code === 'EEXIST') {
+      return { claimed: false, message: `Toolkit bridge lock recovery marker at ${markerPath} was already reclaimed by another process` };
+    }
+    throw error;
+  }
+
+  // Verify under the tombstone: only the inspected generation may be
+  // removed. A different generation means another process already cycled
+  // the marker; it is left untouched and this contender yields.
+  let current = null;
+  try {
+    current = fs.readFileSync(markerPath, 'utf8');
+  } catch {
+    // Marker gone: fall through to the exclusive create below.
+  }
+  if (current !== null && current !== inspection.raw) {
+    return { claimed: false, message: `Toolkit bridge lock recovery marker at ${markerPath} changed while being reclaimed` };
+  }
+  if (current !== null) fs.rmSync(markerPath, { force: true });
+
+  if (tryCreateMarker()) return { claimed: true };
+  return { claimed: false, message: `Toolkit bridge lock recovery marker at ${markerPath} was re-created by another process` };
 }
 
 function releaseRecoveryMarker(markerPath, token) {
@@ -2333,20 +2430,29 @@ function releaseRecoveryMarker(markerPath, token) {
 }
 
 // acquireLock protocol:
-// 1. No lock present: exclusive create is the atomic claim; EEXIST loses.
+// 1. No lock present: an active (live or fresh) recovery claim is respected
+//    first, because the main lock is temporarily displaced while recovery
+//    runs and no replacement writer may enter behind the recoverer. Only
+//    then is exclusive creation the atomic claim; EEXIST loses.
 // 2. Lock present and respected (live owner, or fresh with unknown owner):
 //    hook runs skip, manual runs fail. Nothing is deleted.
-// 3. Recoverable lock: claim the exclusive recovery marker, re-inspect the
-//    lock under the marker (a replacement written in the interim has a live
-//    owner and is respected), displace the recoverable lock by rename and
-//    verify the displaced file's owner is not alive before discarding it,
-//    then exclusively create the replacement carrying a unique ownership
-//    token. Every acquisition failure path releases only this run's marker.
+// 3. Recoverable lock: claim the exclusive recovery marker (reclaiming a
+//    dead or stale marker is atomic and identity-safe via a tombstone on
+//    the inspected marker generation), re-inspect the lock under the marker
+//    (a replacement written in the interim has a live owner and is
+//    respected), displace the recoverable lock by rename and verify the
+//    displaced file's owner is not alive before discarding it, then
+//    exclusively create the replacement carrying a unique ownership token.
+//    A displaced live-owner lock that cannot be restored to its exact path
+//    fails closed: the displaced file is preserved as evidence and this
+//    contender yields without writing.
 // testHooks is a test-only seam for deterministic interleaving; production
 // call sites never pass it.
 function acquireLock(hubRoot, args, testHooks = {}) {
   fs.mkdirSync(hubRoot, { recursive: true });
+  cleanupSpentLockArtifacts(hubRoot);
   const lockPath = path.join(hubRoot, 'update.lock');
+  const markerPath = `${lockPath}${LOCK_RECOVERY_MARKER_SUFFIX}`;
   const liveness = testHooks.liveness || lockOwnerLiveness;
   const token = crypto.randomUUID();
 
@@ -2373,6 +2479,11 @@ function acquireLock(hubRoot, args, testHooks = {}) {
   };
 
   if (!fs.existsSync(lockPath)) {
+    // The main lock is absent while a recovery displaces it; the recovery
+    // marker exists for that entire window, so respecting an active marker
+    // here keeps any replacement writer out from behind the recoverer.
+    const recovery = inspectRecoveryMarker(markerPath, liveness);
+    if (recovery.present && recovery.active) return skipOrThrow(recovery.message);
     if (tryExclusiveCreate()) return { acquired: true, lockPath, token };
     return skipOrThrow(`Toolkit bridge lock at ${lockPath} was created by another process`);
   }
@@ -2381,8 +2492,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
   if (inspection.respected) return skipOrThrow(inspection.message);
   if (testHooks.afterInspect) testHooks.afterInspect();
 
-  const markerPath = `${lockPath}${LOCK_RECOVERY_MARKER_SUFFIX}`;
-  const marker = claimRecoveryMarker(markerPath, token, liveness);
+  const marker = claimRecoveryMarker(markerPath, token, liveness, testHooks);
   if (!marker.claimed) return skipOrThrow(marker.message);
 
   try {
@@ -2390,6 +2500,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
     if (fs.existsSync(lockPath)) {
       const recheck = inspectLockForRecovery(lockPath, liveness);
       if (recheck.respected) return skipOrThrow(recheck.message);
+      if (testHooks.beforeDisplace) testHooks.beforeDisplace();
       // Displace by rename instead of deleting in place, then verify the
       // displaced file: if a live owner's replacement was displaced by a
       // pathological interleaving, restore it untouched and yield.
@@ -2400,6 +2511,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
         // The lock disappeared between the recheck and the rename; continue
         // to the exclusive create, which remains the final arbiter.
       }
+      if (testHooks.afterDisplace) testHooks.afterDisplace();
       if (fs.existsSync(displacedPath)) {
         let displaced = {};
         try {
@@ -2410,16 +2522,23 @@ function acquireLock(hubRoot, args, testHooks = {}) {
           // because the pre-rename inspection already deemed it recoverable.
         }
         if (liveness(displaced.pid) === 'alive') {
+          let restored = false;
           if (!fs.existsSync(lockPath)) {
             try {
               fs.renameSync(displacedPath, lockPath);
+              restored = true;
             } catch {
-              // Restoration lost a further race; the displaced copy is
-              // removed below and the exclusive create decides ownership.
+              // Restoration failed (for example a Windows rename failure);
+              // fail closed below without deleting the displaced evidence.
             }
           }
-          if (fs.existsSync(displacedPath)) fs.rmSync(displacedPath, { force: true });
-          return skipOrThrow(`Toolkit bridge lock at ${lockPath} is held by live process ${displaced.pid}`);
+          if (restored) {
+            return skipOrThrow(`Toolkit bridge lock at ${lockPath} is held by live process ${displaced.pid}`);
+          }
+          // Fail closed: never delete a live owner's displaced lock, do not
+          // write a replacement, and surface where the evidence lives so a
+          // later manual or dead-owner recovery can resolve it safely.
+          return skipOrThrow(`Toolkit bridge lock recovery displaced a lock held by live process ${displaced.pid} and could not restore it; the displaced lock is preserved at ${displacedPath}; not acquiring`);
         }
         fs.rmSync(displacedPath, { force: true });
       }
@@ -3343,9 +3462,11 @@ module.exports = {
   acquireLock,
   defaultHubPath,
   inspectLockForRecovery,
+  inspectRecoveryMarker,
   lockOwnerLiveness,
   parseArgs,
   releaseLock,
+  releaseRecoveryMarker,
   run,
   adapterPayloads,
   payloadChecksum,

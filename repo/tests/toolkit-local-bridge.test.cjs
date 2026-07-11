@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.33';
+const expectedBridgeVersion = '2.3.34';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -1487,6 +1487,167 @@ test('release does not delete a lock that replaced this run own lock', () => {
   bridge.releaseLock(own);
   assert.equal(fs.existsSync(lockPath), true, 'the old owner must not delete the replacement lock');
   assert.equal(readJson(lockPath).token, 'replacement-owner');
+});
+
+test('two contenders reclaiming the same dead recovery marker: only one recovery owner emerges', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const markerPath = `${lockPath}.recovery`;
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  // A dead main lock plus a marker left behind by a crashed recovery.
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: 999999 });
+  writeJson(markerPath, { created_at: new Date().toISOString(), pid: 999998, token: 'crashed-recovery' });
+
+  const liveness = (pid) => (Number(pid) === process.pid ? 'alive' : 'dead');
+
+  // Both contenders inspect the same dead marker generation before either
+  // cleanup completes: A's afterMarkerInspect seam runs B's complete
+  // acquisition between A's marker classification and A's reclaim attempt.
+  let winner = null;
+  const loser = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+    liveness,
+    afterMarkerInspect: () => {
+      if (winner) return; // only the outer contender A schedules B once
+      winner = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, { liveness });
+    }
+  });
+
+  assert.equal(winner.acquired, true, 'contender B reclaims the dead marker and recovers the lock');
+  assert.equal(loser.acquired, false, 'contender A must lose the identity-safe reclaim');
+  assert.match(loser.skipReason, /already reclaimed by another process|changed while being reclaimed|re-created by another process|held by live process/);
+  assert.equal(readJson(lockPath).token, winner.token, 'the loser never displaces or deletes the winner main lock');
+  assert.equal(fs.existsSync(markerPath), false, 'the winner released its own marker; the loser never deleted a live one');
+
+  bridge.releaseLock(loser);
+  assert.equal(fs.existsSync(lockPath), true, 'the loser handle cannot release the winner lock');
+  bridge.releaseLock(winner);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('a third contender cannot create a main lock while recovery has displaced it', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: 999999 });
+
+  const liveness = (pid) => (Number(pid) === process.pid ? 'alive' : 'dead');
+
+  // C starts during the exact gap in which A has displaced the dead lock
+  // but has not yet written its replacement: the main lock path is absent
+  // and only A's live recovery marker guards the hub.
+  let thirdContender = null;
+  const recoverer = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+    liveness,
+    afterDisplace: () => {
+      assert.equal(fs.existsSync(lockPath), false, 'fixture: the main lock is displaced during this gap');
+      thirdContender = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, { liveness });
+    }
+  });
+
+  assert.equal(recoverer.acquired, true, 'the recoverer remains the only possible owner');
+  assert.equal(thirdContender.acquired, false, 'the third contender must not create a lock behind the recoverer');
+  assert.match(thirdContender.skipReason, /recovery .* is in progress by live process/);
+  assert.equal(readJson(lockPath).token, recoverer.token);
+  bridge.releaseLock(recoverer);
+});
+
+test('a displaced live lock that cannot be restored fails closed without deleting evidence', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: 999999 });
+
+  const liveness = (pid) => (Number(pid) === 777777 ? 'alive' : 'dead');
+
+  // A live replacement appears after the under-marker recheck but before the
+  // displacement rename, and an intruding lock occupies the main path before
+  // restoration: the protocol must preserve the displaced live-owner
+  // evidence, must not let this contender write, and must say where the
+  // evidence lives.
+  const result = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+    liveness,
+    beforeDisplace: () => {
+      writeJson(lockPath, { created_at: new Date().toISOString(), pid: 777777, token: 'live-replacement' });
+    },
+    afterDisplace: () => {
+      writeJson(lockPath, { created_at: new Date().toISOString(), pid: 424242, token: 'intruder' });
+    }
+  });
+
+  assert.equal(result.acquired, false, 'no second writer proceeds');
+  assert.match(result.skipReason, /displaced a lock held by live process 777777 and could not restore it/);
+  assert.match(result.skipReason, /preserved at/);
+  const displacedFiles = fs.readdirSync(hubRoot).filter((entry) => entry.startsWith('update.lock.displaced.'));
+  assert.equal(displacedFiles.length, 1, 'the displaced live-owner lock is preserved as evidence');
+  assert.equal(readJson(path.join(hubRoot, displacedFiles[0])).token, 'live-replacement');
+  assert.equal(readJson(lockPath).token, 'intruder', 'the intruding lock is not touched either');
+});
+
+test('a displaced live lock is restored untouched when its path is free', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: 999999 });
+
+  const liveness = (pid) => (Number(pid) === 777777 ? 'alive' : 'dead');
+  const result = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+    liveness,
+    beforeDisplace: () => {
+      writeJson(lockPath, { created_at: new Date().toISOString(), pid: 777777, token: 'live-replacement' });
+    }
+  });
+
+  assert.equal(result.acquired, false);
+  assert.match(result.skipReason, /held by live process 777777/);
+  assert.equal(readJson(lockPath).token, 'live-replacement', 'the displaced live lock is restored to its exact path');
+  assert.equal(fs.readdirSync(hubRoot).filter((entry) => entry.startsWith('update.lock.displaced.')).length, 0);
+});
+
+test('the no-lock acquisition path respects an active recovery claim', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const markerPath = `${lockPath}.recovery`;
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  // No main lock, but a live recovery is in flight.
+  writeJson(markerPath, { created_at: new Date().toISOString(), pid: 888888, token: 'live-recovery' });
+
+  const liveness = (pid) => (Number(pid) === 888888 ? 'alive' : 'dead');
+
+  const hookRun = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, { liveness });
+  assert.equal(hookRun.acquired, false, 'hook runs skip while recovery is active');
+  assert.match(hookRun.skipReason, /recovery .* is in progress by live process 888888/);
+  assert.equal(fs.existsSync(lockPath), false, 'no lock is created behind the recoverer');
+
+  assert.throws(
+    () => bridge.acquireLock(hubRoot, { hook: false, syncSource: 'repo' }, { liveness }),
+    /recovery .* is in progress by live process 888888/,
+    'manual runs fail while recovery is active'
+  );
+  assert.equal(readJson(markerPath).token, 'live-recovery', 'the live recovery marker is untouched');
+});
+
+test('recovery marker release is token-guarded', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const markerPath = path.join(hubRoot, 'update.lock.recovery');
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  writeJson(markerPath, { created_at: new Date().toISOString(), pid: process.pid, token: 'winning-recovery' });
+
+  bridge.releaseRecoveryMarker(markerPath, 'forged-token');
+  assert.equal(fs.existsSync(markerPath), true, 'a forged token cannot remove the winning marker');
+  bridge.releaseRecoveryMarker(markerPath, 'winning-recovery');
+  assert.equal(fs.existsSync(markerPath), false, 'the owner token releases its own marker');
 });
 
 test('lockOwnerLiveness classifies alive, dead, indeterminate, and unusable PIDs safely', () => {

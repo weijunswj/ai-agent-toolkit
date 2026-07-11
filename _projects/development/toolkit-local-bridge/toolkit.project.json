@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.33",
+  "version": "2.3.34",
   "version_policy": "semver",
-  "version_notes": "Hardens the verification-driven Claude plugin mutation and owner-aware locks: every mutation polling wait is capped to the remaining deadline with one final at-deadline verification poll, timeout env overrides are parsed as strict decimal integers, stale-lock recovery serializes on an atomic exclusive recovery marker with rename displacement and liveness verification, and lock release is guarded by a per-run ownership token so a replaced lock is never deleted.",
+  "version_notes": "Closes the remaining lock and budget gaps: reclaiming a dead or stale recovery marker is atomic and identity-safe through a tombstone on the inspected marker generation with verify-under-claim, the no-lock acquisition path respects an active recovery claim so no writer can enter behind a recoverer, a displaced live lock that cannot be restored fails closed preserving the evidence, and the Claude helper budgets account for the full CLI candidate-resolution sequence with a strict-parsed probe timeout.",
   "outputs": [
     {
       "kind": "curated",

@@ -250,21 +250,40 @@ function mutationPollMs() {
   return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS', MUTATION_POLL_DEFAULT_MS, MUTATION_POLL_MIN_MS, MUTATION_DEADLINE_MAX_MS);
 }
 
-// Worst-case wall-clock budget for one `--verify` run: CLI resolution probe,
-// one plugin list, plus spawn/report grace. The setup orchestrator derives
-// its outer timeout from this so it cannot kill a verify that is still
-// within this helper's own supported per-command budget.
-function verifyBudgetMs() {
-  return 10000 + commandTimeoutMs() + 15000;
+const PROBE_TIMEOUT_DEFAULT_MS = 10000;
+const PROBE_TIMEOUT_MAX_MS = 60000;
+
+function probeTimeoutMs() {
+  return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS', PROBE_TIMEOUT_DEFAULT_MS, 1, PROBE_TIMEOUT_MAX_MS);
+}
+
+// Full worst-case CLI resolution budget. resolveClaudeCommand may probe
+// every distinct candidate -- the explicit --claude-cli argument, the
+// CLAUDE_TOOLKIT_CLAUDE_CLI and CLAUDE_CLI_PATH overrides, and bare
+// `claude` -- and each probe may consume one full probe timeout. The count
+// comes from commandCandidates itself so deduplication semantics can never
+// drift from the resolver.
+function resolutionBudgetMs(explicitCommand = '') {
+  return commandCandidates(explicitCommand).length * probeTimeoutMs();
+}
+
+// Worst-case wall-clock budget for one `--verify` run: the full CLI
+// resolution sequence, one plugin list, plus spawn/report grace. The setup
+// orchestrator derives its outer timeout from this (passing the exact same
+// explicit CLI argument and environment the child helper receives) so it
+// cannot kill a verify that is still within this helper's own supported
+// per-command budgets.
+function verifyBudgetMs(explicitCommand = '') {
+  return resolutionBudgetMs(explicitCommand) + commandTimeoutMs() + 15000;
 }
 
 // Worst-case wall-clock budget for one full `--write` run. Each mutation
 // phase may take its verification deadline plus one in-flight plugin list
 // call that started just before the deadline expired. This is a ceiling for
 // the orchestrator's outer timeout, not an expected duration.
-function writeBudgetMs() {
+function writeBudgetMs(explicitCommand = '') {
   const mutationPhase = mutationDeadlineMs() + commandTimeoutMs();
-  return 10000 // resolveClaudeCommand --version probe
+  return resolutionBudgetMs(explicitCommand) // full CLI candidate resolution
     + commandTimeoutMs() // initial plugin list
     + mutationPhase // in-place plugin update + state polling
     + commandTimeoutMs() // plugin uninstall fallback
@@ -285,7 +304,7 @@ function commandCandidates(explicitCommand) {
 function resolveClaudeCommand(explicitCommand) {
   const failures = [];
   for (const command of commandCandidates(explicitCommand)) {
-    const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: 10000 });
+    const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs() });
     if (result.status === 0) return { command, failures };
     failures.push(`${command}: ${commandOutput(result) || `exit ${result.status}`}`);
   }
@@ -731,11 +750,14 @@ module.exports = {
   VALID_SCOPES,
   claudeToolkitInstallCommands,
   claudeSpawnParts,
+  commandCandidates,
   evaluateClaudeToolkitPluginState,
   findPluginEntries,
   mutationDeadlineMs,
   mutationPollMs,
+  probeTimeoutMs,
   readExpectedToolkitVersion,
+  resolutionBudgetMs,
   runClaudeMutationAndVerify,
   quoteWindowsArg,
   validateMarketplaceWrapper,
