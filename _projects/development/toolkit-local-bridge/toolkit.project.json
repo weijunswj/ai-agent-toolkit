@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.34",
+  "version": "2.3.35",
   "version_policy": "semver",
-  "version_notes": "Closes the remaining lock and budget gaps: reclaiming a dead or stale recovery marker is atomic and identity-safe through a tombstone on the inspected marker generation with verify-under-claim, the no-lock acquisition path respects an active recovery claim so no writer can enter behind a recoverer, a displaced live lock that cannot be restored fails closed preserving the evidence, and the Claude helper budgets account for the full CLI candidate-resolution sequence with a strict-parsed probe timeout.",
+  "version_notes": "Makes displaced-lock evidence a persistent fail-closed acquisition barrier: every acquisition inspects preserved displaced evidence before creating anything, a live or liveness-indeterminate displaced owner blocks all later contenders and is never deleted by age-based cleanup, and provably dead evidence is retired through the same atomic identity-safe tombstone protocol as marker reclaim so the barrier cannot outlive its owner.",
   "outputs": [
     {
       "kind": "curated",

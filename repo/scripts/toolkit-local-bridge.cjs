@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.34';
+const BRIDGE_VERSION = '2.3.35';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -2286,11 +2286,15 @@ function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
   return { respected: false, message: '' };
 }
 
-// Best-effort cleanup of long-spent recovery artifacts (reclaim tombstones
-// and orphaned displaced-lock files). A generous age floor keeps cleanup far
-// away from any live acquisition: a contender's inspect-to-claim window is
-// one acquireLock call, and tombstones only need to outlive stale knowledge
-// of a marker generation, not accumulate forever.
+// Best-effort cleanup of long-spent claim tombstones (marker reclaim and
+// displaced-evidence retirement tombstones). A generous age floor keeps
+// cleanup far away from any live acquisition: a contender's
+// inspect-to-claim window is one acquireLock call, and tombstones only need
+// to outlive stale knowledge of a generation, not accumulate forever.
+// Displaced-lock evidence files are deliberately never age-collected here:
+// they are a persistent fail-closed acquisition barrier while their owner
+// is alive or unverifiable, and are removed only through the identity-safe
+// retirement protocol once the owner is provably dead.
 const LOCK_ARTIFACT_GC_MS = 24 * 60 * 60 * 1000;
 
 function cleanupSpentLockArtifacts(hubRoot) {
@@ -2301,7 +2305,7 @@ function cleanupSpentLockArtifacts(hubRoot) {
     return;
   }
   for (const entry of entries) {
-    if (!/^update\.lock\.recovery\.claim-/.test(entry) && !/^update\.lock\.displaced\./.test(entry)) continue;
+    if (!/^update\.lock\.recovery\.claim-/.test(entry) && !/\.retired-[0-9a-f]+$/.test(entry)) continue;
     const fullPath = path.join(hubRoot, entry);
     try {
       if (Date.now() - fs.statSync(fullPath).mtimeMs > LOCK_ARTIFACT_GC_MS) {
@@ -2311,6 +2315,103 @@ function cleanupSpentLockArtifacts(hubRoot) {
       // Best-effort only; a busy or vanished artifact is left alone.
     }
   }
+}
+
+// Displaced-lock evidence is a persistent acquisition barrier. A previous
+// recovery that displaced a live owner's lock and could not restore it
+// preserves that lock as update.lock.displaced.<token>; until the recorded
+// owner is provably dead, no later acquisition may create a new main lock,
+// because the displaced owner may still be running as a writer.
+//
+// Classification per evidence file:
+// - live owner: blocked, and the evidence must never be deleted;
+// - indeterminate owner (for example EPERM): fail closed, blocked;
+// - unusable owner data: age fallback (fresh blocks, stale is retirable);
+// - provably dead owner: retirable through the identity-safe protocol.
+function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(hubRoot);
+  } catch {
+    return { blocked: false, retirable: [] };
+  }
+  const retirable = [];
+  for (const entry of entries) {
+    if (!/^update\.lock\.displaced\.[0-9a-f-]+$/i.test(entry)) continue;
+    const fullPath = path.join(hubRoot, entry);
+    let raw = null;
+    try {
+      raw = fs.readFileSync(fullPath, 'utf8');
+    } catch {
+      continue; // vanished or unreadable this instant; re-inspected next run
+    }
+    let displaced = {};
+    try {
+      displaced = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    } catch {
+      // Malformed evidence: owner is unusable; the age fallback decides.
+    }
+    const owner = liveness(displaced.pid);
+    if (owner === 'alive') {
+      return {
+        blocked: true,
+        message: `Toolkit bridge acquisition blocked: displaced lock evidence at ${fullPath} belongs to live process ${displaced.pid}; a previous recovery could not restore it, and no new lock may be created while the displaced owner is alive`
+      };
+    }
+    if (owner === 'indeterminate') {
+      return {
+        blocked: true,
+        message: `Toolkit bridge acquisition blocked: displaced lock evidence at ${fullPath} records owner process ${displaced.pid} whose liveness cannot be verified; failing closed until the owner can be proved dead (verify the process before considering manual review of the evidence)`
+      };
+    }
+    if (owner === 'unknown') {
+      const age = lockAgeMs(fullPath, displaced);
+      if (Number.isFinite(age) && age < LOCK_STALE_MS) {
+        return {
+          blocked: true,
+          message: `Toolkit bridge acquisition blocked: fresh displaced lock evidence at ${fullPath} has no verifiable owner; failing closed`
+        };
+      }
+    }
+    retirable.push({ fullPath, raw });
+  }
+  return { blocked: false, retirable };
+}
+
+// Retire dead-owner displaced evidence with the same atomic identity-safe
+// discipline as marker reclaim: exclusively create a tombstone named after
+// the hash of the exact inspected bytes (one winner per generation), then
+// re-read and remove the evidence only when it is still that generation. A
+// changed generation is left untouched and this contender yields.
+function retireDisplacedEvidence(retirable, testHooks = {}) {
+  for (const { fullPath, raw } of retirable) {
+    if (testHooks.afterEvidenceInspect) testHooks.afterEvidenceInspect();
+    const identity = lockGenerationIdentity(raw);
+    const tombstonePath = `${fullPath}.retired-${identity}`;
+    try {
+      fs.writeFileSync(
+        tombstonePath,
+        `${JSON.stringify({ created_at: timestamp(), pid: process.pid, retired_identity: identity }, null, 2)}\n`,
+        { encoding: 'utf8', flag: 'wx' }
+      );
+    } catch (error) {
+      if (error && error.code === 'EEXIST') {
+        return { retired: false, message: `Toolkit bridge displaced lock evidence at ${fullPath} is being retired by another process` };
+      }
+      throw error;
+    }
+    let current = null;
+    try {
+      current = fs.readFileSync(fullPath, 'utf8');
+    } catch {
+      continue; // already gone: nothing to remove for this generation
+    }
+    if (current !== raw) {
+      return { retired: false, message: `Toolkit bridge displaced lock evidence at ${fullPath} changed while being retired` };
+    }
+    fs.rmSync(fullPath, { force: true });
+  }
+  return { retired: true };
 }
 
 function lockGenerationIdentity(rawBytes) {
@@ -2329,7 +2430,7 @@ function inspectRecoveryMarker(markerPath, liveness = lockOwnerLiveness) {
   }
   let marker = {};
   try {
-    marker = JSON.parse(raw.replace(/^﻿/, ''));
+    marker = JSON.parse(raw.replace(/^\uFEFF/, ''));
   } catch {
     // Malformed marker content: liveness is unknown and the age fallback
     // (file mtime) decides below.
@@ -2430,6 +2531,12 @@ function releaseRecoveryMarker(markerPath, token) {
 }
 
 // acquireLock protocol:
+// 0. Displaced-lock evidence is a persistent fail-closed barrier checked
+//    before every acquisition path: evidence with a live owner blocks and
+//    is never deleted; an indeterminate owner fails closed; a provably dead
+//    owner's evidence is retired through the atomic identity-safe
+//    tombstone protocol before acquisition may continue, so the barrier
+//    cannot become a permanent wedge after the owner dies.
 // 1. No lock present: an active (live or fresh) recovery claim is respected
 //    first, because the main lock is temporarily displaced while recovery
 //    runs and no replacement writer may enter behind the recoverer. Only
@@ -2477,6 +2584,18 @@ function acquireLock(hubRoot, args, testHooks = {}) {
       throw error;
     }
   };
+
+  // Persistent fail-closed barrier: displaced live or unverifiable-owner
+  // evidence from a previous failed restoration blocks every acquisition,
+  // regardless of whether the recovery marker or the intruding main lock
+  // that caused the failure still exist. Provably dead evidence is retired
+  // atomically before acquisition continues.
+  const evidence = inspectDisplacedEvidence(hubRoot, liveness);
+  if (evidence.blocked) return skipOrThrow(evidence.message);
+  if (evidence.retirable.length) {
+    const retirement = retireDisplacedEvidence(evidence.retirable, testHooks);
+    if (!retirement.retired) return skipOrThrow(retirement.message);
+  }
 
   if (!fs.existsSync(lockPath)) {
     // The main lock is absent while a recovery displaces it; the recovery
@@ -3461,6 +3580,7 @@ module.exports = {
   BRIDGE_VERSION,
   acquireLock,
   defaultHubPath,
+  inspectDisplacedEvidence,
   inspectLockForRecovery,
   inspectRecoveryMarker,
   lockOwnerLiveness,
