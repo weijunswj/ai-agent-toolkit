@@ -225,11 +225,18 @@ const MUTATION_POLL_DEFAULT_MS = 500;
 const MUTATION_DEADLINE_MAX_MS = 60 * 60 * 1000;
 const MUTATION_POLL_MIN_MS = 25;
 
+// Strict decimal-integer override parsing: only a trimmed string of decimal
+// digits within [min, max] is accepted. Partial-number forms that parseInt
+// would silently truncate ('100junk', '100.5', '1e3'), signs, empty or
+// whitespace-only input, zero/negative values (below min), and values above
+// the documented maximum all fall back to the default.
 function boundedIntEnv(name, fallback, min, max) {
   const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return fallback;
+  if (raw === undefined || raw === null) return fallback;
+  const trimmed = String(raw).trim();
+  if (!/^\d+$/.test(trimmed)) return fallback;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) return fallback;
   return parsed;
 }
 
@@ -375,7 +382,7 @@ async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
     };
   }
 
-  while (Date.now() - startedAt <= deadlineMs) {
+  for (;;) {
     try {
       const pluginList = runClaudeJson(command, ['plugin', 'list', '--json']);
       lastListError = null;
@@ -430,7 +437,13 @@ async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
       };
     }
 
-    await sleep(pollMs);
+    const remainingMs = deadlineMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) break;
+    // Every wait is capped to the remaining deadline so an oversized poll
+    // interval can never keep this helper asleep past its advertised
+    // deadline; after the last partial wait the loop performs one final
+    // verification poll at the deadline before giving up.
+    await sleep(Math.min(pollMs, remainingMs));
   }
 
   terminateChild(child);

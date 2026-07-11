@@ -624,17 +624,33 @@ test('setup orchestrator outer Claude timeouts cover the helper verification bud
     'write budget covers both mutation phases plus the sync command steps'
   );
   assert.ok(Number.isFinite(budgets.write) && budgets.write < 60 * 60 * 1000, 'write budget stays bounded');
+
+  // The maximum accepted poll interval must not undercut the outer budget:
+  // polling waits are capped to the remaining deadline, so the budget is a
+  // function of the deadline and command timeout only, never the interval.
+  const savedPoll = process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS;
+  try {
+    process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS = String(60 * 60 * 1000);
+    assert.equal(setup.writeBudgetMs(), budgets.write, 'poll interval must not change the write budget');
+    assert.equal(setup.verifyBudgetMs(), budgets.verify, 'poll interval must not change the verify budget');
+  } finally {
+    if (savedPoll === undefined) delete process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS;
+    else process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS = savedPoll;
+  }
 });
 
 test('Claude Toolkit plugin mutation deadline and poll env controls reject malformed or unsafe values', () => {
   const savedDeadline = process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS;
   const savedPoll = process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS;
   try {
-    for (const bad of ['abc', '0', '-100', String(2 * 60 * 60 * 1000)]) {
+    // Strict decimal-integer parsing: partial-number forms that parseInt
+    // would silently truncate must fall back, alongside zero, negatives,
+    // whitespace-only input, and values above the documented maximum.
+    for (const bad of ['abc', '0', '-100', String(2 * 60 * 60 * 1000), '100junk', '100.5', '1e3', '   ', '+100', '0x64']) {
       process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS = bad;
       assert.equal(setup.mutationDeadlineMs(), 120000, `deadline fallback for ${JSON.stringify(bad)}`);
     }
-    for (const bad of ['abc', '0', '-5', '1']) {
+    for (const bad of ['abc', '0', '-5', '1', '50junk', '50.5', '5e2', '   ']) {
       process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS = bad;
       assert.equal(setup.mutationPollMs(), 500, `poll fallback for ${JSON.stringify(bad)}`);
     }
@@ -642,12 +658,53 @@ test('Claude Toolkit plugin mutation deadline and poll env controls reject malfo
     process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS = '50';
     assert.equal(setup.mutationDeadlineMs(), 2000);
     assert.equal(setup.mutationPollMs(), 50);
+    // A trimmed string of only decimal digits is accepted.
+    process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS = ' 3000 ';
+    assert.equal(setup.mutationDeadlineMs(), 3000);
   } finally {
     if (savedDeadline === undefined) delete process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS;
     else process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_DEADLINE_MS = savedDeadline;
     if (savedPoll === undefined) delete process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS;
     else process.env.CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS = savedPoll;
   }
+});
+
+test('mutation polling caps every wait to the remaining deadline even with an extreme poll interval', async () => {
+  const stateDir = tmpRoot();
+  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, installNeverLands: true });
+
+  const started = Date.now();
+  const outcome = await setup.runClaudeMutationAndVerify(
+    fakeClaude,
+    ['plugin', 'install', setup.pluginId(), '--scope', 'user'],
+    { repoRoot, deadlineMs: 200, pollMs: 3600000 }
+  );
+  const elapsed = Date.now() - started;
+
+  assert.equal(outcome.ok, false);
+  assert.match(outcome.failure, /did not produce a verified install within 200ms/);
+  // Near the deadline plus bounded spawn/list overhead on a slow machine --
+  // never anywhere near the one-hour poll interval.
+  assert.ok(elapsed < 30000, `deadline-capped polling took ${elapsed}ms`);
+});
+
+test('a final verification poll at the deadline can still succeed with an extreme poll interval', async () => {
+  const stateDir = tmpRoot();
+  // The install lands its state and lingers; with a one-hour poll interval,
+  // success requires the loop's remaining-time-capped wait plus the final
+  // at-deadline verification poll rather than a full poll sleep.
+  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, lingerAfterInstall: true });
+
+  const started = Date.now();
+  const outcome = await setup.runClaudeMutationAndVerify(
+    fakeClaude,
+    ['plugin', 'install', setup.pluginId(), '--scope', 'user'],
+    { repoRoot, deadlineMs: 5000, pollMs: 3600000 }
+  );
+  const elapsed = Date.now() - started;
+
+  assert.equal(outcome.ok, true, outcome.failure);
+  assert.ok(elapsed < 30000, `verification-at-deadline took ${elapsed}ms`);
 });
 
 test('Claude Toolkit plugin setup rejects an unusable Claude CLI', () => {

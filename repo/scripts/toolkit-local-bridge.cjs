@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.32';
+const BRIDGE_VERSION = '2.3.33';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -2259,61 +2259,194 @@ function lockAgeMs(lockPath, lock) {
   }
 }
 
-function acquireLock(hubRoot, args) {
-  fs.mkdirSync(hubRoot, { recursive: true });
-  const lockPath = path.join(hubRoot, 'update.lock');
-  if (fs.existsSync(lockPath)) {
-    let lock = {};
-    try {
-      lock = readJsonIfExists(lockPath) || {};
-    } catch {
-      // Malformed lock JSON: no owner can be determined; the mtime-based age
-      // fallback below decides freshness.
-    }
-    const liveness = lockOwnerLiveness(lock.pid);
-    if (liveness === 'alive') {
-      // Never delete a lock whose recorded owner is a live process, no
-      // matter how old the lock file is.
-      const message = `Toolkit bridge lock at ${lockPath} is held by live process ${lock.pid}`;
-      if (args.hook) return { acquired: false, lockPath, skipReason: message };
-      throw new Error(message);
-    }
-    if (liveness !== 'dead') {
-      // Unknown or indeterminate owner: fall back to the age rule that
-      // predates owner-aware locks. A fresh lock is respected; a stale one
-      // is recovered. A dead owner skips this and is recovered immediately.
-      const age = lockAgeMs(lockPath, lock);
-      if (Number.isFinite(age) && age < LOCK_STALE_MS) {
-        const message = `fresh Toolkit bridge lock exists at ${lockPath}`;
-        if (args.hook) return { acquired: false, lockPath, skipReason: message };
-        throw new Error(message);
-      }
-    }
-    fs.rmSync(lockPath, { force: true });
-  }
-  const lockBody = `${JSON.stringify({
-    created_at: timestamp(),
-    pid: process.pid,
-    bridge_version: BRIDGE_VERSION,
-    sync_source: args.syncSource
-  }, null, 2)}\n`;
+const LOCK_RECOVERY_MARKER_SUFFIX = '.recovery';
+
+// Decide whether an existing lock must be respected. A live recorded owner
+// is always respected regardless of age; a provably dead owner is
+// recoverable immediately; unknown or indeterminate owners fall back to the
+// age rule (created_at, or file mtime when the lock is unreadable).
+function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
+  let lock = {};
   try {
-    // Exclusive create: if another process re-created the lock between our
-    // recovery and this write, do not clobber it -- treat the race as lost.
-    fs.writeFileSync(lockPath, lockBody, { encoding: 'utf8', flag: 'wx' });
-  } catch (error) {
-    if (error && error.code === 'EEXIST') {
-      const message = `Toolkit bridge lock at ${lockPath} was re-created by another process`;
-      if (args.hook) return { acquired: false, lockPath, skipReason: message };
-      throw new Error(message);
-    }
-    throw error;
+    lock = readJsonIfExists(lockPath) || {};
+  } catch {
+    // Malformed lock JSON: no owner can be determined; the mtime-based age
+    // fallback decides freshness.
   }
-  return { acquired: true, lockPath };
+  const owner = liveness(lock.pid);
+  if (owner === 'alive') {
+    return { respected: true, message: `Toolkit bridge lock at ${lockPath} is held by live process ${lock.pid}` };
+  }
+  if (owner !== 'dead') {
+    const age = lockAgeMs(lockPath, lock);
+    if (Number.isFinite(age) && age < LOCK_STALE_MS) {
+      return { respected: true, message: `fresh Toolkit bridge lock exists at ${lockPath}` };
+    }
+  }
+  return { respected: false, message: '' };
 }
 
+// Atomic recovery claim: only the process that exclusively created the
+// recovery marker may displace a recoverable lock and write a replacement.
+// The exclusive create is the atomic ownership primitive; the loser of the
+// race never deletes anything. A marker owned by a live process is
+// respected; a marker left by a dead or stale recovery is cleared once and
+// the claim retried.
+function claimRecoveryMarker(markerPath, token, liveness = lockOwnerLiveness) {
+  const markerBody = `${JSON.stringify({ created_at: timestamp(), pid: process.pid, token }, null, 2)}\n`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      fs.writeFileSync(markerPath, markerBody, { encoding: 'utf8', flag: 'wx' });
+      return { claimed: true };
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') throw error;
+    }
+    let marker = {};
+    try {
+      marker = readJsonIfExists(markerPath) || {};
+    } catch {
+      // Malformed marker JSON falls through to the age check below.
+    }
+    const owner = liveness(marker.pid);
+    if (owner === 'alive') {
+      return { claimed: false, message: `Toolkit bridge lock recovery at ${markerPath} is in progress by live process ${marker.pid}` };
+    }
+    if (owner !== 'dead') {
+      const age = lockAgeMs(markerPath, marker);
+      if (Number.isFinite(age) && age < LOCK_STALE_MS) {
+        return { claimed: false, message: `fresh Toolkit bridge lock recovery marker exists at ${markerPath}` };
+      }
+    }
+    fs.rmSync(markerPath, { force: true });
+  }
+  return { claimed: false, message: `Toolkit bridge lock recovery marker at ${markerPath} could not be claimed` };
+}
+
+function releaseRecoveryMarker(markerPath, token) {
+  let marker = null;
+  try {
+    marker = readJsonIfExists(markerPath);
+  } catch {
+    return;
+  }
+  if (marker && marker.token === token) fs.rmSync(markerPath, { force: true });
+}
+
+// acquireLock protocol:
+// 1. No lock present: exclusive create is the atomic claim; EEXIST loses.
+// 2. Lock present and respected (live owner, or fresh with unknown owner):
+//    hook runs skip, manual runs fail. Nothing is deleted.
+// 3. Recoverable lock: claim the exclusive recovery marker, re-inspect the
+//    lock under the marker (a replacement written in the interim has a live
+//    owner and is respected), displace the recoverable lock by rename and
+//    verify the displaced file's owner is not alive before discarding it,
+//    then exclusively create the replacement carrying a unique ownership
+//    token. Every acquisition failure path releases only this run's marker.
+// testHooks is a test-only seam for deterministic interleaving; production
+// call sites never pass it.
+function acquireLock(hubRoot, args, testHooks = {}) {
+  fs.mkdirSync(hubRoot, { recursive: true });
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const liveness = testHooks.liveness || lockOwnerLiveness;
+  const token = crypto.randomUUID();
+
+  const skipOrThrow = (message) => {
+    if (args.hook) return { acquired: false, lockPath, skipReason: message };
+    throw new Error(message);
+  };
+
+  const tryExclusiveCreate = () => {
+    const lockBody = `${JSON.stringify({
+      created_at: timestamp(),
+      pid: process.pid,
+      token,
+      bridge_version: BRIDGE_VERSION,
+      sync_source: args.syncSource
+    }, null, 2)}\n`;
+    try {
+      fs.writeFileSync(lockPath, lockBody, { encoding: 'utf8', flag: 'wx' });
+      return true;
+    } catch (error) {
+      if (error && error.code === 'EEXIST') return false;
+      throw error;
+    }
+  };
+
+  if (!fs.existsSync(lockPath)) {
+    if (tryExclusiveCreate()) return { acquired: true, lockPath, token };
+    return skipOrThrow(`Toolkit bridge lock at ${lockPath} was created by another process`);
+  }
+
+  const inspection = inspectLockForRecovery(lockPath, liveness);
+  if (inspection.respected) return skipOrThrow(inspection.message);
+  if (testHooks.afterInspect) testHooks.afterInspect();
+
+  const markerPath = `${lockPath}${LOCK_RECOVERY_MARKER_SUFFIX}`;
+  const marker = claimRecoveryMarker(markerPath, token, liveness);
+  if (!marker.claimed) return skipOrThrow(marker.message);
+
+  try {
+    if (testHooks.afterMarkerClaim) testHooks.afterMarkerClaim();
+    if (fs.existsSync(lockPath)) {
+      const recheck = inspectLockForRecovery(lockPath, liveness);
+      if (recheck.respected) return skipOrThrow(recheck.message);
+      // Displace by rename instead of deleting in place, then verify the
+      // displaced file: if a live owner's replacement was displaced by a
+      // pathological interleaving, restore it untouched and yield.
+      const displacedPath = `${lockPath}.displaced.${token}`;
+      try {
+        fs.renameSync(lockPath, displacedPath);
+      } catch {
+        // The lock disappeared between the recheck and the rename; continue
+        // to the exclusive create, which remains the final arbiter.
+      }
+      if (fs.existsSync(displacedPath)) {
+        let displaced = {};
+        try {
+          displaced = readJsonIfExists(displacedPath) || {};
+        } catch {
+          // Unreadable displaced lock: treated below by owner liveness of
+          // undefined, which is 'unknown' and therefore discarded only
+          // because the pre-rename inspection already deemed it recoverable.
+        }
+        if (liveness(displaced.pid) === 'alive') {
+          if (!fs.existsSync(lockPath)) {
+            try {
+              fs.renameSync(displacedPath, lockPath);
+            } catch {
+              // Restoration lost a further race; the displaced copy is
+              // removed below and the exclusive create decides ownership.
+            }
+          }
+          if (fs.existsSync(displacedPath)) fs.rmSync(displacedPath, { force: true });
+          return skipOrThrow(`Toolkit bridge lock at ${lockPath} is held by live process ${displaced.pid}`);
+        }
+        fs.rmSync(displacedPath, { force: true });
+      }
+    }
+    if (tryExclusiveCreate()) return { acquired: true, lockPath, token };
+    return skipOrThrow(`Toolkit bridge lock at ${lockPath} was created by another process`);
+  } finally {
+    releaseRecoveryMarker(markerPath, token);
+  }
+}
+
+// Release only the exact lock this run created: the current lock file must
+// still carry this run's ownership token. A lock replaced by another
+// process is never deleted, even by the process that previously owned that
+// path. The token check is stable because no other process may recover a
+// lock whose recorded owner is alive, and this process is alive while
+// releasing.
 function releaseLock(lock) {
-  if (lock?.acquired && lock.lockPath) fs.rmSync(lock.lockPath, { force: true });
+  if (!lock?.acquired || !lock.lockPath) return;
+  let current = null;
+  try {
+    current = readJsonIfExists(lock.lockPath);
+  } catch {
+    return;
+  }
+  if (!current || current.token !== lock.token) return;
+  fs.rmSync(lock.lockPath, { force: true });
 }
 
 function isTransientRenameError(error) {
@@ -3207,9 +3340,12 @@ if (require.main === module) {
 module.exports = {
   ARCHITECTURE_VERSION,
   BRIDGE_VERSION,
+  acquireLock,
   defaultHubPath,
+  inspectLockForRecovery,
   lockOwnerLiveness,
   parseArgs,
+  releaseLock,
   run,
   adapterPayloads,
   payloadChecksum,
