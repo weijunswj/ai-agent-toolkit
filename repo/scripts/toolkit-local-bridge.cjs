@@ -10,7 +10,7 @@ const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.3.36';
+const BRIDGE_VERSION = '2.3.37';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -2296,6 +2296,8 @@ function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
 // is alive or unverifiable, and are removed only through the identity-safe
 // retirement protocol once the owner is provably dead.
 const LOCK_ARTIFACT_GC_MS = 24 * 60 * 60 * 1000;
+const RECOVERY_CLAIM_TOMBSTONE_PATTERN = /^update\.lock\.recovery\.claim-[0-9a-f]{16}$/;
+const DISPLACED_RETIREMENT_TOMBSTONE_PATTERN = /^update\.lock\.displaced\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.retired-[0-9a-f]{16}$/;
 
 function cleanupSpentLockArtifacts(hubRoot) {
   let entries = [];
@@ -2305,10 +2307,11 @@ function cleanupSpentLockArtifacts(hubRoot) {
     return;
   }
   for (const entry of entries) {
-    if (!/^update\.lock\.recovery\.claim-/.test(entry) && !/\.retired-[0-9a-f]+$/.test(entry)) continue;
+    if (!RECOVERY_CLAIM_TOMBSTONE_PATTERN.test(entry) && !DISPLACED_RETIREMENT_TOMBSTONE_PATTERN.test(entry)) continue;
     const fullPath = path.join(hubRoot, entry);
     try {
-      if (Date.now() - fs.statSync(fullPath).mtimeMs > LOCK_ARTIFACT_GC_MS) {
+      const artifact = fs.lstatSync(fullPath);
+      if (artifact.isFile() && Date.now() - artifact.mtimeMs > LOCK_ARTIFACT_GC_MS) {
         fs.rmSync(fullPath, { force: true });
       }
     } catch {
@@ -2599,9 +2602,9 @@ function releaseRecoveryMarker(markerPath, token) {
 //    respected), displace the recoverable lock by rename and verify the
 //    displaced file's owner is not alive before discarding it, then
 //    exclusively create the replacement carrying a unique ownership token.
-//    A displaced live-owner lock that cannot be restored to its exact path
-//    fails closed: the displaced file is preserved as evidence and this
-//    contender yields without writing.
+//    A displaced generation that cannot be proved safe to discard is never
+//    renamed back over the main path: it remains evidence and this contender
+//    yields without writing, eliminating destination-clobber races.
 // testHooks is a test-only seam for deterministic interleaving; production
 // call sites never pass it.
 function acquireLock(hubRoot, args, testHooks = {}) {
@@ -2667,8 +2670,8 @@ function acquireLock(hubRoot, args, testHooks = {}) {
       if (recheck.respected) return skipOrThrow(recheck.message);
       if (testHooks.beforeDisplace) testHooks.beforeDisplace();
       // Displace by rename instead of deleting in place, then verify the
-      // displaced file: if a live owner's replacement was displaced by a
-      // pathological interleaving, restore it untouched and yield.
+      // displaced file. A generation that cannot be proved safe to discard
+      // remains at this unique evidence path and this contender yields.
       const displacedPath = `${lockPath}.displaced.${token}`;
       let displaced = false;
       try {
@@ -2687,26 +2690,11 @@ function acquireLock(hubRoot, args, testHooks = {}) {
           'post-displacement'
         );
         if (!displacedInspection.gone && displacedInspection.blocked) {
-          let restored = false;
-          if (!fs.existsSync(lockPath)) {
-            try {
-              fs.renameSync(displacedPath, lockPath);
-              restored = true;
-            } catch {
-              // Restoration failed (for example a Windows rename failure);
-              // fail closed below without deleting the displaced evidence.
-            }
-          }
-          if (restored) {
-            if (displacedInspection.owner === 'alive') {
-              return skipOrThrow(`Toolkit bridge lock at ${lockPath} is held by live process ${displacedInspection.pid}`);
-            }
-            return skipOrThrow(`Toolkit bridge lock at ${lockPath} could not be safely verified after displacement and was restored; not acquiring`);
-          }
+          if (testHooks.beforeRestorationCommit) testHooks.beforeRestorationCommit();
           if (displacedInspection.owner === 'alive') {
-            return skipOrThrow(`Toolkit bridge lock recovery displaced a lock held by live process ${displacedInspection.pid} and could not restore it; the displaced lock is preserved at ${displacedPath}; not acquiring`);
+            return skipOrThrow(`Toolkit bridge lock recovery displaced a lock held by live process ${displacedInspection.pid}; no-clobber restoration is not guaranteed, so the displaced lock is preserved at ${displacedPath}; not acquiring`);
           }
-          return skipOrThrow(`${displacedInspection.message}; recovery could not restore it, so the displaced lock is preserved; not acquiring`);
+          return skipOrThrow(`${displacedInspection.message}; no-clobber restoration is not guaranteed, so the displaced lock is preserved; not acquiring`);
         }
         if (!displacedInspection.gone) fs.rmSync(displacedPath, { force: true });
       }

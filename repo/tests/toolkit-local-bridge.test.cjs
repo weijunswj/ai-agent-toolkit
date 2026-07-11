@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.36';
+const expectedBridgeVersion = '2.3.37';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -1587,7 +1587,7 @@ test('a displaced live lock that cannot be restored fails closed without deletin
   });
 
   assert.equal(result.acquired, false, 'no second writer proceeds');
-  assert.match(result.skipReason, /displaced a lock held by live process 777777 and could not restore it/);
+  assert.match(result.skipReason, /displaced a lock held by live process 777777; no-clobber restoration is not guaranteed/);
   assert.match(result.skipReason, /preserved at/);
   const displacedFiles = fs.readdirSync(hubRoot).filter((entry) => entry.startsWith('update.lock.displaced.'));
   assert.equal(displacedFiles.length, 1, 'the displaced live-owner lock is preserved as evidence');
@@ -1595,7 +1595,7 @@ test('a displaced live lock that cannot be restored fails closed without deletin
   assert.equal(readJson(lockPath).token, 'intruder', 'the intruding lock is not touched either');
 });
 
-test('a displaced live lock is restored untouched when its path is free', () => {
+test('a displaced live lock remains evidence when the main path is free', () => {
   const root = tmpRoot();
   const hubRoot = path.join(root, 'hub');
   const lockPath = path.join(hubRoot, 'update.lock');
@@ -1612,9 +1612,54 @@ test('a displaced live lock is restored untouched when its path is free', () => 
   });
 
   assert.equal(result.acquired, false);
-  assert.match(result.skipReason, /held by live process 777777/);
-  assert.equal(readJson(lockPath).token, 'live-replacement', 'the displaced live lock is restored to its exact path');
-  assert.equal(fs.readdirSync(hubRoot).filter((entry) => entry.startsWith('update.lock.displaced.')).length, 0);
+  assert.match(result.skipReason, /no-clobber restoration is not guaranteed/);
+  assert.equal(fs.existsSync(lockPath), false, 'no main lock is created when restoration is unsafe');
+  const displacedFiles = fs.readdirSync(hubRoot).filter((entry) => /^update\.lock\.displaced\.[0-9a-f-]+$/i.test(entry));
+  assert.equal(displacedFiles.length, 1, 'the live lock remains persistent evidence');
+  assert.equal(readJson(path.join(hubRoot, displacedFiles[0])).token, 'live-replacement');
+});
+
+test('no-clobber restoration preserves an intruder created at the restoration commitment', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: 999999 });
+
+  const liveness = (pid) => (Number(pid) === 777777 ? 'alive' : 'dead');
+  let intruderRaw = null;
+  const hookRun = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, {
+    liveness,
+    beforeDisplace: () => {
+      writeJson(lockPath, { created_at: new Date().toISOString(), pid: 777777, token: 'live-replacement' });
+    },
+    beforeRestorationCommit: () => {
+      assert.equal(fs.existsSync(lockPath), false, 'restoration initially appears possible');
+      writeJson(lockPath, { created_at: new Date().toISOString(), pid: 424242, token: 'intruder-at-commit' });
+      intruderRaw = fs.readFileSync(lockPath, 'utf8');
+    }
+  });
+
+  assert.equal(hookRun.acquired, false, 'the recoverer never acquires');
+  assert.match(hookRun.skipReason, /no-clobber restoration is not guaranteed/);
+  assert.equal(fs.readFileSync(lockPath, 'utf8'), intruderRaw, 'the intruding main lock remains byte-for-byte untouched');
+  const displacedFiles = fs.readdirSync(hubRoot).filter((entry) => /^update\.lock\.displaced\.[0-9a-f-]+$/i.test(entry));
+  assert.equal(displacedFiles.length, 1, 'the displaced live-owner lock remains evidence');
+  const evidencePath = path.join(hubRoot, displacedFiles[0]);
+  const evidenceRaw = fs.readFileSync(evidencePath, 'utf8');
+  assert.equal(JSON.parse(evidenceRaw).token, 'live-replacement');
+
+  assert.throws(
+    () => bridge.acquireLock(hubRoot, { hook: false, syncSource: 'repo' }, { liveness }),
+    /displaced lock evidence at .* belongs to live process 777777/,
+    'manual mode fails clearly while the evidence owner is alive'
+  );
+  const later = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, { liveness });
+  assert.equal(later.acquired, false, 'a later contender remains blocked');
+  assert.match(later.skipReason, /belongs to live process 777777/);
+  assert.equal(fs.readFileSync(lockPath, 'utf8'), intruderRaw, 'later contenders do not alter the intruder');
+  assert.equal(fs.readFileSync(evidencePath, 'utf8'), evidenceRaw, 'later contenders do not alter the evidence');
 });
 
 test('the no-lock acquisition path respects an active recovery claim', () => {
@@ -2055,7 +2100,7 @@ test('displaced evidence replaced after inspection is not deleted and the conten
   assert.equal(fs.existsSync(lockPath), false, 'no second writer enters');
 });
 
-test('artifact cleanup removes only spent tombstones, never displaced evidence', () => {
+test('artifact cleanup removes only exact Toolkit tombstone namespaces', () => {
   const root = tmpRoot();
   const hubRoot = path.join(root, 'hub');
   const lockPath = path.join(hubRoot, 'update.lock');
@@ -2066,10 +2111,19 @@ test('artifact cleanup removes only spent tombstones, never displaced evidence',
   const liveEvidence = path.join(hubRoot, 'update.lock.displaced.aaaa1111-22bb-4ccc-8ddd-eeee5555ffff');
   const spentReclaim = path.join(hubRoot, 'update.lock.recovery.claim-deadbeefdeadbeef');
   const spentRetire = path.join(hubRoot, 'update.lock.displaced.bbbb2222-33cc-4ddd-8eee-ffff66660000.retired-abcdef0123456789');
+  const unrelatedSuffix = path.join(hubRoot, 'user-notes.retired-deadbeef');
+  const unrelatedFile = path.join(hubRoot, 'unrelated-user-file.txt');
+  const unrelatedDirectory = path.join(hubRoot, 'update.lock.displaced.cccc3333-44dd-4eee-8fff-aaaa77771111.retired-0123456789abcdef');
   writeJson(liveEvidence, { created_at: new Date(old).toISOString(), pid: 777777, token: 'live-owner' });
   writeJson(spentReclaim, { created_at: new Date(old).toISOString(), pid: 999998 });
   writeJson(spentRetire, { created_at: new Date(old).toISOString(), pid: 999997 });
-  for (const file of [liveEvidence, spentReclaim, spentRetire]) fs.utimesSync(file, old, old);
+  fs.writeFileSync(unrelatedSuffix, 'keep similar suffix\n', 'utf8');
+  fs.writeFileSync(unrelatedFile, 'keep unrelated file\n', 'utf8');
+  fs.mkdirSync(unrelatedDirectory);
+  fs.writeFileSync(path.join(unrelatedDirectory, 'keep.txt'), 'keep unrelated directory\n', 'utf8');
+  for (const file of [liveEvidence, spentReclaim, spentRetire, unrelatedSuffix, unrelatedFile, unrelatedDirectory]) {
+    fs.utimesSync(file, old, old);
+  }
 
   const liveness = (pid) => (Number(pid) === 777777 ? 'alive' : 'dead');
   const result = bridge.acquireLock(hubRoot, { hook: true, syncSource: 'repo' }, { liveness });
@@ -2078,6 +2132,9 @@ test('artifact cleanup removes only spent tombstones, never displaced evidence',
   assert.equal(fs.existsSync(liveEvidence), true, 'live displaced evidence is never age-collected');
   assert.equal(fs.existsSync(spentReclaim), false, 'spent reclaim tombstones age out');
   assert.equal(fs.existsSync(spentRetire), false, 'spent retirement tombstones age out');
+  assert.equal(fs.readFileSync(unrelatedSuffix, 'utf8'), 'keep similar suffix\n', 'a similar retirement suffix is unrelated and preserved');
+  assert.equal(fs.readFileSync(unrelatedFile, 'utf8'), 'keep unrelated file\n', 'an unrelated file is preserved');
+  assert.equal(fs.readFileSync(path.join(unrelatedDirectory, 'keep.txt'), 'utf8'), 'keep unrelated directory\n', 'an unrelated directory is preserved even when its name matches the file namespace');
   assert.equal(fs.existsSync(lockPath), false, 'no new writer entered');
 });
 
