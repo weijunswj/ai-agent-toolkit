@@ -46,13 +46,13 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.3.37',
+    version: '2.4.0',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.3.37',
+    version: '2.4.0',
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
@@ -75,7 +75,7 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.37', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.4.0', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -85,7 +85,7 @@ function createMinimalSetupRepo(root) {
     "const path = require('node:path');",
     "fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_HELPER_ARGS.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.3.37', scope: 'user' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.4.0', scope: 'user' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -154,7 +154,7 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createFakeManagedSetupScript(root, version = '2.3.37', options = {}) {
+function createFakeManagedSetupScript(root, version = '2.4.0', options = {}) {
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
   const emitQuestionBank = options.emitQuestionBank !== false;
@@ -260,6 +260,7 @@ test('setup toolkit plan shows one upfront checklist and managed main checkout d
     'upfront_setup_checklist',
     'managed_main_checkout',
     'codex_native_plugin_cache',
+    'host_delegation_control',
     'lite_validation',
     'bridge_preferences',
     'approved_target_sync',
@@ -268,6 +269,7 @@ test('setup toolkit plan shows one upfront checklist and managed main checkout d
   assert.deepEqual(plan.preferences, {
     repo_backed_auto_update: 'question-required',
     host_native_plugin_cache_auto_refresh: 'question-required',
+    delegation_control: 'question-required',
     write_meaningful_update_reports: 'question-required',
     open_update_reports_automatically: 'question-required',
     update_report_retention_days: 'question-required',
@@ -299,13 +301,16 @@ test('claude-code setup plan checks only Claude native plugin metadata and never
     'upfront_setup_checklist',
     'managed_main_checkout',
     'claude_native_plugin_cache',
+    'host_delegation_control',
     'lite_validation',
     'bridge_preferences',
     'approved_target_sync',
     'final_summary'
   ]);
   assert.equal(plan.preferences.host_native_plugin_cache_auto_refresh, 'manual-verification-only');
+  assert.equal(plan.preferences.delegation_control, 'unsupported-policy-only');
   assert.doesNotMatch(flattenCommands(plan).join('\n'), /setup-codex-toolkit-plugin\.cjs/);
+  assert.doesNotMatch(flattenCommands(plan).join('\n'), /agents\.max_threads|agents\.max_depth/);
 });
 
 test('setup execute persists all selected preferences in one run and prints final summary', () => {
@@ -331,6 +336,7 @@ test('setup execute persists all selected preferences in one run and prints fina
     '## Active worktree',
     '## Managed main checkout',
     '## Question bank',
+    '## Delegation control',
     '## Codex native plugin',
     '## Claude Code native plugin',
     '## Bridge state',
@@ -359,8 +365,8 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
   assert.match(result.stdout, /Preference\/target writes before answers: no/);
   assert.match(result.stdout, /Codex plugin cache path:/);
-  assert.match(result.stdout, /Codex expected Toolkit version: 2\.3\.37/);
-  assert.match(result.stdout, /Codex installed Toolkit version: 2\.3\.37/);
+  assert.match(result.stdout, /Codex expected Toolkit version: 2\.4\.0/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.4\.0/);
   assert.match(result.stdout, /Codex plugin installed: yes/);
   assert.match(result.stdout, /Codex plugin enabled: yes/);
   assert.match(result.stdout, /Codex plugin current: yes/);
@@ -416,6 +422,9 @@ test('setup execute with every question pre-answered does not block on an unclos
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /# setup toolkit final summary/);
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
+  assert.match(result.stdout, /Delegation enforcement status: configured/);
+  assert.match(result.stdout, /Direct specialist limit: 1/);
+  assert.match(result.stdout, /Subagent depth limit: 1/);
 });
 
 test('setup execute without explicit choices pauses before preference or target writes', () => {
@@ -438,6 +447,7 @@ test('setup execute without explicit choices pauses before preference or target 
   assert.match(result.stdout, /Repo-backed auto-update/);
   assert.match(result.stdout, /Managed checkout/);
   assert.match(result.stdout, /Codex plugin cache auto-refresh/);
+  assert.match(result.stdout, /Codex delegation control/);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false, 'plugin setup must not run before all answers');
   const bridgeLog = fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log'))
     ? fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8')
@@ -472,14 +482,19 @@ test('setup execute accepts one consolidated answer bank and preserves report au
       'keep',
       'keep',
       'keep',
+      '',
       'keep',
       'keep',
       'enable-sync',
-      ''
     ].join('\n')
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Codex delegation control:[\s\S]*recommended: limit[\s\S]*empty input: limit/);
+  assert.match(result.stdout, /Delegation enforcement status: configured/);
+  const codexConfig = fs.readFileSync(path.join(root, '.codex', 'config.toml'), 'utf8');
+  assert.match(codexConfig, /max_threads = 1/);
+  assert.match(codexConfig, /max_depth = 1/);
   assert.match(result.stdout, /AG2\/Antigravity bridge target:[\s\S]*enabled=yes[\s\S]*version=2\.1\.0/);
   const bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.doesNotMatch(bridgeLog, /--disable-update-report-open/);
@@ -537,7 +552,7 @@ test('setup final summary distinguishes fast-forwarded managed checkout', () => 
 
 test('active setup command delegates to managed checkout script when it exists', () => {
   const root = tmpRoot();
-  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.3.37');
+  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.4.0');
   const beforeStatus = runTestGit(repoRoot, ['status', '--short']);
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -552,13 +567,13 @@ test('active setup command delegates to managed checkout script when it exists',
   assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.match(result.stdout, /Managed checkout commit: [0-9a-f]{40}/);
   assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
-  assert.match(result.stdout, /managed setup script version 2\.3\.37/);
+  assert.match(result.stdout, /managed setup script version 2\.4\.0/);
   assert.match(result.stdout, /# setup toolkit question bank/);
 });
 
 test('active setup command does not block on stdin before delegating to the managed checkout', async () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.3.37', { emitQuestionBank: false, exitCode: 0 });
+  createFakeManagedSetupScript(root, '2.4.0', { emitQuestionBank: false, exitCode: 0 });
 
   const result = await runWithUnclosedStdin(script, ['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -566,12 +581,12 @@ test('active setup command does not block on stdin before delegating to the mana
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /# setup toolkit managed route/);
-  assert.match(result.stdout, /managed setup script version 2\.3\.37/);
+  assert.match(result.stdout, /managed setup script version 2\.4\.0/);
 });
 
 test('managed question-bank pause is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.3.37');
+  createFakeManagedSetupScript(root, '2.4.0');
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
   });
@@ -585,7 +600,7 @@ test('managed question-bank pause is not bypassed with active fallback', () => {
 
 test('managed safety blocker is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.3.37', {
+  createFakeManagedSetupScript(root, '2.4.0', {
     emitQuestionBank: false,
     exitCode: 1,
     extraLines: ["console.error('managed safety blocker');"]
@@ -819,8 +834,9 @@ test('claude-code setup execute with instructions behavior verifies Claude plugi
   assert.match(result.stdout, /Claude Code native plugin metadata verified/);
   assert.match(result.stdout, /## Claude Code native plugin/);
   assert.match(result.stdout, /Claude plugin manifest path:/);
-  assert.match(result.stdout, /Claude expected Toolkit version: 2\.3\.37/);
-  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.3\.37/);
+  assert.match(result.stdout, /Claude expected Toolkit version: 2\.4\.0/);
+  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.4\.0/);
+  assert.match(result.stdout, /Delegation enforcement status: unsupported/);
   assert.match(result.stdout, /Claude plugin status: metadata present/);
   assert.match(result.stdout, /Claude plugin updated this run: no/);
   assert.match(result.stdout, /Claude restart required: no/);
@@ -938,5 +954,23 @@ test('setup docs route setup and refresh prompts to the one-checklist orchestrat
     assert.match(text, /exit code `23`|code `23`/i, relPath);
     assert.match(text, /do not rerun with `--yes-recommended` unless the user explicitly|must not rerun with `--yes-recommended` unless the user explicitly/i, relPath);
     assert.match(text, /non-interactive|chat/i, relPath);
+    assert.match(text, /root agent alone|root-agent work|handled by the root agent alone|routine setup on the root agent/i, relPath);
+    assert.match(text, /must not spawn subagents|do not spawn subagents/i, relPath);
+  }
+});
+
+test('Codex delegation docs preserve one direct security-specialist path without recursion', () => {
+  const docs = [
+    '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md',
+    'skills/toolkit-setup/SKILL.md',
+    'repo/docs/TOOLKIT-LOCAL-BRIDGE.md',
+    'repo/docs/FOR_AI_AGENTS.md'
+  ];
+  for (const relPath of docs) {
+    const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
+    assert.match(text, /max_threads = 1|agents\.max_threads = 1/i, relPath);
+    assert.match(text, /max_depth = 1|agents\.max_depth = 1/i, relPath);
+    assert.match(text, /security specialist|Codex Security/i, relPath);
+    assert.match(text, /prevent(?:s|ing)? recursive|no recursive|prevents? .* descendants/i, relPath);
   }
 });

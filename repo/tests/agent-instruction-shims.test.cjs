@@ -271,6 +271,50 @@ test('execution prompt requires full-bold user-action questions and generated su
   }
 });
 
+test('portable rules require single-agent execution and a complete delegation gate', () => {
+  const requiredRules = [
+    /## Single-Agent Default/,
+    /Complete ordinary work with the root agent alone/,
+    /setup and updates, reading instructions or playbooks, repository orientation, documentation inspection/,
+    /narrow implementation, routine tests, formatting, linting, validation, version alignment, small reviews/,
+    /plans, summaries, and verification the root agent can perform directly/,
+    /A broad task still begins with root-agent scoping/,
+    /`setup toolkit` is a routine interactive setup operation/,
+    /without spawning subagents/,
+    /The exact bounded responsibility being delegated/,
+    /Why the root agent cannot perform it efficiently itself/,
+    /material correctness, safety, or critical-path wall-clock benefit/,
+    /files, evidence, or subsystem the subagent owns/,
+    /duplicate exploration and duplicated context loading will be avoided/,
+    /Why sequential root-agent execution is insufficient/,
+    /If any item is missing, delegation is prohibited/,
+    /Generic parallelism, a second opinion, documentation inspection, routine test or validation execution, independent verification/,
+    /several task steps, subagent availability, or an unsupported claim that delegation will save time are not sufficient reasons/,
+    /bounded specialist security review/,
+    /prefer one direct specialist/,
+    /do not have agents inspect the same files/,
+    /Subagents must not recursively delegate by default/
+  ];
+
+  for (const relPath of [
+    executionPromptPath,
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'AGENTS.md'
+  ]) {
+    const text = readText(relPath);
+    for (const rule of requiredRules) assert.match(text, rule, `${relPath}: ${rule}`);
+  }
+
+  const prompt = readText(executionPromptPath);
+  const section = prompt.match(/## Single-Agent Default\n([\s\S]*?)(?=\n## )/)?.[0] || '';
+  assert.ok(section, 'single-agent policy section exists');
+  assert.ok(Buffer.byteLength(section, 'utf8') < 5000, 'single-agent policy stays compact instead of becoming a giant orchestration manual');
+});
+
 test('repo-local source and published skill templates are local bootstrap templates', () => {
   const sourceToPublished = [
     [

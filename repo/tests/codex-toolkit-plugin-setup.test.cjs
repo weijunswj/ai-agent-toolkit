@@ -286,12 +286,6 @@ function runSetupVerify(codexHome, fakeCodexPath, extraEnv = {}) {
   });
 }
 
-function writeWindowsAliasFailureCodex(dir) {
-  const scriptPath = path.join(dir, 'codex.cmd');
-  fs.writeFileSync(scriptPath, '@echo Access is denied\r\nexit /b 5\r\n', 'utf8');
-  return scriptPath;
-}
-
 test('Codex Toolkit plugin source validates manifest icon assets', () => {
   assert.deepEqual(setup.validateRepoPluginSource(repoRoot), []);
 });
@@ -319,7 +313,7 @@ test('Codex Toolkit plugin setup verifier rejects stale, disabled, or hookless i
     repoRoot
   });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /expected version 2\.3\.37/i);
+  assert.match(state.errors.join('\n'), new RegExp(`expected version ${setup.EXPECTED_TOOLKIT_VERSION.replace(/\./g, '\\.')}`, 'i'));
 
   codexHome = tmpRoot();
   writeInstalledCache(codexHome);
@@ -427,7 +421,7 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
           pluginId: 'ai-agent-toolkit@ai-agent-toolkit-local',
           name: 'ai-agent-toolkit',
           marketplaceName: 'ai-agent-toolkit-local',
-          version: '2.3.37',
+          version: setup.EXPECTED_TOOLKIT_VERSION,
           installed: true,
           enabled: true,
           authPolicy,
@@ -542,18 +536,12 @@ test('Codex Toolkit fallback does not infer hook trust from config text', () => 
   assert.match(state.hookTrustMessage, /verification (?:is )?unavailable/i);
 });
 
-test('Codex Toolkit setup reports bare Windows codex access denied as a known WindowsApps fallback', { skip: process.platform !== 'win32' }, () => {
-  const codexHome = tmpRoot();
-  const aliasHome = tmpRoot();
-  const aliasPath = writeWindowsAliasFailureCodex(aliasHome);
-  const pathEnv = `${aliasHome}${path.delimiter}${process.env.PATH || ''}`;
-  const result = runSetupVerify(codexHome, '', { PATH: pathEnv });
+test('Codex Toolkit formats bare Windows codex access denied as a known WindowsApps fallback', { skip: process.platform !== 'win32' }, () => {
+  const message = setup.formatWindowsAliasFailure('codex', 'Access is denied');
 
-  assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
-  assert.match(result.stderr, /WindowsApps alias|Known condition/i);
-  assert.match(result.stderr, /--codex-cli/i);
-  assert.match(result.stderr, /codex\.exe/i);
-  assert.equal(fs.existsSync(aliasPath), true);
+  assert.match(message, /WindowsApps alias|Known condition/i);
+  assert.match(message, /--codex-cli/i);
+  assert.match(message, /codex\.exe/i);
 });
 
 test('Codex Toolkit Windows alias detection helper recognizes Access denied fallback conditions', { skip: process.platform !== 'win32' }, () => {

@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.5.2",
+  "version": "2.6.0",
   "version_policy": "semver",
-  "version_notes": "Adds portable n8n-workflows routing for root workflow JSON layout, helper-script sync, and live-action safety gates.",
+  "version_notes": "Makes single-agent execution the portable default and adds a concrete delegation gate that prevents duplicate exploration and recursive fan-out.",
   "outputs": [
     {
       "kind": "curated",

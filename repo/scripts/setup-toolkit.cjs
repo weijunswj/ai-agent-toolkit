@@ -10,6 +10,11 @@ const readline = require('node:readline/promises');
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
+const CODEX_AGENT_MAX_THREADS = 1;
+const CODEX_AGENT_MAX_DEPTH = 1;
+const CODEX_DELEGATION_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1';
+const CODEX_DELEGATION_END = '# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS';
+const CODEX_CONFIG_CLIENT_SCOPE = 'Codex user config; official docs explicitly confirm CLI and IDE layers, while desktop app TOML consumption is not separately documented';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
 const SUPPORTED_HOSTS = ['codex', 'claude-code'];
 const SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL = 20;
@@ -29,8 +34,20 @@ function defaultManagedSetupScriptPath() {
   return path.join(defaultManagedSourcePath(), 'repo', 'scripts', 'setup-toolkit.cjs');
 }
 
+function defaultCodexHome() {
+  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+}
+
+function codexConfigPath() {
+  return path.join(defaultCodexHome(), 'config.toml');
+}
+
 function quote(value) {
   return JSON.stringify(String(value));
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function slash(value) {
@@ -88,6 +105,7 @@ function emptySetupChoices() {
     updateReportOpen: '',
     updateReportRetention: '',
     codexPluginAutoRefresh: '',
+    codexDelegationControl: '',
     claudePluginBehavior: '',
     targets: {
       opencode: '',
@@ -177,6 +195,15 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--verify-claude-plugin') args.verifyClaudePlugin = true;
     else if (arg === '--yes-recommended') args.yesRecommended = true;
+    else if (arg === '--codex-delegation-control') {
+      const choice = next().toLowerCase();
+      if (!['keep', 'limit', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-delegation-control choice: ${choice}`);
+      args.setupChoices.codexDelegationControl = choice;
+    } else if (arg.startsWith('--codex-delegation-control=')) {
+      const choice = arg.slice('--codex-delegation-control='.length).toLowerCase();
+      if (!['keep', 'limit', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-delegation-control choice: ${choice}`);
+      args.setupChoices.codexDelegationControl = choice;
+    }
     else if (arg === '--write-repo-auto-update' || arg === '--enable-repo-auto-update') {
       args.repoAutoUpdate = true;
       args.setupChoices.repoAutoUpdate = 'enable';
@@ -299,6 +326,9 @@ function preferenceSummary(options) {
     host_native_plugin_cache_auto_refresh: options.host === 'codex'
       ? (choices.codexPluginAutoRefresh || 'question-required')
       : 'manual-verification-only',
+    delegation_control: options.host === 'codex'
+      ? (choices.codexDelegationControl || 'question-required')
+      : 'unsupported-policy-only',
     write_meaningful_update_reports: choices.updateReports || 'question-required',
     open_update_reports_automatically: choices.updateReportOpen || 'question-required',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
@@ -410,6 +440,15 @@ function setupPlan(options = {}) {
         conditional_write: 'run --write --json only when --verify reports missing, disabled, stale, wrong-source, or invalid installed cache state'
       },
       {
+        id: 'host_delegation_control',
+        title: host === 'codex'
+          ? 'Apply the supported one-direct-specialist Codex limits without overwriting unrelated config'
+          : 'Report host-level delegation enforcement as unsupported; portable policy still applies',
+        commands: host === 'codex' && choices.codexDelegationControl === 'limit'
+          ? [`manage only agents.max_threads=${CODEX_AGENT_MAX_THREADS} and agents.max_depth=${CODEX_AGENT_MAX_DEPTH} in ${codexConfigPath()}`]
+          : []
+      },
+      {
         id: 'lite_validation',
         title: 'Run setup validation from the managed checkout',
         commands: [
@@ -479,6 +518,8 @@ function printHelp() {
     '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
+    '  --codex-delegation-control keep|limit|skip',
+    '                               Codex only; preserve, apply one direct specialist/no recursion, or skip host enforcement',
     '  --managed-checkout keep|default|custom',
     '                               choose the managed checkout answer non-interactively',
     '  --enable-repo-auto-update   enable repo-backed auto-update from the managed checkout',
@@ -756,11 +797,144 @@ function inspectClaudeNativePluginState(args) {
   }
 }
 
+function expectedCodexDelegationBlock(eol = '\n') {
+  return [
+    CODEX_DELEGATION_BEGIN,
+    `max_threads = ${CODEX_AGENT_MAX_THREADS}`,
+    `max_depth = ${CODEX_AGENT_MAX_DEPTH}`,
+    CODEX_DELEGATION_END
+  ].join(eol);
+}
+
+function markerCount(text, marker) {
+  return String(text || '').split(marker).length - 1;
+}
+
+function codexDelegationConfigState(configText, configPath = codexConfigPath()) {
+  const text = String(configText || '');
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const beginCount = markerCount(text, CODEX_DELEGATION_BEGIN);
+  const endCount = markerCount(text, CODEX_DELEGATION_END);
+  const managedPattern = new RegExp(
+    `^[ \\t]*${escapeRegex(CODEX_DELEGATION_BEGIN)}\\r?\\n[\\s\\S]*?^[ \\t]*${escapeRegex(CODEX_DELEGATION_END)}[ \\t]*\\r?$`,
+    'm'
+  );
+  const managedMatch = text.match(managedPattern);
+  if (beginCount !== endCount || beginCount > 1 || (beginCount === 1 && !managedMatch)) {
+    return { status: 'conflicting', config_path: configPath, detail: 'Toolkit delegation markers are incomplete, duplicated, or malformed', text, eol };
+  }
+
+  const outsideManaged = managedMatch ? text.replace(managedMatch[0], '') : text;
+  const dottedOrInline = /^[ \t]*(?:agents\.(?:max_threads|max_depth)|agents)[ \t]*=/m.test(outsideManaged);
+  const agentsHeaders = [...outsideManaged.matchAll(/^[ \t]*\[agents\][ \t]*(?:#.*)?\r?$/gm)];
+  if (dottedOrInline || agentsHeaders.length > 1) {
+    return { status: 'conflicting', config_path: configPath, detail: 'Codex agent limits use an unsupported or duplicated TOML shape', text, eol };
+  }
+
+  let userValues = [];
+  let section = null;
+  if (agentsHeaders.length === 1) {
+    const header = agentsHeaders[0];
+    const rest = outsideManaged.slice(header.index + header[0].length);
+    const nextHeader = rest.match(/\r?\n[ \t]*\[\[?[^\]\r\n]+\]\]?[ \t]*(?:#.*)?\r?(?=\n|$)/);
+    const sectionEnd = nextHeader ? header.index + header[0].length + nextHeader.index : outsideManaged.length;
+    section = { header, end: sectionEnd };
+    const sectionText = outsideManaged.slice(header.index + header[0].length, sectionEnd);
+    const assignments = [...sectionText.matchAll(/^[ \t]*(max_threads|max_depth)[ \t]*=[ \t]*([^#\r\n]+?)[ \t]*(?:#.*)?\r?$/gm)];
+    const possibleLimitLines = sectionText.split(/\r?\n/).filter((line) => /^[ \t]*(?:max_threads|max_depth)[ \t]*=/.test(line));
+    if (possibleLimitLines.length !== assignments.length) {
+      return { status: 'conflicting', config_path: configPath, detail: 'Codex agent limits contain values Toolkit cannot safely verify', text, eol };
+    }
+    userValues = assignments.map((match) => ({ key: match[1], value: Number(match[2].trim()) }));
+  }
+
+  const values = managedMatch
+    ? [...managedMatch[0].matchAll(/^[ \t]*(max_threads|max_depth)[ \t]*=[ \t]*(\d+)[ \t]*$/gm)].map((match) => ({ key: match[1], value: Number(match[2]) }))
+    : userValues;
+  const valueMap = new Map(values.map((entry) => [entry.key, entry.value]));
+  const outsideKeys = userValues.map((entry) => entry.key);
+  if (managedMatch && outsideKeys.length) {
+    return { status: 'conflicting', config_path: configPath, detail: 'User-owned Codex agent-limit keys duplicate the Toolkit-managed block', text, eol };
+  }
+  if (values.length) {
+    const configured = values.length === 2
+      && valueMap.get('max_threads') === CODEX_AGENT_MAX_THREADS
+      && valueMap.get('max_depth') === CODEX_AGENT_MAX_DEPTH;
+    if (!configured) {
+      return { status: 'conflicting', config_path: configPath, detail: 'Existing Codex agent limits differ from Toolkit defaults and were not overwritten', text, eol };
+    }
+    return {
+      status: 'configured',
+      config_path: configPath,
+      max_threads: CODEX_AGENT_MAX_THREADS,
+      max_depth: CODEX_AGENT_MAX_DEPTH,
+      ownership: managedMatch ? 'toolkit-managed' : 'user-owned-compatible',
+      detail: managedMatch ? 'Toolkit-managed limits are configured' : 'Compatible user-owned limits are configured',
+      text,
+      eol
+    };
+  }
+  return { status: 'unconfigured', config_path: configPath, detail: 'Codex agent limits are not configured', text, eol, section };
+}
+
+function inspectCodexDelegationConfig(configPath = codexConfigPath()) {
+  if (!fs.existsSync(configPath)) return codexDelegationConfigState('', configPath);
+  try {
+    return codexDelegationConfigState(fs.readFileSync(configPath, 'utf8'), configPath);
+  } catch (error) {
+    return { status: 'conflicting', config_path: configPath, detail: `Codex config could not be read safely: ${error.message}` };
+  }
+}
+
+function writeFileAtomically(filePath, text) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`);
+  try {
+    fs.writeFileSync(tempPath, text, 'utf8');
+    fs.renameSync(tempPath, filePath);
+  } finally {
+    if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+  }
+}
+
+function configureCodexDelegation(configPath = codexConfigPath()) {
+  const state = inspectCodexDelegationConfig(configPath);
+  if (state.status !== 'unconfigured') return { ...state, changed: false };
+  const block = expectedCodexDelegationBlock(state.eol);
+  let nextText;
+  if (state.section) {
+    const headerEnd = state.section.header.index + state.section.header[0].length;
+    const insertion = state.text[headerEnd] === '\n' ? headerEnd + 1 : headerEnd;
+    const separator = insertion === headerEnd ? state.eol : '';
+    nextText = `${state.text.slice(0, insertion)}${separator}${block}${state.eol}${state.text.slice(insertion)}`;
+  } else {
+    const separator = !state.text ? '' : (state.text.endsWith(state.eol) ? state.eol : `${state.eol}${state.eol}`);
+    nextText = `${state.text}${separator}[agents]${state.eol}${block}${state.eol}`;
+  }
+  writeFileAtomically(configPath, nextText);
+  const verified = inspectCodexDelegationConfig(configPath);
+  if (verified.status !== 'configured') return { ...verified, changed: true };
+  return { ...verified, changed: true };
+}
+
+function applyHostDelegationControl(args, current) {
+  if (args.host !== 'codex') {
+    return { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable', changed: false };
+  }
+  const choice = args.setupChoices.codexDelegationControl;
+  if (choice === 'skip') return { ...current.delegation, status: 'skipped', detail: 'Codex delegation configuration was explicitly skipped', changed: false };
+  if (choice === 'keep') return { ...current.delegation, changed: false };
+  return configureCodexDelegation(current.delegation.config_path);
+}
+
 function collectCurrentState(args) {
   const audit = runBridgeAuditReadOnly(args);
   return {
     audit,
     managed: inspectManagedCheckout(args, audit),
+    delegation: args.host === 'codex'
+      ? inspectCodexDelegationConfig()
+      : { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable' },
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginState(args)
       : inspectCodexNativePluginState(args)
@@ -817,6 +991,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'updateReportOpen') return 'keep';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
+  if (key === 'codexDelegationControl') return current.delegation?.status === 'configured' ? 'keep' : 'limit';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode || 'keep';
   if (key === 'ag2Target') return args.setupChoices.targets.ag2 || 'keep';
@@ -873,6 +1048,15 @@ function setupQuestionSpecs(args, current) {
   ];
 
   if (args.host === 'codex') {
+    specs.push({
+      key: 'codexDelegationControl',
+      title: 'Codex delegation control',
+      prompt: 'Codex delegation control choice',
+      choices: ['keep', 'limit', 'skip'],
+      recommended: recommendedChoice('codexDelegationControl', current, args),
+      selected: args.setupChoices.codexDelegationControl,
+      current: `${current.delegation.status}; ${current.delegation.detail}`
+    });
     specs.push({
       key: 'codexPluginAutoRefresh',
       title: 'Codex plugin cache auto-refresh and Windows hook repair',
@@ -938,6 +1122,7 @@ function printSetupQuestionBank(args, current, specs) {
     console.log(`${spec.title}:`);
     console.log(`- current: ${spec.current}`);
     console.log(`- recommended: ${spec.recommended}`);
+    console.log(`- empty input: ${spec.recommended} (recommended)`);
     console.log(`- choices: ${spec.choices.join(' / ')}`);
     console.log(`- selected: ${selected}`);
   }
@@ -950,6 +1135,7 @@ function assignChoice(args, key, choice) {
   else if (key === 'updateReportOpen') args.setupChoices.updateReportOpen = choice;
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
+  else if (key === 'codexDelegationControl') args.setupChoices.codexDelegationControl = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
   else if (key === 'opencodeTarget') args.setupChoices.targets.opencode = choice;
   else if (key === 'ag2Target') args.setupChoices.targets.ag2 = choice;
@@ -962,6 +1148,7 @@ function choiceForKey(args, key) {
   if (key === 'updateReportOpen') return args.setupChoices.updateReportOpen;
   if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
+  if (key === 'codexDelegationControl') return args.setupChoices.codexDelegationControl;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode;
   if (key === 'ag2Target') return args.setupChoices.targets.ag2;
@@ -978,14 +1165,12 @@ function nextNonEmptyLine(lines) {
 
 async function promptForChoice(spec, lines, rl) {
   if (lines) {
-    const value = nextNonEmptyLine(lines).toLowerCase();
-    if (!value) throw new Error(`Setup question bank requires an answer for ${spec.title}`);
-    return value;
+    if (!lines.length) throw new Error(`Setup question bank requires an answer for ${spec.title}`);
+    return String(lines.shift() || '').trim().toLowerCase() || spec.recommended;
   }
   for (;;) {
-    const answer = (await rl.question(`${spec.prompt} [${spec.choices.join('/')}]: `)).trim().toLowerCase();
-    if (answer) return answer;
-    console.log(`Please answer ${spec.prompt}.`);
+    const answer = (await rl.question(`${spec.prompt} [${spec.choices.join('/')}], Enter=${spec.recommended}: `)).trim().toLowerCase();
+    return answer || spec.recommended;
   }
 }
 
@@ -1618,7 +1803,7 @@ function printValidationSummary(validationResults) {
   }
 }
 
-function printFinalSummary({ args, current, managed, nativeCache, audit, questionBank, validationResults }) {
+function printFinalSummary({ args, current, managed, nativeCache, delegation, audit, questionBank, validationResults }) {
   const repo = audit?.repo_auto_update || {};
   const cleanup = audit?.update_report_cleanup || {};
   const targets = audit?.targets || {};
@@ -1651,6 +1836,15 @@ function printFinalSummary({ args, current, managed, nativeCache, audit, questio
   console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log('Preference/target writes before answers: no');
+  console.log('');
+  console.log('## Delegation control');
+  console.log(`Delegation enforcement status: ${unknown(delegation.status)}`);
+  console.log(`Delegation config path: ${unknown(delegation.config_path)}`);
+  console.log(`Direct specialist limit: ${delegation.status === 'configured' ? CODEX_AGENT_MAX_THREADS : 'not enforced'}`);
+  console.log(`Subagent depth limit: ${delegation.status === 'configured' ? CODEX_AGENT_MAX_DEPTH : 'not enforced'}`);
+  console.log(`Delegation config changed this run: ${yesNo(delegation.changed === true)}`);
+  console.log(`Delegation client scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);
+  console.log(`Delegation detail: ${unknown(delegation.detail)}`);
   console.log('');
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
@@ -1717,6 +1911,7 @@ async function execute(args) {
   if (warning) console.warn(`WARNING: ${warning}`);
   const validationResults = [];
   const managed = verifyAndUpdateTrustedRepo(args, validationResults);
+  const delegation = applyHostDelegationControl(args, current);
   const nativeCache = args.host === 'claude-code'
     ? (args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyClaudeNativePluginMetadata(args))
     : runCodexNativePluginSetup(args);
@@ -1724,7 +1919,7 @@ async function execute(args) {
   writeBridgePreferences(args);
   runApprovedTargetSync(args);
   const audit = runBridgeAudit(args);
-  printFinalSummary({ args, current, managed, nativeCache, audit, questionBank, validationResults });
+  printFinalSummary({ args, current, managed, nativeCache, delegation, audit, questionBank, validationResults });
   return 0;
 }
 
@@ -1769,6 +1964,8 @@ module.exports = {
   DEFAULT_REPO_BRANCH,
   DEFAULT_REPO_REMOTE,
   DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+  CODEX_AGENT_MAX_THREADS,
+  CODEX_AGENT_MAX_DEPTH,
   SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL,
   SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL,
   SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL,
@@ -1777,6 +1974,10 @@ module.exports = {
   CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS,
   claudeSetupBudgets,
   defaultManagedSourcePath,
+  codexDelegationConfigState,
+  inspectCodexDelegationConfig,
+  configureCodexDelegation,
+  applyHostDelegationControl,
   parseArgs,
   setupPlan,
   normalizeRemote,
