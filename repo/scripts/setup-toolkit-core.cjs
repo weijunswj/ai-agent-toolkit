@@ -1,0 +1,1985 @@
+#!/usr/bin/env node
+'use strict';
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const readline = require('node:readline/promises');
+
+const DEFAULT_REPO_BRANCH = 'main';
+const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
+const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
+const CODEX_AGENT_MAX_THREADS = 1;
+const CODEX_AGENT_MAX_DEPTH = 1;
+const CODEX_DELEGATION_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1';
+const CODEX_DELEGATION_END = '# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS';
+const CODEX_CONFIG_CLIENT_SCOPE = 'Codex user config; official docs explicitly confirm CLI and IDE layers, while desktop app TOML consumption is not separately documented';
+const SUPPORTED_TARGETS = ['opencode', 'ag2'];
+const SUPPORTED_HOSTS = ['codex', 'claude-code'];
+const SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL = 20;
+const SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL = 21;
+const SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL = 22;
+const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
+
+function repoRootFromScript() {
+  return path.resolve(__dirname, '..', '..');
+}
+
+function defaultManagedSourcePath() {
+  return path.join(os.homedir(), '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+}
+
+function defaultManagedSetupScriptPath() {
+  return path.join(defaultManagedSourcePath(), 'repo', 'scripts', 'setup-toolkit.cjs');
+}
+
+function defaultCodexHome() {
+  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+}
+
+function codexConfigPath() {
+  return path.join(defaultCodexHome(), 'config.toml');
+}
+
+function quote(value) {
+  return JSON.stringify(String(value));
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function slash(value) {
+  return String(value || '').replace(/\\/g, '/');
+}
+
+function isInside(parent, child) {
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function samePath(left, right) {
+  const leftResolved = path.resolve(left);
+  const rightResolved = path.resolve(right);
+  if (process.platform === 'win32') return leftResolved.toLowerCase() === rightResolved.toLowerCase();
+  return leftResolved === rightResolved;
+}
+
+function isRunningFromStandardManagedCheckout() {
+  return samePath(repoRootFromScript(), defaultManagedSourcePath());
+}
+
+function isStandardManagedPath(value) {
+  return samePath(value, defaultManagedSourcePath());
+}
+
+function normalizeRemote(value) {
+  let remote = String(value || '').trim();
+  if (/^git@github\.com:/i.test(remote)) {
+    remote = remote.replace(/^git@github\.com:/i, 'https://github.com/');
+  }
+  remote = remote.replace(/\.git$/i, '');
+  remote = remote.replace(/\/+$/g, '');
+  return remote.toLowerCase();
+}
+
+function parseTargetList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function parsePositiveInteger(value, flagName) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) throw new Error(`${flagName} requires a positive integer`);
+  return number;
+}
+
+function emptySetupChoices() {
+  return {
+    managedCheckout: '',
+    repoAutoUpdate: '',
+    updateReports: '',
+    updateReportOpen: '',
+    updateReportRetention: '',
+    codexPluginAutoRefresh: '',
+    codexDelegationControl: '',
+    claudePluginBehavior: '',
+    targets: {
+      opencode: '',
+      ag2: ''
+    }
+  };
+}
+
+function setTargetChoice(args, target, choice) {
+  if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
+  args.setupChoices.targets[target] = choice;
+}
+
+function parseArgs(argv = process.argv.slice(2)) {
+  const repoRootDefault = defaultManagedSourcePath();
+  const args = {
+    argv,
+    plan: false,
+    execute: false,
+    json: false,
+    autoMain: false,
+    repoRoot: repoRootDefault,
+    repoRootExplicit: false,
+    repoBranch: DEFAULT_REPO_BRANCH,
+    repoRemote: DEFAULT_REPO_REMOTE,
+    host: 'codex',
+    codexCli: '',
+    hub: '',
+    verifyClaudePlugin: false,
+    repoAutoUpdate: true,
+    updateReports: true,
+    updateReportRetentionDays: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+    updateReportOpen: false,
+    codexPluginAutoRefresh: true,
+    enableTargets: [],
+    disableTargets: [],
+    skipTargets: [],
+    keepTargets: [],
+    yesRecommended: false,
+    setupChoices: emptySetupChoices()
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = () => argv[++index] || '';
+    if (arg === '--plan') args.plan = true;
+    else if (arg === '--execute') args.execute = true;
+    else if (arg === '--json') args.json = true;
+    else if (arg === '--auto-main') args.autoMain = true;
+    else if (arg === '--profile') {
+      const profile = next();
+      if (profile !== 'auto-main') throw new Error(`Unsupported profile: ${profile}`);
+      args.autoMain = true;
+    } else if (arg.startsWith('--profile=')) {
+      const profile = arg.slice('--profile='.length);
+      if (profile !== 'auto-main') throw new Error(`Unsupported profile: ${profile}`);
+      args.autoMain = true;
+    } else if (arg === '--repo-root') {
+      args.repoRoot = next();
+      args.repoRootExplicit = true;
+      args.setupChoices.managedCheckout = 'custom';
+    } else if (arg.startsWith('--repo-root=')) {
+      args.repoRoot = arg.slice('--repo-root='.length);
+      args.repoRootExplicit = true;
+      args.setupChoices.managedCheckout = 'custom';
+    } else if (arg === '--managed-checkout') {
+      const choice = next().toLowerCase();
+      if (!['keep', 'default', 'custom'].includes(choice)) throw new Error(`Unsupported --managed-checkout choice: ${choice}`);
+      args.setupChoices.managedCheckout = choice;
+    } else if (arg.startsWith('--managed-checkout=')) {
+      const choice = arg.slice('--managed-checkout='.length).toLowerCase();
+      if (!['keep', 'default', 'custom'].includes(choice)) throw new Error(`Unsupported --managed-checkout choice: ${choice}`);
+      args.setupChoices.managedCheckout = choice;
+    } else if (arg === '--keep-managed-checkout') args.setupChoices.managedCheckout = 'keep';
+    else if (arg === '--use-default-managed-checkout') args.setupChoices.managedCheckout = 'default';
+    else if (arg === '--repo-branch') args.repoBranch = next();
+    else if (arg.startsWith('--repo-branch=')) args.repoBranch = arg.slice('--repo-branch='.length);
+    else if (arg === '--repo-remote') args.repoRemote = next();
+    else if (arg.startsWith('--repo-remote=')) args.repoRemote = arg.slice('--repo-remote='.length);
+    else if (arg === '--host') args.host = next();
+    else if (arg.startsWith('--host=')) args.host = arg.slice('--host='.length);
+    else if (arg === '--codex-cli') args.codexCli = next();
+    else if (arg.startsWith('--codex-cli=')) args.codexCli = arg.slice('--codex-cli='.length);
+    else if (arg === '--claude-cli') args.claudeCli = next();
+    else if (arg.startsWith('--claude-cli=')) args.claudeCli = arg.slice('--claude-cli='.length);
+    else if (arg === '--hub') args.hub = next();
+    else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
+    else if (arg === '--verify-claude-plugin') args.verifyClaudePlugin = true;
+    else if (arg === '--yes-recommended') args.yesRecommended = true;
+    else if (arg === '--codex-delegation-control') {
+      const choice = next().toLowerCase();
+      if (!['keep', 'limit', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-delegation-control choice: ${choice}`);
+      args.setupChoices.codexDelegationControl = choice;
+    } else if (arg.startsWith('--codex-delegation-control=')) {
+      const choice = arg.slice('--codex-delegation-control='.length).toLowerCase();
+      if (!['keep', 'limit', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-delegation-control choice: ${choice}`);
+      args.setupChoices.codexDelegationControl = choice;
+    }
+    else if (arg === '--write-repo-auto-update' || arg === '--enable-repo-auto-update') {
+      args.repoAutoUpdate = true;
+      args.setupChoices.repoAutoUpdate = 'enable';
+    } else if (arg === '--skip-repo-auto-update' || arg === '--disable-repo-auto-update') {
+      args.repoAutoUpdate = false;
+      args.setupChoices.repoAutoUpdate = 'disable';
+    } else if (arg === '--keep-repo-auto-update') args.setupChoices.repoAutoUpdate = 'keep';
+    else if (arg === '--enable-update-reports') {
+      args.updateReports = true;
+      args.setupChoices.updateReports = 'enable';
+    } else if (arg === '--disable-update-reports' || arg === '--skip-update-reports') {
+      args.updateReports = false;
+      args.setupChoices.updateReports = 'disable';
+    } else if (arg === '--keep-update-reports') args.setupChoices.updateReports = 'keep';
+    else if (arg === '--update-report-retention-days') {
+      args.updateReportRetentionDays = parsePositiveInteger(next(), arg);
+      args.setupChoices.updateReportRetention = 'custom';
+    }
+    else if (arg.startsWith('--update-report-retention-days=')) {
+      args.updateReportRetentionDays = parsePositiveInteger(arg.slice('--update-report-retention-days='.length), '--update-report-retention-days');
+      args.setupChoices.updateReportRetention = 'custom';
+    } else if (arg === '--default-update-report-retention-days') {
+      args.updateReportRetentionDays = DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
+      args.setupChoices.updateReportRetention = 'default';
+    } else if (arg === '--keep-update-report-retention-days') args.setupChoices.updateReportRetention = 'keep';
+    else if (arg === '--enable-update-report-open') {
+      args.updateReportOpen = true;
+      args.setupChoices.updateReportOpen = 'enable';
+    } else if (arg === '--skip-update-report-open' || arg === '--disable-update-report-open') {
+      args.updateReportOpen = false;
+      args.setupChoices.updateReportOpen = 'disable';
+    } else if (arg === '--keep-update-report-open') args.setupChoices.updateReportOpen = 'keep';
+    else if (arg === '--enable-codex-plugin-auto-refresh') {
+      args.codexPluginAutoRefresh = true;
+      args.setupChoices.codexPluginAutoRefresh = 'enable';
+    } else if (arg === '--skip-codex-plugin-auto-refresh' || arg === '--disable-codex-plugin-auto-refresh') {
+      args.codexPluginAutoRefresh = false;
+      args.setupChoices.codexPluginAutoRefresh = 'disable';
+    } else if (arg === '--keep-codex-plugin-auto-refresh') args.setupChoices.codexPluginAutoRefresh = 'keep';
+    else if (arg === '--claude-plugin-behavior') {
+      const choice = next().toLowerCase();
+      if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
+      args.setupChoices.claudePluginBehavior = choice;
+    } else if (arg.startsWith('--claude-plugin-behavior=')) {
+      const choice = arg.slice('--claude-plugin-behavior='.length).toLowerCase();
+      if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
+      args.setupChoices.claudePluginBehavior = choice;
+    } else if (arg === '--enable-target') {
+      for (const target of parseTargetList(next())) {
+        args.enableTargets.push(target);
+        setTargetChoice(args, target, 'enable-sync');
+      }
+    } else if (arg.startsWith('--enable-target=')) {
+      for (const target of parseTargetList(arg.slice('--enable-target='.length))) {
+        args.enableTargets.push(target);
+        setTargetChoice(args, target, 'enable-sync');
+      }
+    } else if (arg === '--disable-target') {
+      for (const target of parseTargetList(next())) {
+        args.disableTargets.push(target);
+        setTargetChoice(args, target, 'disable');
+      }
+    } else if (arg.startsWith('--disable-target=')) {
+      for (const target of parseTargetList(arg.slice('--disable-target='.length))) {
+        args.disableTargets.push(target);
+        setTargetChoice(args, target, 'disable');
+      }
+    } else if (arg === '--skip-target') {
+      for (const target of parseTargetList(next())) {
+        args.skipTargets.push(target);
+        setTargetChoice(args, target, 'skip');
+      }
+    } else if (arg.startsWith('--skip-target=')) {
+      for (const target of parseTargetList(arg.slice('--skip-target='.length))) {
+        args.skipTargets.push(target);
+        setTargetChoice(args, target, 'skip');
+      }
+    } else if (arg === '--keep-target') {
+      for (const target of parseTargetList(next())) {
+        args.keepTargets.push(target);
+        setTargetChoice(args, target, 'keep');
+      }
+    } else if (arg.startsWith('--keep-target=')) {
+      for (const target of parseTargetList(arg.slice('--keep-target='.length))) {
+        args.keepTargets.push(target);
+        setTargetChoice(args, target, 'keep');
+      }
+    } else if (arg === '--help' || arg === '-h') args.help = true;
+    else throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
+  if (!args.plan && !args.execute && !args.help && !args.verifyClaudePlugin) args.plan = true;
+  args.repoRoot = path.resolve(args.repoRoot);
+  args.repoBranch = args.repoBranch || DEFAULT_REPO_BRANCH;
+  args.repoRemote = args.repoRemote || DEFAULT_REPO_REMOTE;
+  if (!SUPPORTED_HOSTS.includes(args.host)) throw new Error(`Unsupported host: ${args.host}`);
+  for (const target of args.enableTargets) {
+    if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
+  }
+  for (const target of args.disableTargets) {
+    if (!SUPPORTED_TARGETS.includes(target)) throw new Error(`Unsupported target: ${target}`);
+  }
+  args.enableTargets = [...new Set(args.enableTargets)];
+  args.disableTargets = [...new Set(args.disableTargets)];
+  args.skipTargets = [...new Set(args.skipTargets)];
+  args.keepTargets = [...new Set(args.keepTargets)];
+  return args;
+}
+
+function relNodeCommand(relScript, extraArgs = []) {
+  return ['node', slash(relScript), ...extraArgs].join(' ');
+}
+
+function preferenceSummary(options) {
+  const choices = options.setupChoices || emptySetupChoices();
+  const targetChoice = (target) => choices.targets?.[target] || 'question-required';
+  return {
+    repo_backed_auto_update: choices.repoAutoUpdate || 'question-required',
+    host_native_plugin_cache_auto_refresh: options.host === 'codex'
+      ? (choices.codexPluginAutoRefresh || 'question-required')
+      : 'manual-verification-only',
+    delegation_control: options.host === 'codex'
+      ? (choices.codexDelegationControl || 'question-required')
+      : 'unsupported-policy-only',
+    write_meaningful_update_reports: choices.updateReports || 'question-required',
+    open_update_reports_automatically: choices.updateReportOpen || 'question-required',
+    update_report_retention_days: choices.updateReportRetention || 'question-required',
+    opencode_sync: targetChoice('opencode'),
+    ag2_antigravity_sync: targetChoice('ag2')
+  };
+}
+
+function setupPlan(options = {}) {
+  const repoRoot = path.resolve(options.repoRoot || defaultManagedSourcePath());
+  const repoBranch = options.repoBranch || DEFAULT_REPO_BRANCH;
+  const host = options.host || 'codex';
+  if (!SUPPORTED_HOSTS.includes(host)) throw new Error(`Unsupported host: ${host}`);
+  const hubArgs = options.hub ? ['--hub', quote(path.resolve(options.hub))] : [];
+  const codexCliArgs = options.codexCli ? ['--codex-cli', quote(options.codexCli)] : [];
+  const claudeCliArgs = options.claudeCli ? ['--claude-cli', quote(options.claudeCli)] : [];
+  const retentionDays = options.updateReportRetentionDays || DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
+  const choices = options.setupChoices || emptySetupChoices();
+  const reportArgs = [];
+  if (choices.updateReports === 'enable') reportArgs.push('--enable-update-reports');
+  else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
+  if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
+    reportArgs.push('--update-report-retention-days', String(retentionDays));
+  }
+  if (choices.updateReportOpen === 'enable') reportArgs.push('--enable-update-report-open');
+  else if (choices.updateReportOpen === 'disable') reportArgs.push('--disable-update-report-open');
+  if (reportArgs.length) reportArgs.push('--write', ...hubArgs);
+
+  const repoAutoArgs = [];
+  if (choices.repoAutoUpdate === 'enable') {
+    repoAutoArgs.push(
+      '--enable-repo-auto-update',
+      '--repo-path',
+      quote(repoRoot),
+      '--repo-branch',
+      repoBranch,
+      '--repo-remote',
+      quote(options.repoRemote || DEFAULT_REPO_REMOTE),
+      '--enable-auto-sync',
+      '--write',
+      ...hubArgs
+    );
+  } else if (choices.repoAutoUpdate === 'disable') {
+    repoAutoArgs.push('--disable-repo-auto-update', '--write', ...hubArgs);
+  }
+
+  const targetArgs = [];
+  for (const target of options.enableTargets || []) targetArgs.push('--enable-target', target);
+  targetArgs.push('--write', ...hubArgs);
+  const disableTargetArgs = [];
+  for (const target of options.disableTargets || []) disableTargetArgs.push('--disable-target', target);
+  if (disableTargetArgs.length) disableTargetArgs.push('--write', ...hubArgs);
+
+  return {
+    name: 'setup toolkit',
+    host,
+    default_mode: 'plan-only; use --execute --auto-main or --execute --profile auto-main to run',
+    managed_source: {
+      required: true,
+      path: repoRoot,
+      branch: repoBranch,
+      remote: options.repoRemote || DEFAULT_REPO_REMOTE,
+      default_path: defaultManagedSourcePath(),
+      custom_override: Boolean(options.repoRootExplicit),
+      purpose: 'single clean main checkout used as the default update source'
+    },
+    checklist_explanation: '**Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**',
+    preferences: preferenceSummary(options),
+    steps: [
+      {
+        id: 'upfront_setup_checklist',
+        title: 'Show one setup summary and collect all preferences before writes',
+        preferences: preferenceSummary(options)
+      },
+      {
+        id: 'managed_main_checkout',
+        title: 'Create or verify the managed clean main checkout',
+        commands: [
+          `git clone --branch ${repoBranch} ${quote(options.repoRemote || DEFAULT_REPO_REMOTE)} ${quote(repoRoot)} # only if missing`,
+          'git status --short',
+          `git switch ${repoBranch}`,
+          `git fetch origin ${repoBranch}`,
+          'git merge --ff-only FETCH_HEAD',
+          'node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs'
+        ],
+        stop_if: 'the managed checkout is dirty, remote is unexpected, fetch fails, update is not fast-forward, or hook-light validation fails'
+      },
+      host === 'claude-code' ? (choices.claudePluginBehavior === 'install' ? {
+        id: 'claude_native_plugin_install',
+        title: 'Verify and install the Claude Code native plugin from this local marketplace when missing or disabled',
+        commands: [
+          relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--verify', '--json', '--repo-root', quote(repoRoot), ...claudeCliArgs]),
+          relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--write', '--json', '--scope', 'user', '--repo-root', quote(repoRoot), ...claudeCliArgs]),
+          relNodeCommand('repo/scripts/setup-claude-toolkit-plugin.cjs', ['--verify', '--json', '--repo-root', quote(repoRoot), ...claudeCliArgs])
+        ],
+        conditional_write: 'run --write --json only when --verify reports the plugin missing, disabled, wrong-version, or wrong-source'
+      } : {
+        id: 'claude_native_plugin_cache',
+        title: 'Verify Claude Code native plugin metadata and report manual native refresh action if needed',
+        commands: [relNodeCommand('repo/scripts/setup-toolkit.cjs', ['--verify-claude-plugin', '--host', 'claude-code', '--repo-root', quote(repoRoot)])]
+      }) : {
+        id: 'codex_native_plugin_cache',
+        title: 'Verify and refresh only the Codex native plugin cache when stale',
+        commands: [
+          relNodeCommand('repo/scripts/setup-codex-toolkit-plugin.cjs', ['--verify', '--json', '--repo-root', quote(repoRoot), ...codexCliArgs]),
+          relNodeCommand('repo/scripts/setup-codex-toolkit-plugin.cjs', ['--write', '--json', '--repo-root', quote(repoRoot), ...codexCliArgs]),
+          relNodeCommand('repo/scripts/setup-codex-toolkit-plugin.cjs', ['--verify', '--json', '--repo-root', quote(repoRoot), ...codexCliArgs])
+        ],
+        conditional_write: 'run --write --json only when --verify reports missing, disabled, stale, wrong-source, or invalid installed cache state'
+      },
+      {
+        id: 'host_delegation_control',
+        title: host === 'codex'
+          ? 'Apply the supported one-direct-specialist Codex limits without overwriting unrelated config'
+          : 'Report host-level delegation enforcement as unsupported; portable policy still applies',
+        commands: host === 'codex' && choices.codexDelegationControl === 'limit'
+          ? [`manage only agents.max_threads=${CODEX_AGENT_MAX_THREADS} and agents.max_depth=${CODEX_AGENT_MAX_DEPTH} in ${codexConfigPath()}`]
+          : []
+      },
+      {
+        id: 'lite_validation',
+        title: 'Run setup validation from the managed checkout',
+        commands: [
+          'node repo/scripts/validate-toolkit.cjs',
+          'node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs'
+        ]
+      },
+      {
+        id: 'bridge_preferences',
+        title: 'Persist repo update, update report, retention, and host cache preferences together',
+        commands: [
+          ...(repoAutoArgs.length ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', repoAutoArgs)] : []),
+          ...(reportArgs.length ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', reportArgs)] : []),
+          ...(host === 'codex'
+            && ['enable', 'disable'].includes(choices.codexPluginAutoRefresh)
+            ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', [
+                options.codexPluginAutoRefresh === false ? '--disable-codex-plugin-auto-refresh' : '--enable-codex-plugin-auto-refresh',
+                '--write',
+                ...hubArgs
+              ])]
+            : [])
+        ]
+      },
+      {
+        id: 'approved_target_sync',
+        title: 'Enable only selected OpenCode and AG2/Antigravity targets, then sync enabled targets',
+        commands: [
+          ...(disableTargetArgs.length ? [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', disableTargetArgs)] : []),
+          ...((options.enableTargets || []).length ? [
+            relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', targetArgs),
+            relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', ['--sync-enabled', '--write', ...hubArgs])
+          ] : [])
+        ]
+      },
+      {
+        id: 'final_summary',
+        title: 'Print final setup summary including cleanup, cache, reports, targets, and restart/trust actions',
+        commands: [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', ['--audit', ...hubArgs])]
+      }
+    ]
+  };
+}
+
+function printHelp() {
+  console.log([
+    'AI Agent Toolkit setup orchestrator',
+    '',
+    'Default mode is --plan. The recommended setup entrypoint is:',
+    '  node "%USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main',
+    '  node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main',
+    '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main  # bootstrap/fallback only when managed script is missing',
+    '',
+    'Common commands:',
+    '  node repo/scripts/setup-toolkit.cjs --plan --json',
+    '  node repo/scripts/setup-toolkit.cjs --execute --auto-main',
+    '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --yes-recommended',
+    '  node "%USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
+    '  node repo/scripts/setup-toolkit.cjs --execute --auto-main --enable-target opencode',
+    '  node repo/scripts/setup-toolkit.cjs --execute --auto-main --enable-target opencode --enable-target ag2',
+    '',
+    'Options:',
+    '  --repo-root <path>           advanced override for managed Toolkit checkout source',
+    '  --repo-branch <branch>       default: main',
+    '  --repo-remote <url>          default: https://github.com/weijunswj/ai-agent-toolkit',
+    '  --host codex|claude-code     default: codex',
+    '  --codex-cli <path>           explicit Codex CLI for native plugin setup',
+    '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
+    '  --hub <path>                 test override for Toolkit bridge hub',
+    '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
+    '  --codex-delegation-control keep|limit|skip',
+    '                               Codex only; preserve, apply one direct specialist/no recursion, or skip host enforcement',
+    '  --managed-checkout keep|default|custom',
+    '                               choose the managed checkout answer non-interactively',
+    '  --enable-repo-auto-update   enable repo-backed auto-update from the managed checkout',
+    '  --skip-repo-auto-update     disable repo-backed auto-update',
+    '  --keep-repo-auto-update     preserve repo-backed auto-update preference',
+    '  --enable-update-reports     write meaningful update reports',
+    '  --disable-update-reports    disable future meaningful update report writes',
+    '  --keep-update-reports       preserve meaningful update report write preference',
+    '  --enable-update-report-open open meaningful update reports automatically',
+    '  --skip-update-report-open   disable automatic opening of generated update reports',
+    '  --keep-update-report-open   preserve update report auto-open preference',
+    '  --update-report-retention-days <days>',
+    '                               custom positive integer retention days',
+    '  --default-update-report-retention-days',
+    '                               explicitly set retention to 7 days',
+    '  --keep-update-report-retention-days',
+    '                               preserve current retention days',
+    '  --enable-codex-plugin-auto-refresh',
+    '                               let Codex hooks refresh stale Codex Toolkit cache and repair unsafe third-party hooks on Windows',
+    '  --skip-codex-plugin-auto-refresh',
+    '                               leave stale Codex plugin cache refresh manual',
+    '  --keep-codex-plugin-auto-refresh',
+    '                               preserve Codex plugin cache auto-refresh preference',
+    '  --claude-plugin-behavior keep|instructions|install',
+    '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
+    '  --enable-target opencode|ag2 enable and sync approved non-native bridge target',
+    '  --disable-target opencode|ag2 disable target without deleting files',
+    '  --keep-target opencode|ag2 preserve target state without refresh/sync',
+    '  --skip-target opencode|ag2 skip target writes for this run'
+  ].join('\n'));
+}
+
+function assertRepoRoot(repoRoot) {
+  const required = [
+    path.join(repoRoot, 'AGENTS.md'),
+    path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'),
+    path.join(repoRoot, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'),
+    path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'),
+    path.join(repoRoot, 'repo', 'scripts', 'validate-toolkit.cjs'),
+    path.join(repoRoot, 'repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs')
+  ];
+  for (const filePath of required) {
+    if (!fs.existsSync(filePath)) throw new Error(`Missing setup prerequisite under repo root: ${filePath}`);
+  }
+}
+
+function runCommand(label, command, args, options = {}) {
+  if (!options.quiet) {
+    console.log(`\n==> ${label}`);
+    console.log([command, ...args].join(' '));
+  }
+  const result = spawnSync(command, args, {
+    cwd: options.cwd,
+    env: options.env || process.env,
+    stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+    encoding: options.capture ? 'utf8' : undefined,
+    timeout: options.timeout || 120000,
+    windowsHide: true
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && !options.allowFailure) {
+    const stderr = options.capture ? result.stderr || '' : '';
+    const stdout = options.capture ? result.stdout || '' : '';
+    throw new Error(`${label} failed with exit code ${result.status}${stderr || stdout ? `: ${(stderr || stdout).trim()}` : ''}`);
+  }
+  return result;
+}
+
+function recordValidation(validationResults, command, status) {
+  if (!validationResults) return;
+  validationResults.push({ command, status });
+}
+
+function isCredentialError(message = '') {
+  return /SEC_E_NO_CREDENTIALS|Authentication failed|could not read Username|Authentication|permission denied|terminal prompts disabled/i.test(message);
+}
+
+function fetchWithCredentialFallback(repoRoot, branch) {
+  const fetchLabel = `git fetch origin ${branch}`;
+  const fetchArgs = ['fetch', 'origin', branch];
+  let lastError = '';
+  const fetchResult = runCommand(fetchLabel, 'git', fetchArgs, { cwd: repoRoot, capture: true, timeout: 120000, allowFailure: true });
+  if (fetchResult.status === 0) return;
+  lastError = fetchResult.stderr || fetchResult.stdout || '';
+  if (isCredentialError(lastError)) {
+    const helpers = ['manager', 'manager-core'];
+    for (const helper of helpers) {
+      const fallbackResult = runCommand(
+        `git -c credential.helper=${helper} fetch origin ${branch}`,
+        'git',
+        ['-c', `credential.helper=${helper}`, 'fetch', 'origin', branch],
+        {
+          cwd: repoRoot,
+          capture: true,
+          timeout: 120000,
+          allowFailure: true
+        }
+      );
+      if (fallbackResult.status === 0) return;
+      if (fallbackResult.stderr || fallbackResult.stdout) {
+        lastError = `${lastError}\n${fallbackResult.stderr || fallbackResult.stdout}`;
+      }
+    }
+  }
+  throw new Error(`${fetchLabel} failed with exit code ${fetchResult.status}: ${String(lastError || '').trim()}`);
+}
+
+function runGitCapture(repoRoot, args, label, allowFailure = false, quiet = false) {
+  const result = runCommand(label, 'git', args, { cwd: repoRoot, capture: true, timeout: 60000, allowFailure: true, quiet });
+  if (result.status !== 0 && !allowFailure) throw new Error(`${label} failed with exit code ${result.status}: ${(result.stderr || result.stdout || '').trim()}`);
+  return (result.stdout || '').trim();
+}
+
+function commitForSummary(repoPath) {
+  if (!repoPath || !fs.existsSync(repoPath)) return 'unknown';
+  return runGitCapture(repoPath, ['rev-parse', 'HEAD'], 'git rev-parse HEAD', true, true) || 'unknown';
+}
+
+function branchForSummary(repoPath) {
+  if (!repoPath || !fs.existsSync(repoPath)) return 'unknown';
+  return runGitCapture(repoPath, ['branch', '--show-current'], 'git branch --show-current', true, true) || 'unknown';
+}
+
+function statusForSummary(repoPath) {
+  if (!repoPath || !fs.existsSync(repoPath)) return 'unknown';
+  const status = runGitCapture(repoPath, ['status', '--short'], 'git status --short', true, true);
+  return status ? 'dirty' : 'clean';
+}
+
+function delegateToManagedSetupIfAvailable(args) {
+  if (!args.execute || args.repoRootExplicit) return null;
+  const managedScript = defaultManagedSetupScriptPath();
+  const currentScript = path.resolve(__filename);
+  if (!fs.existsSync(managedScript) || samePath(managedScript, currentScript)) return null;
+
+  const activeRoot = repoRootFromScript();
+  const managedRoot = defaultManagedSourcePath();
+  console.log('# setup toolkit managed route');
+  console.log(`Active worktree path: ${activeRoot}`);
+  console.log(`Active worktree branch: ${branchForSummary(activeRoot)}`);
+  console.log(`Active worktree commit: ${commitForSummary(activeRoot)}`);
+  console.log(`Active worktree status: ${statusForSummary(activeRoot)}`);
+  console.log('Active worktree role: delegated to managed checkout');
+  console.log(`Managed checkout path: ${managedRoot}`);
+  console.log(`Managed checkout default path: ${defaultManagedSourcePath()} (Windows default: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit; POSIX default: $HOME/.ai-agent-toolkit/source/ai-agent-toolkit)`);
+  console.log(`Managed checkout commit: ${commitForSummary(managedRoot)}`);
+  console.log(`Setup script path executed: ${managedScript}`);
+  console.log('Active worktree setup is bootstrap/fallback only; delegating to the managed checkout setup script.');
+  console.log('');
+
+  const interactive = process.stdin.isTTY;
+  // Inherit stdin directly instead of eagerly buffering it with
+  // fs.readFileSync(0) and forwarding it as `input`: that eager read blocks
+  // until EOF even when the delegated child never ends up needing an answer
+  // (e.g. every setup question was already resolved by flags), hanging any
+  // non-interactive caller whose stdin pipe is never explicitly closed.
+  const result = spawnSync(process.execPath, [managedScript, ...args.argv], {
+    cwd: managedRoot,
+    encoding: interactive ? undefined : 'utf8',
+    stdio: interactive ? 'inherit' : ['inherit', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  if (result.error) throw result.error;
+  if (!interactive) {
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+  }
+  return typeof result.status === 'number' ? result.status : 1;
+}
+
+function scriptRootForReadOnlyProbe(args) {
+  if (args.repoRoot && fs.existsSync(path.join(args.repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'))) return args.repoRoot;
+  return repoRootFromScript();
+}
+
+function parseFirstJsonObject(stdout) {
+  const text = String(stdout || '');
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+  try {
+    return JSON.parse(text.slice(start));
+  } catch {
+    return null;
+  }
+}
+
+function runBridgeAuditReadOnly(args) {
+  const probeRoot = scriptRootForReadOnlyProbe(args);
+  const result = runCommand(
+    'node repo/scripts/toolkit-local-bridge.cjs --audit',
+    process.execPath,
+    bridgeArgs(args, ['--audit']),
+    { cwd: probeRoot, capture: true, timeout: 120000, allowFailure: true, quiet: true }
+  );
+  if (result.status !== 0) {
+    return {
+      error: (result.stderr || result.stdout || '').trim(),
+      repo_auto_update: {},
+      targets: {}
+    };
+  }
+  return parseFirstJsonObject(result.stdout) || {
+    error: 'bridge audit did not return JSON',
+    repo_auto_update: {},
+    targets: {}
+  };
+}
+
+function inspectManagedCheckout(args, audit) {
+  const defaultPath = defaultManagedSourcePath();
+  const configuredPath = audit?.repo_auto_update?.repo_path || '';
+  const currentPath = configuredPath || (args.repoRootExplicit ? args.repoRoot : '');
+  const selectedPath = args.repoRootExplicit ? args.repoRoot : (configuredPath || args.repoRoot || defaultPath);
+  const exists = fs.existsSync(selectedPath);
+  const gitDir = exists ? runGitCapture(selectedPath, ['rev-parse', '--git-dir'], 'git rev-parse --git-dir', true, true) : '';
+  const branch = gitDir ? runGitCapture(selectedPath, ['branch', '--show-current'], 'git branch --show-current', true, true) : '';
+  const remote = gitDir ? runGitCapture(selectedPath, ['remote', 'get-url', 'origin'], 'git remote get-url origin', true, true) : '';
+  const status = gitDir ? runGitCapture(selectedPath, ['status', '--short'], 'git status --short', true, true) : '';
+  const commit = gitDir ? runGitCapture(selectedPath, ['rev-parse', 'HEAD'], 'git rev-parse HEAD', true, true) : '';
+  return {
+    currentPath,
+    selectedPath,
+    defaultPath,
+    exists,
+    git: Boolean(gitDir),
+    branch,
+    remote,
+    dirty: Boolean(status),
+    status,
+    commit
+  };
+}
+
+function inspectCodexNativePluginState(args) {
+  const probeRoot = scriptRootForReadOnlyProbe(args);
+  const result = runCommand(
+    'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupCodexArgs({ ...args, repoRoot: probeRoot }, '--verify'),
+    { cwd: probeRoot, capture: true, timeout: 120000, allowFailure: true, quiet: true }
+  );
+  return {
+    status: result.status === 0 ? 'fresh' : 'needs-review',
+    detail: (result.status === 0 ? result.stdout : (result.stderr || result.stdout || '')).trim()
+  };
+}
+
+function inspectClaudeNativePluginState(args) {
+  const probeRoot = scriptRootForReadOnlyProbe(args);
+  const pluginPath = path.join(probeRoot, '.claude-plugin', 'plugin.json');
+  const hooksPath = path.join(probeRoot, '.claude-plugin', 'hooks', 'hooks.json');
+  if (!fs.existsSync(pluginPath) || !fs.existsSync(hooksPath)) {
+    return {
+      status: 'missing',
+      detail: `Expected ${pluginPath} and ${hooksPath}`
+    };
+  }
+  try {
+    const plugin = readJsonFile(pluginPath);
+    const hooks = readJsonFile(hooksPath);
+    const command = (hooks?.hooks?.SessionStart || [])
+      .flatMap((entry) => Array.isArray(entry.hooks) ? entry.hooks : [])
+      .map((entry) => String(entry.command || ''))
+      .find((value) => value.includes('toolkit-local-bridge.cjs')) || '';
+    return {
+      status: command ? 'metadata-present' : 'hooks-need-review',
+      version: plugin.version || '',
+      detail: command || 'SessionStart hook command not found'
+    };
+  } catch (error) {
+    return {
+      status: 'invalid',
+      detail: error.message
+    };
+  }
+}
+
+function expectedCodexDelegationBlock(eol = '\n') {
+  return [
+    CODEX_DELEGATION_BEGIN,
+    `max_threads = ${CODEX_AGENT_MAX_THREADS}`,
+    `max_depth = ${CODEX_AGENT_MAX_DEPTH}`,
+    CODEX_DELEGATION_END
+  ].join(eol);
+}
+
+function markerCount(text, marker) {
+  return String(text || '').split(marker).length - 1;
+}
+
+function codexDelegationConfigState(configText, configPath = codexConfigPath()) {
+  const text = String(configText || '');
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const beginCount = markerCount(text, CODEX_DELEGATION_BEGIN);
+  const endCount = markerCount(text, CODEX_DELEGATION_END);
+  const managedPattern = new RegExp(
+    `^[ \\t]*${escapeRegex(CODEX_DELEGATION_BEGIN)}\\r?\\n[\\s\\S]*?^[ \\t]*${escapeRegex(CODEX_DELEGATION_END)}[ \\t]*\\r?$`,
+    'm'
+  );
+  const managedMatch = text.match(managedPattern);
+  if (beginCount !== endCount || beginCount > 1 || (beginCount === 1 && !managedMatch)) {
+    return { status: 'conflicting', config_path: configPath, detail: 'Toolkit delegation markers are incomplete, duplicated, or malformed', text, eol };
+  }
+
+  const outsideManaged = managedMatch ? text.replace(managedMatch[0], '') : text;
+  const dottedOrInline = /^[ \t]*(?:agents\.(?:max_threads|max_depth)|agents)[ \t]*=/m.test(outsideManaged);
+  const agentsHeaders = [...outsideManaged.matchAll(/^[ \t]*\[agents\][ \t]*(?:#.*)?\r?$/gm)];
+  if (dottedOrInline || agentsHeaders.length > 1) {
+    return { status: 'conflicting', config_path: configPath, detail: 'Codex agent limits use an unsupported or duplicated TOML shape', text, eol };
+  }
+
+  let userValues = [];
+  let section = null;
+  if (agentsHeaders.length === 1) {
+    const header = agentsHeaders[0];
+    const rest = outsideManaged.slice(header.index + header[0].length);
+    const nextHeader = rest.match(/\r?\n[ \t]*\[\[?[^\]\r\n]+\]\]?[ \t]*(?:#.*)?\r?(?=\n|$)/);
+    const sectionEnd = nextHeader ? header.index + header[0].length + nextHeader.index : outsideManaged.length;
+    section = { header, end: sectionEnd };
+    const sectionText = outsideManaged.slice(header.index + header[0].length, sectionEnd);
+    const assignments = [...sectionText.matchAll(/^[ \t]*(max_threads|max_depth)[ \t]*=[ \t]*([^#\r\n]+?)[ \t]*(?:#.*)?\r?$/gm)];
+    const possibleLimitLines = sectionText.split(/\r?\n/).filter((line) => /^[ \t]*(?:max_threads|max_depth)[ \t]*=/.test(line));
+    if (possibleLimitLines.length !== assignments.length) {
+      return { status: 'conflicting', config_path: configPath, detail: 'Codex agent limits contain values Toolkit cannot safely verify', text, eol };
+    }
+    userValues = assignments.map((match) => ({ key: match[1], value: Number(match[2].trim()) }));
+  }
+
+  const values = managedMatch
+    ? [...managedMatch[0].matchAll(/^[ \t]*(max_threads|max_depth)[ \t]*=[ \t]*(\d+)[ \t]*$/gm)].map((match) => ({ key: match[1], value: Number(match[2]) }))
+    : userValues;
+  const valueMap = new Map(values.map((entry) => [entry.key, entry.value]));
+  const outsideKeys = userValues.map((entry) => entry.key);
+  if (managedMatch && outsideKeys.length) {
+    return { status: 'conflicting', config_path: configPath, detail: 'User-owned Codex agent-limit keys duplicate the Toolkit-managed block', text, eol };
+  }
+  if (values.length) {
+    const configured = values.length === 2
+      && valueMap.get('max_threads') === CODEX_AGENT_MAX_THREADS
+      && valueMap.get('max_depth') === CODEX_AGENT_MAX_DEPTH;
+    if (!configured) {
+      return { status: 'conflicting', config_path: configPath, detail: 'Existing Codex agent limits differ from Toolkit defaults and were not overwritten', text, eol };
+    }
+    return {
+      status: 'configured',
+      config_path: configPath,
+      max_threads: CODEX_AGENT_MAX_THREADS,
+      max_depth: CODEX_AGENT_MAX_DEPTH,
+      ownership: managedMatch ? 'toolkit-managed' : 'user-owned-compatible',
+      detail: managedMatch ? 'Toolkit-managed limits are configured' : 'Compatible user-owned limits are configured',
+      text,
+      eol
+    };
+  }
+  return { status: 'unconfigured', config_path: configPath, detail: 'Codex agent limits are not configured', text, eol, section };
+}
+
+function inspectCodexDelegationConfig(configPath = codexConfigPath()) {
+  if (!fs.existsSync(configPath)) return codexDelegationConfigState('', configPath);
+  try {
+    return codexDelegationConfigState(fs.readFileSync(configPath, 'utf8'), configPath);
+  } catch (error) {
+    return { status: 'conflicting', config_path: configPath, detail: `Codex config could not be read safely: ${error.message}` };
+  }
+}
+
+function writeFileAtomically(filePath, text) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`);
+  try {
+    fs.writeFileSync(tempPath, text, 'utf8');
+    fs.renameSync(tempPath, filePath);
+  } finally {
+    if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+  }
+}
+
+function configureCodexDelegation(configPath = codexConfigPath()) {
+  const state = inspectCodexDelegationConfig(configPath);
+  if (state.status !== 'unconfigured') return { ...state, changed: false };
+  const block = expectedCodexDelegationBlock(state.eol);
+  let nextText;
+  if (state.section) {
+    const headerEnd = state.section.header.index + state.section.header[0].length;
+    const insertion = state.text[headerEnd] === '\n' ? headerEnd + 1 : headerEnd;
+    const separator = insertion === headerEnd ? state.eol : '';
+    nextText = `${state.text.slice(0, insertion)}${separator}${block}${state.eol}${state.text.slice(insertion)}`;
+  } else {
+    const separator = !state.text ? '' : (state.text.endsWith(state.eol) ? state.eol : `${state.eol}${state.eol}`);
+    nextText = `${state.text}${separator}[agents]${state.eol}${block}${state.eol}`;
+  }
+  writeFileAtomically(configPath, nextText);
+  const verified = inspectCodexDelegationConfig(configPath);
+  if (verified.status !== 'configured') return { ...verified, changed: true };
+  return { ...verified, changed: true };
+}
+
+function applyHostDelegationControl(args, current) {
+  if (args.host !== 'codex') {
+    return { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable', changed: false };
+  }
+  const choice = args.setupChoices.codexDelegationControl;
+  if (choice === 'skip') return { ...current.delegation, status: 'skipped', detail: 'Codex delegation configuration was explicitly skipped', changed: false };
+  if (choice === 'keep') return { ...current.delegation, changed: false };
+  return configureCodexDelegation(current.delegation.config_path);
+}
+
+function collectCurrentState(args) {
+  const audit = runBridgeAuditReadOnly(args);
+  return {
+    audit,
+    managed: inspectManagedCheckout(args, audit),
+    delegation: args.host === 'codex'
+      ? inspectCodexDelegationConfig()
+      : { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable' },
+    nativePlugin: args.host === 'claude-code'
+      ? inspectClaudeNativePluginState(args)
+      : inspectCodexNativePluginState(args)
+  };
+}
+
+function formatBool(value) {
+  return value ? 'enabled' : 'disabled';
+}
+
+function formatTargetState(target) {
+  if (!target) return 'not detected';
+  const parts = [
+    `detected=${target.detected ? 'yes' : 'no'}`,
+    `enabled=${target.enabled ? 'yes' : 'no'}`,
+    `synced=${target.synced ? 'yes' : 'no'}`
+  ];
+  if (target.synced_version) parts.push(`version=${target.synced_version}`);
+  if (target.status) parts.push(`status=${target.status}`);
+  return parts.join(', ');
+}
+
+function currentReportRetentionDays(current) {
+  return current?.audit?.update_report_retention_days || DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
+}
+
+function hasUnsafeManagedPathMarker(value) {
+  const normalized = slash(path.resolve(value || '')).toLowerCase();
+  return ['/.tmp/', '/.codex/plugins/cache/', '/.claude/plugins/cache/', '/.codex/.tmp/marketplaces/']
+    .some((marker) => normalized.includes(marker));
+}
+
+function isStandardManagedCheckout(current) {
+  if (!current?.managed?.currentPath) return false;
+  return samePath(current.managed.currentPath, current.managed.defaultPath);
+}
+
+function canRecommendKeepingManagedCheckout(current, args) {
+  const managed = current?.managed || {};
+  if (!managed.currentPath) return false;
+  if (!isStandardManagedCheckout(current)) return false;
+  const resolved = path.resolve(managed.currentPath);
+  if (isInside(repoRootFromScript(), resolved) && !(isRunningFromStandardManagedCheckout() && isStandardManagedPath(resolved))) return false;
+  if (hasUnsafeManagedPathMarker(resolved)) return false;
+  if (!managed.exists || !managed.git || managed.dirty) return false;
+  if (managed.branch !== args.repoBranch) return false;
+  return normalizeRemote(managed.remote) === normalizeRemote(args.repoRemote);
+}
+
+function recommendedChoice(key, current, args) {
+  if (key === 'managedCheckout') return canRecommendKeepingManagedCheckout(current, args) ? 'keep' : 'default';
+  if (key === 'repoAutoUpdate') return 'enable';
+  if (key === 'updateReports') return 'enable';
+  if (key === 'updateReportOpen') return 'keep';
+  if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
+  if (key === 'codexPluginAutoRefresh') return 'enable';
+  if (key === 'codexDelegationControl') return current.delegation?.status === 'configured' ? 'keep' : 'limit';
+  if (key === 'claudePluginBehavior') return 'install';
+  if (key === 'opencodeTarget') return args.setupChoices.targets.opencode || 'keep';
+  if (key === 'ag2Target') return args.setupChoices.targets.ag2 || 'keep';
+  return 'keep';
+}
+
+function setupQuestionSpecs(args, current) {
+  const specs = [
+    {
+      key: 'managedCheckout',
+      title: 'Managed checkout',
+      prompt: 'Managed checkout choice',
+      choices: ['keep', 'default', 'custom'],
+      recommended: recommendedChoice('managedCheckout', current, args),
+      selected: args.setupChoices.managedCheckout,
+      current: current.managed.currentPath || '(none configured)'
+    },
+    {
+      key: 'repoAutoUpdate',
+      title: 'Repo-backed auto-update',
+      prompt: 'Repo-backed auto-update choice',
+      choices: ['keep', 'enable', 'disable'],
+      recommended: recommendedChoice('repoAutoUpdate', current, args),
+      selected: args.setupChoices.repoAutoUpdate,
+      current: formatBool(current.audit?.repo_auto_update?.enabled === true)
+    },
+    {
+      key: 'updateReports',
+      title: 'Update report writes',
+      prompt: 'Update report writes choice',
+      choices: ['keep', 'enable', 'disable'],
+      recommended: recommendedChoice('updateReports', current, args),
+      selected: args.setupChoices.updateReports,
+      current: formatBool(current.audit?.update_report_enabled !== false)
+    },
+    {
+      key: 'updateReportOpen',
+      title: 'Update report auto-open',
+      prompt: 'Update report auto-open choice',
+      choices: ['keep', 'enable', 'disable'],
+      recommended: recommendedChoice('updateReportOpen', current, args),
+      selected: args.setupChoices.updateReportOpen,
+      current: formatBool(current.audit?.update_report_open_enabled === true)
+    },
+    {
+      key: 'updateReportRetention',
+      title: 'Update report/log retention',
+      prompt: 'Update report/log retention choice',
+      choices: ['keep', 'default', 'custom'],
+      recommended: recommendedChoice('updateReportRetention', current, args),
+      selected: args.setupChoices.updateReportRetention,
+      current: `${currentReportRetentionDays(current)} day(s)`
+    }
+  ];
+
+  if (args.host === 'codex') {
+    specs.push({
+      key: 'codexDelegationControl',
+      title: 'Codex delegation control',
+      prompt: 'Codex delegation control choice',
+      choices: ['keep', 'limit', 'skip'],
+      recommended: recommendedChoice('codexDelegationControl', current, args),
+      selected: args.setupChoices.codexDelegationControl,
+      current: `${current.delegation.status}; ${current.delegation.detail}`
+    });
+    specs.push({
+      key: 'codexPluginAutoRefresh',
+      title: 'Codex plugin cache auto-refresh and Windows hook repair',
+      prompt: 'Codex plugin cache auto-refresh and Windows hook repair choice',
+      choices: ['keep', 'enable', 'disable'],
+      recommended: recommendedChoice('codexPluginAutoRefresh', current, args),
+      selected: args.setupChoices.codexPluginAutoRefresh,
+      current: formatBool(current.audit?.codex_plugin_auto_refresh_enabled === true)
+    });
+  } else {
+    specs.push({
+      key: 'claudePluginBehavior',
+      title: 'Claude Code plugin behavior',
+      prompt: 'Claude Code plugin behavior choice',
+      choices: ['keep', 'instructions', 'install'],
+      recommended: recommendedChoice('claudePluginBehavior', current, args),
+      selected: args.setupChoices.claudePluginBehavior,
+      current: `${current.nativePlugin.status}; install runs claude plugin marketplace add + install --scope user, no Codex mutation`
+    });
+  }
+
+  specs.push(
+    {
+      key: 'opencodeTarget',
+      title: 'OpenCode bridge target',
+      prompt: 'OpenCode bridge target choice',
+      choices: ['keep', 'enable-sync', 'disable', 'skip'],
+      recommended: recommendedChoice('opencodeTarget', current, args),
+      selected: args.setupChoices.targets.opencode,
+      current: formatTargetState(current.audit?.targets?.opencode)
+    },
+    {
+      key: 'ag2Target',
+      title: 'AG2/Antigravity bridge target',
+      prompt: 'AG2/Antigravity bridge target choice',
+      choices: ['keep', 'enable-sync', 'disable', 'skip'],
+      recommended: recommendedChoice('ag2Target', current, args),
+      selected: args.setupChoices.targets.ag2,
+      current: formatTargetState(current.audit?.targets?.ag2)
+    }
+  );
+  return specs;
+}
+
+function printSetupQuestionBank(args, current, specs) {
+  console.log('# setup toolkit question bank');
+  console.log('');
+  console.log('Current state was discovered before setup writes. Answer every choice once before setup continues.');
+  console.log('');
+  console.log('Managed checkout:');
+  console.log(`- detected/current path: ${current.managed.currentPath || '(none configured)'}`);
+  console.log(`- selected path for inspection: ${current.managed.selectedPath}`);
+  console.log(`- default path: ${current.managed.defaultPath}`);
+  console.log(`- current git state: exists=${current.managed.exists ? 'yes' : 'no'}, git=${current.managed.git ? 'yes' : 'no'}, branch=${current.managed.branch || '(unknown)'}, dirty=${current.managed.dirty ? 'yes' : 'no'}`);
+  if (current.managed.remote) console.log(`- current remote: ${current.managed.remote}`);
+  console.log('');
+  console.log(`Host: ${args.host}`);
+  console.log(`Host-native plugin state: ${current.nativePlugin.status}${current.nativePlugin.version ? `, version=${current.nativePlugin.version}` : ''}`);
+  if (current.audit?.error) console.log(`Bridge audit warning: ${current.audit.error}`);
+  console.log('');
+  for (const spec of specs) {
+    const selected = spec.selected || '(answer required)';
+    console.log(`${spec.title}:`);
+    console.log(`- current: ${spec.current}`);
+    console.log(`- recommended: ${spec.recommended}`);
+    console.log(`- empty input: ${spec.recommended} (recommended)`);
+    console.log(`- choices: ${spec.choices.join(' / ')}`);
+    console.log(`- selected: ${selected}`);
+  }
+}
+
+function assignChoice(args, key, choice) {
+  if (key === 'managedCheckout') args.setupChoices.managedCheckout = choice;
+  else if (key === 'repoAutoUpdate') args.setupChoices.repoAutoUpdate = choice;
+  else if (key === 'updateReports') args.setupChoices.updateReports = choice;
+  else if (key === 'updateReportOpen') args.setupChoices.updateReportOpen = choice;
+  else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
+  else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
+  else if (key === 'codexDelegationControl') args.setupChoices.codexDelegationControl = choice;
+  else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
+  else if (key === 'opencodeTarget') args.setupChoices.targets.opencode = choice;
+  else if (key === 'ag2Target') args.setupChoices.targets.ag2 = choice;
+}
+
+function choiceForKey(args, key) {
+  if (key === 'managedCheckout') return args.setupChoices.managedCheckout;
+  if (key === 'repoAutoUpdate') return args.setupChoices.repoAutoUpdate;
+  if (key === 'updateReports') return args.setupChoices.updateReports;
+  if (key === 'updateReportOpen') return args.setupChoices.updateReportOpen;
+  if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
+  if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
+  if (key === 'codexDelegationControl') return args.setupChoices.codexDelegationControl;
+  if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
+  if (key === 'opencodeTarget') return args.setupChoices.targets.opencode;
+  if (key === 'ag2Target') return args.setupChoices.targets.ag2;
+  return '';
+}
+
+function nextNonEmptyLine(lines) {
+  while (lines.length) {
+    const line = String(lines.shift() || '').trim();
+    if (line) return line;
+  }
+  return '';
+}
+
+async function promptForChoice(spec, lines, rl) {
+  if (lines) {
+    if (!lines.length) throw new Error(`Setup question bank requires an answer for ${spec.title}`);
+    return String(lines.shift() || '').trim().toLowerCase() || spec.recommended;
+  }
+  for (;;) {
+    const answer = (await rl.question(`${spec.prompt} [${spec.choices.join('/')}], Enter=${spec.recommended}: `)).trim().toLowerCase();
+    return answer || spec.recommended;
+  }
+}
+
+async function promptForCustomPath(lines, rl) {
+  if (lines) {
+    const value = nextNonEmptyLine(lines);
+    if (!value) throw new Error('Managed checkout custom path requires a path answer');
+    return value;
+  }
+  for (;;) {
+    const answer = (await rl.question('Custom managed checkout path: ')).trim();
+    if (answer) return answer;
+    console.log('Please enter a custom managed checkout path.');
+  }
+}
+
+async function answerSetupQuestionBank(args, current) {
+  const specs = setupQuestionSpecs(args, current);
+  printSetupQuestionBank(args, current, specs);
+  const initialMissingCount = specs.filter((spec) => !choiceForKey(args, spec.key)).length;
+  let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
+
+  if (args.yesRecommended) {
+    answerSource = 'user-approved yes-recommended';
+    console.log('');
+    console.log('--yes-recommended selected; setup will apply these choices before writing:');
+    for (const spec of specs) {
+      if (!choiceForKey(args, spec.key)) assignChoice(args, spec.key, spec.recommended);
+      console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
+    }
+  }
+
+  const missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+  if (missing.length) {
+    console.log('');
+    console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
+  }
+
+  const needsPromptedAnswers = missing.length > 0
+    || (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit);
+  const lines = needsPromptedAnswers && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
+  const rl = needsPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
+  try {
+    for (const spec of missing) {
+      const answer = await promptForChoice(spec, lines, rl);
+      if (!spec.choices.includes(answer)) {
+        throw new Error(`${spec.title} must be one of: ${spec.choices.join(', ')}`);
+      }
+      assignChoice(args, spec.key, answer);
+    }
+    if (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit) {
+      args.repoRoot = await promptForCustomPath(lines, rl);
+      args.repoRootExplicit = true;
+    }
+  } finally {
+    if (rl) rl.close();
+  }
+
+  applySetupChoices(args, current);
+  console.log('');
+  console.log('Setup choices confirmed before writes:');
+  for (const spec of specs) console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
+  return {
+    appeared: true,
+    stopped_for_answers: initialMissingCount > 0 && !args.yesRecommended,
+    answer_source: answerSource || 'none'
+  };
+}
+
+function applySetupChoices(args, current) {
+  const choices = args.setupChoices;
+  if (choices.managedCheckout === 'keep') {
+    args.repoRoot = path.resolve(current.managed.currentPath || current.managed.selectedPath || args.repoRoot);
+  } else if (choices.managedCheckout === 'default') {
+    args.repoRoot = defaultManagedSourcePath();
+    args.repoRootExplicit = false;
+  } else if (choices.managedCheckout === 'custom') {
+    args.repoRoot = path.resolve(args.repoRoot);
+    args.repoRootExplicit = true;
+  }
+
+  if (choices.repoAutoUpdate === 'keep') args.repoAutoUpdate = current.audit?.repo_auto_update?.enabled === true;
+  else args.repoAutoUpdate = choices.repoAutoUpdate === 'enable';
+
+  if (choices.updateReports === 'keep') args.updateReports = current.audit?.update_report_enabled !== false;
+  else args.updateReports = choices.updateReports === 'enable';
+
+  if (choices.updateReportOpen === 'keep') args.updateReportOpen = current.audit?.update_report_open_enabled === true;
+  else args.updateReportOpen = choices.updateReportOpen === 'enable';
+
+  if (choices.updateReportRetention === 'keep') args.updateReportRetentionDays = currentReportRetentionDays(current);
+  else if (choices.updateReportRetention === 'default') args.updateReportRetentionDays = DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
+
+  if (args.host === 'codex') {
+    if (choices.codexPluginAutoRefresh === 'keep') args.codexPluginAutoRefresh = current.audit?.codex_plugin_auto_refresh_enabled === true;
+    else args.codexPluginAutoRefresh = choices.codexPluginAutoRefresh === 'enable';
+  }
+
+  args.enableTargets = [];
+  args.disableTargets = [];
+  for (const target of SUPPORTED_TARGETS) {
+    const choice = choices.targets[target];
+    if (choice === 'enable-sync') args.enableTargets.push(target);
+    if (choice === 'disable') args.disableTargets.push(target);
+  }
+  args.repoRoot = path.resolve(args.repoRoot);
+}
+
+function activeToolkitWarning(args) {
+  const activeRoot = repoRootFromScript();
+  if (path.resolve(activeRoot) === path.resolve(args.repoRoot)) return '';
+  if (!fs.existsSync(path.join(activeRoot, 'AGENTS.md')) || !fs.existsSync(path.join(activeRoot, 'repo', 'scripts', 'setup-toolkit.cjs'))) return '';
+  const branch = runGitCapture(activeRoot, ['branch', '--show-current'], 'read active repo branch', true, true);
+  if (!branch || branch === args.repoBranch) return '';
+  return [
+    `Active Toolkit worktree is on ${branch}, not ${args.repoBranch}.`,
+    'This is okay: the active Codex or Claude Code session may be on a PR branch.',
+    `Toolkit updates will use the managed clean ${args.repoBranch} checkout instead: ${args.repoRoot}`
+  ].join(' ');
+}
+
+function validateManagedSourcePath(args) {
+  if (args.repoRootExplicit) return;
+  const activeRoot = repoRootFromScript();
+  const resolved = path.resolve(args.repoRoot);
+  const allowedSelfManagedPath = isRunningFromStandardManagedCheckout() && isStandardManagedPath(resolved);
+  if (isInside(activeRoot, resolved) && !allowedSelfManagedPath) {
+    throw new Error(`Default managed source checkout must not live inside the active Toolkit worktree: ${resolved}`);
+  }
+  if (hasUnsafeManagedPathMarker(resolved)) throw new Error(`Managed source checkout must not live inside plugin cache or temporary marketplace paths: ${resolved}`);
+}
+
+function cloneManagedCheckoutIfMissing(args) {
+  if (fs.existsSync(args.repoRoot)) return false;
+  fs.mkdirSync(path.dirname(args.repoRoot), { recursive: true });
+  runCommand(
+    `git clone --branch ${args.repoBranch} ${args.repoRemote} ${args.repoRoot}`,
+    'git',
+    ['clone', '--branch', args.repoBranch, args.repoRemote, args.repoRoot],
+    { timeout: 180000 }
+  );
+  return true;
+}
+
+function verifyAndUpdateTrustedRepo(args, validationResults) {
+  validateManagedSourcePath(args);
+  const cloned = cloneManagedCheckoutIfMissing(args);
+  assertRepoRoot(args.repoRoot);
+  const status = runGitCapture(args.repoRoot, ['status', '--short'], 'git status --short');
+  if (status) throw new Error(`managed Toolkit source checkout must be clean before setup can continue:\n${status}`);
+
+  const remote = runGitCapture(args.repoRoot, ['remote', 'get-url', 'origin'], 'git remote get-url origin');
+  if (normalizeRemote(remote) !== normalizeRemote(args.repoRemote)) {
+    throw new Error(`Unexpected origin remote for managed Toolkit source checkout: ${remote}`);
+  }
+
+  runCommand(`git switch ${args.repoBranch}`, 'git', ['switch', args.repoBranch], { cwd: args.repoRoot, timeout: 60000 });
+  const branch = runGitCapture(args.repoRoot, ['branch', '--show-current'], 'git branch --show-current');
+  if (branch !== args.repoBranch) throw new Error(`Expected managed source branch ${args.repoBranch}, found ${branch || '<detached>'}`);
+
+  try {
+    fetchWithCredentialFallback(args.repoRoot, args.repoBranch);
+  } catch (error) {
+    if (isCredentialError(error.message)) {
+      throw new Error(
+        `${error.message}\n` +
+        `Credential hint: this process could not authenticate to ${args.repoRemote}.\n` +
+        'Run this command from the same shell/profile that already works for git fetch,\n' +
+        'or run `gh auth login` in this context, then rerun setup toolkit.'
+      );
+    }
+    throw error;
+  }
+  const fetchedCommit = runGitCapture(args.repoRoot, ['rev-parse', 'FETCH_HEAD'], 'git rev-parse FETCH_HEAD');
+  const headBefore = runGitCapture(args.repoRoot, ['rev-parse', 'HEAD'], 'git rev-parse HEAD');
+  const ancestor = runCommand('git merge-base --is-ancestor HEAD FETCH_HEAD', 'git', ['merge-base', '--is-ancestor', 'HEAD', 'FETCH_HEAD'], {
+    cwd: args.repoRoot,
+    capture: true,
+    allowFailure: true
+  });
+  if (ancestor.status !== 0) throw new Error(`Managed source checkout cannot fast-forward from ${headBefore} to ${fetchedCommit}`);
+  runCommand('git merge --ff-only FETCH_HEAD', 'git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: args.repoRoot, timeout: 120000 });
+  runManagedHookLightValidation(args, validationResults);
+  const headAfter = runGitCapture(args.repoRoot, ['rev-parse', 'HEAD'], 'git rev-parse HEAD');
+  return {
+    cloned,
+    branch,
+    remote,
+    commit_before: cloned ? 'unknown' : headBefore,
+    commit_after: headAfter,
+    commit: headAfter,
+    update_action: cloned ? 'cloned' : (headBefore === headAfter ? 'already up to date' : 'fast-forwarded')
+  };
+}
+
+function nodeScriptArgs(relScript, extraArgs = []) {
+  return [path.join(...relScript.split('/')), ...extraArgs];
+}
+
+function setupCodexArgs(args, mode) {
+  const extra = [mode, '--json', '--repo-root', args.repoRoot];
+  if (args.codexCli) extra.push('--codex-cli', args.codexCli);
+  return nodeScriptArgs('repo/scripts/setup-codex-toolkit-plugin.cjs', extra);
+}
+
+function parseJsonFromOutput(text) {
+  return parseFirstJsonObject(text) || {};
+}
+
+function expectedToolkitVersion(repoRoot, platform = 'codex') {
+  const rel = platform === 'claude-code'
+    ? ['.claude-plugin', 'plugin.json']
+    : ['.codex-plugin', 'plugin.json'];
+  try {
+    return readJsonFile(path.join(repoRoot, ...rel)).version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function defaultCodexPluginCachePath(version) {
+  if (!version || version === 'unknown') return 'unknown';
+  return path.join(os.homedir(), '.codex', 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', version);
+}
+
+function runCodexNativePluginSetup(args) {
+  const verify = runCommand(
+    'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupCodexArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: 120000, allowFailure: true }
+  );
+  const expectedVersion = expectedToolkitVersion(args.repoRoot, 'codex');
+  if (verify.status === 0) {
+    process.stdout.write(verify.stdout || '');
+    const summary = parseJsonFromOutput(verify.stdout);
+    return {
+      status: 'already fresh',
+      installed: summary.installed === true,
+      enabled: summary.enabled === true,
+      current: summary.current === true,
+      cache_path: summary.cache_root || defaultCodexPluginCachePath(summary.version || expectedVersion),
+      expected_version: expectedVersion,
+      installed_version: summary.version || expectedVersion,
+      updated_this_run: false,
+      restart_required: false,
+      hook_trust_status: summary.hook_trust_status || 'verification-unavailable',
+      hook_execution_status: summary.hook_execution_status || 'verification unavailable; open `/hooks` in Codex',
+      hook_trust_action: summary.hook_trust_message || 'Open `/hooks` in Codex and review the current Toolkit SessionStart hook'
+    };
+  }
+  process.stderr.write(verify.stderr || '');
+
+  runCommand(
+    'node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json',
+    process.execPath,
+    setupCodexArgs(args, '--write'),
+    { cwd: args.repoRoot, timeout: 180000 }
+  );
+  const finalVerify = runCommand(
+    'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupCodexArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: 120000 }
+  );
+  process.stdout.write(finalVerify.stdout || '');
+  const summary = parseJsonFromOutput(finalVerify.stdout);
+  return {
+    status: 'refreshed',
+    installed: summary.installed === true,
+    enabled: summary.enabled === true,
+    current: summary.current === true,
+    cache_path: summary.cache_root || defaultCodexPluginCachePath(summary.version || expectedVersion),
+    expected_version: expectedVersion,
+    installed_version: summary.version || expectedVersion,
+    updated_this_run: true,
+    restart_required: true,
+    hook_trust_status: 'pending-review',
+    hook_execution_status: 'skipped until the current hook is reviewed and trusted',
+    hook_trust_action: 'Open `/hooks` in Codex, review and trust the current Toolkit SessionStart hook'
+  };
+}
+
+function readJsonFile(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Failed to read JSON ${filePath}: ${error.message}`);
+  }
+}
+
+function verifyClaudeNativePluginMetadata(args) {
+  const pluginPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
+  const hooksPath = path.join(args.repoRoot, '.claude-plugin', 'hooks', 'hooks.json');
+  if (!fs.existsSync(pluginPath)) throw new Error(`Missing Claude Code native plugin manifest: ${pluginPath}`);
+  if (!fs.existsSync(hooksPath)) throw new Error(`Missing Claude Code native plugin hooks: ${hooksPath}`);
+
+  const plugin = readJsonFile(pluginPath);
+  const hooks = readJsonFile(hooksPath);
+  if (plugin.name !== 'ai-agent-toolkit') throw new Error(`Unexpected Claude Code plugin name: ${plugin.name || '<missing>'}`);
+  if (plugin.skills !== './skills') throw new Error('Claude Code plugin manifest must load Toolkit skills from ./skills');
+  if (plugin.hooks !== './.claude-plugin/hooks/hooks.json') {
+    throw new Error('Claude Code plugin manifest must point hooks to ./.claude-plugin/hooks/hooks.json');
+  }
+
+  const sessionStart = hooks?.hooks?.SessionStart;
+  if (!Array.isArray(sessionStart) || !sessionStart.length) {
+    throw new Error('Claude Code plugin hooks must include a SessionStart hook');
+  }
+  const commands = sessionStart
+    .flatMap((entry) => Array.isArray(entry.hooks) ? entry.hooks : [])
+    .map((entry) => String(entry.command || ''));
+  const command = commands.find((value) => value.includes('toolkit-local-bridge.cjs')) || '';
+  if (!command) throw new Error('Claude Code SessionStart hook must call toolkit-local-bridge.cjs');
+  for (const required of ['${CLAUDE_PLUGIN_ROOT}', '--hook', '--sync-enabled', '--write', '--sync-source claude-plugin']) {
+    if (!command.includes(required)) throw new Error(`Claude Code SessionStart hook command is missing ${required}`);
+  }
+  if (/--enable-target|--disable-target|--force-downgrade/.test(command)) {
+    throw new Error('Claude Code SessionStart hook must not enable, disable, or force-downgrade targets');
+  }
+  console.log('Claude Code native plugin metadata verified.');
+  console.log('If Claude Code reports the Toolkit plugin is missing, stale, disabled, or untrusted, refresh it through Claude Code native plugin UI/flow. Codex will not mutate Claude Code plugin cache.');
+  return {
+    status: 'metadata present',
+    manifest_path: pluginPath,
+    expected_version: expectedToolkitVersion(args.repoRoot, 'claude-code'),
+    manifest_version: plugin.version || 'unknown',
+    updated_this_run: false,
+    restart_required: false,
+    hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
+  };
+}
+
+function setupClaudeArgs(args, mode) {
+  const extra = [mode, '--json', '--repo-root', args.repoRoot];
+  if (mode === '--write') extra.push('--scope', 'user');
+  if (args.claudeCli) extra.push('--claude-cli', args.claudeCli);
+  return nodeScriptArgs('repo/scripts/setup-claude-toolkit-plugin.cjs', extra);
+}
+
+// Static fallbacks matching the helper's default worst-case budgets with the
+// maximum supported CLI candidate count (explicit --claude-cli, two env
+// overrides, bare `claude` = 4 candidates x 10s default probe), used only
+// when the sibling helper module cannot be loaded for derived budgets.
+const CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS = 175000;
+const CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS = 895000;
+
+// Derive the outer spawnSync timeouts for the Claude native plugin helper
+// from the helper's own exported budgets so this orchestrator can never kill
+// the helper while it is still inside its own supported verification
+// deadlines. The budgets are computed with the exact explicit CLI argument
+// the child helper receives, in the same environment it inherits, so the
+// full CLI candidate-resolution sequence is accounted identically on both
+// sides. The helper bounds itself (per-candidate probes, per-command
+// timeouts, mutation deadlines); these outer timeouts are only a backstop
+// against a truly hung helper.
+function claudeSetupBudgets(claudeCli = '') {
+  try {
+    const helper = require(path.join(__dirname, 'setup-claude-toolkit-plugin.cjs'));
+    if (typeof helper.verifyBudgetMs === 'function' && typeof helper.writeBudgetMs === 'function') {
+      return { verify: helper.verifyBudgetMs(claudeCli), write: helper.writeBudgetMs(claudeCli) };
+    }
+  } catch {
+    // Fall through to the static fallback budgets below.
+  }
+  return { verify: CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS, write: CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS };
+}
+
+function runClaudeNativePluginSetup(args) {
+  const budgets = claudeSetupBudgets(args.claudeCli);
+  const verify = runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupClaudeArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: budgets.verify, allowFailure: true }
+  );
+  const expectedVersion = expectedToolkitVersion(args.repoRoot, 'claude-code');
+  const manifestPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
+  if (verify.status === 0) {
+    process.stdout.write(verify.stdout || '');
+    const summary = parseJsonFromOutput(verify.stdout);
+    return {
+      status: 'already fresh',
+      manifest_path: manifestPath,
+      expected_version: expectedVersion,
+      manifest_version: summary.version || expectedVersion,
+      installed_version: summary.version || expectedVersion,
+      scope: summary.scope || 'user',
+      updated_this_run: false,
+      restart_required: false,
+      hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
+    };
+  }
+  process.stderr.write(verify.stderr || '');
+
+  runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --write --json --scope user',
+    process.execPath,
+    setupClaudeArgs(args, '--write'),
+    { cwd: args.repoRoot, timeout: budgets.write }
+  );
+  const finalVerify = runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupClaudeArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: budgets.verify }
+  );
+  process.stdout.write(finalVerify.stdout || '');
+  const summary = parseJsonFromOutput(finalVerify.stdout);
+  return {
+    status: 'refreshed',
+    manifest_path: manifestPath,
+    expected_version: expectedVersion,
+    manifest_version: summary.version || expectedVersion,
+    installed_version: summary.version || expectedVersion,
+    scope: summary.scope || 'user',
+    updated_this_run: true,
+    restart_required: true,
+    hook_trust_action: 'approve the Claude Code plugin trust prompt when Claude Code prompts'
+  };
+}
+
+function runClaudeNativePluginVerify(args) {
+  const result = runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupClaudeArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: claudeSetupBudgets(args.claudeCli).verify }
+  );
+  process.stdout.write(result.stdout || '');
+  return parseJsonFromOutput(result.stdout);
+}
+
+function bridgeArgs(args, extraArgs = []) {
+  const result = nodeScriptArgs('repo/scripts/toolkit-local-bridge.cjs', extraArgs);
+  if (args.hub) result.push('--hub', args.hub);
+  return result;
+}
+
+function runManagedHookLightValidation(args, validationResults) {
+  const command = 'node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs';
+  runCommand(
+    command,
+    process.execPath,
+    ['--test', path.join('repo', 'tests', 'toolkit-local-bridge-hook-light.test.cjs')],
+    { cwd: args.repoRoot, timeout: 60000 }
+  );
+  recordValidation(validationResults, command, 'passed');
+}
+
+function runLiteValidation(args, validationResults) {
+  const validateCommand = 'node repo/scripts/validate-toolkit.cjs';
+  runCommand(validateCommand, process.execPath, nodeScriptArgs('repo/scripts/validate-toolkit.cjs'), {
+    cwd: args.repoRoot,
+    timeout: 120000
+  });
+  recordValidation(validationResults, validateCommand, 'passed');
+  runManagedHookLightValidation(args, validationResults);
+}
+
+function runBridgeWrite(args, label, extraArgs) {
+  runCommand(label, process.execPath, bridgeArgs(args, extraArgs), {
+    cwd: args.repoRoot,
+    timeout: 120000
+  });
+}
+
+function writeBridgePreferences(args) {
+  const choices = args.setupChoices || emptySetupChoices();
+  if (choices.repoAutoUpdate === 'enable') {
+    runBridgeWrite(
+      args,
+      'node repo/scripts/toolkit-local-bridge.cjs repo/update preferences --write',
+      [
+        '--enable-repo-auto-update',
+        '--repo-path',
+        args.repoRoot,
+        '--repo-branch',
+        args.repoBranch,
+        '--repo-remote',
+        args.repoRemote,
+        '--enable-auto-sync',
+        '--write'
+      ]
+    );
+  } else if (choices.repoAutoUpdate === 'disable') {
+    runBridgeWrite(
+      args,
+      'node repo/scripts/toolkit-local-bridge.cjs repo/update preferences --write',
+      ['--disable-repo-auto-update', '--write']
+    );
+  }
+
+  const reportArgs = [];
+  if (choices.updateReports === 'enable') reportArgs.push('--enable-update-reports');
+  else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
+  if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
+    reportArgs.push('--update-report-retention-days', String(args.updateReportRetentionDays));
+  }
+  if (choices.updateReportOpen === 'enable') reportArgs.push('--enable-update-report-open');
+  else if (choices.updateReportOpen === 'disable') reportArgs.push('--disable-update-report-open');
+  if (reportArgs.length) {
+    runBridgeWrite(
+      args,
+      'node repo/scripts/toolkit-local-bridge.cjs update report preferences --write',
+      [...reportArgs, '--write']
+    );
+  }
+
+  if (args.host === 'codex' && ['enable', 'disable'].includes(choices.codexPluginAutoRefresh)) {
+    runBridgeWrite(
+      args,
+      'node repo/scripts/toolkit-local-bridge.cjs Codex cache preference --write',
+      [args.codexPluginAutoRefresh ? '--enable-codex-plugin-auto-refresh' : '--disable-codex-plugin-auto-refresh', '--write']
+    );
+  }
+}
+
+function runApprovedTargetSync(args) {
+  if (args.disableTargets.length) {
+    const disableArgs = [];
+    for (const target of args.disableTargets) disableArgs.push('--disable-target', target);
+    disableArgs.push('--write');
+    runBridgeWrite(args, `node repo/scripts/toolkit-local-bridge.cjs ${disableArgs.join(' ')}`, disableArgs);
+  }
+  if (args.enableTargets.length) {
+    const enableArgs = [];
+    for (const target of args.enableTargets) enableArgs.push('--enable-target', target);
+    enableArgs.push('--write');
+    runBridgeWrite(args, `node repo/scripts/toolkit-local-bridge.cjs ${enableArgs.join(' ')}`, enableArgs);
+    runBridgeWrite(args, 'node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write', ['--sync-enabled', '--write']);
+  }
+}
+
+function runBridgeAudit(args) {
+  const result = runCommand('node repo/scripts/toolkit-local-bridge.cjs --audit', process.execPath, bridgeArgs(args, ['--audit']), {
+    cwd: args.repoRoot,
+    capture: true,
+    timeout: 120000
+  });
+  const stdout = result.stdout || '';
+  process.stdout.write(stdout);
+  const jsonStart = stdout.indexOf('{');
+  return jsonStart >= 0 ? JSON.parse(stdout.slice(jsonStart)) : null;
+}
+
+function printSetupChecklist(plan) {
+  console.log('# setup toolkit checklist');
+  console.log('');
+  console.log(plan.checklist_explanation);
+  console.log('');
+  console.log(`Host: ${plan.host}`);
+  console.log(`Managed checkout path: ${plan.managed_source.path}`);
+  console.log(`Managed checkout branch: ${plan.managed_source.branch}`);
+  console.log(`Managed checkout remote: ${plan.managed_source.remote}`);
+  console.log('');
+  console.log('Preferences selected up front:');
+  for (const [key, value] of Object.entries(plan.preferences)) {
+    console.log(`- ${key}: ${value}`);
+  }
+}
+
+function printPlan(plan, asJson) {
+  if (asJson) {
+    console.log(JSON.stringify(plan, null, 2));
+    return;
+  }
+  printSetupChecklist(plan);
+  for (const step of plan.steps) {
+    console.log('');
+    console.log(`${step.id}: ${step.title}`);
+    for (const command of step.commands || []) console.log(`  ${command}`);
+  }
+}
+
+function targetChoiceSummary(choice) {
+  if (choice === 'keep') return 'kept';
+  if (choice === 'skip') return 'skipped';
+  if (choice === 'enable-sync') return 'enabled/synced';
+  if (choice === 'disable') return 'disabled';
+  return 'not touched';
+}
+
+function unknown(value) {
+  if (value === undefined || value === null || value === '') return 'unknown';
+  return value;
+}
+
+function yesNo(value) {
+  return value ? 'yes' : 'no';
+}
+
+function activeWorktreeSummary(args) {
+  const activeRoot = repoRootFromScript();
+  let role = 'bootstrap/fallback only';
+  if (samePath(activeRoot, args.repoRoot)) role = 'managed checkout itself';
+  else if (args.repoRootExplicit) role = 'not used for writes';
+  return {
+    path: activeRoot,
+    branch: branchForSummary(activeRoot),
+    commit: commitForSummary(activeRoot),
+    status: statusForSummary(activeRoot),
+    role
+  };
+}
+
+function targetActionSummary(choice) {
+  return targetChoiceSummary(choice);
+}
+
+function printTargetSummary(label, target, choice) {
+  console.log(`${label} detected: ${yesNo(target?.detected === true)}`);
+  console.log(`${label} enabled: ${yesNo(target?.enabled === true)}`);
+  console.log(`${label} synced: ${yesNo(target?.synced === true)}`);
+  console.log(`${label} version: ${unknown(target?.synced_version)}`);
+  console.log(`${label} path: ${unknown(target?.path || target?.target_path || target?.sync_path)}`);
+  console.log(`${label} status: ${unknown(target?.status)}`);
+  console.log(`${label} action this run: ${targetActionSummary(choice)}`);
+}
+
+function printValidationSummary(validationResults) {
+  if (!validationResults || !validationResults.length) {
+    console.log('Validation command: none');
+    console.log('Validation status: skipped');
+    return;
+  }
+  for (const entry of validationResults) {
+    console.log(`Validation command: ${entry.command}`);
+    console.log(`Validation status: ${entry.status}`);
+  }
+}
+
+function printFinalSummary({ args, current, managed, nativeCache, delegation, audit, questionBank, validationResults }) {
+  const repo = audit?.repo_auto_update || {};
+  const cleanup = audit?.update_report_cleanup || {};
+  const targets = audit?.targets || {};
+  const targetChoices = args.setupChoices?.targets || {};
+  const active = activeWorktreeSummary(args);
+  const defaultPath = defaultManagedSourcePath();
+  const setupScriptPath = path.join(args.repoRoot, 'repo', 'scripts', 'setup-toolkit.cjs');
+  console.log('');
+  console.log('# setup toolkit final summary');
+  console.log('');
+  console.log('## Active worktree');
+  console.log(`Active worktree path: ${active.path}`);
+  console.log(`Active worktree branch: ${active.branch}`);
+  console.log(`Active worktree commit: ${active.commit}`);
+  console.log(`Active worktree status: ${active.status}`);
+  console.log(`Active worktree role: ${active.role}`);
+  console.log('');
+  console.log('## Managed main checkout');
+  console.log(`Managed checkout path: ${args.repoRoot}`);
+  console.log(`Managed checkout default path: ${defaultPath} (Windows default: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit; POSIX default: $HOME/.ai-agent-toolkit/source/ai-agent-toolkit)`);
+  console.log(`Managed checkout branch: ${args.repoBranch}`);
+  console.log(`Managed checkout remote: ${unknown(managed.remote || args.repoRemote)}`);
+  console.log(`Managed checkout commit before: ${unknown(managed.commit_before || current?.managed?.commit)}`);
+  console.log(`Managed checkout commit after: ${unknown(managed.commit_after || managed.commit)}`);
+  console.log(`Managed checkout update action: ${unknown(managed.update_action)}`);
+  console.log(`Setup script path executed: ${setupScriptPath}`);
+  console.log('');
+  console.log('## Question bank');
+  console.log(`Question bank appeared: ${yesNo(questionBank?.appeared)}`);
+  console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
+  console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
+  console.log('Preference/target writes before answers: no');
+  console.log('');
+  console.log('## Delegation control');
+  console.log(`Delegation enforcement status: ${unknown(delegation.status)}`);
+  console.log(`Delegation config path: ${unknown(delegation.config_path)}`);
+  console.log(`Direct specialist limit: ${delegation.status === 'configured' ? CODEX_AGENT_MAX_THREADS : 'not enforced'}`);
+  console.log(`Subagent depth limit: ${delegation.status === 'configured' ? CODEX_AGENT_MAX_DEPTH : 'not enforced'}`);
+  console.log(`Delegation config changed this run: ${yesNo(delegation.changed === true)}`);
+  console.log(`Delegation client scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);
+  console.log(`Delegation detail: ${unknown(delegation.detail)}`);
+  console.log('');
+  console.log('## Codex native plugin');
+  if (args.host === 'codex') {
+    console.log(`Codex plugin cache path: ${unknown(nativeCache.cache_path)}`);
+    console.log(`Codex expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
+    console.log(`Codex installed Toolkit version: ${unknown(nativeCache.installed_version)}`);
+    console.log(`Codex plugin installed: ${yesNo(nativeCache.installed === true)}`);
+    console.log(`Codex plugin enabled: ${yesNo(nativeCache.enabled === true)}`);
+    console.log(`Codex plugin current: ${yesNo(nativeCache.current === true)}`);
+    console.log(`Codex plugin status: ${unknown(nativeCache.status)}`);
+    console.log(`Codex plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
+    console.log(`Codex restart required: ${yesNo(nativeCache.restart_required === true)}`);
+    console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status || 'verification-unavailable')}`);
+    console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status || 'verification unavailable; open /hooks in Codex')}`);
+    console.log(`Codex hook trust action: ${unknown(nativeCache.hook_trust_action || 'Open /hooks in Codex')}`);
+  } else {
+    console.log('Codex plugin status: not checked for this host');
+    console.log('Codex plugin mutation: no');
+  }
+  console.log('');
+  console.log('## Claude Code native plugin');
+  if (args.host === 'claude-code') {
+    console.log(`Claude plugin manifest path: ${unknown(nativeCache.manifest_path)}`);
+    console.log(`Claude expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
+    console.log(`Claude manifest Toolkit version: ${unknown(nativeCache.manifest_version)}`);
+    console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
+    if (nativeCache.scope) console.log(`Claude plugin install scope: ${nativeCache.scope}`);
+    console.log(`Claude plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
+    console.log(`Claude restart required: ${yesNo(nativeCache.restart_required === true)}`);
+    console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
+  } else {
+    console.log('Claude plugin status: not checked for this host');
+    console.log('Claude plugin mutation: no; Codex setup does not mutate Claude Code plugin cache.');
+  }
+  console.log('');
+  console.log('## Bridge state');
+  console.log(`Repo auto-update enabled: ${yesNo(repo.enabled === true || args.repoAutoUpdate === true)}`);
+  console.log(`Repo auto-update path: ${unknown(repo.repo_path || args.repoRoot)}`);
+  console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
+  console.log(`Update report writes enabled: ${args.updateReports}`);
+  console.log(`Update report auto-open enabled: ${args.updateReportOpen}`);
+  console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
+  console.log(`Update report/log directory: ${unknown(cleanup.report_log_directory)}`);
+  console.log(`Update report cleanup deleted count: ${cleanup.deleted_count ?? 0}`);
+  console.log(`Update report cleanup error count: ${cleanup.error_count ?? 0}`);
+  console.log('');
+  console.log('## Targets');
+  console.log('### OpenCode');
+  printTargetSummary('OpenCode', targets.opencode || {}, targetChoices.opencode);
+  console.log('');
+  console.log('### AG2/Antigravity');
+  printTargetSummary('AG2', targets.ag2 || {}, targetChoices.ag2);
+  console.log('');
+  console.log('## Validation');
+  printValidationSummary(validationResults);
+}
+
+async function execute(args) {
+  const current = collectCurrentState(args);
+  const questionBank = await answerSetupQuestionBank(args, current);
+  const plan = setupPlan(args);
+  printSetupChecklist(plan);
+  const warning = activeToolkitWarning(args);
+  if (warning) console.warn(`WARNING: ${warning}`);
+  const validationResults = [];
+  const managed = verifyAndUpdateTrustedRepo(args, validationResults);
+  const delegation = applyHostDelegationControl(args, current);
+  const nativeCache = args.host === 'claude-code'
+    ? (args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyClaudeNativePluginMetadata(args))
+    : runCodexNativePluginSetup(args);
+  runLiteValidation(args, validationResults);
+  writeBridgePreferences(args);
+  runApprovedTargetSync(args);
+  const audit = runBridgeAudit(args);
+  printFinalSummary({ args, current, managed, nativeCache, delegation, audit, questionBank, validationResults });
+  return 0;
+}
+
+async function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
+  if (args.help) {
+    printHelp();
+    return 0;
+  }
+  if (args.verifyClaudePlugin) {
+    runClaudeNativePluginVerify(args);
+    return 0;
+  }
+  const delegatedCode = delegateToManagedSetupIfAvailable(args);
+  if (delegatedCode !== null) return delegatedCode;
+  const plan = setupPlan(args);
+  if (args.plan) {
+    printPlan(plan, args.json);
+    return 0;
+  }
+  return execute(args);
+}
+
+if (require.main === module) {
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error) => {
+      if (/Setup question bank requires|must be one of|requires a path answer/.test(error.message)) {
+        process.exitCode = SETUP_PAUSED_FOR_QUESTION_BANK;
+        console.error(`SETUP PAUSED: ${error.message}`);
+        console.error('Question bank pause is intentional. Ask the user for the missing setup answers; do not rerun with --yes-recommended unless the user explicitly requested recommended defaults.');
+      } else {
+        process.exitCode = 1;
+        console.error(`FAIL: ${error.message}`);
+      }
+    });
+}
+
+module.exports = {
+  DEFAULT_REPO_BRANCH,
+  DEFAULT_REPO_REMOTE,
+  DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+  CODEX_AGENT_MAX_THREADS,
+  CODEX_AGENT_MAX_DEPTH,
+  SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL,
+  SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL,
+  SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL,
+  SETUP_PAUSED_FOR_QUESTION_BANK,
+  CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS,
+  CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS,
+  claudeSetupBudgets,
+  defaultManagedSourcePath,
+  codexDelegationConfigState,
+  inspectCodexDelegationConfig,
+  configureCodexDelegation,
+  applyHostDelegationControl,
+  parseArgs,
+  setupPlan,
+  normalizeRemote,
+  main
+};
