@@ -171,6 +171,8 @@ const expectedFiles = [
   'repo/scripts/run-design-tests.cjs',
   'repo/scripts/safe-source-update.cjs',
   'repo/scripts/toolkit-local-bridge.cjs',
+  'repo/scripts/codex-delegation-config.cjs',
+  'repo/scripts/inspect-codex-config-toml.py',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/sync-repo-doc-contract.cjs',
@@ -822,6 +824,7 @@ function validateExecutables(errors) {
     if (isProjectMainSource) continue;
     if (ext === '.py') {
       const allowedPython =
+        rel === 'repo/scripts/inspect-codex-config-toml.py' ||
         rel.startsWith('skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/') ||
         rel.startsWith('skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/') ||
         rel.startsWith('repo/tests/');

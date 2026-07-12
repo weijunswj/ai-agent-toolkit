@@ -23,6 +23,15 @@ function copyPath(sourcePath, targetPath) {
   if (!fs.existsSync(sourcePath)) return;
   const stat = fs.statSync(sourcePath);
   if (stat.isDirectory()) {
+    if (path.basename(sourcePath) === 'skills') {
+      try {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.symlinkSync(sourcePath, targetPath, process.platform === 'win32' ? 'junction' : 'dir');
+        return;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+    }
     fs.cpSync(sourcePath, targetPath, { recursive: true });
   } else if (stat.isFile()) {
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
@@ -142,6 +151,15 @@ function copyPath(sourcePath, targetPath) {
   if (!fs.existsSync(sourcePath)) return;
   const stat = fs.statSync(sourcePath);
   if (stat.isDirectory()) {
+    if (path.basename(sourcePath) === 'skills') {
+      try {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.symlinkSync(sourcePath, targetPath, process.platform === 'win32' ? 'junction' : 'dir');
+        return;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+    }
     fs.cpSync(sourcePath, targetPath, { recursive: true });
   } else if (stat.isFile()) {
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
@@ -536,9 +554,29 @@ test('Codex Toolkit fallback does not infer hook trust from config text', () => 
   assert.match(state.hookTrustMessage, /verification (?:is )?unavailable/i);
 });
 
-test('Codex Toolkit formats bare Windows codex access denied as a known WindowsApps fallback', { skip: process.platform !== 'win32' }, () => {
-  const message = setup.formatWindowsAliasFailure('codex', 'Access is denied');
-
+test('Codex Toolkit verification route reports bare Windows alias access denied with remediation', { skip: process.platform !== 'win32' }, async () => {
+  const codexHome = tmpRoot();
+  const errors = [];
+  const originalError = console.error;
+  console.error = (...values) => { errors.push(values.join(' ')); };
+  try {
+    const status = await setup.main([
+      '--verify',
+      '--repo-root', repoRoot,
+      '--codex-home', codexHome
+    ], {
+      resolveCodexCommand() {
+        return {
+          command: '',
+          failures: [setup.formatWindowsAliasFailure('codex', 'Access is denied')]
+        };
+      }
+    });
+    assert.equal(status, 2);
+  } finally {
+    console.error = originalError;
+  }
+  const message = errors.join('\n');
   assert.match(message, /WindowsApps alias|Known condition/i);
   assert.match(message, /--codex-cli/i);
   assert.match(message, /codex\.exe/i);

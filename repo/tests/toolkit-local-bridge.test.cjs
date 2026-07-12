@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.4.0';
+const expectedBridgeVersion = '2.4.1';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -113,7 +113,7 @@ function git(cwd, args) {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' },
-    timeout: 15000
+    timeout: 60000
   });
   assert.equal(
     result.status,
@@ -325,6 +325,8 @@ function writeRepoToolkitFixture(repoPath, label) {
     '}',
     ''
   ].join('\n'));
+  writeFile(path.join(repoPath, 'repo', 'scripts', 'codex-delegation-config.cjs'), "'use strict';\n");
+  writeFile(path.join(repoPath, 'repo', 'scripts', 'inspect-codex-config-toml.py'), '#!/usr/bin/env python3\n');
 }
 
 function writeCodexPluginRefreshFixture(repoPath) {

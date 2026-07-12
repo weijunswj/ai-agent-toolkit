@@ -19,6 +19,7 @@ function isolatedHomeEnv(root) {
     PATH: process.env.PATH || '',
     USERPROFILE: root,
     HOME: root,
+    CODEX_HOME: path.join(root, '.codex'),
     LOCALAPPDATA: path.join(root, 'local-app-data'),
     VIRTUAL_ENV: '',
     CONDA_PREFIX: '',
@@ -29,6 +30,30 @@ function isolatedHomeEnv(root) {
 function writeFile(filePath, text) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, text, 'utf8');
+}
+
+function createFakeCodexAppServer(root) {
+  const fakeCodex = path.join(root, 'fake-codex-app-server.cjs');
+  writeFile(fakeCodex, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const readline = require('node:readline');",
+    "const rl = readline.createInterface({ input: process.stdin });",
+    "rl.on('line', (line) => {",
+    "  const message = JSON.parse(line);",
+    "  if (message.method === 'initialize') process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');",
+    "  if (message.method === 'config/batchWrite') {",
+    "    const configPath = path.join(process.env.CODEX_HOME, 'config.toml');",
+    "    const text = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';",
+    "    const separator = text ? (text.endsWith('\\n') ? '\\n' : '\\n\\n') : '';",
+    "    fs.writeFileSync(configPath, text + separator + '[agents]\\nmax_threads = 1\\nmax_depth = 1\\n');",
+    "    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');",
+    "  }",
+    "});",
+    ''
+  ].join('\n'));
+  return fakeCodex;
 }
 
 function run(args, options = {}) {
@@ -46,13 +71,13 @@ function createMinimalSetupRepo(root) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.4.0',
+    version: '2.4.1',
     skills: './skills',
     hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
     name: 'ai-agent-toolkit',
-    version: '2.4.0',
+    version: '2.4.1',
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
@@ -75,7 +100,7 @@ function createMinimalSetupRepo(root) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.4.0', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.4.1', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -85,7 +110,7 @@ function createMinimalSetupRepo(root) {
     "const path = require('node:path');",
     "fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_HELPER_ARGS.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.4.0', scope: 'user' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.4.1', scope: 'user' }));",
     'process.exit(0);',
     ''
   ].join('\n'));
@@ -154,7 +179,7 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function createFakeManagedSetupScript(root, version = '2.4.0', options = {}) {
+function createFakeManagedSetupScript(root, version = '2.4.1', options = {}) {
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
   const emitQuestionBank = options.emitQuestionBank !== false;
@@ -181,8 +206,14 @@ function createFakeManagedSetupScript(root, version = '2.4.0', options = {}) {
 
 function createGitBackedRealSetupRepo(root) {
   const result = createGitBackedSetupRepo(root);
-  writeFile(path.join(result.setupRepo, 'repo', 'scripts', 'setup-toolkit.cjs'), fs.readFileSync(script, 'utf8'));
-  runTestGit(result.setupRepo, ['add', 'repo/scripts/setup-toolkit.cjs']);
+  for (const relPath of [
+    'repo/scripts/setup-toolkit.cjs',
+    'repo/scripts/codex-delegation-config.cjs',
+    'repo/scripts/inspect-codex-config-toml.py'
+  ]) {
+    writeFile(path.join(result.setupRepo, relPath), fs.readFileSync(path.join(repoRoot, relPath), 'utf8'));
+  }
+  runTestGit(result.setupRepo, ['add', 'repo/scripts/setup-toolkit.cjs', 'repo/scripts/codex-delegation-config.cjs', 'repo/scripts/inspect-codex-config-toml.py']);
   runTestGit(result.setupRepo, ['commit', '-m', 'real setup script']);
   runTestGit(result.setupRepo, ['push', 'origin', 'main']);
   return result;
@@ -364,9 +395,12 @@ test('setup execute persists all selected preferences in one run and prints fina
   assert.match(result.stdout, /Question bank stopped for answers: no/);
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
   assert.match(result.stdout, /Preference\/target writes before answers: no/);
+  assert.match(result.stdout, /Delegation enforcement status: unconfigured/);
+  assert.equal(fs.existsSync(path.join(root, '.codex', 'config.toml')), false, '--yes-recommended must not create Codex config');
+  assert.equal(fs.existsSync(path.join(root, '.codex', '.ai-agent-toolkit-backups')), false, '--yes-recommended must not create a config backup');
   assert.match(result.stdout, /Codex plugin cache path:/);
-  assert.match(result.stdout, /Codex expected Toolkit version: 2\.4\.0/);
-  assert.match(result.stdout, /Codex installed Toolkit version: 2\.4\.0/);
+  assert.match(result.stdout, /Codex expected Toolkit version: 2\.4\.1/);
+  assert.match(result.stdout, /Codex installed Toolkit version: 2\.4\.1/);
   assert.match(result.stdout, /Codex plugin installed: yes/);
   assert.match(result.stdout, /Codex plugin enabled: yes/);
   assert.match(result.stdout, /Codex plugin current: yes/);
@@ -422,9 +456,9 @@ test('setup execute with every question pre-answered does not block on an unclos
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /# setup toolkit final summary/);
   assert.match(result.stdout, /Question answer source: user-approved yes-recommended/);
-  assert.match(result.stdout, /Delegation enforcement status: configured/);
-  assert.match(result.stdout, /Direct specialist limit: 1/);
-  assert.match(result.stdout, /Subagent depth limit: 1/);
+  assert.match(result.stdout, /Delegation enforcement status: unconfigured/);
+  assert.match(result.stdout, /Direct specialist limit: not enforced/);
+  assert.equal(fs.existsSync(path.join(root, '.codex', 'config.toml')), false);
 });
 
 test('setup execute without explicit choices pauses before preference or target writes', () => {
@@ -490,17 +524,43 @@ test('setup execute accepts one consolidated answer bank and preserves report au
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Codex delegation control:[\s\S]*recommended: limit[\s\S]*empty input: limit/);
-  assert.match(result.stdout, /Delegation enforcement status: configured/);
-  const codexConfig = fs.readFileSync(path.join(root, '.codex', 'config.toml'), 'utf8');
-  assert.match(codexConfig, /max_threads = 1/);
-  assert.match(codexConfig, /max_depth = 1/);
+  assert.match(result.stdout, /Codex delegation control:[\s\S]*recommended: keep[\s\S]*empty input: keep/);
+  assert.match(result.stdout, /Delegation enforcement status: unconfigured/);
+  assert.equal(fs.existsSync(path.join(root, '.codex', 'config.toml')), false, 'empty input must keep Codex config unchanged');
   assert.match(result.stdout, /AG2\/Antigravity bridge target:[\s\S]*enabled=yes[\s\S]*version=2\.1\.0/);
   const bridgeLog = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.doesNotMatch(bridgeLog, /--disable-update-report-open/);
   assert.doesNotMatch(bridgeLog, /--enable-update-report-open/);
   assert.match(bridgeLog, /--enable-target ag2 --write/);
   assert.match(bridgeLog, /--sync-enabled --write/);
+});
+
+test('setup writes Codex limits only after explicit limit and reports backup restore data', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const fakeCodex = createFakeCodexAppServer(root);
+  const result = run([
+    '--execute',
+    '--repo-root', setupRepo,
+    '--repo-remote', origin,
+    '--yes-recommended',
+    '--codex-delegation-control', 'limit',
+    '--codex-cli', fakeCodex,
+    '--skip-codex-plugin-auto-refresh'
+  ], {
+    env: isolatedHomeEnv(root)
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /## Explicit Codex delegation config preview/);
+  assert.match(result.stdout, new RegExp(`Codex config path: ${escapeRegExp(path.join(root, '.codex', 'config.toml'))}`));
+  assert.match(result.stdout, /\[agents\]\r?\nmax_threads = 1\r?\nmax_depth = 1/);
+  assert.match(result.stdout, /Delegation enforcement status: configured/);
+  assert.match(result.stdout, /Delegation backup path: .*metadata\.json/);
+  assert.match(result.stdout, /Delegation exact restore command: .*--restore-codex-config-backup/);
+  const codexConfig = fs.readFileSync(path.join(root, '.codex', 'config.toml'), 'utf8');
+  assert.match(codexConfig, /max_threads = 1/);
+  assert.match(codexConfig, /max_depth = 1/);
 });
 
 test('setup execute creates missing managed checkout by cloning the expected remote', () => {
@@ -552,7 +612,7 @@ test('setup final summary distinguishes fast-forwarded managed checkout', () => 
 
 test('active setup command delegates to managed checkout script when it exists', () => {
   const root = tmpRoot();
-  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.4.0');
+  const { managedPath, scriptPath } = createFakeManagedSetupScript(root, '2.4.1');
   const beforeStatus = runTestGit(repoRoot, ['status', '--short']);
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -567,13 +627,13 @@ test('active setup command delegates to managed checkout script when it exists',
   assert.match(result.stdout, new RegExp(`Managed checkout path: ${escapeRegExp(managedPath)}`));
   assert.match(result.stdout, /Managed checkout commit: [0-9a-f]{40}/);
   assert.match(result.stdout, new RegExp(`Setup script path executed: ${escapeRegExp(scriptPath)}`));
-  assert.match(result.stdout, /managed setup script version 2\.4\.0/);
+  assert.match(result.stdout, /managed setup script version 2\.4\.1/);
   assert.match(result.stdout, /# setup toolkit question bank/);
 });
 
 test('active setup command does not block on stdin before delegating to the managed checkout', async () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.4.0', { emitQuestionBank: false, exitCode: 0 });
+  createFakeManagedSetupScript(root, '2.4.1', { emitQuestionBank: false, exitCode: 0 });
 
   const result = await runWithUnclosedStdin(script, ['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
@@ -581,12 +641,12 @@ test('active setup command does not block on stdin before delegating to the mana
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /# setup toolkit managed route/);
-  assert.match(result.stdout, /managed setup script version 2\.4\.0/);
+  assert.match(result.stdout, /managed setup script version 2\.4\.1/);
 });
 
 test('managed question-bank pause is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.4.0');
+  createFakeManagedSetupScript(root, '2.4.1');
   const result = run(['--execute', '--profile', 'auto-main'], {
     env: isolatedHomeEnv(root)
   });
@@ -600,7 +660,7 @@ test('managed question-bank pause is not bypassed with active fallback', () => {
 
 test('managed safety blocker is not bypassed with active fallback', () => {
   const root = tmpRoot();
-  createFakeManagedSetupScript(root, '2.4.0', {
+  createFakeManagedSetupScript(root, '2.4.1', {
     emitQuestionBank: false,
     exitCode: 1,
     extraLines: ["console.error('managed safety blocker');"]
@@ -834,8 +894,8 @@ test('claude-code setup execute with instructions behavior verifies Claude plugi
   assert.match(result.stdout, /Claude Code native plugin metadata verified/);
   assert.match(result.stdout, /## Claude Code native plugin/);
   assert.match(result.stdout, /Claude plugin manifest path:/);
-  assert.match(result.stdout, /Claude expected Toolkit version: 2\.4\.0/);
-  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.4\.0/);
+  assert.match(result.stdout, /Claude expected Toolkit version: 2\.4\.1/);
+  assert.match(result.stdout, /Claude manifest Toolkit version: 2\.4\.1/);
   assert.match(result.stdout, /Delegation enforcement status: unsupported/);
   assert.match(result.stdout, /Claude plugin status: metadata present/);
   assert.match(result.stdout, /Claude plugin updated this run: no/);
@@ -959,7 +1019,7 @@ test('setup docs route setup and refresh prompts to the one-checklist orchestrat
   }
 });
 
-test('Codex delegation docs preserve one direct security-specialist path without recursion', () => {
+test('Codex delegation docs preserve one general specialist slot and disclose pending Security UAT', () => {
   const docs = [
     '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md',
     'skills/toolkit-setup/SKILL.md',
@@ -970,7 +1030,9 @@ test('Codex delegation docs preserve one direct security-specialist path without
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /max_threads = 1|agents\.max_threads = 1/i, relPath);
     assert.match(text, /max_depth = 1|agents\.max_depth = 1/i, relPath);
-    assert.match(text, /security specialist|Codex Security/i, relPath);
+    assert.match(text, /general direct-specialist slot/i, relPath);
+    assert.match(text, /Codex Security ordinary\/deep compatibility remains unverified pending native UAT/i, relPath);
+    assert.doesNotMatch(text, /compatible with Codex Security/i, relPath);
     assert.match(text, /prevent(?:s|ing)? recursive|no recursive|prevents? .* descendants/i, relPath);
   }
 });
