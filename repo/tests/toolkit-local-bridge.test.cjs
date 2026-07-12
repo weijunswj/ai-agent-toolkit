@@ -3790,7 +3790,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /\.claude-plugin\/plugin\.json/, relPath);
     assert.match(text, /repair-codex-plugin-windows-hooks\.cjs/, relPath);
     assert.match(text, /installed plugin cache/i, relPath);
-    assert.match(text, /%USERPROFILE%\\\\\.codex\\\\plugins\\\\\.plugin-appserver\\\\codex\.exe/, relPath);
+    assert.match(text, /%USERPROFILE%\\\.codex\\plugins\\\.plugin-appserver\\codex\.exe/, relPath);
     assert.match(text, /fail with the repair error/i, relPath);
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
