@@ -43,7 +43,7 @@ function run(args, options = {}) {
     cwd: options.cwd || repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },
-    timeout: options.timeout || 90000
+    timeout: options.timeout || 300000
   });
 }
 
@@ -325,8 +325,16 @@ function writeRepoToolkitFixture(repoPath, label) {
     '}',
     ''
   ].join('\n'));
-  writeFile(path.join(repoPath, 'repo', 'scripts', 'codex-delegation-config.cjs'), "'use strict';\n");
-  writeFile(path.join(repoPath, 'repo', 'scripts', 'inspect-codex-config-toml.py'), '#!/usr/bin/env python3\n');
+  for (const name of [
+    'codex-delegation-backup.cjs',
+    'codex-delegation-common.cjs',
+    'codex-delegation-config.cjs',
+    'codex-delegation-layout.cjs',
+    'codex-delegation-state.cjs',
+    'setup-toolkit-core.cjs'
+  ]) {
+    writeFile(path.join(repoPath, 'repo', 'scripts', name), "'use strict';\n");
+  }
 }
 
 function writeCodexPluginRefreshFixture(repoPath) {

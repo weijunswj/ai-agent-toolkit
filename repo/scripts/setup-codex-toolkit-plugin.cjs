@@ -14,8 +14,12 @@ const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
   '.codex-plugin/hooks/hooks.json',
+  'repo/scripts/codex-delegation-backup.cjs',
+  'repo/scripts/codex-delegation-common.cjs',
   'repo/scripts/codex-delegation-config.cjs',
-  'repo/scripts/inspect-codex-config-toml.py',
+  'repo/scripts/codex-delegation-layout.cjs',
+  'repo/scripts/codex-delegation-state.cjs',
+  'repo/scripts/setup-toolkit-core.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
   'repo/scripts/toolkit-local-bridge.cjs',

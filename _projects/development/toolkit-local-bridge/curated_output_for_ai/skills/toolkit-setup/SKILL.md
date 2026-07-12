@@ -23,7 +23,7 @@ Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair
 - Claude Code native plugin install/update is Claude Code-only. The setup orchestrator verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`; use Claude Code's native Toolkit plugin flow when Claude Code reports the package is missing, stale, disabled, or untrusted.
 - The shared bridge is platform-neutral. After the native Toolkit package is installed in Codex or Claude Code, use `repo/scripts/toolkit-local-bridge.cjs` for repo auto-update, audit, OpenCode sync, and Antigravity 2 sync.
 - Hook approval differs by host. Codex setup must explain Codex hook trust; Claude Code setup must follow Claude Code's own native plugin/hook review behavior and should confirm the hook uses `--sync-source claude-plugin`.
-- Codex setup may prepare only the explicitly approved `agents.max_threads` and `agents.max_depth` values in `CODEX_HOME/config.toml`, using the official app-server editor against an isolated temporary home plus structural TOML validation. Claude Code and OpenCode receive the portable single-agent policy but no invented host-level enforcement.
+- Codex setup may prepare only explicitly approved `agents.max_threads` and `agents.max_depth` values in `CODEX_HOME/config.toml`, using the official app-server editor in an isolated temporary home plus structural TOML validation. Claude Code and OpenCode receive the portable single-agent policy but no invented host-level enforcement.
 
 ## Required Route
 
@@ -69,14 +69,14 @@ When fallback/bootstrap is used, say that it is bootstrap-only. After the manage
 - Update report auto-open: current enabled/disabled state and keep current / enable / disable. Do not write `update_report_open_enabled=false` unless the user explicitly chooses disable or passes an explicit disable flag.
 - Update report/log retention: current days, default 7, and keep current / use default 7 / custom positive integer.
 - Codex plugin cache auto-refresh on Codex only: current enabled/disabled state and keep current / enable / disable. When enabled on Windows, trusted Toolkit hooks may also repair unsafe installed third-party Codex plugin hook launchers and report the result.
-- Codex delegation control on Codex only: current configured/conflicting state and keep current / limit / skip. `keep` is recommended pending native UAT; empty input and `--yes-recommended` do not write. Only explicit `limit` previews and transactionally applies `agents.max_threads = 1` and `agents.max_depth = 1`, preserving one general direct-specialist slot while preventing recursive delegation.
+- Codex delegation control on Codex only: current configured/conflicting state and keep current / limit / skip. Until native UAT is recorded, the recommendation and empty-input choice are `keep`, and `--yes-recommended` also keeps delegation configuration unchanged. Only explicit interactive `limit` or `--codex-delegation-control limit` approval may preview, back up, and write `agents.max_threads = 1` and `agents.max_depth = 1` through the official Codex config editor.
 - Claude Code plugin behavior on Claude Code only: verify/report only, no Codex mutation, and keep manual/check-only behavior / show native refresh instructions if stale.
 - OpenCode target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
 - AG2/Antigravity target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
 
 After the question bank is answered by interactive input, explicit flags, or explicitly user-requested `--yes-recommended`, do not pause again for preference questions.
 
-Allowed later blockers include dirty managed checkout, unexpected remote, fetch/auth failure, non-fast-forward update, validation failure, plugin cache verification failure, host hook trust required, unsupported/missing host CLI, or unsafe OpenCode/AG2 target writes.
+Allowed later blockers include dirty managed checkout, unexpected remote, fetch/auth failure, non-fast-forward update, validation failure, plugin cache verification failure, host hook trust required, unsupported/missing host CLI, unsafe Codex config topology/TOML, or unsafe OpenCode/AG2 target writes.
 
 4. Start other bridge requests with a dry-run or audit command, usually:
 
@@ -86,9 +86,17 @@ node repo/scripts/toolkit-local-bridge.cjs --audit
 
 5. Use `repo/scripts/setup-codex-toolkit-plugin.cjs` only through the managed checkout setup flow for Codex native plugin install/update verification. For Claude Code setup prompts, run the managed checkout setup command with `--host claude-code`, while keeping Claude Code's native plugin install/trust flow host-local. Use `repo/scripts/toolkit-local-bridge.cjs` for shared bridge setup, repo auto-update enablement, sync, audit, disable, stale-state recovery, and troubleshooting. Use `repo/scripts/repair-codex-plugin-windows-hooks.cjs` only for post-install Windows hook audit/repair of an installed Codex plugin root.
 
-On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable WindowsApps alias. Use `setup-codex-toolkit-plugin.cjs --codex-cli "%USERPROFILE%\\.codex\\plugins\\.plugin-appserver\\codex.exe"` when an explicit CLI path is needed.
+On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable WindowsApps alias. Use `setup-codex-toolkit-plugin.cjs --codex-cli "%USERPROFILE%\.codex\plugins\.plugin-appserver\codex.exe"` when an explicit CLI path is needed.
 
-6. Before final response after setup, report the active worktree path and commit if inspected, managed checkout path and commit, exact setup script path executed, and whether the question bank appeared. Before final response after repo changes, run the relevant validators or tests for the touched surface.
+6. Before final response after setup, report the active worktree path and commit if inspected, managed checkout path and commit, exact setup script path executed, whether the question bank appeared, and the exact Codex delegation state. Before final response after repo changes, run the relevant validators or tests for the touched surface.
+
+## Codex Delegation Safety
+
+- Structural truth comes from an actual TOML parser. Text resembling `[agents]` or limit assignments inside basic, literal, or multiline strings is never treated as configuration.
+- Toolkit asks the official Codex app-server `config/batchWrite` editor to prepare an isolated proposal. Unsupported dotted/inline, duplicate, malformed, symlink, special-file, or ambiguous child-table layouts fail closed without writing.
+- The proposed config path, exact values, and backup directory are printed before an explicit limit write. Existing files receive a Toolkit-owned exact-byte backup plus mode/topology metadata. Writes are atomic, resulting TOML is parsed again, and an exact restore command is reported. Keep, skip, configured no-op, and conflicting states create no backup.
+- The config commitment occurs only after preceding plugin, validation, preference, and sync work succeeds, so a later setup failure cannot leave `CODEX_HOME/config.toml` mutated.
+- Documented thread semantics preserve one general direct-specialist slot and depth one prevents recursive specialist spawning. This is intended to support an explicitly invoked specialist. Codex Security ordinary/deep compatibility remains unverified pending native UAT. If official Security workflows later require more capacity, handle that result explicitly instead of silently widening the limit.
 
 ## Safety Rules
 
@@ -98,7 +106,6 @@ On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable Wi
 - Disabled or never-enabled targets must not be touched.
 - Repo auto-update must validate the configured Toolkit repo and expected remote, refuse dirty worktrees without stashing or switching, auto-switch only the managed clean checkout back to the configured branch, fast-forward update, and run hook-light validation before enabled-target sync.
 - Codex plugin cache auto-refresh is Codex-only. When enabled, startup hooks may refresh stale Codex Toolkit plugin cache content only from the configured managed `main` repo after repo validation and delegated target sync succeed. On Windows, the same opt-in may scan installed non-Toolkit Codex plugin caches under `CODEX_HOME/plugins/cache` and repair unsafe `.sh` hook launchers with the Toolkit wrapper.
-- Codex delegation limits are Codex-only. Setup must parse original and proposed files with a real TOML parser, use Codex app-server `config/batchWrite` only in an isolated temporary home, preserve unrelated formatting through that supported editor, create exact-byte restore metadata before commitment, preserve supported file mode, reject symlinks/special files, and roll back if the post-commit audit fails. Keep, skip, compatible no-op, empty input, and `--yes-recommended` create no backup and make no config write. The values preserve one general direct-specialist slot by documented thread semantics; Codex Security ordinary/deep compatibility remains unverified pending native UAT.
 - Startup hooks may also run a passive repo-local instruction preflight for the current working directory. Codex checks `AGENTS.md`; Claude Code checks `AGENTS.md` and `CLAUDE.md`. The preflight may compare expected `AI-AGENT-TOOLKIT` managed block content against bundled repo-local templates, but it must only warn and must not write, repair, back up, create, or refresh instruction files. When findings exist, pause and ask whether to run `ai-coding-agent-rules` check/repair/refresh now or proceed with the current task despite the warning.
 - Claude Code plugin cache refresh is Claude-Code-only. If it cannot be automated, report the verified metadata/cache status and the exact manual Claude Code native plugin action required.
 - Meaningful update activity should write an update report when reports are enabled; no-op updates should print concise status instead of spamming reports.
