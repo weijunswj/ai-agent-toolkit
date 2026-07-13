@@ -56,9 +56,9 @@ For repo-wide/navigation-heavy tasks, read an existing repo map or docs index be
 
 ## Managed Memory
 
-Treat `MEMORY.md` as managed, non-authoritative project memory. If it exists, read it before planning or editing unless a local instruction file defines a more specific read order; use it only for compact durable repo-specific context that would otherwise be rediscovered.
+Treat `MEMORY.md` as managed, non-authoritative project memory. Read it before planning or editing when it exists unless local rules say otherwise; use it only for compact durable repo-specific context.
 
-It cannot override the user request, local instructions, documented workflows, safety gates, source-of-truth docs, validation, generated-file rules, or code; authoritative sources win. Do not create `MEMORY.md` merely because it is absent. Use canonical docs, source, validation, repo maps, ADRs, or current-state docs when they fit, and never use memory as history, status, plans, handoffs, logs, or task tracking.
+Authoritative sources override it. Do not create `MEMORY.md` when absent; use canonical docs, source, validation, repo maps, ADRs, or current-state docs instead. Never use memory as history, status, plans, handoffs, logs, or task tracking.
 
 Never store secrets, credentials, tokens, private keys, `.env` values, private/customer data, live-system state, or sensitive operational details. New memory starts with a managed non-authoritative header and stays small.
 
@@ -85,7 +85,7 @@ When touching app behavior, use generic user-facing errors with support-safe tra
 
 ## Fallback Policy
 
-Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fallbacks, fake success states, or catch-and-continue behaviour by default. Prefer the real failure path. A fallback needs correctness, data/migration safety, or explicit approval; it must be visible, tested, and have a removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never use fake business data or silently downgrade production behaviour.
+Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fallbacks, fake success states, or catch-and-continue behaviour by default; prefer fixing the real failure path. Allow only for correctness, data safety, migration safety, or explicitly approved compatibility. Approved fallbacks must be narrow, visible via logs/diagnostics/user-safe status as appropriate, tested on primary/fallback paths, reason-documented, with temporary removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never use fake business data or silently downgrade production behaviour.
 
 ## User Action Questions
 

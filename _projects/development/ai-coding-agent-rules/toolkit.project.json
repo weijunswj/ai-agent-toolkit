@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "version_policy": "semver",
-  "version_notes": "Makes supported fork_turns use no parent-turn inheritance by default while preserving the single-agent delegation gate.",
+  "version_notes": "Keeps supported fork_turns opt-in-safe while preserving compact portable memory and fallback-safety guidance.",
   "outputs": [
     {
       "kind": "curated",
