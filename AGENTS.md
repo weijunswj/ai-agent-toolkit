@@ -61,7 +61,7 @@ For repo-wide/navigation-heavy tasks, read an existing repo map or docs index be
 
 Treat `MEMORY.md` as managed, non-authoritative project memory. Read it before planning or editing when it exists unless local rules say otherwise; use it only for compact durable repo-specific context.
 
-Authoritative sources override it. Do not create `MEMORY.md` when absent; use canonical docs, source, validation, repo maps, ADRs, or current-state docs instead. Never use memory as history, status, plans, handoffs, logs, or task tracking.
+Authoritative sources override it. Do not create `MEMORY.md` merely because it is absent. Use canonical docs, source, validation, repo maps, ADRs, or current-state docs instead. Never use memory as history, status, plans, handoffs, logs, or task tracking.
 
 Never store secrets, credentials, tokens, private keys, `.env` values, private/customer data, live-system state, or sensitive operational details. New memory starts with a managed non-authoritative header and stays small.
 
