@@ -8,6 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const config = require('../scripts/codex-delegation-config.cjs');
+const backup = require('../scripts/codex-delegation-backup.cjs');
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-delegation-'));
@@ -140,10 +141,28 @@ test('restore removes a config created from an originally missing file', async (
   const result = await config.configureCodexDelegation(filePath, {
     editor: proposedEditor('[agents]\nmax_threads = 1\nmax_depth = 1\n')
   });
+  assert.equal(result.status, 'configured');
   assert.equal(fs.existsSync(filePath), true);
   const restored = config.restoreCodexDelegationBackup(result.backup_metadata_path, restoreOptions(filePath));
   assert.equal(restored.removed_created_file, true);
   assert.equal(fs.existsSync(filePath), false);
+});
+
+test('restore refuses to delete a concurrently changed config that was originally missing', async () => {
+  const filePath = configPath();
+  const result = await config.configureCodexDelegation(filePath, {
+    editor: proposedEditor('[agents]\nmax_threads = 1\nmax_depth = 1\n')
+  });
+  assert.equal(result.status, 'configured');
+  const concurrent = Buffer.from('model = "concurrent"\n');
+  assert.throws(
+    () => config.restoreCodexDelegationBackup(result.backup_metadata_path, {
+      ...restoreOptions(filePath),
+      beforeDelete() { writeConfig(filePath, concurrent); },
+    }),
+    /changed immediately before restore deletion/
+  );
+  assert.deepEqual(fs.readFileSync(filePath), concurrent);
 });
 
 test('post-write failure restores the exact prior bytes and removes temporary files', async () => {
@@ -159,6 +178,27 @@ test('post-write failure restores the exact prior bytes and removes temporary fi
   );
   assert.deepEqual(fs.readFileSync(filePath), original);
   assert.deepEqual(fs.readdirSync(path.dirname(filePath)).filter((name) => name.includes('.tmp-')), []);
+});
+
+test('post-replacement failure signals commitment and restores bytes and mode', async () => {
+  const root = tempRoot();
+  const filePath = configPath(root);
+  const original = Buffer.from('model = "gpt-5.6"\n');
+  writeConfig(filePath, original, 0o640);
+  await assert.rejects(
+    config.configureCodexDelegation(filePath, {
+      editor: proposedEditor(appendAgents(original.toString('utf8'))),
+      afterReplace() { throw new Error('synthetic post-replacement failure'); },
+    }),
+    /synthetic post-replacement failure/
+  );
+  assert.deepEqual(fs.readFileSync(filePath), original);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(filePath).mode & 0o777, 0o640);
+  assert.deepEqual(fs.readdirSync(path.dirname(filePath)).filter((name) => name.includes('.tmp-')), []);
+  const metadataPath = path.join(backupRootFor(filePath), fs.readdirSync(backupRootFor(filePath))[0], 'restore.json');
+  const validated = backup.readBackupMetadata(metadataPath, restoreOptions(filePath));
+  assert.equal(validated.metadata.original_sha256, backup.captureCodexConfigSnapshot(filePath).sha256);
+  assert.deepEqual(fs.readFileSync(validated.metadata.backup_path), original);
 });
 
 test('concurrent config edits survive editor, pre-backup, and pre-commit races', async () => {

@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "version_policy": "semver",
-  "version_notes": "Uses one canonical setup question bank and hardens explicit Codex delegation edits with marked official-editor proposals, stale-write detection, and restore metadata validation.",
+  "version_notes": "Makes final bridge audit precede Codex config commitment and hardens atomic rollback and missing-file restore races.",
   "outputs": [
     {
       "kind": "curated",

@@ -427,15 +427,6 @@ function setupPlan(options = {}) {
         conditional_write: 'run --write --json only when --verify reports missing, disabled, stale, wrong-source, or invalid installed cache state'
       },
       {
-        id: 'host_delegation_control',
-        title: host === 'codex'
-          ? 'Apply the supported one-direct-specialist Codex limits without overwriting unrelated config'
-          : 'Report host-level delegation enforcement as unsupported; portable policy still applies',
-        commands: host === 'codex' && choices.codexDelegationControl === 'limit'
-          ? [`manage only agents.max_threads=${CODEX_AGENT_MAX_THREADS} and agents.max_depth=${CODEX_AGENT_MAX_DEPTH} in ${delegation.codexConfigPath()}`]
-          : []
-      },
-      {
         id: 'lite_validation',
         title: 'Run setup validation from the managed checkout',
         commands: [
@@ -471,9 +462,23 @@ function setupPlan(options = {}) {
         ]
       },
       {
-        id: 'final_summary',
-        title: 'Print final setup summary including cleanup, cache, reports, targets, and restart/trust actions',
+        id: 'final_bridge_audit',
+        title: 'Run and parse the final bridge audit before any Codex config commitment',
         commands: [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', ['--audit', ...hubArgs])]
+      },
+      {
+        id: 'host_delegation_control',
+        title: host === 'codex'
+          ? 'Apply explicitly approved Codex limits as the final fallible setup operation'
+          : 'Report host-level delegation enforcement as unsupported; portable policy still applies',
+        commands: host === 'codex' && choices.codexDelegationControl === 'limit'
+          ? [`manage only agents.max_threads=${CODEX_AGENT_MAX_THREADS} and agents.max_depth=${CODEX_AGENT_MAX_DEPTH} in ${delegation.codexConfigPath()}`]
+          : []
+      },
+      {
+        id: 'final_summary',
+        title: 'Print the verified final setup summary including cleanup, cache, reports, targets, and restart/trust actions',
+        commands: []
       }
     ]
   };
@@ -1101,6 +1106,7 @@ async function answerSetupQuestionBank(args, current) {
   const initialSpecs = setupQuestionSpecs(args, current);
   const initialMissingCount = initialSpecs.filter((spec) => !choiceForKey(args, spec.key)).length;
   let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
+  let completeStdinConsumed = false;
 
   if (args.yesRecommended) {
     answerSource = 'user-approved yes-recommended';
@@ -1125,6 +1131,7 @@ async function answerSetupQuestionBank(args, current) {
     }
     specs = setupQuestionSpecs(args, current);
     missing = [];
+    completeStdinConsumed = true;
   }
 
   printSetupQuestionBank(args, current, specs);
@@ -1165,7 +1172,10 @@ async function answerSetupQuestionBank(args, current) {
   for (const spec of setupQuestionSpecs(args, current)) console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
   return {
     appeared: true,
-    stopped_for_answers: initialMissingCount > 0 && !args.yesRecommended,
+    answers_initially_required: initialMissingCount > 0 || needsCustomPath,
+    answers_supplied_by_complete_stdin: completeStdinConsumed,
+    answers_prompted_interactively: Boolean(rl),
+    stopped_for_answers: false,
     answer_source: answerSource || 'none'
   };
 }
@@ -1644,7 +1654,12 @@ function runBridgeAudit(args) {
   const stdout = result.stdout || '';
   process.stdout.write(stdout);
   const jsonStart = stdout.indexOf('{');
-  return jsonStart >= 0 ? JSON.parse(stdout.slice(jsonStart)) : null;
+  if (jsonStart < 0) throw new Error('Final bridge audit did not return valid JSON.');
+  const audit = JSON.parse(stdout.slice(jsonStart));
+  if (!audit || typeof audit !== 'object' || Array.isArray(audit)) {
+    throw new Error('Final bridge audit did not return a JSON object.');
+  }
+  return audit;
 }
 
 function printSetupChecklist(plan) {
@@ -1768,6 +1783,9 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('');
   console.log('## Question bank');
   console.log(`Question bank appeared: ${yesNo(questionBank?.appeared)}`);
+  console.log(`Question answers initially required: ${yesNo(questionBank?.answers_initially_required)}`);
+  console.log(`Question answers supplied by complete stdin: ${yesNo(questionBank?.answers_supplied_by_complete_stdin)}`);
+  console.log(`Question answers prompted interactively: ${yesNo(questionBank?.answers_prompted_interactively)}`);
   console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log('Preference/target writes before answers: no');
@@ -1855,8 +1873,8 @@ async function execute(args) {
   runLiteValidation(args, validationResults);
   writeBridgePreferences(args);
   runApprovedTargetSync(args);
-  const delegation = await applyHostDelegationControl(args, current);
   const audit = runBridgeAudit(args);
+  const delegation = await applyHostDelegationControl(args, current);
   printFinalSummary({ args, current, managed, nativeCache, delegation, audit, questionBank, validationResults });
   return 0;
 }

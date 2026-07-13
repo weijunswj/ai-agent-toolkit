@@ -16,8 +16,8 @@ test('plan mode remains read-only and exposes the existing setup journey', () =>
   assert.equal(plan.name, 'setup toolkit');
   assert.deepEqual(plan.steps.map((step) => step.id), [
     'upfront_setup_checklist', 'managed_main_checkout', 'codex_native_plugin_cache',
-    'host_delegation_control', 'lite_validation', 'bridge_preferences',
-    'approved_target_sync', 'final_summary'
+    'lite_validation', 'bridge_preferences', 'approved_target_sync',
+    'final_bridge_audit', 'host_delegation_control', 'final_summary'
   ]);
   assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit')), false);
 });
@@ -115,6 +115,10 @@ test('distinct piped answers follow the canonical question order without shifts'
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*Codex delegation control: limit[\s\S]*Codex plugin cache auto-refresh and Windows hook repair: keep[\s\S]*OpenCode bridge target: skip[\s\S]*AG2\/Antigravity bridge target: disable/);
+  assert.match(result.stdout, /Question answers initially required: yes/);
+  assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
+  assert.match(result.stdout, /Question answers prompted interactively: no/);
+  assert.match(result.stdout, /Question bank stopped for answers: no/);
   assert.match(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS/);
   const bridgeArgs = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeArgs, /--disable-repo-auto-update/);
@@ -149,6 +153,26 @@ test('downstream setup failure cannot mutate Codex config or create a backup', (
     '--codex-delegation-control', 'limit'
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.notEqual(result.status, 0);
+  assert.deepEqual(fs.readFileSync(configPath), original);
+  assert.deepEqual(backupFiles(root), []);
+});
+
+test('final bridge audit failure occurs before delegation config commitment', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const configPath = codexConfig(root);
+  const original = Buffer.from('model = "gpt-5.6"\n');
+  writeFile(configPath, original.toString('utf8'));
+  const result = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh',
+    '--codex-delegation-control', 'limit', '--codex-cli', createFakeCodexAppServer(root)
+  ], {
+    env: { ...isolatedHomeEnv(root), SETUP_FAKE_AUDIT_MALFORMED: '1' },
+    timeout: 300000,
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Final bridge audit did not return valid JSON/);
   assert.deepEqual(fs.readFileSync(configPath), original);
   assert.deepEqual(backupFiles(root), []);
 });

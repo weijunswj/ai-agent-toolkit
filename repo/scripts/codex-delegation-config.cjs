@@ -132,7 +132,7 @@ function runAppServerBatchWrite(command, codexHome) {
     child.stdin.write(`${JSON.stringify({
       method: 'initialize',
       id: 1,
-      params: { clientInfo: { name: 'ai_agent_toolkit', title: 'AI Agent Toolkit', version: '2.4.2' } },
+      params: { clientInfo: { name: 'ai_agent_toolkit', title: 'AI Agent Toolkit', version: '2.4.3' } },
     })}\n`);
   });
 }
@@ -256,8 +256,11 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
   let wrote = false;
   try {
     if (typeof options.beforeCommit === 'function') options.beforeCommit({ configPath, initialSnapshot, backup, proposedBytes: marked.bytes });
-    writeRegularFileAtomically(configPath, marked.bytes, backup.existed ? backup.original_mode : 0o600, { expectedSnapshot: initialSnapshot });
-    wrote = true;
+    const writeResult = writeRegularFileAtomically(configPath, marked.bytes, backup.existed ? backup.original_mode : 0o600, {
+      expectedSnapshot: initialSnapshot,
+      afterReplace: options.afterReplace,
+    });
+    wrote = writeResult.committed;
     const verified = inspectCodexDelegationConfig(configPath);
     if (verified.status !== 'configured' || verified.ownership !== 'toolkit-managed' || verified.max_threads !== 1 || verified.max_depth !== 1) {
       throw new Error(`Post-write Codex config verification failed: ${verified.detail || verified.status}`);
@@ -272,10 +275,11 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
       proposed_block: preview.proposed_block,
     };
   } catch (error) {
-    if (!wrote && /changed while the isolated proposal|changed concurrently/.test(cleanError(error))) {
+    const replacementCommitted = wrote || error.atomicReplacementCommitted === true;
+    if (!replacementCommitted && /changed while the isolated proposal|changed concurrently/.test(cleanError(error))) {
       return concurrentEditResult(initial, error);
     }
-    if (wrote) {
+    if (replacementCommitted) {
       try { restoreCodexDelegationBackup(backup.metadata_path, { configPath, backupRoot: options.backupRoot }); }
       catch (restoreError) {
         const combined = new Error(`Codex delegation configuration failed and exact restoration also failed: ${cleanError(restoreError)}`);

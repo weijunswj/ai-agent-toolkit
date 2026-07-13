@@ -91,10 +91,10 @@ function snapshotsMatch(expected, current) {
     && sameIdentity(expected.identity, current.identity);
 }
 
-function assertSnapshotCurrent(configPath, expected) {
+function assertSnapshotCurrent(configPath, expected, message = 'Codex config changed while the isolated proposal was being prepared; refusing to overwrite the concurrent edit.') {
   const current = captureCodexConfigSnapshot(configPath);
   if (!snapshotsMatch(expected, current)) {
-    throw new Error('Codex config changed while the isolated proposal was being prepared; refusing to overwrite the concurrent edit.');
+    throw new Error(message);
   }
   return current;
 }
@@ -134,6 +134,7 @@ function writeRegularFileAtomically(filePath, bytes, mode, options = {}) {
   fs.mkdirSync(parent, { recursive: true });
   if (options.expectedSnapshot) assertSnapshotCurrent(filePath, options.expectedSnapshot);
   const temp = path.join(parent, `.${path.basename(filePath)}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
+  let committed = false;
   try {
     fs.writeFileSync(temp, bytes, { mode: mode == null ? 0o600 : mode });
     if (mode != null && process.platform !== 'win32') fs.chmodSync(temp, mode);
@@ -141,7 +142,12 @@ function writeRegularFileAtomically(filePath, bytes, mode, options = {}) {
     // a cross-platform compare-and-swap, so uncertainty always aborts first.
     if (options.expectedSnapshot) assertSnapshotCurrent(filePath, options.expectedSnapshot);
     fs.renameSync(temp, filePath);
-    if (mode != null && process.platform !== 'win32') fs.chmodSync(filePath, mode);
+    committed = true;
+    if (typeof options.afterReplace === 'function') options.afterReplace({ filePath, bytes: Buffer.from(bytes), mode });
+    return { committed: true };
+  } catch (error) {
+    if (committed) error.atomicReplacementCommitted = true;
+    throw error;
   } finally {
     try { fs.rmSync(temp, { force: true }); } catch {}
   }
@@ -213,7 +219,9 @@ function restoreCodexDelegationBackup(metadataPath, options = {}) {
     throw new Error('Current Codex config no longer matches the Toolkit replacement; refusing to overwrite or delete it.');
   }
   if (!metadata.existed) {
-    fs.rmSync(expectedConfigPath);
+    if (typeof options.beforeDelete === 'function') options.beforeDelete({ configPath: expectedConfigPath, metadata, current });
+    assertSnapshotCurrent(expectedConfigPath, current, 'Codex config changed immediately before restore deletion; refusing to delete the concurrent file.');
+    fs.unlinkSync(expectedConfigPath);
     return { status: 'restored', config_path: expectedConfigPath, removed_created_file: true, exact: true };
   }
   const bytes = fs.readFileSync(metadata.backup_path);
