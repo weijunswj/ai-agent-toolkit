@@ -174,6 +174,7 @@ function structuralLayout(text) {
   }
   const agentsTables = tables.filter((entry) => entry.kind === 'table' && entry.name === 'agents');
   const agentsChildren = tables.filter((entry) => entry.name.startsWith('agents.'));
+  const featuresTables = tables.filter((entry) => entry.kind === 'table' && entry.name === 'features');
   const multiAgentV2Tables = tables.filter((entry) => entry.kind === 'table' && entry.name === 'features.multi_agent_v2');
   const multiAgentV2Children = tables.filter((entry) => entry.name.startsWith('features.multi_agent_v2.'));
   const unsupportedAssignments = assignments.filter((entry) => {
@@ -187,6 +188,7 @@ function structuralLayout(text) {
     assignments,
     agentsTables,
     agentsChildren,
+    featuresTables,
     unsupportedAssignments,
     beginMarkers,
     endMarkers,

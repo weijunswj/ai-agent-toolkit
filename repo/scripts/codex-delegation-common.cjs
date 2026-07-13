@@ -16,6 +16,7 @@ const CODEX_HELPER_CAPACITY_END = '# AI-AGENT-TOOLKIT:END CODEX-HELPER-CAPACITY'
 const CODEX_V2_ROOT_GUIDANCE = 'Stay root-only by default. Use one helper only for a concrete correctness benefit, an explicitly requested specialist workflow, or an investigation the root cannot handle well. Never spawn for speed, routine parallelism, workload reduction, or a second opinion. Normal work uses zero helpers and at most one direct helper. Keep final judgment, bound the assignment, and avoid duplicate work.';
 const CODEX_V2_HELPER_GUIDANCE = 'Complete only the assigned bounded task. Do not spawn another helper, broaden scope, or duplicate root or sibling work. Return any need for more expertise to the root.';
 const CODEX_V2_TARGET_KEYS = [
+  'enabled',
   'max_concurrent_threads_per_session',
   'root_agent_usage_hint_text',
   'subagent_usage_hint_text',
@@ -69,6 +70,7 @@ print(json.dumps({
     'multi_agent_v2_present': multi_agent_v2 is not None,
     'multi_agent_v2_is_table': type(multi_agent_v2) is dict if multi_agent_v2 is not None else None,
     'multi_agent_v2_type': type(multi_agent_v2).__name__ if multi_agent_v2 is not None else None,
+    'multi_agent_v2_scalar': scalar(multi_agent_v2),
     'multi_agent_v2_values': inspected_values(multi_agent_v2, (
         'enabled',
         'max_concurrent_threads_per_session',

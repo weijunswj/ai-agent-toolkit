@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const {
   CODEX_AGENT_MAX_THREADS,
   CODEX_AGENT_MAX_DEPTH,
@@ -40,7 +40,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.4.4';
+const TOOLKIT_CLIENT_VERSION = '2.4.5';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 
 function inspectCodexDelegationConfig(configPath = codexConfigPath(), runtime = RUNTIMES.UNKNOWN) {
@@ -71,6 +71,7 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
   const state = inspectCodexDelegationConfig(configPath, runtime);
   const configurable = state.status === 'unconfigured'
     || state.status === 'migration-required'
+    || state.status === 'enablement-migration-required'
     || (state.status === 'configured' && String(state.ownership || '').startsWith('toolkit-managed'));
   if (!configurable) return { ...state, changed: false };
   return {
@@ -108,7 +109,7 @@ function wait(milliseconds) {
 }
 
 async function cleanupTemporaryEditorDirectory(root, options = {}) {
-  const delays = options.delays || [0, 25, 75, 150, 300, 600];
+  const delays = options.delays || [0, 50, 150, 300, 600, 1200, 2400];
   const remove = options.remove || ((target) => fs.rmSync(target, { recursive: true, force: true }));
   let lastError = null;
   for (let index = 0; index < delays.length; index += 1) {
@@ -128,6 +129,19 @@ async function cleanupTemporaryEditorDirectory(root, options = {}) {
   throw error;
 }
 
+function terminateChildTree(child) {
+  if (!child.pid) return;
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      timeout: 10000,
+      stdio: 'ignore',
+    });
+  } else if (!child.killed) {
+    child.kill('SIGTERM');
+  }
+}
+
 function runAppServerRequest(command, codexHome, request, options = {}) {
   return new Promise((resolve, reject) => {
     const parts = codexCommandParts(command, ['app-server', '--listen', 'stdio://']);
@@ -140,33 +154,42 @@ function runAppServerRequest(command, codexHome, request, options = {}) {
     let stderr = '';
     let response;
     let settled = false;
-    let closeTimer = null;
+    let shutdownTimer = null;
+    let forceTimer = null;
+    let pendingError = null;
     const rl = readline.createInterface({ input: child.stdout });
 
     const settle = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(requestTimer);
-      if (closeTimer) clearTimeout(closeTimer);
+      if (shutdownTimer) clearTimeout(shutdownTimer);
+      if (forceTimer) clearTimeout(forceTimer);
       rl.close();
       if (error) reject(error);
       else resolve(response);
     };
-    const stopAfterResponse = () => {
+    const beginShutdown = (error = null) => {
+      if (shutdownTimer || forceTimer || settled) return;
+      pendingError = error;
       try { child.stdin.end(); } catch {}
-      if (!child.killed) child.kill();
-      closeTimer = setTimeout(() => settle(), options.closeTimeoutMs || 2000);
+      shutdownTimer = setTimeout(() => {
+        terminateChildTree(child);
+        forceTimer = setTimeout(
+          () => settle(pendingError || new Error(`${command} app-server did not exit after bounded process-tree termination`)),
+          options.forceExitTimeoutMs || 2000
+        );
+      }, options.closeTimeoutMs || 2000);
     };
     const requestTimer = setTimeout(() => {
-      try { child.stdin.end(); } catch {}
-      if (!child.killed) child.kill();
-      settle(new Error(`${command} app-server ${request.method} timed out`));
+      beginShutdown(new Error(`${command} app-server ${request.method} timed out`));
     }, options.timeoutMs || 15000);
 
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.on('error', (error) => settle(error));
     child.on('close', (code) => {
-      if (response !== undefined) settle();
+      if (pendingError) settle(pendingError);
+      else if (response !== undefined) settle();
       else settle(new Error(`${command} app-server exited ${code}: ${stderr.trim()}`));
     });
     rl.on('line', (line) => {
@@ -174,18 +197,18 @@ function runAppServerRequest(command, codexHome, request, options = {}) {
       try { message = JSON.parse(line); } catch { return; }
       if (message.id === 1) {
         if (message.error) {
-          settle(new Error(`app-server initialize failed: ${message.error.message || JSON.stringify(message.error)}`));
+          beginShutdown(new Error(`app-server initialize failed: ${message.error.message || JSON.stringify(message.error)}`));
           return;
         }
         child.stdin.write(`${JSON.stringify({ method: 'initialized', params: {} })}\n`);
         child.stdin.write(`${JSON.stringify({ ...request, id: 2 })}\n`);
       } else if (message.id === 2) {
         if (message.error) {
-          settle(new Error(`${request.method} failed: ${message.error.message || JSON.stringify(message.error)}`));
+          beginShutdown(new Error(`${request.method} failed: ${message.error.message || JSON.stringify(message.error)}`));
           return;
         }
         response = message.result;
-        stopAfterResponse();
+        beginShutdown();
       }
     });
     child.stdin.write(`${JSON.stringify({
@@ -207,7 +230,12 @@ async function inspectCodexMultiAgentRuntime(options = {}) {
       const result = await runAppServerRequest(command, codexHome, {
         method: 'experimentalFeature/list',
         params: { cursor: null, limit: 500, threadId: null },
-      }, { cwd: options.cwd });
+      }, {
+        cwd: options.cwd,
+        timeoutMs: options.timeoutMs,
+        closeTimeoutMs: options.closeTimeoutMs,
+        forceExitTimeoutMs: options.forceExitTimeoutMs,
+      });
       const features = Array.isArray(result?.data) ? result.data : [];
       const v2 = features.find((feature) => feature?.name === 'multi_agent_v2');
       const v1 = features.find((feature) => feature?.name === 'multi_agent');
@@ -238,6 +266,7 @@ async function inspectCodexMultiAgentRuntime(options = {}) {
 function configEdits(runtime, helperCount) {
   if (runtime === RUNTIMES.V2) {
     return [
+      { keyPath: 'features.multi_agent_v2.enabled', value: true, mergeStrategy: 'upsert' },
       { keyPath: 'features.multi_agent_v2.max_concurrent_threads_per_session', value: helpersToTotalThreads(helperCount), mergeStrategy: 'upsert' },
       { keyPath: 'features.multi_agent_v2.root_agent_usage_hint_text', value: CODEX_V2_ROOT_GUIDANCE, mergeStrategy: 'upsert' },
       { keyPath: 'features.multi_agent_v2.subagent_usage_hint_text', value: CODEX_V2_HELPER_GUIDANCE, mergeStrategy: 'upsert' },
@@ -259,12 +288,17 @@ async function editWithCodexAppServer(originalBytes, options = {}) {
   fs.mkdirSync(isolatedHome, { recursive: true });
   if (originalBytes.length) fs.writeFileSync(isolatedConfig, originalBytes);
   const failures = [];
+  let primaryError = null;
   try {
     for (const command of appServerCandidates(options.codexCommand, options.codexHome)) {
       try {
         await runAppServerRequest(command, isolatedHome, {
           method: 'config/batchWrite',
           params: { edits: configEdits(options.runtime, options.helperCount) },
+        }, {
+          timeoutMs: options.timeoutMs,
+          closeTimeoutMs: options.closeTimeoutMs,
+          forceExitTimeoutMs: options.forceExitTimeoutMs,
         });
         if (!fs.existsSync(isolatedConfig)) throw new Error('config/batchWrite did not create config.toml');
         return { bytes: fs.readFileSync(isolatedConfig), editor: `${command} app-server config/batchWrite`, temporary_cleanup: 'removed after child exit' };
@@ -273,8 +307,19 @@ async function editWithCodexAppServer(originalBytes, options = {}) {
       }
     }
     throw new Error(`No supported Codex app-server config editor succeeded: ${failures.join('; ')}`);
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
-    await cleanupTemporaryEditorDirectory(root, options.cleanupOptions);
+    try {
+      await cleanupTemporaryEditorDirectory(root, options.cleanupOptions);
+    } catch (cleanupError) {
+      if (!primaryError) throw cleanupError;
+      const combined = new Error(`${cleanError(primaryError)} Cleanup also failed: ${cleanError(cleanupError)}`);
+      combined.cause = primaryError;
+      combined.cleanupCause = cleanupError;
+      throw combined;
+    }
   }
 }
 
@@ -306,8 +351,9 @@ function assertProposalTextDelta(originalBytes, proposalState, runtime, helperCo
         tableName: 'features.multi_agent_v2',
         tables: proposalLayout.multiAgentV2Tables,
         originalTables: originalLayout.multiAgentV2Tables,
-        keys: ['max_concurrent_threads_per_session', 'root_agent_usage_hint_text', 'subagent_usage_hint_text'],
+        keys: ['enabled', 'max_concurrent_threads_per_session', 'root_agent_usage_hint_text', 'subagent_usage_hint_text'],
         lines: [
+          'enabled = true',
           `max_concurrent_threads_per_session = ${helpersToTotalThreads(helperCount)}`,
           `root_agent_usage_hint_text = ${tomlString(CODEX_V2_ROOT_GUIDANCE)}`,
           `subagent_usage_hint_text = ${tomlString(CODEX_V2_HELPER_GUIDANCE)}`,
@@ -331,8 +377,10 @@ function assertProposalTextDelta(originalBytes, proposalState, runtime, helperCo
   }
 
   if (target.originalTables.length === 1) {
-    const stripped = removeSpans(proposalState.text, assignments);
-    if (stripped !== originalText) throw new Error('Official Codex editor proposal changed text outside the approved helper-capacity assignments.');
+    const originalAssignments = assignmentsInsideTable(originalLayout, target.originalTables[0], target.keys);
+    const strippedProposal = removeSpans(proposalState.text, assignments);
+    const strippedOriginal = removeSpans(originalText, originalAssignments);
+    if (strippedProposal !== strippedOriginal) throw new Error('Official Codex editor proposal changed text outside the approved helper-capacity assignments.');
     return;
   }
 
@@ -356,7 +404,7 @@ function markToolkitProposal(configBytes, configPath, runtime, helperCount, orig
   const layout = proposed.layout;
   const table = runtime === RUNTIMES.V2 ? layout.multiAgentV2Tables[0] : layout.agentsTables[0];
   const keys = runtime === RUNTIMES.V2
-    ? ['max_concurrent_threads_per_session', 'root_agent_usage_hint_text', 'subagent_usage_hint_text']
+    ? ['enabled', 'max_concurrent_threads_per_session', 'root_agent_usage_hint_text', 'subagent_usage_hint_text']
     : ['max_threads', 'max_depth'];
   const assignments = assignmentsInsideTable(layout, table, keys);
   if (assignments.some((entry, index) => index > 0 && entry.index !== assignments[index - 1].index + 1)) {
@@ -387,6 +435,18 @@ function removeManagedBlockBytes(state) {
   const span = managedMarkerSpan(state);
   if (!span) throw new Error('No exact Toolkit-managed helper-capacity block is available for migration or removal.');
   return Buffer.from(`${state.text.slice(0, span.begin.start)}${state.text.slice(span.end.end)}`, 'utf8');
+}
+
+function migrateV2BooleanEnablement(state) {
+  if (state.ownership !== 'user-owned-compatible-v2-enable') throw new Error('No compatible MultiAgentV2 boolean enablement is available for migration.');
+  const table = state.layout.featuresTables[0];
+  const nextTable = state.layout.tables.find((entry) => entry.index > table.index);
+  const assignment = state.layout.assignments.find((entry) => entry.index > table.index
+    && (!nextTable || entry.index < nextTable.index)
+    && entry.key.replace(/\s+/g, '') === 'multi_agent_v2'
+    && entry.value.trim() === 'true');
+  if (!assignment) throw new Error('The compatible MultiAgentV2 boolean enablement could not be located exactly.');
+  return Buffer.from(`${state.text.slice(0, assignment.start)}${state.text.slice(assignment.end)}`, 'utf8');
 }
 
 function initialStateFromSnapshot(snapshot, configPath, runtime) {
@@ -463,9 +523,11 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
   if (![RUNTIMES.V2, RUNTIMES.V1].includes(runtime)) return { ...initial, changed: false };
   if (initial.status === 'configured' && initial.helper_count === helperCount) return { ...initial, changed: false };
   const toolkitOwned = String(initial.ownership || '').startsWith('toolkit-managed');
-  if (!['unconfigured', 'migration-required'].includes(initial.status) && !toolkitOwned) return { ...initial, changed: false };
+  if (!['unconfigured', 'migration-required', 'enablement-migration-required'].includes(initial.status) && !toolkitOwned) return { ...initial, changed: false };
 
-  const stagedBytes = toolkitOwned || initial.status === 'migration-required' ? removeManagedBlockBytes(initial) : initialSnapshot.bytes;
+  const stagedBytes = initial.status === 'enablement-migration-required'
+    ? migrateV2BooleanEnablement(initial)
+    : (toolkitOwned || initial.status === 'migration-required' ? removeManagedBlockBytes(initial) : initialSnapshot.bytes);
   const stagedState = codexDelegationConfigState(stagedBytes, configPath, runtime);
   if (stagedState.status !== 'unconfigured') {
     return { ...initial, status: 'conflicting', changed: false, detail: `Toolkit-owned block removal did not produce an unconfigured ${runtime} proposal base: ${stagedState.detail}` };
@@ -499,6 +561,7 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
     editor: edit.editor || 'injected test editor',
     proposed_block: runtime === RUNTIMES.V2 ? expectedV2Block(helperCount, initial.eol || '\n') : expectedLegacyBlock(helperCount, initial.eol || '\n'),
     migrated_legacy_block: initial.status === 'migration-required',
+    migrated_v2_boolean_enablement: initial.status === 'enablement-migration-required',
     temporary_cleanup: edit.temporary_cleanup || 'test editor did not create a temporary app-server directory',
   };
 }

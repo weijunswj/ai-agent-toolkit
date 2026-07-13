@@ -1910,6 +1910,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Technical setting: ${technicalSetting}`);
   console.log(`Configuration changed this run: ${yesNo(delegation.changed === true)}`);
   console.log(`PR #237 legacy block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
+  console.log(`Official V2 boolean enablement migrated to configured table: ${yesNo(delegation.migrated_v2_boolean_enablement === true)}`);
   console.log(`Codex config path: ${unknown(delegation.config_path)}`);
   console.log(`Configuration scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);
   console.log(`Helper-capacity detail: ${unknown(delegation.detail)}`);

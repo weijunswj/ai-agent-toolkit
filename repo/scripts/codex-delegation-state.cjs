@@ -43,6 +43,7 @@ function expectedCodexDelegationBlock(eol = '\n') {
 function expectedV2Block(helperCount = 1, eol = '\n') {
   return [
     CODEX_HELPER_CAPACITY_BEGIN,
+    'enabled = true',
     `max_concurrent_threads_per_session = ${helpersToTotalThreads(helperCount)}`,
     `root_agent_usage_hint_text = ${tomlString(CODEX_V2_ROOT_GUIDANCE)}`,
     `subagent_usage_hint_text = ${tomlString(CODEX_V2_HELPER_GUIDANCE)}`,
@@ -97,9 +98,24 @@ function exactString(value, expected) {
   return value?.present === true && value.type === 'str' && value.value === expected;
 }
 
+function exactBoolean(value, expected) {
+  return value?.present === true && value.type === 'bool' && value.value === expected;
+}
+
 function v2State(parsed, layout, base) {
   if (parsed.multi_agent_v2_present && parsed.multi_agent_v2_is_table === false) {
-    return { ...base, status: 'conflicting', detail: 'features.multi_agent_v2 is not a table; Toolkit will not rewrite that user-owned shape.' };
+    if (parsed.multi_agent_v2_type === 'bool' && parsed.multi_agent_v2_scalar === true && layout.featuresTables.length === 1) {
+      return {
+        ...base,
+        status: 'enablement-migration-required',
+        ownership: 'user-owned-compatible-v2-enable',
+        helper_count: null,
+        total_threads: null,
+        hard_nested_helper_enforcement: 'not-supported',
+        detail: 'MultiAgentV2 is enabled with the official boolean form; Toolkit can migrate that exact enablement to the configured V2 table when helper capacity is explicitly approved.',
+      };
+    }
+    return { ...base, status: 'conflicting', detail: 'features.multi_agent_v2 is not a compatible enabled table or boolean; Toolkit will not rewrite that user-owned shape.' };
   }
   if (layout.multiAgentV2Tables.length > 1 || layout.multiAgentV2Children.length) {
     return { ...base, status: 'conflicting', detail: 'The MultiAgentV2 table layout is duplicated or has unsupported child tables.' };
@@ -109,6 +125,7 @@ function v2State(parsed, layout, base) {
   }
 
   const values = parsed.multi_agent_v2_values || {};
+  const enabled = values.enabled;
   const anyTarget = ['max_concurrent_threads_per_session', 'root_agent_usage_hint_text', 'subagent_usage_hint_text']
     .some((key) => values[key]?.present === true);
   const capacity = values.max_concurrent_threads_per_session;
@@ -118,7 +135,7 @@ function v2State(parsed, layout, base) {
   const managed = layout.helperBeginMarkers.length === 1;
 
   if (managed) {
-    if (!Number.isSafeInteger(helperCount) || helperCount < 0 || !exactGuidance) {
+    if (!exactBoolean(enabled, true) || !Number.isSafeInteger(helperCount) || helperCount < 0 || !exactGuidance) {
       return { ...base, status: 'conflicting', detail: 'Toolkit MultiAgentV2 markers do not contain valid capacity and guidance values.' };
     }
     const error = validateManagedBlock(
@@ -144,7 +161,7 @@ function v2State(parsed, layout, base) {
   }
 
   if (anyTarget) {
-    if (Number.isSafeInteger(helperCount) && helperCount >= 0 && exactGuidance) {
+    if (exactBoolean(enabled, true) && Number.isSafeInteger(helperCount) && helperCount >= 0 && exactGuidance) {
       return {
         ...base,
         status: 'configured',
@@ -158,6 +175,10 @@ function v2State(parsed, layout, base) {
       };
     }
     return { ...base, status: 'conflicting', detail: 'User-owned MultiAgentV2 capacity or guidance values are present; Toolkit will not overwrite them.' };
+  }
+
+  if (enabled?.present && !exactBoolean(enabled, true)) {
+    return { ...base, status: 'conflicting', detail: 'User-owned MultiAgentV2 enablement is false or non-boolean; Toolkit will not overwrite it.' };
   }
 
   if (layout.beginMarkers.length === 1) {

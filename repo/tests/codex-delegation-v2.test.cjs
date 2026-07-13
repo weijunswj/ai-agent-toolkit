@@ -37,7 +37,12 @@ function v2Editor({ mutate } = {}) {
     const assignments = unmarkedV2Block(helperCount, eol);
     let proposal;
     if (/^\[features\.multi_agent_v2\][ \t]*$/m.test(original)) {
-      proposal = original.replace(/^(\[features\.multi_agent_v2\][ \t]*\r?\n)/m, `$1${assignments}${eol}`);
+      if (/^enabled\s*=\s*true\s*$/m.test(original)) {
+        const inserted = assignments.split(eol).filter((line) => line !== 'enabled = true').join(eol);
+        proposal = original.replace(/^(enabled\s*=\s*true\s*\r?\n)/m, `$1${inserted}${eol}`);
+      } else {
+        proposal = original.replace(/^(\[features\.multi_agent_v2\][ \t]*\r?\n)/m, `$1${assignments}${eol}`);
+      }
     } else {
       const separator = original ? (original.endsWith(eol) ? eol : `${eol}${eol}`) : '';
       proposal = `${original}${separator}[features.multi_agent_v2]${eol}${assignments}${eol}`;
@@ -60,6 +65,30 @@ function createRuntimeServer(root, features, options = {}) {
     options.error
       ? "  if (request.method === 'experimentalFeature/list') process.stdout.write(JSON.stringify({ id: request.id, error: { message: 'fixture failure' } }) + '\\n');"
       : "  if (request.method === 'experimentalFeature/list') process.stdout.write(JSON.stringify({ id: request.id, result: { data: features } }) + '\\n');",
+    '});',
+    '',
+  ].join('\n'));
+  return filePath;
+}
+
+function createLingeringEditorServer(root) {
+  const filePath = path.join(root, 'fake-lingering-editor.cjs');
+  fs.writeFileSync(filePath, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const readline = require('node:readline');",
+    "const rl = readline.createInterface({ input: process.stdin });",
+    "rl.on('line', (line) => {",
+    "  const request = JSON.parse(line);",
+    "  if (request.method === 'initialize') process.stdout.write(JSON.stringify({ id: request.id, result: {} }) + '\\n');",
+    "  if (request.method === 'config/batchWrite') {",
+    "    const values = Object.fromEntries(request.params.edits.map((edit) => [edit.keyPath.split('.').at(-1), edit.value]));",
+    "    const target = path.join(process.env.CODEX_HOME, 'config.toml');",
+    "    fs.writeFileSync(target, '[features.multi_agent_v2]\\nenabled = true\\nmax_concurrent_threads_per_session = ' + values.max_concurrent_threads_per_session + '\\nroot_agent_usage_hint_text = ' + JSON.stringify(values.root_agent_usage_hint_text) + '\\nsubagent_usage_hint_text = ' + JSON.stringify(values.subagent_usage_hint_text) + '\\n');",
+    "    process.stdout.write(JSON.stringify({ id: request.id, result: {} }) + '\\n');",
+    "    setInterval(() => {}, 1000);",
+    "  }",
     '});',
     '',
   ].join('\n'));
@@ -110,6 +139,7 @@ test('RAM-safe V2 configuration allows one helper and two total threads', async 
   assert.equal(result.ownership, 'toolkit-managed-v2');
   assert.match(result.detail, /root counts/);
   const text = fs.readFileSync(filePath, 'utf8');
+  assert.match(text, /enabled = true/);
   assert.match(text, /max_concurrent_threads_per_session = 2/);
   assert.doesNotMatch(text, /max_threads|max_depth/);
 });
@@ -175,6 +205,39 @@ test('non-exact or user-owned V1 settings are not migrated', async () => {
   }
 });
 
+test('user-owned V2 enablement is preserved only when true', async () => {
+  const compatiblePath = configPath();
+  writeConfig(compatiblePath, '[features.multi_agent_v2]\nenabled = true\n');
+  const compatible = await configureV2(compatiblePath);
+  assert.equal(compatible.status, 'configured', compatible.detail);
+  assert.equal((fs.readFileSync(compatiblePath, 'utf8').match(/enabled = true/g) || []).length, 1);
+
+  const conflictingPath = configPath();
+  const conflictingText = '[features.multi_agent_v2]\nenabled = false\n';
+  writeConfig(conflictingPath, conflictingText);
+  const conflicting = await configureV2(conflictingPath);
+  assert.equal(conflicting.status, 'conflicting');
+  assert.equal(conflicting.changed, false);
+  assert.equal(fs.readFileSync(conflictingPath, 'utf8'), conflictingText);
+});
+
+test('official V2 boolean enablement migrates to the configured table', async () => {
+  const filePath = configPath();
+  const original = 'model = "gpt-5.6"\n\n[features]\nmulti_agent_v2 = true\n';
+  writeConfig(filePath, original);
+  const before = config.inspectCodexDelegationConfig(filePath, V2);
+  assert.equal(before.status, 'enablement-migration-required');
+  const result = await configureV2(filePath);
+  assert.equal(result.status, 'configured', result.detail);
+  assert.equal(result.migrated_v2_boolean_enablement, true);
+  const text = fs.readFileSync(filePath, 'utf8');
+  assert.doesNotMatch(text, /^multi_agent_v2\s*=\s*true$/m);
+  assert.match(text, /\[features\.multi_agent_v2\]/);
+  assert.match(text, /enabled = true/);
+  assert.match(text, /max_concurrent_threads_per_session = 2/);
+  assert.match(text, /model = "gpt-5.6"/);
+});
+
 test('repeated setup is idempotent and creates no second backup generation', async () => {
   const filePath = configPath();
   const first = await configureV2(filePath);
@@ -234,6 +297,19 @@ test('persistent temporary editor cleanup failure is visible and preserves evide
   );
   assert.equal(fs.existsSync(root), true);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('lingering app-server is terminated before temporary editor cleanup', async () => {
+  const root = tempRoot();
+  const result = await config.editWithCodexAppServer(Buffer.alloc(0), {
+    runtime: V2,
+    helperCount: 1,
+    codexCommand: createLingeringEditorServer(root),
+    closeTimeoutMs: 25,
+    forceExitTimeoutMs: 2000,
+  });
+  assert.match(result.bytes.toString('utf8'), /max_concurrent_threads_per_session = 2/);
+  assert.equal(result.temporary_cleanup, 'removed after child exit');
 });
 
 test('remove deletes only an exact Toolkit-managed V2 block', async () => {

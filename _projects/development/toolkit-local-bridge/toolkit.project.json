@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.4.4",
+  "version": "2.4.5",
   "version_policy": "semver",
-  "version_notes": "Adds runtime-aware RAM-safe Codex MultiAgentV2 helper capacity, exact PR #237 migration, and honest recursive-enforcement and Security reporting.",
+  "version_notes": "Completes native V2 activation migration and guarantees app-server process-tree exit before temporary cleanup.",
   "outputs": [
     {
       "kind": "curated",

@@ -89,14 +89,14 @@ test('explicit limit previews path and block, creates backup, and writes only af
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, new RegExp(`Codex config path: ${escapeRegExp(configPath)}`));
-  assert.match(result.stdout, /Proposed Toolkit-managed TOML block:[\s\S]*max_concurrent_threads_per_session = 2[\s\S]*root_agent_usage_hint_text/);
+  assert.match(result.stdout, /Proposed Toolkit-managed TOML block:[\s\S]*enabled = true[\s\S]*max_concurrent_threads_per_session = 2[\s\S]*root_agent_usage_hint_text/);
   assert.match(result.stdout, /Codex backup directory:/);
   assert.match(result.stdout, /Normal helper capacity: 1 helper agent; 2 total session threads including the main agent/);
   assert.match(result.stdout, /Exact backup metadata:/);
   assert.match(result.stdout, /Exact restore command \(PowerShell\):/);
   const configured = fs.readFileSync(configPath, 'utf8');
   assert.ok(configured.startsWith(original.toString('utf8')));
-  assert.match(configured, /\[features\.multi_agent_v2\]\r?\n# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v2\r?\nmax_concurrent_threads_per_session = 2/);
+  assert.match(configured, /\[features\.multi_agent_v2\]\r?\n# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v2\r?\nenabled = true\r?\nmax_concurrent_threads_per_session = 2/);
   assert.ok(backupFiles(root).length > 0);
 });
 
