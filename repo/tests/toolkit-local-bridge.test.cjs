@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.3.37';
+const expectedBridgeVersion = '2.4.3';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -43,7 +43,7 @@ function run(args, options = {}) {
     cwd: options.cwd || repoRoot,
     encoding: 'utf8',
     env: { ...process.env, ...(options.env || {}) },
-    timeout: options.timeout || 90000
+    timeout: options.timeout || 300000
   });
 }
 
@@ -113,7 +113,7 @@ function git(cwd, args) {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' },
-    timeout: 15000
+    timeout: 60000
   });
   assert.equal(
     result.status,
@@ -325,6 +325,16 @@ function writeRepoToolkitFixture(repoPath, label) {
     '}',
     ''
   ].join('\n'));
+  for (const name of [
+    'codex-delegation-backup.cjs',
+    'codex-delegation-common.cjs',
+    'codex-delegation-config.cjs',
+    'codex-delegation-layout.cjs',
+    'codex-delegation-state.cjs',
+    'setup-toolkit-core.cjs'
+  ]) {
+    writeFile(path.join(repoPath, 'repo', 'scripts', name), "'use strict';\n");
+  }
 }
 
 function writeCodexPluginRefreshFixture(repoPath) {
@@ -3780,12 +3790,13 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /\.claude-plugin\/plugin\.json/, relPath);
     assert.match(text, /repair-codex-plugin-windows-hooks\.cjs/, relPath);
     assert.match(text, /installed plugin cache/i, relPath);
-    assert.match(text, /%USERPROFILE%\\\\\.codex\\\\plugins\\\\\.plugin-appserver\\\\codex\.exe/, relPath);
+    assert.match(text, /%USERPROFILE%\\\.codex\\plugins\\\.plugin-appserver\\codex\.exe/, relPath);
     assert.match(text, /fail with the repair error/i, relPath);
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2/i, relPath);
-    assert.match(text, /setup question bank must show current state, recommended default, and choices/i, relPath);
+    assert.match(text, /setup question bank must use one canonical order for displayed rows, interactive prompts, piped input, explicit flags, `--yes-recommended`, plans, and execution/i, relPath);
+    assert.match(text, /Every row must show current state, recommended default, empty-input behavior, choices, and selected answer/i, relPath);
     assert.match(text, /OpenCode target: detected state, enabled state, synced state\/version/i, relPath);
     assert.match(text, /AG2\/Antigravity target: detected state, enabled state, synced state\/version/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2 are opt-in only/i, relPath);

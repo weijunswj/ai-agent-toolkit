@@ -9,11 +9,17 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.3.37';
+const EXPECTED_TOOLKIT_VERSION = '2.4.3';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
   '.codex-plugin/hooks/hooks.json',
+  'repo/scripts/codex-delegation-backup.cjs',
+  'repo/scripts/codex-delegation-common.cjs',
+  'repo/scripts/codex-delegation-config.cjs',
+  'repo/scripts/codex-delegation-layout.cjs',
+  'repo/scripts/codex-delegation-state.cjs',
+  'repo/scripts/setup-toolkit-core.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
   'repo/scripts/toolkit-local-bridge.cjs',
@@ -780,7 +786,7 @@ function usage() {
   ].join('\n');
 }
 
-async function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2), dependencies = {}) {
   let options;
   try {
     options = parseArgs(argv);
@@ -800,7 +806,7 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
-  const resolved = resolveCodexCommand(options.codexCommand);
+  const resolved = (dependencies.resolveCodexCommand || resolveCodexCommand)(options.codexCommand);
   if (!resolved.command) {
     console.error('FAIL: local Codex plugin install is unsupported in this environment.');
     console.error('No usable Codex CLI with plugin marketplace commands was found; setup toolkit cannot complete native plugin activation.');
@@ -919,6 +925,8 @@ module.exports = {
   validateRepoPluginSource,
   verifyInstalledCacheFreshness,
   verifySessionStartHook,
+  formatWindowsAliasFailure,
   isWindowsAppsAliasAccessDenied,
-  windowsAliasCliCandidate
+  windowsAliasCliCandidate,
+  main
 };

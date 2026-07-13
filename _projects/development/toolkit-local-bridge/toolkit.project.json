@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.3.37",
+  "version": "2.4.3",
   "version_policy": "semver",
-  "version_notes": "Eliminates destination-clobber races by preserving every blocked displaced generation as evidence instead of renaming it back over the main lock, so a concurrently created intruder remains untouched. Artifact cleanup now deletes only exact Toolkit recovery-claim and displaced-evidence retirement tombstone filenames, preserving unrelated similarly suffixed files and directories.",
+  "version_notes": "Makes final bridge audit precede Codex config commitment and hardens atomic rollback and missing-file restore races.",
   "outputs": [
     {
       "kind": "curated",

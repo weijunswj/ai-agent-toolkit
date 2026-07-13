@@ -22,6 +22,15 @@ If instructions conflict, follow the higher-priority source and report material 
 - Execute mode: for clear local tasks, inspect relevant files, make the narrow change, validate, and report.
 - Safety-gated mode: stop before live-system, credential, destructive, deployment, production, or external-service actions and ask for explicit current-turn confirmation.
 
+## Single-Agent Default
+
+Complete ordinary work with the root agent alone: setup and updates, reading instructions or playbooks, repository orientation, documentation inspection, narrow implementation, routine tests, formatting, linting, validation, version alignment, small reviews, plans, summaries, and verification the root agent can perform directly. A broad task still begins with root-agent scoping.
+`setup toolkit` is a routine interactive setup operation without spawning subagents.
+Before delegation, state: The exact bounded responsibility being delegated; Why the root agent cannot perform it efficiently itself; The material correctness, safety, or critical-path wall-clock benefit; The files, evidence, or subsystem the subagent owns; How duplicate exploration and duplicated context loading will be avoided; Why sequential root-agent execution is insufficient.
+If any item is missing, delegation is prohibited. Generic parallelism, a second opinion, documentation inspection, routine test or validation execution, independent verification, several task steps, subagent availability, or an unsupported claim that delegation will save time are not sufficient reasons.
+Delegate only genuinely separable work such as a bounded specialist security review; prefer one direct specialist, do not have agents inspect the same files, and do not delegate planning, implementation, or validation redundantly. Subagents must not recursively delegate by default.
+When supported, default `fork_turns="none"`; brief only required files, evidence, constraints, and acceptance criteria. Positive bounded inheritance needs specific dialogue; `fork_turns="all"` needs exceptional explicit justification. Do not claim unsupported hosts support it.
+
 ## Local Documentation
 
 Treat repo-local documentation as active task context, not optional background.
@@ -47,19 +56,11 @@ For repo-wide/navigation-heavy tasks, read an existing repo map or docs index be
 
 ## Managed Memory
 
-If root `MEMORY.md` exists, read it before planning or editing unless a local instruction file defines a more specific read order.
+Treat `MEMORY.md` as managed, non-authoritative project memory. Read it before planning or editing when it exists unless local rules say otherwise; use it only for compact durable repo-specific context.
 
-Treat `MEMORY.md` as managed, non-authoritative project memory. It is optional, usually absent, and reserved for compact durable repo-specific context future agents would otherwise rediscover repeatedly.
+Authoritative sources override it. Do not create `MEMORY.md` merely because it is absent. Use canonical docs, source, validation, repo maps, ADRs, or current-state docs instead. Never use memory as history, status, plans, handoffs, logs, or task tracking.
 
-`MEMORY.md` cannot override the user request, local instruction files, documented workflows, safety gates, source-of-truth docs, validation rules, generated-file rules, or code. If it conflicts with an authoritative source, ignore the memory entry and fix or remove it when appropriate.
-
-Do not create `MEMORY.md` merely because it is absent. Create or update it only when context is durable, compact, repeatedly useful, repo-specific, and not better placed in canonical docs, source files, validation, local instructions, repo maps, ADRs, changelogs, architecture, source-of-truth, or current-state docs.
-
-Prefer those canonical homes for most durable context. Do not use `MEMORY.md` as history, changelog, PR log, task log, TODO list, blocker list, plan, handoff log, completion report, audit dump, or status report.
-
-Never store secrets, credentials, tokens, private keys, `.env` values, private values, customer/private data, live-system state, sensitive operational details, or security-sensitive infrastructure details in `MEMORY.md`.
-
-When creating `MEMORY.md`, start it with a managed, non-authoritative project memory header. Keep it small. If useful context fits cleanly in existing canonical docs or a repo map, do not create memory.
+Never store secrets, credentials, tokens, private keys, `.env` values, private/customer data, live-system state, or sensitive operational details. New memory starts with a managed non-authoritative header and stays small.
 
 ## Safety Gates
 
@@ -102,13 +103,9 @@ After editing, run the smallest relevant validation first. If validation fails, 
 
 ## Documentation Closure
 
-Before claiming completion on broad docs/audit/planning/migration/readiness/cleanup/architecture/security/production-readiness/source-of-truth/repo-wide work, review docs created or materially touched.
+For broad docs/audit/planning/readiness/source-of-truth work, review material docs and merge durable findings into the smallest canonical home; do not create root-level status/report/plan files unless required.
 
-Merge durable findings into the smallest existing canonical docs instead of leaving duplicate temporary docs. Prefer existing repo conventions for current-state, architecture, source-of-truth, ADR, changelog, index, or repo-map homes. Do not create new root-level history/status/report/plan docs unless explicitly required.
-
-Use context-preserving compression, not blind deletion. Preserve durable decisions, current state, validation results, unresolved risks, source-of-truth links, ownership boundaries, generated-surface notes, and repo navigation hints. Compress or remove old progress chatter, superseded plans, stale blockers, duplicate audits, obsolete handoffs, and completion noise. Retire, delete, or archive temporary audit/status/plan/handoff/progress/completion docs when stale; do not leave duplicates just in case.
-
-Do not summarize away source/provenance/reference detail needed for auditability, licensing, provenance, validation, source-of-truth, security, or maintenance. If unsure whether a document still has durable value, retain it or merge durable parts first. Final reports for qualifying tasks must say whether docs were consolidated, retained, archived, deleted, or intentionally left unchanged.
+Use context-preserving compression, not blind deletion. Preserve durable decisions, validation, risks, provenance, source-of-truth links, ownership, and generated-surface notes; retire stale progress chatter or temporary handoffs. Do not summarize away auditability, licensing, provenance, validation, source-of-truth, security, or maintenance detail. Final reports say whether docs were consolidated, retained, archived, deleted, or unchanged.
 
 ## Generated Files
 
