@@ -2942,7 +2942,7 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
   assert.match(report.text, new RegExp(`Toolkit updated to commit: \`${updatedCommit}\``));
   assert.match(report.text, new RegExp(`Previous commit: \`${fixture.initialCommit}\``));
   assert.match(report.text, /Running bridge source: `codex-plugin`/);
-  assert.match(report.text, new RegExp(`Running bridge version: \`${expectedBridgeVersion.replace(/\./g, '\\.')}\``));
+  assert.equal(report.text.includes(`Running bridge version: \`${expectedBridgeVersion}\``), true);
   assert.match(report.text, /Recorded repo version:/);
   assert.match(report.text, /Recorded Codex plugin version:/);
   assert.match(report.text, /Recorded Claude plugin version:/);
