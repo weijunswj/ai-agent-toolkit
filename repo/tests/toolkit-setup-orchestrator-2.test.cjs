@@ -16,13 +16,13 @@ test('empty consolidated delegation answer means keep and performs no config wri
     timeout: 300000
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Codex delegation control:[\s\S]*recommended: keep[\s\S]*empty input: keep/);
-  assert.match(result.stdout, /Delegation enforcement status: kept/);
+  assert.match(result.stdout, /How many helper agents may Codex use at the same time\?:[\s\S]*recommended: keep[\s\S]*empty input: keep/);
+  assert.match(result.stdout, /Configuration changed this run: no/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), /--disable-codex-plugin-auto-refresh --write/);
 });
 
-test('existing exact integer values report configured without rewrite or backup', () => {
+test('user-owned V1 values conflict under V2 without rewrite or backup', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const configPath = codexConfig(root);
@@ -30,7 +30,7 @@ test('existing exact integer values report configured without rewrite or backup'
   writeFile(configPath, original.toString('utf8'));
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Delegation enforcement status: configured/);
+  assert.match(result.stdout, /Helper-capacity detail: User-owned legacy \[agents\] limits are present while MultiAgentV2 is effective/);
   assert.deepEqual(fs.readFileSync(configPath), original);
   assert.deepEqual(backupFiles(root), []);
 });
@@ -46,7 +46,7 @@ test('conflicting values remain untouched even after explicit limit approval', (
     '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-delegation-control', 'limit'
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Delegation enforcement status: conflicting/);
+  assert.match(result.stdout, /Helper-capacity detail: User-owned legacy \[agents\] limits are present while MultiAgentV2 is effective/);
   assert.deepEqual(fs.readFileSync(configPath), original);
   assert.deepEqual(backupFiles(root), []);
 });
@@ -70,7 +70,7 @@ test('pre-answered setup does not block on an unclosed stdin pipe', async () => 
     '--yes-recommended', '--skip-codex-plugin-auto-refresh'
   ], { env: isolatedHomeEnv(root) });
   assert.equal(result.code, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Delegation enforcement status: kept/);
+  assert.match(result.stdout, /Configuration changed this run: no/);
 });
 
 test('managed question-bank pause and safety blocker are never bypassed by active fallback', () => {
@@ -108,6 +108,6 @@ test('managed setup script can run from its own standard managed checkout', () =
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Managed checkout:[\s\S]*recommended: keep/);
-  assert.match(result.stdout, /Delegation enforcement status: kept/);
+  assert.match(result.stdout, /Configuration changed this run: no/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
 });

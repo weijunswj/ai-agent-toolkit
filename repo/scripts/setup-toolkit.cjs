@@ -11,7 +11,7 @@ if (require.main === module) {
   main()
     .then((code) => { process.exitCode = code; })
     .catch((error) => {
-      if (/Setup question bank requires|must be one of|requires a path answer/.test(error.message)) {
+      if (/Setup question bank requires|must be one of|requires a path answer|requires a helper-count answer|require the exact approval answer/.test(error.message)) {
         process.exitCode = core.SETUP_PAUSED_FOR_QUESTION_BANK;
         console.error(`SETUP PAUSED: ${error.message}`);
         console.error('Question bank pause is intentional. Ask the user for the missing setup answers; do not rerun with --yes-recommended unless the user explicitly requested recommended defaults.');

@@ -1,6 +1,11 @@
 'use strict';
 
-const { CODEX_DELEGATION_BEGIN, CODEX_DELEGATION_END } = require('./codex-delegation-common.cjs');
+const {
+  CODEX_DELEGATION_BEGIN,
+  CODEX_DELEGATION_END,
+  CODEX_HELPER_CAPACITY_BEGIN,
+  CODEX_HELPER_CAPACITY_END,
+} = require('./codex-delegation-common.cjs');
 
 function scanTomlLines(text) {
   const lines = [];
@@ -146,6 +151,8 @@ function structuralLayout(text) {
   const assignments = [];
   const beginMarkers = [];
   const endMarkers = [];
+  const helperBeginMarkers = [];
+  const helperEndMarkers = [];
   for (let index = 0; index < scanned.lines.length; index += 1) {
     const entry = scanned.lines[index];
     const rawWithoutEol = entry.eol ? entry.raw.slice(0, -entry.eol.length) : entry.raw;
@@ -161,10 +168,14 @@ function structuralLayout(text) {
     const outsideStringComment = entry.realComment === true && structural.trim() === '' && rawWithoutEol.trim().startsWith('#');
     if (outsideStringComment && rawWithoutEol.trim() === CODEX_DELEGATION_BEGIN) beginMarkers.push({ index, start, end });
     if (outsideStringComment && rawWithoutEol.trim() === CODEX_DELEGATION_END) endMarkers.push({ index, start, end });
+    if (outsideStringComment && rawWithoutEol.trim() === CODEX_HELPER_CAPACITY_BEGIN) helperBeginMarkers.push({ index, start, end });
+    if (outsideStringComment && rawWithoutEol.trim() === CODEX_HELPER_CAPACITY_END) helperEndMarkers.push({ index, start, end });
     offset = end;
   }
   const agentsTables = tables.filter((entry) => entry.kind === 'table' && entry.name === 'agents');
   const agentsChildren = tables.filter((entry) => entry.name.startsWith('agents.'));
+  const multiAgentV2Tables = tables.filter((entry) => entry.kind === 'table' && entry.name === 'features.multi_agent_v2');
+  const multiAgentV2Children = tables.filter((entry) => entry.name.startsWith('features.multi_agent_v2.'));
   const unsupportedAssignments = assignments.filter((entry) => {
     const normalized = entry.key.replace(/\s+/g, '');
     return normalized === 'agents' || normalized.startsWith('agents.');
@@ -179,6 +190,10 @@ function structuralLayout(text) {
     unsupportedAssignments,
     beginMarkers,
     endMarkers,
+    helperBeginMarkers,
+    helperEndMarkers,
+    multiAgentV2Tables,
+    multiAgentV2Children,
   };
 }
 

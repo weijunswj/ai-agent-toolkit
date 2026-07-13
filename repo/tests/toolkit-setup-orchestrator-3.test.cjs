@@ -32,7 +32,7 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
     '--yes-recommended', '--claude-plugin-behavior', 'instructions', '--skip-update-report-open'
   ], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Delegation enforcement status: unsupported/);
+  assert.match(result.stdout, /Helper-capacity detail: Host-level delegation enforcement is unsupported/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
@@ -57,7 +57,7 @@ test('target keep, skip, enable-sync, and disable remain distinct', () => {
   assert.match(second.stdout, /AG2 action this run: kept/);
 });
 
-test('setup docs require explicit opt-in and pending-UAT disclosure', () => {
+test('setup docs require explicit V2 opt-in and honest enforcement disclosure', () => {
   const docs = [
     '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md',
     'skills/toolkit-setup/SKILL.md',
@@ -69,10 +69,11 @@ test('setup docs require explicit opt-in and pending-UAT disclosure', () => {
     assert.match(text, /setup toolkit/i, relPath);
     assert.match(text, /root agent alone|root-agent work|handled by the root agent alone|routine setup on the root agent/i, relPath);
     assert.match(text, /must not spawn subagents|do not spawn subagents/i, relPath);
-    assert.match(text, /max_threads = 1|agents\.max_threads = 1/i, relPath);
-    assert.match(text, /max_depth = 1|agents\.max_depth = 1/i, relPath);
-    assert.match(text, /explicit.*limit|only.*limit.*write|opt-in/i, relPath);
-    assert.match(text, /Codex Security[\s\S]{0,240}(unverified|pending.*UAT)|pending.*UAT[\s\S]{0,240}Codex Security/i, relPath);
+    assert.match(text, /MultiAgentV2|multi_agent_v2/i, relPath);
+    assert.match(text, /one helper|helper capacity/i, relPath);
+    assert.match(text, /root counts|include(?:s|ing)? the root|root-inclusive/i, relPath);
+    assert.match(text, /policy-only|no native hard block/i, relPath);
+    assert.match(text, /Codex Security[\s\S]{0,400}(never raise|never raises|not raised automatically|no documented)/i, relPath);
     assert.doesNotMatch(text, /compatible with Codex Security|Codex Security compatible/i, relPath);
   }
   const bridge = fs.readFileSync(path.join(repoRoot, 'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');

@@ -28,7 +28,7 @@ test('Claude Code plan stays portable-policy-only and never emits Codex config w
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
   assert.equal(plan.host, 'claude-code');
-  assert.equal(plan.preferences.delegation_control, 'unsupported-policy-only');
+  assert.equal(plan.preferences.helper_capacity, 'unsupported-policy-only');
   assert.doesNotMatch(plan.steps.flatMap((step) => step.commands || []).join('\n'), /agents\.max_threads|agents\.max_depth/);
 });
 
@@ -38,14 +38,14 @@ test('plain and JSON plans share the keep recommendation and canonical Codex que
   const json = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
   assert.equal(plain.status, 0, plain.stderr);
   assert.equal(json.status, 0, json.stderr);
-  assert.match(plain.stdout, /Codex delegation control:[\s\S]*recommended: keep[\s\S]*empty input: keep[\s\S]*selected: keep/);
+  assert.match(plain.stdout, /How many helper agents may Codex use at the same time\?:[\s\S]*recommended: keep[\s\S]*empty input: keep[\s\S]*selected: keep/);
   const plan = JSON.parse(json.stdout);
-  const delegationRow = plan.question_bank.find((row) => row.key === 'codexDelegationControl');
+  const delegationRow = plan.question_bank.find((row) => row.key === 'codexHelperCapacity');
   assert.deepEqual(
     { recommended: delegationRow.recommended, empty_input: delegationRow.empty_input, selected: delegationRow.selected },
     { recommended: 'keep', empty_input: 'keep', selected: 'keep' }
   );
-  assert.equal(plan.preferences.delegation_control, 'keep');
+  assert.equal(plan.preferences.helper_capacity, 'keep');
 });
 
 test('canonical question specification orders delegation before plugin auto-refresh for TTY and stdin', () => {
@@ -57,21 +57,21 @@ test('canonical question specification orders delegation before plugin auto-refr
     nativePlugin: { status: 'not checked' },
   };
   const keys = core.setupQuestionSpecs(args, current).map((spec) => spec.key);
-  assert.ok(keys.indexOf('codexDelegationControl') < keys.indexOf('codexPluginAutoRefresh'));
+  assert.ok(keys.indexOf('codexHelperCapacity') < keys.indexOf('codexPluginAutoRefresh'));
   assert.deepEqual(keys, [
     'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportOpen', 'updateReportRetention',
-    'codexDelegationControl', 'codexPluginAutoRefresh', 'opencodeTarget', 'ag2Target',
+    'codexHelperCapacity', 'codexPluginAutoRefresh', 'opencodeTarget', 'ag2Target',
   ]);
 });
 
-test('--yes-recommended keeps an unconfigured Codex config unchanged pending native UAT', () => {
+test('--yes-recommended keeps an unconfigured Codex config unchanged', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Codex delegation control:[\s\S]*recommended: keep[\s\S]*selected: keep/);
-  assert.match(result.stdout, /Delegation enforcement status: kept/);
-  assert.match(result.stdout, /Delegation native UAT: pending/);
+  assert.match(result.stdout, /How many helper agents may Codex use at the same time\?:[\s\S]*recommended: keep[\s\S]*selected: keep/);
+  assert.match(result.stdout, /Codex helper-agent runtime: MultiAgentV2/);
+  assert.match(result.stdout, /Configuration changed this run: no/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   assert.deepEqual(backupFiles(root), []);
 });
@@ -89,14 +89,14 @@ test('explicit limit previews path and block, creates backup, and writes only af
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, new RegExp(`Codex config path: ${escapeRegExp(configPath)}`));
-  assert.match(result.stdout, /Proposed Toolkit-managed TOML block:[\s\S]*max_threads = 1[\s\S]*max_depth = 1/);
+  assert.match(result.stdout, /Proposed Toolkit-managed TOML block:[\s\S]*max_concurrent_threads_per_session = 2[\s\S]*root_agent_usage_hint_text/);
   assert.match(result.stdout, /Codex backup directory:/);
-  assert.match(result.stdout, /Delegation enforcement status: configured/);
-  assert.match(result.stdout, /Delegation backup metadata:/);
-  assert.match(result.stdout, /Delegation exact restore command:/);
+  assert.match(result.stdout, /Normal helper capacity: 1 helper agent; 2 total session threads including the main agent/);
+  assert.match(result.stdout, /Exact backup metadata:/);
+  assert.match(result.stdout, /Exact restore command \(PowerShell\):/);
   const configured = fs.readFileSync(configPath, 'utf8');
   assert.ok(configured.startsWith(original.toString('utf8')));
-  assert.match(configured, /\[agents\]\r?\n# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1\r?\nmax_threads = 1\r?\nmax_depth = 1\r?\n# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS/);
+  assert.match(configured, /\[features\.multi_agent_v2\]\r?\n# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v2\r?\nmax_concurrent_threads_per_session = 2/);
   assert.ok(backupFiles(root).length > 0);
 });
 
@@ -110,16 +110,16 @@ test('distinct piped answers follow the canonical question order without shifts'
     '--codex-cli', createFakeCodexAppServer(root),
   ], {
     env: isolatedHomeEnv(root),
-    input: ['disable', 'enable', 'disable', 'default', 'limit', 'keep', 'skip', 'disable'].join('\n'),
+    input: ['disable', 'enable', 'disable', 'default', 'ram-safe', 'keep', 'skip', 'disable'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*Codex delegation control: limit[\s\S]*Codex plugin cache auto-refresh and Windows hook repair: keep[\s\S]*OpenCode bridge target: skip[\s\S]*AG2\/Antigravity bridge target: disable/);
+  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*How many helper agents may Codex use at the same time\?: ram-safe[\s\S]*Codex plugin cache auto-refresh and Windows hook repair: keep[\s\S]*OpenCode bridge target: skip[\s\S]*AG2\/Antigravity bridge target: disable/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
   assert.match(result.stdout, /Question answers prompted interactively: no/);
   assert.match(result.stdout, /Question bank stopped for answers: no/);
-  assert.match(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS/);
+  assert.match(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY/);
   const bridgeArgs = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeArgs, /--disable-repo-auto-update/);
   assert.match(bridgeArgs, /--enable-update-reports --update-report-retention-days 7 --disable-update-report-open --write/);
@@ -175,4 +175,29 @@ test('final bridge audit failure occurs before delegation config commitment', ()
   assert.match(result.stderr, /Final bridge audit did not return valid JSON/);
   assert.deepEqual(fs.readFileSync(configPath), original);
   assert.deepEqual(backupFiles(root), []);
+});
+
+test('custom helper counts above one require separate RAM-risk approval', () => {
+  const blockedRoot = tmpRoot();
+  const blockedRepo = createGitBackedSetupRepo(blockedRoot);
+  const blocked = run([
+    '--execute', '--repo-root', blockedRepo.setupRepo, '--repo-remote', blockedRepo.origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-count', '2',
+  ], { env: isolatedHomeEnv(blockedRoot), timeout: 300000 });
+  assert.equal(blocked.status, 23, blocked.stderr || blocked.stdout);
+  assert.match(`${blocked.stdout}\n${blocked.stderr}`, /More than one helper may exhaust RAM|require the exact approval answer/);
+  assert.equal(fs.existsSync(codexConfig(blockedRoot)), false);
+  assert.deepEqual(backupFiles(blockedRoot), []);
+
+  const approvedRoot = tmpRoot();
+  const approvedRepo = createGitBackedSetupRepo(approvedRoot);
+  const approved = run([
+    '--execute', '--repo-root', approvedRepo.setupRepo, '--repo-remote', approvedRepo.origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-count', '2',
+    '--approve-high-helper-capacity', '--codex-cli', createFakeCodexAppServer(approvedRoot),
+  ], { env: isolatedHomeEnv(approvedRoot), timeout: 300000 });
+  assert.equal(approved.status, 0, approved.stderr || approved.stdout);
+  assert.match(approved.stdout, /RAM-risk approval for more than one helper: approved/);
+  assert.match(approved.stdout, /Normal helper capacity: 2 helper agents; 3 total session threads including the main agent/);
+  assert.match(fs.readFileSync(codexConfig(approvedRoot), 'utf8'), /max_concurrent_threads_per_session = 3/);
 });

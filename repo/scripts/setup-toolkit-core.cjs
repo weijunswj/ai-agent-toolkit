@@ -11,8 +11,8 @@ const delegation = require('./codex-delegation-config.cjs');
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
-const { CODEX_AGENT_MAX_THREADS, CODEX_AGENT_MAX_DEPTH, RESTORE_FLAG } = delegation;
-const CODEX_CONFIG_CLIENT_SCOPE = 'Codex user config; official docs explicitly confirm CLI and IDE layers, while desktop app TOML consumption is not separately documented';
+const { CODEX_AGENT_MAX_THREADS, CODEX_AGENT_MAX_DEPTH, CODEX_V2_RAM_SAFE_HELPERS, RUNTIMES, RESTORE_FLAG } = delegation;
+const CODEX_CONFIG_CLIENT_SCOPE = 'Codex effective runtime inspected through app-server experimentalFeature/list; writes target only the Codex user config';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
 const SUPPORTED_HOSTS = ['codex', 'claude-code'];
 const SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL = 20;
@@ -83,6 +83,12 @@ function parsePositiveInteger(value, flagName) {
   return number;
 }
 
+function parseNonNegativeInteger(value, flagName) {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0) throw new Error(`${flagName} requires a non-negative integer`);
+  return number;
+}
+
 function emptySetupChoices() {
   return {
     managedCheckout: '',
@@ -91,7 +97,7 @@ function emptySetupChoices() {
     updateReportOpen: '',
     updateReportRetention: '',
     codexPluginAutoRefresh: '',
-    codexDelegationControl: '',
+    codexHelperCapacity: '',
     claudePluginBehavior: '',
     targets: {
       opencode: '',
@@ -131,6 +137,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     skipTargets: [],
     keepTargets: [],
     yesRecommended: false,
+    codexHelperCount: null,
+    approveHighHelperCapacity: false,
+    codexRuntime: RUNTIMES.UNKNOWN,
     setupChoices: emptySetupChoices()
   };
 
@@ -181,14 +190,27 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--verify-claude-plugin') args.verifyClaudePlugin = true;
     else if (arg === '--yes-recommended') args.yesRecommended = true;
-    else if (arg === '--codex-delegation-control') {
+    else if (arg === '--codex-helper-capacity') {
       const choice = next().toLowerCase();
-      if (!['keep', 'limit', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-delegation-control choice: ${choice}`);
-      args.setupChoices.codexDelegationControl = choice;
-    } else if (arg.startsWith('--codex-delegation-control=')) {
-      const choice = arg.slice('--codex-delegation-control='.length).toLowerCase();
-      if (!['keep', 'limit', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-delegation-control choice: ${choice}`);
-      args.setupChoices.codexDelegationControl = choice;
+      if (!['keep', 'ram-safe', 'custom', 'remove', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      args.setupChoices.codexHelperCapacity = choice;
+    } else if (arg === '--codex-delegation-control') {
+      const legacyChoice = String(argv[++index] || '').toLowerCase();
+      const choice = { limit: 'ram-safe', keep: 'keep', skip: 'skip' }[legacyChoice];
+      if (!choice) throw new Error(`Unsupported --codex-delegation-control choice: ${legacyChoice}`);
+      args.setupChoices.codexHelperCapacity = choice;
+    } else if (arg.startsWith('--codex-helper-capacity=')) {
+      const choice = arg.slice('--codex-helper-capacity='.length).toLowerCase();
+      if (!['keep', 'ram-safe', 'custom', 'remove', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      args.setupChoices.codexHelperCapacity = choice;
+    } else if (arg === '--codex-helper-count') {
+      args.codexHelperCount = parseNonNegativeInteger(next(), arg);
+      args.setupChoices.codexHelperCapacity = 'custom';
+    } else if (arg.startsWith('--codex-helper-count=')) {
+      args.codexHelperCount = parseNonNegativeInteger(arg.slice('--codex-helper-count='.length), '--codex-helper-count');
+      args.setupChoices.codexHelperCapacity = 'custom';
+    } else if (arg === '--approve-high-helper-capacity') {
+      args.approveHighHelperCapacity = true;
     }
     else if (arg === '--write-repo-auto-update' || arg === '--enable-repo-auto-update') {
       args.repoAutoUpdate = true;
@@ -312,9 +334,12 @@ function preferenceSummary(options) {
     host_native_plugin_cache_auto_refresh: options.host === 'codex'
       ? (choices.codexPluginAutoRefresh || 'question-required')
       : 'manual-verification-only',
-    delegation_control: options.host === 'codex'
-      ? (choices.codexDelegationControl || 'question-required')
+    helper_capacity: options.host === 'codex'
+      ? (choices.codexHelperCapacity || 'question-required')
       : 'unsupported-policy-only',
+    helper_count: options.host === 'codex' && choices.codexHelperCapacity === 'custom'
+      ? options.codexHelperCount
+      : (options.host === 'codex' && choices.codexHelperCapacity === 'ram-safe' ? CODEX_V2_RAM_SAFE_HELPERS : 'unchanged'),
     write_meaningful_update_reports: choices.updateReports || 'question-required',
     open_update_reports_automatically: choices.updateReportOpen || 'question-required',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
@@ -371,6 +396,14 @@ function setupPlan(options = {}) {
   return {
     name: 'setup toolkit',
     host,
+    codex_helper_runtime: host === 'codex' ? (options.codexRuntime || RUNTIMES.UNKNOWN) : 'not-applicable',
+    codex_helper_policy: host === 'codex' ? {
+      routine: 'main agent only by default',
+      ram_safe_helpers: CODEX_V2_RAM_SAFE_HELPERS,
+      v2_total_threads: CODEX_V2_RAM_SAFE_HELPERS + 1,
+      recursive_delegation: 'prohibited by policy; hard enforcement depends on detected runtime',
+      security_capacity: 'no automatic elevation',
+    } : { routine: 'portable policy only' },
     default_mode: 'plan-only; use --execute --auto-main or --execute --profile auto-main to run',
     managed_source: {
       required: true,
@@ -469,10 +502,10 @@ function setupPlan(options = {}) {
       {
         id: 'host_delegation_control',
         title: host === 'codex'
-          ? 'Apply explicitly approved Codex limits as the final fallible setup operation'
+          ? 'Apply the selected Codex helper-agent capacity as the final fallible setup operation'
           : 'Report host-level delegation enforcement as unsupported; portable policy still applies',
-        commands: host === 'codex' && choices.codexDelegationControl === 'limit'
-          ? [`manage only agents.max_threads=${CODEX_AGENT_MAX_THREADS} and agents.max_depth=${CODEX_AGENT_MAX_DEPTH} in ${delegation.codexConfigPath()}`]
+        commands: host === 'codex' && ['ram-safe', 'custom', 'remove'].includes(choices.codexHelperCapacity)
+          ? [`manage only the Toolkit-owned ${options.codexRuntime || RUNTIMES.UNKNOWN} helper-capacity block in ${delegation.codexConfigPath()}`]
           : []
       },
       {
@@ -510,8 +543,12 @@ function printHelp() {
     '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
-    '  --codex-delegation-control keep|limit|skip',
-    '                               Codex only; preserve, apply one direct specialist/no recursion, or skip host enforcement',
+    '  --codex-helper-capacity keep|ram-safe|custom|remove|skip',
+    '                               Codex only; preserve current state, allow one helper, set an advanced custom count, remove Toolkit ownership, or skip',
+    '  --codex-helper-count <count>',
+    '                               number of helpers, not total agents; the main agent counts as one additional V2 session thread',
+    '  --approve-high-helper-capacity',
+    '                               explicit RAM-risk approval required when custom helper count is above one',
     '  --managed-checkout keep|default|custom',
     '                               choose the managed checkout answer non-interactively',
     '  --enable-repo-auto-update   enable repo-backed auto-update from the managed checkout',
@@ -791,8 +828,11 @@ function inspectClaudeNativePluginState(args) {
 
 function printDelegationPreview(preview) {
   console.log('');
-  console.log('# Codex delegation config preview');
+  console.log('# Codex helper-agent config preview');
   console.log(`Codex config path: ${preview.config_path}`);
+  console.log(`Effective runtime: ${preview.runtime}`);
+  console.log(`Requested helper agents: ${preview.helper_count}`);
+  if (preview.total_threads != null) console.log(`Total session threads including the main agent: ${preview.total_threads}`);
   console.log('Proposed Toolkit-managed TOML block:');
   console.log('```toml');
   console.log(preview.proposed_block);
@@ -805,24 +845,35 @@ async function applyHostDelegationControl(args, current) {
   if (args.host !== 'codex') {
     return { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable', changed: false };
   }
-  const choice = args.setupChoices.codexDelegationControl;
+  const choice = args.setupChoices.codexHelperCapacity;
   const configPath = current.delegation.config_path || delegation.codexConfigPath();
-  if (choice !== 'limit') return delegation.delegationResultForChoice(choice, configPath);
-  const preview = delegation.previewCodexDelegation(configPath);
-  if (preview.status === 'preview') printDelegationPreview(preview);
-  return delegation.delegationResultForChoice('limit', configPath, {
+  const options = {
+    runtime: current.runtime.runtime,
+    helperCount: choice === 'ram-safe' ? CODEX_V2_RAM_SAFE_HELPERS : args.codexHelperCount,
     codexCommand: args.codexCli,
     codexHome: delegation.defaultCodexHome(),
-  });
+  };
+  if (!['ram-safe', 'custom'].includes(choice)) return delegation.delegationResultForChoice(choice, configPath, options);
+  const preview = delegation.previewCodexDelegation(configPath, options);
+  if (preview.status === 'preview') printDelegationPreview(preview);
+  return delegation.delegationResultForChoice(choice, configPath, options);
 }
 
-function collectCurrentState(args) {
+async function collectCurrentState(args) {
   const audit = runBridgeAuditReadOnly(args);
+  const runtime = args.host === 'codex'
+    ? await delegation.inspectCodexMultiAgentRuntime({
+        codexCommand: args.codexCli,
+        codexHome: delegation.defaultCodexHome(),
+        cwd: repoRootFromScript(),
+      })
+    : { runtime: RUNTIMES.UNKNOWN, detector: 'not applicable', detail: 'Codex runtime detection is not applicable to this host.' };
   return {
     audit,
+    runtime,
     managed: inspectManagedCheckout(args, audit),
     delegation: args.host === 'codex'
-      ? delegation.inspectCodexDelegationConfig()
+      ? delegation.inspectCodexDelegationConfig(delegation.codexConfigPath(), runtime.runtime)
       : { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable' },
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginState(args)
@@ -880,7 +931,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'updateReportOpen') return 'keep';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
-  if (key === 'codexDelegationControl') return 'keep';
+  if (key === 'codexHelperCapacity') return 'keep';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode || 'keep';
   if (key === 'ag2Target') return args.setupChoices.targets.ag2 || 'keep';
@@ -938,13 +989,21 @@ function setupQuestionSpecs(args, current) {
 
   if (args.host === 'codex') {
     specs.push({
-      key: 'codexDelegationControl',
-      title: 'Codex delegation control',
-      prompt: 'Codex delegation control choice',
-      choices: ['keep', 'limit', 'skip'],
-      recommended: recommendedChoice('codexDelegationControl', current, args),
-      selected: args.setupChoices.codexDelegationControl,
-      current: `${current.delegation.status}; ${current.delegation.detail}`
+      key: 'codexHelperCapacity',
+      title: 'How many helper agents may Codex use at the same time?',
+      prompt: 'Codex helper-agent capacity choice',
+      choices: ['keep', 'ram-safe', 'custom', 'remove', 'skip'],
+      choice_help: [
+        'keep = Keep my current setting (safe default for existing installations)',
+        'ram-safe = RAM-safe mode: allow one helper',
+        'custom = Custom helper count (advanced)',
+        'remove = Remove the Toolkit-managed helper capacity',
+        'skip = Skip for now',
+      ],
+      explanation: 'Codex itself is the main agent. Helper agents use extra memory. More than one helper may slow or freeze lower-memory PCs. In MultiAgentV2 the main agent counts as one total session thread.',
+      recommended: recommendedChoice('codexHelperCapacity', current, args),
+      selected: args.setupChoices.codexHelperCapacity,
+      current: `${current.runtime?.runtime || RUNTIMES.UNKNOWN}; ${current.delegation.status}; ${current.delegation.detail}`
     });
     specs.push({
       key: 'codexPluginAutoRefresh',
@@ -1019,6 +1078,8 @@ function printQuestionRows(specs) {
     console.log(`- recommended: ${spec.recommended}`);
     console.log(`- empty input: ${spec.empty_input || spec.recommended} (recommended)`);
     console.log(`- choices: ${spec.choices.join(' / ')}`);
+    if (spec.explanation) console.log(`- explanation: ${spec.explanation}`);
+    for (const help of spec.choice_help || []) console.log(`- ${help}`);
     console.log(`- selected: ${selected}`);
     console.log('');
   }
@@ -1050,7 +1111,7 @@ function assignChoice(args, key, choice) {
   else if (key === 'updateReportOpen') args.setupChoices.updateReportOpen = choice;
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
-  else if (key === 'codexDelegationControl') args.setupChoices.codexDelegationControl = choice;
+  else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
   else if (key === 'opencodeTarget') args.setupChoices.targets.opencode = choice;
   else if (key === 'ag2Target') args.setupChoices.targets.ag2 = choice;
@@ -1063,7 +1124,7 @@ function choiceForKey(args, key) {
   if (key === 'updateReportOpen') return args.setupChoices.updateReportOpen;
   if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
-  if (key === 'codexDelegationControl') return args.setupChoices.codexDelegationControl;
+  if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode;
   if (key === 'ag2Target') return args.setupChoices.targets.ag2;
@@ -1102,6 +1163,35 @@ async function promptForCustomPath(lines, rl) {
   }
 }
 
+async function promptForHelperCount(lines, rl) {
+  if (lines) {
+    const value = nextNonEmptyLine(lines);
+    if (!value) throw new Error('Custom Codex helper capacity requires a helper-count answer');
+    return parseNonNegativeInteger(value, 'Custom Codex helper count');
+  }
+  for (;;) {
+    const answer = (await rl.question('How many helper agents may Codex use at the same time? Enter a non-negative integer: ')).trim();
+    try {
+      return parseNonNegativeInteger(answer, 'Custom Codex helper count');
+    } catch (error) {
+      console.log(error.message);
+    }
+  }
+}
+
+async function requireHighHelperCapacityApproval(args, lines, rl) {
+  if (args.codexHelperCount <= 1 || args.approveHighHelperCapacity) return;
+  console.log('WARNING: More than one helper may exhaust RAM, slow or freeze this PC, and stop useful work.');
+  if (lines) {
+    const answer = nextNonEmptyLine(lines).toLowerCase();
+    if (answer !== 'approve') throw new Error('Custom helper counts above one require the exact approval answer `approve`');
+  } else {
+    const answer = (await rl.question('Type approve to accept the RAM risk for this persistent capacity change: ')).trim().toLowerCase();
+    if (answer !== 'approve') throw new Error('Custom helper counts above one require the exact approval answer `approve`');
+  }
+  args.approveHighHelperCapacity = true;
+}
+
 async function answerSetupQuestionBank(args, current) {
   const initialSpecs = setupQuestionSpecs(args, current);
   const initialMissingCount = initialSpecs.filter((spec) => !choiceForKey(args, spec.key)).length;
@@ -1118,7 +1208,10 @@ async function answerSetupQuestionBank(args, current) {
   let specs = setupQuestionSpecs(args, current);
   let missing = specs.filter((spec) => !choiceForKey(args, spec.key));
   const needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
-  const needsPromptedAnswers = missing.length > 0 || needsCustomPath;
+  const helperChoiceInitiallyMissing = initialSpecs.some((spec) => spec.key === 'codexHelperCapacity' && !spec.selected);
+  const needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
+    && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
+  const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails;
   const lines = needsPromptedAnswers && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
 
   // Complete full piped banks before displaying them so every row reports its
@@ -1131,7 +1224,6 @@ async function answerSetupQuestionBank(args, current) {
     }
     specs = setupQuestionSpecs(args, current);
     missing = [];
-    completeStdinConsumed = true;
   }
 
   printSetupQuestionBank(args, current, specs);
@@ -1144,7 +1236,7 @@ async function answerSetupQuestionBank(args, current) {
     console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
   }
 
-  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath;
+  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || helperChoiceInitiallyMissing;
   const rl = remainingPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
     for (const spec of missing) {
@@ -1153,6 +1245,10 @@ async function answerSetupQuestionBank(args, current) {
         throw new Error(`${spec.title} must be one of: ${spec.choices.join(', ')}`);
       }
       assignChoice(args, spec.key, answer);
+    }
+    if (args.setupChoices.codexHelperCapacity === 'custom') {
+      if (args.codexHelperCount === null) args.codexHelperCount = await promptForHelperCount(lines, rl);
+      await requireHighHelperCapacityApproval(args, lines, rl);
     }
     if (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit) {
       args.repoRoot = await promptForCustomPath(lines, rl);
@@ -1165,14 +1261,20 @@ async function answerSetupQuestionBank(args, current) {
   if (lines && lines.some((line) => String(line).trim())) {
     throw new Error('Setup question bank received unexpected extra non-empty input.');
   }
+  if (lines) completeStdinConsumed = true;
 
   applySetupChoices(args, current);
   console.log('');
   console.log('Setup choices confirmed before writes:');
   for (const spec of setupQuestionSpecs(args, current)) console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
+  if (args.setupChoices.codexHelperCapacity === 'custom') {
+    console.log(`- Custom Codex helper count: ${args.codexHelperCount}`);
+    console.log(`- Total MultiAgentV2 session threads including the main agent: ${args.codexHelperCount + 1}`);
+    console.log(`- RAM-risk approval for more than one helper: ${args.codexHelperCount > 1 ? (args.approveHighHelperCapacity ? 'approved' : 'missing') : 'not required'}`);
+  }
   return {
     appeared: true,
-    answers_initially_required: initialMissingCount > 0 || needsCustomPath,
+    answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsHelperDetails,
     answers_supplied_by_complete_stdin: completeStdinConsumed,
     answers_prompted_interactively: Boolean(rl),
     stopped_for_answers: false,
@@ -1790,17 +1892,36 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log('Preference/target writes before answers: no');
   console.log('');
-  console.log('## Delegation control');
-  console.log(`Delegation enforcement status: ${unknown(delegation.status)}`);
-  console.log(`Delegation config path: ${unknown(delegation.config_path)}`);
-  console.log(`Direct specialist limit: ${delegation.status === 'configured' ? CODEX_AGENT_MAX_THREADS : 'not enforced'}`);
-  console.log(`Subagent depth limit: ${delegation.status === 'configured' ? CODEX_AGENT_MAX_DEPTH : 'not enforced'}`);
-  console.log(`Delegation config changed this run: ${yesNo(delegation.changed === true)}`);
-  console.log(`Delegation client scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);
-  console.log('Delegation native UAT: pending for Codex native host behavior and Codex Security ordinary/deep workflows');
-  console.log(`Delegation detail: ${unknown(delegation.detail)}`);
-  if (delegation.backup_metadata_path) console.log(`Delegation backup metadata: ${delegation.backup_metadata_path}`);
-  if (delegation.restore_command) console.log(`Delegation exact restore command: ${delegation.restore_command}`);
+  console.log('## Codex helper agents');
+  console.log(`Codex helper-agent runtime: ${unknown(current?.runtime?.runtime || delegation.runtime)}`);
+  console.log(`Runtime detection: ${unknown(current?.runtime?.detector)}`);
+  console.log(`Normal helper capacity: ${Number.isSafeInteger(delegation.helper_count)
+    ? `${delegation.helper_count} helper agent${delegation.helper_count === 1 ? '' : 's'}; ${delegation.total_threads || delegation.helper_count + 1} total session threads including the main agent (the root counts toward the total)`
+    : 'unchanged or not configured'}`);
+  console.log('Routine policy: Main agent only by default');
+  console.log('Helper use for speed alone: Not allowed by Toolkit policy');
+  console.log('Helpers creating helpers: Prohibited by Toolkit policy');
+  console.log(`Hard nested-helper enforcement: ${unknown(delegation.hard_nested_helper_enforcement || 'unverified')}`);
+  const technicalSetting = delegation.runtime === RUNTIMES.V2 && Number.isSafeInteger(delegation.total_threads)
+    ? `features.multi_agent_v2.max_concurrent_threads_per_session = ${delegation.total_threads}`
+    : (delegation.runtime === RUNTIMES.V1 && Number.isSafeInteger(delegation.helper_count)
+        ? `agents.max_threads = ${delegation.helper_count}; agents.max_depth = 1`
+        : 'not changed');
+  console.log(`Technical setting: ${technicalSetting}`);
+  console.log(`Configuration changed this run: ${yesNo(delegation.changed === true)}`);
+  console.log(`PR #237 legacy block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
+  console.log(`Codex config path: ${unknown(delegation.config_path)}`);
+  console.log(`Configuration scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);
+  console.log(`Helper-capacity detail: ${unknown(delegation.detail)}`);
+  console.log(`Temporary editor cleanup: ${unknown(delegation.temporary_cleanup || 'no temporary editor directory created')}`);
+  if (delegation.backup_metadata_path) console.log(`Exact backup metadata: ${delegation.backup_metadata_path}`);
+  if (delegation.restore_commands?.powershell) console.log(`Exact restore command (PowerShell): ${delegation.restore_commands.powershell}`);
+  if (delegation.restore_commands?.posix) console.log(`Exact restore command (POSIX shell): ${delegation.restore_commands.posix}`);
+  console.log('');
+  console.log('## Codex Security capacity');
+  console.log('Security capacity behavior: normal global capacity is never raised automatically');
+  console.log('Isolated Security exception: unsupported by the currently documented Codex Security plugin and app-server interfaces');
+  console.log('If a selected Security workflow requires more workers, raising global capacity may exhaust RAM. Use a lower-capacity ordinary or sequential review, run Deep Scan on another machine, or explicitly make a temporary global increase with exact backup, restart, restoration, and another restart. A sequential custom review is not an official Deep Security Scan.');
   console.log('');
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
@@ -1815,7 +1936,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
     console.log(`Codex restart required: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status || 'verification-unavailable')}`);
     console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status || 'verification unavailable; open /hooks in Codex')}`);
-    console.log(`Codex hook trust action: ${unknown(nativeCache.hook_trust_action || 'Open /hooks in Codex')}`);
+    console.log(`Codex hook trust action: Open /hooks and verify the enabled Toolkit SessionStart hook belongs to the installed ai-agent-toolkit plugin at version ${unknown(nativeCache.installed_version || nativeCache.expected_version)}. ${unknown(nativeCache.hook_trust_action || '')}`);
   } else {
     console.log('Codex plugin status: not checked for this host');
     console.log('Codex plugin mutation: no');
@@ -1859,7 +1980,8 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
 }
 
 async function execute(args) {
-  const current = collectCurrentState(args);
+  const current = await collectCurrentState(args);
+  args.codexRuntime = current.runtime.runtime;
   const questionBank = await answerSetupQuestionBank(args, current);
   const plan = setupPlan(args);
   printSetupChecklist(plan);
@@ -1902,7 +2024,8 @@ async function main(argv = process.argv.slice(2)) {
   const delegatedCode = delegateToManagedSetupIfAvailable(args);
   if (delegatedCode !== null) return delegatedCode;
   if (args.plan) {
-    const current = collectCurrentState(args);
+    const current = await collectCurrentState(args);
+    args.codexRuntime = current.runtime.runtime;
     const planned = plannedQuestionBank(args, current);
     printPlan(setupPlan({ ...planned.args, questionBank: planned.specs }), args.json);
     return 0;
@@ -1916,7 +2039,7 @@ if (require.main === module) {
       process.exitCode = code;
     })
     .catch((error) => {
-      if (/Setup question bank requires|must be one of|requires a path answer/.test(error.message)) {
+      if (/Setup question bank requires|must be one of|requires a path answer|requires a helper-count answer|require the exact approval answer/.test(error.message)) {
         process.exitCode = SETUP_PAUSED_FOR_QUESTION_BANK;
         console.error(`SETUP PAUSED: ${error.message}`);
         console.error('Question bank pause is intentional. Ask the user for the missing setup answers; do not rerun with --yes-recommended unless the user explicitly requested recommended defaults.');
