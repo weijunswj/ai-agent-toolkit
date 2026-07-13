@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
@@ -11,8 +12,14 @@ const {
   CODEX_V2_RAM_SAFE_HELPERS,
   CODEX_DELEGATION_BEGIN,
   CODEX_DELEGATION_END,
+  CODEX_V2_ENABLEMENT_BEGIN,
+  CODEX_V2_ENABLEMENT_END,
   CODEX_HELPER_CAPACITY_BEGIN,
   CODEX_HELPER_CAPACITY_END,
+  CODEX_ROOT_GUIDANCE_BEGIN,
+  CODEX_ROOT_GUIDANCE_END,
+  CODEX_HELPER_GUIDANCE_BEGIN,
+  CODEX_HELPER_GUIDANCE_END,
   CODEX_V2_ROOT_GUIDANCE,
   CODEX_V2_HELPER_GUIDANCE,
   RESTORE_FLAG,
@@ -27,6 +34,7 @@ const { structuralLayout } = require('./codex-delegation-layout.cjs');
 const {
   RUNTIMES,
   tomlString,
+  managedAssignmentBlock,
   expectedLegacyBlock,
   expectedCodexDelegationBlock,
   expectedV2Block,
@@ -74,6 +82,8 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
     || state.status === 'enablement-migration-required'
     || (state.status === 'configured' && String(state.ownership || '').startsWith('toolkit-managed'));
   if (!configurable) return { ...state, changed: false };
+  const backupGenerationId = `planned-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
+  const backupMetadataPath = path.join(backupRoot(configPath), backupGenerationId, 'restore.json');
   return {
     ...state,
     status: 'preview',
@@ -81,7 +91,12 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
     helper_count: helperCount,
     total_threads: runtime === RUNTIMES.V2 ? helpersToTotalThreads(helperCount) : null,
     backup_root: backupRoot(configPath),
-    proposed_block: runtime === RUNTIMES.V2 ? expectedV2Block(helperCount, state.eol || '\n') : expectedLegacyBlock(helperCount, state.eol || '\n'),
+    backup_generation_id: backupGenerationId,
+    backup_metadata_path: backupMetadataPath,
+    restore_commands: restoreCommands(backupMetadataPath, options.setupScriptPath),
+    proposed_block: runtime === RUNTIMES.V2
+      ? expectedV2Block(helperCount, state.eol || '\n', { manageEnablement: !String(state.enablement_ownership || '').startsWith('user-owned') })
+      : expectedLegacyBlock(helperCount, state.eol || '\n'),
     proposed_action: 'isolated Codex app-server config/batchWrite with exact full-proposal delta validation',
     detail: runtime === RUNTIMES.V2
       ? `The proposal allows ${helperCount} helper(s) plus the main agent (${helpersToTotalThreads(helperCount)} total session threads).`
@@ -236,18 +251,24 @@ async function inspectCodexMultiAgentRuntime(options = {}) {
         closeTimeoutMs: options.closeTimeoutMs,
         forceExitTimeoutMs: options.forceExitTimeoutMs,
       });
-      const features = Array.isArray(result?.data) ? result.data : [];
-      const v2 = features.find((feature) => feature?.name === 'multi_agent_v2');
-      const v1 = features.find((feature) => feature?.name === 'multi_agent');
-      if (!v2 || !v1 || typeof v2.enabled !== 'boolean' || typeof v1.enabled !== 'boolean') {
-        throw new Error('experimentalFeature/list did not report both multi_agent_v2 and multi_agent');
+      if (!Array.isArray(result?.data)) throw new Error('experimentalFeature/list did not return a feature-row array');
+      const relevant = result.data.filter((feature) => feature?.name === 'multi_agent_v2' || feature?.name === 'multi_agent');
+      const rows = (name) => relevant.filter((feature) => feature.name === name);
+      const v2Rows = rows('multi_agent_v2');
+      const v1Rows = rows('multi_agent');
+      if (!v2Rows.length && !v1Rows.length) throw new Error('experimentalFeature/list reported no supported multi-agent feature row');
+      if (v2Rows.length > 1 || v1Rows.length > 1) throw new Error('experimentalFeature/list reported duplicate or contradictory multi-agent feature rows');
+      const v2 = v2Rows[0];
+      const v1 = v1Rows[0];
+      if ((v2 && typeof v2.enabled !== 'boolean') || (v1 && typeof v1.enabled !== 'boolean')) {
+        throw new Error('experimentalFeature/list reported a multi-agent feature without a boolean enabled value');
       }
-      const runtime = v2.enabled ? RUNTIMES.V2 : (v1.enabled ? RUNTIMES.V1 : RUNTIMES.DISABLED);
+      const runtime = v2?.enabled === true ? RUNTIMES.V2 : (v1?.enabled === true ? RUNTIMES.V1 : RUNTIMES.DISABLED);
       return {
         runtime,
         detector: `${command} app-server experimentalFeature/list`,
-        multi_agent_v2_enabled: v2.enabled,
-        multi_agent_v1_enabled: v1.enabled,
+        multi_agent_v2_enabled: v2 ? v2.enabled : null,
+        multi_agent_v1_enabled: v1 ? v1.enabled : null,
         detail: `${runtime} detected from effective app-server feature state.`,
       };
     } catch (error) {
@@ -371,13 +392,23 @@ function assertProposalTextDelta(originalBytes, proposalState, runtime, helperCo
   }
   const table = target.tables[0];
   const assignments = assignmentsInsideTable(proposalLayout, table, target.keys);
+  const originalAssignments = target.originalTables.length === 1
+    ? assignmentsInsideTable(originalLayout, target.originalTables[0], target.keys)
+    : [];
+  const originalByKey = new Map(originalAssignments.map((assignment) => [assignment.key, assignment]));
   if (assignments.length !== target.lines.length
-    || assignments.some((assignment, index) => assignment.key !== target.keys[index] || lineText(proposalLayout, assignment.index) !== target.lines[index])) {
+    || assignments.some((assignment, index) => {
+      if (assignment.key !== target.keys[index]) return true;
+      const original = originalByKey.get(assignment.key);
+      if (runtime === RUNTIMES.V2 && assignment.key === 'enabled' && original) {
+        return proposalState.text.slice(assignment.start, assignment.end) !== originalText.slice(original.start, original.end);
+      }
+      return lineText(proposalLayout, assignment.index) !== target.lines[index];
+    })) {
     throw new Error('Official Codex editor proposal does not contain exactly the approved helper-capacity assignments in canonical order.');
   }
 
   if (target.originalTables.length === 1) {
-    const originalAssignments = assignmentsInsideTable(originalLayout, target.originalTables[0], target.keys);
     const strippedProposal = removeSpans(proposalState.text, assignments);
     const strippedOriginal = removeSpans(originalText, originalAssignments);
     if (strippedProposal !== strippedOriginal) throw new Error('Official Codex editor proposal changed text outside the approved helper-capacity assignments.');
@@ -394,7 +425,7 @@ function assertProposalTextDelta(originalBytes, proposalState, runtime, helperCo
   }
 }
 
-function markToolkitProposal(configBytes, configPath, runtime, helperCount, originalBytes) {
+function markToolkitProposal(configBytes, configPath, runtime, helperCount, originalBytes, options = {}) {
   const proposed = codexDelegationConfigState(configBytes, configPath, runtime);
   const expectedOwnership = runtime === RUNTIMES.V2 ? 'user-owned-compatible-v2' : 'user-owned-compatible-v1';
   if (proposed.status !== 'configured' || proposed.ownership !== expectedOwnership || proposed.helper_count !== helperCount) {
@@ -411,11 +442,27 @@ function markToolkitProposal(configBytes, configPath, runtime, helperCount, orig
     throw new Error('Official Codex editor proposal does not place the approved helper-capacity assignments together.');
   }
   const eol = proposed.eol || '\n';
-  const first = assignments[0];
-  const last = assignments[assignments.length - 1];
-  const lastLine = layout.lines[last.index];
-  const block = runtime === RUNTIMES.V2 ? expectedV2Block(helperCount, eol) : expectedLegacyBlock(helperCount, eol);
-  const marked = Buffer.from(`${proposed.text.slice(0, first.start)}${block}${lastLine.eol ? eol : ''}${proposed.text.slice(last.end)}`, 'utf8');
+  let markedText = proposed.text;
+  if (runtime === RUNTIMES.V2) {
+    const manageEnablement = options.manageEnablement !== false;
+    const replacements = [
+      ...(manageEnablement ? [[assignments[0], managedAssignmentBlock(CODEX_V2_ENABLEMENT_BEGIN, 'enabled = true', CODEX_V2_ENABLEMENT_END, eol)]] : []),
+      [assignments[1], managedAssignmentBlock(CODEX_HELPER_CAPACITY_BEGIN, `max_concurrent_threads_per_session = ${helpersToTotalThreads(helperCount)}`, CODEX_HELPER_CAPACITY_END, eol)],
+      [assignments[2], managedAssignmentBlock(CODEX_ROOT_GUIDANCE_BEGIN, `root_agent_usage_hint_text = ${tomlString(CODEX_V2_ROOT_GUIDANCE)}`, CODEX_ROOT_GUIDANCE_END, eol)],
+      [assignments[3], managedAssignmentBlock(CODEX_HELPER_GUIDANCE_BEGIN, `subagent_usage_hint_text = ${tomlString(CODEX_V2_HELPER_GUIDANCE)}`, CODEX_HELPER_GUIDANCE_END, eol)],
+    ];
+    for (const [assignment, block] of replacements.sort((left, right) => right[0].start - left[0].start)) {
+      const line = layout.lines[assignment.index];
+      markedText = `${markedText.slice(0, assignment.start)}${block}${line.eol ? eol : ''}${markedText.slice(assignment.end)}`;
+    }
+  } else {
+    const first = assignments[0];
+    const last = assignments[assignments.length - 1];
+    const lastLine = layout.lines[last.index];
+    const block = expectedLegacyBlock(helperCount, eol);
+    markedText = `${proposed.text.slice(0, first.start)}${block}${lastLine.eol ? eol : ''}${proposed.text.slice(last.end)}`;
+  }
+  const marked = Buffer.from(markedText, 'utf8');
   const verified = codexDelegationConfigState(marked, configPath, runtime);
   const managedOwnership = runtime === RUNTIMES.V2 ? 'toolkit-managed-v2' : 'toolkit-managed-v1';
   if (verified.status !== 'configured' || verified.ownership !== managedOwnership || verified.helper_count !== helperCount) {
@@ -424,17 +471,24 @@ function markToolkitProposal(configBytes, configPath, runtime, helperCount, orig
   return { bytes: marked, state: verified };
 }
 
-function managedMarkerSpan(state) {
+function managedMarkerSpans(state) {
   const layout = state.layout;
-  if (state.ownership === 'toolkit-managed-v2') return { begin: layout.helperBeginMarkers[0], end: layout.helperEndMarkers[0] };
-  if (state.ownership === 'toolkit-managed-v1' || state.ownership === 'toolkit-managed-v1-legacy') return { begin: layout.beginMarkers[0], end: layout.endMarkers[0] };
-  return null;
+  if (state.ownership === 'toolkit-managed-v2') {
+    return [
+      ...(state.enablement_ownership === 'toolkit-managed' ? [{ begin: layout.enablementBeginMarkers[0], end: layout.enablementEndMarkers[0] }] : []),
+      { begin: layout.helperBeginMarkers[0], end: layout.helperEndMarkers[0] },
+      { begin: layout.rootGuidanceBeginMarkers[0], end: layout.rootGuidanceEndMarkers[0] },
+      { begin: layout.helperGuidanceBeginMarkers[0], end: layout.helperGuidanceEndMarkers[0] },
+    ];
+  }
+  if (state.ownership === 'toolkit-managed-v1' || state.ownership === 'toolkit-managed-v1-legacy') return [{ begin: layout.beginMarkers[0], end: layout.endMarkers[0] }];
+  return [];
 }
 
 function removeManagedBlockBytes(state) {
-  const span = managedMarkerSpan(state);
-  if (!span) throw new Error('No exact Toolkit-managed helper-capacity block is available for migration or removal.');
-  return Buffer.from(`${state.text.slice(0, span.begin.start)}${state.text.slice(span.end.end)}`, 'utf8');
+  const spans = managedMarkerSpans(state);
+  if (!spans.length) throw new Error('No exact Toolkit-managed helper-capacity block is available for migration or removal.');
+  return Buffer.from(removeSpans(state.text, spans.map((span) => ({ start: span.begin.start, end: span.end.end }))), 'utf8');
 }
 
 function migrateV2BooleanEnablement(state) {
@@ -446,7 +500,13 @@ function migrateV2BooleanEnablement(state) {
     && entry.key.replace(/\s+/g, '') === 'multi_agent_v2'
     && entry.value.trim() === 'true');
   if (!assignment) throw new Error('The compatible MultiAgentV2 boolean enablement could not be located exactly.');
-  return Buffer.from(`${state.text.slice(0, assignment.start)}${state.text.slice(assignment.end)}`, 'utf8');
+  const raw = state.text.slice(assignment.start, assignment.end);
+  const eol = raw.endsWith('\r\n') ? '\r\n' : (raw.endsWith('\n') ? '\n' : '');
+  const line = eol ? raw.slice(0, -eol.length) : raw;
+  const indent = line.match(/^[ \t]*/)?.[0] || '';
+  const commentStart = line.search(/[ \t]+#|#/);
+  const replacement = commentStart >= 0 ? `${indent}${line.slice(commentStart)}${eol}` : '';
+  return Buffer.from(`${state.text.slice(0, assignment.start)}${replacement}${state.text.slice(assignment.end)}`, 'utf8');
 }
 
 function initialStateFromSnapshot(snapshot, configPath, runtime) {
@@ -466,10 +526,20 @@ function quotePosixArgument(value) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
-function restoreCommands(metadataPath) {
+function verifiedSetupScriptPath(setupScriptPath = path.join(__dirname, 'setup-toolkit.cjs')) {
+  const resolved = path.resolve(setupScriptPath);
+  let stat;
+  try { stat = fs.lstatSync(resolved); } catch (error) { throw new Error(`Exact restore command setup script is unavailable: ${resolved}: ${cleanError(error)}`); }
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Exact restore command setup script must be a verified regular file, not a symlink: ${resolved}`);
+  return fs.realpathSync(resolved);
+}
+
+function restoreCommands(metadataPath, setupScriptPath) {
+  const scriptPath = verifiedSetupScriptPath(setupScriptPath);
   return {
-    powershell: `node repo/scripts/setup-toolkit.cjs ${RESTORE_FLAG} ${quotePowerShellArgument(metadataPath)}`,
-    posix: `node repo/scripts/setup-toolkit.cjs ${RESTORE_FLAG} ${quotePosixArgument(metadataPath)}`,
+    setup_script_path: scriptPath,
+    powershell: `node ${quotePowerShellArgument(scriptPath)} ${RESTORE_FLAG} ${quotePowerShellArgument(path.resolve(metadataPath))}`,
+    posix: `node ${quotePosixArgument(scriptPath)} ${RESTORE_FLAG} ${quotePosixArgument(path.resolve(metadataPath))}`,
   };
 }
 
@@ -480,7 +550,7 @@ function commitProposal(configPath, initialSnapshot, initial, proposedBytes, ver
   } catch (error) {
     return concurrentEditResult(initial, error);
   }
-  const backup = createCodexConfigBackup(configPath, { snapshot: initialSnapshot, replacementBytes: proposedBytes, backupRoot: options.backupRoot });
+  const backup = createCodexConfigBackup(configPath, { snapshot: initialSnapshot, replacementBytes: proposedBytes, backupRoot: options.backupRoot, generationId: options.backupGenerationId });
   let wrote = false;
   try {
     if (typeof options.beforeCommit === 'function') options.beforeCommit({ configPath, initialSnapshot, backup, proposedBytes });
@@ -492,7 +562,7 @@ function commitProposal(configPath, initialSnapshot, initial, proposedBytes, ver
       ...verified,
       changed: true,
       backup_metadata_path: backup.metadata_path,
-      restore_commands: restoreCommands(backup.metadata_path),
+      restore_commands: restoreCommands(backup.metadata_path, options.setupScriptPath),
     };
   } catch (error) {
     const replacementCommitted = wrote || error.atomicReplacementCommitted === true;
@@ -525,6 +595,7 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
   const toolkitOwned = String(initial.ownership || '').startsWith('toolkit-managed');
   if (!['unconfigured', 'migration-required', 'enablement-migration-required'].includes(initial.status) && !toolkitOwned) return { ...initial, changed: false };
 
+  const manageEnablement = runtime === RUNTIMES.V2 && !String(initial.enablement_ownership || '').startsWith('user-owned');
   const stagedBytes = initial.status === 'enablement-migration-required'
     ? migrateV2BooleanEnablement(initial)
     : (toolkitOwned || initial.status === 'migration-required' ? removeManagedBlockBytes(initial) : initialSnapshot.bytes);
@@ -537,7 +608,7 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
     : await editWithCodexAppServer(stagedBytes, { ...options, runtime, helperCount });
   let marked;
   try {
-    marked = markToolkitProposal(Buffer.from(edit.bytes), configPath, runtime, helperCount, stagedBytes);
+    marked = markToolkitProposal(Buffer.from(edit.bytes), configPath, runtime, helperCount, stagedBytes, { manageEnablement });
   } catch (error) {
     return { ...initial, status: 'conflicting', changed: false, detail: `Proposed Codex config failed complete proposal validation: ${cleanError(error)}` };
   }
@@ -559,7 +630,7 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
   return {
     ...result,
     editor: edit.editor || 'injected test editor',
-    proposed_block: runtime === RUNTIMES.V2 ? expectedV2Block(helperCount, initial.eol || '\n') : expectedLegacyBlock(helperCount, initial.eol || '\n'),
+    proposed_block: runtime === RUNTIMES.V2 ? expectedV2Block(helperCount, initial.eol || '\n', { manageEnablement }) : expectedLegacyBlock(helperCount, initial.eol || '\n'),
     migrated_legacy_block: initial.status === 'migration-required',
     migrated_v2_boolean_enablement: initial.status === 'enablement-migration-required',
     temporary_cleanup: edit.temporary_cleanup || 'test editor did not create a temporary app-server directory',
@@ -579,6 +650,9 @@ function removeCodexDelegation(configPath = codexConfigPath(), options = {}) {
   if (!toolkitOwned && initial.status !== 'migration-required') {
     return { ...initial, changed: false, detail: `${initial.detail} No Toolkit-managed helper-capacity block was removed.` };
   }
+  if (!options.approveCapacityResetRisk) {
+    return { ...initial, status: 'approval-required', changed: false, detail: 'Removal may restore a higher host-default helper capacity. Review the warning and explicitly approve removal before Toolkit changes the file.' };
+  }
   const proposedBytes = removeManagedBlockBytes(initial);
   return commitProposal(
     configPath,
@@ -586,9 +660,20 @@ function removeCodexDelegation(configPath = codexConfigPath(), options = {}) {
     initial,
     proposedBytes,
     () => {
+      const committedBytes = fs.readFileSync(configPath);
       const verified = inspectCodexDelegationConfig(configPath, runtime);
-      if (verified.status !== 'unconfigured') throw new Error(`Post-removal verification failed: ${verified.detail || verified.status}`);
-      return { ...verified, status: 'removed', detail: 'Toolkit-managed helper capacity was removed; user-owned settings were preserved.' };
+      const remainingLayout = structuralLayout(committedBytes.toString('utf8'));
+      const markerCount = [
+        'beginMarkers', 'endMarkers',
+        'enablementBeginMarkers', 'enablementEndMarkers',
+        'helperBeginMarkers', 'helperEndMarkers',
+        'rootGuidanceBeginMarkers', 'rootGuidanceEndMarkers',
+        'helperGuidanceBeginMarkers', 'helperGuidanceEndMarkers',
+        'unknownToolkitDelegationMarkers',
+      ]
+        .reduce((count, key) => count + remainingLayout[key].length, 0);
+      if (!committedBytes.equals(proposedBytes) || !remainingLayout.ok || markerCount) throw new Error(`Post-removal verification failed: ${verified.detail || verified.status}`);
+      return { ...verified, status: 'removed', changed: true, detail: 'Exact Toolkit-managed helper capacity and any Toolkit-owned enablement were removed; user-owned enablement and settings were preserved.' };
     },
     options
   );
@@ -598,12 +683,13 @@ async function delegationResultForChoice(choice, configPath = codexConfigPath(),
   const runtime = options.runtime || RUNTIMES.UNKNOWN;
   const current = inspectCodexDelegationConfig(configPath, runtime);
   if (choice === 'skip') return { ...current, status: 'skipped', changed: false, detail: 'Codex helper-capacity configuration was explicitly skipped.' };
-  if (choice === 'remove') return removeCodexDelegation(configPath, options);
+  if (choice === 'remove') return removeCodexDelegation(configPath, { ...options, approveCapacityResetRisk: true });
   if (choice === 'keep') {
-    if (runtime === RUNTIMES.V2 && current.status === 'migration-required') {
-      return configureCodexDelegation(configPath, { ...options, helperCount: current.helper_count });
-    }
     return { ...current, status: current.status === 'configured' ? 'configured' : 'kept', changed: false, detail: current.status === 'configured' ? current.detail : `${current.detail} Current helper capacity was kept unchanged.` };
+  }
+  if (choice === 'migrate') {
+    if (runtime !== RUNTIMES.V2 || current.status !== 'migration-required') return { ...current, changed: false, detail: `${current.detail} No exact Toolkit-managed legacy setting is available to migrate.` };
+    return configureCodexDelegation(configPath, { ...options, helperCount: current.helper_count });
   }
   if (choice === 'ram-safe') return configureCodexDelegation(configPath, { ...options, helperCount: CODEX_V2_RAM_SAFE_HELPERS });
   if (choice === 'custom') return configureCodexDelegation(configPath, options);
@@ -616,8 +702,14 @@ module.exports = {
   CODEX_V2_RAM_SAFE_HELPERS,
   CODEX_DELEGATION_BEGIN,
   CODEX_DELEGATION_END,
+  CODEX_V2_ENABLEMENT_BEGIN,
+  CODEX_V2_ENABLEMENT_END,
   CODEX_HELPER_CAPACITY_BEGIN,
   CODEX_HELPER_CAPACITY_END,
+  CODEX_ROOT_GUIDANCE_BEGIN,
+  CODEX_ROOT_GUIDANCE_END,
+  CODEX_HELPER_GUIDANCE_BEGIN,
+  CODEX_HELPER_GUIDANCE_END,
   CODEX_V2_ROOT_GUIDANCE,
   CODEX_V2_HELPER_GUIDANCE,
   RESTORE_FLAG,
@@ -640,6 +732,7 @@ module.exports = {
   removeManagedBlockBytes,
   quotePowerShellArgument,
   quotePosixArgument,
+  verifiedSetupScriptPath,
   restoreCommands,
   createCodexConfigBackup,
   restoreCodexDelegationBackup,

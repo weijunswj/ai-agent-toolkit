@@ -192,7 +192,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--yes-recommended') args.yesRecommended = true;
     else if (arg === '--codex-helper-capacity') {
       const choice = next().toLowerCase();
-      if (!['keep', 'ram-safe', 'custom', 'remove', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      if (!['keep', 'migrate', 'ram-safe', 'custom', 'remove', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
       args.setupChoices.codexHelperCapacity = choice;
     } else if (arg === '--codex-delegation-control') {
       const legacyChoice = String(argv[++index] || '').toLowerCase();
@@ -201,7 +201,7 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.setupChoices.codexHelperCapacity = choice;
     } else if (arg.startsWith('--codex-helper-capacity=')) {
       const choice = arg.slice('--codex-helper-capacity='.length).toLowerCase();
-      if (!['keep', 'ram-safe', 'custom', 'remove', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      if (!['keep', 'migrate', 'ram-safe', 'custom', 'remove', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
       args.setupChoices.codexHelperCapacity = choice;
     } else if (arg === '--codex-helper-count') {
       args.codexHelperCount = parseNonNegativeInteger(next(), arg);
@@ -504,7 +504,7 @@ function setupPlan(options = {}) {
         title: host === 'codex'
           ? 'Apply the selected Codex helper-agent capacity as the final fallible setup operation'
           : 'Report host-level delegation enforcement as unsupported; portable policy still applies',
-        commands: host === 'codex' && ['ram-safe', 'custom', 'remove'].includes(choices.codexHelperCapacity)
+        commands: host === 'codex' && ['migrate', 'ram-safe', 'custom', 'remove'].includes(choices.codexHelperCapacity)
           ? [`manage only the Toolkit-owned ${options.codexRuntime || RUNTIMES.UNKNOWN} helper-capacity block in ${delegation.codexConfigPath()}`]
           : []
       },
@@ -543,8 +543,10 @@ function printHelp() {
     '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
-    '  --codex-helper-capacity keep|ram-safe|custom|remove|skip',
-    '                               Codex only; preserve current state, allow one helper, set an advanced custom count, remove Toolkit ownership, or skip',
+    '  --codex-helper-capacity keep|migrate|ram-safe|custom|remove|skip',
+    '                               Codex only; preserve the file unchanged, explicitly migrate an exact Toolkit legacy block, allow one helper, set an advanced custom count, remove Toolkit ownership, or skip',
+    '  --codex-delegation-control limit',
+    '                               backward-compatible alias for --codex-helper-capacity ram-safe; no other legacy alias writes config',
     '  --codex-helper-count <count>',
     '                               number of helpers, not total agents; the main agent counts as one additional V2 session thread',
     '  --approve-high-helper-capacity',
@@ -831,6 +833,8 @@ function printDelegationPreview(preview) {
   console.log('# Codex helper-agent config preview');
   console.log(`Codex config path: ${preview.config_path}`);
   console.log(`Effective runtime: ${preview.runtime}`);
+  console.log(`Before semantics: ${preview.before_semantics || preview.detail}`);
+  console.log(`After semantics: ${preview.detail}`);
   console.log(`Requested helper agents: ${preview.helper_count}`);
   if (preview.total_threads != null) console.log(`Total session threads including the main agent: ${preview.total_threads}`);
   console.log('Proposed Toolkit-managed TOML block:');
@@ -839,6 +843,10 @@ function printDelegationPreview(preview) {
   console.log('```');
   console.log(`Proposed edit: ${preview.proposed_action}`);
   console.log(`Codex backup directory: ${preview.backup_root}`);
+  console.log(`Planned exact backup metadata: ${preview.backup_metadata_path}`);
+  console.log(`Restore command setup script: ${preview.restore_commands.setup_script_path}`);
+  console.log(`Exact restore command after the approved write (PowerShell): ${preview.restore_commands.powershell}`);
+  console.log(`Exact restore command after the approved write (POSIX shell): ${preview.restore_commands.posix}`);
 }
 
 async function applyHostDelegationControl(args, current) {
@@ -852,10 +860,18 @@ async function applyHostDelegationControl(args, current) {
     helperCount: choice === 'ram-safe' ? CODEX_V2_RAM_SAFE_HELPERS : args.codexHelperCount,
     codexCommand: args.codexCli,
     codexHome: delegation.defaultCodexHome(),
+    setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
   };
-  if (!['ram-safe', 'custom'].includes(choice)) return delegation.delegationResultForChoice(choice, configPath, options);
-  const preview = delegation.previewCodexDelegation(configPath, options);
-  if (preview.status === 'preview') printDelegationPreview(preview);
+  if (!['migrate', 'ram-safe', 'custom'].includes(choice)) return delegation.delegationResultForChoice(choice, configPath, options);
+  if (choice === 'migrate') options.helperCount = current.delegation.helper_count;
+  const preview = choice === 'migrate' && current.delegationMigrationPreview
+    ? current.delegationMigrationPreview
+    : delegation.previewCodexDelegation(configPath, options);
+  if (preview.status === 'preview') {
+    preview.before_semantics = current.delegation.detail;
+    printDelegationPreview(preview);
+    options.backupGenerationId = preview.backup_generation_id;
+  }
   return delegation.delegationResultForChoice(choice, configPath, options);
 }
 
@@ -868,13 +884,22 @@ async function collectCurrentState(args) {
         cwd: repoRootFromScript(),
       })
     : { runtime: RUNTIMES.UNKNOWN, detector: 'not applicable', detail: 'Codex runtime detection is not applicable to this host.' };
+  const delegationState = args.host === 'codex'
+    ? delegation.inspectCodexDelegationConfig(delegation.codexConfigPath(), runtime.runtime)
+    : { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable' };
+  const delegationMigrationPreview = args.host === 'codex' && delegationState.status === 'migration-required'
+    ? delegation.previewCodexDelegation(delegationState.config_path, {
+        runtime: runtime.runtime,
+        helperCount: delegationState.helper_count,
+        setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
+      })
+    : null;
   return {
     audit,
     runtime,
     managed: inspectManagedCheckout(args, audit),
-    delegation: args.host === 'codex'
-      ? delegation.inspectCodexDelegationConfig(delegation.codexConfigPath(), runtime.runtime)
-      : { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable' },
+    delegation: delegationState,
+    delegationMigrationPreview,
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginState(args)
       : inspectCodexNativePluginState(args)
@@ -992,15 +1017,25 @@ function setupQuestionSpecs(args, current) {
       key: 'codexHelperCapacity',
       title: 'How many helper agents may Codex use at the same time?',
       prompt: 'Codex helper-agent capacity choice',
-      choices: ['keep', 'ram-safe', 'custom', 'remove', 'skip'],
+      choices: ['keep', 'migrate', 'ram-safe', 'custom', 'remove', 'skip'],
       choice_help: [
-        'keep = Keep my current setting (safe default for existing installations)',
+        'keep = Keep current file unchanged (safe default; never migrates or writes)',
+        'migrate = Migrate the exact Toolkit-managed PR #237 legacy setting to effective V2',
         'ram-safe = RAM-safe mode: allow one helper',
         'custom = Custom helper count (advanced)',
-        'remove = Remove the Toolkit-managed helper capacity',
+        'remove = Remove exact Toolkit-managed values after explicit approval; WARNING: the host default may allow higher capacity',
         'skip = Skip for now',
       ],
       explanation: 'Codex itself is the main agent. Helper agents use extra memory. More than one helper may slow or freeze lower-memory PCs. In MultiAgentV2 the main agent counts as one total session thread.',
+      migration_preview: current.delegationMigrationPreview ? {
+        target_path: current.delegationMigrationPreview.config_path,
+        runtime: current.delegationMigrationPreview.runtime,
+        before_semantics: current.delegation.detail,
+        after_semantics: current.delegationMigrationPreview.detail,
+        proposed_block: current.delegationMigrationPreview.proposed_block,
+        backup_metadata_path: current.delegationMigrationPreview.backup_metadata_path,
+        restore_commands: current.delegationMigrationPreview.restore_commands,
+      } : null,
       recommended: recommendedChoice('codexHelperCapacity', current, args),
       selected: args.setupChoices.codexHelperCapacity,
       current: `${current.runtime?.runtime || RUNTIMES.UNKNOWN}; ${current.delegation.status}; ${current.delegation.detail}`
@@ -1080,6 +1115,18 @@ function printQuestionRows(specs) {
     console.log(`- choices: ${spec.choices.join(' / ')}`);
     if (spec.explanation) console.log(`- explanation: ${spec.explanation}`);
     for (const help of spec.choice_help || []) console.log(`- ${help}`);
+    if (spec.migration_preview) {
+      console.log('- explicit migration preview:');
+      console.log(`  target path: ${spec.migration_preview.target_path}`);
+      console.log(`  runtime: ${spec.migration_preview.runtime}`);
+      console.log(`  before semantics: ${spec.migration_preview.before_semantics}`);
+      console.log(`  after semantics: ${spec.migration_preview.after_semantics}`);
+      console.log(`  proposed block: ${JSON.stringify(spec.migration_preview.proposed_block)}`);
+      console.log(`  planned backup metadata: ${spec.migration_preview.backup_metadata_path}`);
+      console.log(`  restore command setup script: ${spec.migration_preview.restore_commands.setup_script_path}`);
+      console.log(`  exact restore command (PowerShell): ${spec.migration_preview.restore_commands.powershell}`);
+      console.log(`  exact restore command (POSIX shell): ${spec.migration_preview.restore_commands.posix}`);
+    }
     console.log(`- selected: ${selected}`);
     console.log('');
   }
@@ -1197,6 +1244,15 @@ async function answerSetupQuestionBank(args, current) {
   const initialMissingCount = initialSpecs.filter((spec) => !choiceForKey(args, spec.key)).length;
   let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
   let completeStdinConsumed = false;
+
+  if (current.delegationMigrationPreview) {
+    console.log('# Codex legacy migration pre-approval preview');
+    const preview = current.delegationMigrationPreview;
+    preview.before_semantics = current.delegation.detail;
+    printDelegationPreview(preview);
+    console.log('Choosing keep, empty input, or --yes-recommended leaves the file unchanged. Choose migrate explicitly only after reviewing this preview.');
+    console.log('');
+  }
 
   if (args.yesRecommended) {
     answerSource = 'user-approved yes-recommended';
@@ -1899,7 +1955,10 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
     ? `${delegation.helper_count} helper agent${delegation.helper_count === 1 ? '' : 's'}; ${delegation.total_threads || delegation.helper_count + 1} total session threads including the main agent (the root counts toward the total)`
     : 'unchanged or not configured'}`);
   console.log('Routine policy: Main agent only by default');
+  console.log('Ordinary helper limit: At most one directly justified helper');
   console.log('Helper use for speed alone: Not allowed by Toolkit policy');
+  console.log('Defined multi-worker workflow exception: Only when the user invoked that workflow, its worker count is stated, and higher persistent or temporary capacity was explicitly approved');
+  console.log('Worker topology policy: Direct children of the root with no needless scope overlap; helpers must not spawn helpers; root retains coordination and final judgment');
   console.log('Helpers creating helpers: Prohibited by Toolkit policy');
   console.log(`Hard nested-helper enforcement: ${unknown(delegation.hard_nested_helper_enforcement || 'unverified')}`);
   const technicalSetting = delegation.runtime === RUNTIMES.V2 && Number.isSafeInteger(delegation.total_threads)
@@ -1916,13 +1975,14 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Helper-capacity detail: ${unknown(delegation.detail)}`);
   console.log(`Temporary editor cleanup: ${unknown(delegation.temporary_cleanup || 'no temporary editor directory created')}`);
   if (delegation.backup_metadata_path) console.log(`Exact backup metadata: ${delegation.backup_metadata_path}`);
+  if (delegation.restore_commands?.setup_script_path) console.log(`Restore command setup script: ${delegation.restore_commands.setup_script_path}`);
   if (delegation.restore_commands?.powershell) console.log(`Exact restore command (PowerShell): ${delegation.restore_commands.powershell}`);
   if (delegation.restore_commands?.posix) console.log(`Exact restore command (POSIX shell): ${delegation.restore_commands.posix}`);
   console.log('');
   console.log('## Codex Security capacity');
   console.log('Security capacity behavior: normal global capacity is never raised automatically');
   console.log('Isolated Security exception: unsupported by the currently documented Codex Security plugin and app-server interfaces');
-  console.log('If a selected Security workflow requires more workers, raising global capacity may exhaust RAM. Use a lower-capacity ordinary or sequential review, run Deep Scan on another machine, or explicitly make a temporary global increase with exact backup, restart, restoration, and another restart. A sequential custom review is not an official Deep Security Scan.');
+  console.log('If a selected Security workflow requires more workers, raising global capacity may exhaust RAM. Never imply that an official Deep Scan can run with insufficient capacity. Use a lower-capacity ordinary or sequential review, run Deep Scan on another sufficiently provisioned machine, or explicitly make a temporary global increase with exact backup, restart, restoration, and another restart. A sequential custom review is not an official Deep Security Scan.');
   console.log('');
   console.log('## Codex native plugin');
   if (args.host === 'codex') {

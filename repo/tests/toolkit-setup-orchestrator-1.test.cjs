@@ -96,7 +96,7 @@ test('explicit limit previews path and block, creates backup, and writes only af
   assert.match(result.stdout, /Exact restore command \(PowerShell\):/);
   const configured = fs.readFileSync(configPath, 'utf8');
   assert.ok(configured.startsWith(original.toString('utf8')));
-  assert.match(configured, /\[features\.multi_agent_v2\]\r?\n# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v2\r?\nenabled = true\r?\nmax_concurrent_threads_per_session = 2/);
+  assert.match(configured, /\[features\.multi_agent_v2\]\r?\n# AI-AGENT-TOOLKIT:BEGIN CODEX-V2-ENABLEMENT v1\r?\nenabled = true\r?\n# AI-AGENT-TOOLKIT:END CODEX-V2-ENABLEMENT\r?\n# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3\r?\nmax_concurrent_threads_per_session = 2/);
   assert.ok(backupFiles(root).length > 0);
 });
 
@@ -199,5 +199,8 @@ test('custom helper counts above one require separate RAM-risk approval', () => 
   assert.equal(approved.status, 0, approved.stderr || approved.stdout);
   assert.match(approved.stdout, /RAM-risk approval for more than one helper: approved/);
   assert.match(approved.stdout, /Normal helper capacity: 2 helper agents; 3 total session threads including the main agent/);
+  assert.match(approved.stdout, /Defined multi-worker workflow exception: Only when the user invoked that workflow/);
+  assert.match(approved.stdout, /helpers must not spawn helpers; root retains coordination and final judgment/);
+  assert.match(approved.stdout, /Never imply that an official Deep Scan can run with insufficient capacity/);
   assert.match(fs.readFileSync(codexConfig(approvedRoot), 'utf8'), /max_concurrent_threads_per_session = 3/);
 });

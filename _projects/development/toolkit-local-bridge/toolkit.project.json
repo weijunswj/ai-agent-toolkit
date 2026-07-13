@@ -7,7 +7,7 @@
   "main_path": "_projects/development/toolkit-local-bridge/_main",
   "version": "2.4.5",
   "version_policy": "semver",
-  "version_notes": "Completes native V2 activation migration and guarantees app-server process-tree exit before temporary cleanup.",
+  "version_notes": "Adds provenance-safe MultiAgentV2 capacity setup, explicit legacy migration, runtime detection, exact restore commands, and app-server cleanup.",
   "outputs": [
     {
       "kind": "curated",

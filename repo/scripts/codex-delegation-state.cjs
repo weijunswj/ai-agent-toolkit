@@ -4,8 +4,14 @@ const {
   CODEX_AGENT_MAX_DEPTH,
   CODEX_DELEGATION_BEGIN,
   CODEX_DELEGATION_END,
+  CODEX_V2_ENABLEMENT_BEGIN,
+  CODEX_V2_ENABLEMENT_END,
   CODEX_HELPER_CAPACITY_BEGIN,
   CODEX_HELPER_CAPACITY_END,
+  CODEX_ROOT_GUIDANCE_BEGIN,
+  CODEX_ROOT_GUIDANCE_END,
+  CODEX_HELPER_GUIDANCE_BEGIN,
+  CODEX_HELPER_GUIDANCE_END,
   CODEX_V2_ROOT_GUIDANCE,
   CODEX_V2_HELPER_GUIDANCE,
   cleanError,
@@ -40,15 +46,20 @@ function expectedCodexDelegationBlock(eol = '\n') {
   return expectedLegacyBlock(1, eol);
 }
 
-function expectedV2Block(helperCount = 1, eol = '\n') {
-  return [
-    CODEX_HELPER_CAPACITY_BEGIN,
-    'enabled = true',
-    `max_concurrent_threads_per_session = ${helpersToTotalThreads(helperCount)}`,
-    `root_agent_usage_hint_text = ${tomlString(CODEX_V2_ROOT_GUIDANCE)}`,
-    `subagent_usage_hint_text = ${tomlString(CODEX_V2_HELPER_GUIDANCE)}`,
-    CODEX_HELPER_CAPACITY_END,
-  ].join(eol);
+function managedAssignmentBlock(begin, assignment, end, eol = '\n') {
+  return [begin, assignment, end].join(eol);
+}
+
+function expectedV2Block(helperCount = 1, eol = '\n', options = {}) {
+  const blocks = [];
+  if (options.manageEnablement !== false) blocks.push(managedAssignmentBlock(CODEX_V2_ENABLEMENT_BEGIN, 'enabled = true', CODEX_V2_ENABLEMENT_END, eol));
+  else blocks.push('enabled = true');
+  blocks.push(
+    managedAssignmentBlock(CODEX_HELPER_CAPACITY_BEGIN, `max_concurrent_threads_per_session = ${helpersToTotalThreads(helperCount)}`, CODEX_HELPER_CAPACITY_END, eol),
+    managedAssignmentBlock(CODEX_ROOT_GUIDANCE_BEGIN, `root_agent_usage_hint_text = ${tomlString(CODEX_V2_ROOT_GUIDANCE)}`, CODEX_ROOT_GUIDANCE_END, eol),
+    managedAssignmentBlock(CODEX_HELPER_GUIDANCE_BEGIN, `subagent_usage_hint_text = ${tomlString(CODEX_V2_HELPER_GUIDANCE)}`, CODEX_HELPER_GUIDANCE_END, eol)
+  );
+  return blocks.join(eol);
 }
 
 function stateBase(configPath, text, bytes, runtime, extra = {}) {
@@ -64,12 +75,14 @@ function stateBase(configPath, text, bytes, runtime, extra = {}) {
 }
 
 function markerFailure(layout) {
-  return layout.beginMarkers.length > 1
-    || layout.endMarkers.length > 1
-    || layout.beginMarkers.length !== layout.endMarkers.length
-    || layout.helperBeginMarkers.length > 1
-    || layout.helperEndMarkers.length > 1
-    || layout.helperBeginMarkers.length !== layout.helperEndMarkers.length;
+  const pairs = [
+    ['beginMarkers', 'endMarkers'],
+    ['enablementBeginMarkers', 'enablementEndMarkers'],
+    ['helperBeginMarkers', 'helperEndMarkers'],
+    ['rootGuidanceBeginMarkers', 'rootGuidanceEndMarkers'],
+    ['helperGuidanceBeginMarkers', 'helperGuidanceEndMarkers'],
+  ];
+  return pairs.some(([begin, end]) => layout[begin].length > 1 || layout[end].length > 1 || layout[begin].length !== layout[end].length);
 }
 
 function linesBetween(layout, begin, end) {
@@ -109,6 +122,7 @@ function v2State(parsed, layout, base) {
         ...base,
         status: 'enablement-migration-required',
         ownership: 'user-owned-compatible-v2-enable',
+        enablement_ownership: 'user-owned-boolean',
         helper_count: null,
         total_threads: null,
         hard_nested_helper_enforcement: 'not-supported',
@@ -132,25 +146,37 @@ function v2State(parsed, layout, base) {
   const helperCount = capacity?.exact_int ? totalThreadsToHelpers(capacity.value) : null;
   const exactGuidance = exactString(values.root_agent_usage_hint_text, CODEX_V2_ROOT_GUIDANCE)
     && exactString(values.subagent_usage_hint_text, CODEX_V2_HELPER_GUIDANCE);
-  const managed = layout.helperBeginMarkers.length === 1;
+  const managedEnablement = layout.enablementBeginMarkers.length === 1;
+  const managedCapacity = layout.helperBeginMarkers.length === 1;
+  const managedRootGuidance = layout.rootGuidanceBeginMarkers.length === 1;
+  const managedHelperGuidance = layout.helperGuidanceBeginMarkers.length === 1;
+  const anyManaged = managedEnablement || managedCapacity || managedRootGuidance || managedHelperGuidance;
+  const completeManagedValues = managedCapacity && managedRootGuidance && managedHelperGuidance;
 
-  if (managed) {
+  if (anyManaged) {
     if (!exactBoolean(enabled, true) || !Number.isSafeInteger(helperCount) || helperCount < 0 || !exactGuidance) {
       return { ...base, status: 'conflicting', detail: 'Toolkit MultiAgentV2 markers do not contain valid capacity and guidance values.' };
     }
-    const error = validateManagedBlock(
-      layout,
-      layout.multiAgentV2Tables[0],
-      layout.helperBeginMarkers[0],
-      layout.helperEndMarkers[0],
-      expectedV2Block(helperCount, '\n'),
-      'Toolkit MultiAgentV2 helper-capacity'
-    );
-    if (error) return { ...base, status: 'conflicting', detail: error };
+    if (!completeManagedValues) return { ...base, status: 'conflicting', detail: 'Toolkit MultiAgentV2 capacity and guidance ownership markers are incomplete.' };
+    const table = layout.multiAgentV2Tables[0];
+    const checks = [
+      ...(managedEnablement ? [[layout.enablementBeginMarkers[0], layout.enablementEndMarkers[0], managedAssignmentBlock(CODEX_V2_ENABLEMENT_BEGIN, 'enabled = true', CODEX_V2_ENABLEMENT_END), 'Toolkit MultiAgentV2 enablement']] : []),
+      [layout.helperBeginMarkers[0], layout.helperEndMarkers[0], managedAssignmentBlock(CODEX_HELPER_CAPACITY_BEGIN, `max_concurrent_threads_per_session = ${helpersToTotalThreads(helperCount)}`, CODEX_HELPER_CAPACITY_END), 'Toolkit MultiAgentV2 helper capacity'],
+      [layout.rootGuidanceBeginMarkers[0], layout.rootGuidanceEndMarkers[0], managedAssignmentBlock(CODEX_ROOT_GUIDANCE_BEGIN, `root_agent_usage_hint_text = ${tomlString(CODEX_V2_ROOT_GUIDANCE)}`, CODEX_ROOT_GUIDANCE_END), 'Toolkit MultiAgentV2 root guidance'],
+      [layout.helperGuidanceBeginMarkers[0], layout.helperGuidanceEndMarkers[0], managedAssignmentBlock(CODEX_HELPER_GUIDANCE_BEGIN, `subagent_usage_hint_text = ${tomlString(CODEX_V2_HELPER_GUIDANCE)}`, CODEX_HELPER_GUIDANCE_END), 'Toolkit MultiAgentV2 helper guidance'],
+    ];
+    for (const [begin, end, expected, label] of checks) {
+      const error = validateManagedBlock(layout, table, begin, end, expected, label);
+      if (error) return { ...base, status: 'conflicting', detail: error };
+    }
     return {
       ...base,
       status: 'configured',
       ownership: 'toolkit-managed-v2',
+      enablement_ownership: managedEnablement ? 'toolkit-managed' : 'user-owned-table',
+      capacity_ownership: 'toolkit-managed',
+      root_guidance_ownership: 'toolkit-managed',
+      helper_guidance_ownership: 'toolkit-managed',
       helper_count: helperCount,
       total_threads: helperCount + 1,
       hard_nested_helper_enforcement: 'not-supported',
@@ -166,6 +192,10 @@ function v2State(parsed, layout, base) {
         ...base,
         status: 'configured',
         ownership: 'user-owned-compatible-v2',
+        enablement_ownership: 'user-owned-table',
+        capacity_ownership: 'user-owned',
+        root_guidance_ownership: 'user-owned',
+        helper_guidance_ownership: 'user-owned',
         helper_count: helperCount,
         total_threads: helperCount + 1,
         hard_nested_helper_enforcement: 'not-supported',
@@ -213,6 +243,7 @@ function v2State(parsed, layout, base) {
   return {
     ...base,
     status: 'unconfigured',
+    enablement_ownership: exactBoolean(enabled, true) ? 'user-owned-table' : 'absent',
     helper_count: null,
     total_threads: null,
     hard_nested_helper_enforcement: 'not-supported',
@@ -282,11 +313,15 @@ function codexDelegationConfigState(configBytes, configPath = codexConfigPath(),
   const layout = structuralLayout(text);
   if (!layout.ok) return stateBase(configPath, text, bytes, runtime, { status: 'conflicting', detail: layout.detail, parser: parsed.parser });
   const base = stateBase(configPath, text, bytes, runtime, { parser: parsed.parser, layout, parsed });
+  if (layout.unknownToolkitDelegationMarkers.length) return { ...base, status: 'conflicting', detail: 'Unknown or obsolete Toolkit delegation ownership markers are present; ownership is ambiguous and Toolkit will not modify the file.' };
   if (markerFailure(layout)) return { ...base, status: 'conflicting', detail: 'Toolkit helper-capacity markers are duplicated, mismatched, or malformed.' };
-  if (layout.beginMarkers.length && layout.helperBeginMarkers.length) return { ...base, status: 'conflicting', detail: 'Legacy and MultiAgentV2 Toolkit marker blocks cannot coexist.' };
+  const anyV2Marker = layout.enablementBeginMarkers.length || layout.helperBeginMarkers.length || layout.rootGuidanceBeginMarkers.length || layout.helperGuidanceBeginMarkers.length;
+  if (layout.beginMarkers.length && anyV2Marker) return { ...base, status: 'conflicting', detail: 'Legacy and MultiAgentV2 Toolkit marker blocks cannot coexist.' };
 
   if (runtime === RUNTIMES.V2) return v2State(parsed, layout, base);
   if (runtime === RUNTIMES.V1) return v1State(parsed, layout, base);
+  if (anyV2Marker) return v2State(parsed, layout, base);
+  if (layout.beginMarkers.length) return v1State(parsed, layout, base);
   return {
     ...base,
     status: runtime === RUNTIMES.DISABLED ? 'disabled' : 'unsupported',
@@ -304,6 +339,7 @@ module.exports = {
   tomlString,
   expectedLegacyBlock,
   expectedCodexDelegationBlock,
+  managedAssignmentBlock,
   expectedV2Block,
   stateBase,
   codexDelegationConfigState,

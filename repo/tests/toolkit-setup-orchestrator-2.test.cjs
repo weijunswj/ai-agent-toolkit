@@ -6,6 +6,7 @@ const {
   createGitBackedSetupRepo, createGitBackedRealSetupRepo, createFakeManagedSetupScript,
   runWithUnclosedStdin, codexConfig, backupFiles
 } = require('./toolkit-setup-test-support.cjs');
+const delegation = require('../scripts/codex-delegation-config.cjs');
 
 test('empty consolidated delegation answer means keep and performs no config write', () => {
   const root = tmpRoot();
@@ -20,6 +21,40 @@ test('empty consolidated delegation answer means keep and performs no config wri
   assert.match(result.stdout, /Configuration changed this run: no/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), /--disable-codex-plugin-auto-refresh --write/);
+});
+
+test('keep and yes-recommended do not migrate an exact legacy block or create a backup', () => {
+  for (const mode of ['stdin', 'recommended']) {
+    const root = tmpRoot();
+    const { origin, setupRepo } = createGitBackedSetupRepo(root);
+    const configPath = codexConfig(root);
+    const original = `[agents]\n${delegation.expectedLegacyBlock(1)}\n`;
+    writeFile(configPath, original);
+    const args = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--skip-codex-plugin-auto-refresh'];
+    const options = { env: isolatedHomeEnv(root), timeout: 300000 };
+    if (mode === 'recommended') args.push('--yes-recommended');
+    else options.input = ['keep', 'keep', 'keep', 'keep', 'keep', 'keep', 'keep'].join('\n');
+    const result = run(args, options);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Configuration changed this run: no/);
+    assert.equal(fs.readFileSync(configPath, 'utf8'), original);
+    assert.deepEqual(backupFiles(root), []);
+  }
+});
+
+test('legacy migration is a distinct explicit choice with a full visible preview', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const configPath = codexConfig(root);
+  writeFile(configPath, `[agents]\n${delegation.expectedLegacyBlock(1)}\n`);
+  const result = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'migrate',
+  ], { env: isolatedHomeEnv(root), timeout: 300000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.ok(result.stdout.indexOf('# Codex legacy migration pre-approval preview') < result.stdout.indexOf('# setup toolkit question bank'));
+  assert.match(result.stdout, /Before semantics:[\s\S]*After semantics:[\s\S]*Proposed Toolkit-managed TOML block:[\s\S]*Planned exact backup metadata:[\s\S]*Restore command setup script:[\s\S]*Exact restore command after the approved write \(PowerShell\):/);
+  assert.match(result.stdout, /PR #237 legacy block migrated: yes/);
 });
 
 test('user-owned V1 values conflict under V2 without rewrite or backup', () => {

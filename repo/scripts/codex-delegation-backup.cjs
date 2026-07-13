@@ -102,10 +102,12 @@ function assertSnapshotCurrent(configPath, expected, message = 'Codex config cha
 function createCodexConfigBackup(configPath = codexConfigPath(), options = {}) {
   const snapshot = options.snapshot || captureCodexConfigSnapshot(configPath);
   const current = assertSnapshotCurrent(configPath, snapshot);
-  const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
+  const id = options.generationId || `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
+  if (!/^[A-Za-z0-9._-]+$/.test(id) || id === '.' || id === '..') throw new Error('Backup generation ID is unsafe.');
   const root = path.resolve(options.backupRoot || backupRoot(configPath));
   const generation = path.join(root, id);
-  fs.mkdirSync(generation, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(generation, { recursive: false, mode: 0o700 });
   const backupPath = current.existed ? path.join(generation, 'config.toml.original') : null;
   if (backupPath) fs.writeFileSync(backupPath, current.bytes, { mode: 0o600 });
   const replacement = Buffer.from(options.replacementBytes || Buffer.alloc(0));

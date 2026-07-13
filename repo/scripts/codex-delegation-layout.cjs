@@ -3,8 +3,14 @@
 const {
   CODEX_DELEGATION_BEGIN,
   CODEX_DELEGATION_END,
+  CODEX_V2_ENABLEMENT_BEGIN,
+  CODEX_V2_ENABLEMENT_END,
   CODEX_HELPER_CAPACITY_BEGIN,
   CODEX_HELPER_CAPACITY_END,
+  CODEX_ROOT_GUIDANCE_BEGIN,
+  CODEX_ROOT_GUIDANCE_END,
+  CODEX_HELPER_GUIDANCE_BEGIN,
+  CODEX_HELPER_GUIDANCE_END,
 } = require('./codex-delegation-common.cjs');
 
 function scanTomlLines(text) {
@@ -153,6 +159,13 @@ function structuralLayout(text) {
   const endMarkers = [];
   const helperBeginMarkers = [];
   const helperEndMarkers = [];
+  const enablementBeginMarkers = [];
+  const enablementEndMarkers = [];
+  const rootGuidanceBeginMarkers = [];
+  const rootGuidanceEndMarkers = [];
+  const helperGuidanceBeginMarkers = [];
+  const helperGuidanceEndMarkers = [];
+  const unknownToolkitDelegationMarkers = [];
   for (let index = 0; index < scanned.lines.length; index += 1) {
     const entry = scanned.lines[index];
     const rawWithoutEol = entry.eol ? entry.raw.slice(0, -entry.eol.length) : entry.raw;
@@ -170,6 +183,22 @@ function structuralLayout(text) {
     if (outsideStringComment && rawWithoutEol.trim() === CODEX_DELEGATION_END) endMarkers.push({ index, start, end });
     if (outsideStringComment && rawWithoutEol.trim() === CODEX_HELPER_CAPACITY_BEGIN) helperBeginMarkers.push({ index, start, end });
     if (outsideStringComment && rawWithoutEol.trim() === CODEX_HELPER_CAPACITY_END) helperEndMarkers.push({ index, start, end });
+    if (outsideStringComment && rawWithoutEol.trim() === CODEX_V2_ENABLEMENT_BEGIN) enablementBeginMarkers.push({ index, start, end });
+    if (outsideStringComment && rawWithoutEol.trim() === CODEX_V2_ENABLEMENT_END) enablementEndMarkers.push({ index, start, end });
+    if (outsideStringComment && rawWithoutEol.trim() === CODEX_ROOT_GUIDANCE_BEGIN) rootGuidanceBeginMarkers.push({ index, start, end });
+    if (outsideStringComment && rawWithoutEol.trim() === CODEX_ROOT_GUIDANCE_END) rootGuidanceEndMarkers.push({ index, start, end });
+    if (outsideStringComment && rawWithoutEol.trim() === CODEX_HELPER_GUIDANCE_BEGIN) helperGuidanceBeginMarkers.push({ index, start, end });
+    if (outsideStringComment && rawWithoutEol.trim() === CODEX_HELPER_GUIDANCE_END) helperGuidanceEndMarkers.push({ index, start, end });
+    if (outsideStringComment
+      && rawWithoutEol.trim().startsWith('# AI-AGENT-TOOLKIT:')
+      && /CODEX-(?:DELEGATION|HELPER|V2|ROOT)/.test(rawWithoutEol)
+      && ![
+        CODEX_DELEGATION_BEGIN, CODEX_DELEGATION_END,
+        CODEX_V2_ENABLEMENT_BEGIN, CODEX_V2_ENABLEMENT_END,
+        CODEX_HELPER_CAPACITY_BEGIN, CODEX_HELPER_CAPACITY_END,
+        CODEX_ROOT_GUIDANCE_BEGIN, CODEX_ROOT_GUIDANCE_END,
+        CODEX_HELPER_GUIDANCE_BEGIN, CODEX_HELPER_GUIDANCE_END,
+      ].includes(rawWithoutEol.trim())) unknownToolkitDelegationMarkers.push({ index, start, end, raw: rawWithoutEol });
     offset = end;
   }
   const agentsTables = tables.filter((entry) => entry.kind === 'table' && entry.name === 'agents');
@@ -194,6 +223,13 @@ function structuralLayout(text) {
     endMarkers,
     helperBeginMarkers,
     helperEndMarkers,
+    enablementBeginMarkers,
+    enablementEndMarkers,
+    rootGuidanceBeginMarkers,
+    rootGuidanceEndMarkers,
+    helperGuidanceBeginMarkers,
+    helperGuidanceEndMarkers,
+    unknownToolkitDelegationMarkers,
     multiAgentV2Tables,
     multiAgentV2Children,
   };

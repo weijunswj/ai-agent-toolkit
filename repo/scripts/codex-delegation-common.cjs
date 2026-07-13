@@ -11,9 +11,15 @@ const CODEX_AGENT_MAX_DEPTH = 1;
 const CODEX_V2_RAM_SAFE_HELPERS = 1;
 const CODEX_DELEGATION_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1';
 const CODEX_DELEGATION_END = '# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS';
-const CODEX_HELPER_CAPACITY_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v2';
+const CODEX_V2_ENABLEMENT_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-V2-ENABLEMENT v1';
+const CODEX_V2_ENABLEMENT_END = '# AI-AGENT-TOOLKIT:END CODEX-V2-ENABLEMENT';
+const CODEX_HELPER_CAPACITY_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3';
 const CODEX_HELPER_CAPACITY_END = '# AI-AGENT-TOOLKIT:END CODEX-HELPER-CAPACITY';
-const CODEX_V2_ROOT_GUIDANCE = 'Stay root-only by default. Use one helper only for a concrete correctness benefit, an explicitly requested specialist workflow, or an investigation the root cannot handle well. Never spawn for speed, routine parallelism, workload reduction, or a second opinion. Normal work uses zero helpers and at most one direct helper. Keep final judgment, bound the assignment, and avoid duplicate work.';
+const CODEX_ROOT_GUIDANCE_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-ROOT-GUIDANCE v1';
+const CODEX_ROOT_GUIDANCE_END = '# AI-AGENT-TOOLKIT:END CODEX-ROOT-GUIDANCE';
+const CODEX_HELPER_GUIDANCE_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-GUIDANCE v1';
+const CODEX_HELPER_GUIDANCE_END = '# AI-AGENT-TOOLKIT:END CODEX-HELPER-GUIDANCE';
+const CODEX_V2_ROOT_GUIDANCE = 'Root-only by default. Ordinary work: at most one directly justified helper. Speed, generic parallelism, workload reduction, routine exploration, and second opinions are insufficient. A user-invoked defined multi-worker workflow may follow its stated count and plan with explicit approval of higher persistent or temporary capacity. Workers are direct root children, avoid overlap, never spawn helpers. Root retains coordination and final judgment.';
 const CODEX_V2_HELPER_GUIDANCE = 'Complete only the assigned bounded task. Do not spawn another helper, broaden scope, or duplicate root or sibling work. Return any need for more expertise to the root.';
 const CODEX_V2_TARGET_KEYS = [
   'enabled',
@@ -171,8 +177,14 @@ module.exports = {
   CODEX_V2_RAM_SAFE_HELPERS,
   CODEX_DELEGATION_BEGIN,
   CODEX_DELEGATION_END,
+  CODEX_V2_ENABLEMENT_BEGIN,
+  CODEX_V2_ENABLEMENT_END,
   CODEX_HELPER_CAPACITY_BEGIN,
   CODEX_HELPER_CAPACITY_END,
+  CODEX_ROOT_GUIDANCE_BEGIN,
+  CODEX_ROOT_GUIDANCE_END,
+  CODEX_HELPER_GUIDANCE_BEGIN,
+  CODEX_HELPER_GUIDANCE_END,
   CODEX_V2_ROOT_GUIDANCE,
   CODEX_V2_HELPER_GUIDANCE,
   CODEX_V2_TARGET_KEYS,
