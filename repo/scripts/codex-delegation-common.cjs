@@ -8,8 +8,25 @@ const { spawnSync } = require('node:child_process');
 
 const CODEX_AGENT_MAX_THREADS = 1;
 const CODEX_AGENT_MAX_DEPTH = 1;
+const CODEX_V2_RAM_SAFE_HELPERS = 1;
 const CODEX_DELEGATION_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1';
 const CODEX_DELEGATION_END = '# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS';
+const CODEX_V2_ENABLEMENT_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-V2-ENABLEMENT v1';
+const CODEX_V2_ENABLEMENT_END = '# AI-AGENT-TOOLKIT:END CODEX-V2-ENABLEMENT';
+const CODEX_HELPER_CAPACITY_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY v3';
+const CODEX_HELPER_CAPACITY_END = '# AI-AGENT-TOOLKIT:END CODEX-HELPER-CAPACITY';
+const CODEX_ROOT_GUIDANCE_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-ROOT-GUIDANCE v1';
+const CODEX_ROOT_GUIDANCE_END = '# AI-AGENT-TOOLKIT:END CODEX-ROOT-GUIDANCE';
+const CODEX_HELPER_GUIDANCE_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-GUIDANCE v1';
+const CODEX_HELPER_GUIDANCE_END = '# AI-AGENT-TOOLKIT:END CODEX-HELPER-GUIDANCE';
+const CODEX_V2_ROOT_GUIDANCE = 'Root-only by default. Ordinary work: at most one directly justified helper. Speed, generic parallelism, workload reduction, routine exploration, and second opinions are insufficient. A user-invoked defined multi-worker workflow may follow its stated count and plan with explicit approval of higher persistent or temporary capacity. Workers are direct root children, avoid overlap, never spawn helpers. Root retains coordination and final judgment.';
+const CODEX_V2_HELPER_GUIDANCE = 'Complete only the assigned bounded task. Do not spawn another helper, broaden scope, or duplicate root or sibling work. Return any need for more expertise to the root.';
+const CODEX_V2_TARGET_KEYS = [
+  'enabled',
+  'max_concurrent_threads_per_session',
+  'root_agent_usage_hint_text',
+  'subagent_usage_hint_text',
+];
 const RESTORE_FLAG = '--restore-codex-delegation-backup';
 const TOML_PARSE_CACHE = new Map();
 
@@ -26,34 +43,58 @@ try:
 except Exception as exc:
     print(json.dumps({'ok': False, 'kind': 'parse', 'detail': str(exc)}))
     raise SystemExit(0)
+def scalar(value):
+    return value if type(value) in (int, float, str, bool) or value is None else None
+
+def inspected_values(table, keys):
+    values = {}
+    for key in keys:
+        if type(table) is dict and key in table:
+            value = table[key]
+            values[key] = {
+                'present': True,
+                'type': type(value).__name__,
+                'exact_int': type(value) is int,
+                'value': scalar(value),
+            }
+        else:
+            values[key] = {'present': False}
+    return values
+
 agents = parsed.get('agents', None)
-if agents is None:
-    print(json.dumps({'ok': True, 'agents_present': False}))
-    raise SystemExit(0)
-if type(agents) is not dict:
-    print(json.dumps({'ok': True, 'agents_present': True, 'agents_is_table': False, 'agents_type': type(agents).__name__}))
-    raise SystemExit(0)
-values = {}
-for key in ('max_threads', 'max_depth'):
-    if key in agents:
-        value = agents[key]
-        values[key] = {
-            'present': True,
-            'type': type(value).__name__,
-            'exact_int': type(value) is int,
-            'value': value if type(value) in (int, float, str, bool) or value is None else None,
-        }
-    else:
-        values[key] = {'present': False}
-children = sorted(str(key) for key, value in agents.items() if type(value) is dict)
+features = parsed.get('features', None)
+multi_agent_v2 = features.get('multi_agent_v2', None) if type(features) is dict else None
 print(json.dumps({
     'ok': True,
-    'agents_present': True,
-    'agents_is_table': True,
-    'values': values,
-    'child_tables': children,
+    'agents_present': agents is not None,
+    'agents_is_table': type(agents) is dict if agents is not None else None,
+    'agents_type': type(agents).__name__ if agents is not None else None,
+    'values': inspected_values(agents, ('max_threads', 'max_depth')),
+    'child_tables': sorted(str(key) for key, value in agents.items() if type(value) is dict) if type(agents) is dict else [],
+    'features_present': features is not None,
+    'features_is_table': type(features) is dict if features is not None else None,
+    'multi_agent_v2_present': multi_agent_v2 is not None,
+    'multi_agent_v2_is_table': type(multi_agent_v2) is dict if multi_agent_v2 is not None else None,
+    'multi_agent_v2_type': type(multi_agent_v2).__name__ if multi_agent_v2 is not None else None,
+    'multi_agent_v2_scalar': scalar(multi_agent_v2),
+    'multi_agent_v2_values': inspected_values(multi_agent_v2, (
+        'enabled',
+        'max_concurrent_threads_per_session',
+        'root_agent_usage_hint_text',
+        'subagent_usage_hint_text',
+    )),
 }, sort_keys=True))
 `;
+
+function helpersToTotalThreads(helperCount) {
+  if (!Number.isSafeInteger(helperCount) || helperCount < 0) throw new Error('Helper count must be a non-negative integer.');
+  return helperCount + 1;
+}
+
+function totalThreadsToHelpers(totalThreads) {
+  if (!Number.isSafeInteger(totalThreads) || totalThreads < 1) return null;
+  return totalThreads - 1;
+}
 
 function cleanError(error) {
   return String(error && error.message ? error.message : error || 'unknown error').replace(/[\r\n]+/g, ' ').slice(0, 300);
@@ -133,8 +174,20 @@ function parseTomlStructurally(bytes) {
 module.exports = {
   CODEX_AGENT_MAX_THREADS,
   CODEX_AGENT_MAX_DEPTH,
+  CODEX_V2_RAM_SAFE_HELPERS,
   CODEX_DELEGATION_BEGIN,
   CODEX_DELEGATION_END,
+  CODEX_V2_ENABLEMENT_BEGIN,
+  CODEX_V2_ENABLEMENT_END,
+  CODEX_HELPER_CAPACITY_BEGIN,
+  CODEX_HELPER_CAPACITY_END,
+  CODEX_ROOT_GUIDANCE_BEGIN,
+  CODEX_ROOT_GUIDANCE_END,
+  CODEX_HELPER_GUIDANCE_BEGIN,
+  CODEX_HELPER_GUIDANCE_END,
+  CODEX_V2_ROOT_GUIDANCE,
+  CODEX_V2_HELPER_GUIDANCE,
+  CODEX_V2_TARGET_KEYS,
   RESTORE_FLAG,
   cleanError,
   sha256,
@@ -142,4 +195,6 @@ module.exports = {
   codexConfigPath,
   backupRoot,
   parseTomlStructurally,
+  helpersToTotalThreads,
+  totalThreadsToHelpers,
 };

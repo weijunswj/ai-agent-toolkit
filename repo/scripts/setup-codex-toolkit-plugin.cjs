@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.4.3';
+const EXPECTED_TOOLKIT_VERSION = '2.4.5';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
@@ -662,18 +662,14 @@ function shouldRemoveBeforeInstall(state) {
   return Boolean(state?.installed);
 }
 
-function codexHookCommand(repoRoot) {
-  return `node "${path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs')}" --hook --sync-enabled --write --sync-source codex-plugin`;
-}
-
-function nextStepsForState(state, options = {}) {
+function nextStepsForState(state) {
   return [
     '**Next Steps:**',
     '1. Restart Codex if the plugin install changed anything.',
     '2. Open `/hooks` in Codex.',
-    '3. Review and trust the current Toolkit `SessionStart` hook only if it runs:',
-    `   \`${codexHookCommand(options.repoRoot || repoRootFromScript())}\``,
-    `4. ${state.hookTrustMessage}`,
+    `3. Verify the enabled Toolkit \`SessionStart\` hook belongs to the installed \`ai-agent-toolkit\` plugin at version \`${EXPECTED_TOOLKIT_VERSION}\`.`,
+    `4. The supported hook normally runs from the installed plugin-cache copy${state.cacheRoot ? ` at \`${state.cacheRoot}\`` : ''}, not the managed Git checkout.`,
+    `5. ${state.hookTrustMessage}`,
     '',
     'This hook approval step applies to Codex only. Claude Code does not need Codex hook approval.',
     'Codex must not install or update Claude Code. Claude Code must not install or update Codex.'

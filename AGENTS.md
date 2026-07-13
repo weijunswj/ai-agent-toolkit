@@ -31,7 +31,7 @@ Complete ordinary work with the root agent alone: setup and updates, reading ins
 `setup toolkit` is a routine interactive setup operation without spawning subagents.
 Before delegation, state: The exact bounded responsibility being delegated; Why the root agent cannot perform it efficiently itself; The material correctness, safety, or critical-path wall-clock benefit; The files, evidence, or subsystem the subagent owns; How duplicate exploration and duplicated context loading will be avoided; Why sequential root-agent execution is insufficient.
 If any item is missing, delegation is prohibited. Generic parallelism, a second opinion, documentation inspection, routine test or validation execution, independent verification, several task steps, subagent availability, or an unsupported claim that delegation will save time are not sufficient reasons.
-Delegate only genuinely separable work such as a bounded specialist security review; prefer one direct specialist, do not have agents inspect the same files, and do not delegate planning, implementation, or validation redundantly. Subagents must not recursively delegate by default.
+Delegate only genuinely separable work such as a bounded specialist security review; prefer one direct specialist, avoid duplicate inspection, and avoid redundant planning, implementation, or validation. On Codex MultiAgentV2 the root counts toward capacity; keep work root-only and forbid helper recursion by policy.
 When supported, default `fork_turns="none"`; brief only required files, evidence, constraints, and acceptance criteria. Positive bounded inheritance needs specific dialogue; `fork_turns="all"` needs exceptional explicit justification. Do not claim unsupported hosts support it.
 
 ## Local Documentation

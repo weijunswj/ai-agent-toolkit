@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.4.3",
+  "version": "2.4.5",
   "version_policy": "semver",
-  "version_notes": "Makes final bridge audit precede Codex config commitment and hardens atomic rollback and missing-file restore races.",
+  "version_notes": "Adds provenance-safe MultiAgentV2 capacity setup, explicit legacy migration, runtime detection, exact restore commands, and app-server cleanup.",
   "outputs": [
     {
       "kind": "curated",

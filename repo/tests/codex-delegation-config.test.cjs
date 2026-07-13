@@ -10,6 +10,16 @@ const test = require('node:test');
 const config = require('../scripts/codex-delegation-config.cjs');
 const backup = require('../scripts/codex-delegation-backup.cjs');
 
+const V1_RUNTIME = 'MultiAgentV1';
+
+function inspectConfig(filePath, runtime = V1_RUNTIME) {
+  return config.inspectCodexDelegationConfig(filePath, runtime);
+}
+
+function configure(filePath, options = {}) {
+  return config.configureCodexDelegation(filePath, { runtime: V1_RUNTIME, ...options });
+}
+
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-delegation-'));
 }
@@ -72,9 +82,9 @@ test('tomllib ignores apparent agents structure inside basic and multiline strin
   ]) {
     const filePath = configPath();
     writeConfig(filePath, text);
-    const state = config.inspectCodexDelegationConfig(filePath);
+    const state = inspectConfig(filePath);
     assert.equal(state.status, 'unconfigured');
-    const preview = config.previewCodexDelegation(filePath);
+    const preview = config.previewCodexDelegation(filePath, { runtime: V1_RUNTIME });
     assert.equal(preview.status, 'preview');
     assert.match(preview.proposed_block, /max_threads = 1/);
     assert.match(preview.proposed_block, /max_depth = 1/);
@@ -88,13 +98,12 @@ test('tomllib rejects non-integer, duplicate, malformed, and conflicting real va
     '[agents]\nmax_threads = "1"\nmax_depth = 1\n',
     '[agents]\nmax_threads = true\nmax_depth = 1\n',
     '[agents]\nmax_threads = 1\nmax_threads = 1\nmax_depth = 1\n',
-    '[agents]\nmax_threads = 2\nmax_depth = 1\n',
     '[agents]\nmax_threads = [\n'
   ]) {
     const filePath = configPath();
     writeConfig(filePath, text);
     const before = fs.readFileSync(filePath);
-    const result = await config.configureCodexDelegation(filePath, {
+    const result = await configure(filePath, {
       editor: async () => { throw new Error('editor must not run for invalid config'); }
     });
     assert.equal(result.changed, false);
@@ -108,7 +117,7 @@ test('official app-server batchWrite prepares an isolated proposal and preserves
   const filePath = configPath(root);
   const original = 'model = "gpt-5.6"\r\n# preserve formatting\r\n';
   writeConfig(filePath, original);
-  const result = await config.configureCodexDelegation(filePath, {
+  const result = await configure(filePath, {
     codexCommand: createFakeCodexAppServer(root),
     codexHome: path.dirname(filePath)
   });
@@ -118,7 +127,7 @@ test('official app-server batchWrite prepares an isolated proposal and preserves
   const configured = fs.readFileSync(filePath, 'utf8');
   assert.ok(configured.startsWith(original));
   assert.match(configured, /# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1\r?\nmax_threads = 1\r?\nmax_depth = 1\r?\n# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS/);
-  assert.equal(config.inspectCodexDelegationConfig(filePath).ownership, 'toolkit-managed');
+  assert.equal(inspectConfig(filePath).ownership, 'toolkit-managed-v1');
 });
 
 test('injected editor proposal preserves child tables and supports exact backup restore', async () => {
@@ -126,11 +135,12 @@ test('injected editor proposal preserves child tables and supports exact backup 
   const original = Buffer.from('[agents]\r\n# user comment\r\n\r\n[agents.security-reviewer]\r\ndescription = "explicit"\r\n');
   const proposed = original.toString('utf8').replace('[agents]\r\n', '[agents]\r\nmax_threads = 1\r\nmax_depth = 1\r\n');
   writeConfig(filePath, original, 0o640);
-  const result = await config.configureCodexDelegation(filePath, { editor: proposedEditor(proposed) });
+  const result = await configure(filePath, { editor: proposedEditor(proposed) });
   assert.equal(result.status, 'configured');
   assert.match(fs.readFileSync(filePath, 'utf8'), /# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1\r?\nmax_threads = 1\r?\nmax_depth = 1\r?\n# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS/);
   assert.ok(fs.existsSync(result.backup_metadata_path));
-  assert.match(result.restore_command, /restore-codex-delegation-backup/);
+  assert.match(result.restore_commands.powershell, /restore-codex-delegation-backup/);
+  assert.match(result.restore_commands.posix, /restore-codex-delegation-backup/);
   config.restoreCodexDelegationBackup(result.backup_metadata_path, restoreOptions(filePath));
   assert.deepEqual(fs.readFileSync(filePath), original);
   if (process.platform !== 'win32') assert.equal(fs.statSync(filePath).mode & 0o777, 0o640);
@@ -138,7 +148,7 @@ test('injected editor proposal preserves child tables and supports exact backup 
 
 test('restore removes a config created from an originally missing file', async () => {
   const filePath = configPath();
-  const result = await config.configureCodexDelegation(filePath, {
+  const result = await configure(filePath, {
     editor: proposedEditor('[agents]\nmax_threads = 1\nmax_depth = 1\n')
   });
   assert.equal(result.status, 'configured');
@@ -150,7 +160,7 @@ test('restore removes a config created from an originally missing file', async (
 
 test('restore refuses to delete a concurrently changed config that was originally missing', async () => {
   const filePath = configPath();
-  const result = await config.configureCodexDelegation(filePath, {
+  const result = await configure(filePath, {
     editor: proposedEditor('[agents]\nmax_threads = 1\nmax_depth = 1\n')
   });
   assert.equal(result.status, 'configured');
@@ -170,7 +180,7 @@ test('post-write failure restores the exact prior bytes and removes temporary fi
   const original = Buffer.from('model = "gpt-5.6"\n');
   writeConfig(filePath, original);
   await assert.rejects(
-    config.configureCodexDelegation(filePath, {
+    configure(filePath, {
       editor: proposedEditor(appendAgents(original.toString('utf8'))),
       afterWrite() { throw new Error('synthetic downstream failure'); }
     }),
@@ -186,7 +196,7 @@ test('post-replacement failure signals commitment and restores bytes and mode', 
   const original = Buffer.from('model = "gpt-5.6"\n');
   writeConfig(filePath, original, 0o640);
   await assert.rejects(
-    config.configureCodexDelegation(filePath, {
+    configure(filePath, {
       editor: proposedEditor(appendAgents(original.toString('utf8'))),
       afterReplace() { throw new Error('synthetic post-replacement failure'); },
     }),
@@ -208,7 +218,7 @@ test('concurrent config edits survive editor, pre-backup, and pre-commit races',
     const original = 'model = "gpt-5.6"\n';
     const concurrent = `model = "concurrent-${phase}"\n`;
     writeConfig(filePath, original);
-    const result = await config.configureCodexDelegation(filePath, {
+    const result = await configure(filePath, {
       editor: async () => {
         if (phase === 'editor') writeConfig(filePath, concurrent);
         return { bytes: Buffer.from(appendAgents(original)), editor: 'race test editor' };
@@ -230,7 +240,7 @@ test('restore metadata rejects arbitrary paths, traversal, schema, and hash tamp
   const root = tempRoot();
   const filePath = configPath(root);
   writeConfig(filePath, 'model = "gpt-5.6"\n');
-  const result = await config.configureCodexDelegation(filePath, {
+  const result = await configure(filePath, {
     editor: proposedEditor(appendAgents('model = "gpt-5.6"\n')),
   });
   const metadataPath = result.backup_metadata_path;
@@ -263,7 +273,7 @@ test('restore rejects symlinked metadata, generation, backup file, and target pa
   const root = tempRoot();
   const filePath = configPath(root);
   writeConfig(filePath, 'model = "gpt-5.6"\n');
-  return config.configureCodexDelegation(filePath, {
+  return configure(filePath, {
     editor: proposedEditor(appendAgents('model = "gpt-5.6"\n')),
   }).then((result) => {
     const metadataPath = result.backup_metadata_path;
@@ -309,7 +319,7 @@ test('keep, skip, and configured no-op create no backup or config write', async 
     const result = await config.delegationResultForChoice(choice, filePath);
     assert.equal(result.changed, false);
   }
-  const noOp = await config.configureCodexDelegation(filePath, {
+  const noOp = await configure(filePath, {
     editor: async () => { throw new Error('configured no-op must not invoke editor'); }
   });
   assert.equal(noOp.changed, false);
@@ -323,19 +333,19 @@ test('symlink, directory, and special topology fail closed', async (t) => {
   writeConfig(target, 'model = "gpt-5.6"\n');
   try {
     fs.symlinkSync(target, link, 'file');
-    assert.equal(config.inspectCodexDelegationConfig(link).status, 'unsupported');
+    assert.equal(inspectConfig(link).status, 'unsupported');
   } catch (error) {
     if (process.platform === 'win32' && error.code === 'EPERM') t.diagnostic('Symlink creation unavailable on this Windows host');
     else throw error;
   }
   const directory = path.join(root, 'config-directory.toml');
   fs.mkdirSync(directory);
-  assert.equal(config.inspectCodexDelegationConfig(directory).status, 'unsupported');
+  assert.equal(inspectConfig(directory).status, 'unsupported');
   if (process.platform === 'win32') {
     t.diagnostic('FIFO creation is unavailable on Windows; special-file topology is covered on POSIX hosts');
     return;
   }
   const fifo = path.join(root, 'config-fifo.toml');
   assert.equal(spawnSync('mkfifo', [fifo]).status, 0);
-  assert.equal(config.inspectCodexDelegationConfig(fifo).status, 'unsupported');
+  assert.equal(inspectConfig(fifo).status, 'unsupported');
 });

@@ -601,8 +601,10 @@ test('Codex Toolkit verify-only human output keeps trust verification unavailabl
   assert.match(result.stdout, /Hook trust status: verification-unavailable/);
   assert.match(result.stdout, /Hook execution status: verification unavailable; open `\/hooks` in Codex/);
   assert.match(result.stdout, /\*\*Next Steps:\*\*/);
-  assert.match(result.stdout, /Review and trust the current Toolkit `SessionStart` hook only if it runs:/);
-  assert.match(result.stdout, /toolkit-local-bridge\.cjs" --hook --sync-enabled --write --sync-source codex-plugin/);
+  assert.match(result.stdout, /Verify the enabled Toolkit `SessionStart` hook belongs to the installed `ai-agent-toolkit` plugin/);
+  assert.match(result.stdout, /installed plugin-cache copy/);
+  assert.match(result.stdout, /not the managed Git checkout/);
+  assert.doesNotMatch(result.stdout, /Review and trust.*only if it runs:/);
   assert.match(result.stdout, /Hook trust verification is unavailable from supported non-interactive Codex inspection/i);
   assert.match(result.stdout, /Open `\/hooks` in Codex/i);
   assert.match(result.stdout, /review and trust the current Toolkit `SessionStart` hook/i);
