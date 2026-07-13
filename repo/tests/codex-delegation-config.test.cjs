@@ -31,6 +31,14 @@ function proposedEditor(text) {
   return async () => ({ bytes: Buffer.from(text), editor: 'deterministic test editor' });
 }
 
+function restoreOptions(filePath) {
+  return { configPath: filePath };
+}
+
+function backupRootFor(filePath) {
+  return path.join(path.dirname(path.dirname(filePath)), '.ai-agent-toolkit', 'backups', 'codex-delegation');
+}
+
 function createFakeCodexAppServer(root) {
   const fakeCodex = path.join(root, 'fake-codex-app-server.cjs');
   fs.writeFileSync(fakeCodex, [
@@ -106,7 +114,10 @@ test('official app-server batchWrite prepares an isolated proposal and preserves
   assert.equal(result.status, 'configured');
   assert.equal(result.changed, true);
   assert.match(result.editor, /app-server config\/batchWrite/);
-  assert.ok(fs.readFileSync(filePath, 'utf8').startsWith(original));
+  const configured = fs.readFileSync(filePath, 'utf8');
+  assert.ok(configured.startsWith(original));
+  assert.match(configured, /# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1\r?\nmax_threads = 1\r?\nmax_depth = 1\r?\n# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS/);
+  assert.equal(config.inspectCodexDelegationConfig(filePath).ownership, 'toolkit-managed');
 });
 
 test('injected editor proposal preserves child tables and supports exact backup restore', async () => {
@@ -116,9 +127,10 @@ test('injected editor proposal preserves child tables and supports exact backup 
   writeConfig(filePath, original, 0o640);
   const result = await config.configureCodexDelegation(filePath, { editor: proposedEditor(proposed) });
   assert.equal(result.status, 'configured');
+  assert.match(fs.readFileSync(filePath, 'utf8'), /# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1\r?\nmax_threads = 1\r?\nmax_depth = 1\r?\n# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS/);
   assert.ok(fs.existsSync(result.backup_metadata_path));
   assert.match(result.restore_command, /restore-codex-delegation-backup/);
-  config.restoreCodexDelegationBackup(result.backup_metadata_path);
+  config.restoreCodexDelegationBackup(result.backup_metadata_path, restoreOptions(filePath));
   assert.deepEqual(fs.readFileSync(filePath), original);
   if (process.platform !== 'win32') assert.equal(fs.statSync(filePath).mode & 0o777, 0o640);
 });
@@ -129,7 +141,7 @@ test('restore removes a config created from an originally missing file', async (
     editor: proposedEditor('[agents]\nmax_threads = 1\nmax_depth = 1\n')
   });
   assert.equal(fs.existsSync(filePath), true);
-  const restored = config.restoreCodexDelegationBackup(result.backup_metadata_path);
+  const restored = config.restoreCodexDelegationBackup(result.backup_metadata_path, restoreOptions(filePath));
   assert.equal(restored.removed_created_file, true);
   assert.equal(fs.existsSync(filePath), false);
 });
@@ -147,6 +159,106 @@ test('post-write failure restores the exact prior bytes and removes temporary fi
   );
   assert.deepEqual(fs.readFileSync(filePath), original);
   assert.deepEqual(fs.readdirSync(path.dirname(filePath)).filter((name) => name.includes('.tmp-')), []);
+});
+
+test('concurrent config edits survive editor, pre-backup, and pre-commit races', async () => {
+  for (const phase of ['editor', 'beforeBackup', 'beforeCommit']) {
+    const root = tempRoot();
+    const filePath = configPath(root);
+    const original = 'model = "gpt-5.6"\n';
+    const concurrent = `model = "concurrent-${phase}"\n`;
+    writeConfig(filePath, original);
+    const result = await config.configureCodexDelegation(filePath, {
+      editor: async () => {
+        if (phase === 'editor') writeConfig(filePath, concurrent);
+        return { bytes: Buffer.from(appendAgents(original)), editor: 'race test editor' };
+      },
+      beforeBackup() {
+        if (phase === 'beforeBackup') writeConfig(filePath, concurrent);
+      },
+      beforeCommit() {
+        if (phase === 'beforeCommit') writeConfig(filePath, concurrent);
+      },
+    });
+    assert.equal(result.status, 'conflicting', phase);
+    assert.equal(result.changed, false, phase);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), concurrent, phase);
+  }
+});
+
+test('restore metadata rejects arbitrary paths, traversal, schema, and hash tampering', async () => {
+  const root = tempRoot();
+  const filePath = configPath(root);
+  writeConfig(filePath, 'model = "gpt-5.6"\n');
+  const result = await config.configureCodexDelegation(filePath, {
+    editor: proposedEditor(appendAgents('model = "gpt-5.6"\n')),
+  });
+  const metadataPath = result.backup_metadata_path;
+  const originalMetadata = fs.readFileSync(metadataPath, 'utf8');
+  const generation = path.dirname(metadataPath);
+  const mutations = [
+    (metadata) => { metadata.config_path = path.join(root, 'unrelated.toml'); },
+    (metadata) => { metadata.backup_path = path.join(root, 'unrelated.toml'); },
+    (metadata) => { metadata.backup_path = path.join(generation, '..', 'config.toml.original'); },
+    (metadata) => { metadata.generation = 'wrong-generation'; },
+    (metadata) => { metadata.schema = 'ai-agent-toolkit.codex-config-backup.v1'; },
+    (metadata) => { metadata.original_sha256 = '0'.repeat(64); },
+    (metadata) => { metadata.replacement_sha256 = 'f'.repeat(64); },
+  ];
+  for (const mutate of mutations) {
+    const metadata = JSON.parse(originalMetadata);
+    mutate(metadata);
+    fs.writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`);
+    assert.throws(() => config.restoreCodexDelegationBackup(metadataPath, restoreOptions(filePath)));
+    assert.match(fs.readFileSync(filePath, 'utf8'), /AI-AGENT-TOOLKIT:BEGIN/);
+  }
+  fs.writeFileSync(metadataPath, originalMetadata);
+});
+
+test('restore rejects symlinked metadata, generation, backup file, and target paths', (t) => {
+  if (process.platform === 'win32') {
+    t.diagnostic('Symlink fixture coverage is unavailable on this Windows host');
+    return;
+  }
+  const root = tempRoot();
+  const filePath = configPath(root);
+  writeConfig(filePath, 'model = "gpt-5.6"\n');
+  return config.configureCodexDelegation(filePath, {
+    editor: proposedEditor(appendAgents('model = "gpt-5.6"\n')),
+  }).then((result) => {
+    const metadataPath = result.backup_metadata_path;
+    const generation = path.dirname(metadataPath);
+    const backupPath = path.join(generation, 'config.toml.original');
+    const originalBackup = fs.readFileSync(backupPath);
+    const linkMetadata = path.join(backupRootFor(filePath), 'metadata-link', 'restore.json');
+    fs.mkdirSync(path.dirname(linkMetadata));
+    fs.symlinkSync(metadataPath, linkMetadata, 'file');
+    assert.throws(() => config.restoreCodexDelegationBackup(linkMetadata, restoreOptions(filePath)));
+
+    const realGeneration = `${generation}.real`;
+    fs.renameSync(generation, realGeneration);
+    fs.symlinkSync(realGeneration, generation, 'dir');
+    assert.throws(() => config.restoreCodexDelegationBackup(metadataPath, restoreOptions(filePath)));
+    fs.rmSync(generation);
+    fs.renameSync(realGeneration, generation);
+
+    fs.rmSync(backupPath);
+    const outsideBackup = path.join(root, 'outside.toml');
+    fs.writeFileSync(outsideBackup, originalBackup);
+    fs.symlinkSync(outsideBackup, backupPath, 'file');
+    assert.throws(() => config.restoreCodexDelegationBackup(metadataPath, restoreOptions(filePath)));
+    fs.rmSync(backupPath);
+    fs.writeFileSync(backupPath, originalBackup);
+
+    const configured = fs.readFileSync(filePath);
+    const target = path.join(root, 'target.toml');
+    fs.renameSync(filePath, target);
+    fs.symlinkSync(target, filePath, 'file');
+    assert.throws(() => config.restoreCodexDelegationBackup(metadataPath, restoreOptions(filePath)));
+    fs.rmSync(filePath);
+    fs.renameSync(target, filePath);
+    assert.deepEqual(fs.readFileSync(filePath), configured);
+  });
 });
 
 test('keep, skip, and configured no-op create no backup or config write', async () => {

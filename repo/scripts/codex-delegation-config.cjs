@@ -19,7 +19,13 @@ const {
 } = require('./codex-delegation-common.cjs');
 const { structuralLayout } = require('./codex-delegation-layout.cjs');
 const { expectedCodexDelegationBlock, codexDelegationConfigState } = require('./codex-delegation-state.cjs');
-const { createCodexConfigBackup, restoreCodexDelegationBackup, writeRegularFileAtomically } = require('./codex-delegation-backup.cjs');
+const {
+  captureCodexConfigSnapshot,
+  assertSnapshotCurrent,
+  createCodexConfigBackup,
+  restoreCodexDelegationBackup,
+  writeRegularFileAtomically,
+} = require('./codex-delegation-backup.cjs');
 
 function inspectCodexDelegationConfig(configPath = codexConfigPath()) {
   let stat;
@@ -54,7 +60,7 @@ function previewCodexDelegation(configPath = codexConfigPath()) {
     ...state,
     status: 'preview',
     changed: false,
-    backup_root: backupRoot(),
+    backup_root: backupRoot(configPath),
     proposed_block: expectedCodexDelegationBlock(state.eol || '\n'),
     proposed_action: 'isolated Codex app-server config/batchWrite',
     detail: 'Explicit limit approval may prepare the shown values through the official Codex config editor.',
@@ -126,7 +132,7 @@ function runAppServerBatchWrite(command, codexHome) {
     child.stdin.write(`${JSON.stringify({
       method: 'initialize',
       id: 1,
-      params: { clientInfo: { name: 'ai_agent_toolkit', title: 'AI Agent Toolkit', version: '2.4.1' } },
+      params: { clientInfo: { name: 'ai_agent_toolkit', title: 'AI Agent Toolkit', version: '2.4.2' } },
     })}\n`);
   });
 }
@@ -154,24 +160,106 @@ async function editWithCodexAppServer(originalBytes, options = {}) {
   }
 }
 
-async function configureCodexDelegation(configPath = codexConfigPath(), options = {}) {
-  const preview = previewCodexDelegation(configPath);
-  if (preview.status !== 'preview') return { ...preview, changed: false };
-  const edit = options.editor
-    ? await options.editor({ originalBytes: preview.bytes, configPath })
-    : await editWithCodexAppServer(preview.bytes, options);
-  const nextBytes = Buffer.from(edit.bytes);
-  const proposed = codexDelegationConfigState(nextBytes, configPath);
-  if (proposed.status !== 'configured') {
-    return { ...proposed, status: 'conflicting', changed: false, detail: `Proposed Codex config failed TOML validation: ${proposed.detail}` };
+function markToolkitDelegationProposal(configBytes, configPath) {
+  const proposed = codexDelegationConfigState(configBytes, configPath);
+  if (proposed.status !== 'configured' || proposed.ownership !== 'user-owned-compatible') {
+    throw new Error('Official Codex editor proposal must contain exactly the compatible unmarked integer limits before Toolkit ownership markers can be added.');
   }
-  const backup = createCodexConfigBackup(configPath);
+  const layout = proposed.layout;
+  const agents = layout.agentsTables[0];
+  const nextTable = layout.tables.find((entry) => entry.index > agents.index);
+  const limitAssignments = layout.assignments
+    .filter((entry) => entry.index > agents.index && (!nextTable || entry.index < nextTable.index))
+    .filter((entry) => entry.key === 'max_threads' || entry.key === 'max_depth')
+    .sort((left, right) => left.index - right.index);
+  if (limitAssignments.length !== 2
+    || limitAssignments[0].key !== 'max_threads'
+    || limitAssignments[1].key !== 'max_depth'
+    || limitAssignments[1].index !== limitAssignments[0].index + 1) {
+    throw new Error('Official Codex editor proposal does not place exactly the two limit assignments together inside the real [agents] table.');
+  }
+  const firstLine = layout.lines[limitAssignments[0].index];
+  const secondLine = layout.lines[limitAssignments[1].index];
+  const lineText = (line) => line.raw.slice(0, line.eol ? -line.eol.length : undefined).trim();
+  if (lineText(firstLine) !== 'max_threads = 1' || lineText(secondLine) !== 'max_depth = 1') {
+    throw new Error('Official Codex editor proposal contains unsupported limit-line formatting.');
+  }
+  const eol = proposed.eol || '\n';
+  const text = proposed.text;
+  const marked = Buffer.from(
+    `${text.slice(0, limitAssignments[0].start)}${expectedCodexDelegationBlock(eol)}${secondLine.eol ? eol : ''}${text.slice(limitAssignments[1].end)}`,
+    'utf8'
+  );
+  const verified = codexDelegationConfigState(marked, configPath);
+  if (verified.status !== 'configured' || verified.ownership !== 'toolkit-managed') {
+    throw new Error(`Final Toolkit-marked Codex proposal failed structural validation: ${verified.detail || verified.status}`);
+  }
+  return { bytes: marked, state: verified };
+}
+
+function initialStateFromSnapshot(snapshot, configPath) {
+  const state = codexDelegationConfigState(snapshot.bytes, configPath);
+  return {
+    ...state,
+    file_type: snapshot.file_type,
+    mode: snapshot.mode,
+  };
+}
+
+function concurrentEditResult(current, error) {
+  return {
+    ...current,
+    status: 'conflicting',
+    changed: false,
+    detail: `Codex delegation configuration was not written because the target changed concurrently: ${cleanError(error)}`,
+  };
+}
+
+async function configureCodexDelegation(configPath = codexConfigPath(), options = {}) {
+  let initialSnapshot;
+  try {
+    initialSnapshot = captureCodexConfigSnapshot(configPath);
+  } catch (error) {
+    return { status: 'unsupported', config_path: configPath, changed: false, detail: cleanError(error) };
+  }
+  const initial = initialStateFromSnapshot(initialSnapshot, configPath);
+  if (initial.status !== 'unconfigured') return { ...initial, changed: false };
+  const preview = {
+    ...initial,
+    status: 'preview',
+    changed: false,
+    backup_root: backupRoot(configPath),
+    proposed_block: expectedCodexDelegationBlock(initial.eol || '\n'),
+    proposed_action: 'isolated Codex app-server config/batchWrite',
+    detail: 'Explicit limit approval may prepare the shown values through the official Codex config editor.',
+  };
+  const edit = options.editor
+    ? await options.editor({ originalBytes: initialSnapshot.bytes, configPath })
+    : await editWithCodexAppServer(initialSnapshot.bytes, options);
+  let marked;
+  try {
+    marked = markToolkitDelegationProposal(Buffer.from(edit.bytes), configPath);
+  } catch (error) {
+    return { ...initial, status: 'conflicting', changed: false, detail: `Proposed Codex config failed structural validation: ${cleanError(error)}` };
+  }
+  if (typeof options.beforeBackup === 'function') options.beforeBackup({ configPath, initialSnapshot, proposedBytes: marked.bytes });
+  try {
+    assertSnapshotCurrent(configPath, initialSnapshot);
+  } catch (error) {
+    return concurrentEditResult(initial, error);
+  }
+  const backup = createCodexConfigBackup(configPath, {
+    snapshot: initialSnapshot,
+    replacementBytes: marked.bytes,
+    backupRoot: options.backupRoot,
+  });
   let wrote = false;
   try {
-    writeRegularFileAtomically(configPath, nextBytes, backup.existed ? backup.original_mode : 0o600);
+    if (typeof options.beforeCommit === 'function') options.beforeCommit({ configPath, initialSnapshot, backup, proposedBytes: marked.bytes });
+    writeRegularFileAtomically(configPath, marked.bytes, backup.existed ? backup.original_mode : 0o600, { expectedSnapshot: initialSnapshot });
     wrote = true;
     const verified = inspectCodexDelegationConfig(configPath);
-    if (verified.status !== 'configured' || verified.max_threads !== 1 || verified.max_depth !== 1) {
+    if (verified.status !== 'configured' || verified.ownership !== 'toolkit-managed' || verified.max_threads !== 1 || verified.max_depth !== 1) {
       throw new Error(`Post-write Codex config verification failed: ${verified.detail || verified.status}`);
     }
     if (typeof options.afterWrite === 'function') options.afterWrite({ configPath, backup, verified });
@@ -184,8 +272,11 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
       proposed_block: preview.proposed_block,
     };
   } catch (error) {
+    if (!wrote && /changed while the isolated proposal|changed concurrently/.test(cleanError(error))) {
+      return concurrentEditResult(initial, error);
+    }
     if (wrote) {
-      try { restoreCodexDelegationBackup(backup.metadata_path); }
+      try { restoreCodexDelegationBackup(backup.metadata_path, { configPath, backupRoot: options.backupRoot }); }
       catch (restoreError) {
         const combined = new Error(`Codex delegation configuration failed and exact restoration also failed: ${cleanError(restoreError)}`);
         combined.cause = error;
@@ -214,6 +305,7 @@ module.exports = {
   parseTomlStructurally,
   structuralLayout,
   expectedCodexDelegationBlock,
+  markToolkitDelegationProposal,
   codexDelegationConfigState,
   inspectCodexDelegationConfig,
   previewCodexDelegation,

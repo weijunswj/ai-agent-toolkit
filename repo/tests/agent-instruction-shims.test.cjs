@@ -293,7 +293,12 @@ test('portable rules require single-agent execution and a complete delegation ga
     /bounded specialist security review/,
     /prefer one direct specialist/,
     /do not have agents inspect the same files/,
-    /Subagents must not recursively delegate by default/
+    /Subagents must not recursively delegate by default/,
+    /default `fork_turns="none"`/,
+    /brief only required files, evidence, constraints, and acceptance criteria/,
+    /Positive bounded inheritance needs specific dialogue/,
+    /`fork_turns="all"` needs exceptional explicit justification/,
+    /Do not claim unsupported hosts support it/
   ];
 
   for (const relPath of [

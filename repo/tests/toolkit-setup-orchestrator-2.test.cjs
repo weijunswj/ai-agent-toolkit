@@ -12,13 +12,14 @@ test('empty consolidated delegation answer means keep and performs no config wri
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin], {
     env: isolatedHomeEnv(root),
-    input: ['keep', 'keep', 'keep', 'keep', 'keep', '', 'keep', 'keep', 'keep'].join('\n'),
+    input: ['keep', 'keep', 'keep', 'keep', '', 'disable', 'keep', 'keep'].join('\n'),
     timeout: 300000
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Codex delegation control:[\s\S]*recommended: keep[\s\S]*empty input: keep/);
   assert.match(result.stdout, /Delegation enforcement status: kept/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
+  assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), /--disable-codex-plugin-auto-refresh --write/);
 });
 
 test('existing exact integer values report configured without rewrite or backup', () => {

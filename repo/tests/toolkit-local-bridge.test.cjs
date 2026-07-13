@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.4.1';
+const expectedBridgeVersion = '2.4.2';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -3795,7 +3795,8 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2/i, relPath);
-    assert.match(text, /setup question bank must show current state, recommended default, and choices/i, relPath);
+    assert.match(text, /setup question bank must use one canonical order for displayed rows, interactive prompts, piped input, explicit flags, `--yes-recommended`, plans, and execution/i, relPath);
+    assert.match(text, /Every row must show current state, recommended default, empty-input behavior, choices, and selected answer/i, relPath);
     assert.match(text, /OpenCode target: detected state, enabled state, synced state\/version/i, relPath);
     assert.match(text, /AG2\/Antigravity target: detected state, enabled state, synced state\/version/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2 are opt-in only/i, relPath);

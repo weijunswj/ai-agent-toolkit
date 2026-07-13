@@ -11,10 +11,7 @@ const delegation = require('./codex-delegation-config.cjs');
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
 const DEFAULT_UPDATE_REPORT_RETENTION_DAYS = 7;
-const CODEX_AGENT_MAX_THREADS = 1;
-const CODEX_AGENT_MAX_DEPTH = 1;
-const CODEX_DELEGATION_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-DELEGATION-LIMITS v1';
-const CODEX_DELEGATION_END = '# AI-AGENT-TOOLKIT:END CODEX-DELEGATION-LIMITS';
+const { CODEX_AGENT_MAX_THREADS, CODEX_AGENT_MAX_DEPTH, RESTORE_FLAG } = delegation;
 const CODEX_CONFIG_CLIENT_SCOPE = 'Codex user config; official docs explicitly confirm CLI and IDE layers, while desktop app TOML consumption is not separately documented';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
 const SUPPORTED_HOSTS = ['codex', 'claude-code'];
@@ -35,20 +32,8 @@ function defaultManagedSetupScriptPath() {
   return path.join(defaultManagedSourcePath(), 'repo', 'scripts', 'setup-toolkit.cjs');
 }
 
-function defaultCodexHome() {
-  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-}
-
-function codexConfigPath() {
-  return path.join(defaultCodexHome(), 'config.toml');
-}
-
 function quote(value) {
   return JSON.stringify(String(value));
-}
-
-function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function slash(value) {
@@ -398,6 +383,7 @@ function setupPlan(options = {}) {
     },
     checklist_explanation: '**Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**',
     preferences: preferenceSummary(options),
+    question_bank: options.questionBank || [],
     steps: [
       {
         id: 'upfront_setup_checklist',
@@ -446,7 +432,7 @@ function setupPlan(options = {}) {
           ? 'Apply the supported one-direct-specialist Codex limits without overwriting unrelated config'
           : 'Report host-level delegation enforcement as unsupported; portable policy still applies',
         commands: host === 'codex' && choices.codexDelegationControl === 'limit'
-          ? [`manage only agents.max_threads=${CODEX_AGENT_MAX_THREADS} and agents.max_depth=${CODEX_AGENT_MAX_DEPTH} in ${codexConfigPath()}`]
+          ? [`manage only agents.max_threads=${CODEX_AGENT_MAX_THREADS} and agents.max_depth=${CODEX_AGENT_MAX_DEPTH} in ${delegation.codexConfigPath()}`]
           : []
       },
       {
@@ -798,139 +784,31 @@ function inspectClaudeNativePluginState(args) {
   }
 }
 
-function expectedCodexDelegationBlock(eol = '\n') {
-  return [
-    CODEX_DELEGATION_BEGIN,
-    `max_threads = ${CODEX_AGENT_MAX_THREADS}`,
-    `max_depth = ${CODEX_AGENT_MAX_DEPTH}`,
-    CODEX_DELEGATION_END
-  ].join(eol);
+function printDelegationPreview(preview) {
+  console.log('');
+  console.log('# Codex delegation config preview');
+  console.log(`Codex config path: ${preview.config_path}`);
+  console.log('Proposed Toolkit-managed TOML block:');
+  console.log('```toml');
+  console.log(preview.proposed_block);
+  console.log('```');
+  console.log(`Proposed edit: ${preview.proposed_action}`);
+  console.log(`Codex backup directory: ${preview.backup_root}`);
 }
 
-function markerCount(text, marker) {
-  return String(text || '').split(marker).length - 1;
-}
-
-function codexDelegationConfigState(configText, configPath = codexConfigPath()) {
-  const text = String(configText || '');
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const beginCount = markerCount(text, CODEX_DELEGATION_BEGIN);
-  const endCount = markerCount(text, CODEX_DELEGATION_END);
-  const managedPattern = new RegExp(
-    `^[ \\t]*${escapeRegex(CODEX_DELEGATION_BEGIN)}\\r?\\n[\\s\\S]*?^[ \\t]*${escapeRegex(CODEX_DELEGATION_END)}[ \\t]*\\r?$`,
-    'm'
-  );
-  const managedMatch = text.match(managedPattern);
-  if (beginCount !== endCount || beginCount > 1 || (beginCount === 1 && !managedMatch)) {
-    return { status: 'conflicting', config_path: configPath, detail: 'Toolkit delegation markers are incomplete, duplicated, or malformed', text, eol };
-  }
-
-  const outsideManaged = managedMatch ? text.replace(managedMatch[0], '') : text;
-  const dottedOrInline = /^[ \t]*(?:agents\.(?:max_threads|max_depth)|agents)[ \t]*=/m.test(outsideManaged);
-  const agentsHeaders = [...outsideManaged.matchAll(/^[ \t]*\[agents\][ \t]*(?:#.*)?\r?$/gm)];
-  if (dottedOrInline || agentsHeaders.length > 1) {
-    return { status: 'conflicting', config_path: configPath, detail: 'Codex agent limits use an unsupported or duplicated TOML shape', text, eol };
-  }
-
-  let userValues = [];
-  let section = null;
-  if (agentsHeaders.length === 1) {
-    const header = agentsHeaders[0];
-    const rest = outsideManaged.slice(header.index + header[0].length);
-    const nextHeader = rest.match(/\r?\n[ \t]*\[\[?[^\]\r\n]+\]\]?[ \t]*(?:#.*)?\r?(?=\n|$)/);
-    const sectionEnd = nextHeader ? header.index + header[0].length + nextHeader.index : outsideManaged.length;
-    section = { header, end: sectionEnd };
-    const sectionText = outsideManaged.slice(header.index + header[0].length, sectionEnd);
-    const assignments = [...sectionText.matchAll(/^[ \t]*(max_threads|max_depth)[ \t]*=[ \t]*([^#\r\n]+?)[ \t]*(?:#.*)?\r?$/gm)];
-    const possibleLimitLines = sectionText.split(/\r?\n/).filter((line) => /^[ \t]*(?:max_threads|max_depth)[ \t]*=/.test(line));
-    if (possibleLimitLines.length !== assignments.length) {
-      return { status: 'conflicting', config_path: configPath, detail: 'Codex agent limits contain values Toolkit cannot safely verify', text, eol };
-    }
-    userValues = assignments.map((match) => ({ key: match[1], value: Number(match[2].trim()) }));
-  }
-
-  const values = managedMatch
-    ? [...managedMatch[0].matchAll(/^[ \t]*(max_threads|max_depth)[ \t]*=[ \t]*(\d+)[ \t]*$/gm)].map((match) => ({ key: match[1], value: Number(match[2]) }))
-    : userValues;
-  const valueMap = new Map(values.map((entry) => [entry.key, entry.value]));
-  const outsideKeys = userValues.map((entry) => entry.key);
-  if (managedMatch && outsideKeys.length) {
-    return { status: 'conflicting', config_path: configPath, detail: 'User-owned Codex agent-limit keys duplicate the Toolkit-managed block', text, eol };
-  }
-  if (values.length) {
-    const configured = values.length === 2
-      && valueMap.get('max_threads') === CODEX_AGENT_MAX_THREADS
-      && valueMap.get('max_depth') === CODEX_AGENT_MAX_DEPTH;
-    if (!configured) {
-      return { status: 'conflicting', config_path: configPath, detail: 'Existing Codex agent limits differ from Toolkit defaults and were not overwritten', text, eol };
-    }
-    return {
-      status: 'configured',
-      config_path: configPath,
-      max_threads: CODEX_AGENT_MAX_THREADS,
-      max_depth: CODEX_AGENT_MAX_DEPTH,
-      ownership: managedMatch ? 'toolkit-managed' : 'user-owned-compatible',
-      detail: managedMatch ? 'Toolkit-managed limits are configured' : 'Compatible user-owned limits are configured',
-      text,
-      eol
-    };
-  }
-  return { status: 'unconfigured', config_path: configPath, detail: 'Codex agent limits are not configured', text, eol, section };
-}
-
-function inspectCodexDelegationConfig(configPath = codexConfigPath()) {
-  if (!fs.existsSync(configPath)) return codexDelegationConfigState('', configPath);
-  try {
-    return codexDelegationConfigState(fs.readFileSync(configPath, 'utf8'), configPath);
-  } catch (error) {
-    return { status: 'conflicting', config_path: configPath, detail: `Codex config could not be read safely: ${error.message}` };
-  }
-}
-
-function writeFileAtomically(filePath, text) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`);
-  try {
-    fs.writeFileSync(tempPath, text, 'utf8');
-    fs.renameSync(tempPath, filePath);
-  } finally {
-    if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
-  }
-}
-
-function configureCodexDelegation(configPath = codexConfigPath()) {
-  const state = inspectCodexDelegationConfig(configPath);
-  if (state.status !== 'unconfigured') return { ...state, changed: false };
-  const block = expectedCodexDelegationBlock(state.eol);
-  let nextText;
-  if (state.section) {
-    const headerEnd = state.section.header.index + state.section.header[0].length;
-    const insertion = state.text[headerEnd] === '\n' ? headerEnd + 1 : headerEnd;
-    const separator = insertion === headerEnd ? state.eol : '';
-    nextText = `${state.text.slice(0, insertion)}${separator}${block}${state.eol}${state.text.slice(insertion)}`;
-  } else {
-    const separator = !state.text ? '' : (state.text.endsWith(state.eol) ? state.eol : `${state.eol}${state.eol}`);
-    nextText = `${state.text}${separator}[agents]${state.eol}${block}${state.eol}`;
-  }
-  writeFileAtomically(configPath, nextText);
-  const verified = inspectCodexDelegationConfig(configPath);
-  if (verified.status !== 'configured') return { ...verified, changed: true };
-  return { ...verified, changed: true };
-}
-
-function applyHostDelegationControl(args, current) {
+async function applyHostDelegationControl(args, current) {
   if (args.host !== 'codex') {
     return { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable', changed: false };
   }
   const choice = args.setupChoices.codexDelegationControl;
-  if (choice === 'skip') return { ...current.delegation, status: 'skipped', detail: 'Codex delegation configuration was explicitly skipped', changed: false };
-  if (choice === 'keep') return { ...current.delegation, changed: false };
-  return {
-    ...current.delegation,
-    status: 'unsupported',
-    changed: false,
-    detail: 'Codex delegation limits must be applied through the setup-toolkit delegation wrapper.'
-  };
+  const configPath = current.delegation.config_path || delegation.codexConfigPath();
+  if (choice !== 'limit') return delegation.delegationResultForChoice(choice, configPath);
+  const preview = delegation.previewCodexDelegation(configPath);
+  if (preview.status === 'preview') printDelegationPreview(preview);
+  return delegation.delegationResultForChoice('limit', configPath, {
+    codexCommand: args.codexCli,
+    codexHome: delegation.defaultCodexHome(),
+  });
 }
 
 function collectCurrentState(args) {
@@ -997,7 +875,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'updateReportOpen') return 'keep';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
-  if (key === 'codexDelegationControl') return current.delegation?.status === 'configured' ? 'keep' : 'limit';
+  if (key === 'codexDelegationControl') return 'keep';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode || 'keep';
   if (key === 'ag2Target') return args.setupChoices.targets.ag2 || 'keep';
@@ -1107,6 +985,40 @@ function setupQuestionSpecs(args, current) {
   return specs;
 }
 
+function clonedSetupArgs(args) {
+  return {
+    ...args,
+    setupChoices: {
+      ...args.setupChoices,
+      targets: { ...args.setupChoices.targets },
+    },
+  };
+}
+
+function plannedQuestionBank(args, current) {
+  const planned = clonedSetupArgs(args);
+  for (const spec of setupQuestionSpecs(planned, current)) {
+    if (!choiceForKey(planned, spec.key)) assignChoice(planned, spec.key, spec.recommended);
+  }
+  return {
+    args: planned,
+    specs: setupQuestionSpecs(planned, current).map((spec) => ({ ...spec, empty_input: spec.recommended })),
+  };
+}
+
+function printQuestionRows(specs) {
+  for (const spec of specs) {
+    const selected = spec.selected || '(answer required)';
+    console.log(`${spec.title}:`);
+    console.log(`- current: ${spec.current}`);
+    console.log(`- recommended: ${spec.recommended}`);
+    console.log(`- empty input: ${spec.empty_input || spec.recommended} (recommended)`);
+    console.log(`- choices: ${spec.choices.join(' / ')}`);
+    console.log(`- selected: ${selected}`);
+    console.log('');
+  }
+}
+
 function printSetupQuestionBank(args, current, specs) {
   console.log('# setup toolkit question bank');
   console.log('');
@@ -1123,15 +1035,7 @@ function printSetupQuestionBank(args, current, specs) {
   console.log(`Host-native plugin state: ${current.nativePlugin.status}${current.nativePlugin.version ? `, version=${current.nativePlugin.version}` : ''}`);
   if (current.audit?.error) console.log(`Bridge audit warning: ${current.audit.error}`);
   console.log('');
-  for (const spec of specs) {
-    const selected = spec.selected || '(answer required)';
-    console.log(`${spec.title}:`);
-    console.log(`- current: ${spec.current}`);
-    console.log(`- recommended: ${spec.recommended}`);
-    console.log(`- empty input: ${spec.recommended} (recommended)`);
-    console.log(`- choices: ${spec.choices.join(' / ')}`);
-    console.log(`- selected: ${selected}`);
-  }
+  printQuestionRows(specs);
 }
 
 function assignChoice(args, key, choice) {
@@ -1194,31 +1098,47 @@ async function promptForCustomPath(lines, rl) {
 }
 
 async function answerSetupQuestionBank(args, current) {
-  const specs = setupQuestionSpecs(args, current);
-  printSetupQuestionBank(args, current, specs);
-  const initialMissingCount = specs.filter((spec) => !choiceForKey(args, spec.key)).length;
+  const initialSpecs = setupQuestionSpecs(args, current);
+  const initialMissingCount = initialSpecs.filter((spec) => !choiceForKey(args, spec.key)).length;
   let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
 
   if (args.yesRecommended) {
     answerSource = 'user-approved yes-recommended';
-    console.log('');
-    console.log('--yes-recommended selected; setup will apply these choices before writing:');
-    for (const spec of specs) {
+    for (const spec of initialSpecs) {
       if (!choiceForKey(args, spec.key)) assignChoice(args, spec.key, spec.recommended);
-      console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
     }
   }
 
-  const missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+  let specs = setupQuestionSpecs(args, current);
+  let missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+  const needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
+  const needsPromptedAnswers = missing.length > 0 || needsCustomPath;
+  const lines = needsPromptedAnswers && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
+
+  // Complete full piped banks before displaying them so every row reports its
+  // actual selection. Partial/empty input still prints the bank before pausing.
+  if (lines && !needsCustomPath && lines.length >= missing.length) {
+    for (const spec of missing) {
+      const answer = await promptForChoice(spec, lines, null);
+      if (!spec.choices.includes(answer)) throw new Error(`${spec.title} must be one of: ${spec.choices.join(', ')}`);
+      assignChoice(args, spec.key, answer);
+    }
+    specs = setupQuestionSpecs(args, current);
+    missing = [];
+  }
+
+  printSetupQuestionBank(args, current, specs);
+  if (args.yesRecommended) {
+    console.log('--yes-recommended selected; setup will apply these choices before writing.');
+    console.log('');
+  }
   if (missing.length) {
     console.log('');
     console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
   }
 
-  const needsPromptedAnswers = missing.length > 0
-    || (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit);
-  const lines = needsPromptedAnswers && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
-  const rl = needsPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
+  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath;
+  const rl = remainingPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
     for (const spec of missing) {
       const answer = await promptForChoice(spec, lines, rl);
@@ -1235,10 +1155,14 @@ async function answerSetupQuestionBank(args, current) {
     if (rl) rl.close();
   }
 
+  if (lines && lines.some((line) => String(line).trim())) {
+    throw new Error('Setup question bank received unexpected extra non-empty input.');
+  }
+
   applySetupChoices(args, current);
   console.log('');
   console.log('Setup choices confirmed before writes:');
-  for (const spec of specs) console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
+  for (const spec of setupQuestionSpecs(args, current)) console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
   return {
     appeared: true,
     stopped_for_answers: initialMissingCount > 0 && !args.yesRecommended,
@@ -1744,6 +1668,11 @@ function printPlan(plan, asJson) {
     console.log(JSON.stringify(plan, null, 2));
     return;
   }
+  if (plan.question_bank.length) {
+    console.log('# setup toolkit question bank (plan)');
+    console.log('');
+    printQuestionRows(plan.question_bank);
+  }
   printSetupChecklist(plan);
   for (const step of plan.steps) {
     console.log('');
@@ -1850,7 +1779,10 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Subagent depth limit: ${delegation.status === 'configured' ? CODEX_AGENT_MAX_DEPTH : 'not enforced'}`);
   console.log(`Delegation config changed this run: ${yesNo(delegation.changed === true)}`);
   console.log(`Delegation client scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);
+  console.log('Delegation native UAT: pending for Codex native host behavior and Codex Security ordinary/deep workflows');
   console.log(`Delegation detail: ${unknown(delegation.detail)}`);
+  if (delegation.backup_metadata_path) console.log(`Delegation backup metadata: ${delegation.backup_metadata_path}`);
+  if (delegation.restore_command) console.log(`Delegation exact restore command: ${delegation.restore_command}`);
   console.log('');
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
@@ -1917,19 +1849,29 @@ async function execute(args) {
   if (warning) console.warn(`WARNING: ${warning}`);
   const validationResults = [];
   const managed = verifyAndUpdateTrustedRepo(args, validationResults);
-  const delegation = applyHostDelegationControl(args, current);
   const nativeCache = args.host === 'claude-code'
     ? (args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyClaudeNativePluginMetadata(args))
     : runCodexNativePluginSetup(args);
   runLiteValidation(args, validationResults);
   writeBridgePreferences(args);
   runApprovedTargetSync(args);
+  const delegation = await applyHostDelegationControl(args, current);
   const audit = runBridgeAudit(args);
   printFinalSummary({ args, current, managed, nativeCache, delegation, audit, questionBank, validationResults });
   return 0;
 }
 
 async function main(argv = process.argv.slice(2)) {
+  const restoreIndex = argv.indexOf(RESTORE_FLAG);
+  const restoreInline = argv.find((arg) => arg.startsWith(`${RESTORE_FLAG}=`));
+  if (restoreIndex >= 0 || restoreInline) {
+    const metadataPath = restoreInline
+      ? restoreInline.slice(`${RESTORE_FLAG}=`.length)
+      : String(argv[restoreIndex + 1] || '');
+    if (!metadataPath) throw new Error(`${RESTORE_FLAG} requires a backup metadata path`);
+    console.log(JSON.stringify(delegation.restoreCodexDelegationBackup(metadataPath), null, 2));
+    return 0;
+  }
   const args = parseArgs(argv);
   if (args.help) {
     printHelp();
@@ -1941,9 +1883,10 @@ async function main(argv = process.argv.slice(2)) {
   }
   const delegatedCode = delegateToManagedSetupIfAvailable(args);
   if (delegatedCode !== null) return delegatedCode;
-  const plan = setupPlan(args);
   if (args.plan) {
-    printPlan(plan, args.json);
+    const current = collectCurrentState(args);
+    const planned = plannedQuestionBank(args, current);
+    printPlan(setupPlan({ ...planned.args, questionBank: planned.specs }), args.json);
     return 0;
   }
   return execute(args);
@@ -1985,6 +1928,8 @@ module.exports = {
   configureCodexDelegation: delegation.configureCodexDelegation,
   applyHostDelegationControl,
   parseArgs,
+  setupQuestionSpecs,
+  plannedQuestionBank,
   setupPlan,
   normalizeRemote,
   main

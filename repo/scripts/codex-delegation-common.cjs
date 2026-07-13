@@ -71,8 +71,10 @@ function codexConfigPath() {
   return path.join(defaultCodexHome(), 'config.toml');
 }
 
-function backupRoot() {
-  return path.join(os.homedir(), '.ai-agent-toolkit', 'backups', 'codex-delegation');
+function backupRoot(configPath = codexConfigPath()) {
+  // Keep backups beside the selected CODEX_HOME's owning home. This keeps
+  // isolated editor/test homes self-contained and avoids touching real state.
+  return path.join(path.dirname(path.dirname(path.resolve(configPath))), '.ai-agent-toolkit', 'backups', 'codex-delegation');
 }
 
 function pythonCandidates() {

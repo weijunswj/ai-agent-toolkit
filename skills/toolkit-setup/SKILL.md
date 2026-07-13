@@ -67,15 +67,15 @@ node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
 
 When fallback/bootstrap is used, say that it is bootstrap-only. After the managed checkout exists, hand off to the managed checkout script above and use that script for the question bank, setup writes, and verification. In Claude Code, append `--host claude-code` to the managed or fallback setup command. If the managed setup script exists but exits for question-bank pause or a real safety blocker, do not fall back to the active repo command; stop and report the pause or blocker. Do not run an active stale verifier after managed setup; verify from the same managed checkout script/repo that performed setup.
 
-3. The one setup question bank must show current state, recommended default, and choices for every setup decision before writes:
+3. The one setup question bank must use one canonical order for displayed rows, interactive prompts, piped input, explicit flags, `--yes-recommended`, plans, and execution. Every row must show current state, recommended default, empty-input behavior, choices, and selected answer before writes:
 
 - Managed checkout: detected/current path, default path, and keep current / use default managed main checkout / explicit custom path.
 - Repo-backed auto-update: current enabled/disabled state and keep current / enable / disable.
 - Update report writes: current enabled/disabled state and keep current / enable / disable.
 - Update report auto-open: current enabled/disabled state and keep current / enable / disable. Do not write `update_report_open_enabled=false` unless the user explicitly chooses disable or passes an explicit disable flag.
 - Update report/log retention: current days, default 7, and keep current / use default 7 / custom positive integer.
-- Codex plugin cache auto-refresh on Codex only: current enabled/disabled state and keep current / enable / disable. When enabled on Windows, trusted Toolkit hooks may also repair unsafe installed third-party Codex plugin hook launchers and report the result.
 - Codex delegation control on Codex only: current configured/conflicting state and keep current / limit / skip. Until native UAT is recorded, the recommendation and empty-input choice are `keep`, and `--yes-recommended` also keeps delegation configuration unchanged. Only explicit interactive `limit` or `--codex-delegation-control limit` approval may preview, back up, and write `agents.max_threads = 1` and `agents.max_depth = 1` through the official Codex config editor.
+- Codex plugin cache auto-refresh on Codex only: current enabled/disabled state and keep current / enable / disable. When enabled on Windows, trusted Toolkit hooks may also repair unsafe installed third-party Codex plugin hook launchers and report the result.
 - Claude Code plugin behavior on Claude Code only: verify/report only, no Codex mutation, and keep manual/check-only behavior / show native refresh instructions if stale.
 - OpenCode target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
 - AG2/Antigravity target: detected state, enabled state, synced state/version when known, and keep current / enable and sync / disable / skip.
@@ -99,8 +99,8 @@ On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable Wi
 ## Codex Delegation Safety
 
 - Structural truth comes from an actual TOML parser. Text resembling `[agents]` or limit assignments inside basic, literal, or multiline strings is never treated as configuration.
-- Toolkit asks the official Codex app-server `config/batchWrite` editor to prepare an isolated proposal. Unsupported dotted/inline, duplicate, malformed, symlink, special-file, or ambiguous child-table layouts fail closed without writing.
-- The proposed config path, exact values, and backup directory are printed before an explicit limit write. Existing files receive a Toolkit-owned exact-byte backup plus mode/topology metadata. Writes are atomic, resulting TOML is parsed again, and an exact restore command is reported. Keep, skip, configured no-op, and conflicting states create no backup.
+- Toolkit asks the official Codex app-server `config/batchWrite` editor to prepare an isolated proposal. After structural parsing, Toolkit adds exact ownership markers around only the two values in the real `[agents]` table and parses the final marked proposal again. Unsupported dotted/inline, duplicate, malformed, symlink, special-file, ambiguous child-table, or marker layouts fail closed without writing.
+- The proposed config path, exact values, and backup directory are printed before an explicit limit write. The target is snapshotted before proposal generation and compared again immediately before backup and atomic replacement; concurrent edits abort without overwrite. Existing files receive a Toolkit-owned exact-byte backup plus mode, identity, and integrity metadata. Restore validates generation-local metadata, paths, topology, hashes, and the expected current Codex config before mutation. Keep, skip, configured no-op, and conflicting states create no backup.
 - The config commitment occurs only after preceding plugin, validation, preference, and sync work succeeds, so a later setup failure cannot leave `CODEX_HOME/config.toml` mutated.
 - Documented thread semantics preserve one general direct-specialist slot and depth one prevents recursive specialist spawning. This is intended to support an explicitly invoked specialist. Codex Security ordinary/deep compatibility remains unverified pending native UAT. If official Security workflows later require more capacity, handle that result explicitly instead of silently widening the limit.
 
