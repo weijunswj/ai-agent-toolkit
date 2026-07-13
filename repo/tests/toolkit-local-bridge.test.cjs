@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const test = require('node:test');
 const {
   runRepoValidation,
@@ -23,7 +23,7 @@ const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-s
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.4.5';
+const expectedBridgeVersion = '2.4.6';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -1238,26 +1238,89 @@ test('disabled target is not overwritten during later sync', () => {
   assert.equal(fs.readFileSync(ag2Marker, 'utf8'), 'keep ag2\n', 'disabled Antigravity target must not be overwritten');
 });
 
-test('older bridge refuses to overwrite newer hub state unless forced', () => {
+test('cross-source versions do not block native hosts or repo target sync', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   writeJson(path.join(hub, 'state.json'), {
     schema_version: 1,
     architecture_version: 2,
     hub_version: '9.9.9',
-    auto_sync_enabled: false,
+    bridge_versions_by_source: {
+      repo: '9.9.9',
+      'codex-plugin': '9.8.0'
+    },
+    auto_sync_enabled: true,
     targets: {}
   });
 
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], { env: isolatedHomeEnv(root) });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Refusing downgrade/);
-
-  result = run(['--hub', hub, '--write', '--force-downgrade', '--enable-target', 'ag2'], {
+  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'claude-plugin'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(readJson(path.join(hub, 'state.json')).hub_version, expectedBridgeVersion);
+  let state = readJson(path.join(hub, 'state.json'));
+  assert.deepEqual(state.bridge_versions_by_source, {
+    repo: '9.9.9',
+    'codex-plugin': '9.8.0',
+    'claude-plugin': expectedBridgeVersion
+  });
+  assert.equal(state.targets.ag2.synced_version, expectedBridgeVersion);
+  assert.equal(state.hub_version, '9.9.9');
+
+  state.bridge_versions_by_source['claude-plugin'] = '9.7.0';
+  delete state.bridge_versions_by_source['codex-plugin'];
+  writeJson(path.join(hub, 'state.json'), state);
+  result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.bridge_versions_by_source['claude-plugin'], '9.7.0');
+  assert.equal(state.bridge_versions_by_source['codex-plugin'], expectedBridgeVersion);
+  assert.equal(state.hub_version, '9.9.9');
+});
+
+test('same-source downgrade refuses unless forced and forced write changes only that source', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: '9.9.9',
+    bridge_versions_by_source: {
+      repo: '9.8.0',
+      'codex-plugin': '9.9.9',
+      'claude-plugin': '8.8.8'
+    },
+    auto_sync_enabled: false,
+    forward_compatible_setting: { keep: true },
+    targets: {}
+  });
+
+  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Refusing downgrade for sync source codex-plugin/);
+  assert.match(result.stderr, /running bridge .* recorded codex-plugin bridge 9\.9\.9/);
+  assert.match(result.stderr, /setup toolkit.*Codex/i);
+  assert.match(result.stderr, /--force-downgrade.*explicit manual same-source recovery/);
+
+  result = run(['--hub', hub, '--write', '--force-downgrade', '--enable-target', 'ag2', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.equal(state.bridge_versions_by_source.repo, '9.8.0');
+  assert.equal(state.bridge_versions_by_source['codex-plugin'], expectedBridgeVersion);
+  assert.equal(state.bridge_versions_by_source['claude-plugin'], '8.8.8');
+  assert.equal(state.hub_version, '9.9.9');
+  assert.deepEqual(state.forward_compatible_setting, { keep: true });
+
+  result = run(['--hub', hub, '--write', '--force-downgrade', '--enable-target', 'unsupported'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unsupported target/);
 });
 
 test('hook mode downgrade skip exits 0 and prints host remediation on stdout', () => {
@@ -1267,6 +1330,7 @@ test('hook mode downgrade skip exits 0 and prints host remediation on stdout', (
     schema_version: 1,
     architecture_version: 2,
     hub_version: '9.9.9',
+    bridge_versions_by_source: { 'claude-plugin': '9.9.9' },
     auto_sync_enabled: true,
     targets: {}
   });
@@ -1282,6 +1346,255 @@ test('hook mode downgrade skip exits 0 and prints host remediation on stdout', (
   assert.match(result.stdout, /restart Claude Code/);
   assert.match(result.stdout, /claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user/);
   assert.match(result.stdout, /reinstall through the supported Claude Code marketplace path/);
+  assert.doesNotMatch(result.stdout, /--force-downgrade/);
+});
+
+test('repo same-source downgrade names managed source remediation', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    hub_version: '9.9.9',
+    bridge_versions_by_source: { repo: '9.9.9' },
+    targets: {}
+  });
+  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'repo'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /sync source repo/);
+  assert.match(result.stderr, /managed Toolkit source checkout/);
+  assert.doesNotMatch(result.stderr, /Codex plugin cache|Claude Code plugin cache/);
+});
+
+test('legacy migration seeds only an attributable recognized source', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    hub_version: '2.4.3',
+    last_sync_source: 'codex-plugin',
+    preserved_setting: 'keep',
+    targets: {}
+  });
+
+  let result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  let state = readJson(path.join(hub, 'state.json'));
+  assert.deepEqual(state.bridge_versions_by_source, {
+    'codex-plugin': '2.4.3',
+    'claude-plugin': expectedBridgeVersion
+  });
+  assert.equal(state.bridge_versions_by_source.repo, undefined);
+  assert.equal(state.preserved_setting, 'keep');
+
+  result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  state = readJson(path.join(hub, 'state.json'));
+  assert.deepEqual(state.bridge_versions_by_source, {
+    'codex-plugin': '2.4.3',
+    'claude-plugin': expectedBridgeVersion
+  });
+});
+
+test('attributable legacy same-source history still refuses a genuine downgrade', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    hub_version: '9.9.9',
+    last_sync_source: 'claude-plugin',
+    targets: {}
+  });
+  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /recorded claude-plugin bridge 9\.9\.9/);
+});
+
+test('unattributed legacy hub versions do not cross-block and establish the running source', () => {
+  for (const lastSyncSource of [undefined, 'unknown-host']) {
+    const root = tmpRoot();
+    const hub = path.join(root, 'hub', 'current');
+    const legacy = {
+      schema_version: 1,
+      hub_version: '9.9.9',
+      targets: {}
+    };
+    if (lastSyncSource) legacy.last_sync_source = lastSyncSource;
+    writeJson(path.join(hub, 'state.json'), legacy);
+
+    const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+      env: isolatedHomeEnv(root)
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const state = readJson(path.join(hub, 'state.json'));
+    assert.deepEqual(state.bridge_versions_by_source, { 'claude-plugin': expectedBridgeVersion });
+    assert.equal(state.hub_version, '9.9.9');
+  }
+});
+
+test('partially migrated state never attributes the reporting watermark to a missing source', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    hub_version: '9.9.9',
+    last_sync_source: 'codex-plugin',
+    bridge_versions_by_source: { repo: '9.9.9' },
+    targets: {}
+  });
+
+  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.deepEqual(state.bridge_versions_by_source, {
+    repo: '9.9.9',
+    'claude-plugin': expectedBridgeVersion
+  });
+  assert.equal(state.bridge_versions_by_source['codex-plugin'], undefined);
+});
+
+test('malformed and attacker-controlled version maps follow the safe normalization policy', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    hub_version: '2.4.3',
+    last_sync_source: 'repo',
+    bridge_versions_by_source: ['repo', '9.9.9'],
+    targets: {}
+  });
+  let result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(readJson(path.join(hub, 'state.json')).bridge_versions_by_source, {
+    repo: '2.4.3',
+    'claude-plugin': expectedBridgeVersion
+  });
+
+  fs.writeFileSync(path.join(hub, 'state.json'), `${JSON.stringify({
+    schema_version: 1,
+    hub_version: '9.9.9',
+    bridge_versions_by_source: {
+      repo: '9.9.9',
+      unsupported: '99.0.0',
+      constructor: '99.0.0'
+    },
+    targets: {}
+  }, null, 2).replace('"constructor": "99.0.0"', '"__proto__": "99.0.0",\n      "constructor": "99.0.0"')}\n`, 'utf8');
+  result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const safeMap = readJson(path.join(hub, 'state.json')).bridge_versions_by_source;
+  assert.deepEqual(safeMap, { repo: '9.9.9', 'claude-plugin': expectedBridgeVersion });
+  assert.equal(Object.prototype.polluted, undefined);
+
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    bridge_versions_by_source: { 'claude-plugin': 'not-semver' },
+    targets: {}
+  });
+  result = run(['--hub', hub, '--hook', '--write', '--sync-enabled', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /hook skipped: Invalid bridge_versions_by_source\.claude-plugin/);
+});
+
+test('audit reports source-scoped versions and reporting-only hub watermark', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    hub_version: '9.9.9',
+    bridge_versions_by_source: { repo: '9.9.9', 'codex-plugin': '2.4.4' },
+    targets: {}
+  });
+  const result = run(['--hub', hub, '--audit', '--sync-source', 'claude-plugin'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const audit = parseLastJson(result.stdout);
+  assert.equal(audit.running_bridge_source, 'claude-plugin');
+  assert.equal(audit.running_bridge_version, expectedBridgeVersion);
+  assert.deepEqual(audit.bridge_versions_by_source, { repo: '9.9.9', 'codex-plugin': '2.4.4' });
+  assert.equal(audit.hub_reporting_version, '9.9.9');
+  assert.equal(audit.downgrade_enforcement_source, 'claude-plugin');
+});
+
+test('unsupported running sync sources fail closed without writing state', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', 'attacker-controlled'], {
+    env: isolatedHomeEnv(root)
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--sync-source must be repo, codex-plugin, or claude-plugin/);
+  assert.equal(fs.existsSync(hub), false);
+});
+
+test('alternating source writes preserve all source entries and stable state', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  for (const source of ['codex-plugin', 'claude-plugin', 'repo', 'codex-plugin']) {
+    const result = run(['--hub', hub, '--write', '--enable-auto-sync', '--sync-source', source], {
+      env: isolatedHomeEnv(root)
+    });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const state = readJson(path.join(hub, 'state.json'));
+  assert.deepEqual(state.bridge_versions_by_source, {
+    repo: expectedBridgeVersion,
+    'codex-plugin': expectedBridgeVersion,
+    'claude-plugin': expectedBridgeVersion
+  });
+  assert.equal(state.hub_version, expectedBridgeVersion);
+});
+
+test('concurrent source writers retry lock contention and preserve every source entry', async () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const worker = [
+    "'use strict';",
+    "const { spawnSync } = require('node:child_process');",
+    'const [script, hub, source, cwd, home] = process.argv.slice(1);',
+    'for (let attempt = 0; attempt < 500; attempt += 1) {',
+    "  const result = spawnSync(process.execPath, [script, '--hub', hub, '--write', '--enable-auto-sync', '--sync-source', source], {",
+    "    cwd, encoding: 'utf8', env: { ...process.env, PATH: '', USERPROFILE: home, HOME: home, LOCALAPPDATA: home }",
+    '  });',
+    '  if (result.status === 0) process.exit(0);',
+    "  if (!/Toolkit bridge lock/.test(result.stderr)) { process.stderr.write(result.stderr); process.exit(result.status || 1); }",
+    '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);',
+    '}',
+    "process.stderr.write('lock retry limit exceeded\\n');",
+    'process.exit(1);'
+  ].join('\n');
+
+  const results = await Promise.all(['repo', 'codex-plugin', 'claude-plugin'].map((source) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ['-e', worker, script, hub, source, repoRoot, root], {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (status) => resolve({ source, status, stderr }));
+  })));
+  for (const result of results) assert.equal(result.status, 0, `${result.source}: ${result.stderr}`);
+  assert.deepEqual(readJson(path.join(hub, 'state.json')).bridge_versions_by_source, {
+    repo: expectedBridgeVersion,
+    'codex-plugin': expectedBridgeVersion,
+    'claude-plugin': expectedBridgeVersion
+  });
 });
 
 function deadTestPid() {
@@ -2628,7 +2941,13 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
   assert.match(report.text, /^# AI Agent Toolkit Update/m);
   assert.match(report.text, new RegExp(`Toolkit updated to commit: \`${updatedCommit}\``));
   assert.match(report.text, new RegExp(`Previous commit: \`${fixture.initialCommit}\``));
-  assert.match(report.text, /Source: `codex-plugin`/);
+  assert.match(report.text, /Running bridge source: `codex-plugin`/);
+  assert.match(report.text, new RegExp(`Running bridge version: \`${expectedBridgeVersion.replace(/\./g, '\\.')}\``));
+  assert.match(report.text, /Recorded repo version:/);
+  assert.match(report.text, /Recorded Codex plugin version:/);
+  assert.match(report.text, /Recorded Claude plugin version:/);
+  assert.match(report.text, /Hub reporting version:/);
+  assert.match(report.text, /Downgrade enforcement scope: `codex-plugin only`/);
   assert.match(report.text, /- `VERSION\.txt`/);
   assert.match(report.text, /- `skills\/fixture-skill\/SKILL\.md`/);
   assert.match(report.text, /repo update status: `updated`/);
@@ -3081,7 +3400,7 @@ test('legacy delegated repo sync writes an update report using stored repo updat
   assert.match(report.text, /Triggered from: manual or repo run \(`repo`\)\./);
   assert.match(report.text, new RegExp(`Toolkit updated to commit: \`${fixture.toCommit}\``));
   assert.match(report.text, new RegExp(`Previous commit: \`${fixture.fromCommit}\``));
-  assert.match(report.text, /Source: `repo`/);
+  assert.match(report.text, /Running bridge source: `repo`/);
   assert.match(report.text, /Time \(SGT\): `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} SGT`/);
   assert.doesNotMatch(report.text, /Timestamp: `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`/);
   assert.match(report.text, /Repo: updated from [0-9a-f]{8} to [0-9a-f]{8}\./);
@@ -3294,6 +3613,10 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
   ], { env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH }) });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(currentCommit(fixture.repo), fixture.initialCommit);
+  const preUpdateState = readJson(path.join(hub, 'state.json'));
+  preUpdateState.bridge_versions_by_source.repo = '9.9.9';
+  preUpdateState.hub_version = '9.9.9';
+  writeJson(path.join(hub, 'state.json'), preUpdateState);
 
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
     env: isolatedHomeEnv(fixture.root, {
@@ -3318,6 +3641,9 @@ test('hook mode performs a fast-forward repo update before delegating sync', () 
   ]);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_repo_update_status, 'updated');
+  assert.equal(state.bridge_versions_by_source.repo, '9.9.9');
+  assert.equal(state.bridge_versions_by_source['codex-plugin'], expectedBridgeVersion);
+  assert.equal(state.hub_version, '9.9.9');
   assert.equal(state.last_repo_update_from_commit, fixture.initialCommit);
   assert.equal(state.last_repo_update_to_commit, updatedCommit);
 });
@@ -3820,6 +4146,11 @@ test('bridge docs document cache-first setup and release branch auto-update boun
   assert.match(text, /configure `--repo-branch release` only after that branch exists and has a clear CI\/merge policy/i);
   assert.match(text, /pull-on-session-start/i);
   assert.match(text, /does not run a GitHub webhook listener or background push daemon/i);
+  assert.match(text, /New bridges never use `hub_version` for downgrade enforcement/i);
+  assert.match(text, /old Claude Code cache still uses the legacy global `hub_version` guard/i);
+  assert.match(text, /fully resolved on a machine only after every affected native host cache has the fixed bridge/i);
+  assert.match(text, /Codex: run `setup toolkit` in Codex/i);
+  assert.match(text, /Claude Code: run `setup toolkit --host claude-code`/i);
 });
 
 test('Toolkit exposes a local Codex marketplace wrapper for supported plugin install', () => {
