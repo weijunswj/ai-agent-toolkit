@@ -68,6 +68,38 @@ The lock file lives beside the hub at `%USERPROFILE%\.ai-agent-toolkit\update.lo
 
 Writes are rename-first and atomic in the normal case. On Windows, when the final staging-to-`current` directory rename is blocked by a transient `EPERM`, `EBUSY`, or `ENOTEMPTY` after the previous target has already been moved to a backup path, the bridge may fall back to copying the validated staging directory into the empty target path and then cleaning up staging plus backup. If the fallback copy fails, it removes the partial target and restores the backup.
 
+### Owned Staging Generations
+
+Every bridge-created hub or target staging directory uses a generation-scoped ownership protocol. Before `mkdir`, the bridge exclusively creates an immutable sidecar that binds Toolkit owner/schema, generation ID, random ownership token, exact staging path and parent, exact final target, operation and source type, process lease identity, creation time, bridge version, and initial state. After `mkdir`, a second sidecar and an in-directory marker bind the token to the directory identity. Completion and handled failure use separate token-bound state markers.
+
+The bridge cleans only its current proven generation in `finally` handling after success, payload-write failure, staged validation failure, replacement failure, and rollback. Initialization cleanup removes an unmarked partial directory only when the current invocation's own `mkdir` succeeded and the directory still has the identity captured immediately afterward; `EEXIST` and every other ambiguous creation result preserve both sidecar and directory for review. Immediately before deletion it revalidates the exact parent, target, generation ID, token, path containment, ordinary directory type, real path, directory identity, and unchanged ownership record. Ambiguous ownership is preserved and reported instead of deleted. A dead PID is only one liveness signal; it never establishes ownership or authorizes cleanup, and a reused live PID remains protected.
+
+Ordinary `--audit` includes a bounded `staging_generations` inventory. It distinguishes live owned, dead safely attributable, completed awaiting cleanup, malformed, ownership-mismatched, unrelated matching, historical unmarked, special filesystem object, and indeterminate entries. Historical `.staging-*` directories without the new ownership format are reported but never modified.
+
+Safe reconciliation stays inside the existing bridge command family and is dry-run first:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id>
+node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id> --write
+```
+
+The write form is the established explicit approval convention. It acquires the bridge lock, constructs the exact generation sidecar path under every approved managed parent, requires exactly one candidate across the complete parent set, and revalidates ownership immediately before mutation. This exact lookup is independent of the bounded general audit, which remains supplemental diagnostics only. It refuses live, indeterminate, malformed, mismatched, escaped, symlink, junction, reparse-point, or unrelated targets. Repeating an already successful exact reconciliation is a no-op only after absence was checked under every approved parent. Never use a generic recursive `.staging-*` cleaner or delete by name, timestamp, or dead PID.
+
+Reconciliation uses an isolated command route before hook no-op handling, requested-state application, update-report retention cleanup, report writes/opening, repo auto-update, target sync, native plugin refresh, hook repair, or ordinary state persistence. Its accepted controls are limited to `--reconcile-staging`, optional `--write`, `--hub`, `--sync-source`, `--force-downgrade`, `--opencode-config-dir`, and `--opencode-target`; every other bridge flag is rejected before mutation. Dry-run creates no lock. Write mode may acquire and release the existing bridge lock, then remove only the exact generation and ownership sidecars.
+
+Post-merge native Windows UAT for issue #247 must:
+
+1. Use an isolated Windows fixture to prove success and handled payload, validation, replacement, and rollback failures create no staging residue.
+2. Create one safely attributable abandoned new-format generation and prove audit identifies it.
+3. Prove live and ambiguous generations are preserved.
+4. Reconcile only the explicitly approved abandoned fixture generation, first by dry-run and then with `--write`.
+5. Verify no lock, recovery marker, displaced evidence, ownership sidecar, or new staging residue remains in the fixture.
+6. Refresh Codex and Claude Code separately after merge.
+7. Confirm each host runs its own installed cache with its own `codex-plugin` or `claude-plugin` source identifier.
+8. Confirm one host refresh does not mutate the other host cache.
+9. Confirm repo, Codex, and Claude source-version state remains isolated and same-source downgrade protection remains active.
+10. Leave the real 17 historical unmarked staging directories unchanged.
+
 1. Write a staging directory.
 2. Validate staged `manifest.json`, `state.json`, OpenCode adapter output, and Antigravity 2 adapter output.
 3. Rename staging into `current`.
@@ -151,6 +183,7 @@ Supported flags:
 - `--repo-remote <url>`, default `https://github.com/weijunswj/ai-agent-toolkit`.
 - `--repo-update-now`.
 - `--audit`.
+- `--reconcile-staging <generation-id>`; dry-run by default, exact generation cleanup only with `--write`.
 - `--open-update-report`.
 - `--enable-update-reports`.
 - `--disable-update-reports`.

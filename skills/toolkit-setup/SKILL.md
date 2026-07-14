@@ -90,6 +90,15 @@ Allowed later blockers include dirty managed checkout, unexpected remote, fetch/
 node repo/scripts/toolkit-local-bridge.cjs --audit
 ```
 
+The audit reports new-format owned staging generations separately from historical unmarked or unrelated matching directories. Never delete staging from its name, age, or dead PID alone. For one safely attributable generation reported as reconcilable, preview and then run only the exact approved generation:
+
+```powershell
+node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id>
+node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id> --write
+```
+
+Historical unmarked, malformed, mismatched, live, indeterminate, escaped, symlink, junction, reparse-point, and unrelated entries remain untouched.
+
 5. Use `repo/scripts/setup-codex-toolkit-plugin.cjs` only through the managed checkout setup flow for Codex native plugin install/update verification. For Claude Code setup prompts, run the managed checkout setup command with `--host claude-code`, while keeping Claude Code's native plugin install/trust flow host-local. Use `repo/scripts/toolkit-local-bridge.cjs` for shared bridge setup, repo auto-update enablement, sync, audit, disable, stale-state recovery, and troubleshooting. Use `repo/scripts/repair-codex-plugin-windows-hooks.cjs` only for post-install Windows hook audit/repair of an installed Codex plugin root.
 
 On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable WindowsApps alias. Use `setup-codex-toolkit-plugin.cjs --codex-cli "%USERPROFILE%\.codex\plugins\.plugin-appserver\codex.exe"` when an explicit CLI path is needed.

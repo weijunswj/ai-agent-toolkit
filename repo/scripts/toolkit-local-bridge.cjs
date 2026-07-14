@@ -8,9 +8,16 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.cjs');
 const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
+const {
+  auditOwnedStaging,
+  cleanupOwnedGeneration,
+  createOwnedStagingGeneration,
+  markOwnedStaging,
+  reconcileOwnedStaging
+} = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.4.6';
+const BRIDGE_VERSION = '2.4.9';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -42,6 +49,15 @@ const AGENT_RULES_PREFLIGHT_FILES = {
     { target: 'CLAUDE.md', template: 'CLAUDE.shim.template.md' }
   ]
 };
+const RECONCILIATION_ALLOWED_FLAGS = new Set([
+  '--reconcile-staging',
+  '--write',
+  '--hub',
+  '--sync-source',
+  '--force-downgrade',
+  '--opencode-config-dir',
+  '--opencode-target'
+]);
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -112,6 +128,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     enableCodexPluginAutoRefresh: false,
     disableCodexPluginAutoRefresh: false,
     suppressUpdateReport: false,
+    reconcileStaging: '',
     syncSource: 'repo',
     hub: '',
     opencodeConfigDir: '',
@@ -157,6 +174,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--enable-codex-plugin-auto-refresh') args.enableCodexPluginAutoRefresh = true;
     else if (arg === '--disable-codex-plugin-auto-refresh') args.disableCodexPluginAutoRefresh = true;
     else if (arg === '--suppress-update-report') args.suppressUpdateReport = true;
+    else if (arg === '--reconcile-staging') args.reconcileStaging = next();
+    else if (arg.startsWith('--reconcile-staging=')) args.reconcileStaging = arg.slice('--reconcile-staging='.length);
     else if (arg === '--enable-target') args.enableTargets.push(...parseListValue(next()));
     else if (arg.startsWith('--enable-target=')) args.enableTargets.push(...parseListValue(arg.slice('--enable-target='.length)));
     else if (arg === '--disable-target') args.disableTargets.push(...parseListValue(next()));
@@ -208,7 +227,21 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.enableCodexPluginAutoRefresh && args.disableCodexPluginAutoRefresh) {
     throw new Error('--enable-codex-plugin-auto-refresh and --disable-codex-plugin-auto-refresh cannot be used together');
   }
+  if (args.reconcileStaging && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.reconcileStaging)) {
+    throw new Error('--reconcile-staging requires one exact generation ID from a prior audit');
+  }
   return args;
+}
+
+function assertReconciliationCommandArgs(args) {
+  if (!args.reconcileStaging) return;
+  const incompatible = [...new Set(args.argv
+    .filter((value) => String(value).startsWith('--'))
+    .map((value) => String(value).split('=')[0])
+    .filter((flag) => !RECONCILIATION_ALLOWED_FLAGS.has(flag)))];
+  if (incompatible.length) {
+    throw new Error(`--reconcile-staging cannot be combined with: ${incompatible.join(', ')}`);
+  }
 }
 
 function printHelp() {
@@ -224,6 +257,8 @@ function printHelp() {
     '  node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2',
     '  node repo/scripts/toolkit-local-bridge.cjs --enable-target ag2 --write',
     '  node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write',
+    '  node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id>',
+    '  node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id> --write',
     '  node repo/scripts/toolkit-local-bridge.cjs --disable-target opencode --write',
     '',
     'Options:',
@@ -250,6 +285,8 @@ function printHelp() {
     '                                persist opt-in Codex Toolkit cache refresh and Windows third-party hook repair',
     '  --disable-codex-plugin-auto-refresh',
     '  --audit',
+    '  --reconcile-staging <generation-id>',
+    '                                audit one new-format owned generation; add --write for exact cleanup',
     '  --force-downgrade',
     '  --sync-source repo|codex-plugin|claude-plugin',
     '  --hub <path>                  test override; defaults to ~/.ai-agent-toolkit/current',
@@ -2281,23 +2318,75 @@ function writePayloadTree(rootDir, payload) {
   }
 }
 
-function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads, sourceCommit }) {
-  const stagePath = path.join(path.dirname(hubPath), `.staging-${process.pid}-${Date.now()}`);
-  if (fs.existsSync(stagePath)) fs.rmSync(stagePath, { recursive: true, force: true });
-  fs.mkdirSync(stagePath, { recursive: true });
-  writePayloadTree(path.join(stagePath, 'adapters', 'opencode'), payloads.opencode);
-  writePayloadTree(path.join(stagePath, 'adapters', 'ag2'), payloads.ag2);
-  writeJson(path.join(stagePath, 'manifest.json'), buildManifest({
-    state,
-    discoveries,
-    checksum,
-    sourceCommit,
-    syncSource: args.syncSource,
-    hubPath
-  }));
-  writeJson(path.join(stagePath, 'state.json'), state);
-  validateStagedHub(stagePath, checksum);
-  replaceDirectoryAtomically(stagePath, hubPath);
+function withOwnedStaging(options, callback) {
+  const generation = createOwnedStagingGeneration({
+    parent: path.dirname(options.target),
+    target: options.target,
+    stagePrefix: options.stagePrefix,
+    operation: options.operation,
+    sourceType: options.sourceType,
+    bridgeVersion: BRIDGE_VERSION,
+    afterRegistration: options.afterRegistration
+  });
+  let operationError = null;
+  try {
+    const result = callback(generation.stagePath, generation);
+    markOwnedStaging(generation, 'completed');
+    return result;
+  } catch (error) {
+    operationError = error;
+    try {
+      markOwnedStaging(generation, 'failed');
+    } catch (markerError) {
+      error.stagingMarkerError = markerError;
+    }
+    throw error;
+  } finally {
+    const cleanup = cleanupOwnedGeneration(generation, {
+      currentOperation: true,
+      beforeDelete: options.beforeDelete
+    });
+    if (!cleanup.cleaned) {
+      const cleanupError = new Error(
+        `Owned staging generation ${generation.record.generation_id} was preserved because cleanup could not prove ownership: ${cleanup.reason}`
+      );
+      if (operationError) {
+        operationError.stagingCleanupError = cleanupError;
+        operationError.message = `${operationError.message}; ${cleanupError.message}`;
+      }
+      else throw cleanupError;
+    }
+  }
+}
+
+function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads, sourceCommit }, testHooks = {}) {
+  return withOwnedStaging({
+    target: hubPath,
+    stagePrefix: '.staging-',
+    operation: 'hub-snapshot-replacement',
+    sourceType: args.syncSource,
+    afterRegistration: testHooks.afterHubStagingRegistration,
+    beforeDelete: testHooks.beforeHubStagingCleanup
+  }, (stagePath, generation) => {
+    if (testHooks.afterHubStagingReady) testHooks.afterHubStagingReady({ stagePath, generation });
+    if (testHooks.beforeHubPayloadWrite) testHooks.beforeHubPayloadWrite({ stagePath, generation });
+    writePayloadTree(path.join(stagePath, 'adapters', 'opencode'), payloads.opencode);
+    writePayloadTree(path.join(stagePath, 'adapters', 'ag2'), payloads.ag2);
+    writeJson(path.join(stagePath, 'manifest.json'), buildManifest({
+      state,
+      discoveries,
+      checksum,
+      sourceCommit,
+      syncSource: args.syncSource,
+      hubPath
+    }));
+    writeJson(path.join(stagePath, 'state.json'), state);
+    if (testHooks.afterHubPayloadWrite) testHooks.afterHubPayloadWrite({ stagePath, generation });
+    validateStagedHub(stagePath, checksum);
+    if (testHooks.afterHubValidation) testHooks.afterHubValidation({ stagePath, generation });
+    if (testHooks.beforeHubReplacement) testHooks.beforeHubReplacement({ stagePath, generation });
+    replaceDirectoryAtomically(stagePath, hubPath, testHooks.replaceDirectoryOptions || {});
+  });
 }
 
 function validateStagedHub(stagePath, checksum) {
@@ -2872,16 +2961,19 @@ function replaceDirectoryAtomically(sourceDir, targetDir, options = {}) {
   if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
 }
 
-function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.md') {
-  const parent = path.dirname(targetDir);
-  fs.mkdirSync(parent, { recursive: true });
-  const staging = path.join(parent, `.${path.basename(targetDir)}.staging-${process.pid}-${Date.now()}`);
-  if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
-  fs.cpSync(sourceDir, staging, { recursive: true });
-  if (requiredRelPath && !fs.existsSync(path.join(staging, requiredRelPath))) {
-    throw new Error(`staged target missing ${requiredRelPath}: ${staging}`);
-  }
-  replaceDirectoryAtomically(staging, targetDir);
+function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.md', options = {}) {
+  return withOwnedStaging({
+    target: targetDir,
+    stagePrefix: `.${path.basename(targetDir)}.staging-`,
+    operation: options.operation || 'target-directory-copy',
+    sourceType: options.sourceType || 'repo'
+  }, (staging) => {
+    fs.cpSync(sourceDir, staging, { recursive: true });
+    if (requiredRelPath && !fs.existsSync(path.join(staging, requiredRelPath))) {
+      throw new Error(`staged target missing ${requiredRelPath}: ${staging}`);
+    }
+    replaceDirectoryAtomically(staging, targetDir);
+  });
 }
 
 function writeFileAtomically(filePath, content) {
@@ -2920,18 +3012,20 @@ function rootPayloadForTarget(targetName, payload) {
   return rootPayload;
 }
 
-function writeSkillPayloadAtomically(targetPath, baseRel, payload) {
+function writeSkillPayloadAtomically(targetPath, baseRel, payload, sourceType) {
   const targetDir = path.join(targetPath, ...slash(baseRel).split('/'));
-  const parent = path.dirname(targetDir);
-  fs.mkdirSync(parent, { recursive: true });
-  const staging = path.join(parent, `.${path.basename(targetDir)}.staging-${process.pid}-${Date.now()}`);
-  if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
-  fs.mkdirSync(staging, { recursive: true });
-  writePayloadTree(staging, payload);
-  if (!fs.existsSync(path.join(staging, 'SKILL.md'))) {
-    throw new Error(`staged target skill missing SKILL.md: ${staging}`);
-  }
-  replaceDirectoryAtomically(staging, targetDir);
+  return withOwnedStaging({
+    target: targetDir,
+    stagePrefix: `.${path.basename(targetDir)}.staging-`,
+    operation: 'target-skill-replacement',
+    sourceType
+  }, (staging) => {
+    writePayloadTree(staging, payload);
+    if (!fs.existsSync(path.join(staging, 'SKILL.md'))) {
+      throw new Error(`staged target skill missing SKILL.md: ${staging}`);
+    }
+    replaceDirectoryAtomically(staging, targetDir);
+  });
 }
 
 function removeStaleManagedSkills(targetName, targetPath, previousNames, currentNames) {
@@ -2946,7 +3040,7 @@ function removeStaleManagedSkills(targetName, targetPath, previousNames, current
   return removed.sort((left, right) => left.localeCompare(right));
 }
 
-function syncTargetPayload(targetName, targetPath, payloads) {
+function syncTargetPayload(targetName, targetPath, payloads, sourceType) {
   const payload = appTargetPayload(targetName, payloads);
   const skillNames = targetSkillNames(targetName, payloads);
   const previousNames = previousManagedSkillNames(targetPath);
@@ -2956,7 +3050,8 @@ function syncTargetPayload(targetName, targetPath, payloads) {
     writeSkillPayloadAtomically(
       targetPath,
       skillBaseRel(targetName, skillName),
-      skillPayloadForTarget(targetName, payload, skillName)
+      skillPayloadForTarget(targetName, payload, skillName),
+      sourceType
     );
   }
 
@@ -3009,6 +3104,92 @@ function updateTargetState(state, targetName, discovery, checksum, synced, skipR
   }
 }
 
+function stagingAuditParents(hubPath, discoveries) {
+  const parents = [path.dirname(hubPath)];
+  const opencodeTarget = discoveries?.opencode?.target_path;
+  const ag2Target = discoveries?.ag2?.target_path;
+  if (opencodeTarget) parents.push(opencodeTarget);
+  if (ag2Target) parents.push(path.join(ag2Target, 'skills'));
+  return [...new Set(parents.map((value) => path.resolve(value)))];
+}
+
+function stagingReconciliationParents(args, hubPath, state) {
+  const parents = [path.dirname(hubPath)];
+  const openCodeConfig = args.opencodeConfigDir || process.env.OPENCODE_CONFIG_DIR || path.join(os.homedir(), '.config', 'opencode');
+  const openCodeDefaultTarget = path.join(openCodeConfig, 'skills');
+  const openCodeTarget = normalizeOpenCodeTargetPath(
+    args.opencodeTarget || state.targets.opencode.target_path || openCodeDefaultTarget,
+    openCodeDefaultTarget
+  );
+  parents.push(assertSafeWritePath(openCodeTarget, 'OpenCode staging reconciliation parent'));
+
+  const internalAg2Adapter = path.join(hubPath, 'adapters', 'ag2');
+  const savedAg2Target = String(state.targets.ag2.target_path || '');
+  const defaultAg2Target = path.join(os.homedir(), '.gemini', 'config', 'plugins', TOOLKIT_NAME);
+  const ag2Target = savedAg2Target && path.resolve(savedAg2Target) !== path.resolve(internalAg2Adapter)
+    ? savedAg2Target
+    : defaultAg2Target;
+  parents.push(assertSafeWritePath(path.join(ag2Target, 'skills'), 'Antigravity 2 staging reconciliation parent'));
+  return [...new Set(parents.map((value) => path.resolve(value)))];
+}
+
+function stagingReconciliationOutput({ args, hubPath, reconciliation }) {
+  const alreadyAbsent = reconciliation.reason === 'generation-id-not-found';
+  return {
+    architecture_version: ARCHITECTURE_VERSION,
+    bridge_version: BRIDGE_VERSION,
+    dry_run: !args.write,
+    hub_path: hubPath,
+    sync_source: args.syncSource,
+    staging_generations: reconciliation.audit,
+    staging_reconciliation: {
+      generation_id: args.reconcileStaging,
+      reconciled: reconciliation.reconciled,
+      status: reconciliation.reconciled
+        ? 'cleaned'
+        : (alreadyAbsent ? 'already-absent' : (reconciliation.would_reconcile ? 'would-clean' : 'refused')),
+      checked_parent_count: reconciliation.exact_lookup?.checked_parents?.length || 0,
+      reason: reconciliation.reason || ''
+    }
+  };
+}
+
+function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
+  const parents = stagingReconciliationParents(args, hubPath, state);
+  if (!args.write) {
+    const reconciliation = reconcileOwnedStaging(parents, args.reconcileStaging, {
+      write: false,
+      liveness: testHooks.stagingLiveness
+    });
+    if (!reconciliation.would_reconcile && reconciliation.reason !== 'generation-id-not-found') {
+      throw new Error(`staging reconciliation refused: ${reconciliation.reason}`);
+    }
+    const output = stagingReconciliationOutput({ args, hubPath, reconciliation });
+    console.log(JSON.stringify(output, null, 2));
+    return { status: 0, audit: reconciliation.audit, reconciliation };
+  }
+
+  const reconciliationLock = acquireLock(path.dirname(hubPath), args);
+  if (!reconciliationLock.acquired) {
+    throw new Error(`staging reconciliation blocked: ${reconciliationLock.skipReason}`);
+  }
+  try {
+    const reconciliation = reconcileOwnedStaging(parents, args.reconcileStaging, {
+      write: true,
+      liveness: testHooks.stagingLiveness,
+      beforeDelete: testHooks.beforeStagingReconciliationDelete
+    });
+    if (!reconciliation.reconciled && reconciliation.reason !== 'generation-id-not-found') {
+      throw new Error(`staging reconciliation refused: ${reconciliation.reason}`);
+    }
+    const output = stagingReconciliationOutput({ args, hubPath, reconciliation });
+    console.log(JSON.stringify(output, null, 2));
+    return { status: 0, audit: reconciliation.audit, reconciliation };
+  } finally {
+    releaseLock(reconciliationLock);
+  }
+}
+
 function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
   const dryRun = !args.write;
   return {
@@ -3050,6 +3231,7 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
       error: state.last_repo_update_error
     },
     checksum,
+    staging_generations: auditOwnedStaging(stagingAuditParents(hubPath, discoveries)),
     targets: Object.fromEntries(SUPPORTED_TARGETS.map((target) => {
       const targetState = state.targets[target];
       const discovery = discoveries[target];
@@ -3391,7 +3573,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       });
       snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
       statusState = snapshot.state;
-      writeHubSnapshot({ hubPath, args, ...snapshot });
+      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     } catch (error) {
       const details = error.repoUpdateDetails || {};
       statusState = applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
@@ -3401,7 +3583,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       });
       snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
       statusState = snapshot.state;
-      writeHubSnapshot({ hubPath, args, ...snapshot });
+      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
       const report = maybeWriteUpdateReport({
         args,
         hubPath,
@@ -3426,7 +3608,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       statusState = report.state;
       if (report.reportPath) {
         snapshot = { ...snapshot, state: statusState };
-        writeHubSnapshot({ hubPath, args, ...snapshot });
+        writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
       }
       printUpdateReportLine(args, report.reportPath);
       if (args.hook) {
@@ -3447,7 +3629,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
       statusState = snapshot.state;
       plannedTargetSyncs = snapshot.plannedTargetSyncs;
-      writeHubSnapshot({ hubPath, args, ...snapshot });
+      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     }
   } finally {
     releaseLock(refreshLock);
@@ -3475,7 +3657,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
         });
         let failedSnapshot = deriveSnapshotGeneration({ args, hubPath, state: failedState, prepareForWrite: true });
         failedState = failedSnapshot.state;
-        writeHubSnapshot({ hubPath, args, ...failedSnapshot });
+        writeHubSnapshot({ hubPath, args, ...failedSnapshot }, testHooks);
         report = maybeWriteUpdateReport({
           args,
           hubPath,
@@ -3500,7 +3682,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
         failedState = report.state;
         if (report.reportPath) {
           failedSnapshot = { ...failedSnapshot, state: failedState };
-          writeHubSnapshot({ hubPath, args, ...failedSnapshot });
+          writeHubSnapshot({ hubPath, args, ...failedSnapshot }, testHooks);
         }
         snapshot = failedSnapshot;
       }
@@ -3552,7 +3734,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       }
       if (report.reportPath) {
         reportSnapshot = { ...reportSnapshot, state: report.state };
-        writeHubSnapshot({ hubPath, args, ...reportSnapshot });
+        writeHubSnapshot({ hubPath, args, ...reportSnapshot }, testHooks);
       }
       snapshot = reportSnapshot;
     }
@@ -3572,7 +3754,8 @@ function persistActiveNoTargetWrite({
   args,
   hubPath,
   cleanupResult,
-  buildReportContext
+  buildReportContext,
+  testHooks = {}
 }) {
   const lock = acquireLock(path.dirname(hubPath), args);
   if (!lock.acquired) {
@@ -3593,17 +3776,17 @@ function persistActiveNoTargetWrite({
     state = snapshot.state;
 
     // Source-version persistence is independent of optional report creation.
-    writeHubSnapshot({ hubPath, args, ...snapshot });
+    writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     const targetSyncs = [];
     for (const plan of snapshot.plannedTargetSyncs) {
       const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(syncTargetPayload(plan.target, targetPath, snapshot.payloads));
+      targetSyncs.push(syncTargetPayload(plan.target, targetPath, snapshot.payloads, args.syncSource));
       updateTargetState(state, plan.target, snapshot.discoveries[plan.target], snapshot.checksum, true, '');
     }
     if (targetSyncs.length) {
       state.updated_at = timestamp();
       snapshot = { ...snapshot, state };
-      writeHubSnapshot({ hubPath, args, ...snapshot });
+      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     }
     const report = maybeWriteUpdateReport({
       args,
@@ -3614,7 +3797,7 @@ function persistActiveNoTargetWrite({
     });
     if (report.reportPath) {
       snapshot = { ...snapshot, state: report.state };
-      writeHubSnapshot({ hubPath, args, ...snapshot });
+      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     }
     return { ...report, snapshot, persisted: true };
   } finally {
@@ -3624,8 +3807,13 @@ function persistActiveNoTargetWrite({
 
 function run(argv = process.argv.slice(2), testHooks = {}) {
   const args = parseArgs(argv);
+  assertReconciliationCommandArgs(args);
   const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
   const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+  if (args.reconcileStaging) {
+    assertSourceDowngradeAllowed(existingState, args);
+    return runStagingReconciliation({ args, hubPath, state: existingState, testHooks });
+  }
   maybePrintAgentRulesPreflight(args);
 
   assertSourceDowngradeAllowed(existingState, args);
@@ -3695,6 +3883,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
       args,
       hubPath,
       cleanupResult,
+      testHooks,
       buildReportContext: (state, snapshot, targetSyncs) => ({
         repo: repoReportContextFromState(state, args),
         targetSyncs,
@@ -3719,6 +3908,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
       args,
       hubPath,
       cleanupResult,
+      testHooks,
       buildReportContext: (state, snapshot, targetSyncs) => ({
         repo: repoReportContextFromState(state, args),
         targetSyncs,
@@ -3752,18 +3942,18 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     let snapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState, prepareForWrite: true });
     nextState = snapshot.state;
     ({ discoveries, payloads, checksum } = snapshot);
-    writeHubSnapshot({ hubPath, args, ...snapshot });
+    writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
 
     const targetSyncs = [];
     for (const plan of snapshot.plannedTargetSyncs) {
       const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
-      targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads));
+      targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads, args.syncSource));
       updateTargetState(nextState, plan.target, discoveries[plan.target], checksum, true, '');
     }
 
     nextState.updated_at = timestamp();
     snapshot = { ...snapshot, state: nextState };
-    writeHubSnapshot({ hubPath, args, ...snapshot });
+    writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
 
     const report = maybeWriteUpdateReport({
       args,
@@ -3785,7 +3975,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     nextState = report.state;
     if (report.reportPath) {
       snapshot = { ...snapshot, state: nextState };
-      writeHubSnapshot({ hubPath, args, ...snapshot });
+      writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     }
 
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
@@ -3803,7 +3993,8 @@ if (require.main === module) {
     const result = run();
     process.exit(result.status || 0);
   } catch (error) {
-    if (process.argv.includes('--hook')) {
+    const reconciliationRequested = process.argv.some((arg) => arg === '--reconcile-staging' || arg.startsWith('--reconcile-staging='));
+    if (process.argv.includes('--hook') && !reconciliationRequested) {
       console.log(`Toolkit local bridge hook skipped: ${error.message}`);
       process.exit(0);
     }

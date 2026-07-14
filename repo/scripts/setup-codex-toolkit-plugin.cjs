@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.4.6';
+const EXPECTED_TOOLKIT_VERSION = '2.4.9';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
@@ -23,6 +23,7 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
   'repo/scripts/toolkit-local-bridge.cjs',
+  'repo/scripts/toolkit-staging-generations.cjs',
   'repo/tests/toolkit-local-bridge-hook-light.test.cjs'
 ];
 const CACHE_FINGERPRINT_DIRS = [
