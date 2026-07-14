@@ -18,7 +18,8 @@ const {
   formatAgentRulesPreflight,
   repairThirdPartyCodexPluginHooks,
   adapterPayloads,
-  payloadChecksum
+  payloadChecksum,
+  updateReportSignature
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
@@ -1654,20 +1655,32 @@ test('writer recomputes its complete snapshot from state committed before lock a
   const hub = path.join(root, 'hub', 'current');
   const sourceA = createMinimalToolkitSource(path.join(root, 'source-a'), { alpha: 'source A\n' });
   const sourceB = createMinimalToolkitSource(path.join(root, 'source-b'), { alpha: 'source B\n' });
-  const opencodeTarget = path.join(root, 'opencode-skills');
+  const sourceATarget = path.join(root, 'opencode-source-a');
+  const sourceBTarget = path.join(root, 'opencode-source-b');
   const env = isolatedHomeEnv(root);
   const setup = run([
     '--hub', hub,
     '--write',
     '--enable-auto-sync',
     '--enable-target', 'opencode',
-    '--opencode-target', opencodeTarget,
+    '--opencode-target', sourceATarget,
     '--repo-path', sourceA,
     '--sync-source', 'repo'
   ], { env });
   assert.equal(setup.status, 0, setup.stderr);
+  const codexWriter = run([
+    '--hub', hub,
+    '--sync-enabled',
+    '--write',
+    '--repo-path', sourceA,
+    '--opencode-target', sourceATarget,
+    '--sync-source', 'codex-plugin',
+    '--suppress-update-report'
+  ], { env });
+  assert.equal(codexWriter.status, 0, codexWriter.stderr);
   const state = readJson(path.join(hub, 'state.json'));
   state.update_report_enabled = false;
+  state.future_bridge_metadata = { owner: 'future-version', preserve: true };
   writeJson(path.join(hub, 'state.json'), state);
 
   let writerBResult = null;
@@ -1686,6 +1699,7 @@ test('writer recomputes its complete snapshot from state committed before lock a
         '--sync-enabled',
         '--write',
         '--repo-path', sourceB,
+        '--opencode-target', sourceBTarget,
         '--sync-source', 'claude-plugin'
       ], { env });
       assert.equal(writerBResult.status, 0, writerBResult.stderr);
@@ -1709,11 +1723,54 @@ test('writer recomputes its complete snapshot from state committed before lock a
   const manifest = readJson(path.join(hub, 'manifest.json'));
   const expectedPayloads = adapterPayloads({ repo_path: sourceB });
   assert.equal(finalState.repo_path, path.resolve(sourceB));
+  assert.deepEqual(finalState.bridge_versions_by_source, {
+    repo: expectedBridgeVersion,
+    'codex-plugin': expectedBridgeVersion,
+    'claude-plugin': expectedBridgeVersion
+  });
+  assert.deepEqual(finalState.future_bridge_metadata, { owner: 'future-version', preserve: true });
   assert.equal(manifest.checksum, payloadChecksum(expectedPayloads));
   assert.equal(manifest.source_commit, git(sourceB, ['rev-parse', 'HEAD']));
+  assert.equal(path.resolve(finalState.targets.opencode.target_path), path.resolve(sourceBTarget));
+  assert.equal(path.resolve(manifest.targets.opencode.target_path), path.resolve(sourceBTarget));
+  assert.equal(finalState.targets.opencode.synced_checksum, manifest.checksum);
   assert.match(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
   assert.doesNotMatch(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source A/);
-  assert.match(fs.readFileSync(path.join(opencodeTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
+  assert.match(fs.readFileSync(path.join(sourceBTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
+
+  const hubRoot = path.dirname(hub);
+  const residuePattern = /^(?:update\.lock(?:$|\.recovery(?:$|\.)|\.displaced\.)|\.staging-)/;
+  assert.deepEqual(fs.readdirSync(hubRoot).filter((name) => residuePattern.test(name)), []);
+
+  const firstChecksum = manifest.checksum;
+  const firstVersions = finalState.bridge_versions_by_source;
+  const rerun = run([
+    '--hub', hub,
+    '--sync-enabled',
+    '--write',
+    '--repo-path', sourceB,
+    '--opencode-target', sourceBTarget,
+    '--sync-source', 'repo',
+    '--suppress-update-report'
+  ], { env });
+  assert.equal(rerun.status, 0, rerun.stderr);
+  const rerunState = readJson(path.join(hub, 'state.json'));
+  const rerunManifest = readJson(path.join(hub, 'manifest.json'));
+  assert.equal(rerunState.repo_path, path.resolve(sourceB));
+  assert.equal(path.resolve(rerunState.targets.opencode.target_path), path.resolve(sourceBTarget));
+  assert.equal(rerunManifest.checksum, firstChecksum);
+  assert.deepEqual(rerunState.bridge_versions_by_source, firstVersions);
+  assert.deepEqual(rerunState.future_bridge_metadata, { owner: 'future-version', preserve: true });
+  assert.equal(rerunState.targets.opencode.synced_checksum, firstChecksum);
+  assert.match(fs.readFileSync(path.join(sourceBTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
+  assert.deepEqual(fs.readdirSync(hubRoot).filter((name) => residuePattern.test(name)), []);
+
+  const rerunAudit = run(['--hub', hub, '--audit', '--sync-source', 'repo'], { env });
+  assert.equal(rerunAudit.status, 0, rerunAudit.stderr);
+  const audit = parseLastJson(rerunAudit.stdout);
+  assert.equal(audit.checksum, firstChecksum);
+  assert.equal(audit.targets.opencode.synced, true);
+  assert.equal(audit.targets.opencode.would_write, false);
 });
 
 function deadTestPid() {
@@ -3194,6 +3251,79 @@ test('hook report includes both external repo advance and Antigravity 2 target s
   assert.match(report.text, /Copied\/updated `2` Toolkit skills\./);
   assert.match(report.text, /repo update status: `up-to-date`/);
   assert.match(report.text, /target sync status: `synced`/);
+});
+
+test('final report relock uses final target enablement for skipped targets and signature', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const hub = path.join(fixture.root, 'hub', 'current');
+  const opencodeTarget = path.join(fixture.root, 'final-opencode-skills');
+  const env = isolatedHomeEnv(fixture.root, { PATH: process.env.PATH });
+  const setup = run([
+    '--hub', hub,
+    '--enable-repo-auto-update',
+    '--repo-path', fixture.repo,
+    '--repo-branch', 'main',
+    '--repo-remote', fixture.origin,
+    '--enable-auto-sync',
+    '--write'
+  ], { env });
+  assert.equal(setup.status, 0, setup.stderr);
+  pushRepoToolkitUpdate(fixture, 'final-report-relock-target-state');
+
+  let competingWriter = null;
+  let capturedReport = null;
+  const result = runBridge([
+    '--hub', hub,
+    '--hook',
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'claude-plugin'
+  ], {
+    beforeFinalReportLock() {
+      competingWriter = run([
+        '--hub', hub,
+        '--sync-enabled',
+        '--write',
+        '--enable-target', 'opencode',
+        '--opencode-target', opencodeTarget,
+        '--repo-path', fixture.repo,
+        '--sync-source', 'codex-plugin',
+        '--suppress-update-report'
+      ], { env });
+      assert.equal(competingWriter.status, 0, competingWriter.stderr);
+    },
+    afterFinalReportBuild(details) {
+      capturedReport = details;
+    }
+  });
+
+  assert.ok(competingWriter, 'competing writer must change target enablement before the final report lock');
+  assert.equal(result.status, 0);
+  assert.ok(capturedReport, 'final report context must be observable after the relock');
+  assert.deepEqual(capturedReport.reportContext.skippedTargets, ['ag2']);
+  assert.equal(capturedReport.reportSnapshot.state.targets.opencode.enabled, true);
+  assert.equal(capturedReport.reportSnapshot.state.targets.ag2.enabled, false);
+
+  const report = readLatestReport(hub);
+  assert.doesNotMatch(report.text, /Skipped OpenCode because target is disabled/);
+  assert.match(report.text, /Skipped Antigravity 2 because target is disabled/);
+  const persisted = readJson(path.join(hub, 'state.json'));
+  const signatureContext = {
+    cleanup: capturedReport.reportSnapshot.state.last_update_report_cleanup || {},
+    ...capturedReport.reportContext
+  };
+  const expectedSignature = updateReportSignature({
+    args: capturedReport.args,
+    checksum: capturedReport.reportSnapshot.checksum,
+    context: signatureContext
+  });
+  const staleSignature = updateReportSignature({
+    args: capturedReport.args,
+    checksum: capturedReport.reportSnapshot.checksum,
+    context: { ...signatureContext, skippedTargets: ['opencode', 'ag2'] }
+  });
+  assert.equal(persisted.last_update_report_signature, expectedSignature);
+  assert.notEqual(persisted.last_update_report_signature, staleSignature);
 });
 
 test('hook report is generated when target sync happens without a repo commit change', () => {

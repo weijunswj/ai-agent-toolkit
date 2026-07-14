@@ -3365,7 +3365,7 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
   return { status: 0 };
 }
 
-function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads }) {
+function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
   const lock = acquireLock(path.dirname(hubPath), args);
   if (!lock.acquired) {
     console.log(`Toolkit local bridge: ${lock.skipReason}; skipping repo auto-update.`);
@@ -3379,7 +3379,6 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   let updateResult = null;
   let snapshot = null;
   let plannedTargetSyncs = [];
-  let skippedTargets = [];
   let nativePluginCache = { status: '' };
   let thirdPartyHookRepair = { status: '' };
   const previousObservedRepoCommit = state.last_repo_update_to_commit || '';
@@ -3419,6 +3418,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
             branchSwitchedFrom: details.branchSwitchedFrom || '',
             error: details.error || error.message
           },
+          skippedTargets: snapshot.skippedTargets,
           nativePluginCache: nativePluginCacheStatus(args, statusState),
           targetSyncStatus: 'skipped'
         }
@@ -3447,7 +3447,6 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
       statusState = snapshot.state;
       plannedTargetSyncs = snapshot.plannedTargetSyncs;
-      skippedTargets = snapshot.skippedTargets;
       writeHubSnapshot({ hubPath, args, ...snapshot });
     }
   } finally {
@@ -3518,6 +3517,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
 
   const finalState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
   const plannedChecksum = snapshot.checksum;
+  if (testHooks.beforeFinalReportLock) testHooks.beforeFinalReportLock({ hubPath, statusState, snapshot });
   const reportLock = acquireLock(path.dirname(hubPath), args);
   let report = { state: finalState, reportPath: '' };
   try {
@@ -3530,22 +3530,26 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
         reportSnapshot.checksum === plannedChecksum &&
         targetIsSynced(sync.target, reportState.targets[sync.target], reportSnapshot.checksum, reportSnapshot.discoveries[sync.target], reportSnapshot.payloads)
       ));
+      const reportContext = {
+        repo: repoReportContextFromUpdate(reportState, updateResult, previousObservedRepoCommit),
+        targetSyncs: completedTargetSyncs,
+        skippedTargets: reportSnapshot.skippedTargets,
+        nativePluginCache,
+        thirdPartyHookRepair,
+        targetSyncStatus: plannedTargetSyncs.length
+          ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
+          : 'not needed'
+      };
       report = maybeWriteUpdateReport({
         args,
         hubPath,
         state: reportState,
         checksum: reportSnapshot.checksum,
-        context: {
-          repo: repoReportContextFromUpdate(reportState, updateResult, previousObservedRepoCommit),
-          targetSyncs: completedTargetSyncs,
-          skippedTargets,
-          nativePluginCache,
-          thirdPartyHookRepair,
-          targetSyncStatus: plannedTargetSyncs.length
-            ? (completedTargetSyncs.length === plannedTargetSyncs.length ? 'synced' : 'not confirmed')
-            : 'not needed'
-        }
+        context: reportContext
       });
+      if (testHooks.afterFinalReportBuild) {
+        testHooks.afterFinalReportBuild({ args, report, reportContext, reportSnapshot });
+      }
       if (report.reportPath) {
         reportSnapshot = { ...reportSnapshot, state: report.state };
         writeHubSnapshot({ hubPath, args, ...reportSnapshot });
@@ -3663,7 +3667,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   }
   if (!args.write) return { status: 0, audit };
   if (shouldRunRepoAutoUpdate(args, nextState)) {
-    return runRepoAutoUpdate({ args, hubPath, state: nextState, discoveries, checksum, payloads });
+    return runRepoAutoUpdate({ args, hubPath, state: nextState, discoveries, checksum, payloads, testHooks });
   }
   const hasTargetSync = SUPPORTED_TARGETS.some((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads));
   if (
@@ -3769,7 +3773,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
       context: {
         repo: repoReportContextFromState(nextState, args),
         targetSyncs,
-        skippedTargets: SUPPORTED_TARGETS.filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled),
+        skippedTargets: snapshot.skippedTargets,
         nativePluginCache: nativePluginCacheStatusForReport(args, nextState, {
           repoPath: nextState.repo_path,
           validateRepo: true
@@ -3826,6 +3830,7 @@ module.exports = {
   compareSemver,
   getRepoValidationLabels,
   runRepoValidation,
+  updateReportSignature,
   updateReportDir,
   cleanupUpdateReports,
   openUpdateReport,
