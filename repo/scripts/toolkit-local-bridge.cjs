@@ -3543,6 +3543,52 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   return { status: 0, audit: finalAudit };
 }
 
+function persistActiveNoTargetWrite({
+  args,
+  hubPath,
+  cleanupResult,
+  discoveries,
+  checksum,
+  payloads,
+  buildReportContext
+}) {
+  const lock = acquireLock(path.dirname(hubPath), args);
+  if (!lock.acquired) {
+    console.log(`Toolkit local bridge: ${lock.skipReason}; skipping sync.`);
+    return {
+      state: normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))),
+      reportPath: '',
+      persisted: false
+    };
+  }
+
+  try {
+    const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+    assertSourceDowngradeAllowed(latestState, args);
+    let state = applyRequestedState(latestState, args);
+    state.last_update_report_cleanup = cleanupResult;
+    updateTargetState(state, 'opencode', discoveries.opencode, checksum, false, state.targets.opencode.enabled ? '' : 'not enabled');
+    updateTargetState(state, 'ag2', discoveries.ag2, checksum, false, state.targets.ag2.enabled ? '' : 'not enabled');
+    state = prepareStateForWrite(state, args);
+
+    // Source-version persistence is independent of optional report creation.
+    writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads });
+    const report = maybeWriteUpdateReport({
+      args,
+      hubPath,
+      state,
+      checksum,
+      context: buildReportContext(state)
+    });
+    if (report.reportPath) {
+      writeHubSnapshot({ hubPath, args, state: report.state, discoveries, checksum, payloads });
+    }
+    return { ...report, persisted: true };
+  } finally {
+    releaseLock(lock);
+  }
+}
+
 function run(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
@@ -3606,35 +3652,34 @@ function run(argv = process.argv.slice(2)) {
     !args.disableRepoAutoUpdate &&
     !hasTargetSync
   ) {
-    const reportLock = acquireLock(path.dirname(hubPath), args);
-    let report = { state: nextState, reportPath: '' };
-    try {
-      if (reportLock.acquired) {
-        const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
-        assertSourceDowngradeAllowed(latestState, args);
-        const reportState = prepareStateForWrite(latestState, args);
-        report = maybeWriteUpdateReport({
-          args,
-          hubPath,
-          state: reportState,
-          checksum,
-          context: {
-            repo: repoReportContextFromState(reportState, args),
-            nativePluginCache: nativePluginCacheStatusForReport(args, reportState, {
-              repoPath: reportState.repo_path,
-              validateRepo: true
-            }),
-            thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, reportState),
-            targetSyncStatus: 'not needed'
-          }
-        });
-        if (report.reportPath) {
-          writeHubSnapshot({ hubPath, args, state: report.state, discoveries, checksum, payloads });
-        }
-      }
-    } finally {
-      releaseLock(reportLock);
+    const hasConfiguredState = Boolean(
+      existingState.hub_version ||
+      Object.keys(existingState.bridge_versions_by_source || {}).length ||
+      existingState.auto_sync_enabled ||
+      existingState.repo_auto_update_enabled ||
+      SUPPORTED_TARGETS.some((target) => existingState.targets[target]?.enabled)
+    );
+    if (!hasConfiguredState) {
+      if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
+      return { status: 0, audit };
     }
+    const report = persistActiveNoTargetWrite({
+      args,
+      hubPath,
+      cleanupResult,
+      discoveries,
+      checksum,
+      payloads,
+      buildReportContext: (state) => ({
+        repo: repoReportContextFromState(state, args),
+        nativePluginCache: nativePluginCacheStatusForReport(args, state, {
+          repoPath: state.repo_path,
+          validateRepo: true
+        }),
+        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
+        targetSyncStatus: 'not needed'
+      })
+    });
     nextState = report.state;
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
     if (report.reportPath) printUpdateReportLine(args, report.reportPath);
@@ -3642,35 +3687,23 @@ function run(argv = process.argv.slice(2)) {
     return { status: 0, audit: finalAudit };
   }
   if (args.hook && !hasTargetSync) {
-    const reportLock = acquireLock(path.dirname(hubPath), args);
-    let report = { state: nextState, reportPath: '' };
-    try {
-      if (reportLock.acquired) {
-        const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
-        assertSourceDowngradeAllowed(latestState, args);
-        const reportState = prepareStateForWrite(latestState, args);
-        report = maybeWriteUpdateReport({
-          args,
-          hubPath,
-          state: reportState,
-          checksum,
-          context: {
-            repo: repoReportContextFromState(reportState, args),
-            nativePluginCache: nativePluginCacheStatusForReport(args, reportState, {
-              repoPath: reportState.repo_path,
-              validateRepo: true
-            }),
-            thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, reportState),
-            targetSyncStatus: 'not needed'
-          }
-        });
-        if (report.reportPath) {
-          writeHubSnapshot({ hubPath, args, state: report.state, discoveries, checksum, payloads });
-        }
-      }
-    } finally {
-      releaseLock(reportLock);
-    }
+    const report = persistActiveNoTargetWrite({
+      args,
+      hubPath,
+      cleanupResult,
+      discoveries,
+      checksum,
+      payloads,
+      buildReportContext: (state) => ({
+        repo: repoReportContextFromState(state, args),
+        nativePluginCache: nativePluginCacheStatusForReport(args, state, {
+          repoPath: state.repo_path,
+          validateRepo: true
+        }),
+        thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
+        targetSyncStatus: 'not needed'
+      })
+    });
     nextState = report.state;
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
     if (report.reportPath) printUpdateReportLine(args, report.reportPath);

@@ -7,6 +7,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const test = require('node:test');
 const {
+  run: runBridge,
   runRepoValidation,
   getRepoValidationLabels,
   openUpdateReport,
@@ -17,7 +18,10 @@ const {
   formatAgentRulesPreflight,
   repairThirdPartyCodexPluginHooks
 } = require('../scripts/toolkit-local-bridge.cjs');
-const { verifyInstalledCacheFreshness } = require('../scripts/setup-codex-toolkit-plugin.cjs');
+const {
+  CACHE_FINGERPRINT_PATHS,
+  verifyInstalledCacheFreshness
+} = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
 const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-skills-plugin-hooks.cjs');
 
@@ -160,6 +164,52 @@ function writeDisabledHookHub(hub) {
     auto_sync_enabled: false,
     targets: {}
   });
+}
+
+function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const sourceRepo = createMinimalToolkitSource(root, { alpha: 'alpha no-target fixture\n' });
+  for (const relPath of CACHE_FINGERPRINT_PATHS) {
+    const sourcePath = path.join(repoRoot, ...relPath.split('/'));
+    const fixturePath = path.join(sourceRepo, ...relPath.split('/'));
+    fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
+    fs.copyFileSync(sourcePath, fixturePath);
+  }
+  fs.cpSync(
+    path.join(repoRoot, '.codex-plugin', 'assets'),
+    path.join(sourceRepo, '.codex-plugin', 'assets'),
+    { recursive: true }
+  );
+  fs.cpSync(
+    path.join(repoRoot, 'skills', 'ai-coding-agent-rules'),
+    path.join(sourceRepo, 'skills', 'ai-coding-agent-rules'),
+    { recursive: true }
+  );
+  const temp = path.join(root, 'temp');
+  fs.mkdirSync(temp, { recursive: true });
+  const env = isolatedHomeEnv(root, { TEMP: temp, TMP: temp });
+  const setup = run([
+    '--hub', hub,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-target', 'ag2',
+    '--repo-path', sourceRepo,
+    '--sync-source', initialSource
+  ], { env });
+  assert.equal(setup.status, 0, setup.stderr);
+  return { root, hub, sourceRepo, temp, env };
+}
+
+function runFixtureBridge(fixture, args) {
+  const originalPluginRoot = process.env.PLUGIN_ROOT;
+  if (args.includes('codex-plugin')) process.env.PLUGIN_ROOT = fixture.sourceRepo;
+  try {
+    return runBridge(args);
+  } finally {
+    if (originalPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
+    else process.env.PLUGIN_ROOT = originalPluginRoot;
+  }
 }
 
 function expectedMissingAgentsContext(root) {
@@ -3350,23 +3400,205 @@ test('hook report records removed stale managed skill folders during target sync
   assert.match(report.text, /- `beta`/);
 });
 
-test('no-op hook sync does not generate or open an update report', () => {
-  const root = tmpRoot();
-  const hub = path.join(root, 'hub', 'current');
-  let result = run(['--hub', hub, '--write', '--enable-target', 'ag2'], {
-    env: isolatedHomeEnv(root)
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const existingState = readJson(path.join(hub, 'state.json'));
-  assert.equal(existingState.last_update_report_path || '', '');
+test('active no-target writes persist each source independently without requiring a report', () => {
+  const fixture = createActiveNoTargetFixture('codex-plugin');
+  let state = readJson(path.join(fixture.hub, 'state.json'));
+  assert.deepEqual(state.bridge_versions_by_source, { 'codex-plugin': expectedBridgeVersion });
+  state.update_report_enabled = false;
+  writeJson(path.join(fixture.hub, 'state.json'), state);
 
-  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write'], {
-    env: isolatedHomeEnv(root)
+  let result = runFixtureBridge(fixture, [
+    '--hub', fixture.hub,
+    '--hook',
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'claude-plugin'
+  ]);
+  assert.equal(result.status, 0);
+  assert.ok(result.audit);
+  state = readJson(path.join(fixture.hub, 'state.json'));
+  assert.deepEqual(state.bridge_versions_by_source, {
+    'codex-plugin': expectedBridgeVersion,
+    'claude-plugin': expectedBridgeVersion
   });
-  assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
-  const state = readJson(path.join(hub, 'state.json'));
+  assert.deepEqual(result.audit.bridge_versions_by_source, state.bridge_versions_by_source);
+  assert.equal(state.hub_version, expectedBridgeVersion);
   assert.equal(state.last_update_report_path || '', '');
+  assert.equal(fs.existsSync(path.join(fixture.temp, 'ai-agent-toolkit', 'update-reports')), false);
+
+  state.update_report_enabled = true;
+  state.last_update_report_path = 'existing-report.md';
+  state.last_update_report_signature = 'a'.repeat(64);
+  writeJson(path.join(fixture.hub, 'state.json'), state);
+  result = runFixtureBridge(fixture, [
+    '--hub', fixture.hub,
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'repo'
+  ]);
+  assert.equal(result.status, 0);
+  state = readJson(path.join(fixture.hub, 'state.json'));
+  assert.equal(state.bridge_versions_by_source.repo, expectedBridgeVersion);
+  assert.deepEqual(result.audit.bridge_versions_by_source, state.bridge_versions_by_source);
+  assert.equal(state.last_update_report_path, 'existing-report.md');
+  assert.equal(state.last_update_report_signature, 'a'.repeat(64));
+
+  result = runFixtureBridge(fixture, [
+    '--hub', fixture.hub,
+    '--hook',
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'repo',
+    '--suppress-update-report'
+  ]);
+  assert.equal(result.status, 0);
+  state = readJson(path.join(fixture.hub, 'state.json'));
+  assert.deepEqual(result.audit.bridge_versions_by_source, state.bridge_versions_by_source);
+  assert.equal(state.last_update_report_signature, 'a'.repeat(64));
+
+  delete state.bridge_versions_by_source['codex-plugin'];
+  writeJson(path.join(fixture.hub, 'state.json'), state);
+  result = runFixtureBridge(fixture, [
+    '--hub', fixture.hub,
+    '--hook',
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'codex-plugin'
+  ]);
+  assert.equal(result.status, 0);
+  const firstCodexState = readJson(path.join(fixture.hub, 'state.json'));
+  assert.deepEqual(firstCodexState.bridge_versions_by_source, {
+    repo: expectedBridgeVersion,
+    'codex-plugin': expectedBridgeVersion,
+    'claude-plugin': expectedBridgeVersion
+  });
+  assert.deepEqual(result.audit.bridge_versions_by_source, firstCodexState.bridge_versions_by_source);
+  assert.equal(firstCodexState.last_update_report_path, 'existing-report.md');
+  assert.equal(firstCodexState.last_update_report_signature, 'a'.repeat(64));
+
+  result = runFixtureBridge(fixture, [
+    '--hub', fixture.hub,
+    '--hook',
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'codex-plugin'
+  ]);
+  assert.equal(result.status, 0);
+  const repeatedState = readJson(path.join(fixture.hub, 'state.json'));
+  assert.deepEqual(repeatedState.bridge_versions_by_source, firstCodexState.bridge_versions_by_source);
+  assert.equal(repeatedState.hub_version, firstCodexState.hub_version);
+  assert.deepEqual(repeatedState.targets, firstCodexState.targets);
+  assert.deepEqual(result.audit.bridge_versions_by_source, repeatedState.bridge_versions_by_source);
+
+  delete repeatedState.bridge_versions_by_source['claude-plugin'];
+  writeJson(path.join(fixture.hub, 'state.json'), repeatedState);
+  result = runFixtureBridge(fixture, [
+    '--hub', fixture.hub,
+    '--hook',
+    '--write',
+    '--sync-source', 'claude-plugin'
+  ]);
+  assert.equal(result.status, 0);
+  const hookOnlyState = readJson(path.join(fixture.hub, 'state.json'));
+  assert.equal(hookOnlyState.bridge_versions_by_source['claude-plugin'], expectedBridgeVersion);
+  assert.deepEqual(result.audit.bridge_versions_by_source, hookOnlyState.bridge_versions_by_source);
+  assert.equal(hookOnlyState.last_update_report_signature, 'a'.repeat(64));
+  assert.equal(fs.existsSync(path.join(fixture.temp, 'ai-agent-toolkit', 'update-reports')), false);
+});
+
+test('active no-target write persists lazy legacy migration', () => {
+  const fixture = createActiveNoTargetFixture('codex-plugin');
+  const state = readJson(path.join(fixture.hub, 'state.json'));
+  delete state.bridge_versions_by_source;
+  state.hub_version = '2.4.3';
+  state.last_sync_source = 'codex-plugin';
+  state.update_report_enabled = false;
+  writeJson(path.join(fixture.hub, 'state.json'), state);
+
+  const result = runFixtureBridge(fixture, [
+    '--hub', fixture.hub,
+    '--hook',
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'claude-plugin'
+  ]);
+  assert.equal(result.status, 0);
+  const persisted = readJson(path.join(fixture.hub, 'state.json'));
+  assert.deepEqual(persisted.bridge_versions_by_source, {
+    'codex-plugin': '2.4.3',
+    'claude-plugin': expectedBridgeVersion
+  });
+  assert.equal(persisted.hub_version, expectedBridgeVersion);
+  assert.deepEqual(result.audit.bridge_versions_by_source, persisted.bridge_versions_by_source);
+});
+
+test('forced same-source no-target downgrade changes only that source and keeps hub watermark', () => {
+  const fixture = createActiveNoTargetFixture('claude-plugin');
+  const state = readJson(path.join(fixture.hub, 'state.json'));
+  state.bridge_versions_by_source = {
+    repo: '8.8.8',
+    'codex-plugin': '9.9.9',
+    'claude-plugin': '7.7.7'
+  };
+  state.hub_version = '10.0.0';
+  state.update_report_enabled = false;
+  writeJson(path.join(fixture.hub, 'state.json'), state);
+
+  const result = runFixtureBridge(fixture, [
+    '--hub', fixture.hub,
+    '--hook',
+    '--sync-enabled',
+    '--write',
+    '--force-downgrade',
+    '--sync-source', 'codex-plugin'
+  ]);
+  assert.equal(result.status, 0);
+  const persisted = readJson(path.join(fixture.hub, 'state.json'));
+  assert.deepEqual(persisted.bridge_versions_by_source, {
+    repo: '8.8.8',
+    'codex-plugin': expectedBridgeVersion,
+    'claude-plugin': '7.7.7'
+  });
+  assert.equal(persisted.hub_version, '10.0.0');
+  assert.deepEqual(result.audit.bridge_versions_by_source, persisted.bridge_versions_by_source);
+});
+
+test('disabled hook remains no-write and active lock contention reports an unpersisted skip', () => {
+  const fixture = createActiveNoTargetFixture('codex-plugin');
+  let state = readJson(path.join(fixture.hub, 'state.json'));
+  state.auto_sync_enabled = false;
+  state.repo_auto_update_enabled = false;
+  writeJson(path.join(fixture.hub, 'state.json'), state);
+  const statePath = path.join(fixture.hub, 'state.json');
+  const disabledBytes = fs.readFileSync(statePath);
+
+  let result = run([
+    '--hub', fixture.hub,
+    '--hook',
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'claude-plugin'
+  ], { env: fixture.env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(fs.readFileSync(statePath), disabledBytes);
+  assert.match(result.stdout, /auto-sync disabled/);
+
+  state = readJson(statePath);
+  state.auto_sync_enabled = true;
+  writeJson(statePath, state);
+  const lockPath = path.join(path.dirname(fixture.hub), 'update.lock');
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid });
+  result = run([
+    '--hub', fixture.hub,
+    '--hook',
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'claude-plugin'
+  ], { env: fixture.env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /lock at .*held by live process.*skipping sync/i);
+  assert.equal(readJson(statePath).bridge_versions_by_source['claude-plugin'], undefined);
+  fs.rmSync(lockPath, { force: true });
 });
 
 test('legacy delegated repo sync writes an update report using stored repo update metadata', () => {
