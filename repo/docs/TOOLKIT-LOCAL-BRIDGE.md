@@ -85,6 +85,8 @@ node repo/scripts/toolkit-local-bridge.cjs --reconcile-staging <generation-id> -
 
 The write form is the established explicit approval convention. It acquires the bridge lock, constructs the exact generation sidecar path under every approved managed parent, requires exactly one candidate across the complete parent set, and revalidates ownership immediately before mutation. This exact lookup is independent of the bounded general audit, which remains supplemental diagnostics only. It refuses live, indeterminate, malformed, mismatched, escaped, symlink, junction, reparse-point, or unrelated targets. Repeating an already successful exact reconciliation is a no-op only after absence was checked under every approved parent. Never use a generic recursive `.staging-*` cleaner or delete by name, timestamp, or dead PID.
 
+Reconciliation uses an isolated command route before hook no-op handling, requested-state application, update-report retention cleanup, report writes/opening, repo auto-update, target sync, native plugin refresh, hook repair, or ordinary state persistence. Its accepted controls are limited to `--reconcile-staging`, optional `--write`, `--hub`, `--sync-source`, `--force-downgrade`, `--opencode-config-dir`, and `--opencode-target`; every other bridge flag is rejected before mutation. Dry-run creates no lock. Write mode may acquire and release the existing bridge lock, then remove only the exact generation and ownership sidecars.
+
 Post-merge native Windows UAT for issue #247 must:
 
 1. Use an isolated Windows fixture to prove success and handled payload, validation, replacement, and rollback failures create no staging residue.

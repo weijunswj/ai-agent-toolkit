@@ -34,7 +34,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.4.8';
+const expectedBridgeVersion = '2.4.9';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -1878,6 +1878,202 @@ test('bridge audit and approved reconciliation clean only one exact abandoned ne
   const idempotent = run(['--hub', hub, '--reconcile-staging', generation.record.generation_id, '--write', '--sync-source', 'repo'], { env });
   assert.equal(idempotent.status, 0, idempotent.stderr);
   assert.equal(fs.readFileSync(path.join(historical, 'keep.txt'), 'utf8'), 'historical bytes stay unchanged\n');
+});
+
+test('isolated reconciliation bypasses reports, state, targets, repo update, and native maintenance', () => {
+  const root = tmpRoot();
+  const tempRoot = path.join(root, 'isolated-temp');
+  const hub = path.join(root, 'managed-hub', 'current');
+  const parent = path.dirname(hub);
+  const openCodeTarget = path.join(root, 'opencode-target', 'skills');
+  const repoPath = path.join(root, 'configured-repo');
+  const pluginRoot = path.join(root, 'native-plugin-cache');
+  const reportDir = path.join(tempRoot, 'ai-agent-toolkit', 'update-reports');
+  const historical = path.join(parent, '.staging-historical-preserve');
+  const unrelated = path.join(parent, '.user.staging-preserve');
+  fs.mkdirSync(parent, { recursive: true });
+  fs.mkdirSync(openCodeTarget, { recursive: true });
+  fs.mkdirSync(repoPath, { recursive: true });
+  fs.mkdirSync(pluginRoot, { recursive: true });
+  fs.mkdirSync(reportDir, { recursive: true });
+  fs.mkdirSync(historical);
+  fs.mkdirSync(unrelated);
+  fs.writeFileSync(path.join(openCodeTarget, 'enabled-target.txt'), 'enabled target bytes\n');
+  fs.writeFileSync(path.join(pluginRoot, 'native-cache.txt'), 'native cache bytes\n');
+  fs.writeFileSync(path.join(historical, 'keep.txt'), 'historical staging bytes\n');
+  fs.writeFileSync(path.join(unrelated, 'keep.txt'), 'unrelated staging bytes\n');
+  fs.writeFileSync(path.join(reportDir, 'toolkit-update-20000101-000000.md'), 'expired report bytes\n');
+  for (let index = 0; index < 205; index += 1) {
+    fs.writeFileSync(path.join(reportDir, `toolkit-update-20260714-120000-${index}.md`), `over-limit report ${index}\n`);
+  }
+  const oldDate = new Date('2000-01-01T00:00:00.000Z');
+  fs.utimesSync(path.join(reportDir, 'toolkit-update-20000101-000000.md'), oldDate, oldDate);
+
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    bridge_versions_by_source: { repo: expectedBridgeVersion },
+    auto_sync_enabled: true,
+    repo_auto_update_enabled: true,
+    repo_path: repoPath,
+    update_report_enabled: true,
+    update_report_open_enabled: true,
+    update_report_retention_days: 1,
+    codex_plugin_auto_refresh_enabled: true,
+    targets: {
+      opencode: {
+        enabled: true,
+        explicitly_disabled: false,
+        target_path: openCodeTarget,
+        synced_version: '0.0.1',
+        synced_checksum: 'stale'
+      },
+      ag2: { enabled: false, explicitly_disabled: true }
+    }
+  });
+  fs.writeFileSync(path.join(hub, 'manifest.json'), 'manifest bytes remain exact\n');
+  const generation = createOwnedStagingGeneration({
+    parent,
+    target: hub,
+    operation: 'hub-snapshot-replacement',
+    sourceType: 'repo',
+    bridgeVersion: expectedBridgeVersion,
+    pid: deadTestPid()
+  });
+  fs.writeFileSync(path.join(generation.stagePath, 'partial.txt'), 'selected generation bytes\n');
+
+  const env = isolatedHomeEnv(root, {
+    PATH: '',
+    TEMP: tempRoot,
+    TMP: tempRoot,
+    TMPDIR: tempRoot,
+    PLUGIN_ROOT: pluginRoot,
+    TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: path.join(root, 'repo-update-marker.txt')
+  });
+  const reportBefore = snapshotTree(reportDir);
+  const stateBefore = fs.readFileSync(path.join(hub, 'state.json'));
+  const manifestBefore = fs.readFileSync(path.join(hub, 'manifest.json'));
+  const targetBefore = snapshotTree(openCodeTarget);
+  const pluginBefore = snapshotTree(pluginRoot);
+  const historicalBefore = snapshotTree(historical);
+  const unrelatedBefore = snapshotTree(unrelated);
+  const lockPath = path.join(parent, 'update.lock');
+
+  const dryRun = run(['--hub', hub, '--reconcile-staging', generation.record.generation_id], { env });
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  assert.equal(parseLastJson(dryRun.stdout).staging_reconciliation.status, 'would-clean');
+  assert.deepEqual(snapshotTree(reportDir), reportBefore);
+  assert.deepEqual(fs.readFileSync(path.join(hub, 'state.json')), stateBefore);
+  assert.deepEqual(fs.readFileSync(path.join(hub, 'manifest.json')), manifestBefore);
+  assert.deepEqual(snapshotTree(openCodeTarget), targetBefore);
+  assert.deepEqual(snapshotTree(pluginRoot), pluginBefore);
+  assert.equal(fs.existsSync(lockPath), false, 'dry-run reconciliation must not create a lock');
+
+  const write = run(['--hub', hub, '--reconcile-staging', generation.record.generation_id, '--write'], { env });
+  assert.equal(write.status, 0, write.stderr);
+  assert.equal(parseLastJson(write.stdout).staging_reconciliation.status, 'cleaned');
+  assert.equal(fs.existsSync(generation.stagePath), false);
+  assert.equal(fs.existsSync(generation.recordPath), false);
+  assert.equal(fs.existsSync(lockPath), false, 'write reconciliation must release its lock');
+  assert.deepEqual(snapshotTree(reportDir), reportBefore);
+  assert.deepEqual(fs.readFileSync(path.join(hub, 'state.json')), stateBefore);
+  assert.deepEqual(fs.readFileSync(path.join(hub, 'manifest.json')), manifestBefore);
+  assert.deepEqual(snapshotTree(openCodeTarget), targetBefore);
+  assert.deepEqual(snapshotTree(pluginRoot), pluginBefore);
+  assert.deepEqual(snapshotTree(historical), historicalBefore);
+  assert.deepEqual(snapshotTree(unrelated), unrelatedBefore);
+  assert.equal(fs.existsSync(env.TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER), false, 'repo auto-update must not run');
+
+  const rerun = run(['--hub', hub, '--reconcile-staging', generation.record.generation_id, '--write'], { env });
+  assert.equal(rerun.status, 0, rerun.stderr);
+  const rerunOutput = parseLastJson(rerun.stdout);
+  assert.equal(rerunOutput.staging_reconciliation.status, 'already-absent');
+  assert.equal(rerunOutput.staging_reconciliation.checked_parent_count, 3);
+  assert.deepEqual(snapshotTree(reportDir), reportBefore);
+});
+
+test('reconciliation rejects every unrelated command flag before mutation', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const sentinel = path.join(root, 'sentinel.txt');
+  fs.writeFileSync(sentinel, 'unchanged\n');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    update_report_enabled: false,
+    update_report_open_enabled: false,
+    codex_plugin_auto_refresh_enabled: false,
+    targets: {}
+  });
+  const stateBefore = fs.readFileSync(path.join(hub, 'state.json'));
+  const generationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const incompatible = [
+    ['--hook'],
+    ['--audit'],
+    ['--sync-enabled'],
+    ['--enable-auto-sync'],
+    ['--disable-auto-sync'],
+    ['--enable-repo-auto-update'],
+    ['--disable-repo-auto-update'],
+    ['--repo-path', root],
+    ['--repo-branch', 'main'],
+    ['--repo-remote', 'https://example.invalid/repo'],
+    ['--repo-update-now'],
+    ['--skip-repo-auto-update'],
+    ['--open-update-report'],
+    ['--enable-update-reports'],
+    ['--disable-update-reports'],
+    ['--update-report-retention-days', '1'],
+    ['--enable-update-report-open'],
+    ['--disable-update-report-open'],
+    ['--enable-codex-plugin-auto-refresh'],
+    ['--disable-codex-plugin-auto-refresh'],
+    ['--suppress-update-report'],
+    ['--enable-target', 'opencode'],
+    ['--disable-target', 'opencode'],
+    ['--opencode-command', 'unused-opencode'],
+    ['--python-command', 'unused-python'],
+    ['--set-ag2-python-command', 'unused-python']
+  ];
+  const env = isolatedHomeEnv(root, { PATH: '' });
+  for (const extraArgs of incompatible) {
+    const result = run(['--hub', hub, '--reconcile-staging', generationId, '--write', ...extraArgs], { env });
+    assert.notEqual(result.status, 0, `${extraArgs[0]} must fail`);
+    assert.match(result.stderr, /--reconcile-staging cannot be combined with:/);
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n');
+    assert.deepEqual(fs.readFileSync(path.join(hub, 'state.json')), stateBefore);
+    assert.equal(fs.existsSync(path.join(path.dirname(hub), 'update.lock')), false);
+  }
+});
+
+test('reconciliation lock refusal preserves the selected generation and unrelated files', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const parent = path.dirname(hub);
+  fs.mkdirSync(parent, { recursive: true });
+  const generation = createOwnedStagingGeneration({
+    parent,
+    target: hub,
+    operation: 'hub-snapshot-replacement',
+    sourceType: 'repo',
+    bridgeVersion: expectedBridgeVersion,
+    pid: deadTestPid()
+  });
+  fs.writeFileSync(path.join(generation.stagePath, 'partial.txt'), 'selected bytes\n');
+  const unrelated = path.join(parent, 'unrelated.txt');
+  fs.writeFileSync(unrelated, 'unrelated bytes\n');
+  const lockPath = path.join(parent, 'update.lock');
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid, token: 'live-owner-token' });
+  const before = snapshotTree(parent);
+
+  const result = run(['--hub', hub, '--reconcile-staging', generation.record.generation_id, '--write'], {
+    env: isolatedHomeEnv(root, { PATH: '' })
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /staging reconciliation blocked|held by live process/);
+  assert.deepEqual(snapshotTree(parent), before);
 });
 
 function fsError(code) {

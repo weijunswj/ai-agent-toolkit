@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.4.8",
+  "version": "2.4.9",
   "version_policy": "semver",
-  "version_notes": "Makes initialization cleanup require locally proven directory creation and makes exact reconciliation independent of bounded audit results.",
+  "version_notes": "Isolates exact staging reconciliation from ordinary report, state, target, repo, hook, and native-cache maintenance.",
   "outputs": [
     {
       "kind": "curated",

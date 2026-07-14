@@ -17,7 +17,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.4.8';
+const BRIDGE_VERSION = '2.4.9';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -49,6 +49,15 @@ const AGENT_RULES_PREFLIGHT_FILES = {
     { target: 'CLAUDE.md', template: 'CLAUDE.shim.template.md' }
   ]
 };
+const RECONCILIATION_ALLOWED_FLAGS = new Set([
+  '--reconcile-staging',
+  '--write',
+  '--hub',
+  '--sync-source',
+  '--force-downgrade',
+  '--opencode-config-dir',
+  '--opencode-target'
+]);
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -221,13 +230,18 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.reconcileStaging && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.reconcileStaging)) {
     throw new Error('--reconcile-staging requires one exact generation ID from a prior audit');
   }
-  if (args.reconcileStaging && (
-    args.syncEnabled || args.enableTargets.length || args.disableTargets.length || args.enableAutoSync ||
-    args.disableAutoSync || args.enableRepoAutoUpdate || args.disableRepoAutoUpdate || args.repoUpdateNow
-  )) {
-    throw new Error('--reconcile-staging cannot be combined with bridge state, update, or target sync actions');
-  }
   return args;
+}
+
+function assertReconciliationCommandArgs(args) {
+  if (!args.reconcileStaging) return;
+  const incompatible = [...new Set(args.argv
+    .filter((value) => String(value).startsWith('--'))
+    .map((value) => String(value).split('=')[0])
+    .filter((flag) => !RECONCILIATION_ALLOWED_FLAGS.has(flag)))];
+  if (incompatible.length) {
+    throw new Error(`--reconcile-staging cannot be combined with: ${incompatible.join(', ')}`);
+  }
 }
 
 function printHelp() {
@@ -3099,6 +3113,83 @@ function stagingAuditParents(hubPath, discoveries) {
   return [...new Set(parents.map((value) => path.resolve(value)))];
 }
 
+function stagingReconciliationParents(args, hubPath, state) {
+  const parents = [path.dirname(hubPath)];
+  const openCodeConfig = args.opencodeConfigDir || process.env.OPENCODE_CONFIG_DIR || path.join(os.homedir(), '.config', 'opencode');
+  const openCodeDefaultTarget = path.join(openCodeConfig, 'skills');
+  const openCodeTarget = normalizeOpenCodeTargetPath(
+    args.opencodeTarget || state.targets.opencode.target_path || openCodeDefaultTarget,
+    openCodeDefaultTarget
+  );
+  parents.push(assertSafeWritePath(openCodeTarget, 'OpenCode staging reconciliation parent'));
+
+  const internalAg2Adapter = path.join(hubPath, 'adapters', 'ag2');
+  const savedAg2Target = String(state.targets.ag2.target_path || '');
+  const defaultAg2Target = path.join(os.homedir(), '.gemini', 'config', 'plugins', TOOLKIT_NAME);
+  const ag2Target = savedAg2Target && path.resolve(savedAg2Target) !== path.resolve(internalAg2Adapter)
+    ? savedAg2Target
+    : defaultAg2Target;
+  parents.push(assertSafeWritePath(path.join(ag2Target, 'skills'), 'Antigravity 2 staging reconciliation parent'));
+  return [...new Set(parents.map((value) => path.resolve(value)))];
+}
+
+function stagingReconciliationOutput({ args, hubPath, reconciliation }) {
+  const alreadyAbsent = reconciliation.reason === 'generation-id-not-found';
+  return {
+    architecture_version: ARCHITECTURE_VERSION,
+    bridge_version: BRIDGE_VERSION,
+    dry_run: !args.write,
+    hub_path: hubPath,
+    sync_source: args.syncSource,
+    staging_generations: reconciliation.audit,
+    staging_reconciliation: {
+      generation_id: args.reconcileStaging,
+      reconciled: reconciliation.reconciled,
+      status: reconciliation.reconciled
+        ? 'cleaned'
+        : (alreadyAbsent ? 'already-absent' : (reconciliation.would_reconcile ? 'would-clean' : 'refused')),
+      checked_parent_count: reconciliation.exact_lookup?.checked_parents?.length || 0,
+      reason: reconciliation.reason || ''
+    }
+  };
+}
+
+function runStagingReconciliation({ args, hubPath, state, testHooks = {} }) {
+  const parents = stagingReconciliationParents(args, hubPath, state);
+  if (!args.write) {
+    const reconciliation = reconcileOwnedStaging(parents, args.reconcileStaging, {
+      write: false,
+      liveness: testHooks.stagingLiveness
+    });
+    if (!reconciliation.would_reconcile && reconciliation.reason !== 'generation-id-not-found') {
+      throw new Error(`staging reconciliation refused: ${reconciliation.reason}`);
+    }
+    const output = stagingReconciliationOutput({ args, hubPath, reconciliation });
+    console.log(JSON.stringify(output, null, 2));
+    return { status: 0, audit: reconciliation.audit, reconciliation };
+  }
+
+  const reconciliationLock = acquireLock(path.dirname(hubPath), args);
+  if (!reconciliationLock.acquired) {
+    throw new Error(`staging reconciliation blocked: ${reconciliationLock.skipReason}`);
+  }
+  try {
+    const reconciliation = reconcileOwnedStaging(parents, args.reconcileStaging, {
+      write: true,
+      liveness: testHooks.stagingLiveness,
+      beforeDelete: testHooks.beforeStagingReconciliationDelete
+    });
+    if (!reconciliation.reconciled && reconciliation.reason !== 'generation-id-not-found') {
+      throw new Error(`staging reconciliation refused: ${reconciliation.reason}`);
+    }
+    const output = stagingReconciliationOutput({ args, hubPath, reconciliation });
+    console.log(JSON.stringify(output, null, 2));
+    return { status: 0, audit: reconciliation.audit, reconciliation };
+  } finally {
+    releaseLock(reconciliationLock);
+  }
+}
+
 function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
   const dryRun = !args.write;
   return {
@@ -3716,8 +3807,13 @@ function persistActiveNoTargetWrite({
 
 function run(argv = process.argv.slice(2), testHooks = {}) {
   const args = parseArgs(argv);
+  assertReconciliationCommandArgs(args);
   const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
   const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
+  if (args.reconcileStaging) {
+    assertSourceDowngradeAllowed(existingState, args);
+    return runStagingReconciliation({ args, hubPath, state: existingState, testHooks });
+  }
   maybePrintAgentRulesPreflight(args);
 
   assertSourceDowngradeAllowed(existingState, args);
@@ -3754,41 +3850,6 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
   if (testHooks.afterInitialSnapshotDerivation) testHooks.afterInitialSnapshotDerivation(initialSnapshot);
 
   const audit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
-  if (args.reconcileStaging) {
-    const parents = stagingAuditParents(hubPath, discoveries);
-    if (!args.write) {
-      const reconciliation = reconcileOwnedStaging(parents, args.reconcileStaging, {
-        write: false,
-        liveness: testHooks.stagingLiveness
-      });
-      console.log(JSON.stringify({ ...audit, staging_reconciliation: reconciliation }, null, 2));
-      return { status: 0, audit };
-    }
-    const reconciliationLock = acquireLock(path.dirname(hubPath), args);
-    if (!reconciliationLock.acquired) {
-      throw new Error(`staging reconciliation blocked: ${reconciliationLock.skipReason}`);
-    }
-    try {
-      const reconciliation = reconcileOwnedStaging(parents, args.reconcileStaging, {
-        write: true,
-        liveness: testHooks.stagingLiveness,
-        beforeDelete: testHooks.beforeStagingReconciliationDelete
-      });
-      if (!reconciliation.reconciled && reconciliation.reason !== 'generation-id-not-found') {
-        throw new Error(`staging reconciliation refused: ${reconciliation.reason}`);
-      }
-      console.log(JSON.stringify({
-        staging_reconciliation: {
-          generation_id: args.reconcileStaging,
-          reconciled: reconciliation.reconciled,
-          status: reconciliation.reconciled ? 'cleaned' : 'already-absent'
-        }
-      }, null, 2));
-      return { status: 0, audit };
-    } finally {
-      releaseLock(reconciliationLock);
-    }
-  }
   if (args.audit || !args.write) {
     console.log(JSON.stringify(audit, null, 2));
   }
@@ -3932,7 +3993,8 @@ if (require.main === module) {
     const result = run();
     process.exit(result.status || 0);
   } catch (error) {
-    if (process.argv.includes('--hook')) {
+    const reconciliationRequested = process.argv.some((arg) => arg === '--reconcile-staging' || arg.startsWith('--reconcile-staging='));
+    if (process.argv.includes('--hook') && !reconciliationRequested) {
       console.log(`Toolkit local bridge hook skipped: ${error.message}`);
       process.exit(0);
     }
