@@ -17,7 +17,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.4.7';
+const BRIDGE_VERSION = '2.4.8';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -218,7 +218,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   if (args.enableCodexPluginAutoRefresh && args.disableCodexPluginAutoRefresh) {
     throw new Error('--enable-codex-plugin-auto-refresh and --disable-codex-plugin-auto-refresh cannot be used together');
   }
-  if (args.reconcileStaging && !/^[0-9a-f-]{36}$/i.test(args.reconcileStaging)) {
+  if (args.reconcileStaging && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.reconcileStaging)) {
     throw new Error('--reconcile-staging requires one exact generation ID from a prior audit');
   }
   if (args.reconcileStaging && (

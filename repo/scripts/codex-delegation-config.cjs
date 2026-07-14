@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.4.7';
+const TOOLKIT_CLIENT_VERSION = '2.4.8';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 
 function inspectCodexDelegationConfig(configPath = codexConfigPath(), runtime = RUNTIMES.UNKNOWN) {
