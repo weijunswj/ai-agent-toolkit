@@ -1143,8 +1143,7 @@ function addSkillToPayload(payload, skillName, files, prefix = 'skills') {
   }
 }
 
-function adapterPayloads(state = {}) {
-  const sourceRoot = resolveToolkitSourceRoot(state);
+function adapterPayloads(state = {}, sourceRoot = resolveToolkitSourceRoot(state)) {
   const toolkitSkills = collectToolkitSkills(sourceRoot);
   const toolkitSkillNames = Object.keys(toolkitSkills).sort();
   const opencodeSkill = [
@@ -1391,12 +1390,6 @@ function pluginRootFromCwd() {
     current = path.dirname(current);
   }
   return '';
-}
-
-function sourceCommit() {
-  const root = pluginRootFromCwd() || path.resolve(__dirname, '..', '..');
-  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 3000, windowsHide: true });
-  return result.status === 0 ? result.stdout.trim() : 'unknown';
 }
 
 function currentToolkitCommit(state = {}) {
@@ -2211,13 +2204,13 @@ function printUpdateReportLine(args, reportPath) {
   else console.log(`Toolkit update report: ${reportPath}`);
 }
 
-function buildManifest({ state, discoveries, checksum, syncSource, hubPath }) {
+function buildManifest({ state, discoveries, checksum, sourceCommit, syncSource, hubPath }) {
   return {
     name: 'ai-agent-toolkit-local-bridge',
     architecture_version: ARCHITECTURE_VERSION,
     bridge_version: BRIDGE_VERSION,
     checksum,
-    source_commit: sourceCommit(),
+    source_commit: sourceCommit,
     sync_source: syncSource,
     sync_timestamp: timestamp(),
     hub_path: hubPath,
@@ -2251,6 +2244,35 @@ function prepareStateForWrite(state, args) {
   return next;
 }
 
+function deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite = false }) {
+  let nextState = normalizedState(state);
+  const sourceRoot = resolveToolkitSourceRoot(nextState);
+  const payloads = adapterPayloads(nextState, sourceRoot);
+  const checksum = payloadChecksum(payloads);
+  const discoveries = {
+    opencode: discoverOpenCode(args, nextState.targets.opencode, hubPath),
+    ag2: discoverAg2(args, nextState.targets.ag2, hubPath)
+  };
+  updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
+  updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, false, nextState.targets.ag2.enabled ? '' : 'not enabled');
+  const plannedTargetSyncs = SUPPORTED_TARGETS
+    .filter((target) => targetWouldSync(target, nextState, checksum, discoveries[target], payloads))
+    .map((target) => targetSyncPlan(target, discoveries[target], payloads));
+  const skippedTargets = SUPPORTED_TARGETS
+    .filter((target) => !nextState.targets[target].enabled || nextState.targets[target].explicitly_disabled);
+  if (prepareForWrite) nextState = prepareStateForWrite(nextState, args);
+  return {
+    state: nextState,
+    sourceRoot,
+    sourceCommit: currentToolkitCommit({ repo_path: sourceRoot }),
+    discoveries,
+    payloads,
+    checksum,
+    plannedTargetSyncs,
+    skippedTargets
+  };
+}
+
 function writePayloadTree(rootDir, payload) {
   for (const [rel, text] of Object.entries(payload)) {
     const target = path.join(rootDir, rel);
@@ -2259,7 +2281,7 @@ function writePayloadTree(rootDir, payload) {
   }
 }
 
-function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads }) {
+function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads, sourceCommit }) {
   const stagePath = path.join(path.dirname(hubPath), `.staging-${process.pid}-${Date.now()}`);
   if (fs.existsSync(stagePath)) fs.rmSync(stagePath, { recursive: true, force: true });
   fs.mkdirSync(stagePath, { recursive: true });
@@ -2269,6 +2291,7 @@ function writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payload
     state,
     discoveries,
     checksum,
+    sourceCommit,
     syncSource: args.syncSource,
     hubPath
   }));
@@ -3354,9 +3377,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
 
   let statusState = state;
   let updateResult = null;
-  let updatedDiscoveries = discoveries;
-  let updatedPayloads = payloads;
-  let updatedChecksum = checksum;
+  let snapshot = null;
   let plannedTargetSyncs = [];
   let skippedTargets = [];
   let nativePluginCache = { status: '' };
@@ -3365,24 +3386,28 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
   try {
     try {
       updateResult = validateAndUpdateRepo(state, args);
-      statusState = prepareStateForWrite(applyRepoUpdateStatus(state, updateResult.status, {
+      statusState = applyRepoUpdateStatus(state, updateResult.status, {
         fromCommit: updateResult.fromCommit,
         toCommit: updateResult.toCommit
-      }), args);
-      writeHubSnapshot({ hubPath, args, state: statusState, discoveries, checksum, payloads });
+      });
+      snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
+      statusState = snapshot.state;
+      writeHubSnapshot({ hubPath, args, ...snapshot });
     } catch (error) {
       const details = error.repoUpdateDetails || {};
-      statusState = prepareStateForWrite(applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
+      statusState = applyRepoUpdateStatus(state, error.repoUpdateStatus || 'skipped', {
         fromCommit: details.fromCommit || '',
         toCommit: details.toCommit || '',
         error: details.error || error.message
-      }), args);
-      writeHubSnapshot({ hubPath, args, state: statusState, discoveries, checksum, payloads });
+      });
+      snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
+      statusState = snapshot.state;
+      writeHubSnapshot({ hubPath, args, ...snapshot });
       const report = maybeWriteUpdateReport({
         args,
         hubPath,
         state: statusState,
-        checksum,
+        checksum: snapshot.checksum,
         context: {
           repo: {
             status: error.repoUpdateStatus || 'skipped',
@@ -3400,12 +3425,13 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       });
       statusState = report.state;
       if (report.reportPath) {
-        writeHubSnapshot({ hubPath, args, state: statusState, discoveries, checksum, payloads });
+        snapshot = { ...snapshot, state: statusState };
+        writeHubSnapshot({ hubPath, args, ...snapshot });
       }
       printUpdateReportLine(args, report.reportPath);
       if (args.hook) {
         hookSafeWarning(args, error.message);
-        return { status: 0, audit: buildAudit({ args, hubPath, state: statusState, discoveries, checksum, payloads }) };
+        return { status: 0, audit: buildAudit({ args, hubPath, ...snapshot, state: statusState }) };
       }
       throw error;
     }
@@ -3413,30 +3439,16 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     releaseLock(lock);
   }
 
-  updatedPayloads = adapterPayloads(statusState);
-  updatedChecksum = payloadChecksum(updatedPayloads);
-  updatedDiscoveries = {
-    opencode: discoverOpenCode(args, statusState.targets.opencode, hubPath),
-    ag2: discoverAg2(args, statusState.targets.ag2, hubPath)
-  };
-  plannedTargetSyncs = SUPPORTED_TARGETS
-    .filter((target) => targetWouldSync(target, statusState, updatedChecksum, updatedDiscoveries[target], updatedPayloads))
-    .map((target) => targetSyncPlan(target, updatedDiscoveries[target], updatedPayloads));
-  skippedTargets = SUPPORTED_TARGETS.filter((target) => !statusState.targets[target].enabled || statusState.targets[target].explicitly_disabled);
   const refreshLock = acquireLock(path.dirname(hubPath), args);
   try {
     if (refreshLock.acquired) {
       statusState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
       assertSourceDowngradeAllowed(statusState, args);
-      statusState = prepareStateForWrite(statusState, args);
-      writeHubSnapshot({
-        hubPath,
-        args,
-        state: statusState,
-        discoveries: updatedDiscoveries,
-        checksum: updatedChecksum,
-        payloads: updatedPayloads
-      });
+      snapshot = deriveSnapshotGeneration({ args, hubPath, state: statusState, prepareForWrite: true });
+      statusState = snapshot.state;
+      plannedTargetSyncs = snapshot.plannedTargetSyncs;
+      skippedTargets = snapshot.skippedTargets;
+      writeHubSnapshot({ hubPath, args, ...snapshot });
     }
   } finally {
     releaseLock(refreshLock);
@@ -3457,17 +3469,19 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
       if (relock.acquired) {
         const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
         assertSourceDowngradeAllowed(latestState, args);
-        failedState = prepareStateForWrite(applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
+        failedState = applyRepoUpdateStatus(latestState, 'sync-delegation-failed', {
           fromCommit: updateResult.fromCommit,
           toCommit: updateResult.toCommit,
           error: error.message
-        }), args);
-        writeHubSnapshot({ hubPath, args, state: failedState, discoveries: updatedDiscoveries, checksum: updatedChecksum, payloads: updatedPayloads });
+        });
+        let failedSnapshot = deriveSnapshotGeneration({ args, hubPath, state: failedState, prepareForWrite: true });
+        failedState = failedSnapshot.state;
+        writeHubSnapshot({ hubPath, args, ...failedSnapshot });
         report = maybeWriteUpdateReport({
           args,
           hubPath,
           state: failedState,
-          checksum: updatedChecksum,
+          checksum: failedSnapshot.checksum,
           context: {
             repo: {
               status: 'sync-delegation-failed',
@@ -3478,7 +3492,7 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
               validationStatus: updateResult.validation?.status || 'passed',
               error: error.message
             },
-            skippedTargets,
+            skippedTargets: failedSnapshot.skippedTargets,
             nativePluginCache,
             thirdPartyHookRepair,
             targetSyncStatus: 'failed'
@@ -3486,8 +3500,10 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
         });
         failedState = report.state;
         if (report.reportPath) {
-          writeHubSnapshot({ hubPath, args, state: failedState, discoveries: updatedDiscoveries, checksum: updatedChecksum, payloads: updatedPayloads });
+          failedSnapshot = { ...failedSnapshot, state: failedState };
+          writeHubSnapshot({ hubPath, args, ...failedSnapshot });
         }
+        snapshot = failedSnapshot;
       }
     } finally {
       releaseLock(relock);
@@ -3495,29 +3511,32 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
     printUpdateReportLine(args, report.reportPath);
     if (args.hook) {
       hookSafeWarning(args, error.message);
-      return { status: 0, audit: buildAudit({ args, hubPath, state: report.state, discoveries: updatedDiscoveries, checksum: updatedChecksum, payloads: updatedPayloads }) };
+      return { status: 0, audit: buildAudit({ args, hubPath, ...snapshot, state: report.state }) };
     }
     throw error;
   }
 
   const finalState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || statusState);
-  const completedTargetSyncs = plannedTargetSyncs.filter((sync) => (
-    targetIsSynced(sync.target, finalState.targets[sync.target], updatedChecksum, updatedDiscoveries[sync.target], updatedPayloads)
-  ));
+  const plannedChecksum = snapshot.checksum;
   const reportLock = acquireLock(path.dirname(hubPath), args);
   let report = { state: finalState, reportPath: '' };
   try {
     if (reportLock.acquired) {
       const latestState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')) || finalState);
       assertSourceDowngradeAllowed(latestState, args);
-      const reportState = prepareStateForWrite(latestState, args);
+      let reportSnapshot = deriveSnapshotGeneration({ args, hubPath, state: latestState, prepareForWrite: true });
+      const reportState = reportSnapshot.state;
+      const completedTargetSyncs = plannedTargetSyncs.filter((sync) => (
+        reportSnapshot.checksum === plannedChecksum &&
+        targetIsSynced(sync.target, reportState.targets[sync.target], reportSnapshot.checksum, reportSnapshot.discoveries[sync.target], reportSnapshot.payloads)
+      ));
       report = maybeWriteUpdateReport({
         args,
         hubPath,
         state: reportState,
-        checksum: updatedChecksum,
+        checksum: reportSnapshot.checksum,
         context: {
-          repo: repoReportContextFromUpdate(statusState, updateResult, previousObservedRepoCommit),
+          repo: repoReportContextFromUpdate(reportState, updateResult, previousObservedRepoCommit),
           targetSyncs: completedTargetSyncs,
           skippedTargets,
           nativePluginCache,
@@ -3528,17 +3547,19 @@ function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloa
         }
       });
       if (report.reportPath) {
-        writeHubSnapshot({ hubPath, args, state: report.state, discoveries: updatedDiscoveries, checksum: updatedChecksum, payloads: updatedPayloads });
+        reportSnapshot = { ...reportSnapshot, state: report.state };
+        writeHubSnapshot({ hubPath, args, ...reportSnapshot });
       }
+      snapshot = reportSnapshot;
     }
   } finally {
     releaseLock(reportLock);
   }
   printUpdateReportLine(args, report.reportPath);
-  if (!report.reportPath && !args.hook && updateResult.status === 'up-to-date' && !completedTargetSyncs.length) {
+  if (!report.reportPath && !args.hook && updateResult.status === 'up-to-date' && !plannedTargetSyncs.length) {
     console.log('Toolkit already up to date.');
   }
-  const finalAudit = buildAudit({ args, hubPath, state: report.state, discoveries: updatedDiscoveries, checksum: updatedChecksum, payloads: updatedPayloads });
+  const finalAudit = buildAudit({ args, hubPath, ...snapshot, state: report.state });
   if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
   return { status: 0, audit: finalAudit };
 }
@@ -3547,9 +3568,6 @@ function persistActiveNoTargetWrite({
   args,
   hubPath,
   cleanupResult,
-  discoveries,
-  checksum,
-  payloads,
   buildReportContext
 }) {
   const lock = acquireLock(path.dirname(hubPath), args);
@@ -3567,29 +3585,40 @@ function persistActiveNoTargetWrite({
     assertSourceDowngradeAllowed(latestState, args);
     let state = applyRequestedState(latestState, args);
     state.last_update_report_cleanup = cleanupResult;
-    updateTargetState(state, 'opencode', discoveries.opencode, checksum, false, state.targets.opencode.enabled ? '' : 'not enabled');
-    updateTargetState(state, 'ag2', discoveries.ag2, checksum, false, state.targets.ag2.enabled ? '' : 'not enabled');
-    state = prepareStateForWrite(state, args);
+    let snapshot = deriveSnapshotGeneration({ args, hubPath, state, prepareForWrite: true });
+    state = snapshot.state;
 
     // Source-version persistence is independent of optional report creation.
-    writeHubSnapshot({ hubPath, args, state, discoveries, checksum, payloads });
+    writeHubSnapshot({ hubPath, args, ...snapshot });
+    const targetSyncs = [];
+    for (const plan of snapshot.plannedTargetSyncs) {
+      const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
+      targetSyncs.push(syncTargetPayload(plan.target, targetPath, snapshot.payloads));
+      updateTargetState(state, plan.target, snapshot.discoveries[plan.target], snapshot.checksum, true, '');
+    }
+    if (targetSyncs.length) {
+      state.updated_at = timestamp();
+      snapshot = { ...snapshot, state };
+      writeHubSnapshot({ hubPath, args, ...snapshot });
+    }
     const report = maybeWriteUpdateReport({
       args,
       hubPath,
       state,
-      checksum,
-      context: buildReportContext(state)
+      checksum: snapshot.checksum,
+      context: buildReportContext(state, snapshot, targetSyncs)
     });
     if (report.reportPath) {
-      writeHubSnapshot({ hubPath, args, state: report.state, discoveries, checksum, payloads });
+      snapshot = { ...snapshot, state: report.state };
+      writeHubSnapshot({ hubPath, args, ...snapshot });
     }
-    return { ...report, persisted: true };
+    return { ...report, snapshot, persisted: true };
   } finally {
     releaseLock(lock);
   }
 }
 
-function run(argv = process.argv.slice(2)) {
+function run(argv = process.argv.slice(2), testHooks = {}) {
   const args = parseArgs(argv);
   const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');
   const existingState = normalizedState(readJsonIfExists(path.join(hubPath, 'state.json')));
@@ -3623,15 +3652,10 @@ function run(argv = process.argv.slice(2)) {
   if (args.enableRepoAutoUpdate && !nextState.repo_path) {
     throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
   }
-  const discoveries = {
-    opencode: discoverOpenCode(args, nextState.targets.opencode, hubPath),
-    ag2: discoverAg2(args, nextState.targets.ag2, hubPath)
-  };
-  const payloads = adapterPayloads(nextState);
-  const checksum = payloadChecksum(payloads);
-
-  updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
-  updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, false, nextState.targets.ag2.enabled ? '' : 'not enabled');
+  const initialSnapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState });
+  nextState = initialSnapshot.state;
+  let { discoveries, payloads, checksum } = initialSnapshot;
+  if (testHooks.afterInitialSnapshotDerivation) testHooks.afterInitialSnapshotDerivation(initialSnapshot);
 
   const audit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
   if (args.audit || !args.write) {
@@ -3667,20 +3691,20 @@ function run(argv = process.argv.slice(2)) {
       args,
       hubPath,
       cleanupResult,
-      discoveries,
-      checksum,
-      payloads,
-      buildReportContext: (state) => ({
+      buildReportContext: (state, snapshot, targetSyncs) => ({
         repo: repoReportContextFromState(state, args),
+        targetSyncs,
+        skippedTargets: snapshot.skippedTargets,
         nativePluginCache: nativePluginCacheStatusForReport(args, state, {
           repoPath: state.repo_path,
           validateRepo: true
         }),
         thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
-        targetSyncStatus: 'not needed'
+        targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
       })
     });
     nextState = report.state;
+    if (report.snapshot) ({ discoveries, payloads, checksum } = report.snapshot);
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
     if (report.reportPath) printUpdateReportLine(args, report.reportPath);
     else if (!args.hook) console.log('Toolkit local bridge: no enabled stale targets to sync.');
@@ -3691,20 +3715,20 @@ function run(argv = process.argv.slice(2)) {
       args,
       hubPath,
       cleanupResult,
-      discoveries,
-      checksum,
-      payloads,
-      buildReportContext: (state) => ({
+      buildReportContext: (state, snapshot, targetSyncs) => ({
         repo: repoReportContextFromState(state, args),
+        targetSyncs,
+        skippedTargets: snapshot.skippedTargets,
         nativePluginCache: nativePluginCacheStatusForReport(args, state, {
           repoPath: state.repo_path,
           validateRepo: true
         }),
         thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
-        targetSyncStatus: 'not needed'
+        targetSyncStatus: targetSyncs.length ? 'synced' : 'not needed'
       })
     });
     nextState = report.state;
+    if (report.snapshot) ({ discoveries, payloads, checksum } = report.snapshot);
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
     if (report.reportPath) printUpdateReportLine(args, report.reportPath);
     return { status: 0, audit: finalAudit };
@@ -3721,25 +3745,21 @@ function run(argv = process.argv.slice(2)) {
     assertSourceDowngradeAllowed(lockedState, args);
     nextState = applyRequestedState(lockedState, args);
     nextState.last_update_report_cleanup = cleanupResult;
-    updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, false, nextState.targets.opencode.enabled ? '' : 'not enabled');
-    updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, false, nextState.targets.ag2.enabled ? '' : 'not enabled');
-    nextState = prepareStateForWrite(nextState, args);
-    writeHubSnapshot({ hubPath, args, state: nextState, discoveries, checksum, payloads });
+    let snapshot = deriveSnapshotGeneration({ args, hubPath, state: nextState, prepareForWrite: true });
+    nextState = snapshot.state;
+    ({ discoveries, payloads, checksum } = snapshot);
+    writeHubSnapshot({ hubPath, args, ...snapshot });
 
     const targetSyncs = [];
-    if (targetWouldSync('opencode', nextState, checksum, discoveries.opencode, payloads)) {
-      const targetPath = assertSafeWritePath(discoveries.opencode.target_path, 'OpenCode target path');
-      targetSyncs.push(syncTargetPayload('opencode', targetPath, payloads));
-      updateTargetState(nextState, 'opencode', discoveries.opencode, checksum, true, '');
-    }
-    if (targetWouldSync('ag2', nextState, checksum, discoveries.ag2, payloads)) {
-      const targetPath = assertSafeWritePath(discoveries.ag2.target_path, 'Antigravity 2 target path');
-      targetSyncs.push(syncTargetPayload('ag2', targetPath, payloads));
-      updateTargetState(nextState, 'ag2', discoveries.ag2, checksum, true, '');
+    for (const plan of snapshot.plannedTargetSyncs) {
+      const targetPath = assertSafeWritePath(plan.targetPath, `${targetDisplayName(plan.target)} target path`);
+      targetSyncs.push(syncTargetPayload(plan.target, targetPath, payloads));
+      updateTargetState(nextState, plan.target, discoveries[plan.target], checksum, true, '');
     }
 
     nextState.updated_at = timestamp();
-    writeHubSnapshot({ hubPath, args, state: nextState, discoveries, checksum, payloads });
+    snapshot = { ...snapshot, state: nextState };
+    writeHubSnapshot({ hubPath, args, ...snapshot });
 
     const report = maybeWriteUpdateReport({
       args,
@@ -3760,7 +3780,8 @@ function run(argv = process.argv.slice(2)) {
     });
     nextState = report.state;
     if (report.reportPath) {
-      writeHubSnapshot({ hubPath, args, state: nextState, discoveries, checksum, payloads });
+      snapshot = { ...snapshot, state: nextState };
+      writeHubSnapshot({ hubPath, args, ...snapshot });
     }
 
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });

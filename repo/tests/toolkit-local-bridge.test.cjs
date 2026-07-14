@@ -16,7 +16,9 @@ const {
   replaceDirectoryAtomically,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
-  repairThirdPartyCodexPluginHooks
+  repairThirdPartyCodexPluginHooks,
+  adapterPayloads,
+  payloadChecksum
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
@@ -1645,6 +1647,73 @@ test('concurrent source writers retry lock contention and preserve every source 
     'codex-plugin': expectedBridgeVersion,
     'claude-plugin': expectedBridgeVersion
   });
+});
+
+test('writer recomputes its complete snapshot from state committed before lock acquisition', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const sourceA = createMinimalToolkitSource(path.join(root, 'source-a'), { alpha: 'source A\n' });
+  const sourceB = createMinimalToolkitSource(path.join(root, 'source-b'), { alpha: 'source B\n' });
+  const opencodeTarget = path.join(root, 'opencode-skills');
+  const env = isolatedHomeEnv(root);
+  const setup = run([
+    '--hub', hub,
+    '--write',
+    '--enable-auto-sync',
+    '--enable-target', 'opencode',
+    '--opencode-target', opencodeTarget,
+    '--repo-path', sourceA,
+    '--sync-source', 'repo'
+  ], { env });
+  assert.equal(setup.status, 0, setup.stderr);
+  const state = readJson(path.join(hub, 'state.json'));
+  state.update_report_enabled = false;
+  writeJson(path.join(hub, 'state.json'), state);
+
+  let writerBResult = null;
+  const writerAResult = runBridge([
+    '--hub', hub,
+    '--sync-enabled',
+    '--write',
+    '--sync-source', 'repo'
+  ], {
+    afterInitialSnapshotDerivation(initialSnapshot) {
+      assert.equal(initialSnapshot.sourceRoot, path.resolve(sourceA));
+      assert.deepEqual(initialSnapshot.plannedTargetSyncs, []);
+      assert.match(initialSnapshot.payloads.opencode['skills/alpha/SKILL.md'].toString('utf8'), /source A/);
+      writerBResult = run([
+        '--hub', hub,
+        '--sync-enabled',
+        '--write',
+        '--repo-path', sourceB,
+        '--sync-source', 'claude-plugin'
+      ], { env });
+      assert.equal(writerBResult.status, 0, writerBResult.stderr);
+      writeFile(path.join(sourceB, 'skills', 'alpha', 'SKILL.md'), [
+        '---',
+        'name: alpha',
+        'description: alpha fixture skill for Toolkit bridge tests',
+        '---',
+        '',
+        'source B after writer B',
+        ''
+      ].join('\n'));
+      git(sourceB, ['add', '.']);
+      git(sourceB, ['commit', '-m', 'advance source B after writer B snapshot']);
+    }
+  });
+
+  assert.ok(writerBResult, 'writer B must commit while writer A is paused before lock acquisition');
+  assert.equal(writerAResult.status, 0);
+  const finalState = readJson(path.join(hub, 'state.json'));
+  const manifest = readJson(path.join(hub, 'manifest.json'));
+  const expectedPayloads = adapterPayloads({ repo_path: sourceB });
+  assert.equal(finalState.repo_path, path.resolve(sourceB));
+  assert.equal(manifest.checksum, payloadChecksum(expectedPayloads));
+  assert.equal(manifest.source_commit, git(sourceB, ['rev-parse', 'HEAD']));
+  assert.match(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
+  assert.doesNotMatch(fs.readFileSync(path.join(hub, 'adapters', 'opencode', 'skills', 'alpha', 'SKILL.md'), 'utf8'), /source A/);
+  assert.match(fs.readFileSync(path.join(opencodeTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
 });
 
 function deadTestPid() {
