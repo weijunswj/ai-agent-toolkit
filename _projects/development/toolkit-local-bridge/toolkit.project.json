@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.4.6",
+  "version": "2.4.7",
   "version_policy": "semver",
-  "version_notes": "Scopes bridge downgrade protection to each recognized sync source while retaining a monotonic compatibility watermark.",
+  "version_notes": "Adds generation-owned staging cleanup, audit, and exact approved reconciliation while preserving source-isolated downgrade and recovery safeguards.",
   "outputs": [
     {
       "kind": "curated",

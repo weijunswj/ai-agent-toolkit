@@ -27,10 +27,14 @@ const {
 } = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
 const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-skills-plugin-hooks.cjs');
+const {
+  RECORD_PREFIX,
+  createOwnedStagingGeneration
+} = require('../scripts/toolkit-staging-generations.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.4.6';
+const expectedBridgeVersion = '2.4.7';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -157,6 +161,11 @@ function snapshotTree(root) {
   }
   visit(root);
   return entries;
+}
+
+function ownedStagingArtifacts(parent) {
+  if (!fs.existsSync(parent)) return [];
+  return fs.readdirSync(parent).filter((name) => name.startsWith(RECORD_PREFIX) || name.startsWith('.staging-') || /^\..+\.staging-/.test(name));
 }
 
 function writeDisabledHookHub(hub) {
@@ -384,7 +393,8 @@ function writeRepoToolkitFixture(repoPath, label) {
     'codex-delegation-config.cjs',
     'codex-delegation-layout.cjs',
     'codex-delegation-state.cjs',
-    'setup-toolkit-core.cjs'
+    'setup-toolkit-core.cjs',
+    'toolkit-staging-generations.cjs'
   ]) {
     writeFile(path.join(repoPath, 'repo', 'scripts', name), "'use strict';\n");
   }
@@ -1773,6 +1783,55 @@ test('writer recomputes its complete snapshot from state committed before lock a
   assert.equal(audit.targets.opencode.would_write, false);
 });
 
+test('owned hub snapshot success and handled payload, validation, and replacement failures leave no generation residue', () => {
+  const cases = [
+    { name: 'success', hooks: {}, succeeds: true },
+    {
+      name: 'payload-write',
+      hooks: { beforeHubPayloadWrite() { throw new Error('injected payload-write failure'); } },
+      succeeds: false
+    },
+    {
+      name: 'validation',
+      hooks: { afterHubPayloadWrite({ stagePath }) { fs.rmSync(path.join(stagePath, 'state.json')); } },
+      succeeds: false
+    },
+    {
+      name: 'replacement',
+      hooks: { beforeHubReplacement() { throw new Error('injected replacement failure'); } },
+      succeeds: false
+    }
+  ];
+
+  for (const fixture of cases) {
+    const root = tmpRoot();
+    const hub = path.join(root, `hub with spaces ${fixture.name}`, 'current');
+    const args = [
+      '--hub', hub,
+      '--enable-auto-sync',
+      '--write',
+      '--sync-source', 'repo'
+    ];
+    const savedEnv = Object.fromEntries(Object.keys(isolatedHomeEnv(root)).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, isolatedHomeEnv(root));
+    try {
+      if (fixture.succeeds) {
+        const result = runBridge(args, fixture.hooks);
+        assert.equal(result.status, 0);
+        assert.equal(fs.existsSync(path.join(hub, 'manifest.json')), true);
+      } else {
+        assert.throws(() => runBridge(args, fixture.hooks));
+      }
+    } finally {
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+    assert.deepEqual(ownedStagingArtifacts(path.dirname(hub)), [], `${fixture.name} hub staging must be cleaned`);
+  }
+});
+
 function deadTestPid() {
   // A short-lived child that has already exited gives a PID that is
   // definitely not alive when the bridge checks it.
@@ -1780,6 +1839,46 @@ function deadTestPid() {
   assert.ok(child.pid > 0, 'fixture child must have spawned');
   return child.pid;
 }
+
+test('bridge audit and approved reconciliation clean only one exact abandoned new-format generation', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'managed hub with spaces', 'current');
+  const parent = path.dirname(hub);
+  fs.mkdirSync(parent, { recursive: true });
+  const historical = path.join(parent, '.staging-historical-user-bytes');
+  fs.mkdirSync(historical);
+  fs.writeFileSync(path.join(historical, 'keep.txt'), 'historical bytes stay unchanged\n');
+  const generation = createOwnedStagingGeneration({
+    parent,
+    target: hub,
+    operation: 'hub-snapshot-replacement',
+    sourceType: 'repo',
+    bridgeVersion: expectedBridgeVersion,
+    pid: deadTestPid()
+  });
+  fs.writeFileSync(path.join(generation.stagePath, 'partial.txt'), 'private fixture payload\n');
+  const env = isolatedHomeEnv(root);
+
+  const auditResult = run(['--hub', hub, '--audit', '--sync-source', 'repo'], { env });
+  assert.equal(auditResult.status, 0, auditResult.stderr);
+  const audit = parseLastJson(auditResult.stdout);
+  assert.equal(audit.staging_generations.counts['dead-owned'], 1);
+  assert.equal(audit.staging_generations.counts['historical-unmarked'], 1);
+  assert.doesNotMatch(auditResult.stdout, /private fixture payload|historical bytes stay unchanged/);
+
+  const preview = run(['--hub', hub, '--reconcile-staging', generation.record.generation_id, '--sync-source', 'repo'], { env });
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.equal(fs.existsSync(generation.stagePath), true);
+
+  const approved = run(['--hub', hub, '--reconcile-staging', generation.record.generation_id, '--write', '--sync-source', 'repo'], { env });
+  assert.equal(approved.status, 0, approved.stderr);
+  assert.equal(fs.existsSync(generation.stagePath), false);
+  assert.equal(fs.readFileSync(path.join(historical, 'keep.txt'), 'utf8'), 'historical bytes stay unchanged\n');
+
+  const idempotent = run(['--hub', hub, '--reconcile-staging', generation.record.generation_id, '--write', '--sync-source', 'repo'], { env });
+  assert.equal(idempotent.status, 0, idempotent.stderr);
+  assert.equal(fs.readFileSync(path.join(historical, 'keep.txt'), 'utf8'), 'historical bytes stay unchanged\n');
+});
 
 function fsError(code) {
   const error = new Error(`injected ${code}`);
