@@ -1255,7 +1255,8 @@ function validateToolkitPluginVersionAlignment(errors) {
     ['_projects/development/toolkit-local-bridge/_main/codex-plugin/plugin.json', readJson('_projects/development/toolkit-local-bridge/_main/codex-plugin/plugin.json').version],
     ['_projects/development/toolkit-local-bridge/_main/claude-plugin/plugin.json', readJson('_projects/development/toolkit-local-bridge/_main/claude-plugin/plugin.json').version],
     ['repo/scripts/toolkit-local-bridge.cjs BRIDGE_VERSION', extractSingleQuotedConst(readText('repo/scripts/toolkit-local-bridge.cjs'), 'BRIDGE_VERSION')],
-    ['repo/scripts/setup-codex-toolkit-plugin.cjs EXPECTED_TOOLKIT_VERSION', extractSingleQuotedConst(readText('repo/scripts/setup-codex-toolkit-plugin.cjs'), 'EXPECTED_TOOLKIT_VERSION')]
+    ['repo/scripts/setup-codex-toolkit-plugin.cjs EXPECTED_TOOLKIT_VERSION', extractSingleQuotedConst(readText('repo/scripts/setup-codex-toolkit-plugin.cjs'), 'EXPECTED_TOOLKIT_VERSION')],
+    ['repo/scripts/codex-delegation-config.cjs TOOLKIT_CLIENT_VERSION', extractSingleQuotedConst(readText('repo/scripts/codex-delegation-config.cjs'), 'TOOLKIT_CLIENT_VERSION')]
   ];
   for (const [label, version] of versionSources) {
     if (version !== projectVersion) {

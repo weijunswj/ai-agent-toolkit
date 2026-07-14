@@ -242,7 +242,14 @@ Disable repo auto-update:
 node repo/scripts/toolkit-local-bridge.cjs --disable-repo-auto-update --write
 ```
 
-The bridge is Toolkit setup and maintenance infrastructure with one compact `toolkit-setup` discoverability skill, not a command-per-bridge skill family. It never silently sets up new non-native targets. Enabled targets may auto-sync from whichever native plugin is newer. Disabled and never-enabled targets are not touched.
+The bridge is Toolkit setup and maintenance infrastructure with one compact `toolkit-setup` discoverability skill, not a command-per-bridge skill family. It never silently sets up new non-native targets. Repo, Codex, and Claude Code bridge copies record and enforce their versions independently, while `hub_version` remains a reporting and older-cache compatibility watermark only. Disabled and never-enabled targets are not touched.
+
+Native hooks run cached bridge copies. After a bridge fix is merged, the machine is not fully updated until every affected host cache is refreshed:
+
+- In Codex, run `setup toolkit`.
+- In Claude Code, run `setup toolkit --host claude-code` (or `setup toolkit` from Claude Code), then restart Claude Code.
+
+Refreshing one host never mutates the other host's cache.
 
 Policy layering stays portable:
 
