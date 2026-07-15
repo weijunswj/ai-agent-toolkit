@@ -9,8 +9,12 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.5.2';
+const EXPECTED_TOOLKIT_VERSION = '2.5.3';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
+const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
+const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
+const SESSION_START_RUNTIME_REL_PATH = '.codex-plugin/session-start-runtime.json';
+const SESSION_START_ARGS = ['--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'];
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
   '.codex-plugin/hooks/hooks.json',
@@ -22,6 +26,8 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/setup-toolkit-core.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
+  SESSION_START_LAUNCHER_REL_PATH,
+  SESSION_START_POWERSHELL_REL_PATH,
   'repo/scripts/toolkit-local-bridge.cjs',
   'repo/scripts/toolkit-staging-generations.cjs',
   'repo/tests/toolkit-local-bridge-hook-light.test.cjs'
@@ -66,6 +72,31 @@ function compareSemver(left, right) {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
+}
+
+function sourceSessionStartCommand() {
+  return `node "\${PLUGIN_ROOT}/${SESSION_START_LAUNCHER_REL_PATH}" ${SESSION_START_ARGS.join(' ')}`;
+}
+
+function defaultWindowsPowerShellPath() {
+  const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows';
+  return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+function windowsSessionStartCommand(powershellPath = defaultWindowsPowerShellPath()) {
+  const script = `& { & (Join-Path $env:PLUGIN_ROOT '${SESSION_START_POWERSHELL_REL_PATH}') ${SESSION_START_ARGS.map((arg) => `'${arg}'`).join(' ')} }`;
+  return `"${powershellPath}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "${script}"`;
+}
+
+function writeFileAtomically(filePath, bytes) {
+  const tempPath = `${filePath}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  try {
+    fs.writeFileSync(tempPath, bytes, { mode: 0o600 });
+    fs.renameSync(tempPath, filePath);
+  } finally {
+    fs.rmSync(tempPath, { force: true });
+  }
 }
 
 function pngSize(filePath) {
@@ -173,12 +204,15 @@ function validateMarketplaceWrapper(marketplace) {
   return errors;
 }
 
-function verifySessionStartHook(hooksPath) {
+function verifySessionStartHook(hooksPath, options = {}) {
   const errors = [];
   const hooks = readJson(hooksPath);
   const sessionStart = hooks?.hooks?.SessionStart;
-  if (!Array.isArray(sessionStart) || sessionStart.length === 0) {
+  if (!Array.isArray(sessionStart) || sessionStart.length !== 1) {
     return ['must include a SessionStart hook'];
+  }
+  if (sessionStart[0]?.matcher !== 'startup|resume|clear|compact') {
+    errors.push('SessionStart matcher must support startup, resume, clear, and compact');
   }
   const commands = [];
   for (const group of sessionStart) {
@@ -186,15 +220,79 @@ function verifySessionStartHook(hooksPath) {
       if (hook?.type === 'command' && typeof hook.command === 'string') commands.push(hook.command);
     }
   }
-  if (commands.length === 0) errors.push('SessionStart must include a command hook');
-  const joined = commands.join('\n');
-  if (!/toolkit-local-bridge\.cjs/.test(joined)) {
-    errors.push('SessionStart command must call toolkit-local-bridge.cjs');
+  if (commands.length !== 1) errors.push('SessionStart must include exactly one command hook');
+  const command = commands[0] || '';
+  const expected = options.windows
+    ? windowsSessionStartCommand(options.powershellPath)
+    : sourceSessionStartCommand();
+  if (command !== expected) errors.push(`SessionStart command must use the exact ${options.windows ? 'installed Windows' : 'portable source'} Toolkit launcher shape`);
+  if (!command.includes(SESSION_START_LAUNCHER_REL_PATH) && !command.includes(SESSION_START_POWERSHELL_REL_PATH)) {
+    errors.push('SessionStart command must call the Toolkit hook-safe launcher');
   }
-  if (!/--sync-source codex-plugin/.test(joined)) {
-    errors.push('SessionStart command must use --sync-source codex-plugin');
+  if (/toolkit-local-bridge\.cjs/.test(command)) errors.push('SessionStart command must not call toolkit-local-bridge.cjs directly');
+  for (const arg of SESSION_START_ARGS) {
+    if (!command.includes(arg)) errors.push(`SessionStart command must include ${arg}`);
   }
   return errors;
+}
+
+function verifySessionStartRuntime(cacheRoot, options = {}) {
+  if (!(options.platform || process.platform).startsWith('win')) return [];
+  const runtimePath = path.join(cacheRoot, ...SESSION_START_RUNTIME_REL_PATH.split('/'));
+  if (!fs.existsSync(runtimePath)) return ['installed Windows SessionStart runtime metadata is missing'];
+  let runtime;
+  try {
+    runtime = readJson(runtimePath);
+  } catch (error) {
+    return [`installed Windows SessionStart runtime metadata is invalid: ${error.message}`];
+  }
+  const nodePath = String(runtime?.node_path || '');
+  if (runtime?.schema !== 1 || !path.isAbsolute(nodePath)) return ['installed Windows SessionStart runtime metadata must contain one absolute Node executable path'];
+  try {
+    const stat = fs.lstatSync(nodePath);
+    if (stat.isSymbolicLink() || !stat.isFile()) return ['installed Windows SessionStart Node executable must be a regular file'];
+  } catch {
+    return ['installed Windows SessionStart Node executable is unavailable; rerun setup toolkit'];
+  }
+  const expectedNodePath = options.nodePath || process.execPath;
+  if (comparablePath(nodePath) !== comparablePath(expectedNodePath)) {
+    return ['installed Windows SessionStart Node executable differs from the current setup runtime; rerun setup toolkit'];
+  }
+  return [];
+}
+
+function prepareInstalledSessionStartIfPresent(options = {}) {
+  const cacheRoot = cacheRootFor(options.codexHome || defaultCodexHome(), options.expectedVersion || EXPECTED_TOOLKIT_VERSION);
+  const hooksPath = path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json');
+  if (!fs.existsSync(hooksPath)) return { changed: false, hooksChanged: false, runtimeChanged: false };
+  return prepareInstalledSessionStart(cacheRoot, options);
+}
+
+function prepareInstalledSessionStart(cacheRoot, options = {}) {
+  if (!(options.platform || process.platform).startsWith('win')) return { changed: false };
+  const hooksPath = path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json');
+  const nodePath = path.resolve(options.nodePath || process.execPath);
+  const powershellPath = path.resolve(options.powershellPath || defaultWindowsPowerShellPath());
+  for (const [filePath, label] of [[nodePath, 'Node executable'], [powershellPath, 'Windows PowerShell executable']]) {
+    const stat = fs.lstatSync(filePath);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${label} must be a regular file for Toolkit SessionStart setup.`);
+  }
+  const hooks = readJson(hooksPath);
+  const commandHook = hooks?.hooks?.SessionStart?.[0]?.hooks?.[0];
+  const currentCommand = String(commandHook?.command || '');
+  const installedCommand = windowsSessionStartCommand(powershellPath);
+  if (currentCommand !== sourceSessionStartCommand() && currentCommand !== installedCommand) {
+    throw new Error('Installed SessionStart hook does not match a supported Toolkit source or Windows launcher shape.');
+  }
+  commandHook.command = installedCommand;
+  const hooksBytes = Buffer.from(`${JSON.stringify(hooks, null, 2)}\n`, 'utf8');
+  const runtimePath = path.join(cacheRoot, ...SESSION_START_RUNTIME_REL_PATH.split('/'));
+  const runtimeBytes = Buffer.from(`${JSON.stringify({ schema: 1, node_path: nodePath }, null, 2)}\n`, 'utf8');
+  const hooksChanged = !fs.readFileSync(hooksPath).equals(hooksBytes);
+  const runtimeChanged = !fs.existsSync(runtimePath) || !fs.readFileSync(runtimePath).equals(runtimeBytes);
+  if (hooksChanged) writeFileAtomically(hooksPath, hooksBytes);
+  if (runtimeChanged) writeFileAtomically(runtimePath, runtimeBytes);
+  return { changed: hooksChanged || runtimeChanged, hooksChanged, runtimeChanged };
 }
 
 function pluginId() {
@@ -248,7 +346,7 @@ function fileFingerprint(filePath) {
   };
 }
 
-function verifyInstalledCacheFreshness(cacheRoot, repoRoot) {
+function verifyInstalledCacheFreshness(cacheRoot, repoRoot, options = {}) {
   const errors = [];
   if (!repoRoot) return errors;
   const sourceRoot = path.resolve(repoRoot);
@@ -267,6 +365,13 @@ function verifyInstalledCacheFreshness(cacheRoot, repoRoot) {
     }
     const sourceFile = path.join(sourceRoot, ...relPath.split('/'));
     const cacheFile = path.join(installedRoot, ...relPath.split('/'));
+    if (relPath === '.codex-plugin/hooks/hooks.json' && (options.platform || process.platform).startsWith('win')) {
+      if (!fs.existsSync(sourceFile)) errors.push(`${pluginId()} repo is missing file: ${relPath}`);
+      else errors.push(...verifySessionStartHook(sourceFile).map((error) => `${pluginId()} repo ${error}`));
+      if (!fs.existsSync(cacheFile)) errors.push(`${pluginId()} installed plugin cache is missing repo file: ${relPath}`);
+      else errors.push(...verifySessionStartHook(cacheFile, { windows: true, powershellPath: options.powershellPath }).map((error) => `${pluginId()} cache ${error}`));
+      continue;
+    }
     const source = fileFingerprint(sourceFile);
     const cache = fileFingerprint(cacheFile);
     if (!source.exists) {
@@ -400,9 +505,13 @@ function verifyInstalledCache(codexHome, expectedVersion = EXPECTED_TOOLKIT_VERS
   if (!fs.existsSync(cacheHooksPath)) {
     errors.push(`${pluginId()} installed plugin cache is missing SessionStart hook config at ${cacheHooksPath}`);
   } else {
-    errors.push(...verifySessionStartHook(cacheHooksPath).map((error) => `${pluginId()} cache ${error}`));
+    errors.push(...verifySessionStartHook(cacheHooksPath, {
+      windows: (options.platform || process.platform).startsWith('win'),
+      powershellPath: options.powershellPath
+    }).map((error) => `${pluginId()} cache ${error}`));
   }
-  errors.push(...verifyInstalledCacheFreshness(cacheRoot, options.repoRoot || ''));
+  errors.push(...verifySessionStartRuntime(cacheRoot, { platform: options.platform, nodePath: options.nodePath }));
+  errors.push(...verifyInstalledCacheFreshness(cacheRoot, options.repoRoot || '', options));
   return { cacheRoot, errors };
 }
 
@@ -686,6 +795,7 @@ async function runCodexAddAndVerify(command, addArgs, options) {
   let childError = null;
   let lastState = null;
   let lastListError = null;
+  let hookChanged = false;
 
   try {
     child = spawnCodexProcess(command, addArgs, { env: process.env });
@@ -704,6 +814,12 @@ async function runCodexAddAndVerify(command, addArgs, options) {
     try {
       const pluginList = runCodexJson(command, ['plugin', 'list', '--json', '--available']);
       lastListError = null;
+      try {
+        const prepared = prepareInstalledSessionStartIfPresent(options);
+        hookChanged = hookChanged || prepared.hooksChanged;
+      } catch {
+        // Installed-state verification below reports an unsafe or incomplete cache.
+      }
       lastState = evaluateCodexToolkitPluginState(pluginList, {
         codexHome: options.codexHome,
         repoRoot: options.repoRoot,
@@ -714,6 +830,7 @@ async function runCodexAddAndVerify(command, addArgs, options) {
         terminateChild(child);
         return {
           state: lastState,
+          hookChanged,
           warning: addDidNotExitCleanly ? codexAddTimeoutWarning(addArgs) : ''
         };
       }
@@ -818,6 +935,14 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
 
   try {
     pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
+    if (options.write) {
+      try {
+        const prepared = prepareInstalledSessionStartIfPresent({ codexHome: options.codexHome });
+        pluginChanged = pluginChanged || prepared.hooksChanged;
+      } catch {
+        // A stale unsupported cache is handled by the supported reinstall path.
+      }
+    }
     state = evaluateCodexToolkitPluginState(pluginList, {
       codexHome: options.codexHome,
       repoRoot: options.repoRoot,
@@ -832,6 +957,12 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     try {
       runCodexJson(resolved.command, ['plugin', 'marketplace', 'add', options.repoRoot, '--json']);
       pluginList = runCodexJson(resolved.command, ['plugin', 'list', '--json', '--available']);
+      try {
+        const prepared = prepareInstalledSessionStartIfPresent({ codexHome: options.codexHome });
+        pluginChanged = pluginChanged || prepared.hooksChanged;
+      } catch {
+        // Verification decides whether reinstall is required.
+      }
       state = evaluateCodexToolkitPluginState(pluginList, {
         codexHome: options.codexHome,
         repoRoot: options.repoRoot,
@@ -849,6 +980,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
           repoRoot: options.repoRoot
         });
         state = addOutcome.state;
+        pluginChanged = pluginChanged || addOutcome.hookChanged;
         if (addOutcome.warning) warnings.push(addOutcome.warning);
       }
     } catch (error) {
@@ -916,12 +1048,22 @@ module.exports = {
   MARKETPLACE_REL_PATH,
   CACHE_FINGERPRINT_PATHS,
   CACHE_FINGERPRINT_DIRS,
+  SESSION_START_ARGS,
+  SESSION_START_LAUNCHER_REL_PATH,
+  SESSION_START_POWERSHELL_REL_PATH,
+  SESSION_START_RUNTIME_REL_PATH,
   codexToolkitInstallCommands,
+  defaultWindowsPowerShellPath,
   evaluateCodexToolkitPluginState,
+  prepareInstalledSessionStart,
+  prepareInstalledSessionStartIfPresent,
+  sourceSessionStartCommand,
   validateMarketplaceWrapper,
   validateRepoPluginSource,
   verifyInstalledCacheFreshness,
   verifySessionStartHook,
+  verifySessionStartRuntime,
+  windowsSessionStartCommand,
   formatWindowsAliasFailure,
   isWindowsAppsAliasAccessDenied,
   windowsAliasCliCandidate,

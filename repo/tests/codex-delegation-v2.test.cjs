@@ -667,6 +667,39 @@ test('remove deletes only an exact Toolkit-managed V2 block', async () => {
   assert.equal(state.enablement_ownership, 'absent');
 });
 
+test('visible removal preview binds approval to exact bytes and creates an exact backup', async () => {
+  const driftPath = configPath();
+  writeConfig(driftPath, 'model = "before"\n');
+  await configureV2(driftPath);
+  const stalePreview = config.previewCodexDelegationRemoval(driftPath, { runtime: V2, setupScriptPath: __filename });
+  assert.equal(stalePreview.status, 'removal-preview');
+  assert.match(stalePreview.detail, /higher host default/);
+  fs.writeFileSync(driftPath, fs.readFileSync(driftPath, 'utf8').replace('model = "before"', 'model = "after"'));
+  const stale = config.removeCodexDelegation(driftPath, {
+    runtime: V2,
+    approveCapacityResetRisk: true,
+    approvedProposal: stalePreview.approval_binding,
+    backupGenerationId: stalePreview.backup_generation_id,
+  });
+  assert.equal(stale.status, 'approval-stale');
+  assert.equal(fs.existsSync(stalePreview.backup_metadata_path), false);
+  assert.match(fs.readFileSync(driftPath, 'utf8'), /CODEX-HELPER-CAPACITY/);
+
+  const appliedPath = configPath();
+  writeConfig(appliedPath, 'model = "stable"\n');
+  await configureV2(appliedPath);
+  const preview = config.previewCodexDelegationRemoval(appliedPath, { runtime: V2, setupScriptPath: __filename });
+  const removed = config.removeCodexDelegation(appliedPath, {
+    runtime: V2,
+    approveCapacityResetRisk: true,
+    approvedProposal: preview.approval_binding,
+    backupGenerationId: preview.backup_generation_id,
+  });
+  assert.equal(removed.status, 'removed');
+  assert.equal(fs.existsSync(preview.backup_metadata_path), true);
+  assert.doesNotMatch(fs.readFileSync(appliedPath, 'utf8'), /AI-AGENT-TOOLKIT|max_concurrent_threads_per_session/);
+});
+
 test('fresh Toolkit enablement is independently owned and removal restores absent enablement', async () => {
   const filePath = configPath();
   const original = 'model = "gpt-5.6"\r\n';

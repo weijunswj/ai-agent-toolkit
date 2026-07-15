@@ -42,8 +42,22 @@ test('plain and JSON plans share the one-helper recommendation and canonical Cod
   const plan = JSON.parse(json.stdout);
   const delegationRow = plan.question_bank.find((row) => row.key === 'codexHelperCapacity');
   assert.deepEqual(
-    { recommended: delegationRow.recommended, empty_input: delegationRow.empty_input, selected: delegationRow.selected },
-    { recommended: 'one-helper', empty_input: 'one-helper', selected: 'one-helper' }
+    {
+      recommended: delegationRow.recommended,
+      recommended_value: delegationRow.recommended_value,
+      empty_input: delegationRow.empty_input,
+      empty_input_behavior: delegationRow.empty_input_behavior,
+      selected: delegationRow.selected,
+      selected_value: delegationRow.selected_value,
+    },
+    {
+      recommended: 'one-helper',
+      recommended_value: 'one-helper',
+      empty_input: 'one-helper',
+      empty_input_behavior: 'one-helper',
+      selected: 'one-helper',
+      selected_value: 'one-helper',
+    }
   );
   assert.equal(plan.preferences.helper_capacity, 'one-helper');
 });
@@ -113,10 +127,16 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   };
   const planned = core.plannedQuestionBank(args, current);
   const text = core.renderSetupQuestionBank(planned.specs);
+  const terminal = core.renderSetupQuestionBankTerminal(planned.specs);
   assert.match(text, /## Automatic updates[\s\S]*## Computer performance/);
   assert.doesNotMatch(text, /## Other coding apps/);
   assert.doesNotMatch(text, /Update report auto-open|MultiAgentV[12]|max_threads|max_concurrent|AI-AGENT-TOOLKIT|PR #|issue #|C:\\|restore command|migration/i);
   assert.match(text, /How many helper agents may Codex use\?[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*Selected:\*\*/);
+  assert.match(text, /\*\*Choices:\*\*\n\n- One helper at most - recommended\n- Root agent only\n- Keep current\n- Use a custom number/);
+  assert.doesNotMatch(text, /\bAdvanced(?: options)?\b|Show advanced choices|More options/);
+  assert.doesNotMatch(text, /\*\*Choices:\*\*[^\n]*(?:\/|\|)/);
+  assert.match(terminal, /Choices:\n  - One helper at most - recommended\n  - Root agent only\n  - Keep current\n  - Use a custom number/);
+  assert.doesNotMatch(terminal, /Choices:[^\n]*(?:\/|,)/);
   assert.match(text, /Accept all displayed recommended settings:[\s\S]*setup-toolkit-question-bank:complete/);
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
 
@@ -124,6 +144,36 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   const unsafe = core.setupQuestionSpecs(args, current).find((spec) => spec.key === 'codexHelperCapacity');
   assert.match(unsafe.current, /Risk:/);
   assert.match(unsafe.choices.find((choice) => choice.value === 'keep').label, /memory risk/);
+});
+
+test('helper choices are direct and conditional on current runtime and ownership', () => {
+  const args = core.parseArgs(['--plan']);
+  const base = {
+    managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
+    audit: { repo_auto_update: {}, targets: {} },
+    nativePlugin: { status: 'not checked' },
+  };
+  const helperSpec = (runtime, delegationState) => core.setupQuestionSpecs(args, {
+    ...base,
+    runtime: { runtime },
+    delegation: delegationState,
+  }).find((spec) => spec.key === 'codexHelperCapacity');
+
+  const supported = helperSpec('MultiAgentV2', { status: 'unconfigured', detail: 'not configured' });
+  assert.deepEqual(supported.choices.map((choice) => choice.value), ['one-helper', 'root-only', 'keep', 'custom']);
+  assert.equal(supported.choices.find((choice) => choice.value === 'custom').label, 'Use a custom number');
+  assert.equal(supported.choices.some((choice) => /advanced/i.test(choice.label)), false);
+
+  const unsupported = helperSpec('unknown', { status: 'unsupported', detail: 'unknown runtime' });
+  assert.deepEqual(unsupported.choices.map((choice) => choice.value), ['keep']);
+
+  const migration = helperSpec('MultiAgentV2', { status: 'migration-required', ownership: 'toolkit-managed-v1-legacy', helper_count: 1, detail: 'pending' });
+  assert.deepEqual(migration.choices.map((choice) => choice.value), ['keep', 'migrate']);
+  assert.deepEqual(migration.choices.map((choice) => choice.label), ['Keep current - recommended', 'Update the existing Toolkit helper setting']);
+
+  const removable = helperSpec('MultiAgentV2', { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 1, detail: 'configured' });
+  assert.equal(removable.choices.find((choice) => choice.value === 'remove').label, 'Remove the Toolkit helper limit');
+  assert.equal(removable.choices.some((choice) => choice.value === 'migrate'), false);
 });
 
 test('missing wizard output retries the complete bank and never emits a shortcut alone', () => {

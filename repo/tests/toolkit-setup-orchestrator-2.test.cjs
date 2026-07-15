@@ -54,7 +54,7 @@ test('migration-required defaults and yes-recommended keep the legacy block unch
       timeout: 300000,
     });
     assert.equal(result.status, 0, `${mode}: ${result.stderr || result.stdout}`);
-    assert.match(result.stdout, /Migrate the existing Toolkit legacy setting/);
+    assert.match(result.stdout, /Update the existing Toolkit helper setting/);
     assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*\*\*Selected:\*\* Keep current/);
     assert.match(result.stdout, /Helper-capacity outcome this run: kept/);
     assert.match(result.stdout, /PR #237 legacy block migrated: no/);
@@ -106,6 +106,45 @@ test('legacy migration is a distinct explicit choice with a full visible preview
   assert.deepEqual(fs.readFileSync(configPath), configuredBytes);
   assert.equal(fs.readFileSync(editorLog, 'utf8').trim(), 'config/batchWrite');
   assert.equal(backupFiles(root).length, backupCount);
+});
+
+test('visible Toolkit limit removal requires one exact preview approval and remains transactional', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const common = [
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh',
+  ];
+  const configured = run(common, { env: isolatedHomeEnv(root), timeout: 300000 });
+  assert.equal(configured.status, 0, configured.stderr || configured.stdout);
+  const configPath = codexConfig(root);
+  const before = fs.readFileSync(configPath);
+  const backupsBefore = new Set(backupFiles(root));
+  fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
+
+  const paused = run([...common, '--codex-helper-capacity', 'remove'], {
+    env: isolatedHomeEnv(root), timeout: 300000,
+  });
+  assert.equal(paused.status, 23, paused.stderr || paused.stdout);
+  assert.match(paused.stdout, /# Codex helper-limit removal preview/);
+  assert.match(paused.stdout, /After semantics:[\s\S]*higher host default/);
+  assert.match(paused.stdout, /Exact affected keys:[\s\S]*Planned exact backup metadata:[\s\S]*Exact restore command/);
+  assert.match(paused.stderr, /answer `apply`/);
+  assert.deepEqual(fs.readFileSync(configPath), before);
+  assert.deepEqual(new Set(backupFiles(root)), backupsBefore);
+
+  const removed = run([
+    ...common,
+    '--codex-helper-capacity', 'remove',
+    '--approve-codex-config-proposal',
+  ], { env: isolatedHomeEnv(root), timeout: 300000 });
+  assert.equal(removed.status, 0, removed.stderr || removed.stdout);
+  assert.match(removed.stdout, /Helper-capacity outcome this run: removed/);
+  assert.doesNotMatch(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT|max_concurrent_threads_per_session/);
+  const newBackupEntries = backupFiles(root).filter((entry) => !backupsBefore.has(entry));
+  assert.equal(newBackupEntries.length, 3);
+  assert.equal(newBackupEntries.filter((entry) => entry.endsWith('config.toml.original')).length, 1);
+  assert.equal(newBackupEntries.filter((entry) => entry.endsWith('restore.json')).length, 1);
 });
 
 test('ordinary capacity choices cannot silently migrate a pending legacy block', () => {

@@ -115,12 +115,12 @@ test('generated Codex and Claude instruction surfaces preserve root-first and he
   const agents = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   for (const pattern of [
-    /Complete ordinary work with the root agent alone/,
-    /Generic parallelism, a second opinion.*are not sufficient reasons/,
+    /Complete ordinary work with root agent alone/,
+    /Generic parallelism, second opinions.*are insufficient/,
     /prefer one direct specialist/,
-    /complete only its assigned bounded scope/,
-    /must not spawn another agent/,
-    /return any need for more expertise to the root/,
+    /completes its scope/,
+    /cannot spawn another agent/,
+    /returns expertise needs to root/,
   ]) assert.match(agents, pattern);
   assert.match(claude, /@AGENTS\.md/);
   assert.match(claude, /Root `AGENTS\.md` is canonical/);

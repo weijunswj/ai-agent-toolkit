@@ -31,12 +31,13 @@ If instructions conflict, follow the higher-priority source and report material 
 
 ## Single-Agent Default
 
-Complete ordinary work with the root agent alone: setup and updates, reading instructions or playbooks, repository orientation, documentation inspection, narrow implementation, routine tests, formatting, linting, validation, version alignment, small reviews, plans, summaries, and verification the root agent can perform directly. A broad task still begins with root-agent scoping.
-`setup toolkit` is a routine interactive setup operation without spawning subagents.
-Before delegation, state: The exact bounded responsibility being delegated; Why the root agent cannot perform it efficiently itself; The material correctness, safety, or critical-path wall-clock benefit; The files, evidence, or subsystem the subagent owns; How duplicate exploration and duplicated context loading will be avoided; Why sequential root-agent execution is insufficient.
-If any item is missing, delegation is prohibited. Generic parallelism, a second opinion, documentation inspection, routine test or validation execution, independent verification, several task steps, subagent availability, or an unsupported claim that delegation will save time are not sufficient reasons.
-Delegate only a bounded specialist security review or separable work; prefer one direct specialist and avoid duplicate inspection. On Codex MultiAgentV2 the root counts toward capacity; keep work root-only and forbid helper recursion by policy. A delegated helper must complete only its assigned bounded scope, must not spawn another agent, and must return any need for more expertise to the root.
-When supported, default `fork_turns="none"`; brief only required files, evidence, constraints, and acceptance criteria. Positive bounded inheritance needs specific dialogue; `fork_turns="all"` needs exceptional explicit justification. Do not claim unsupported hosts support it.
+Complete ordinary work with root agent alone, including setup/updates, docs/repo orientation, narrow changes, routine tests/checks/formatting, version alignment, reviews/plans/summaries, and root-capable verification. Scope broad work in root first.
+`setup toolkit` is routine root-agent work without subagents.
+Generic wording like `use helpers`, `use agents`, `parallelize this`, `delegate this`, `use subagents`, or `finish faster with helpers` is a preference, not a bounded delegation instruction; it neither conflicts with nor overrides the single-agent default. Do not clarify or invent scope. UAT context, later stages, capacity, or future helper tests cannot qualify the present task.
+Decide from the present task in order: identify it; root efficiency/safety; genuinely separable bounded specialist scope; material correctness/safety/critical-path benefit; non-overlapping ownership; sequential root inadequacy. Delegate only if all pass.
+State those six facts before delegating. Missing any prohibits it. Generic parallelism, second opinions, docs, routine validation, independent verification, multiple steps, available capacity, or speed claims are insufficient.
+Delegate only bounded specialist security review or genuinely separable present-task work; prefer one direct specialist and no duplicate inspection. Defined multi-worker workflows remain supported when scopes/capacity pass. On Codex MultiAgentV2 the root counts toward capacity; keep root-only and forbid helper recursion. A helper completes its scope, cannot spawn another agent, and returns expertise needs to root.
+When supported, default `fork_turns="none"` and brief only required files/evidence/constraints/criteria. `fork_turns="all"` needs exceptional justification; bounded inheritance needs specific dialogue. Do not claim support on unsupported hosts.
 
 ## Local Documentation
 

@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.6.5",
+  "version": "2.6.6",
   "version_policy": "semver",
-  "version_notes": "Makes bounded helper scope, no-recursion, and return-to-root guidance explicit across generated harness surfaces.",
+  "version_notes": "Makes generic helper and speed wording non-conflicting with present-task delegation qualification across generated harness surfaces.",
   "outputs": [
     {
       "kind": "curated",

@@ -52,6 +52,7 @@ function writeInstalledCache(codexHome, options = {}) {
   const version = options.version || setup.EXPECTED_TOOLKIT_VERSION;
   const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', version);
   copyPackageFingerprint(repoRoot, root);
+  if (process.platform === 'win32') setup.prepareInstalledSessionStart(root);
   if (version !== setup.EXPECTED_TOOLKIT_VERSION) {
     const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
@@ -306,6 +307,45 @@ function runSetupVerify(codexHome, fakeCodexPath, extraEnv = {}) {
 
 test('Codex Toolkit plugin source validates manifest icon assets', () => {
   assert.deepEqual(setup.validateRepoPluginSource(repoRoot), []);
+});
+
+test('Codex SessionStart verifier rejects the old direct bridge command and incomplete matchers', () => {
+  const root = tmpRoot();
+  const hooksPath = path.join(root, 'hooks.json');
+  writeJson(hooksPath, {
+    hooks: {
+      SessionStart: [{
+        matcher: 'startup',
+        hooks: [{ type: 'command', command: 'node "${PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source codex-plugin' }]
+      }]
+    }
+  });
+  const errors = setup.verifySessionStartHook(hooksPath).join('\n');
+  assert.match(errors, /startup, resume, clear, and compact/);
+  assert.match(errors, /exact portable source Toolkit launcher shape/);
+  assert.match(errors, /must not call toolkit-local-bridge\.cjs directly/);
+});
+
+test('Windows SessionStart preparation installs strict launcher metadata without touching Claude cache', { skip: process.platform !== 'win32' }, () => {
+  const root = tmpRoot();
+  const codexCache = path.join(root, 'Codex cache with spaces & brackets', 'ai-agent-toolkit');
+  const claudeSentinel = path.join(root, 'claude-cache', 'sentinel.txt');
+  copyPackageFingerprint(repoRoot, codexCache);
+  fs.mkdirSync(path.dirname(claudeSentinel), { recursive: true });
+  fs.writeFileSync(claudeSentinel, 'unchanged\n');
+
+  const prepared = setup.prepareInstalledSessionStart(codexCache);
+  assert.equal(prepared.changed, true);
+  const hooksPath = path.join(codexCache, '.codex-plugin', 'hooks', 'hooks.json');
+  assert.deepEqual(setup.verifySessionStartHook(hooksPath, {
+    windows: true,
+    powershellPath: setup.defaultWindowsPowerShellPath()
+  }), []);
+  assert.deepEqual(setup.verifySessionStartRuntime(codexCache), []);
+  assert.equal(fs.readFileSync(claudeSentinel, 'utf8'), 'unchanged\n');
+  assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.SESSION_START_LAUNCHER_REL_PATH), true);
+  assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.SESSION_START_POWERSHELL_REL_PATH), true);
+  assert.deepEqual(setup.verifyInstalledCacheFreshness(codexCache, repoRoot), []);
 });
 
 test('Codex Toolkit plugin setup verifier accepts active expected-version install with SessionStart cache', () => {
@@ -648,6 +688,14 @@ test('Codex Toolkit --write succeeds when plugin add installs then times out', (
     'codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json did not exit cleanly, but installed-state verification passed'
   ]);
   assert.match(result.stderr, /WARN: codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json did not exit cleanly/i);
+  if (process.platform === 'win32') {
+    const hooksPath = path.join(summary.cache_root, '.codex-plugin', 'hooks', 'hooks.json');
+    assert.deepEqual(setup.verifySessionStartHook(hooksPath, {
+      windows: true,
+      powershellPath: setup.defaultWindowsPowerShellPath()
+    }), []);
+    assert.deepEqual(setup.verifySessionStartRuntime(summary.cache_root), []);
+  }
 });
 
 test('Codex Toolkit --write human output reports the changed hook with JSON-aligned pending review state', () => {

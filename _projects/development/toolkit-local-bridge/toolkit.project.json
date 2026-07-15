@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.5.2",
+  "version": "2.5.3",
   "version_policy": "semver",
-  "version_notes": "Closes setup pre-write, matching-config no-op, and explicit legacy-migration review gaps while preserving approval-bound Codex writes.",
+  "version_notes": "Repairs native Codex SessionStart launching and setup question-bank choice presentation after post-2.5.2 UAT.",
   "outputs": [
     {
       "kind": "curated",

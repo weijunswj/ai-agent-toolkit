@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs\" --hook --sync-enabled --write --sync-source codex-plugin"
+            "command": "node \"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.cjs\" --hook --sync-enabled --write --sync-source codex-plugin"
           }
         ]
       }
