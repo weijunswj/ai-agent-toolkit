@@ -929,10 +929,15 @@ async function applyHostDelegationControl(args, current) {
   };
   if (!['migrate', 'one-helper', 'root-only', 'advanced'].includes(choice)) return delegation.delegationResultForChoice(choice, configPath, options);
   if (choice === 'migrate') options.helperCount = current.delegation.helper_count;
-  const preview = args.codexDelegationPreview || delegation.previewCodexDelegation(configPath, options);
-  if (preview.status === 'preview') options.backupGenerationId = preview.backup_generation_id;
+  const preview = args.codexDelegationPreview;
+  if (!preview || preview.status !== 'preview' || !preview.approval_binding) {
+    throw new Error('Selected helper setting remains unapplied. Toolkit could not verify the approved Codex proposal. Rerun setup to receive a fresh proposal.');
+  }
+  options.backupGenerationId = preview.backup_generation_id;
+  options.approvedProposal = preview.approval_binding;
   const effectiveChoice = ['one-helper', 'root-only', 'advanced'].includes(choice) ? 'custom' : choice;
   const result = await delegation.delegationResultForChoice(effectiveChoice, configPath, options);
+  if (result.status === 'approval-stale' || result.status === 'approval-invalid') throw new Error(result.detail);
   if (result.status !== 'configured' || result.helper_count !== options.helperCount) {
     throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration problem and rerun setup. ${result.detail || result.status}`);
   }

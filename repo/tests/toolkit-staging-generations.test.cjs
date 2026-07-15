@@ -15,7 +15,7 @@ const {
   reconcileOwnedStaging
 } = require('../scripts/toolkit-staging-generations.cjs');
 
-const bridgeVersion = '2.5.0';
+const bridgeVersion = '2.5.1';
 
 function fixtureRoot(label = '') {
   return fs.mkdtempSync(path.join(os.tmpdir(), `toolkit owned staging ${label}-`));

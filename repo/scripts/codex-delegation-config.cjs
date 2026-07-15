@@ -48,8 +48,9 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.5.0';
+const TOOLKIT_CLIENT_VERSION = '2.5.1';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
+const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v1';
 
 function inspectCodexDelegationConfig(configPath = codexConfigPath(), runtime = RUNTIMES.UNKNOWN) {
   let stat;
@@ -91,10 +92,121 @@ function canReplaceUserOwnedRuntimeControls(state, runtime) {
   return false;
 }
 
+function cloneConfigSnapshot(snapshot) {
+  return {
+    ...snapshot,
+    bytes: Buffer.from(snapshot.bytes),
+    identity: snapshot.identity ? { ...snapshot.identity } : null,
+  };
+}
+
+function approvalSnapshotDescriptor(snapshot) {
+  return {
+    config_path: snapshot.config_path,
+    existed: snapshot.existed,
+    file_type: snapshot.file_type,
+    size_bytes: snapshot.size_bytes,
+    sha256: snapshot.sha256,
+    mode: snapshot.mode,
+    identity: snapshot.identity ? { ...snapshot.identity } : null,
+  };
+}
+
+function hashApprovalValue(value) {
+  const input = Buffer.isBuffer(value) ? value : (typeof value === 'string' ? value : JSON.stringify(value));
+  return crypto.createHash('sha256').update(input).digest('hex');
+}
+
+function proposalAffectedKeys(state, runtime) {
+  if (runtime === RUNTIMES.V2) {
+    const manageEnablement = !String(state.enablement_ownership || '').startsWith('user-owned');
+    return [
+      ...(manageEnablement ? ['features.multi_agent_v2.enabled'] : []),
+      'features.multi_agent_v2.max_concurrent_threads_per_session',
+      'features.multi_agent_v2.root_agent_usage_hint_text',
+      'features.multi_agent_v2.subagent_usage_hint_text',
+    ];
+  }
+  return ['agents.max_threads', 'agents.max_depth'];
+}
+
+function approvalBindingPayload(binding) {
+  return {
+    schema: binding.schema,
+    config_path: binding.config_path,
+    runtime: binding.runtime,
+    helper_count: binding.helper_count,
+    affected_keys: binding.affected_keys,
+    backup_generation_id: binding.backup_generation_id,
+    proposal_sha256: binding.proposal_sha256,
+    snapshot: approvalSnapshotDescriptor(binding.snapshot),
+  };
+}
+
+function createApprovalBinding({ snapshot, runtime, helperCount, affectedKeys, backupGenerationId, proposedBlock }) {
+  const snapshotCopy = cloneConfigSnapshot(snapshot);
+  const binding = {
+    schema: APPROVAL_BINDING_SCHEMA,
+    config_path: snapshotCopy.config_path,
+    runtime,
+    helper_count: helperCount,
+    affected_keys: Object.freeze([...affectedKeys]),
+    backup_generation_id: backupGenerationId,
+    proposal_sha256: hashApprovalValue(proposedBlock),
+    snapshot: Object.freeze(snapshotCopy),
+  };
+  binding.approval_sha256 = hashApprovalValue(approvalBindingPayload(binding));
+  return Object.freeze(binding);
+}
+
+function approvedSnapshotForConfiguration(binding, configPath, runtime, helperCount, backupGenerationId) {
+  if (!binding || binding.schema !== APPROVAL_BINDING_SCHEMA || !binding.snapshot || !Buffer.isBuffer(binding.snapshot.bytes)) {
+    throw new Error('Approved Codex proposal binding is missing or malformed.');
+  }
+  const snapshot = cloneConfigSnapshot(binding.snapshot);
+  const resolvedPath = path.resolve(configPath);
+  const bytesHash = snapshot.existed ? hashApprovalValue(snapshot.bytes) : null;
+  if (binding.config_path !== resolvedPath
+    || snapshot.config_path !== resolvedPath
+    || binding.runtime !== runtime
+    || binding.helper_count !== helperCount
+    || binding.backup_generation_id !== backupGenerationId
+    || snapshot.bytes.length !== snapshot.size_bytes
+    || snapshot.sha256 !== bytesHash
+    || binding.approval_sha256 !== hashApprovalValue(approvalBindingPayload(binding))) {
+    throw new Error('Approved Codex proposal binding does not match the requested transaction.');
+  }
+  if (!snapshot.existed && (snapshot.file_type !== 'missing' || snapshot.size_bytes !== 0 || snapshot.sha256 !== null || snapshot.mode !== null || snapshot.identity !== null)) {
+    throw new Error('Approved Codex proposal binding has invalid missing-file semantics.');
+  }
+  if (snapshot.existed && snapshot.file_type !== 'regular') throw new Error('Approved Codex proposal binding does not describe a regular file.');
+  return snapshot;
+}
+
+function approvalFailureResult(runtime, configPath, status, technicalDetail) {
+  const changedAfterApproval = status === 'approval-stale';
+  return {
+    status,
+    runtime,
+    config_path: path.resolve(configPath),
+    changed: false,
+    detail: changedAfterApproval
+      ? 'Selected helper setting remains unapplied. The Codex configuration changed after you approved the proposal, so Toolkit did not apply the helper setting. Review the updated configuration and rerun setup to receive a fresh proposal. Other setup operations may already have completed; Toolkit did not roll them back.'
+      : 'Selected helper setting remains unapplied. Toolkit could not verify the approved Codex proposal, so it did not apply the helper setting. Rerun setup to receive a fresh proposal.',
+    approval_error: cleanError(technicalDetail),
+  };
+}
+
 function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
   const runtime = options.runtime || RUNTIMES.UNKNOWN;
   const helperCount = options.helperCount ?? CODEX_V2_RAM_SAFE_HELPERS;
-  const state = inspectCodexDelegationConfig(configPath, runtime);
+  let snapshot;
+  try {
+    snapshot = captureCodexConfigSnapshot(configPath);
+  } catch {
+    return { ...inspectCodexDelegationConfig(configPath, runtime), changed: false };
+  }
+  const state = initialStateFromSnapshot(snapshot, snapshot.config_path, runtime);
   const configurable = state.status === 'unconfigured'
     || state.status === 'migration-required'
     || state.status === 'enablement-migration-required'
@@ -103,29 +215,32 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
   if (!configurable) return { ...state, changed: false };
   const manageEnablement = runtime === RUNTIMES.V2 && !String(state.enablement_ownership || '').startsWith('user-owned');
   const backupGenerationId = `planned-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
-  const backupMetadataPath = path.join(backupRoot(configPath), backupGenerationId, 'restore.json');
+  const backupMetadataPath = path.join(backupRoot(snapshot.config_path), backupGenerationId, 'restore.json');
+  const proposedBlock = runtime === RUNTIMES.V2
+    ? expectedV2Block(helperCount, state.eol || '\n', { manageEnablement })
+    : expectedLegacyBlock(helperCount, state.eol || '\n');
+  const affectedKeys = proposalAffectedKeys(state, runtime);
   return {
     ...state,
     status: 'preview',
     changed: false,
     helper_count: helperCount,
     total_threads: runtime === RUNTIMES.V2 ? helpersToTotalThreads(helperCount) : null,
-    backup_root: backupRoot(configPath),
+    backup_root: backupRoot(snapshot.config_path),
     backup_generation_id: backupGenerationId,
     backup_metadata_path: backupMetadataPath,
     restore_commands: restoreCommands(backupMetadataPath, options.setupScriptPath),
-    proposed_block: runtime === RUNTIMES.V2
-      ? expectedV2Block(helperCount, state.eol || '\n', { manageEnablement })
-      : expectedLegacyBlock(helperCount, state.eol || '\n'),
+    proposed_block: proposedBlock,
     proposed_action: 'isolated Codex app-server config/batchWrite with exact full-proposal delta validation',
-    affected_keys: runtime === RUNTIMES.V2
-      ? [
-          ...(manageEnablement ? ['features.multi_agent_v2.enabled'] : []),
-          'features.multi_agent_v2.max_concurrent_threads_per_session',
-          'features.multi_agent_v2.root_agent_usage_hint_text',
-          'features.multi_agent_v2.subagent_usage_hint_text',
-        ]
-      : ['agents.max_threads', 'agents.max_depth'],
+    affected_keys: affectedKeys,
+    approval_binding: createApprovalBinding({
+      snapshot,
+      runtime,
+      helperCount,
+      affectedKeys,
+      backupGenerationId,
+      proposedBlock,
+    }),
     requires_user_confirmation: Boolean(state.legacy_values_ignored || canReplaceUserOwnedRuntimeControls(state, runtime)),
     detail: runtime === RUNTIMES.V2
       ? `The proposal allows ${helperCount} helper(s) plus the main agent (${helpersToTotalThreads(helperCount)} total session threads).`
@@ -613,25 +728,57 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
   const helperCount = options.helperCount ?? CODEX_V2_RAM_SAFE_HELPERS;
   if (!Number.isSafeInteger(helperCount) || helperCount < 0) throw new Error('Helper count must be a non-negative integer.');
   let initialSnapshot;
-  try {
-    initialSnapshot = captureCodexConfigSnapshot(configPath);
-  } catch (error) {
-    return { status: 'unsupported', runtime, config_path: configPath, changed: false, detail: cleanError(error) };
+  const approvedProposal = options.approvedProposal || null;
+  const backupGenerationId = options.backupGenerationId || approvedProposal?.backup_generation_id;
+  if (approvedProposal) {
+    try {
+      initialSnapshot = approvedSnapshotForConfiguration(approvedProposal, configPath, runtime, helperCount, backupGenerationId);
+    } catch (error) {
+      return approvalFailureResult(runtime, configPath, 'approval-invalid', error);
+    }
+    try {
+      assertSnapshotCurrent(configPath, initialSnapshot, 'Codex config changed after proposal approval.');
+    } catch (error) {
+      return approvalFailureResult(runtime, configPath, 'approval-stale', error);
+    }
+  } else {
+    try {
+      initialSnapshot = captureCodexConfigSnapshot(configPath);
+    } catch (error) {
+      return { status: 'unsupported', runtime, config_path: configPath, changed: false, detail: cleanError(error) };
+    }
   }
   const initial = initialStateFromSnapshot(initialSnapshot, configPath, runtime);
   if (![RUNTIMES.V2, RUNTIMES.V1].includes(runtime)) return { ...initial, changed: false };
+  const manageEnablement = runtime === RUNTIMES.V2 && !String(initial.enablement_ownership || '').startsWith('user-owned');
+  if (approvedProposal) {
+    const expectedBlock = runtime === RUNTIMES.V2
+      ? expectedV2Block(helperCount, initial.eol || '\n', { manageEnablement })
+      : expectedLegacyBlock(helperCount, initial.eol || '\n');
+    const expectedKeys = proposalAffectedKeys(initial, runtime);
+    if (approvedProposal.proposal_sha256 !== hashApprovalValue(expectedBlock)
+      || JSON.stringify(approvedProposal.affected_keys) !== JSON.stringify(expectedKeys)) {
+      return approvalFailureResult(runtime, configPath, 'approval-invalid', 'Approved Codex proposal identity does not match the approved snapshot.');
+    }
+  }
   if (initial.status === 'configured' && initial.helper_count === helperCount) return { ...initial, changed: false };
   const toolkitOwned = String(initial.ownership || '').startsWith('toolkit-managed');
   const replaceUserOwned = options.allowUserOwnedReplacement && canReplaceUserOwnedRuntimeControls(initial, runtime);
   if (!['unconfigured', 'migration-required', 'enablement-migration-required'].includes(initial.status) && !toolkitOwned && !replaceUserOwned) return { ...initial, changed: false };
 
-  const manageEnablement = runtime === RUNTIMES.V2 && !String(initial.enablement_ownership || '').startsWith('user-owned');
   const stagedBytes = initial.status === 'enablement-migration-required'
     ? migrateV2BooleanEnablement(initial)
     : (toolkitOwned || initial.status === 'migration-required' ? removeManagedBlockBytes(initial) : initialSnapshot.bytes);
   const stagedState = codexDelegationConfigState(stagedBytes, configPath, runtime);
   if (stagedState.status !== 'unconfigured' && !replaceUserOwned) {
     return { ...initial, status: 'conflicting', changed: false, detail: `Toolkit-owned block removal did not produce an unconfigured ${runtime} proposal base: ${stagedState.detail}` };
+  }
+  if (approvedProposal) {
+    try {
+      assertSnapshotCurrent(configPath, initialSnapshot, 'Codex config changed after proposal approval and before editor invocation.');
+    } catch (error) {
+      return approvalFailureResult(runtime, configPath, 'approval-stale', error);
+    }
   }
   const edit = options.editor
     ? await options.editor({ originalBytes: stagedBytes, configPath, runtime, helperCount })
@@ -655,7 +802,7 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
       }
       return verified;
     },
-    options
+    { ...options, backupGenerationId }
   );
   return {
     ...result,
@@ -718,6 +865,7 @@ async function delegationResultForChoice(choice, configPath = codexConfigPath(),
     return { ...current, status: current.status === 'configured' ? 'configured' : 'kept', changed: false, detail: current.status === 'configured' ? current.detail : `${current.detail} Current helper capacity was kept unchanged.` };
   }
   if (choice === 'migrate') {
+    if (options.approvedProposal) return configureCodexDelegation(configPath, { ...options, helperCount: options.helperCount });
     if (runtime !== RUNTIMES.V2 || current.status !== 'migration-required') return { ...current, changed: false, detail: `${current.detail} No exact Toolkit-managed legacy setting is available to migrate.` };
     return configureCodexDelegation(configPath, { ...options, helperCount: current.helper_count });
   }

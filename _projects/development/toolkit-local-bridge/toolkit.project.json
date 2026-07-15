@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "version_policy": "semver",
-  "version_notes": "Adds the canonical user-facing setup wizard, effective Codex helper-capacity flow, and failure-only actionable report opening.",
+  "version_notes": "Binds Codex helper-capacity approval to the exact preview-time config snapshot through final mutation.",
   "outputs": [
     {
       "kind": "curated",

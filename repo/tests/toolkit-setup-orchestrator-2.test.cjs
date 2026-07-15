@@ -86,6 +86,55 @@ test('approved safe helper proposal completes in the same setup flow and preserv
   assert.match(result.stdout, /Configuration changed this run: yes/);
 });
 
+test('setup rejects V1 and V2 config drift after proposal approval without editor or backup', () => {
+  const fixtures = [
+    {
+      runtime: 'v2',
+      original: '[features.multi_agent_v2]\nenabled = true\nmax_concurrent_threads_per_session = 6\nroot_agent_usage_hint_text = "custom root"\nsubagent_usage_hint_text = "custom helper"\n',
+      drift: '[features.multi_agent_v2]\nenabled = true\nmax_concurrent_threads_per_session = 5\nroot_agent_usage_hint_text = "custom root"\nsubagent_usage_hint_text = "custom helper"\n',
+    },
+    {
+      runtime: 'v1',
+      original: 'approval_policy = "on-request"\n[agents]\nmax_threads = 6\nmax_depth = 2\n',
+      drift: 'approval_policy = "never"\n[agents]\nmax_threads = 6\nmax_depth = 2\n',
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const root = tmpRoot();
+    const { origin, setupRepo } = createGitBackedSetupRepo(root);
+    const configPath = codexConfig(root);
+    const editorLog = path.join(root, 'editor.log');
+    writeFile(configPath, fixture.original);
+    const result = run([
+      '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+      '--skip-codex-plugin-auto-refresh',
+    ], {
+      env: {
+        ...isolatedHomeEnv(root),
+        SETUP_FAKE_CODEX_RUNTIME: fixture.runtime,
+        SETUP_FAKE_AUDIT_COUNT_PATH: path.join(root, 'audit-count'),
+        SETUP_FAKE_CONFIG_DRIFT_CONTENT: fixture.drift,
+        SETUP_FAKE_CODEX_EDITOR_LOG: editorLog,
+      },
+      input: ['keep', 'keep', 'keep', 'one-helper', 'apply'].join('\n'),
+      timeout: 300000,
+    });
+    assert.equal(result.status, 23, `${fixture.runtime}: ${result.stderr || result.stdout}`);
+    assert.match(result.stdout, /# Codex helper-agent config preview/);
+    assert.match(result.stdout, /Exact affected keys:/);
+    assert.match(result.stderr, /Selected helper setting remains unapplied/);
+    assert.match(result.stderr, /configuration changed after you approved the proposal/i);
+    assert.match(result.stderr, /rerun setup to receive a fresh proposal/i);
+    assert.doesNotMatch(result.stdout, /# setup toolkit final summary/);
+    assert.doesNotMatch(result.stdout, /Configuration changed this run: yes/);
+    assert.equal(fs.readFileSync(configPath, 'utf8'), fixture.drift);
+    assert.equal(fs.existsSync(editorLog), false);
+    assert.deepEqual(backupFiles(root), []);
+    assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), true);
+  }
+});
+
 test('question bank pauses before plugin, config, preference, or target writes', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);

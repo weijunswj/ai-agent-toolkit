@@ -50,6 +50,13 @@ function backupRootFor(filePath) {
   return path.join(path.dirname(path.dirname(filePath)), '.ai-agent-toolkit', 'backups', 'codex-delegation');
 }
 
+function approvedOptions(preview) {
+  return {
+    approvedProposal: preview.approval_binding,
+    backupGenerationId: preview.backup_generation_id,
+  };
+}
+
 function createFakeCodexAppServer(root) {
   const fakeCodex = path.join(root, 'fake-codex-app-server.cjs');
   fs.writeFileSync(fakeCodex, [
@@ -139,10 +146,17 @@ test('explicitly approved V1 replacement changes only supported legacy controls'
   assert.equal(blocked.changed, false);
   assert.equal(fs.readFileSync(filePath, 'utf8'), original);
 
+  const preview = config.previewCodexDelegation(filePath, {
+    runtime: V1_RUNTIME,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  assert.equal(preview.status, 'preview');
   const result = await configure(filePath, {
     helperCount: 1,
     allowUserOwnedReplacement: true,
     editor: proposedEditor(proposed),
+    ...approvedOptions(preview),
   });
   assert.equal(result.status, 'configured', result.detail);
   assert.equal(result.helper_count, 1);
@@ -151,6 +165,138 @@ test('explicitly approved V1 replacement changes only supported legacy controls'
   assert.match(configured, /max_threads = 1\nmax_depth = 1/);
   assert.match(configured, /\[agents\.security-reviewer\]\ndescription = "preserve exactly"/);
   assert.doesNotMatch(configured, /multi_agent_v2|max_concurrent_threads_per_session/);
+  assert.ok(fs.existsSync(result.backup_metadata_path));
+  config.restoreCodexDelegationBackup(result.backup_metadata_path, restoreOptions(filePath));
+  assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+});
+
+test('approved V1 proposal rejects affected-key drift before editor or backup', async () => {
+  const filePath = configPath();
+  const original = '[agents]\nmax_threads = 8\nmax_depth = 2\n';
+  writeConfig(filePath, original);
+  const preview = config.previewCodexDelegation(filePath, {
+    runtime: V1_RUNTIME,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  const drift = original.replace('max_threads = 8', 'max_threads = 7');
+  writeConfig(filePath, drift);
+  let editorCalls = 0;
+  const result = await configure(filePath, {
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+    editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+    ...approvedOptions(preview),
+  });
+  assert.equal(result.status, 'approval-stale');
+  assert.equal(result.changed, false);
+  assert.match(result.detail, /configuration changed after you approved the proposal/i);
+  assert.equal(editorCalls, 0);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), drift);
+  assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+});
+
+test('approved V1 proposal rejects unrelated-byte drift before editor or backup', async () => {
+  const filePath = configPath();
+  const original = 'approval_policy = "on-request"\n[agents]\nmax_threads = 8\nmax_depth = 2\n';
+  writeConfig(filePath, original);
+  const preview = config.previewCodexDelegation(filePath, {
+    runtime: V1_RUNTIME,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  const drift = original.replace('approval_policy = "on-request"', 'approval_policy = "never"');
+  writeConfig(filePath, drift);
+  let editorCalls = 0;
+  const result = await configure(filePath, {
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+    editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+    ...approvedOptions(preview),
+  });
+  assert.equal(result.status, 'approval-stale');
+  assert.equal(editorCalls, 0);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), drift);
+  assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+});
+
+test('approved proposal rejects missing, deleted, and special-file topology drift', async (t) => {
+  const cases = [
+    {
+      name: 'missing-to-created',
+      prepare() {},
+      drift(filePath) { writeConfig(filePath, 'model = "created later"\n'); },
+      verify(filePath) { assert.equal(fs.readFileSync(filePath, 'utf8'), 'model = "created later"\n'); },
+    },
+    {
+      name: 'existing-to-missing',
+      prepare(filePath) { writeConfig(filePath, 'model = "approved"\n'); },
+      drift(filePath) { fs.rmSync(filePath); },
+      verify(filePath) { assert.equal(fs.existsSync(filePath), false); },
+    },
+    {
+      name: 'regular-to-directory',
+      prepare(filePath) { writeConfig(filePath, 'model = "approved"\n'); },
+      drift(filePath) { fs.rmSync(filePath); fs.mkdirSync(filePath); },
+      verify(filePath) { assert.equal(fs.lstatSync(filePath).isDirectory(), true); },
+    },
+  ];
+  if (process.platform !== 'win32') {
+    cases.push({
+      name: 'regular-to-symlink',
+      prepare(filePath) { writeConfig(filePath, 'model = "approved"\n'); },
+      drift(filePath) {
+        const target = `${filePath}.target`;
+        writeConfig(target, 'model = "symlink target"\n');
+        fs.rmSync(filePath);
+        fs.symlinkSync(target, filePath, 'file');
+      },
+      verify(filePath) { assert.equal(fs.lstatSync(filePath).isSymbolicLink(), true); },
+    });
+  } else {
+    t.diagnostic('Approval-bound symlink topology drift is covered on POSIX hosts');
+  }
+
+  for (const fixture of cases) {
+    const filePath = configPath();
+    fixture.prepare(filePath);
+    const preview = config.previewCodexDelegation(filePath, { runtime: V1_RUNTIME, helperCount: 1, allowUserOwnedReplacement: true });
+    assert.equal(preview.status, 'preview', fixture.name);
+    fixture.drift(filePath);
+    let editorCalls = 0;
+    const result = await configure(filePath, {
+      helperCount: 1,
+      allowUserOwnedReplacement: true,
+      editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+      ...approvedOptions(preview),
+    });
+    assert.equal(result.status, 'approval-stale', fixture.name);
+    assert.equal(editorCalls, 0, fixture.name);
+    fixture.verify(filePath);
+    assert.equal(fs.existsSync(backupRootFor(filePath)), false, fixture.name);
+  }
+});
+
+test('approval binding preserves late concurrent-edit detection after editor precheck', async () => {
+  const filePath = configPath();
+  const original = 'model = "approved"\n';
+  const concurrent = 'model = "late concurrent edit"\n';
+  writeConfig(filePath, original);
+  const preview = config.previewCodexDelegation(filePath, { runtime: V1_RUNTIME, helperCount: 1, allowUserOwnedReplacement: true });
+  let editorCalls = 0;
+  const result = await configure(filePath, {
+    helperCount: 1,
+    editor: async () => {
+      editorCalls += 1;
+      return { bytes: Buffer.from(appendAgents(original)), editor: 'approval-bound late race editor' };
+    },
+    beforeCommit() { writeConfig(filePath, concurrent); },
+    ...approvedOptions(preview),
+  });
+  assert.equal(result.status, 'conflicting');
+  assert.equal(result.changed, false);
+  assert.equal(editorCalls, 1);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), concurrent);
 });
 
 test('injected editor proposal preserves child tables and supports exact backup restore', async () => {
