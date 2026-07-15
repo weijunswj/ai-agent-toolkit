@@ -522,7 +522,7 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.6\.0/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.6\.1/i);
 });
 
 test('skill discovery includes migrated skills', () => {
