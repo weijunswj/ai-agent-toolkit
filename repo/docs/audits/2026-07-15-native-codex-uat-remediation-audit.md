@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Eight exact-head review findings under amendment; independent current-head verification and native UAT pending
+Status: Eight exact-head review findings repaired and independently verified; native UAT pending
 
 ## Scope
 
@@ -71,7 +71,7 @@ The only implemented Toolkit-managed topology is Claude direct-only. Capacity ne
 - Setup recommendation: repaired so disabled, unknown, and unsupported runtimes expose and recommend only `keep`; visible recommendation text uses the same runtime-supported state as the choices.
 - Productive parallelism: the portable policy now requires a declared bounded launch gate, active topology and resource admission, verified medium non-fast child execution, immediate meaningful root-owned work, and root-owned integration. Generic requests, capacity, task count, speed, or later UAT cannot qualify delegation alone.
 - Native capability: Codex remains root-only under the strict contract because native hooks cannot block spawn or establish child-only non-fast mode and Codex plugins do not package custom agents. Claude now has one separate `claude-toolkit-direct` profile: trusted `PreToolUse` blocks native Agent/Task bypass, and the Toolkit controller admits only fresh direct external sessions with explicit effort, fast disabled, nesting disabled, atomic reservations, and productive-parent declarations. Native teams, built-in, Security, plugin, user-created, third-party, and direct CLI bypasses remain outside Toolkit coverage.
-- Scoped deterministic release finding status: local deterministic coverage now exercises the enforceable Claude boundary and both current P2 review regressions. Exact-head CI, current-head review verification, and native host UAT remain pending.
+- Scoped deterministic release finding status: local deterministic coverage exercises the enforceable Claude boundary and all eight current review regressions. Exact-head CI and current-head review-thread verification passed; native host UAT remains pending.
 
 ## Security Readiness
 
@@ -146,12 +146,29 @@ Passed on the current worktree unless qualified:
 - `node repo/scripts/validate-toolkit.cjs --workspace <clean current-diff workspace>`: passed. The ordinary working-directory invocation reports only the ignored `.agent-toolkit-backups` rollback backup created during this session; it is not tracked or included in the validation workspace/PR. Deleting that local backup still requires explicit destructive-cleanup approval.
 - Local `npm run validate:all` was not run because repository policy assigns the full gate to CI.
 
-Implementation-head PR CI passed on `3943c28c5c6ccbba81cc00c992067ec5f59fddb4`, and the audit-only follow-up `f3e44a681e22e74c16d40b1dda31c22b2eae51bd` also passed: both validation workflows, generated-surface sync, both package checks, the CodeQL workflow gate, and all three material CodeQL analyses passed. The prior six threads remain historical, but eight current exact-head findings are unresolved until this amendment is pushed, independently verified, replied to, and resolved. Any later closure-note head must independently pass exact-head CI before completion. Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT remain pending.
+Implementation-head PR CI passed on `3943c28c5c6ccbba81cc00c992067ec5f59fddb4`, and the audit-only follow-up `f3e44a681e22e74c16d40b1dda31c22b2eae51bd` also passed: both validation workflows, generated-surface sync, both package checks, the CodeQL workflow gate, and all three material CodeQL analyses passed. The prior six threads remain historical. All eight current findings were repaired in `8fa84a84bf9d7a39c4f865813617d9d7dc3ea7ce`, independently verified at exact head `6207ba997d9ca1cb111e87a3113cd9be5eff53e4`, replied to with implementation and regression evidence, and resolved. The re-listed review state is 14 total threads, 0 unresolved, and 0 unresolved-current. Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT remain pending.
+
+## Exact-Head Eight-Finding Amendment
+
+Implemented in `8fa84a84bf9d7a39c4f865813617d9d7dc3ea7ce` and validator-version test alignment completed in `6207ba997d9ca1cb111e87a3113cd9be5eff53e4`:
+
+- Codex owned-block removal uses one affected-key identity through preview, approval, digest, backup metadata, execution, and final verification; unknown and disabled end-to-end removal cases pass.
+- Every private job, prompt/output, state/profile, and reservation artifact is created as a verified regular `0600` file independent of umask; permissive-umask coverage passes.
+- Topology and capacity resolve canonically before plan, display, approval, or write across flag, JSON, TTY, piped, recommended, and execution surfaces.
+- Admission subtracts validated aggregate active-reservation cost from physical and commit/pagefile headroom while holding the same lock; malformed costs fail closed and the concurrent stale-snapshot case permits only one start.
+- Strict Claude profiles require the current installed plugin identity/version/source/cache, enabled state, exact `Agent|Task` matcher and Toolkit command, current hook/controller bytes, and current CLI controls. Missing, stale, disabled, wrong-source, malformed/future-profile, and kept-profile capability-loss cases fail closed.
+- Child prompt bytes use a bounded private stdin pipe, never argv; transport failure terminates the owned child and releases its reservation.
+
+Successful local amendment evidence includes 88 combined SessionStart/plugin/controller regressions, 42 relevant Toolkit Local Bridge lock/recovery/concurrency regressions, 8 canonical Claude profile/topology regressions after the final enforcement change, the focused packaged-version validator regression, generated/project/doc sync checks, skill and pack package checks, and `git diff --check`. Broader setup/delegation runs identified two stale expectation-only failures; each corrected case passed in its focused rerun. Local `npm run validate:all` was not run per repository policy.
+
+The first implementation-head CI run failed only the stale packaged-version validator assertion. Replacement exact head `6207ba997d9ca1cb111e87a3113cd9be5eff53e4` passed both full validation workflows, generated-surface auto-sync, package skills, package packs, CodeQL workflow gating, and the actions, JavaScript/TypeScript, and Python CodeQL analyses. All eight original threads were then replied to and resolved; re-listing returned 0 unresolved and 0 unresolved-current.
+
+Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT were not run and remain explicitly pending.
 
 ## Release Gates
 
-- The earlier topology/admission lane exists, but eight current exact-head findings require repair: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv. None may be marked resolved until pushed current-head evidence exists.
-- Implementation-head CI passed on `3943c28c5c6ccbba81cc00c992067ec5f59fddb4`, and audit-only head `f3e44a681e22e74c16d40b1dda31c22b2eae51bd` also passed. Any subsequent closure-note head remains subject to the same exact-head gate.
+- The eight current exact-head findings are repaired: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv. Current-head implementation evidence and regression results were posted in each original thread before resolution.
+- Implementation-head CI initially found one stale validator-version expectation on `8fa84a84bf9d7a39c4f865813617d9d7dc3ea7ce`. The one-line repair in `6207ba997d9ca1cb111e87a3113cd9be5eff53e4` passed both validation workflows, generated-surface sync, both package checks, the CodeQL workflow gate, and all material CodeQL analyses. Any subsequent closure-note head remains subject to the same exact-head gate.
 - PR remains unmerged.
 - Issues #241 and #247 remain open.
 - Native Codex C1/C2 and startup/resume/clear/compact reruns remain post-merge gates.
