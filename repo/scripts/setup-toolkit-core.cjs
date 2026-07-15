@@ -7,6 +7,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const readline = require('node:readline/promises');
 const delegation = require('./codex-delegation-config.cjs');
+const agentControl = require('./toolkit-agent-control.cjs');
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
@@ -99,6 +100,8 @@ function emptySetupChoices() {
     updateReportRetention: '',
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
+    claudeTopology: '',
+    claudeAgentCapacity: '',
     claudePluginBehavior: '',
     targets: {
       opencode: '',
@@ -139,6 +142,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     keepTargets: [],
     yesRecommended: false,
     codexHelperCount: null,
+    claudeManualMaximum: null,
     approveHighHelperCapacity: false,
     approveCodexConfigProposal: false,
     codexRuntime: RUNTIMES.UNKNOWN,
@@ -255,6 +259,29 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.codexPluginAutoRefresh = false;
       args.setupChoices.codexPluginAutoRefresh = 'disable';
     } else if (arg === '--keep-codex-plugin-auto-refresh') args.setupChoices.codexPluginAutoRefresh = 'keep';
+    else if (arg === '--claude-topology') {
+      const choice = next().toLowerCase();
+      if (!['root-only', 'toolkit-direct', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
+      args.setupChoices.claudeTopology = choice;
+    } else if (arg.startsWith('--claude-topology=')) {
+      const choice = arg.slice('--claude-topology='.length).toLowerCase();
+      if (!['root-only', 'toolkit-direct', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
+      args.setupChoices.claudeTopology = choice;
+    } else if (arg === '--claude-agent-capacity') {
+      const choice = next().toLowerCase();
+      if (!['automatic', 'root-only', 'keep', 'manual'].includes(choice)) throw new Error(`Unsupported --claude-agent-capacity choice: ${choice}`);
+      args.setupChoices.claudeAgentCapacity = choice;
+    } else if (arg.startsWith('--claude-agent-capacity=')) {
+      const choice = arg.slice('--claude-agent-capacity='.length).toLowerCase();
+      if (!['automatic', 'root-only', 'keep', 'manual'].includes(choice)) throw new Error(`Unsupported --claude-agent-capacity choice: ${choice}`);
+      args.setupChoices.claudeAgentCapacity = choice;
+    } else if (arg === '--claude-agent-maximum') {
+      args.claudeManualMaximum = parsePositiveInteger(next(), arg);
+      args.setupChoices.claudeAgentCapacity = 'manual';
+    } else if (arg.startsWith('--claude-agent-maximum=')) {
+      args.claudeManualMaximum = parsePositiveInteger(arg.slice('--claude-agent-maximum='.length), '--claude-agent-maximum');
+      args.setupChoices.claudeAgentCapacity = 'manual';
+    }
     else if (arg === '--claude-plugin-behavior') {
       const choice = next().toLowerCase();
       if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
@@ -340,7 +367,10 @@ function preferenceSummary(options) {
       : 'manual-verification-only',
     helper_capacity_backstop: options.host === 'codex'
       ? (choices.codexHelperCapacity || 'question-required')
-      : 'unsupported-no-enforceable-profile',
+      : (choices.claudeAgentCapacity || 'question-required'),
+    selected_topology: options.host === 'codex'
+      ? 'native-unintercepted-root-only'
+      : (choices.claudeTopology || 'question-required'),
     helper_count: options.host === 'codex' && choices.codexHelperCapacity === 'custom'
       ? options.codexHelperCount
       : (options.host === 'codex' && choices.codexHelperCapacity === 'one-helper'
@@ -507,10 +537,12 @@ function setupPlan(options = {}) {
         id: 'host_delegation_control',
         title: host === 'codex'
           ? 'Apply the selected Codex helper-agent capacity as the final fallible setup operation'
-          : 'Report host-level delegation enforcement as unsupported; portable policy still applies',
+          : 'Apply the selected Claude-only topology and admission profile as the final fallible setup operation',
         commands: host === 'codex' && ['migrate', 'one-helper', 'root-only', 'custom', 'remove'].includes(choices.codexHelperCapacity)
           ? [`manage only the Toolkit-owned ${options.codexRuntime || RUNTIMES.UNKNOWN} helper-capacity block in ${delegation.codexConfigPath()}`]
-          : []
+          : (host === 'claude-code' && (choices.claudeTopology !== 'keep' || choices.claudeAgentCapacity !== 'keep')
+              ? ['write only the Claude Code profile under ~/.ai-agent-toolkit/agent-control/profiles/claude-code.json']
+              : [])
       },
       {
         id: 'final_summary',
@@ -580,6 +612,12 @@ function printHelp() {
     '                               leave stale Codex plugin cache refresh manual',
     '  --keep-codex-plugin-auto-refresh',
     '                               preserve Codex plugin cache auto-refresh preference',
+    '  --claude-topology root-only|toolkit-direct|broader-native|keep',
+    '                               Claude-only topology; Toolkit direct is offered only when its launch controls verify',
+    '  --claude-agent-capacity automatic|root-only|keep|manual',
+    '                               canonical Claude admission mode; manual is still only a backstop',
+    '  --claude-agent-maximum <count>',
+    '                               positive manual maximum for Toolkit-managed Claude workers',
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --enable-target opencode|ag2 enable and sync approved non-native bridge target',
@@ -896,6 +934,13 @@ async function confirmSelectedDelegationProposal(args, current, questionBank) {
     if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
   };
   if (args.host !== 'codex') {
+    if (args.host === 'claude-code') {
+      const selectedTopology = args.setupChoices.claudeTopology === 'keep' ? current.agentProfile.topology : args.setupChoices.claudeTopology;
+      const managedCapacity = ['automatic', 'manual'].includes(args.setupChoices.claudeAgentCapacity);
+      if (managedCapacity && !['toolkit-direct', agentControl.TOPOLOGIES.CLAUDE_DIRECT].includes(selectedTopology)) {
+        throw new Error('Automatic or manual Toolkit admission requires the Direct Toolkit-managed subagents topology.');
+      }
+    }
     assertQuestionBankConsumed();
     return null;
   }
@@ -952,6 +997,28 @@ async function confirmSelectedDelegationProposal(args, current, questionBank) {
 }
 
 async function applyHostDelegationControl(args, current) {
+  if (args.host === 'claude-code') {
+    const topologyChoice = args.setupChoices.claudeTopology;
+    const capacityChoice = args.setupChoices.claudeAgentCapacity;
+    if (topologyChoice === 'keep' && capacityChoice === 'keep') {
+      return { status: 'kept', ...current.agentProfile, changed: false, client_scope: 'Claude-only Toolkit profile' };
+    }
+    const topology = topologyChoice === 'keep'
+      ? current.agentProfile.topology
+      : ({ 'toolkit-direct': agentControl.TOPOLOGIES.CLAUDE_DIRECT, 'root-only': agentControl.TOPOLOGIES.ROOT_ONLY, 'broader-native': agentControl.TOPOLOGIES.BROADER_NATIVE }[topologyChoice]);
+    const capacityMode = capacityChoice === 'keep'
+      ? current.agentProfile.capacity_mode
+      : ({ automatic: agentControl.CAPACITY_MODES.AUTO, 'root-only': agentControl.CAPACITY_MODES.ROOT_ONLY, manual: agentControl.CAPACITY_MODES.MANUAL }[capacityChoice]);
+    if (!current.agentCapability?.supported && (topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT || capacityMode === agentControl.CAPACITY_MODES.AUTO || capacityMode === agentControl.CAPACITY_MODES.MANUAL)) {
+      throw new Error('Selected Claude Toolkit management remains unapplied because required launch controls are not verifiable.');
+    }
+    const configured = agentControl.configureProfile('claude-code', {
+      topology,
+      capacity_mode: capacityMode,
+      manual_maximum: args.claudeManualMaximum ?? current.agentProfile.manual_maximum,
+    });
+    return { status: 'configured', ...configured, changed: true, client_scope: 'Claude-only Toolkit profile' };
+  }
   if (args.host !== 'codex') {
     return { status: 'unsupported', detail: 'No enforceable host topology profile is available; portable root-first launch gates still apply', client_scope: 'not applicable', changed: false };
   }
@@ -1000,6 +1067,23 @@ async function applyHostDelegationControl(args, current) {
   return result;
 }
 
+function inspectClaudeAgentCapability(args) {
+  const command = args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
+  const helper = require('./setup-claude-toolkit-plugin.cjs');
+  const parts = helper.claudeSpawnParts(command, ['--help']);
+  const result = spawnSync(parts.command, parts.args, { shell: parts.shell, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  const help = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const required = ['--effort', '--print', '--output-format', '--disallowedTools', '--permission-mode'];
+  const supported = result.status === 0 && required.every((flag) => help.includes(flag));
+  return {
+    supported,
+    detector: supported ? 'claude --help exact launch flags' : 'required Claude launch flags unavailable',
+    direct_only: supported,
+    medium_effort: supported,
+    non_fast_environment_override: supported,
+  };
+}
+
 async function collectCurrentState(args) {
   const audit = runBridgeAuditReadOnly(args);
   const runtime = args.host === 'codex'
@@ -1025,6 +1109,8 @@ async function collectCurrentState(args) {
     managed: inspectManagedCheckout(args, audit),
     delegation: delegationState,
     delegationMigrationPreview,
+    agentCapability: args.host === 'claude-code' ? inspectClaudeAgentCapability(args) : { supported: false, detector: 'not applicable' },
+    agentProfile: args.host === 'claude-code' ? agentControl.readProfile('claude-code') : agentControl.readProfile('codex'),
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginState(args)
       : inspectCodexNativePluginState(args)
@@ -1082,8 +1168,10 @@ function recommendedChoice(key, current, args) {
   if (key === 'codexPluginAutoRefresh') return 'enable';
   if (key === 'codexHelperCapacity') {
     if (current.delegation?.status === 'migration-required') return 'keep';
-    return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'one-helper' : 'keep';
+    return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep';
   }
+  if (key === 'claudeTopology') return current.agentCapability?.supported ? 'toolkit-direct' : 'keep';
+  if (key === 'claudeAgentCapacity') return current.agentCapability?.supported ? 'automatic' : 'keep';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode || 'keep';
   if (key === 'ag2Target') return args.setupChoices.targets.ag2 || 'keep';
@@ -1181,8 +1269,8 @@ function setupQuestionSpecs(args, current) {
         ]
       : [
           ...(runtimeSupported ? [
-            wizardChoice('one-helper', 'One helper at most - recommended'),
-            wizardChoice('root-only', 'Root agent only'),
+            wizardChoice('root-only', 'Root agent only - recommended'),
+            wizardChoice('one-helper', 'One helper at most - manual capacity backstop'),
           ] : []),
           wizardChoice('keep', Number.isSafeInteger(current.delegation?.helper_count) && current.delegation.helper_count > 1
             ? 'Keep current - memory risk'
@@ -1204,7 +1292,7 @@ function setupQuestionSpecs(args, current) {
         ? 'Keep the existing Toolkit legacy setting unchanged unless you explicitly choose migration.'
         : !runtimeSupported
         ? 'Keep the current setting until Codex reports supported effective helper controls.'
-        : 'One helper at most as a memory backstop. A helper still cannot launch unless the active profile verifies admission, medium reasoning, and non-fast mode.'
+        : 'Root agent only. Codex does not expose a Toolkit-controlled path that can verify adaptive admission plus medium non-fast child execution.'
     });
     specs.push({
       key: 'codexPluginAutoRefresh',
@@ -1219,6 +1307,46 @@ function setupQuestionSpecs(args, current) {
       recommended_outcome: 'Refresh the installed Codex plugin and repair Windows hooks when needed.'
     });
   } else {
+    const capabilitySupported = current.agentCapability?.supported === true;
+    const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
+    specs.push({
+      key: 'claudeTopology',
+      section: 'Computer performance',
+      title: 'How should Claude Code use agents?',
+      prompt: 'Claude Code agent topology choice',
+      description: 'Toolkit can enforce a direct-only launch boundary when the current Claude CLI exposes every required control. Broader native agents remain outside Toolkit resource admission.',
+      choices: [
+        ...(capabilitySupported ? [wizardChoice('toolkit-direct', 'Direct Toolkit-managed subagents only - recommended')] : []),
+        wizardChoice('root-only', capabilitySupported ? 'Root agent only' : 'Root agent only - recommended'),
+        wizardChoice('broader-native', 'Broader native behaviour - outside Toolkit admission'),
+        wizardChoice('keep', 'Keep current'),
+      ],
+      recommended: recommendedChoice('claudeTopology', current, args),
+      selected: args.setupChoices.claudeTopology,
+      current: `Current topology: ${activeProfile.topology || 'root-only'}.`,
+      recommended_outcome: capabilitySupported
+        ? 'Use direct Toolkit-managed subagents with native Agent launches blocked.'
+        : 'Keep current or select root-only until the required Claude launch controls are verifiable.'
+    });
+    specs.push({
+      key: 'claudeAgentCapacity',
+      section: 'Computer performance',
+      title: 'How should Toolkit manage agent capacity?',
+      prompt: 'Claude Code agent capacity choice',
+      description: 'Automatic admission checks current memory, commit headroom, pressure, active workers, reservations, topology and nesting before every Toolkit-controlled launch.',
+      choices: [
+        ...(capabilitySupported ? [wizardChoice('automatic', 'Manage automatically based on available resources - recommended')] : []),
+        wizardChoice('root-only', capabilitySupported ? 'Root agent only' : 'Root agent only - recommended'),
+        wizardChoice('keep', 'Keep current'),
+        ...(capabilitySupported ? [wizardChoice('manual', 'Use a manual maximum')] : []),
+      ],
+      recommended: recommendedChoice('claudeAgentCapacity', current, args),
+      selected: args.setupChoices.claudeAgentCapacity,
+      current: `Current capacity outcome: ${activeProfile.capacity_mode || 'root-only'}${activeProfile.manual_maximum ? ` (manual maximum ${activeProfile.manual_maximum})` : ''}.`,
+      recommended_outcome: capabilitySupported
+        ? 'Manage automatically based on available resources.'
+        : 'Remain root-only because automatic admission cannot be enforced with the detected CLI.'
+    });
     specs.push({
       key: 'claudePluginBehavior',
       section: 'Other coding apps',
@@ -1372,6 +1500,8 @@ function assignChoice(args, key, choice) {
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
+  else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
+  else if (key === 'claudeAgentCapacity') args.setupChoices.claudeAgentCapacity = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
   else if (key === 'opencodeTarget') args.setupChoices.targets.opencode = choice;
   else if (key === 'ag2Target') args.setupChoices.targets.ag2 = choice;
@@ -1384,6 +1514,8 @@ function choiceForKey(args, key) {
   if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
+  if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
+  if (key === 'claudeAgentCapacity') return args.setupChoices.claudeAgentCapacity;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode;
   if (key === 'ag2Target') return args.setupChoices.targets.ag2;
@@ -1440,6 +1572,19 @@ async function promptForHelperCount(lines, rl) {
   }
 }
 
+async function promptForClaudeManualMaximum(lines, rl) {
+  if (lines) {
+    const value = nextNonEmptyLine(lines);
+    if (!value) throw new Error('Manual Claude agent capacity requires a maximum answer');
+    return parsePositiveInteger(value, 'Manual Claude agent maximum');
+  }
+  for (;;) {
+    const answer = (await rl.question('Manual maximum for Toolkit-managed Claude workers: ')).trim();
+    try { return parsePositiveInteger(answer, 'Manual Claude agent maximum'); }
+    catch (error) { console.log(error.message); }
+  }
+}
+
 async function requireHighHelperCapacityApproval(args, lines, rl) {
   if (args.codexHelperCount <= 1 || args.approveHighHelperCapacity) return;
   console.log('WARNING: More than one helper may exhaust RAM, slow or freeze this PC, and stop useful work.');
@@ -1472,7 +1617,8 @@ async function answerSetupQuestionBank(args, current) {
   const helperChoiceInitiallyMissing = initialSpecs.some((spec) => spec.key === 'codexHelperCapacity' && !spec.selected);
   const needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
     && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
-  const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails;
+  const needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
+  const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails;
   const lines = needsPromptedAnswers && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
 
   // Complete full piped banks before displaying them so every row reports its
@@ -1499,7 +1645,7 @@ async function answerSetupQuestionBank(args, current) {
     console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
   }
 
-  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || helperChoiceInitiallyMissing;
+  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails || helperChoiceInitiallyMissing;
   const rl = remainingPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
     for (const spec of missing) {
@@ -1512,6 +1658,9 @@ async function answerSetupQuestionBank(args, current) {
     if (args.setupChoices.codexHelperCapacity === 'custom') {
       if (args.codexHelperCount === null) args.codexHelperCount = await promptForHelperCount(lines, rl);
       await requireHighHelperCapacityApproval(args, lines, rl);
+    }
+    if (args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null) {
+      args.claudeManualMaximum = await promptForClaudeManualMaximum(lines, rl);
     }
     if (args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit) {
       args.repoRoot = await promptForCustomPath(lines, rl);
@@ -1527,6 +1676,7 @@ async function answerSetupQuestionBank(args, current) {
   console.log('');
   console.log('Setup choices confirmed before writes:');
   for (const spec of setupQuestionSpecs(args, current)) console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
+  if (args.setupChoices.claudeAgentCapacity === 'manual') console.log(`- Manual Claude worker maximum: ${args.claudeManualMaximum}`);
   if (args.setupChoices.codexHelperCapacity === 'custom') {
     console.log(`- Custom Codex helper count: ${args.codexHelperCount}`);
     console.log(`- Total MultiAgentV2 session threads including the main agent: ${args.codexHelperCount + 1}`);
@@ -1534,7 +1684,7 @@ async function answerSetupQuestionBank(args, current) {
   }
   return {
     appeared: true,
-    answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsHelperDetails,
+    answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails,
     answers_supplied_by_complete_stdin: completeStdinConsumed,
     answers_prompted_interactively: Boolean(rl),
     stopped_for_answers: false,
@@ -1793,6 +1943,13 @@ function verifyClaudeNativePluginMetadata(args) {
   }
   if (/--enable-target|--disable-target|--force-downgrade/.test(command)) {
     throw new Error('Claude Code SessionStart hook must not enable, disable, or force-downgrade targets');
+  }
+  const agentHookCommands = (hooks?.hooks?.PreToolUse || [])
+    .filter((entry) => /(?:^|\|)(?:Agent|Task)(?:\||$)/.test(String(entry?.matcher || '')))
+    .flatMap((entry) => Array.isArray(entry.hooks) ? entry.hooks : [])
+    .map((entry) => String(entry.command || ''));
+  if (!agentHookCommands.some((value) => value.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
+    throw new Error('Claude Code plugin hooks must block native Agent launches through toolkit-claude-agent-hook.cjs');
   }
   console.log('Claude Code native plugin metadata verified.');
   console.log('If Claude Code reports the Toolkit plugin is missing, stale, disabled, or untrusted, refresh it through Claude Code native plugin UI/flow. Codex will not mutate Claude Code plugin cache.');
@@ -2158,6 +2315,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Question bank render attempts: ${unknown(questionBank?.render_attempts)}`);
   console.log('Preference/target writes before answers: no');
   console.log('');
+  if (args.host === 'codex') {
   console.log('## Codex helper agents');
   console.log(`Codex helper-agent runtime: ${unknown(current?.runtime?.runtime || delegation.runtime)}`);
   console.log(`Runtime detection: ${unknown(current?.runtime?.detector)}`);
@@ -2196,6 +2354,18 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('Isolated Security exception: unsupported by the currently documented Codex Security plugin and app-server interfaces');
   console.log('If a selected Security workflow requires more workers, raising global capacity may exhaust RAM. Never imply that an official Deep Scan can run with insufficient capacity. Use a lower-capacity ordinary or sequential review, run Deep Scan on another sufficiently provisioned machine, or explicitly make a temporary global increase with exact backup, restart, restoration, and another restart. A sequential custom review is not an official Deep Security Scan.');
   console.log('');
+  } else {
+    console.log('## Claude Code agent topology');
+    console.log(`Selected topology: ${unknown(delegation.topology)}`);
+    console.log(`Capacity mode: ${unknown(delegation.capacity_mode)}`);
+    console.log(`Manual maximum backstop: ${delegation.manual_maximum || 'not selected'}`);
+    console.log('Toolkit-controlled child effort: medium by default; higher effort requires one named difficult role and narrow justification');
+    console.log('Toolkit-controlled child fast mode: disabled with CLAUDE_CODE_DISABLE_FAST_MODE=1');
+    console.log('Nested Toolkit-controlled children: blocked by direct-only --disallowedTools Agent');
+    console.log('Native, built-in, team, plugin, user-created, and third-party workers outside the launch script: not covered by Toolkit admission');
+    console.log(`Profile outcome this run: ${delegation.status || 'unchanged'}`);
+    console.log('');
+  }
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
     console.log(`Codex plugin cache path: ${unknown(nativeCache.cache_path)}`);

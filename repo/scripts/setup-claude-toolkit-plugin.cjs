@@ -80,6 +80,16 @@ function verifySessionStartHook(hooksPath) {
   if (/--enable-target|--disable-target|--force-downgrade/.test(joined)) {
     errors.push('SessionStart command must not enable, disable, or force-downgrade targets');
   }
+  const preToolUse = hooks?.hooks?.PreToolUse;
+  const agentGroups = Array.isArray(preToolUse)
+    ? preToolUse.filter((group) => /(?:^|\|)(?:Agent|Task)(?:\||$)/.test(String(group?.matcher || '')))
+    : [];
+  const agentCommands = agentGroups.flatMap((group) => group?.hooks || [])
+    .filter((hook) => hook?.type === 'command')
+    .map((hook) => String(hook.command || ''));
+  if (!agentCommands.some((command) => command.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
+    errors.push('PreToolUse Agent hook must call toolkit-claude-agent-hook.cjs through CLAUDE_PLUGIN_ROOT');
+  }
   return errors;
 }
 
@@ -132,6 +142,10 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
   } else {
     const hookErrors = verifySessionStartHook(hooksPath);
     errors.push(...hookErrors.map((error) => `${slash(path.relative(repoRoot, hooksPath))}: ${error}`));
+  }
+
+  for (const relPath of ['repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs']) {
+    if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing Claude agent-control package file: ${relPath}`);
   }
 
   if (!fs.existsSync(localMarketplacePath)) {

@@ -254,6 +254,10 @@ test('Claude Toolkit plugin SessionStart hook validator requires sync-source cla
     hooks: {
       SessionStart: [{
         hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source claude-plugin' }]
+      }],
+      PreToolUse: [{
+        matcher: 'Agent|Task',
+        hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs"' }]
       }]
     }
   });

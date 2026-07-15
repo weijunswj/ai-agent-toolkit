@@ -29,11 +29,11 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-plugin-behavior', 'instructions', '--skip-update-report-open'
+    '--yes-recommended', '--claude-topology', 'root-only', '--claude-agent-capacity', 'root-only', '--claude-plugin-behavior', 'instructions', '--skip-update-report-open'
   ], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Helper-capacity outcome this run: unsupported/);
-  assert.match(result.stdout, /Helper-capacity detail: No enforceable host topology profile is available/);
+  assert.match(result.stdout, /Selected topology: root-only/);
+  assert.match(result.stdout, /Capacity mode: root-only/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
@@ -45,7 +45,7 @@ test('Claude setup rejects extra non-empty piped input before every setup write'
     '--execute', '--host', 'claude-code', '--repo-root', validRepo.setupRepo, '--repo-remote', validRepo.origin,
   ], {
     env: isolatedHomeEnv(validRoot),
-    input: ['keep', 'keep', 'keep', 'instructions', '   ', ''].join('\n'),
+    input: ['keep', 'keep', 'keep', 'root-only', 'root-only', 'instructions', '   ', ''].join('\n'),
   });
   assert.equal(valid.status, 0, valid.stderr || valid.stdout);
 
@@ -56,7 +56,7 @@ test('Claude setup rejects extra non-empty piped input before every setup write'
     '--execute', '--host', 'claude-code', '--repo-root', rejectedRepo.setupRepo, '--repo-remote', rejectedRepo.origin,
   ], {
     env: isolatedHomeEnv(rejectedRoot),
-    input: ['keep', 'keep', 'keep', 'instructions', 'unexpected'].join('\n'),
+    input: ['keep', 'keep', 'keep', 'root-only', 'root-only', 'instructions', 'unexpected'].join('\n'),
   });
   assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
   assert.match(rejected.stderr, /Setup question bank received unexpected extra non-empty input\./);

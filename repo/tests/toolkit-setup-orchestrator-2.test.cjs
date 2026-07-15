@@ -8,7 +8,7 @@ const {
 } = require('./toolkit-setup-test-support.cjs');
 const delegation = require('../scripts/codex-delegation-config.cjs');
 
-test('empty consolidated delegation answer selects the visible one-helper recommendation', () => {
+test('empty consolidated delegation answer selects the visible root-only recommendation', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin], {
@@ -17,9 +17,9 @@ test('empty consolidated delegation answer selects the visible one-helper recomm
     timeout: 300000
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*\*\*Selected:\*\* One helper at most - recommended/);
+  assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*\*\*Selected:\*\* Root agent only - recommended/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
-  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 2/);
+  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
   assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), /--disable-codex-plugin-auto-refresh --write/);
 });
 
@@ -98,7 +98,7 @@ test('legacy migration is a distinct explicit choice with a full visible preview
   fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
   const repeated = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--skip-codex-plugin-auto-refresh',
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'one-helper',
   ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog }, timeout: 300000 });
   assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
   assert.match(repeated.stdout, /Helper-capacity outcome this run: already configured/);
@@ -214,14 +214,14 @@ test('already matching user-owned V1 and V2 configs complete without apply, edit
     {
       name: 'V2 empty input',
       runtime: 'v2',
-      text: ['[features.multi_agent_v2]', 'enabled = true', 'max_concurrent_threads_per_session = 2', `root_agent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_ROOT_GUIDANCE)}`, `subagent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_HELPER_GUIDANCE)}`, ''].join('\n'),
+      text: ['[features.multi_agent_v2]', 'enabled = true', 'max_concurrent_threads_per_session = 1', `root_agent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_ROOT_GUIDANCE)}`, `subagent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_HELPER_GUIDANCE)}`, ''].join('\n'),
       args: [],
       input: ['keep', 'keep', 'keep', ''].join('\n'),
     },
     {
       name: 'V1 yes-recommended',
       runtime: 'v1',
-      text: '[agents]\nmax_threads = 1\nmax_depth = 1\n',
+      text: '[agents]\nmax_threads = 0\nmax_depth = 1\n',
       args: ['--yes-recommended'],
     },
   ];

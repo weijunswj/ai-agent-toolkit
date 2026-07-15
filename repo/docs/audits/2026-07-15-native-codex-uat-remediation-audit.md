@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Amendment and exact-head PR CI validated; native UAT pending
+Status: Enforceable Claude amendment implemented locally; exact-head PR CI and native UAT pending
 
 ## Scope
 
@@ -26,7 +26,28 @@ Base: `771af1c1191d8a31d3d0cacfc2253421b6c18b59`
 - PR #258 reviewed head `23193e06d1bea8623a1dff709dd616dfa1aa76c1` and squash merge `771af1c1191d8a31d3d0cacfc2253421b6c18b59`.
 - Authoritative agent-rule partials, Toolkit Local Bridge project sources, native plugin manifests, setup scripts, validators, tests, and generated-output declarations.
 - Official Codex multi-agent, configuration, speed, hooks, and plugin documentation.
-- Official Claude Code subagent, hooks, plugin, fast-mode, model, settings, and environment documentation.
+- Official Claude Code subagent, hooks, plugin, fast-mode, model, settings, and environment documentation:
+  - https://code.claude.com/docs/en/sub-agents
+  - https://code.claude.com/docs/en/hooks
+  - https://code.claude.com/docs/en/fast-mode
+  - https://code.claude.com/docs/en/plugins
+  - https://code.claude.com/docs/en/agent-teams
+- Current local host surfaces: Codex CLI/app-server 0.144.2 schemas and help; Claude Code 2.1.198 `--help` and `--version`.
+- Current official Codex manual sections for multi-agent, configuration, hooks, speed/fast mode, plugins, and app-server protocol, generated from the installed OpenAI documentation corpus:
+  - https://developers.openai.com/codex/multi-agent
+  - https://developers.openai.com/codex/config-reference
+  - https://developers.openai.com/codex/hooks
+  - https://developers.openai.com/codex/fast-mode
+  - https://developers.openai.com/codex/plugins
+
+## Host Capability Decision
+
+| Host | Supported and enforceable | Observable but not enforceable | Policy-only | Unsupported | Outside Toolkit control |
+| --- | --- | --- | --- | --- | --- |
+| Codex 0.144.2 | Native concurrency/depth backstops can be written for a verified runtime; root-only can be selected as a capacity outcome. | App-server collaboration events expose requested child model/reasoning and lifecycle; `SubagentStart` reports a launch after it begins. | Productive-root wording, medium/non-fast intent, and no-recursion guidance for native workers. | Plugin-provided custom agents; pre-launch blocking; child-only fast override/verification; adaptive admission for native, Security, plugin, built-in, third-party, or nested launches. | User configuration and launches not performed through Toolkit; host UI/session concurrency and Security internals. |
+| Claude Code 2.1.198 | Trusted `PreToolUse` can deny native `Agent`/legacy `Task`; a fresh Toolkit external session can force medium effort by default, `CLAUDE_CODE_DISABLE_FAST_MODE=1`, `Agent` denial, direct-only depth, pre-launch admission, and supervisor-owned release. | `SubagentStart` and lifecycle output can observe native workers after launch; semantic parent activity after controller return is observable rather than an OS-level primitive. | Productive-root behavior after the enforced declaration gate and broader-native behavior. | Toolkit-managed nesting beyond depth 1; complete interception of agent teams or every built-in/named worker path. | Native teams, built-in, Security, user-created, third-party/plugin, and direct CLI launches outside `toolkit-agent-control.cjs`; host-wide concurrent sessions. |
+
+The only implemented Toolkit-managed topology is Claude direct-only. Capacity never grants launch by itself. Codex has no strict managed topology and remains root-only for the #240/#241/#247 contract.
 
 ## Findings
 
@@ -38,7 +59,7 @@ Base: `771af1c1191d8a31d3d0cacfc2253421b6c18b59`
 | P1 | Installed hook freshness | Windows verification normalized only the command shape and did not compare the complete normalized hook file, allowing unrelated stale hook entries to survive. | Validate both hook shapes, normalize only the intentional Windows command, then require exact source/cache bytes. |
 | P1 | Launcher privacy | Bridge output could be emitted before a later optional-maintenance failure, exposing partial diagnostics despite the final privacy-safe warning. | Capture stream, console, and module-load output within a fixed bound; replay only after complete success. |
 | P1 | Setup recommendation | Unsupported and disabled runtime states exposed only `keep` but could still describe a one-helper recommendation. | Derive choices and recommendation text from the same runtime-support state. |
-| P2 | Native enforcement capability | Current native Codex and Claude surfaces cannot verify strict child-only non-fast execution and all required admission controls for every built-in, plugin, Security, third-party, and nested path. | Do not ship decorative profiles or claim hard enforcement. Keep unsupported paths root-only and describe configured capacity as a backstop. |
+| P1 | Native enforcement capability | The previous head shipped only policy plus a Codex capacity backstop and no enforceable adaptive launch path. | Implement one truthful Toolkit-controlled path where every admitted launch crosses resource, effort, non-fast, topology, and productive-parent gates; keep all bypass paths explicitly outside coverage. |
 
 ## Remediation Disposition
 
@@ -49,8 +70,8 @@ Base: `771af1c1191d8a31d3d0cacfc2253421b6c18b59`
 - Launcher privacy: repaired with a 1 MiB bounded transactional capture for stdout, stderr, console methods, and dependency-load output. Output is replayed only after successful bridge completion; failures emit only the existing support-safe warning and exit zero.
 - Setup recommendation: repaired so disabled, unknown, and unsupported runtimes expose and recommend only `keep`; visible recommendation text uses the same runtime-supported state as the choices.
 - Productive parallelism: the portable policy now requires a declared bounded launch gate, active topology and resource admission, verified medium non-fast child execution, immediate meaningful root-owned work, and root-owned integration. Generic requests, capacity, task count, speed, or later UAT cannot qualify delegation alone.
-- Native capability: no Codex or Claude profile was added because the reviewed native surfaces do not provide verifiable strict enforcement for all required paths. Codex helper capacity remains a conservative memory backstop, not launch permission; unsupported paths remain root-only.
-- Scoped deterministic release finding status: no unresolved P1 finding. Native host behavior remains a post-merge gate rather than implementation proof.
+- Native capability: Codex remains root-only under the strict contract because native hooks cannot block spawn or establish child-only non-fast mode and Codex plugins do not package custom agents. Claude now has one separate `claude-toolkit-direct` profile: trusted `PreToolUse` blocks native Agent/Task bypass, and the Toolkit controller admits only fresh direct external sessions with explicit effort, fast disabled, nesting disabled, atomic reservations, and productive-parent declarations. Native teams, built-in, Security, plugin, user-created, third-party, and direct CLI bypasses remain outside Toolkit coverage.
+- Scoped deterministic release finding status: local deterministic coverage now exercises the enforceable Claude boundary and both current P2 review regressions. Exact-head CI, current-head review verification, and native host UAT remain pending.
 
 ## Security Readiness
 
@@ -108,10 +129,29 @@ The first amendment CI run on `e4bb4388b4fe7b83c52ea8b37adfe0ef5f2c9f2f` failed 
 
 Native Codex C1/C2 and startup/resume/clear/compact were not run and are explicitly excluded from implementation proof.
 
+## Current Topology Amendment Validation
+
+Passed on the current worktree unless qualified:
+
+- Claude admission/productive-root/mode/reservation controller plus detached lifecycle: 15 passed.
+- Canonical Claude setup topology/capacity specification and end-to-end isolated profile execution: 5 passed.
+- Codex unknown/disabled owned-V2 removal regression: 2 passed.
+- Setup orchestrator shards: 41 passed across all three shards after the Codex root-only recommendation update.
+- Codex delegation/configuration suites: 56 passed, 1 POSIX-only skip.
+- Codex SessionStart launcher: 12 passed.
+- Codex and Claude native plugin setup suites: 55 passed.
+- Directly affected bridge source-version, concurrent-writer, and native-manifest cases: 3 passed.
+- Packaged-version validator regression: 1 passed.
+- Project sync, instruction shim sync, repo-doc sync, source-lock audit, published-surface audit, fallback-risk audit, skill portability, skill package, pack package, and `git diff --check`: passed.
+- `node repo/scripts/validate-toolkit.cjs --workspace <clean current-diff workspace>`: passed. The ordinary working-directory invocation reports only the ignored `.agent-toolkit-backups` rollback backup created during this session; it is not tracked or included in the validation workspace/PR. Deleting that local backup still requires explicit destructive-cleanup approval.
+- Local `npm run validate:all` was not run because repository policy assigns the full gate to CI.
+
+Exact-head PR CI has not run yet. Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT remain pending.
+
 ## Release Gates
 
-- No unresolved P1 finding in the scoped implementation and deterministic tests.
-- Current amendment exact-head CI passed on `d5ae876e`; the documentation-only follow-up recording that result must also pass before final completion.
+- The current P1 topology/admission finding is locally implemented but remains open until exact-head CI and independent current-head review verification pass.
+- Exact-head CI for the new amendment is pending; earlier-head results are not implementation proof.
 - PR remains unmerged.
 - Issues #241 and #247 remain open.
 - Native Codex C1/C2 and startup/resume/clear/compact reruns remain post-merge gates.

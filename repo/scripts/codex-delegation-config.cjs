@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.5.4';
+const TOOLKIT_CLIENT_VERSION = '2.6.0';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v1';
 
@@ -140,8 +140,11 @@ function hashApprovalValue(value) {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
-function proposalAffectedKeys(state, runtime) {
-  if (runtime === RUNTIMES.V2) {
+function proposalAffectedKeys(state, runtime, options = {}) {
+  const ownership = String(state.ownership || '');
+  const ownsV2 = ownership === 'toolkit-managed-v2';
+  const useV2 = options.preferOwnedBlock ? ownsV2 : runtime === RUNTIMES.V2;
+  if (useV2) {
     const manageEnablement = !String(state.enablement_ownership || '').startsWith('user-owned');
     return [
       ...(manageEnablement ? ['features.multi_agent_v2.enabled'] : []),
@@ -291,7 +294,7 @@ function previewCodexDelegationRemoval(configPath = codexConfigPath(), options =
   const state = initialStateFromSnapshot(snapshot, snapshot.config_path, runtime);
   if (!String(state.ownership || '').startsWith('toolkit-managed')) return { ...state, changed: false };
   const proposedBytes = removeManagedBlockBytes(state);
-  const affectedKeys = proposalAffectedKeys(state, runtime);
+  const affectedKeys = proposalAffectedKeys(state, runtime, { preferOwnedBlock: true });
   const backupGenerationId = `planned-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
   const backupMetadataPath = path.join(backupRoot(snapshot.config_path), backupGenerationId, 'restore.json');
   return {

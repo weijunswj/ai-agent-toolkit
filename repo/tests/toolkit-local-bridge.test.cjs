@@ -39,7 +39,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.5.4';
+const expectedBridgeVersion = '2.6.0';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -4860,7 +4860,10 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
   assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['SessionStart']);
-  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['SessionStart']);
+  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PreToolUse', 'SessionStart']);
+  const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
+  assert.equal(claudeAgentHook.matcher, 'Agent|Task');
+  assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
   assert.equal(codexHooks.hooks.SessionEnd, undefined);
   assert.equal(claudeHooks.hooks.SessionEnd, undefined);
   assert.equal(codexHooks.hooks.Stop, undefined);

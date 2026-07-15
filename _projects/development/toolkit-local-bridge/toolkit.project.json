@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.5.4",
+  "version": "2.6.0",
   "version_policy": "semver",
-  "version_notes": "Completes Windows hook freshness and privacy repairs while making helper capacity an honest backstop under strict host capability gates.",
+  "version_notes": "Adds a truthful Claude direct-agent launch boundary with adaptive admission, atomic reservations, medium non-fast execution, productive-parent declarations, separate host profiles, and capability-valid setup choices while retaining Codex root-only limitations.",
   "outputs": [
     {
       "kind": "curated",
@@ -69,7 +69,7 @@
       "kind": "json",
       "source": "_main/claude-plugin/hooks/hooks.json",
       "output": ".claude-plugin/hooks/hooks.json",
-      "notes": "Claude Code native plugin hook config generated from first-party module source; hook only calls the shared updater.",
+      "notes": "Claude Code native plugin hooks generated from first-party module source; SessionStart calls the shared updater and PreToolUse blocks native Agent bypass under strict Toolkit profiles.",
       "fidelity": "generated_metadata"
     },
     {
