@@ -52,3 +52,43 @@ test('flags accept only implemented topology and capacity outcomes', () => {
   assert.throws(() => core.parseArgs(['--claude-topology', 'decorative']), /Unsupported/);
   assert.throws(() => core.parseArgs(['--claude-agent-capacity', 'ignored']), /Unsupported/);
 });
+
+test('topology and capacity resolve to one canonical compatible outcome', () => {
+  const directProfile = current(true, {
+    topology: 'claude-toolkit-direct', capacity_mode: 'automatic', manual_maximum: 0, supported: true, status: 'configured',
+  });
+
+  const rootUnanswered = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'root-only']);
+  core.setupQuestionSpecs(rootUnanswered, directProfile);
+  assert.equal(rootUnanswered.setupChoices.claudeAgentCapacity, 'root-only');
+  assert.deepEqual(core.resolveClaudeTopologyCapacity(rootUnanswered, directProfile), {
+    topology: 'root-only', capacity_mode: 'root-only', manual_maximum: 0,
+  });
+
+  const rootKeep = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'root-only', '--claude-agent-capacity', 'keep']);
+  assert.equal(core.resolveClaudeTopologyCapacity(rootKeep, directProfile).capacity_mode, 'root-only');
+
+  const automatic = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'toolkit-direct', '--claude-agent-capacity', 'automatic']);
+  assert.equal(core.resolveClaudeTopologyCapacity(automatic, directProfile).capacity_mode, 'automatic');
+
+  const manual = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'toolkit-direct', '--claude-agent-capacity', 'manual', '--claude-agent-maximum', '2']);
+  assert.deepEqual(core.resolveClaudeTopologyCapacity(manual, directProfile), {
+    topology: 'claude-toolkit-direct', capacity_mode: 'manual', manual_maximum: 2,
+  });
+
+  const unsupported = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'toolkit-direct']);
+  assert.throws(() => core.resolveClaudeTopologyCapacity(unsupported, current(false)), /unavailable/);
+});
+
+test('recommended plan and rendered question surfaces show the same reconciled root-only result', () => {
+  const args = core.parseArgs(['--plan', '--host', 'claude-code', '--yes-recommended', '--claude-topology', 'root-only']);
+  const planned = core.plannedQuestionBank(args, current(true));
+  const resolved = core.resolveClaudeTopologyCapacity(planned.args, current(true));
+  assert.equal(resolved.topology, 'root-only');
+  assert.equal(resolved.capacity_mode, 'root-only');
+  const capacity = planned.specs.find((row) => row.key === 'claudeAgentCapacity');
+  assert.equal(capacity.selected, 'root-only');
+  assert.deepEqual(capacity.choices.map((choice) => choice.value), ['root-only', 'keep']);
+  assert.match(core.renderSetupQuestionBank(planned.specs), /How should Toolkit manage agent capacity\?[\s\S]*Selected:\*\* Root agent only - recommended/);
+  assert.match(core.renderSetupQuestionBankTerminal(planned.specs), /How should Toolkit manage agent capacity\?[\s\S]*Selected: Root agent only - recommended/);
+});

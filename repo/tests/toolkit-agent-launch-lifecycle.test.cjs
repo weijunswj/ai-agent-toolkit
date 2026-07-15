@@ -12,26 +12,39 @@ function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 test('detached Claude supervisor forces medium non-fast invocation and releases its reservation', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-lifecycle-'));
   const fake = path.join(root, 'fake-claude.cjs');
+  const secretPrompt = 'UNIQUE_PRIVATE_PROMPT_8f06f6c1 repository customer fixture';
   fs.writeFileSync(fake, [
     "'use strict';",
-    "process.stdout.write(JSON.stringify({ args: process.argv.slice(2), fast_disabled: process.env.CLAUDE_CODE_DISABLE_FAST_MODE, background_disabled: process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS }));",
+    "let input = ''; process.stdin.setEncoding('utf8');",
+    "process.stdin.on('data', (chunk) => { input += chunk; });",
+    "process.stdin.on('end', () => process.stdout.write(JSON.stringify({ args: process.argv.slice(2), input, fast_disabled: process.env.CLAUDE_CODE_DISABLE_FAST_MODE, background_disabled: process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS })));",
     '',
   ].join('\n'));
+  const previousUmask = process.umask(0);
   const result = control.launch({
     child_responsibility: 'Implement the isolated parser shard and focused unit coverage.',
     parent_responsibility: 'Review the integration interface and reconcile adjacent contracts.',
     integration_plan: 'The root owns interface reconciliation and final integration judgement.',
     validation_plan: 'The root runs cross-shard validation and reviews the final combined diff.',
     material_benefit: 'The isolated parser work is independent and improves implementation quality.',
-    child_prompt: 'Implement only the isolated parser shard.',
+    child_prompt: secretPrompt,
   }, {
     root,
     claudeCli: fake,
-    profile: { schema: control.SCHEMA, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0 },
+    profile: { schema: control.SCHEMA, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT,
+      capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST,
+      queue_limit: control.MAX_QUEUE, reservation_limit: control.EMERGENCY_WORKER_CEILING,
+      controller_version: control.CONTROL_VERSION, enforcement_verified: true, status: 'configured', supported: true },
     resourceState: { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB },
   });
+  if (process.platform !== 'win32') assert.equal(fs.statSync(result.output_path).mode & 0o777, 0o600);
+  process.umask(previousUmask);
   assert.equal(result.result, control.RESULTS.START);
   assert.equal(result.status, 'launched');
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(result.spec_path).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(control.statePath({ root })).mode & 0o777, 0o600);
+  }
   let output = '';
   let reservations = [{}];
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -46,4 +59,7 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
   assert.equal(child.fast_disabled, '1');
   assert.equal(child.background_disabled, '1');
   assert.deepEqual(child.args.slice(0, 7), ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent']);
+  assert.equal(child.input, secretPrompt);
+  assert.equal(child.args.some((arg) => arg.includes('UNIQUE_PRIVATE_PROMPT_8f06f6c1')), false);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(result.error_path).mode & 0o777, 0o600);
 });

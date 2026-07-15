@@ -157,6 +157,49 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
 
   return errors;
 }
+function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
+  const errors = [];
+  const installPath = installed?.installPath ? path.resolve(installed.installPath) : '';
+  if (!installPath) return ['installed plugin state does not expose an exact cache path'];
+  const pairs = [
+    ['.claude-plugin/plugin.json', true],
+    ['.claude-plugin/hooks/hooks.json', true],
+    ['repo/scripts/toolkit-agent-control.cjs', false],
+    ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
+  ];
+  for (const [relPath, json] of pairs) {
+    const source = path.join(repoRoot, ...relPath.split('/'));
+    const installedFile = path.join(installPath, ...relPath.split('/'));
+    if (!fs.existsSync(installedFile)) {
+      errors.push(`installed plugin cache is missing ${relPath}: ${installedFile}`);
+      continue;
+    }
+    if (!fs.lstatSync(installedFile).isFile()) {
+      errors.push(`installed plugin cache path is not a regular file: ${installedFile}`);
+      continue;
+    }
+    const sourceBytes = fs.readFileSync(source);
+    const installedBytes = fs.readFileSync(installedFile);
+    if (!sourceBytes.equals(installedBytes)) errors.push(`installed plugin cache is stale for ${relPath}`);
+    if (json && relPath.endsWith('plugin.json')) {
+      try {
+        const manifest = JSON.parse(installedBytes.toString('utf8'));
+        if (manifest.name !== TOOLKIT_PLUGIN_NAME || manifest.version !== expectedVersion) errors.push('installed plugin identity or version is not current');
+      } catch { errors.push('installed plugin manifest is invalid'); }
+    }
+    if (json && relPath.endsWith('hooks.json')) {
+      try {
+        const hooks = JSON.parse(installedBytes.toString('utf8'));
+        const groups = hooks?.hooks?.PreToolUse;
+        const exact = Array.isArray(groups) && groups.some((group) => group?.matcher === 'Agent|Task'
+          && Array.isArray(group.hooks) && group.hooks.some((hook) => hook?.type === 'command'
+            && hook.command === 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs"'));
+        if (!exact) errors.push('installed plugin cache lacks the exact Agent|Task PreToolUse Toolkit hook');
+      } catch { errors.push('installed plugin hooks are invalid'); }
+    }
+  }
+  return errors;
+}
 
 function commandOutput(result) {
   return `${result?.stdout || ''}${result?.stderr || ''}${result?.error ? result.error.message : ''}`.trim();
@@ -541,9 +584,12 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
     }
   }
   const sourcePath = installed.projectPath || installed.source?.path || installed.path || '';
-  const sourceMatches = !sourcePath || path.resolve(sourcePath) === repoRoot;
+  const sourceMatches = Boolean(sourcePath) && path.resolve(sourcePath) === repoRoot;
   if (!sourceMatches) {
     errors.push(`${pluginId()} source path does not match this local repo: ${sourcePath}`);
+  }
+  if (enabled && sourceMatches) {
+    errors.push(...validateInstalledEnforcement(installed, repoRoot, expectedVersion));
   }
 
   // `claude plugin install` no-ops on an id that is already installed (it
@@ -732,6 +778,12 @@ async function main(argv = process.argv.slice(2)) {
     version: expectedVersion,
     enabled: true,
     scope: options.scope,
+    current: true,
+    enforcement_verified: true,
+    source_path: state.installed.projectPath || state.installed.source?.path || state.installed.path || '',
+    cache_path: state.installed.installPath || '',
+    trusted: typeof state.installed.trusted === 'boolean' ? state.installed.trusted : null,
+    installed_entry: state.installed,
     install_path: claudeToolkitInstallCommands(options.repoRoot, options.scope),
     next_steps: nextSteps(options.scope),
     warnings
@@ -777,6 +829,7 @@ module.exports = {
   validateMarketplaceWrapper,
   validateRepoPluginSource,
   verifyBudgetMs,
+  validateInstalledEnforcement,
   verifySessionStartHook,
   writeBudgetMs,
   pluginId

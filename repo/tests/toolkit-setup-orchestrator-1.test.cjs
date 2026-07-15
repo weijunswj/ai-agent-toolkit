@@ -28,7 +28,7 @@ test('Claude Code plan omits unsupported automatic admission and never emits Cod
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
   assert.equal(plan.host, 'claude-code');
-  assert.equal(plan.preferences.helper_capacity_backstop, 'keep');
+  assert.equal(plan.preferences.helper_capacity_backstop, 'root-only');
   assert.equal(plan.question_bank.find((row) => row.key === 'claudeAgentCapacity').choices.some((choice) => choice.value === 'automatic'), false);
   assert.doesNotMatch(plan.steps.flatMap((step) => step.commands || []).join('\n'), /agents\.max_threads|agents\.max_depth/);
 });

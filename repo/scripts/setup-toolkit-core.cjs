@@ -855,31 +855,20 @@ function inspectCodexNativePluginState(args) {
 
 function inspectClaudeNativePluginState(args) {
   const probeRoot = scriptRootForReadOnlyProbe(args);
-  const pluginPath = path.join(probeRoot, '.claude-plugin', 'plugin.json');
-  const hooksPath = path.join(probeRoot, '.claude-plugin', 'hooks', 'hooks.json');
-  if (!fs.existsSync(pluginPath) || !fs.existsSync(hooksPath)) {
-    return {
-      status: 'missing',
-      detail: `Expected ${pluginPath} and ${hooksPath}`
-    };
+  const result = runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupClaudeArgs({ ...args, repoRoot: probeRoot }, '--verify'),
+    { cwd: probeRoot, capture: true, timeout: claudeSetupBudgets(args.claudeCli).verify, allowFailure: true, quiet: true }
+  );
+  if (result.status !== 0) {
+    return { status: 'needs-review', current: false, enforcement_verified: false, detail: (result.stderr || result.stdout || '').trim() };
   }
   try {
-    const plugin = readJsonFile(pluginPath);
-    const hooks = readJsonFile(hooksPath);
-    const command = (hooks?.hooks?.SessionStart || [])
-      .flatMap((entry) => Array.isArray(entry.hooks) ? entry.hooks : [])
-      .map((entry) => String(entry.command || ''))
-      .find((value) => value.includes('toolkit-local-bridge.cjs')) || '';
-    return {
-      status: command ? 'metadata-present' : 'hooks-need-review',
-      version: plugin.version || '',
-      detail: command || 'SessionStart hook command not found'
-    };
+    const summary = parseJsonFromOutput(result.stdout);
+    return { ...summary, status: summary.enforcement_verified === true ? 'fresh' : 'needs-review', detail: 'Installed Claude plugin and enforcement bytes verified.' };
   } catch (error) {
-    return {
-      status: 'invalid',
-      detail: error.message
-    };
+    return { status: 'invalid', current: false, enforcement_verified: false, detail: error.message };
   }
 }
 
@@ -996,28 +985,25 @@ async function confirmSelectedDelegationProposal(args, current, questionBank) {
   return preview;
 }
 
-async function applyHostDelegationControl(args, current) {
+async function applyHostDelegationControl(args, current, nativeCache = {}) {
   if (args.host === 'claude-code') {
-    const topologyChoice = args.setupChoices.claudeTopology;
-    const capacityChoice = args.setupChoices.claudeAgentCapacity;
-    if (topologyChoice === 'keep' && capacityChoice === 'keep') {
-      return { status: 'kept', ...current.agentProfile, changed: false, client_scope: 'Claude-only Toolkit profile' };
-    }
-    const topology = topologyChoice === 'keep'
-      ? current.agentProfile.topology
-      : ({ 'toolkit-direct': agentControl.TOPOLOGIES.CLAUDE_DIRECT, 'root-only': agentControl.TOPOLOGIES.ROOT_ONLY, 'broader-native': agentControl.TOPOLOGIES.BROADER_NATIVE }[topologyChoice]);
-    const capacityMode = capacityChoice === 'keep'
-      ? current.agentProfile.capacity_mode
-      : ({ automatic: agentControl.CAPACITY_MODES.AUTO, 'root-only': agentControl.CAPACITY_MODES.ROOT_ONLY, manual: agentControl.CAPACITY_MODES.MANUAL }[capacityChoice]);
-    if (!current.agentCapability?.supported && (topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT || capacityMode === agentControl.CAPACITY_MODES.AUTO || capacityMode === agentControl.CAPACITY_MODES.MANUAL)) {
-      throw new Error('Selected Claude Toolkit management remains unapplied because required launch controls are not verifiable.');
+    const resolved = resolveClaudeTopologyCapacity(args, current);
+    const topology = resolved.topology;
+    const capacityMode = resolved.capacity_mode;
+    const strict = [agentControl.TOPOLOGIES.ROOT_ONLY, agentControl.TOPOLOGIES.CLAUDE_DIRECT].includes(topology);
+    const installedEnforcement = nativeCache.enforcement_verified === true;
+    const enforceable = current.agentCapability?.supported === true && installedEnforcement;
+    if (strict && !enforceable) {
+      const invalidated = agentControl.invalidateProfile('claude-code', 'Current Claude CLI controls or installed Toolkit plugin enforcement could not be verified.');
+      return { ...invalidated, status: 'capability-lost-root-only', changed: true, selected_strict_state_applied: false, client_scope: 'Claude-only Toolkit profile' };
     }
     const configured = agentControl.configureProfile('claude-code', {
       topology,
       capacity_mode: capacityMode,
-      manual_maximum: args.claudeManualMaximum ?? current.agentProfile.manual_maximum,
+      manual_maximum: resolved.manual_maximum,
+      enforcement_verified: strict,
     });
-    return { status: 'configured', ...configured, changed: true, client_scope: 'Claude-only Toolkit profile' };
+    return { status: 'configured', ...configured, changed: true, selected_strict_state_applied: !strict || enforceable, client_scope: 'Claude-only Toolkit profile' };
   }
   if (args.host !== 'codex') {
     return { status: 'unsupported', detail: 'No enforceable host topology profile is available; portable root-first launch gates still apply', client_scope: 'not applicable', changed: false };
@@ -1073,11 +1059,15 @@ function inspectClaudeAgentCapability(args) {
   const parts = helper.claudeSpawnParts(command, ['--help']);
   const result = spawnSync(parts.command, parts.args, { shell: parts.shell, encoding: 'utf8', windowsHide: true, timeout: 10000 });
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const versionParts = helper.claudeSpawnParts(command, ['--version']);
+  const versionResult = spawnSync(versionParts.command, versionParts.args, { shell: versionParts.shell, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  const version = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`.trim();
   const required = ['--effort', '--print', '--output-format', '--disallowedTools', '--permission-mode'];
-  const supported = result.status === 0 && required.every((flag) => help.includes(flag));
+  const supported = result.status === 0 && versionResult.status === 0 && version.length > 0 && required.every((flag) => help.includes(flag));
   return {
     supported,
-    detector: supported ? 'claude --help exact launch flags' : 'required Claude launch flags unavailable',
+    detector: supported ? 'claude --version plus --help exact launch flags' : 'required Claude version or launch flags unavailable',
+    version,
     direct_only: supported,
     medium_effort: supported,
     non_fast_environment_override: supported,
@@ -1190,6 +1180,47 @@ function choiceLabel(spec, value) {
   return spec.choices.find((choice) => choice.value === value)?.label || value || '(answer required)';
 }
 
+function reconcileClaudeQuestionChoices(args, current) {
+  if (args.host !== 'claude-code') return;
+  const choices = args.setupChoices;
+  const currentProfile = current.agentProfile || agentControl.readProfile('claude-code');
+  if (choices.claudeAgentCapacity === 'root-only') choices.claudeTopology = 'root-only';
+  if (['root-only', 'broader-native'].includes(choices.claudeTopology)) choices.claudeAgentCapacity = 'root-only';
+  if (choices.claudeTopology === 'keep' && currentProfile.supported !== true) {
+    choices.claudeTopology = 'root-only';
+    choices.claudeAgentCapacity = 'root-only';
+  }
+  if (choices.claudeTopology === 'toolkit-direct' && choices.claudeAgentCapacity === 'keep') {
+    const compatibleKeep = currentProfile.supported === true && currentProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT
+      && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(currentProfile.capacity_mode);
+    if (!compatibleKeep) choices.claudeAgentCapacity = 'automatic';
+  }
+}
+
+function resolveClaudeTopologyCapacity(args, current) {
+  reconcileClaudeQuestionChoices(args, current);
+  const capability = current.agentCapability?.supported === true;
+  const profile = current.agentProfile || agentControl.readProfile('claude-code');
+  const topologyChoice = args.setupChoices.claudeTopology || 'keep';
+  const capacityChoice = args.setupChoices.claudeAgentCapacity || 'keep';
+  if (topologyChoice === 'toolkit-direct' && !capability) throw new Error('Direct Toolkit-managed Claude agents are unavailable because required CLI launch controls are not verifiable.');
+  let topology = topologyChoice === 'keep' && profile.supported === true ? profile.topology
+    : ({ 'toolkit-direct': agentControl.TOPOLOGIES.CLAUDE_DIRECT, 'root-only': agentControl.TOPOLOGIES.ROOT_ONLY, 'broader-native': agentControl.TOPOLOGIES.BROADER_NATIVE }[topologyChoice] || agentControl.TOPOLOGIES.ROOT_ONLY);
+  if (capacityChoice === 'root-only') topology = agentControl.TOPOLOGIES.ROOT_ONLY;
+  let capacityMode;
+  if (topology !== agentControl.TOPOLOGIES.CLAUDE_DIRECT) capacityMode = agentControl.CAPACITY_MODES.ROOT_ONLY;
+  else if (capacityChoice === 'keep' && profile.supported === true && profile.topology === topology
+    && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) capacityMode = profile.capacity_mode;
+  else capacityMode = capacityChoice === 'manual' ? agentControl.CAPACITY_MODES.MANUAL : agentControl.CAPACITY_MODES.AUTO;
+  const manualMaximum = capacityMode === agentControl.CAPACITY_MODES.MANUAL ? (args.claudeManualMaximum ?? profile.manual_maximum) : 0;
+  if (capacityMode === agentControl.CAPACITY_MODES.MANUAL && (!Number.isSafeInteger(manualMaximum) || manualMaximum < 1 || manualMaximum > agentControl.MAX_MANUAL_WORKERS)) {
+    throw new Error('Manual Claude agent maximum is outside the supported bounds.');
+  }
+  args.setupChoices.claudeTopology = topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-direct' : (topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'broader-native' : 'root-only');
+  args.setupChoices.claudeAgentCapacity = capacityMode === agentControl.CAPACITY_MODES.AUTO ? 'automatic' : (capacityMode === agentControl.CAPACITY_MODES.MANUAL ? 'manual' : 'root-only');
+  return { topology, capacity_mode: capacityMode, manual_maximum: manualMaximum };
+}
+
 function currentHelperOutcome(current) {
   const helperCount = current.delegation?.helper_count;
   if (Number.isSafeInteger(helperCount)) {
@@ -1203,6 +1234,7 @@ function currentHelperOutcome(current) {
 }
 
 function setupQuestionSpecs(args, current) {
+  reconcileClaudeQuestionChoices(args, current);
   const specs = [
     {
       key: 'managedCheckout',
@@ -1309,6 +1341,9 @@ function setupQuestionSpecs(args, current) {
   } else {
     const capabilitySupported = current.agentCapability?.supported === true;
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
+    const selectedTopology = args.setupChoices.claudeTopology;
+    const currentDirect = activeProfile.supported === true && activeProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT;
+    const directCapacityAvailable = capabilitySupported && (!selectedTopology || selectedTopology === 'toolkit-direct' || (selectedTopology === 'keep' && currentDirect));
     specs.push({
       key: 'claudeTopology',
       section: 'Computer performance',
@@ -1335,15 +1370,15 @@ function setupQuestionSpecs(args, current) {
       prompt: 'Claude Code agent capacity choice',
       description: 'Automatic admission checks current memory, commit headroom, pressure, active workers, reservations, topology and nesting before every Toolkit-controlled launch.',
       choices: [
-        ...(capabilitySupported ? [wizardChoice('automatic', 'Manage automatically based on available resources - recommended')] : []),
-        wizardChoice('root-only', capabilitySupported ? 'Root agent only' : 'Root agent only - recommended'),
-        wizardChoice('keep', 'Keep current'),
-        ...(capabilitySupported ? [wizardChoice('manual', 'Use a manual maximum')] : []),
+        ...(directCapacityAvailable ? [wizardChoice('automatic', 'Manage automatically based on available resources - recommended')] : []),
+        wizardChoice('root-only', directCapacityAvailable ? 'Root agent only' : 'Root agent only - recommended'),
+        ...(directCapacityAvailable || activeProfile.capacity_mode === agentControl.CAPACITY_MODES.ROOT_ONLY ? [wizardChoice('keep', 'Keep current')] : []),
+        ...(directCapacityAvailable ? [wizardChoice('manual', 'Use a manual maximum')] : []),
       ],
-      recommended: recommendedChoice('claudeAgentCapacity', current, args),
+      recommended: directCapacityAvailable ? recommendedChoice('claudeAgentCapacity', current, args) : 'root-only',
       selected: args.setupChoices.claudeAgentCapacity,
       current: `Current capacity outcome: ${activeProfile.capacity_mode || 'root-only'}${activeProfile.manual_maximum ? ` (manual maximum ${activeProfile.manual_maximum})` : ''}.`,
-      recommended_outcome: capabilitySupported
+      recommended_outcome: directCapacityAvailable
         ? 'Manage automatically based on available resources.'
         : 'Remain root-only because automatic admission cannot be enforced with the detected CLI.'
     });
@@ -1672,6 +1707,7 @@ async function answerSetupQuestionBank(args, current) {
 
   if (lines) completeStdinConsumed = true;
 
+  if (args.host === 'claude-code') resolveClaudeTopologyCapacity(args, current);
   applySetupChoices(args, current);
   console.log('');
   console.log('Setup choices confirmed before writes:');
@@ -1964,6 +2000,25 @@ function verifyClaudeNativePluginMetadata(args) {
   };
 }
 
+
+function verifyCurrentClaudeNativeEnforcement(args) {
+  const metadata = verifyClaudeNativePluginMetadata(args);
+  const result = runCommand(
+    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    process.execPath,
+    setupClaudeArgs(args, '--verify'),
+    { cwd: args.repoRoot, capture: true, timeout: claudeSetupBudgets(args.claudeCli).verify, allowFailure: true, quiet: true }
+  );
+  if (result.status !== 0) {
+    return { ...metadata, status: 'needs-review', current: false, enforcement_verified: false, detail: (result.stderr || result.stdout || '').trim() };
+  }
+  try {
+    const summary = parseJsonFromOutput(result.stdout);
+    return { ...metadata, ...summary, status: summary.enforcement_verified === true ? 'already fresh' : 'needs-review' };
+  } catch (error) {
+    return { ...metadata, status: 'invalid', current: false, enforcement_verified: false, detail: error.message };
+  }
+}
 function setupClaudeArgs(args, mode) {
   const extra = [mode, '--json', '--repo-root', args.repoRoot];
   if (mode === '--write') extra.push('--scope', 'user');
@@ -2019,6 +2074,11 @@ function runClaudeNativePluginSetup(args) {
       manifest_version: summary.version || expectedVersion,
       installed_version: summary.version || expectedVersion,
       scope: summary.scope || 'user',
+      current: summary.current === true,
+      enforcement_verified: summary.enforcement_verified === true,
+      source_path: summary.source_path || '',
+      cache_path: summary.cache_path || '',
+      trusted: summary.trusted ?? null,
       updated_this_run: false,
       restart_required: false,
       hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
@@ -2047,6 +2107,11 @@ function runClaudeNativePluginSetup(args) {
     manifest_version: summary.version || expectedVersion,
     installed_version: summary.version || expectedVersion,
     scope: summary.scope || 'user',
+    current: summary.current === true,
+    enforcement_verified: summary.enforcement_verified === true,
+    source_path: summary.source_path || '',
+    cache_path: summary.cache_path || '',
+    trusted: summary.trusted ?? null,
     updated_this_run: true,
     restart_required: true,
     hook_trust_action: 'approve the Claude Code plugin trust prompt when Claude Code prompts'
@@ -2434,13 +2499,13 @@ async function execute(args) {
   const validationResults = [];
   const managed = verifyAndUpdateTrustedRepo(args, validationResults);
   const nativeCache = args.host === 'claude-code'
-    ? (args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyClaudeNativePluginMetadata(args))
+    ? (args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyCurrentClaudeNativeEnforcement(args))
     : runCodexNativePluginSetup(args);
   runLiteValidation(args, validationResults);
   writeBridgePreferences(args);
   runApprovedTargetSync(args);
   const audit = runBridgeAudit(args);
-  const delegation = await applyHostDelegationControl(args, current);
+  const delegation = await applyHostDelegationControl(args, current, nativeCache);
   printFinalSummary({ args, current, managed, nativeCache, delegation, audit, questionBank, validationResults });
   return 0;
 }
@@ -2515,6 +2580,8 @@ module.exports = {
   parseArgs,
   setupQuestionSpecs,
   renderSetupQuestionBank,
+  reconcileClaudeQuestionChoices,
+  resolveClaudeTopologyCapacity,
   renderSetupQuestionBankTerminal,
   emitCompleteQuestionBank,
   plannedQuestionBank,

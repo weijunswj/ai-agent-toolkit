@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.6.0';
+const TOOLKIT_CLIENT_VERSION = '2.6.1';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v1';
 
@@ -156,7 +156,12 @@ function proposalAffectedKeys(state, runtime, options = {}) {
   return ['agents.max_threads', 'agents.max_depth'];
 }
 
+function removalAffectedKeys(state, runtime) {
+  return proposalAffectedKeys(state, runtime, { preferOwnedBlock: true });
+}
+
 function approvalBindingPayload(binding) {
+
   return {
     schema: binding.schema,
     config_path: binding.config_path,
@@ -294,7 +299,7 @@ function previewCodexDelegationRemoval(configPath = codexConfigPath(), options =
   const state = initialStateFromSnapshot(snapshot, snapshot.config_path, runtime);
   if (!String(state.ownership || '').startsWith('toolkit-managed')) return { ...state, changed: false };
   const proposedBytes = removeManagedBlockBytes(state);
-  const affectedKeys = proposalAffectedKeys(state, runtime, { preferOwnedBlock: true });
+  const affectedKeys = removalAffectedKeys(state, runtime);
   const backupGenerationId = `planned-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
   const backupMetadataPath = path.join(backupRoot(snapshot.config_path), backupGenerationId, 'restore.json');
   return {
@@ -916,7 +921,7 @@ function removeCodexDelegation(configPath = codexConfigPath(), options = {}) {
   const proposedBytes = removeManagedBlockBytes(initial);
   if (approvedProposal && (
     approvedProposal.proposal_sha256 !== hashApprovalValue(proposedBytes)
-    || JSON.stringify(approvedProposal.affected_keys) !== JSON.stringify(proposalAffectedKeys(initial, runtime))
+    || JSON.stringify(approvedProposal.affected_keys) !== JSON.stringify(removalAffectedKeys(initial, runtime))
   )) {
     return approvalFailureResult(runtime, configPath, 'approval-invalid', 'Approved removal proposal does not match the current Toolkit-owned controls.');
   }

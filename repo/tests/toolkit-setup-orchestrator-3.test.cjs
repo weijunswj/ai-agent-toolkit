@@ -100,7 +100,7 @@ test('setup docs require explicit V2 opt-in and honest enforcement disclosure', 
     assert.match(text, /root agent alone|root-agent work|handled by the root agent alone|routine setup on the root agent/i, relPath);
     assert.match(text, /must not spawn subagents|do not spawn subagents/i, relPath);
     assert.match(text, /MultiAgentV2|multi_agent_v2/i, relPath);
-    assert.match(text, /one helper|helper capacity/i, relPath);
+    assert.match(text, /one[- ]helper|helper capacity/i, relPath);
     assert.match(text, /root counts|include(?:s|ing)? the root|root-inclusive/i, relPath);
     assert.match(text, /policy-only|no native hard block|no invented host-level enforcement|cannot .*strict enforcement|unsupported .*enforcement/i, relPath);
     assert.match(text, /Codex Security[\s\S]{0,400}(never raise|never raises|not raised automatically|no documented)/i, relPath);

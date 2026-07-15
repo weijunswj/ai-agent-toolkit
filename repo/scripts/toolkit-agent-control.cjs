@@ -8,6 +8,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 
 const SCHEMA = 1;
+const CONTROL_VERSION = '2.6.1';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -19,6 +20,10 @@ const LOCK_TTL_MS = 30 * 1000;
 const MAX_QUEUE = 4;
 // Deliberately not exposed as setup capacity: this is only an emergency guard.
 const EMERGENCY_WORKER_CEILING = 4;
+const MIN_WORKER_COST = GIB;
+const MAX_WORKER_COST = 16 * GIB;
+const MAX_MANUAL_WORKERS = 64;
+const MAX_PROMPT_BYTES = 1024 * 1024;
 
 function controlRoot(options = {}) {
   return path.resolve(options.root || process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control'));
@@ -36,6 +41,25 @@ function atomicWriteJson(filePath, value) {
   const temp = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   fs.renameSync(temp, filePath);
+  fs.chmodSync(filePath, 0o600);
+  verifyPrivateRegularFile(filePath);
+}
+
+function verifyPrivateRegularFile(filePath) {
+  const stat = fs.lstatSync(filePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Private Toolkit artifact is not a regular file.');
+  if (process.platform !== 'win32' && (stat.mode & 0o777) !== 0o600) throw new Error('Private Toolkit artifact permissions are not restrictive.');
+  return stat;
+}
+
+function createPrivateFile(filePath, content = '') {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const fd = fs.openSync(filePath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600);
+  try {
+    if (content !== '') fs.writeFileSync(fd, content, { encoding: 'utf8' });
+    fs.fchmodSync(fd, 0o600);
+  } finally { fs.closeSync(fd); }
+  verifyPrivateRegularFile(filePath);
 }
 
 function readJson(filePath, fallback = null) {
@@ -89,13 +113,28 @@ function withLock(options, action) {
 
 function emptyState() { return { schema: SCHEMA, reservations: [], queue: [] }; }
 
-function sanitizeState(raw) {
-  if (!raw || raw.schema !== SCHEMA || !Array.isArray(raw.reservations) || !Array.isArray(raw.queue)) return emptyState();
-  return { schema: SCHEMA, reservations: raw.reservations.filter((v) => v && typeof v === 'object'), queue: raw.queue.filter((v) => v && typeof v === 'object') };
+function validReservation(entry) {
+  return Boolean(entry && typeof entry === 'object'
+    && typeof entry.id === 'string' && entry.id.length > 0
+    && Number.isSafeInteger(entry.owner_pid) && entry.owner_pid > 0
+    && Number.isSafeInteger(entry.created_at_ms) && Number.isSafeInteger(entry.expires_at_ms)
+    && Number.isSafeInteger(entry.estimated_memory_bytes)
+    && entry.estimated_memory_bytes >= MIN_WORKER_COST && entry.estimated_memory_bytes <= MAX_WORKER_COST);
+}
+
+function validQueueEntry(entry) {
+  return Boolean(entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id.length > 0
+    && Number.isSafeInteger(entry.created_at_ms) && Number.isSafeInteger(entry.expires_at_ms));
 }
 
 function validControlState(raw) {
-  return Boolean(raw && raw.schema === SCHEMA && Array.isArray(raw.reservations) && Array.isArray(raw.queue));
+  return Boolean(raw && raw.schema === SCHEMA && Array.isArray(raw.reservations) && Array.isArray(raw.queue)
+    && raw.reservations.every(validReservation) && raw.queue.every(validQueueEntry));
+}
+
+function sanitizeState(raw) {
+  if (!validControlState(raw)) return emptyState();
+  return { schema: SCHEMA, reservations: [...raw.reservations], queue: [...raw.queue] };
 }
 
 function recoverState(state, now = Date.now()) {
@@ -107,12 +146,28 @@ function recoverState(state, now = Date.now()) {
   return state;
 }
 
+function rootOnlyProfile(host, status, reason) {
+  return { schema: SCHEMA, host, topology: TOPOLOGIES.ROOT_ONLY, capacity_mode: CAPACITY_MODES.ROOT_ONLY, manual_maximum: 0, status, supported: false, reason };
+}
+
 function readProfile(host = 'claude-code', options = {}) {
   const raw = readJson(profilePath(host, options));
-  if (!raw || raw.schema !== SCHEMA || raw.host !== host) {
-    return { schema: SCHEMA, host, topology: TOPOLOGIES.ROOT_ONLY, capacity_mode: CAPACITY_MODES.ROOT_ONLY, manual_maximum: 0, status: 'unconfigured-root-only' };
+  if (!raw) return rootOnlyProfile(host, 'unconfigured-root-only', 'No verified Toolkit profile is configured.');
+  const validEnums = Object.values(TOPOLOGIES).includes(raw.topology) && Object.values(CAPACITY_MODES).includes(raw.capacity_mode);
+  const validNumbers = Number.isSafeInteger(raw.manual_maximum) && raw.manual_maximum >= 0 && raw.manual_maximum <= MAX_MANUAL_WORKERS
+    && Number.isSafeInteger(raw.worker_estimate_bytes) && raw.worker_estimate_bytes >= MIN_WORKER_COST && raw.worker_estimate_bytes <= MAX_WORKER_COST
+    && raw.queue_limit === MAX_QUEUE && raw.reservation_limit === EMERGENCY_WORKER_CEILING;
+  const compatible = (raw.topology === TOPOLOGIES.ROOT_ONLY && raw.capacity_mode === CAPACITY_MODES.ROOT_ONLY && raw.manual_maximum === 0)
+    || (raw.topology === TOPOLOGIES.CLAUDE_DIRECT && [CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(raw.capacity_mode)
+      && (raw.capacity_mode !== CAPACITY_MODES.MANUAL || raw.manual_maximum >= 1))
+    || (raw.topology === TOPOLOGIES.BROADER_NATIVE && raw.capacity_mode === CAPACITY_MODES.ROOT_ONLY && raw.manual_maximum === 0);
+  const strict = [TOPOLOGIES.ROOT_ONLY, TOPOLOGIES.CLAUDE_DIRECT].includes(raw.topology);
+  const strictValid = !strict || (raw.enforcement_verified === true && raw.controller_version === CONTROL_VERSION
+    && ['native-agent-hook-deny', 'toolkit-launch-boundary'].includes(raw.enforcement));
+  if (raw.schema !== SCHEMA || raw.host !== host || !validEnums || !validNumbers || !compatible || !strictValid || typeof raw.updated_at !== 'string') {
+    return rootOnlyProfile(host, 'unsupported-root-only', 'The stored Toolkit profile is malformed, contradictory, stale, or from an unsupported schema.');
   }
-  return raw;
+  return { ...raw, status: 'configured', supported: true };
 }
 
 function configureProfile(host, selected, options = {}) {
@@ -121,27 +176,41 @@ function configureProfile(host, selected, options = {}) {
   const capacityMode = selected.capacity_mode;
   if (!Object.values(TOPOLOGIES).includes(topology)) throw new Error(`Unsupported topology: ${topology}`);
   if (!Object.values(CAPACITY_MODES).includes(capacityMode)) throw new Error(`Unsupported capacity mode: ${capacityMode}`);
-  if (topology !== TOPOLOGIES.CLAUDE_DIRECT && capacityMode === CAPACITY_MODES.AUTO) {
-    throw new Error('Automatic admission is available only for the Toolkit-managed direct Claude topology.');
-  }
+  const compatible = (topology === TOPOLOGIES.ROOT_ONLY && capacityMode === CAPACITY_MODES.ROOT_ONLY)
+    || (topology === TOPOLOGIES.CLAUDE_DIRECT && [CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(capacityMode))
+    || (topology === TOPOLOGIES.BROADER_NATIVE && capacityMode === CAPACITY_MODES.ROOT_ONLY);
+  if (!compatible) throw new Error('Topology and capacity mode are incompatible.');
   let manualMaximum = 0;
   if (capacityMode === CAPACITY_MODES.MANUAL) {
     manualMaximum = Number(selected.manual_maximum);
-    if (!Number.isSafeInteger(manualMaximum) || manualMaximum < 1) throw new Error('Manual maximum must be a positive integer.');
+    if (!Number.isSafeInteger(manualMaximum) || manualMaximum < 1 || manualMaximum > MAX_MANUAL_WORKERS) throw new Error('Manual maximum is outside the supported bounds.');
   }
+  const workerEstimate = Number(selected.worker_estimate_bytes || DEFAULT_WORKER_COST);
+  if (!Number.isSafeInteger(workerEstimate) || workerEstimate < MIN_WORKER_COST || workerEstimate > MAX_WORKER_COST) throw new Error('Worker estimate is outside the supported bounds.');
+  const strict = [TOPOLOGIES.ROOT_ONLY, TOPOLOGIES.CLAUDE_DIRECT].includes(topology);
+  if (strict && selected.enforcement_verified !== true) throw new Error('A strict Claude profile requires a verified current plugin, hook, controller, and launch capability.');
   const profile = {
-    schema: SCHEMA,
-    host,
-    topology,
-    capacity_mode: capacityMode,
-    manual_maximum: manualMaximum,
-    updated_at: new Date().toISOString(),
+    schema: SCHEMA, host, topology, capacity_mode: capacityMode, manual_maximum: manualMaximum,
+    worker_estimate_bytes: workerEstimate, queue_limit: MAX_QUEUE, reservation_limit: EMERGENCY_WORKER_CEILING,
+    controller_version: CONTROL_VERSION, enforcement_verified: strict, updated_at: new Date().toISOString(),
     enforcement: topology === TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-launch-boundary' : (topology === TOPOLOGIES.ROOT_ONLY ? 'native-agent-hook-deny' : 'outside-toolkit-control'),
   };
   atomicWriteJson(profilePath(host, options), profile);
-  return profile;
+  return { ...profile, status: 'configured', supported: true };
 }
 
+function invalidateProfile(host, reason, options = {}) {
+  if (host !== 'claude-code') throw new Error('Toolkit-managed agent launch is not supported for this host.');
+  const profile = {
+    schema: SCHEMA, host, topology: TOPOLOGIES.ROOT_ONLY, capacity_mode: CAPACITY_MODES.ROOT_ONLY,
+    manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST, queue_limit: MAX_QUEUE,
+    reservation_limit: EMERGENCY_WORKER_CEILING, controller_version: CONTROL_VERSION,
+    enforcement_verified: false, enforcement: 'unverified-root-only-policy', updated_at: new Date().toISOString(),
+    invalidation_reason: String(reason || 'Current enforcement capability could not be verified.'),
+  };
+  atomicWriteJson(profilePath(host, options), profile);
+  return rootOnlyProfile(host, 'capability-lost-root-only', profile.invalidation_reason);
+}
 function linuxResources() {
   const text = fs.readFileSync('/proc/meminfo', 'utf8');
   const values = Object.fromEntries([...text.matchAll(/^(\w+):\s+(\d+)\s+kB$/gm)].map((m) => [m[1], Number(m[2]) * 1024]));
@@ -207,7 +276,9 @@ function admissionDecision(specInput, options = {}) {
   try { spec = validateLaunchSpec(specInput); }
   catch (error) { return refusal(error.message); }
   const profile = options.profile || readProfile('claude-code', options);
-  if (profile.topology !== TOPOLOGIES.CLAUDE_DIRECT || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected Claude topology is root-only or outside the Toolkit launch boundary.');
+  if (profile.supported !== true || profile.status !== 'configured' || profile.enforcement_verified !== true
+    || profile.controller_version !== CONTROL_VERSION || profile.topology !== TOPOLOGIES.CLAUDE_DIRECT
+    || ![CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) return refusal('The selected Claude profile is root-only, stale, unsupported, or outside the verified Toolkit launch boundary.');
   const resources = inspectResources(options);
   if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
 
@@ -217,14 +288,21 @@ function admissionDecision(specInput, options = {}) {
     const rawState = readJson(stateFile);
     if (fs.existsSync(stateFile) && !validControlState(rawState)) return refusal('Toolkit admission state could not be verified safely.');
     const state = recoverState(sanitizeState(rawState || emptyState()), now);
+    let reservedBytes = 0;
+    for (const entry of state.reservations) {
+      if (!validReservation(entry) || reservedBytes > Number.MAX_SAFE_INTEGER - entry.estimated_memory_bytes) return refusal('Toolkit reservation memory state could not be verified safely.');
+      reservedBytes += entry.estimated_memory_bytes;
+    }
     const active = state.reservations.length;
     const maximum = profile.capacity_mode === CAPACITY_MODES.MANUAL ? profile.manual_maximum : EMERGENCY_WORKER_CEILING;
     const physicalReserve = Math.max(4 * GIB, resources.physical_total * 0.25);
     const commitReserve = Math.max(6 * GIB, resources.commit_total * 0.20);
-    const requested = Number(spec.estimated_memory_bytes || DEFAULT_WORKER_COST);
-    if (!Number.isFinite(requested) || requested < GIB || requested > 16 * GIB) return refusal('The requested worker cost is unknown or outside the supported range.');
-    const physicalAfter = resources.physical_available - requested;
-    const commitAfter = resources.commit_available - requested;
+    const requested = Number(spec.estimated_memory_bytes || profile.worker_estimate_bytes);
+    if (!Number.isSafeInteger(requested) || requested < MIN_WORKER_COST || requested > MAX_WORKER_COST) return refusal('The requested worker cost is unknown or outside the supported range.');
+    const effectivePhysical = Math.max(0, resources.physical_available - reservedBytes);
+    const effectiveCommit = Math.max(0, resources.commit_available - reservedBytes);
+    const physicalAfter = effectivePhysical - requested;
+    const commitAfter = effectiveCommit - requested;
     const critical = resources.physical_available / resources.physical_total < 0.08 || resources.commit_available / resources.commit_total < 0.08;
     if (critical) return refusal('Current memory pressure is unsafe for another worker.');
     const queuedReservation = spec.queue_id ? state.queue.find((entry) => entry.id === spec.queue_id) : null;
@@ -287,10 +365,12 @@ function releaseReservation(id, options = {}) {
 function claudeInvocation(spec, options = {}) {
   const checked = validateLaunchSpec(spec);
   const executable = options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
-  const args = ['--print', '--output-format', 'json', '--effort', checked.effort, '--disallowedTools', 'Agent', '--permission-mode', 'default', String(checked.child_prompt || checked.child_responsibility)];
+  const prompt = String(checked.child_prompt || checked.child_responsibility);
+  if (Buffer.byteLength(prompt, 'utf8') > MAX_PROMPT_BYTES) throw new Error('Child prompt exceeds the bounded private transport limit.');
+  const args = ['--print', '--output-format', 'json', '--effort', checked.effort, '--disallowedTools', 'Agent', '--permission-mode', 'default'];
   const env = { ...process.env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CHILD: '1' };
   const parts = require('./setup-claude-toolkit-plugin.cjs').claudeSpawnParts(executable, args);
-  return { executable: parts.command, args: parts.args, shell: parts.shell, raw_executable: executable, raw_args: args, env, effort: checked.effort, non_fast: true, max_depth: 1 };
+  return { executable: parts.command, args: parts.args, shell: parts.shell, raw_executable: executable, raw_args: args, env, stdin: Buffer.from(prompt, 'utf8'), effort: checked.effort, non_fast: true, max_depth: 1 };
 }
 
 function launch(specInput, options = {}) {
@@ -299,38 +379,54 @@ function launch(specInput, options = {}) {
   if (admitted.result !== RESULTS.START) return admitted;
   const root = controlRoot(options);
   const jobs = path.join(root, 'jobs');
-  fs.mkdirSync(jobs, { recursive: true });
   const specPath = path.join(jobs, `${admitted.reservation_id}.json`);
-  atomicWriteJson(specPath, spec);
   const outputPath = path.join(jobs, `${admitted.reservation_id}.stdout.json`);
   const errorPath = path.join(jobs, `${admitted.reservation_id}.stderr.log`);
-  const out = fs.openSync(outputPath, 'a');
-  const err = fs.openSync(errorPath, 'a');
+  let out;
+  let err;
   try {
+    createPrivateFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+    createPrivateFile(outputPath);
+    createPrivateFile(errorPath);
+    out = fs.openSync(outputPath, 'w');
+    err = fs.openSync(errorPath, 'w');
     const supervisorArgs = [__filename, 'supervise', '--root', root, '--reservation', admitted.reservation_id, '--spec', specPath];
     if (options.claudeCli) supervisorArgs.push('--claude-cli', options.claudeCli);
     const supervisor = spawn(process.execPath, supervisorArgs, { detached: true, windowsHide: true, stdio: ['ignore', out, err], env: process.env });
     supervisor.unref();
-    return { ...admitted, supervisor_pid: supervisor.pid, output_path: outputPath, error_path: errorPath, status: 'launched' };
-  } catch (error) {
+    return { ...admitted, supervisor_pid: supervisor.pid, spec_path: specPath, output_path: outputPath, error_path: errorPath, status: 'launched' };
+  } catch {
     releaseReservation(admitted.reservation_id, options);
+    for (const privatePath of [specPath, outputPath, errorPath]) {
+      try { if (fs.existsSync(privatePath) && verifyPrivateRegularFile(privatePath)) fs.unlinkSync(privatePath); } catch {}
+    }
     return refusal('Worker launch failed safely before execution.');
   } finally {
-    fs.closeSync(out); fs.closeSync(err);
+    if (out !== undefined) fs.closeSync(out);
+    if (err !== undefined) fs.closeSync(err);
   }
 }
 
 async function supervise(args) {
   const spec = readJson(args.spec);
   const options = { root: args.root };
-  const invocation = claudeInvocation(spec, { claudeCli: args.claudeCli });
-  updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options);
-  const code = await new Promise((resolve) => {
-    const child = spawn(invocation.executable, invocation.args, { shell: invocation.shell, env: invocation.env, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'] });
-    child.on('error', () => resolve(1));
-    child.on('exit', (value) => resolve(Number.isInteger(value) ? value : 1));
-  });
-  releaseReservation(args.reservation, options);
+  let code = 1;
+  try {
+    const invocation = claudeInvocation(spec, { claudeCli: args.claudeCli });
+    updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options);
+    code = await new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
+      const child = spawn(invocation.executable, invocation.args, { shell: invocation.shell, env: invocation.env, windowsHide: true, stdio: ['pipe', 'inherit', 'inherit'] });
+      child.on('error', () => finish(1));
+      child.on('exit', (value) => finish(Number.isInteger(value) ? value : 1));
+      child.stdin.on('error', () => { child.kill(); finish(1); });
+      child.stdin.end(invocation.stdin);
+    });
+  } finally {
+    releaseReservation(args.reservation, options);
+    try { if (verifyPrivateRegularFile(args.spec)) fs.unlinkSync(args.spec); } catch {}
+  }
   return code;
 }
 
@@ -364,7 +460,7 @@ async function main(argv = process.argv.slice(2)) {
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
-  SCHEMA, RESULTS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING,
-  controlRoot, profilePath, statePath, readProfile, configureProfile, validateLaunchSpec, inspectResources,
+  SCHEMA, CONTROL_VERSION, RESULTS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES,
+  controlRoot, profilePath, statePath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources,
   admissionDecision, updateReservation, releaseReservation, claudeInvocation, launch, recoverState, pidAlive,
 };

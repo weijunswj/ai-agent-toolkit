@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Enforceable Claude amendment and review-thread verification complete; native UAT pending
+Status: Eight exact-head review findings under amendment; independent current-head verification and native UAT pending
 
 ## Scope
 
@@ -146,11 +146,11 @@ Passed on the current worktree unless qualified:
 - `node repo/scripts/validate-toolkit.cjs --workspace <clean current-diff workspace>`: passed. The ordinary working-directory invocation reports only the ignored `.agent-toolkit-backups` rollback backup created during this session; it is not tracked or included in the validation workspace/PR. Deleting that local backup still requires explicit destructive-cleanup approval.
 - Local `npm run validate:all` was not run because repository policy assigns the full gate to CI.
 
-Implementation-head PR CI passed on `3943c28c5c6ccbba81cc00c992067ec5f59fddb4`, and the audit-only follow-up `f3e44a681e22e74c16d40b1dda31c22b2eae51bd` also passed: both validation workflows, generated-surface sync, both package checks, the CodeQL workflow gate, and all three material CodeQL analyses passed. All six review threads are resolved after current-head verification; unresolved-current count is zero. Any later closure-note head must independently pass exact-head CI before completion. Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT remain pending.
+Implementation-head PR CI passed on `3943c28c5c6ccbba81cc00c992067ec5f59fddb4`, and the audit-only follow-up `f3e44a681e22e74c16d40b1dda31c22b2eae51bd` also passed: both validation workflows, generated-surface sync, both package checks, the CodeQL workflow gate, and all three material CodeQL analyses passed. The prior six threads remain historical, but eight current exact-head findings are unresolved until this amendment is pushed, independently verified, replied to, and resolved. Any later closure-note head must independently pass exact-head CI before completion. Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT remain pending.
 
 ## Release Gates
 
-- The P1 topology/admission finding is implemented; its review thread and both current P2 threads were resolved only after fixing-SHA evidence and exact-head verification. All six PR review threads are resolved.
+- The earlier topology/admission lane exists, but eight current exact-head findings require repair: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv. None may be marked resolved until pushed current-head evidence exists.
 - Implementation-head CI passed on `3943c28c5c6ccbba81cc00c992067ec5f59fddb4`, and audit-only head `f3e44a681e22e74c16d40b1dda31c22b2eae51bd` also passed. Any subsequent closure-note head remains subject to the same exact-head gate.
 - PR remains unmerged.
 - Issues #241 and #247 remain open.

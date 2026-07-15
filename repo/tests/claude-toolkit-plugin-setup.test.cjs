@@ -32,7 +32,8 @@ function installedList(options = {}) {
         marketplace: setup.TOOLKIT_MARKETPLACE_NAME,
         version,
         enabled: options.enabled !== false,
-        source: { path: options.sourcePath || repoRoot }
+        source: { path: options.sourcePath || repoRoot },
+        installPath: options.installPath || repoRoot
       }
     ]
   };
@@ -42,7 +43,7 @@ function writeFakeClaude(stateDir, options = {}) {
   const fakeClaudeScript = path.join(stateDir, 'fake-claude.cjs');
   const initialVersion = options.installedVersion || expectedVersion();
   writeJson(path.join(stateDir, 'state.json'), {
-    repoRoot: options.initialInstalled ? (options.initialRepoRoot || repoRoot) : '',
+    repoRoot: options.initialRepoRoot || (options.initialInstalled ? repoRoot : ''),
     installed: Boolean(options.initialInstalled),
     scope: options.initialInstalled ? 'user' : '',
     version: initialVersion,
@@ -181,7 +182,8 @@ if (args[0] === 'plugin' && args[1] === 'list') {
       version: state.version,
       enabled: true,
       scope: state.scope || 'user',
-      source: { path: state.repoRoot }
+      source: { path: state.repoRoot },
+      installPath: state.repoRoot
     }
   ] : [];
   process.stdout.write(JSON.stringify({ installed }) + '\\n');
@@ -359,7 +361,7 @@ test('Claude Toolkit plugin state evaluator accepts the real claude plugin list 
       version: expectedVersion(),
       scope: 'user',
       enabled: true,
-      installPath: 'C:\\Users\\someone\\.claude\\plugins\\cache\\ai-agent-toolkit-local\\ai-agent-toolkit\\2.3.2',
+      installPath: repoRoot,
       installedAt: '2026-07-01T14:44:35.944Z',
       lastUpdated: '2026-07-01T14:44:35.944Z',
       projectPath: repoRoot
@@ -784,7 +786,7 @@ test('a final verification poll at the deadline can still succeed with an extrem
   // The install lands its state and lingers; with a one-hour poll interval,
   // success requires the loop's remaining-time-capped wait plus the final
   // at-deadline verification poll rather than a full poll sleep.
-  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, lingerAfterInstall: true });
+  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, initialRepoRoot: repoRoot, lingerAfterInstall: true });
 
   const started = Date.now();
   const outcome = await setup.runClaudeMutationAndVerify(
@@ -812,4 +814,28 @@ test('Claude Toolkit plugin setup rejects an unusable Claude CLI', () => {
   const result = runSetup('--verify', brokenClaude, [], { env: isolatedEnv });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /no usable claude code cli/i);
+});
+
+test('installed enforcement byte verification rejects missing and stale cache files', () => {
+  const cache = tmpRoot();
+  for (const relPath of [
+    '.claude-plugin/plugin.json',
+    '.claude-plugin/hooks/hooks.json',
+    'repo/scripts/toolkit-agent-control.cjs',
+    'repo/scripts/toolkit-claude-agent-hook.cjs',
+  ]) {
+    const target = path.join(cache, ...relPath.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
+  }
+  assert.equal(setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot }).ok, true);
+  fs.appendFileSync(path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'), ' ');
+  let state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /stale.*hooks/i);
+  fs.copyFileSync(path.join(repoRoot, '.claude-plugin', 'hooks', 'hooks.json'), path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'));
+  fs.unlinkSync(path.join(cache, 'repo', 'scripts', 'toolkit-agent-control.cjs'));
+  state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /missing.*toolkit-agent-control/i);
 });
