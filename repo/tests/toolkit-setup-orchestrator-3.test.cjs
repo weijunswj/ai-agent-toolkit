@@ -32,7 +32,8 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
     '--yes-recommended', '--claude-plugin-behavior', 'instructions', '--skip-update-report-open'
   ], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Helper-capacity detail: Host-level delegation enforcement is unsupported/);
+  assert.match(result.stdout, /Helper-capacity outcome this run: unsupported/);
+  assert.match(result.stdout, /Helper-capacity detail: No enforceable host topology profile is available/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
@@ -101,7 +102,7 @@ test('setup docs require explicit V2 opt-in and honest enforcement disclosure', 
     assert.match(text, /MultiAgentV2|multi_agent_v2/i, relPath);
     assert.match(text, /one helper|helper capacity/i, relPath);
     assert.match(text, /root counts|include(?:s|ing)? the root|root-inclusive/i, relPath);
-    assert.match(text, /policy-only|no native hard block/i, relPath);
+    assert.match(text, /policy-only|no native hard block|no invented host-level enforcement|cannot .*strict enforcement|unsupported .*enforcement/i, relPath);
     assert.match(text, /Codex Security[\s\S]{0,400}(never raise|never raises|not raised automatically|no documented)/i, relPath);
     assert.doesNotMatch(text, /compatible with Codex Security|Codex Security compatible/i, relPath);
   }
@@ -111,16 +112,18 @@ test('setup docs require explicit V2 opt-in and honest enforcement disclosure', 
   assert.match(bridge, /managed checkout is only its refresh source/i);
 });
 
-test('generated Codex and Claude instruction surfaces preserve root-first and helper no-recursion policy', () => {
+test('generated Codex and Claude instruction surfaces preserve productive root-first topology policy', () => {
   const agents = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   for (const pattern of [
-    /Complete ordinary work with root agent alone/,
-    /Generic parallelism, second opinions.*are insufficient/,
-    /prefer one direct specialist/,
-    /completes its scope/,
-    /cannot spawn another agent/,
-    /returns expertise needs to root/,
+    /Ordinary work begins root-first/,
+    /active host profile is a topology ceiling/,
+    /Missing any fact prohibits launch/,
+    /Never delegate every substantive shard/,
+    /meaningful root-owned work starting immediately/,
+    /default to medium reasoning effort/,
+    /never use or inherit fast mode/,
+    /Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned/,
   ]) assert.match(agents, pattern);
   assert.match(claude, /@AGENTS\.md/);
   assert.match(claude, /Root `AGENTS\.md` is canonical/);

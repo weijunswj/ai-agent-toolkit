@@ -28,7 +28,7 @@ test('Claude Code plan stays portable-policy-only and never emits Codex config w
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
   assert.equal(plan.host, 'claude-code');
-  assert.equal(plan.preferences.helper_capacity, 'unsupported-policy-only');
+  assert.equal(plan.preferences.helper_capacity_backstop, 'unsupported-no-enforceable-profile');
   assert.doesNotMatch(plan.steps.flatMap((step) => step.commands || []).join('\n'), /agents\.max_threads|agents\.max_depth/);
 });
 
@@ -59,7 +59,7 @@ test('plain and JSON plans share the one-helper recommendation and canonical Cod
       selected_value: 'one-helper',
     }
   );
-  assert.equal(plan.preferences.helper_capacity, 'one-helper');
+  assert.equal(plan.preferences.helper_capacity_backstop, 'one-helper');
 });
 
 test('canonical question specification orders delegation before plugin auto-refresh for TTY and stdin', () => {
@@ -166,6 +166,14 @@ test('helper choices are direct and conditional on current runtime and ownership
 
   const unsupported = helperSpec('unknown', { status: 'unsupported', detail: 'unknown runtime' });
   assert.deepEqual(unsupported.choices.map((choice) => choice.value), ['keep']);
+  assert.equal(unsupported.recommended, 'keep');
+  assert.match(unsupported.recommended_outcome, /Keep the current setting.*supported effective helper controls/i);
+
+  const disabled = helperSpec('disabled', { status: 'disabled', detail: 'disabled runtime' });
+  assert.deepEqual(disabled.choices.map((choice) => choice.value), ['keep']);
+  assert.equal(disabled.recommended, 'keep');
+  assert.match(disabled.recommended_outcome, /Keep the current setting.*supported effective helper controls/i);
+  assert.doesNotMatch(disabled.recommended_outcome, /One helper at most/i);
 
   const migration = helperSpec('MultiAgentV2', { status: 'migration-required', ownership: 'toolkit-managed-v1-legacy', helper_count: 1, detail: 'pending' });
   assert.deepEqual(migration.choices.map((choice) => choice.value), ['keep', 'migrate']);

@@ -19,8 +19,8 @@ const CODEX_ROOT_GUIDANCE_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-ROOT-GUIDANCE 
 const CODEX_ROOT_GUIDANCE_END = '# AI-AGENT-TOOLKIT:END CODEX-ROOT-GUIDANCE';
 const CODEX_HELPER_GUIDANCE_BEGIN = '# AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-GUIDANCE v1';
 const CODEX_HELPER_GUIDANCE_END = '# AI-AGENT-TOOLKIT:END CODEX-HELPER-GUIDANCE';
-const CODEX_V2_ROOT_GUIDANCE = 'Root-only by default. Ordinary work: at most one directly justified helper. Speed, generic parallelism, workload reduction, routine exploration, and second opinions are insufficient. A user-invoked defined multi-worker workflow may follow its stated count and plan with explicit approval of higher persistent or temporary capacity. Workers are direct root children, avoid overlap, never spawn helpers. Root retains coordination and final judgment.';
-const CODEX_V2_HELPER_GUIDANCE = 'Complete only the assigned bounded task. Do not spawn another helper, broaden scope, or duplicate root or sibling work. Return any need for more expertise to the root.';
+const CODEX_V2_ROOT_GUIDANCE = 'Root-first. Capacity is only a backstop, not launch permission. Launch only independent, non-overlapping work with material benefit, active topology and resource admission, verified medium non-fast child execution, meaningful concurrent root work, and a root-owned integration plan. Otherwise stay root-only. Root works immediately and retains final judgment.';
+const CODEX_V2_HELPER_GUIDANCE = 'Complete only the assigned bounded task. Apply the same launch gate before any child: active topology and admission, independent non-overlapping scope, material benefit, verified medium non-fast execution, and meaningful work retained by this agent. Never inherit fast mode. Return unsupported expertise needs to the root.';
 const CODEX_V2_TARGET_KEYS = [
   'enabled',
   'max_concurrent_threads_per_session',

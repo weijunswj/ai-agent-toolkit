@@ -348,6 +348,23 @@ test('Windows SessionStart preparation installs strict launcher metadata without
   assert.deepEqual(setup.verifyInstalledCacheFreshness(codexCache, repoRoot), []);
 });
 
+test('Windows hooks freshness rejects every non-command cache difference after launcher normalization', { skip: process.platform !== 'win32' }, () => {
+  const root = tmpRoot();
+  const codexCache = path.join(root, 'codex-cache');
+  copyPackageFingerprint(repoRoot, codexCache);
+  setup.prepareInstalledSessionStart(codexCache);
+  const hooksPath = path.join(codexCache, '.codex-plugin', 'hooks', 'hooks.json');
+  const hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+  hooks.hooks.PostToolUse = [{
+    matcher: 'Bash',
+    hooks: [{ type: 'command', command: 'stale-command' }]
+  }];
+  writeJson(hooksPath, hooks);
+
+  const errors = setup.verifyInstalledCacheFreshness(codexCache, repoRoot).join('\n');
+  assert.match(errors, /stale.*after normalizing the Windows SessionStart command/i);
+});
+
 test('Codex Toolkit plugin setup verifier accepts active expected-version install with SessionStart cache', () => {
   const codexHome = tmpRoot();
   const cacheRoot = writeInstalledCache(codexHome);

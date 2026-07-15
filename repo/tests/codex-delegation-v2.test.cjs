@@ -169,20 +169,20 @@ test('custom V2 capacity translates helpers to total session threads', async () 
   assert.match(fs.readFileSync(filePath, 'utf8'), /max_concurrent_threads_per_session = 4/);
 });
 
-test('V2 guidance is compact, root-only by default, and honest about policy enforcement', async () => {
+test('V2 guidance is compact, productive root-first, and honest about launch enforcement', async () => {
   const filePath = configPath();
   await configureV2(filePath);
   const text = fs.readFileSync(filePath, 'utf8');
-  assert.match(text, /Root-only by default/);
-  assert.match(text, /Do not spawn another helper/);
-  assert.ok(config.CODEX_V2_ROOT_GUIDANCE.length < 450);
-  assert.ok(config.CODEX_V2_HELPER_GUIDANCE.length < 300);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /at most one directly justified helper/);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /user-invoked defined multi-worker workflow/);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /stated count and plan/);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /explicit approval of higher persistent or temporary capacity/);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /never spawn helpers/);
-  assert.doesNotMatch(config.CODEX_V2_ROOT_GUIDANCE, /capacity is available.*parallel/i);
+  assert.match(text, /Root-first/);
+  assert.match(text, /Apply the same launch gate before any child/);
+  assert.ok(config.CODEX_V2_ROOT_GUIDANCE.length < 500);
+  assert.ok(config.CODEX_V2_HELPER_GUIDANCE.length < 400);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /Capacity is only a backstop, not launch permission/);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /independent, non-overlapping work with material benefit/);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /verified medium non-fast child execution/);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /meaningful concurrent root work/);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /Otherwise stay root-only/);
+  assert.match(config.CODEX_V2_HELPER_GUIDANCE, /Never inherit fast mode/);
   const state = config.inspectCodexDelegationConfig(filePath, V2);
   assert.match(state.recursive_helper_control, /policy-only/);
   assert.equal(state.recursive_hard_block, false);

@@ -272,39 +272,42 @@ test('execution prompt requires full-bold user-action questions and generated su
   }
 });
 
-test('portable rules require single-agent execution and a complete delegation gate', () => {
+test('portable rules require host-profile-aware topology and a complete delegation gate', () => {
   const requiredRules = [
-    /## Single-Agent Default/,
-    /Complete ordinary work with root agent alone/,
+    /## Agent Topology And Delegation/,
+    /Ordinary work begins root-first/,
     /setup\/updates, docs\/repo orientation, narrow changes/,
     /routine tests\/checks\/formatting, version alignment, reviews\/plans\/summaries/,
     /root-capable verification/,
     /Scope broad work in root first/,
-    /`setup toolkit` is routine root-agent work/,
-    /without subagents/,
+    /`setup toolkit` uses no subagents/,
+    /active host profile is a topology ceiling, not a delegation instruction/,
+    /Capacity is a resource backstop, never launch permission/,
+    /unverifiable topology, admission, effort, or non-fast guarantee means root-only/,
+    /Never project one host's controls onto another/,
+    /policy-only behavior as hard enforcement/,
     /Generic wording like `use helpers`, `use agents`, `parallelize this`, `delegate this`, `use subagents`, or `finish faster with helpers` is a preference, not a bounded delegation instruction/,
-    /neither conflicts with nor overrides the single-agent default/,
-    /Do not clarify or invent scope/,
-    /UAT context, later stages, capacity, or future helper tests cannot qualify the present task/,
-    /Decide from the present task in order/,
-    /root efficiency\/safety/,
-    /genuinely separable bounded specialist scope/,
-    /sequential root inadequacy/,
-    /Delegate only if all pass/,
-    /State those six facts before delegating/,
-    /Missing any prohibits it/,
-    /Generic parallelism, second opinions, docs, routine validation, independent verification/,
-    /multiple steps, available capacity, or speed claims are insufficient/,
-    /bounded specialist security review/,
-    /separable present-task work/,
-    /Defined multi-worker workflows remain supported/,
-    /prefer one direct specialist/,
-    /no duplicate inspection/,
-    /Codex MultiAgentV2 the root counts toward capacity/,
-    /keep root-only and forbid helper recursion/,
-    /A helper completes its scope/,
-    /cannot spawn another agent/,
-    /returns expertise needs to root/,
+    /Do not invent scope/,
+    /UAT context, later stages, available capacity, or future helper tests cannot qualify the present task/,
+    /Before launch, state/,
+    /independent bounded scopes/,
+    /non-overlapping ownership/,
+    /material quality, safety, or critical-path benefit/,
+    /active topology and resource admission/,
+    /verified medium reasoning and non-fast child mode/,
+    /meaningful root-owned work starting immediately/,
+    /root-owned integration\/validation/,
+    /Missing any fact prohibits launch/,
+    /may run concurrently when it materially shortens the critical path even if root could do it sequentially/,
+    /routine-work offloading/,
+    /Never delegate every substantive shard/,
+    /wait, poll, narrate status/,
+    /Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned/,
+    /Every child applies the same launch gate and active profile/,
+    /default to medium reasoning effort/,
+    /Children never use or inherit fast mode/,
+    /before launch or reject\/queue it/,
+    /Built-in, Security, plugin, named multi-worker, third-party, and nested paths get no exception/,
     /default `fork_turns="none"`/,
     /brief only required files\/evidence\/constraints\/criteria/,
     /bounded inheritance needs specific dialogue/,
@@ -326,9 +329,9 @@ test('portable rules require single-agent execution and a complete delegation ga
   }
 
   const prompt = readText(executionPromptPath);
-  const section = prompt.match(/## Single-Agent Default\n([\s\S]*?)(?=\n## )/)?.[0] || '';
-  assert.ok(section, 'single-agent policy section exists');
-  assert.ok(Buffer.byteLength(section, 'utf8') < 5000, 'single-agent policy stays compact instead of becoming a giant orchestration manual');
+  const section = prompt.match(/## Agent Topology And Delegation\n([\s\S]*?)(?=\n## )/)?.[0] || '';
+  assert.ok(section, 'agent topology policy section exists');
+  assert.ok(Buffer.byteLength(section, 'utf8') < 7000, 'agent topology policy stays compact instead of becoming a giant orchestration manual');
 });
 
 test('speed-only C2 wording remains root-only without blocking qualified specialist workflows', () => {
@@ -344,11 +347,11 @@ test('speed-only C2 wording remains root-only without blocking qualified special
   for (const relPath of surfaces) {
     const text = readText(relPath);
     assert.match(text, /finish faster with helpers` is a preference, not a bounded delegation instruction/, relPath);
-    assert.match(text, /capacity[^.]*cannot qualify the present task/, relPath);
-    assert.match(text, /Do not clarify or invent scope/, relPath);
-    assert.match(text, /separable present-task work/, relPath);
-    assert.match(text, /Defined multi-worker workflows remain supported/, relPath);
-    assert.match(text, /cannot spawn another agent/, relPath);
+    assert.match(text, /available capacity[^.]*cannot qualify the present task/, relPath);
+    assert.match(text, /Do not invent scope/, relPath);
+    assert.match(text, /Missing any fact prohibits launch/, relPath);
+    assert.match(text, /Never delegate every substantive shard/, relPath);
+    assert.match(text, /Children never use or inherit fast mode/, relPath);
   }
 });
 

@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.6.6",
+  "version": "2.6.7",
   "version_policy": "semver",
-  "version_notes": "Makes generic helper and speed wording non-conflicting with present-task delegation qualification across generated harness surfaces.",
+  "version_notes": "Adds productive root concurrency, host-profile ceilings, medium-effort defaults, and strict non-fast launch gates without unsupported enforcement claims.",
   "outputs": [
     {
       "kind": "curated",

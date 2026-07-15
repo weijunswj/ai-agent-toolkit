@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.5.3';
+const EXPECTED_TOOLKIT_VERSION = '2.5.4';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -366,10 +366,26 @@ function verifyInstalledCacheFreshness(cacheRoot, repoRoot, options = {}) {
     const sourceFile = path.join(sourceRoot, ...relPath.split('/'));
     const cacheFile = path.join(installedRoot, ...relPath.split('/'));
     if (relPath === '.codex-plugin/hooks/hooks.json' && (options.platform || process.platform).startsWith('win')) {
+      let sourceHookErrors = [];
+      let cacheHookErrors = [];
       if (!fs.existsSync(sourceFile)) errors.push(`${pluginId()} repo is missing file: ${relPath}`);
-      else errors.push(...verifySessionStartHook(sourceFile).map((error) => `${pluginId()} repo ${error}`));
+      else {
+        sourceHookErrors = verifySessionStartHook(sourceFile);
+        errors.push(...sourceHookErrors.map((error) => `${pluginId()} repo ${error}`));
+      }
       if (!fs.existsSync(cacheFile)) errors.push(`${pluginId()} installed plugin cache is missing repo file: ${relPath}`);
-      else errors.push(...verifySessionStartHook(cacheFile, { windows: true, powershellPath: options.powershellPath }).map((error) => `${pluginId()} cache ${error}`));
+      else {
+        cacheHookErrors = verifySessionStartHook(cacheFile, { windows: true, powershellPath: options.powershellPath });
+        errors.push(...cacheHookErrors.map((error) => `${pluginId()} cache ${error}`));
+      }
+      if (!sourceHookErrors.length && !cacheHookErrors.length && fs.existsSync(sourceFile) && fs.existsSync(cacheFile)) {
+        const normalizedCacheHooks = readJson(cacheFile);
+        normalizedCacheHooks.hooks.SessionStart[0].hooks[0].command = sourceSessionStartCommand();
+        const normalizedCacheBytes = Buffer.from(`${JSON.stringify(normalizedCacheHooks, null, 2)}\n`, 'utf8');
+        if (!fs.readFileSync(sourceFile).equals(normalizedCacheBytes)) {
+          errors.push(`${pluginId()} installed plugin cache is stale for repo file after normalizing the Windows SessionStart command: ${relPath}`);
+        }
+      }
       continue;
     }
     const source = fileFingerprint(sourceFile);

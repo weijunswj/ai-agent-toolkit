@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.5.3",
+  "version": "2.5.4",
   "version_policy": "semver",
-  "version_notes": "Repairs native Codex SessionStart launching and setup question-bank choice presentation after post-2.5.2 UAT.",
+  "version_notes": "Completes Windows hook freshness and privacy repairs while making helper capacity an honest backstop under strict host capability gates.",
   "outputs": [
     {
       "kind": "curated",

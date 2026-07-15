@@ -43,6 +43,29 @@ function createPluginFixture(root, bridgeText) {
   return pluginRoot;
 }
 
+function createRealBridgePluginFixture(root) {
+  const pluginRoot = path.join(root, 'real bridge plugin');
+  for (const relPath of [
+    setup.SESSION_START_LAUNCHER_REL_PATH,
+    setup.SESSION_START_POWERSHELL_REL_PATH,
+    'repo/scripts/toolkit-local-bridge.cjs',
+    'repo/scripts/setup-codex-toolkit-plugin.cjs',
+    'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
+    'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
+    'repo/scripts/toolkit-staging-generations.cjs',
+  ]) copyFile(relPath, pluginRoot);
+  writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
+    hooks: {
+      SessionStart: [{
+        matcher: 'startup|resume|clear|compact',
+        hooks: [{ type: 'command', command: setup.sourceSessionStartCommand() }]
+      }]
+    }
+  }, null, 2)}\n`);
+  setup.prepareInstalledSessionStart(pluginRoot);
+  return pluginRoot;
+}
+
 function runWindowsHook(pluginRoot, input = '') {
   return spawnSync(setup.windowsSessionStartCommand(), [], {
     cwd: repoRoot,
@@ -74,6 +97,74 @@ test('hook-safe Node launcher converts thrown and returned non-zero outcomes to 
     assert.equal(output, launcher.WARNING);
     assert.doesNotMatch(output, /private path|Users[\\/]|\.env|token/i);
   }
+});
+
+test('hook-safe Node launcher suppresses prior bridge output when maintenance later fails', () => {
+  const output = captureLauncherWarning({
+    run() {
+      console.log('private preflight path C:\\Users\\Example\\project');
+      console.error('private diagnostic');
+      throw new Error('later failure');
+    }
+  });
+  assert.equal(output, launcher.WARNING);
+  assert.doesNotMatch(output, /private|Users|diagnostic|later failure/i);
+});
+
+test('hook-safe Node launcher captures dependency-load output before a load failure', () => {
+  const dependencies = {};
+  Object.defineProperty(dependencies, 'bridge', {
+    get() {
+      console.error('private module-load diagnostic');
+      throw new Error('module load failed');
+    }
+  });
+  const lines = [];
+  const original = console.log;
+  console.log = (line) => lines.push(String(line));
+  try {
+    assert.equal(launcher.main(launcher.HOOK_ARGS, dependencies), 0);
+  } finally {
+    console.log = original;
+  }
+  const output = lines.join('\n');
+  assert.equal(output, launcher.WARNING);
+  assert.doesNotMatch(output, /private|module-load|load failed/i);
+});
+
+test('hook-safe Node launcher replays bridge stdout and stderr only after success', () => {
+  const stdout = [];
+  const stderr = [];
+  const originalStdoutWrite = process.stdout.write;
+  const originalStderrWrite = process.stderr.write;
+  process.stdout.write = (chunk) => { stdout.push(String(chunk)); return true; };
+  process.stderr.write = (chunk) => { stderr.push(String(chunk)); return true; };
+  try {
+    assert.equal(launcher.main(launcher.HOOK_ARGS, {
+      bridge: {
+        run() {
+          console.log('bridge success');
+          console.error('bridge warning');
+          return { status: 0 };
+        }
+      }
+    }), 0);
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
+  }
+  assert.equal(stdout.join(''), 'bridge success\n');
+  assert.equal(stderr.join(''), 'bridge warning\n');
+});
+
+test('hook-safe Node launcher fails closed when bridge output exceeds the capture ceiling', () => {
+  const output = captureLauncherWarning({
+    run() {
+      process.stdout.write('x'.repeat(launcher.MAX_CAPTURE_BYTES + 1));
+      return { status: 0 };
+    }
+  });
+  assert.equal(output, launcher.WARNING);
 });
 
 test('manual bridge command retains a non-zero exit for an equivalent explicit configuration failure', () => {
@@ -183,4 +274,34 @@ test('near-concurrent hook launchers permit at most one protected mutation and l
   assert.equal(fs.readFileSync(path.join(hub, 'mutation.log'), 'utf8'), 'write\n');
   assert.equal(fs.existsSync(path.join(hub, 'update.lock')), false);
   assert.deepEqual(fs.readdirSync(hub).filter((name) => /recovery|staging|displaced/i.test(name)), []);
+});
+
+test('near-concurrent launchers execute the real bridge safely in an isolated home', async () => {
+  const root = tmpRoot();
+  const pluginRoot = createRealBridgePluginFixture(root);
+  const scriptPath = path.join(pluginRoot, ...setup.SESSION_START_LAUNCHER_REL_PATH.split('/'));
+  const runOne = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath, ...launcher.HOOK_ARGS], {
+      cwd: root,
+      env: { ...process.env, HOME: root, USERPROFILE: root, PLUGIN_ROOT: pluginRoot },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('exit', (status) => resolve({ status, stdout, stderr }));
+  });
+
+  const results = await Promise.all([runOne(), runOne()]);
+  for (const result of results) {
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /SessionStart skipped optional maintenance/i);
+  }
+  const toolkitHome = path.join(root, '.ai-agent-toolkit');
+  if (fs.existsSync(toolkitHome)) {
+    assert.deepEqual(fs.readdirSync(toolkitHome).filter((name) => /update\.lock|recovery|staging|displaced/i.test(name)), []);
+  }
 });

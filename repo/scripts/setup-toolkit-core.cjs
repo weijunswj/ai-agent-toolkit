@@ -338,9 +338,9 @@ function preferenceSummary(options) {
     host_native_plugin_cache_auto_refresh: options.host === 'codex'
       ? (choices.codexPluginAutoRefresh || 'question-required')
       : 'manual-verification-only',
-    helper_capacity: options.host === 'codex'
+    helper_capacity_backstop: options.host === 'codex'
       ? (choices.codexHelperCapacity || 'question-required')
-      : 'unsupported-policy-only',
+      : 'unsupported-no-enforceable-profile',
     helper_count: options.host === 'codex' && choices.codexHelperCapacity === 'custom'
       ? options.codexHelperCount
       : (options.host === 'codex' && choices.codexHelperCapacity === 'one-helper'
@@ -953,7 +953,7 @@ async function confirmSelectedDelegationProposal(args, current, questionBank) {
 
 async function applyHostDelegationControl(args, current) {
   if (args.host !== 'codex') {
-    return { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable', changed: false };
+    return { status: 'unsupported', detail: 'No enforceable host topology profile is available; portable root-first launch gates still apply', client_scope: 'not applicable', changed: false };
   }
   const choice = args.setupChoices.codexHelperCapacity;
   const configPath = current.delegation.config_path || delegation.codexConfigPath();
@@ -1011,7 +1011,7 @@ async function collectCurrentState(args) {
     : { runtime: RUNTIMES.UNKNOWN, detector: 'not applicable', detail: 'Codex runtime detection is not applicable to this host.' };
   const delegationState = args.host === 'codex'
     ? delegation.inspectCodexDelegationConfig(delegation.codexConfigPath(), runtime.runtime)
-    : { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable' };
+    : { status: 'unsupported', detail: 'No enforceable host topology profile is available; portable root-first launch gates still apply', client_scope: 'not applicable' };
   const delegationMigrationPreview = args.host === 'codex' && delegationState.status === 'migration-required'
     ? delegation.previewCodexDelegation(delegationState.config_path, {
         runtime: runtime.runtime,
@@ -1195,16 +1195,16 @@ function setupQuestionSpecs(args, current) {
       section: 'Computer performance',
       title: 'How many helper agents may Codex use?',
       prompt: 'Codex helper choice',
-      description: 'Each helper can use substantial memory. More than one helper can make the computer unresponsive.',
+      description: 'This sets a memory backstop, not permission to launch. Each helper can use substantial memory, and more than one can make the computer unresponsive.',
       choices: helperChoices,
       recommended: recommendedChoice('codexHelperCapacity', current, args),
       selected: args.setupChoices.codexHelperCapacity,
       current: currentHelperOutcome(current),
       recommended_outcome: migrationPending
         ? 'Keep the existing Toolkit legacy setting unchanged unless you explicitly choose migration.'
-        : current.runtime?.runtime === RUNTIMES.UNKNOWN
-        ? 'Keep the current setting until Codex can verify the effective helper controls.'
-        : 'One helper at most. Codex performs the main work and may use one helper for a difficult, clearly separate task.'
+        : !runtimeSupported
+        ? 'Keep the current setting until Codex reports supported effective helper controls.'
+        : 'One helper at most as a memory backstop. A helper still cannot launch unless the active profile verifies admission, medium reasoning, and non-fast mode.'
     });
     specs.push({
       key: 'codexPluginAutoRefresh',
