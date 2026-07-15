@@ -64,6 +64,37 @@ test('canonical question specification orders delegation before plugin auto-refr
   ]);
 });
 
+test('agent-facing setup docs match the report question rows', () => {
+  const args = core.parseArgs(['--plan']);
+  const current = {
+    managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
+    audit: { repo_auto_update: {}, targets: {} },
+    delegation: { status: 'unconfigured', detail: 'not configured' },
+    nativePlugin: { status: 'not checked' },
+  };
+  const reportRows = core.setupQuestionSpecs(args, current)
+    .filter((spec) => /report/i.test(`${spec.key} ${spec.title}`));
+  assert.deepEqual(reportRows.map((spec) => spec.key), ['updateReports', 'updateReportRetention']);
+  assert.equal(reportRows.some((spec) => /open/i.test(spec.key)), false);
+
+  const docs = [
+    'repo/docs/FOR_AI_AGENTS.md',
+    'repo/docs/HOW-TO-USE.md',
+    'repo/docs/TOOLKIT-LOCAL-BRIDGE.md',
+    '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md',
+    'skills/toolkit-setup/SKILL.md',
+  ];
+  for (const relPath of docs) {
+    const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
+    assert.match(text, /report creation|update report writes|meaningful update reports (?:stay|are) enabled/i, relPath);
+    assert.match(text, /report creation and retention|report(?:\/log)? retention|reports\/logs older than|reports.*kept for/i, relPath);
+    assert.match(text, /(?:action-required|failed or safety-blocked|reports (?:needing|requiring) action)[^.;\n]{0,120}open automatically/i, relPath);
+    assert.match(text, /successful[^.;\n]{0,100}reports (?:remain|stay) closed/i, relPath);
+    assert.doesNotMatch(text, /(?:question bank|wizard)[^.\n]*(?:report auto-open|report opening)/i, relPath);
+    assert.doesNotMatch(text, /(?:ask|answer|pipe|choice)[^.\n]{0,100}(?:report auto-open|report opening)/i, relPath);
+  }
+});
+
 test('canonical wizard renderer is compact, aligned, and free of implementation vocabulary', () => {
   const args = core.parseArgs(['--plan']);
   const current = {
