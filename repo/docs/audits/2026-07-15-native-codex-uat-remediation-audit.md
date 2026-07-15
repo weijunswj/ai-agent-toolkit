@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Implementation validated; PR CI and native UAT pending
+Status: Implementation and PR CI validated; native UAT pending
 
 ## Scope
 
@@ -74,6 +74,8 @@ Passed focused and integration suites:
 - Packaged-version validator regression: 1 targeted test passed.
 
 The complete `repo/tests/validate-toolkit.test.cjs` process exceeded 15 minutes twice without output and left no owned orphan. Its directly affected packaged-version case and the direct Toolkit validator both pass. CI remains the full read-only gate; local `npm run validate:all` was not run per repository policy.
+
+PR #259 exact-head CI passed on commit `cd6b32dde6377436ea7e46573bd2b00789d4d843`, including both validation jobs, package checks, generated-surface sync, and CodeQL. The documentation-only follow-up that records this result must also pass exact-head CI before final completion.
 
 Native Codex C1/C2 and startup/resume/clear/compact were not run and are explicitly excluded from implementation proof.
 
