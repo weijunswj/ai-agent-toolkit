@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Enforceable Claude amendment implemented locally; exact-head PR CI and native UAT pending
+Status: Enforceable Claude amendment implemented; implementation-head CI passed; final documentation-head CI and native UAT pending
 
 ## Scope
 
@@ -146,12 +146,12 @@ Passed on the current worktree unless qualified:
 - `node repo/scripts/validate-toolkit.cjs --workspace <clean current-diff workspace>`: passed. The ordinary working-directory invocation reports only the ignored `.agent-toolkit-backups` rollback backup created during this session; it is not tracked or included in the validation workspace/PR. Deleting that local backup still requires explicit destructive-cleanup approval.
 - Local `npm run validate:all` was not run because repository policy assigns the full gate to CI.
 
-Exact-head PR CI has not run yet. Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT remain pending.
+Implementation-head PR CI passed on `3943c28c5c6ccbba81cc00c992067ec5f59fddb4`: both validation workflows, generated-surface sync, both package checks, the CodeQL workflow gate, and all three material CodeQL analyses passed. This audit-recording documentation follow-up requires replacement exact-head CI. Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT remain pending.
 
 ## Release Gates
 
-- The current P1 topology/admission finding is locally implemented but remains open until exact-head CI and independent current-head review verification pass.
-- Exact-head CI for the new amendment is pending; earlier-head results are not implementation proof.
+- The current P1 topology/admission finding is implemented and its implementation head passed CI; the review thread remains open until the final documentation head passes CI and receives independent current-head verification.
+- Implementation-head CI passed on `3943c28c5c6ccbba81cc00c992067ec5f59fddb4`; replacement exact-head CI for this audit-only follow-up is pending.
 - PR remains unmerged.
 - Issues #241 and #247 remain open.
 - Native Codex C1/C2 and startup/resume/clear/compact reruns remain post-merge gates.
