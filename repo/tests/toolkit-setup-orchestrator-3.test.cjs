@@ -37,6 +37,35 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
 
+test('Claude setup rejects extra non-empty piped input before every setup write', () => {
+  const validRoot = tmpRoot();
+  const validRepo = createGitBackedSetupRepo(validRoot);
+  const valid = run([
+    '--execute', '--host', 'claude-code', '--repo-root', validRepo.setupRepo, '--repo-remote', validRepo.origin,
+  ], {
+    env: isolatedHomeEnv(validRoot),
+    input: ['keep', 'keep', 'keep', 'instructions', '   ', ''].join('\n'),
+  });
+  assert.equal(valid.status, 0, valid.stderr || valid.stdout);
+
+  const rejectedRoot = tmpRoot();
+  const rejectedRepo = createGitBackedSetupRepo(rejectedRoot);
+  const beforeStatus = runTestGit(rejectedRepo.setupRepo, ['status', '--porcelain']);
+  const rejected = run([
+    '--execute', '--host', 'claude-code', '--repo-root', rejectedRepo.setupRepo, '--repo-remote', rejectedRepo.origin,
+  ], {
+    env: isolatedHomeEnv(rejectedRoot),
+    input: ['keep', 'keep', 'keep', 'instructions', 'unexpected'].join('\n'),
+  });
+  assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
+  assert.match(rejected.stderr, /Setup question bank received unexpected extra non-empty input\./);
+  assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'CLAUDE_PLUGIN_HELPER_ARGS.log')), false);
+  assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'CLAUDE_PLUGIN_SETUP.log')), false);
+  assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'BRIDGE_ARGS.log')), false);
+  assert.equal(runTestGit(rejectedRepo.setupRepo, ['status', '--porcelain']), beforeStatus);
+  assert.equal(fs.existsSync(codexConfig(rejectedRoot)), false);
+});
+
 test('target keep, skip, enable-sync, and disable remain distinct', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
@@ -78,4 +107,35 @@ test('setup docs require explicit V2 opt-in and honest enforcement disclosure', 
   }
   const bridge = fs.readFileSync(path.join(repoRoot, 'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');
   assert.doesNotMatch(bridge, /compatible with Codex Security|Codex Security compatible/i);
+  assert.match(bridge, /executing SessionStart bridge in that installed cache/i);
+  assert.match(bridge, /managed checkout is only its refresh source/i);
+});
+
+test('generated Codex and Claude instruction surfaces preserve root-first and helper no-recursion policy', () => {
+  const agents = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
+  const claude = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
+  for (const pattern of [
+    /Complete ordinary work with the root agent alone/,
+    /Generic parallelism, a second opinion.*are not sufficient reasons/,
+    /prefer one direct specialist/,
+    /complete only its assigned bounded scope/,
+    /must not spawn another agent/,
+    /return any need for more expertise to the root/,
+  ]) assert.match(agents, pattern);
+  assert.match(claude, /@AGENTS\.md/);
+  assert.match(claude, /Root `AGENTS\.md` is canonical/);
+  assert.doesNotMatch(claude, /multi_agent_v2|max_concurrent_threads_per_session|agents\.max_threads/);
+});
+
+test('Security policy never raises normal capacity or relabels sequential review as Deep Scan', () => {
+  const core = fs.readFileSync(path.join(repoRoot, 'repo/scripts/setup-toolkit-core.cjs'), 'utf8');
+  const delegation = fs.readFileSync(path.join(repoRoot, 'repo/scripts/codex-delegation-common.cjs'), 'utf8');
+  const docs = fs.readFileSync(path.join(repoRoot, 'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');
+  assert.match(delegation, /CODEX_V2_RAM_SAFE_HELPERS = 1/);
+  assert.doesNotMatch(delegation, /CODEX_V2_RAM_SAFE_HELPERS = [7-9]/);
+  assert.match(core, /normal global capacity is never raised automatically/i);
+  assert.match(core, /explicitly make a temporary global increase with exact backup, restart, restoration, and another restart/i);
+  assert.match(core, /A sequential custom review is not an official Deep Security Scan/i);
+  assert.match(docs, /No documented Codex Security scan-scoped capacity activation exists/i);
+  assert.match(docs, /explicitly approved temporary global increase with backup and restoration/i);
 });

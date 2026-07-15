@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.4.9",
+  "version": "2.5.2",
   "version_policy": "semver",
-  "version_notes": "Isolates exact staging reconciliation from ordinary report, state, target, repo, hook, and native-cache maintenance.",
+  "version_notes": "Closes setup pre-write, matching-config no-op, and explicit legacy-migration review gaps while preserving approval-bound Codex writes.",
   "outputs": [
     {
       "kind": "curated",

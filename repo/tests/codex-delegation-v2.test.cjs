@@ -105,6 +105,17 @@ async function configureV2(filePath, helperCount = 1, options = {}) {
   });
 }
 
+function approvedOptions(preview) {
+  return {
+    approvedProposal: preview.approval_binding,
+    backupGenerationId: preview.backup_generation_id,
+  };
+}
+
+function backupRootFor(filePath) {
+  return path.join(path.dirname(path.dirname(filePath)), '.ai-agent-toolkit', 'backups', 'codex-delegation');
+}
+
 test('runtime detection accepts V1-only and V2-only hosts with V2 precedence', async () => {
   for (const fixture of [
     { features: [{ name: 'multi_agent', enabled: true }], expected: config.RUNTIMES.V1 },
@@ -202,9 +213,21 @@ test('exact PR 237 V1 block migrates to V2 while unrelated bytes survive', async
   assert.match(text, /CODEX-HELPER-CAPACITY/);
 });
 
-test('non-exact or user-owned V1 settings are not migrated', async () => {
+test('V2 preserves user-owned legacy values while configuring only effective V2 keys', async () => {
+  const filePath = configPath();
+  const legacy = '[agents]\n# user-owned legacy values\nmax_threads = 6\nmax_depth = 2\n';
+  writeConfig(filePath, legacy);
+  const result = await configureV2(filePath);
+  assert.equal(result.status, 'configured', result.detail);
+  const text = fs.readFileSync(filePath, 'utf8');
+  assert.ok(text.startsWith(legacy));
+  assert.match(text, /max_concurrent_threads_per_session = 2/);
+  assert.equal((text.match(/max_threads = 6/g) || []).length, 1);
+  assert.equal((text.match(/max_depth = 2/g) || []).length, 1);
+});
+
+test('non-exact managed V1 ownership remains fail-closed under V2', async () => {
   for (const text of [
-    '[agents]\nmax_threads = 1\nmax_depth = 1\n',
     `[agents]\n${config.CODEX_DELEGATION_BEGIN}\nmax_threads = 2\nmax_depth = 1\n${config.CODEX_DELEGATION_END}\n`,
     `[agents]\n${config.CODEX_DELEGATION_BEGIN}\nmax_threads = 1\nmax_depth = 1\n`,
   ]) {
@@ -215,6 +238,15 @@ test('non-exact or user-owned V1 settings are not migrated', async () => {
     assert.ok(['conflicting', 'unsupported'].includes(result.status));
     assert.equal(fs.readFileSync(filePath, 'utf8'), text);
   }
+});
+
+test('V2 root-only mode maps zero helpers to one total session thread', async () => {
+  const filePath = configPath();
+  const result = await configureV2(filePath, 0);
+  assert.equal(result.helper_count, 0);
+  assert.equal(result.total_threads, 1);
+  assert.match(fs.readFileSync(filePath, 'utf8'), /max_concurrent_threads_per_session = 1/);
+  assert.doesNotMatch(fs.readFileSync(filePath, 'utf8'), /max_threads|max_depth/);
 });
 
 test('table-form user-owned V2 enablement remains unmarked and survives removal byte-for-byte', async () => {
@@ -237,6 +269,264 @@ test('table-form user-owned V2 enablement remains unmarked and survives removal 
   assert.equal(conflicting.status, 'conflicting');
   assert.equal(conflicting.changed, false);
   assert.equal(fs.readFileSync(conflictingPath, 'utf8'), conflictingText);
+});
+
+test('unsupported V2 child tables are not replaceable or approvable', async () => {
+  const filePath = configPath();
+  const original = '[features.multi_agent_v2]\nenabled = true\n\n[features.multi_agent_v2.custom]\nvalue = "unsupported"\n';
+  writeConfig(filePath, original);
+  const state = config.inspectCodexDelegationConfig(filePath, V2);
+  assert.equal(state.status, 'conflicting');
+  assert.equal(config.canReplaceUserOwnedRuntimeControls(state, V2), false);
+  const preview = config.previewCodexDelegation(filePath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  assert.notEqual(preview.status, 'preview');
+  let editorCalls = 0;
+  const result = await config.configureCodexDelegation(filePath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+    editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+  });
+  assert.equal(result.changed, false);
+  assert.equal(editorCalls, 0);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+  assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+
+  const parentOnlyPath = configPath();
+  const parentOnly = '[features.multi_agent_v2]\nenabled = true\n';
+  writeConfig(parentOnlyPath, parentOnly);
+  const supported = config.previewCodexDelegation(parentOnlyPath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  assert.equal(supported.status, 'preview');
+  assert.equal(fs.readFileSync(parentOnlyPath, 'utf8'), parentOnly);
+});
+
+test('explicit false or non-boolean V2 enablement is not replaceable', async () => {
+  for (const enabled of ['false', '"true"']) {
+    const filePath = configPath();
+    const original = `[features.multi_agent_v2]\nenabled = ${enabled}\nmax_concurrent_threads_per_session = 2\n`;
+    writeConfig(filePath, original);
+    const state = config.inspectCodexDelegationConfig(filePath, V2);
+    assert.equal(state.status, 'conflicting');
+    assert.equal(config.canReplaceUserOwnedRuntimeControls(state, V2), false);
+    const preview = config.previewCodexDelegation(filePath, { runtime: V2, helperCount: 1, allowUserOwnedReplacement: true });
+    assert.notEqual(preview.status, 'preview');
+    let editorCalls = 0;
+    const result = await config.configureCodexDelegation(filePath, {
+      runtime: V2,
+      helperCount: 1,
+      allowUserOwnedReplacement: true,
+      editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+    });
+    assert.equal(result.changed, false);
+    assert.equal(editorCalls, 0);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+    assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+  }
+});
+
+test('approved migrate remains guarded when no exact legacy state exists', async () => {
+  const filePath = configPath();
+  const original = 'model = "gpt-5.6"\n';
+  writeConfig(filePath, original);
+  const preview = config.previewCodexDelegation(filePath, { runtime: V2, helperCount: 1 });
+  assert.equal(preview.status, 'preview');
+  let editorCalls = 0;
+  const result = await config.delegationResultForChoice('migrate', filePath, {
+    runtime: V2,
+    helperCount: 1,
+    editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+    ...approvedOptions(preview),
+  });
+  assert.equal(result.changed, false);
+  assert.match(result.detail, /No exact Toolkit-managed legacy setting is available to migrate/);
+  assert.equal(editorCalls, 0);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+  assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+});
+
+test('matching user-owned V2 controls are byte-preserving no-ops with root-inclusive arithmetic', async () => {
+  for (const helperCount of [1, 0]) {
+    const filePath = configPath();
+    const original = [
+      '[features.multi_agent_v2]',
+      'enabled = true # user owned',
+      `max_concurrent_threads_per_session = ${helperCount + 1}`,
+      `root_agent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_ROOT_GUIDANCE)}`,
+      `subagent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_HELPER_GUIDANCE)}`,
+      '',
+    ].join('\n');
+    writeConfig(filePath, original);
+    const preview = config.previewCodexDelegation(filePath, {
+      runtime: V2,
+      helperCount,
+      allowUserOwnedReplacement: true,
+    });
+    assert.equal(preview.status, 'configured');
+    assert.equal(preview.selected_outcome_matches, true);
+    assert.equal(preview.requires_user_confirmation, false);
+    const result = await config.configureCodexDelegation(filePath, {
+      runtime: V2,
+      helperCount,
+      allowUserOwnedReplacement: true,
+      editor: async () => { throw new Error('matching user-owned V2 config must not invoke editor'); },
+    });
+    assert.equal(result.changed, false);
+    assert.equal(result.helper_count, helperCount);
+    assert.equal(result.total_threads, helperCount + 1);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+    assert.doesNotMatch(fs.readFileSync(filePath, 'utf8'), /AI-AGENT-TOOLKIT/);
+    assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+  }
+});
+
+test('different or structurally incomplete user-owned V2 controls are not matching no-ops', () => {
+  const filePath = configPath();
+  const complete = [
+    '[features.multi_agent_v2]',
+    'enabled = true',
+    'max_concurrent_threads_per_session = 1',
+    `root_agent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_ROOT_GUIDANCE)}`,
+    `subagent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_HELPER_GUIDANCE)}`,
+    '',
+  ].join('\n');
+  writeConfig(filePath, complete);
+  const different = config.previewCodexDelegation(filePath, { runtime: V2, helperCount: 1, allowUserOwnedReplacement: true });
+  assert.equal(different.status, 'preview');
+  assert.equal(different.requires_user_confirmation, true);
+  assert.notEqual(different.selected_outcome_matches, true);
+
+  const incompletePath = configPath();
+  writeConfig(incompletePath, '[features.multi_agent_v2]\nenabled = true\nmax_concurrent_threads_per_session = 2\n');
+  const incomplete = config.previewCodexDelegation(incompletePath, { runtime: V2, helperCount: 1, allowUserOwnedReplacement: true });
+  assert.notEqual(incomplete.selected_outcome_matches, true);
+  assert.equal(incomplete.requires_user_confirmation, true);
+});
+
+test('approved user-owned V2 control replacement preserves enablement and unrelated keys', async () => {
+  const filePath = configPath();
+  const original = [
+    '[features.multi_agent_v2]',
+    'enabled = true # user-owned enablement',
+    'max_concurrent_threads_per_session = 6',
+    'root_agent_usage_hint_text = "custom root"',
+    'subagent_usage_hint_text = "custom helper"',
+    'unrelated = "preserve"',
+    '',
+  ].join('\n');
+  writeConfig(filePath, original);
+  const preview = config.previewCodexDelegation(filePath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  assert.equal(preview.status, 'preview');
+  assert.equal(preview.requires_user_confirmation, true);
+  assert.doesNotMatch(preview.affected_keys.join('\n'), /\.enabled$/m);
+  assert.match(preview.affected_keys.join('\n'), /max_concurrent_threads_per_session/);
+
+  const result = await config.configureCodexDelegation(filePath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+    ...approvedOptions(preview),
+    editor: async () => ({
+      bytes: Buffer.from(original
+        .replace('max_concurrent_threads_per_session = 6', 'max_concurrent_threads_per_session = 2')
+        .replace('root_agent_usage_hint_text = "custom root"', `root_agent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_ROOT_GUIDANCE)}`)
+        .replace('subagent_usage_hint_text = "custom helper"', `subagent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_HELPER_GUIDANCE)}`)),
+      editor: 'approved V2 replacement fixture',
+    }),
+  });
+  assert.equal(result.status, 'configured', result.detail);
+  const configured = fs.readFileSync(filePath, 'utf8');
+  assert.match(configured, /enabled = true # user-owned enablement/);
+  assert.match(configured, /unrelated = "preserve"/);
+  assert.match(configured, /max_concurrent_threads_per_session = 2/);
+  assert.doesNotMatch(configured, /CODEX-V2-ENABLEMENT/);
+  assert.ok(fs.existsSync(result.backup_metadata_path));
+  config.restoreCodexDelegationBackup(result.backup_metadata_path, { configPath: filePath });
+  assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+});
+
+test('approved V2 proposal rejects affected-key drift before editor or backup', async () => {
+  const filePath = configPath();
+  const original = [
+    '[features.multi_agent_v2]',
+    'enabled = true',
+    'max_concurrent_threads_per_session = 6',
+    'root_agent_usage_hint_text = "custom root"',
+    'subagent_usage_hint_text = "custom helper"',
+    '',
+  ].join('\n');
+  writeConfig(filePath, original);
+  const preview = config.previewCodexDelegation(filePath, { runtime: V2, helperCount: 1, allowUserOwnedReplacement: true });
+  const drift = original.replace('max_concurrent_threads_per_session = 6', 'max_concurrent_threads_per_session = 5');
+  writeConfig(filePath, drift);
+  let editorCalls = 0;
+  const result = await config.configureCodexDelegation(filePath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+    editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+    ...approvedOptions(preview),
+  });
+  assert.equal(result.status, 'approval-stale');
+  assert.equal(result.changed, false);
+  assert.match(result.detail, /configuration changed after you approved the proposal/i);
+  assert.equal(editorCalls, 0);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), drift);
+  assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+});
+
+test('approved V2 proposal rejects unrelated-byte drift before editor or backup', async () => {
+  const filePath = configPath();
+  const original = [
+    'sandbox_mode = "workspace-write"',
+    '[features.multi_agent_v2]',
+    'enabled = true',
+    'max_concurrent_threads_per_session = 6',
+    'root_agent_usage_hint_text = "custom root"',
+    'subagent_usage_hint_text = "custom helper"',
+    '',
+  ].join('\n');
+  writeConfig(filePath, original);
+  const preview = config.previewCodexDelegation(filePath, { runtime: V2, helperCount: 1, allowUserOwnedReplacement: true });
+  const drift = original.replace('sandbox_mode = "workspace-write"', 'sandbox_mode = "danger-full-access"');
+  writeConfig(filePath, drift);
+  let editorCalls = 0;
+  const result = await config.configureCodexDelegation(filePath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+    editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+    ...approvedOptions(preview),
+  });
+  assert.equal(result.status, 'approval-stale');
+  assert.equal(editorCalls, 0);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), drift);
+  assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+});
+
+test('approved Toolkit-managed V2 capacity change uses the reviewed snapshot and restores exactly', async () => {
+  const filePath = configPath();
+  await configureV2(filePath, 1);
+  const approvedBytes = fs.readFileSync(filePath);
+  const preview = config.previewCodexDelegation(filePath, { runtime: V2, helperCount: 0, allowUserOwnedReplacement: true });
+  const result = await configureV2(filePath, 0, approvedOptions(preview));
+  assert.equal(result.status, 'configured', result.detail);
+  assert.equal(result.helper_count, 0);
+  assert.match(fs.readFileSync(filePath, 'utf8'), /max_concurrent_threads_per_session = 1/);
+  assert.ok(fs.existsSync(result.backup_metadata_path));
+  config.restoreCodexDelegationBackup(result.backup_metadata_path, { configPath: filePath });
+  assert.deepEqual(fs.readFileSync(filePath), approvedBytes);
 });
 
 test('official V2 boolean enablement migrates to the configured table', async () => {
@@ -286,6 +576,27 @@ test('proposal validation rejects unrelated editor mutations without writing', a
   assert.equal(result.changed, false);
   assert.match(result.detail, /changed text before/);
   assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+});
+
+test('whole-file proposal validation rejects adversarial security-setting mutations', async () => {
+  for (const mutate of [
+    (text) => text.replace('approval_policy = "on-request"', 'approval_policy = "never"'),
+    (text) => text.replace('sandbox_mode = "workspace-write"', 'sandbox_mode = "danger-full-access"'),
+    (text) => text.replace('web_search = false', 'web_search = true'),
+    (text) => `${text}\n[mcp_servers.attacker]\ncommand = "unexpected"\n`,
+  ]) {
+    const filePath = configPath();
+    const original = 'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n[features]\nweb_search = false\n';
+    writeConfig(filePath, original);
+    const result = await config.configureCodexDelegation(filePath, {
+      runtime: V2,
+      helperCount: 1,
+      editor: v2Editor({ mutate }),
+    });
+    assert.equal(result.status, 'conflicting');
+    assert.equal(result.changed, false);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+  }
 });
 
 test('exact restore commands quote absolute hostile script and metadata paths for both shells', () => {

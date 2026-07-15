@@ -19,7 +19,9 @@ const {
   repairThirdPartyCodexPluginHooks,
   adapterPayloads,
   payloadChecksum,
-  updateReportSignature
+  updateReportSignature,
+  classifyUpdateReport,
+  maybeWriteUpdateReport
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
@@ -34,7 +36,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.4.9';
+const expectedBridgeVersion = '2.5.2';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -4551,14 +4553,15 @@ test('update report opening is Windows-only notepad and rejects non-report paths
   }).ok, false);
 });
 
-test('update report opening is persisted opt-in', () => {
+test('legacy update-report open flags retain failure-only behavior', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   let result = run(['--hub', hub, '--enable-update-report-open', '--write'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_enabled, true);
+  assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_enabled, false);
+  assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_behavior, 'action-required-only');
 
   result = run(['--hub', hub, '--disable-update-report-open', '--write'], {
     env: isolatedHomeEnv(root)
@@ -4567,23 +4570,24 @@ test('update report opening is persisted opt-in', () => {
   assert.equal(readJson(path.join(hub, 'state.json')).update_report_open_enabled, false);
 });
 
-test('update report opening and retention are preserved when flags are omitted', () => {
+test('legacy persisted all-report opening migrates while retention is preserved', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
-  let result = run(['--hub', hub, '--enable-update-report-open', '--update-report-retention-days', '14', '--write'], {
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    update_report_open_enabled: true,
+    update_report_retention_days: 14,
+    targets: {}
+  });
+  let result = run(['--hub', hub, '--enable-update-reports', '--write'], {
     env: isolatedHomeEnv(root)
   });
   assert.equal(result.status, 0, result.stderr);
   let state = readJson(path.join(hub, 'state.json'));
-  assert.equal(state.update_report_open_enabled, true);
-  assert.equal(state.update_report_retention_days, 14);
-
-  result = run(['--hub', hub, '--enable-update-reports', '--write'], {
-    env: isolatedHomeEnv(root)
-  });
-  assert.equal(result.status, 0, result.stderr);
-  state = readJson(path.join(hub, 'state.json'));
-  assert.equal(state.update_report_open_enabled, true);
+  assert.equal(state.update_report_open_enabled, false);
+  assert.equal(state.legacy_update_report_open_migrated, true);
   assert.equal(state.update_report_retention_days, 14);
 
   result = run(['--hub', hub, '--audit'], {
@@ -4591,8 +4595,43 @@ test('update report opening and retention are preserved when flags are omitted',
   });
   assert.equal(result.status, 0, result.stderr);
   const audit = parseLastJson(result.stdout);
-  assert.equal(audit.update_report_open_enabled, true);
+  assert.equal(audit.update_report_open_enabled, false);
+  assert.equal(audit.update_report_open_behavior, 'action-required-only');
+  assert.equal(audit.legacy_update_report_open_migrated, true);
   assert.equal(audit.update_report_retention_days, 14);
+});
+
+test('central report classification opens only actionable reports', () => {
+  const base = { repo: {}, nativePluginCache: {}, thirdPartyHookRepair: {}, targetSyncs: [], targetSyncStatus: 'not needed' };
+  assert.deepEqual(classifyUpdateReport(base), { meaningful: false, actionable: false, kind: 'no-op' });
+  assert.deepEqual(classifyUpdateReport({ ...base, repo: { status: 'updated' } }), { meaningful: true, actionable: false, kind: 'successful-activity' });
+  assert.deepEqual(classifyUpdateReport({ ...base, nativePluginCache: { status: 'refreshed' } }), { meaningful: true, actionable: false, kind: 'successful-activity' });
+  assert.deepEqual(classifyUpdateReport({ ...base, thirdPartyHookRepair: { status: 'repaired' } }), { meaningful: true, actionable: false, kind: 'successful-activity' });
+  assert.equal(classifyUpdateReport({ ...base, repo: { status: 'validation-failed' } }).actionable, true);
+  assert.equal(classifyUpdateReport({ ...base, repo: { status: 'skipped', error: 'remote mismatch' } }).actionable, true);
+  assert.equal(classifyUpdateReport({ ...base, nativePluginCache: { status: 'refresh-failed' } }).actionable, true);
+  assert.equal(classifyUpdateReport({ ...base, thirdPartyHookRepair: { status: 'partial-failed' } }).actionable, true);
+  assert.equal(classifyUpdateReport({ ...base, targetSyncStatus: 'failed' }).actionable, true);
+
+  const writes = [];
+  const opens = [];
+  const invoke = (context) => maybeWriteUpdateReport({
+    args: { hook: true, repoUpdateNow: false, openUpdateReport: false, suppressUpdateReport: false, syncSource: 'repo' },
+    hubPath: 'unused',
+    state: { update_report_enabled: true, last_update_report_signature: '', last_update_report_cleanup: {}, bridge_versions_by_source: {}, hub_version: '', update_report_retention_days: 7 },
+    checksum: 'fixture',
+    context,
+    writeReport(markdown) { writes.push(markdown); return `fixture-${writes.length}.md`; },
+    openReport(reportPath) { opens.push(reportPath); return { ok: true }; },
+  });
+  invoke({ ...base, repo: { status: 'updated' } });
+  assert.equal(writes.length, 1);
+  assert.equal(opens.length, 0);
+  invoke({ ...base, repo: { status: 'validation-failed' } });
+  assert.equal(writes.length, 2);
+  assert.deepEqual(opens, ['fixture-2.md']);
+  invoke(base);
+  assert.equal(writes.length, 2);
 });
 
 test('update report cleanup deletes only old Toolkit-managed reports inside the report root', () => {
@@ -4826,10 +4865,10 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit/, relPath);
     assert.match(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
     assert.match(text, /separate from the active Codex or Claude Code worktree, plugin caches, `\.tmp` directories, and temporary marketplace checkouts/i, relPath);
-    assert.match(text, /one consolidated upfront setup question bank/i, relPath);
-    assert.match(text, /Update report auto-open/i, relPath);
-    assert.match(text, /OpenCode target: detected state, enabled state, synced state\/version/i, relPath);
-    assert.match(text, /AG2\/Antigravity target: detected state, enabled state, synced state\/version/i, relPath);
+    assert.match(text, /complete compact bank|semantic wizard model/i, relPath);
+    assert.match(text, /report auto-open is not an ordinary question|failure-only behavior/i, relPath);
+    assert.match(text, /OpenCode.*omit|Omit OpenCode/i, relPath);
+    assert.match(text, /Antigravity.*omit|Omit OpenCode, Antigravity/i, relPath);
     assert.match(text, /Allowed later blockers include dirty managed checkout, unexpected remote, fetch\/auth failure, non-fast-forward update, validation failure/i, relPath);
     assert.match(text, /node repo\/scripts\/validate-toolkit\.cjs/, relPath);
     const setupValidationBlock = text.match(/For bridge or setup-surface changes, prefer targeted checks first:[\s\S]*?```powershell\r?\n([\s\S]*?)\r?\n```/i);
@@ -4847,10 +4886,10 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2/i, relPath);
-    assert.match(text, /setup question bank must use one canonical order for displayed rows, interactive prompts, piped input, explicit flags, `--yes-recommended`, plans, and execution/i, relPath);
-    assert.match(text, /Every row must show current state, recommended default, empty-input behavior, choices, and selected answer/i, relPath);
-    assert.match(text, /OpenCode target: detected state, enabled state, synced state\/version/i, relPath);
-    assert.match(text, /AG2\/Antigravity target: detected state, enabled state, synced state\/version/i, relPath);
+    assert.match(text, /semantic wizard model|One semantic wizard model/i, relPath);
+    assert.match(text, /current user-visible outcome.*recommended user-visible outcome.*choices/i, relPath);
+    assert.match(text, /OpenCode.*omit|Omit OpenCode/i, relPath);
+    assert.match(text, /Antigravity.*omit|Omit OpenCode, Antigravity/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2 are opt-in only/i, relPath);
     assert.match(text, /Sync only enabled targets/i, relPath);
     assert.match(text, /fast-forward/i, relPath);

@@ -44,14 +44,21 @@ function createFakeCodexAppServer(root) {
     "rl.on('line', (line) => {",
     "  const message = JSON.parse(line);",
     "  if (message.method === 'initialize') process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');",
-    "  if (message.method === 'experimentalFeature/list') process.stdout.write(JSON.stringify({ id: message.id, result: { data: [{ name: 'multi_agent_v2', enabled: true }, { name: 'multi_agent', enabled: false }] } }) + '\\n');",
+    "  if (message.method === 'experimentalFeature/list') {",
+    "    const v1 = process.env.SETUP_FAKE_CODEX_RUNTIME === 'v1';",
+    "    process.stdout.write(JSON.stringify({ id: message.id, result: { data: [{ name: 'multi_agent_v2', enabled: !v1 }, { name: 'multi_agent', enabled: v1 }] } }) + '\\n');",
+    "  }",
     "  if (message.method === 'config/batchWrite') {",
+    "    if (process.env.SETUP_FAKE_CODEX_EDITOR_LOG) fs.appendFileSync(process.env.SETUP_FAKE_CODEX_EDITOR_LOG, 'config/batchWrite\\n');",
     "    const target = path.join(process.env.CODEX_HOME, 'config.toml');",
     "    const text = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';",
     "    const separator = text ? (text.endsWith('\\n') ? '\\n' : '\\n\\n') : '';",
     "    const edits = message.params.edits;",
     "    const values = Object.fromEntries(edits.map((edit) => [edit.keyPath.split('.').at(-1), edit.value]));",
-    "    fs.writeFileSync(target, text + separator + '[features.multi_agent_v2]\\nenabled = ' + values.enabled + '\\nmax_concurrent_threads_per_session = ' + values.max_concurrent_threads_per_session + '\\nroot_agent_usage_hint_text = ' + JSON.stringify(values.root_agent_usage_hint_text) + '\\nsubagent_usage_hint_text = ' + JSON.stringify(values.subagent_usage_hint_text) + '\\n');",
+    "    const replacement = Object.hasOwn(values, 'max_threads')",
+    "      ? '[agents]\\nmax_threads = ' + values.max_threads + '\\nmax_depth = ' + values.max_depth + '\\n'",
+    "      : '[features.multi_agent_v2]\\nenabled = ' + values.enabled + '\\nmax_concurrent_threads_per_session = ' + values.max_concurrent_threads_per_session + '\\nroot_agent_usage_hint_text = ' + JSON.stringify(values.root_agent_usage_hint_text) + '\\nsubagent_usage_hint_text = ' + JSON.stringify(values.subagent_usage_hint_text) + '\\n';",
+    "    fs.writeFileSync(target, text + separator + replacement);",
     "    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');",
     "  }",
     '});',
@@ -85,10 +92,10 @@ function runTestGit(cwd, args) {
 function createMinimalSetupRepo(root, options = {}) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '2.4.9', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '2.5.2', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '2.4.9', hooks: './.codex-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '2.5.2', hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
     hooks: { SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source claude-plugin' }] }] }
@@ -99,7 +106,7 @@ function createMinimalSetupRepo(root, options = {}) {
     "const path = require('node:path');",
     "if (process.env.SETUP_FAKE_PLUGIN_FAILURE === '1') { console.error('synthetic plugin failure'); process.exit(1); }",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.4.9', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.5.2', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
     'process.exit(0);', ''
   ].join('\n'));
   writeFile(path.join(root, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'), [
@@ -108,7 +115,7 @@ function createMinimalSetupRepo(root, options = {}) {
     "const path = require('node:path');",
     "fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_HELPER_ARGS.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.4.9', scope: 'user' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.5.2', scope: 'user' }));",
     'process.exit(0);', ''
   ].join('\n'));
   writeFile(path.join(root, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
@@ -118,6 +125,16 @@ function createMinimalSetupRepo(root, options = {}) {
     "const args = process.argv.slice(2);",
     "if (args.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'BRIDGE_ARGS.log'), `${args.join(' ')}\\n`);",
     "if (args.includes('--audit')) {",
+    "  if (process.env.SETUP_FAKE_AUDIT_COUNT_PATH) {",
+    "    const countPath = process.env.SETUP_FAKE_AUDIT_COUNT_PATH;",
+    "    const count = fs.existsSync(countPath) ? Number(fs.readFileSync(countPath, 'utf8')) + 1 : 1;",
+    "    fs.writeFileSync(countPath, String(count));",
+    "    if (process.env.SETUP_FAKE_CONFIG_DRIFT_CONTENT && count === Number(process.env.SETUP_FAKE_CONFIG_DRIFT_ON_AUDIT || '2')) {",
+    "      const configPath = path.join(process.env.CODEX_HOME, 'config.toml');",
+    "      fs.mkdirSync(path.dirname(configPath), { recursive: true });",
+    "      fs.writeFileSync(configPath, process.env.SETUP_FAKE_CONFIG_DRIFT_CONTENT);",
+    "    }",
+    "  }",
     "  const fallback = { update_report_enabled: true, update_report_open_enabled: false, update_report_retention_days: 7, codex_plugin_auto_refresh_enabled: false, repo_auto_update: { enabled: false, last_status: 'configured', repo_path: '' }, update_report_cleanup: { retention_days: 7, deleted_count: 0, error_count: 0, report_log_directory: path.join(process.cwd(), 'tmp-reports') }, targets: { opencode: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '', path: '' }, ag2: { detected: false, enabled: false, synced: false, status: 'not detected', synced_version: '', path: '' } } };",
     "  process.stdout.write(process.env.SETUP_FAKE_AUDIT_MALFORMED === '1' ? 'not-json' : JSON.stringify(process.env.SETUP_FAKE_AUDIT_JSON ? JSON.parse(process.env.SETUP_FAKE_AUDIT_JSON) : fallback));",
     "}",
@@ -170,8 +187,12 @@ function createFakeManagedSetupScript(root, options = {}) {
   const exitCode = Number.isInteger(options.exitCode) ? options.exitCode : 23;
   writeFile(scriptPath, [
     '#!/usr/bin/env node', "'use strict';",
-    "console.log('managed setup script version 2.4.9');",
-    ...(options.emitQuestionBank === false ? [] : ["console.log('# setup toolkit question bank');"]),
+    "console.log('managed setup script version 2.5.2');",
+    ...(options.emitQuestionBank === false ? [] : [
+      "console.log('<!-- setup-toolkit-question-bank:begin -->');",
+      "console.log('# Toolkit setup choices');",
+      "console.log('<!-- setup-toolkit-question-bank:complete -->');"
+    ]),
     ...(options.extraLines || []),
     "console.log('Setup script path executed: ' + __filename);",
     `process.exit(${exitCode});`, ''

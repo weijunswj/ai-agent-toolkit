@@ -204,7 +204,12 @@ function v2State(parsed, layout, base) {
         detail: `Compatible user-owned MultiAgentV2 values allow ${helperCount} helper(s) plus the root (${helperCount + 1} total session threads); the root counts toward the total and Toolkit will not claim ownership.`,
       };
     }
-    return { ...base, status: 'conflicting', detail: 'User-owned MultiAgentV2 capacity or guidance values are present; Toolkit will not overwrite them.' };
+    return {
+      ...base,
+      status: 'conflicting',
+      enablement_ownership: exactBoolean(enabled, true) ? 'user-owned-table' : 'replace-required',
+      detail: 'User-owned MultiAgentV2 capacity or guidance values are present; Toolkit will not overwrite them.',
+    };
   }
 
   if (enabled?.present && !exactBoolean(enabled, true)) {
@@ -237,7 +242,16 @@ function v2State(parsed, layout, base) {
 
   const legacyValues = parsed.values || {};
   if (legacyValues.max_threads?.present || legacyValues.max_depth?.present) {
-    return { ...base, status: 'conflicting', detail: 'User-owned legacy [agents] limits are present while MultiAgentV2 is effective; Toolkit will not modify them.' };
+    return {
+      ...base,
+      status: 'unconfigured',
+      ownership: 'user-owned-legacy-ignored-by-v2',
+      legacy_values_ignored: true,
+      helper_count: null,
+      total_threads: null,
+      hard_nested_helper_enforcement: 'not-supported',
+      detail: 'MultiAgentV2 is effective, so the preserved user-owned legacy [agents] values do not enforce the active helper capacity. No effective Toolkit helper capacity is configured.',
+    };
   }
 
   return {
@@ -287,6 +301,8 @@ function v1State(parsed, layout, base) {
       helper_count: helperCount,
       total_threads: null,
       hard_nested_helper_enforcement: 'supported',
+      recursive_helper_control: 'hard-enforced by the supported V1 nesting-depth control',
+      recursive_hard_block: true,
       detail: managed ? `Toolkit-managed MultiAgentV1 capacity allows ${helperCount} helper(s).` : `Compatible user-owned MultiAgentV1 values allow ${helperCount} helper(s).`,
     };
   }
@@ -294,7 +310,7 @@ function v1State(parsed, layout, base) {
   if (layout.agentsChildren.length && layout.agentsTables.length === 0) {
     return { ...base, status: 'conflicting', detail: 'Codex config contains [agents.<role>] child tables without an explicit [agents] table.' };
   }
-  return { ...base, status: 'unconfigured', helper_count: null, total_threads: null, hard_nested_helper_enforcement: 'supported', detail: 'MultiAgentV1 is effective and helper capacity is not configured.' };
+  return { ...base, status: 'unconfigured', helper_count: null, total_threads: null, hard_nested_helper_enforcement: 'supported', recursive_helper_control: 'hard-enforced when Toolkit configures the supported V1 nesting-depth control', recursive_hard_block: true, detail: 'MultiAgentV1 is effective and helper capacity is not configured.' };
 }
 
 function codexDelegationConfigState(configBytes, configPath = codexConfigPath(), runtime = RUNTIMES.UNKNOWN) {

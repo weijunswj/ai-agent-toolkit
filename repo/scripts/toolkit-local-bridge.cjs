@@ -17,7 +17,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.4.9';
+const BRIDGE_VERSION = '2.5.2';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -279,8 +279,8 @@ function printHelp() {
     '  --disable-update-reports',
     '  --update-report-retention-days <days>',
     '                                positive integer, default: 7',
-    '  --enable-update-report-open persist opt-in opening of generated update reports',
-    '  --disable-update-report-open',
+    '  --enable-update-report-open compatibility alias for failure-only opening; successful reports remain closed',
+    '  --disable-update-report-open retain failure-only opening; successful reports remain closed',
     '  --enable-codex-plugin-auto-refresh',
     '                                persist opt-in Codex Toolkit cache refresh and Windows third-party hook repair',
     '  --disable-codex-plugin-auto-refresh',
@@ -766,6 +766,8 @@ function defaultState() {
     last_update_report_signature: '',
     update_report_enabled: true,
     update_report_open_enabled: false,
+    update_report_open_behavior: 'action-required-only',
+    legacy_update_report_open_migrated: false,
     update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
     last_update_report_cleanup: null,
     codex_plugin_auto_refresh_enabled: false,
@@ -803,7 +805,10 @@ function normalizedState(raw) {
   state.last_update_report_path = state.last_update_report_path || '';
   state.last_update_report_signature = state.last_update_report_signature || '';
   state.update_report_enabled = state.update_report_enabled !== false;
-  state.update_report_open_enabled = state.update_report_open_enabled === true;
+  state.legacy_update_report_open_migrated = raw?.update_report_open_enabled === true
+    || raw?.legacy_update_report_open_migrated === true;
+  state.update_report_open_enabled = false;
+  state.update_report_open_behavior = 'action-required-only';
   state.update_report_retention_days = Number.isInteger(state.update_report_retention_days) && state.update_report_retention_days > 0
     ? state.update_report_retention_days
     : DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
@@ -831,8 +836,7 @@ function applyRequestedState(state, args) {
     next.last_repo_update_status = 'disabled';
     next.last_repo_update_error = '';
   }
-  if (args.enableUpdateReportOpen) next.update_report_open_enabled = true;
-  if (args.disableUpdateReportOpen) next.update_report_open_enabled = false;
+  if (args.enableUpdateReportOpen || args.disableUpdateReportOpen) next.update_report_open_enabled = false;
   if (args.enableUpdateReports) next.update_report_enabled = true;
   if (args.disableUpdateReports) next.update_report_enabled = false;
   if (args.updateReportRetentionDaysExplicit) next.update_report_retention_days = args.updateReportRetentionDays;
@@ -1912,24 +1916,39 @@ function shouldConsiderUpdateReport(args, state) {
       args.hook ||
       args.repoUpdateNow ||
       args.openUpdateReport ||
-      state.update_report_open_enabled ||
       isLegacyDelegatedRepoSync(args)
     )
   );
 }
 
-function updateReportIsMeaningful(context) {
+function classifyUpdateReport(context) {
   const repoStatus = context.repo?.status || '';
-  if (context.repo?.branchSwitchedFrom) return true;
-  if (repoStatus === 'updated') return true;
-  if (context.repo?.externalAdvanceDetected) return true;
-  if (repoStatus === 'validation-failed') return true;
-  if (repoStatus === 'sync-delegation-failed') return true;
-  if (repoStatus === 'skipped' && context.repo?.error) return true;
-  if (['stale', 'refreshed', 'refresh-failed'].includes(context.nativePluginCache?.status)) return true;
-  if (['repaired', 'repair-failed', 'partial-failed'].includes(context.thirdPartyHookRepair?.status)) return true;
-  if ((context.targetSyncs || []).length) return true;
-  return (context.targetSyncs || []).some((entry) => (entry.removedSkillNames || []).length);
+  const cacheStatus = context.nativePluginCache?.status || '';
+  const repairStatus = context.thirdPartyHookRepair?.status || '';
+  const targetStatus = context.targetSyncStatus || '';
+  const actionable = repoStatus === 'validation-failed'
+    || repoStatus === 'sync-delegation-failed'
+    || (repoStatus === 'skipped' && Boolean(context.repo?.error))
+    || ['stale', 'refresh-failed'].includes(cacheStatus)
+    || ['repair-failed', 'partial-failed'].includes(repairStatus)
+    || ['failed', 'not confirmed'].includes(targetStatus)
+    || Boolean(context.warning);
+  const successfulActivity = Boolean(context.repo?.branchSwitchedFrom)
+    || repoStatus === 'updated'
+    || Boolean(context.repo?.externalAdvanceDetected)
+    || cacheStatus === 'refreshed'
+    || repairStatus === 'repaired'
+    || (context.targetSyncs || []).length > 0
+    || (context.targetSyncs || []).some((entry) => (entry.removedSkillNames || []).length > 0);
+  return {
+    meaningful: actionable || successfulActivity,
+    actionable,
+    kind: actionable ? 'action-required' : (successfulActivity ? 'successful-activity' : 'no-op'),
+  };
+}
+
+function updateReportIsMeaningful(context) {
+  return classifyUpdateReport(context).meaningful;
 }
 
 function shortCommit(value) {
@@ -2212,8 +2231,9 @@ function updateReportSignature({ args, checksum, context }) {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-function maybeWriteUpdateReport({ args, hubPath, state, checksum, context }) {
-  if (!shouldConsiderUpdateReport(args, state) || !updateReportIsMeaningful(context)) {
+function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, writeReport = writeUpdateReportFile, openReport = openUpdateReport }) {
+  const classification = classifyUpdateReport(context);
+  if (!shouldConsiderUpdateReport(args, state) || !classification.meaningful) {
     return { state, reportPath: '' };
   }
   const reportContext = {
@@ -2226,11 +2246,11 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context }) {
     return { state, reportPath: '' };
   }
   const markdown = buildUpdateReport({ args, state, checksum, context: reportContext });
-  const reportPath = writeUpdateReportFile(markdown);
+  const reportPath = writeReport(markdown);
   state.last_update_report_path = reportPath;
   state.last_update_report_signature = signature;
-  if (args.openUpdateReport || state.update_report_open_enabled) {
-    openUpdateReport(reportPath);
+  if (args.openUpdateReport || classification.actionable) {
+    openReport(reportPath);
   }
   return { state, reportPath };
 }
@@ -3207,6 +3227,8 @@ function buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) {
     auto_sync_enabled: state.auto_sync_enabled,
     update_report_enabled: state.update_report_enabled,
     update_report_open_enabled: state.update_report_open_enabled,
+    update_report_open_behavior: state.update_report_open_behavior,
+    legacy_update_report_open_migrated: state.legacy_update_report_open_migrated,
     update_report_retention_days: state.update_report_retention_days,
     update_report_cleanup: state.last_update_report_cleanup || {
       retention_days: state.update_report_retention_days,
@@ -4022,6 +4044,8 @@ module.exports = {
   getRepoValidationLabels,
   runRepoValidation,
   updateReportSignature,
+  classifyUpdateReport,
+  maybeWriteUpdateReport,
   updateReportDir,
   cleanupUpdateReports,
   openUpdateReport,
