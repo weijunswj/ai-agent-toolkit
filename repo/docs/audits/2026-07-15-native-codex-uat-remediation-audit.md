@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Amendment locally validated; exact-head PR CI and native UAT pending
+Status: Amendment and exact-head PR CI validated; native UAT pending
 
 ## Scope
 
@@ -102,16 +102,16 @@ PR #259 amendment validation on the current worktree:
 
 The complete `repo/tests/validate-toolkit.test.cjs` process exceeded 15 minutes twice without output and left no owned orphan. Its directly affected packaged-version case and the direct Toolkit validator both pass. CI remains the full read-only gate; local `npm run validate:all` was not run per repository policy.
 
-PR #259 CI passed on earlier commit `cd6b32dde6377436ea7e46573bd2b00789d4d843`, including both validation jobs, package checks, generated-surface sync, and CodeQL. That result does not validate the current amendment; the new exact head must pass before final completion.
+PR #259 CI passed on earlier commit `cd6b32dde6377436ea7e46573bd2b00789d4d843`, including both validation jobs, package checks, generated-surface sync, and CodeQL. That result preceded the current amendment.
 
-The first amendment CI run on `e4bb4388b4fe7b83c52ea8b37adfe0ef5f2c9f2f` failed three portable instruction phrase-contract assertions. The targeted repair restored the compact application-error, fallback, and optional-memory contracts and aligned Git Completion assertions with the compressed equivalent wording. The five-test observability suite, two affected validator tests, 18 instruction-shim tests, direct validator, and both generated checks pass locally; replacement exact-head CI remains required.
+The first amendment CI run on `e4bb4388b4fe7b83c52ea8b37adfe0ef5f2c9f2f` failed three portable instruction phrase-contract assertions. The targeted repair restored the compact application-error, fallback, and optional-memory contracts and aligned Git Completion assertions with the compressed equivalent wording. The five-test observability suite, two affected validator tests, 18 instruction-shim tests, direct validator, and both generated checks pass locally. Replacement exact-head CI passed on `d5ae876e`, including both validation jobs, generated sync, both package checks, and all CodeQL analyses.
 
 Native Codex C1/C2 and startup/resume/clear/compact were not run and are explicitly excluded from implementation proof.
 
 ## Release Gates
 
 - No unresolved P1 finding in the scoped implementation and deterministic tests.
-- Current amendment exact-head CI remains required before calling the PR implementation-complete.
+- Current amendment exact-head CI passed on `d5ae876e`; the documentation-only follow-up recording that result must also pass before final completion.
 - PR remains unmerged.
 - Issues #241 and #247 remain open.
 - Native Codex C1/C2 and startup/resume/clear/compact reruns remain post-merge gates.
