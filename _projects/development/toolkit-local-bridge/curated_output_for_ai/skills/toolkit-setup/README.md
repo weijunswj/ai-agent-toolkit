@@ -18,7 +18,7 @@ Routine setup routes through the host-aware orchestrator in the managed checkout
 
 Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing. After bootstrap creates the managed checkout, hand off to the managed checkout script.
 
-Exit code `23` or a required-answer question-bank message is an intentional pause for user answers. Stop and ask the user; do not rerun with `--yes-recommended` unless the user explicitly requested recommended/default choices in the current turn.
+Exit code `23` or a required-answer question-bank message is an intentional pause for user answers. A chat host must surface the complete compact bank as visible text before offering any recommended-default shortcut; if output is missing, re-emit the bank and never infer approval. Do not rerun with `--yes-recommended` unless the user explicitly requested the displayed recommended choices in the current turn.
 
 **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 

@@ -32,20 +32,20 @@ test('Claude Code plan stays portable-policy-only and never emits Codex config w
   assert.doesNotMatch(plan.steps.flatMap((step) => step.commands || []).join('\n'), /agents\.max_threads|agents\.max_depth/);
 });
 
-test('plain and JSON plans share the keep recommendation and canonical Codex question row', () => {
+test('plain and JSON plans share the one-helper recommendation and canonical Codex question row', () => {
   const root = tmpRoot();
   const plain = run(['--plan'], { env: isolatedHomeEnv(root) });
   const json = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
   assert.equal(plain.status, 0, plain.stderr);
   assert.equal(json.status, 0, json.stderr);
-  assert.match(plain.stdout, /How many helper agents may Codex use at the same time\?:[\s\S]*recommended: keep[\s\S]*empty input: keep[\s\S]*selected: keep/);
+  assert.match(plain.stdout, /## Computer performance[\s\S]*How many helper agents may Codex use\?[\s\S]*\*\*Recommended:\*\* One helper at most/);
   const plan = JSON.parse(json.stdout);
   const delegationRow = plan.question_bank.find((row) => row.key === 'codexHelperCapacity');
   assert.deepEqual(
     { recommended: delegationRow.recommended, empty_input: delegationRow.empty_input, selected: delegationRow.selected },
-    { recommended: 'keep', empty_input: 'keep', selected: 'keep' }
+    { recommended: 'one-helper', empty_input: 'one-helper', selected: 'one-helper' }
   );
-  assert.equal(plan.preferences.helper_capacity, 'keep');
+  assert.equal(plan.preferences.helper_capacity, 'one-helper');
 });
 
 test('canonical question specification orders delegation before plugin auto-refresh for TTY and stdin', () => {
@@ -59,21 +59,65 @@ test('canonical question specification orders delegation before plugin auto-refr
   const keys = core.setupQuestionSpecs(args, current).map((spec) => spec.key);
   assert.ok(keys.indexOf('codexHelperCapacity') < keys.indexOf('codexPluginAutoRefresh'));
   assert.deepEqual(keys, [
-    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportOpen', 'updateReportRetention',
-    'codexHelperCapacity', 'codexPluginAutoRefresh', 'opencodeTarget', 'ag2Target',
+    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention',
+    'codexHelperCapacity', 'codexPluginAutoRefresh',
   ]);
 });
 
-test('--yes-recommended keeps an unconfigured Codex config unchanged', () => {
+test('canonical wizard renderer is compact, aligned, and free of implementation vocabulary', () => {
+  const args = core.parseArgs(['--plan']);
+  const current = {
+    managed: { currentPath: '', selectedPath: 'C:\\hidden', defaultPath: 'C:\\hidden', exists: false, git: false, dirty: false, branch: '', remote: '' },
+    audit: {
+      repo_auto_update: { enabled: false },
+      update_report_enabled: true,
+      update_report_open_enabled: true,
+      update_report_retention_days: 7,
+      codex_plugin_auto_refresh_enabled: false,
+      targets: { opencode: { detected: false, enabled: false }, ag2: { detected: false, enabled: false } },
+    },
+    runtime: { runtime: 'MultiAgentV2' },
+    delegation: { status: 'unconfigured', helper_count: null, detail: 'technical detail' },
+    nativePlugin: { status: 'fresh' },
+  };
+  const planned = core.plannedQuestionBank(args, current);
+  const text = core.renderSetupQuestionBank(planned.specs);
+  assert.match(text, /## Automatic updates[\s\S]*## Computer performance/);
+  assert.doesNotMatch(text, /## Other coding apps/);
+  assert.doesNotMatch(text, /Update report auto-open|MultiAgentV[12]|max_threads|max_concurrent|AI-AGENT-TOOLKIT|PR #|issue #|C:\\|restore command|migration/i);
+  assert.match(text, /How many helper agents may Codex use\?[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*Selected:\*\*/);
+  assert.match(text, /Accept all displayed recommended settings:[\s\S]*setup-toolkit-question-bank:complete/);
+  for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
+
+  current.delegation.helper_count = 4;
+  const unsafe = core.setupQuestionSpecs(args, current).find((spec) => spec.key === 'codexHelperCapacity');
+  assert.match(unsafe.current, /Risk:/);
+  assert.match(unsafe.choices.find((choice) => choice.value === 'keep').label, /memory risk/);
+});
+
+test('missing wizard output retries the complete bank and never emits a shortcut alone', () => {
+  const specs = [{
+    key: 'example', section: 'Automatic updates', title: 'Example?', description: 'Example control.',
+    current: 'Off.', recommended_outcome: 'On.', recommended: 'on', selected: 'on', empty_input: 'on',
+    choices: [{ value: 'on', label: 'On - recommended' }, { value: 'off', label: 'Off' }],
+  }];
+  let writes = 0;
+  const retried = core.emitCompleteQuestionBank(specs, { write() { writes += 1; return writes > 1; } });
+  assert.equal(retried.attempts, 2);
+  assert.equal(writes, 2);
+  assert.throws(() => core.emitCompleteQuestionBank(specs, { write() { return false; } }), /no approval prompt or write is allowed/i);
+});
+
+test('--yes-recommended applies the visibly recommended one-helper Codex outcome', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /How many helper agents may Codex use at the same time\?:[\s\S]*recommended: keep[\s\S]*selected: keep/);
+  assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*One helper at most - recommended/);
   assert.match(result.stdout, /Codex helper-agent runtime: MultiAgentV2/);
-  assert.match(result.stdout, /Configuration changed this run: no/);
-  assert.equal(fs.existsSync(codexConfig(root)), false);
-  assert.deepEqual(backupFiles(root), []);
+  assert.match(result.stdout, /Configuration changed this run: yes/);
+  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 2/);
+  assert.ok(backupFiles(root).length > 0);
 });
 
 test('explicit limit previews path and block, creates backup, and writes only after setup succeeds', () => {
@@ -100,6 +144,18 @@ test('explicit limit previews path and block, creates backup, and writes only af
   assert.ok(backupFiles(root).length > 0);
 });
 
+test('root-only choice maps V2 to one total session thread', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const result = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'root-only'
+  ], { env: isolatedHomeEnv(root), timeout: 300000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
+  assert.match(result.stdout, /Normal helper capacity: 0 helper agents; 1 total session threads including the main agent/);
+});
+
 test('distinct piped answers follow the canonical question order without shifts', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
@@ -110,11 +166,11 @@ test('distinct piped answers follow the canonical question order without shifts'
     '--codex-cli', createFakeCodexAppServer(root),
   ], {
     env: isolatedHomeEnv(root),
-    input: ['disable', 'enable', 'disable', 'default', 'ram-safe', 'keep', 'skip', 'disable'].join('\n'),
+    input: ['disable', 'enable', 'default', 'one-helper', 'keep'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*How many helper agents may Codex use at the same time\?: ram-safe[\s\S]*Codex plugin cache auto-refresh and Windows hook repair: keep[\s\S]*OpenCode bridge target: skip[\s\S]*AG2\/Antigravity bridge target: disable/);
+  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*How many helper agents may Codex use\?: one-helper[\s\S]*Keep the Codex Toolkit plugin working automatically\?: keep/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
   assert.match(result.stdout, /Question answers prompted interactively: no/);
@@ -122,8 +178,7 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY/);
   const bridgeArgs = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeArgs, /--disable-repo-auto-update/);
-  assert.match(bridgeArgs, /--enable-update-reports --update-report-retention-days 7 --disable-update-report-open --write/);
-  assert.match(bridgeArgs, /--disable-target ag2 --write/);
+  assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --write/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
   assert.doesNotMatch(bridgeArgs, /--enable-target opencode/);
 });
@@ -133,7 +188,7 @@ test('extra non-empty piped answers fail before any setup write', () => {
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin], {
     env: isolatedHomeEnv(root),
-    input: ['keep', 'keep', 'keep', 'keep', 'keep', 'keep', 'keep', 'keep', 'unexpected'].join('\n'),
+    input: ['keep', 'keep', 'keep', 'keep', 'keep', 'unexpected'].join('\n'),
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /unexpected extra non-empty input/);

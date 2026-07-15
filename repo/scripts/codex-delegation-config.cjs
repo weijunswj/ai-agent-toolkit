@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.4.9';
+const TOOLKIT_CLIENT_VERSION = '2.5.0';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 
 function inspectCodexDelegationConfig(configPath = codexConfigPath(), runtime = RUNTIMES.UNKNOWN) {
@@ -73,6 +73,24 @@ function inspectCodexDelegationConfig(configPath = codexConfigPath(), runtime = 
   }
 }
 
+function canReplaceUserOwnedRuntimeControls(state, runtime) {
+  if (String(state.ownership || '').startsWith('user-owned-compatible-')) return true;
+  if (state.status !== 'conflicting' || !state.layout?.ok || !state.parsed?.ok) return false;
+  if (runtime === RUNTIMES.V1) {
+    return state.layout.agentsTables.length === 1
+      && state.layout.beginMarkers.length === 0
+      && state.layout.unsupportedAssignments.length === 0;
+  }
+  if (runtime === RUNTIMES.V2) {
+    return state.layout.multiAgentV2Tables.length === 1
+      && state.layout.enablementBeginMarkers.length === 0
+      && state.layout.helperBeginMarkers.length === 0
+      && state.layout.rootGuidanceBeginMarkers.length === 0
+      && state.layout.helperGuidanceBeginMarkers.length === 0;
+  }
+  return false;
+}
+
 function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
   const runtime = options.runtime || RUNTIMES.UNKNOWN;
   const helperCount = options.helperCount ?? CODEX_V2_RAM_SAFE_HELPERS;
@@ -80,8 +98,10 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
   const configurable = state.status === 'unconfigured'
     || state.status === 'migration-required'
     || state.status === 'enablement-migration-required'
-    || (state.status === 'configured' && String(state.ownership || '').startsWith('toolkit-managed'));
+    || (state.status === 'configured' && String(state.ownership || '').startsWith('toolkit-managed'))
+    || (options.allowUserOwnedReplacement && canReplaceUserOwnedRuntimeControls(state, runtime));
   if (!configurable) return { ...state, changed: false };
+  const manageEnablement = runtime === RUNTIMES.V2 && !String(state.enablement_ownership || '').startsWith('user-owned');
   const backupGenerationId = `planned-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
   const backupMetadataPath = path.join(backupRoot(configPath), backupGenerationId, 'restore.json');
   return {
@@ -95,9 +115,18 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
     backup_metadata_path: backupMetadataPath,
     restore_commands: restoreCommands(backupMetadataPath, options.setupScriptPath),
     proposed_block: runtime === RUNTIMES.V2
-      ? expectedV2Block(helperCount, state.eol || '\n', { manageEnablement: !String(state.enablement_ownership || '').startsWith('user-owned') })
+      ? expectedV2Block(helperCount, state.eol || '\n', { manageEnablement })
       : expectedLegacyBlock(helperCount, state.eol || '\n'),
     proposed_action: 'isolated Codex app-server config/batchWrite with exact full-proposal delta validation',
+    affected_keys: runtime === RUNTIMES.V2
+      ? [
+          ...(manageEnablement ? ['features.multi_agent_v2.enabled'] : []),
+          'features.multi_agent_v2.max_concurrent_threads_per_session',
+          'features.multi_agent_v2.root_agent_usage_hint_text',
+          'features.multi_agent_v2.subagent_usage_hint_text',
+        ]
+      : ['agents.max_threads', 'agents.max_depth'],
+    requires_user_confirmation: Boolean(state.legacy_values_ignored || canReplaceUserOwnedRuntimeControls(state, runtime)),
     detail: runtime === RUNTIMES.V2
       ? `The proposal allows ${helperCount} helper(s) plus the main agent (${helpersToTotalThreads(helperCount)} total session threads).`
       : `The proposal allows ${helperCount} direct helper(s) and keeps nested helper spawning blocked at depth 1.`,
@@ -593,14 +622,15 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
   if (![RUNTIMES.V2, RUNTIMES.V1].includes(runtime)) return { ...initial, changed: false };
   if (initial.status === 'configured' && initial.helper_count === helperCount) return { ...initial, changed: false };
   const toolkitOwned = String(initial.ownership || '').startsWith('toolkit-managed');
-  if (!['unconfigured', 'migration-required', 'enablement-migration-required'].includes(initial.status) && !toolkitOwned) return { ...initial, changed: false };
+  const replaceUserOwned = options.allowUserOwnedReplacement && canReplaceUserOwnedRuntimeControls(initial, runtime);
+  if (!['unconfigured', 'migration-required', 'enablement-migration-required'].includes(initial.status) && !toolkitOwned && !replaceUserOwned) return { ...initial, changed: false };
 
   const manageEnablement = runtime === RUNTIMES.V2 && !String(initial.enablement_ownership || '').startsWith('user-owned');
   const stagedBytes = initial.status === 'enablement-migration-required'
     ? migrateV2BooleanEnablement(initial)
     : (toolkitOwned || initial.status === 'migration-required' ? removeManagedBlockBytes(initial) : initialSnapshot.bytes);
   const stagedState = codexDelegationConfigState(stagedBytes, configPath, runtime);
-  if (stagedState.status !== 'unconfigured') {
+  if (stagedState.status !== 'unconfigured' && !replaceUserOwned) {
     return { ...initial, status: 'conflicting', changed: false, detail: `Toolkit-owned block removal did not produce an unconfigured ${runtime} proposal base: ${stagedState.detail}` };
   }
   const edit = options.editor
@@ -732,6 +762,7 @@ module.exports = {
   removeManagedBlockBytes,
   quotePowerShellArgument,
   quotePosixArgument,
+  canReplaceUserOwnedRuntimeControls,
   verifiedSetupScriptPath,
   restoreCommands,
   createCodexConfigBackup,

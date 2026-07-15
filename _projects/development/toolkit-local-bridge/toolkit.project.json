@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.4.9",
+  "version": "2.5.0",
   "version_policy": "semver",
-  "version_notes": "Isolates exact staging reconciliation from ordinary report, state, target, repo, hook, and native-cache maintenance.",
+  "version_notes": "Adds the canonical user-facing setup wizard, effective Codex helper-capacity flow, and failure-only actionable report opening.",
   "outputs": [
     {
       "kind": "curated",

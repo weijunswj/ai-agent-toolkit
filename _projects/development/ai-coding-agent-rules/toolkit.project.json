@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.6.4",
+  "version": "2.6.5",
   "version_policy": "semver",
-  "version_notes": "Clarifies Codex MultiAgentV2 root-inclusive RAM-safe capacity and policy-only recursive-helper prevention.",
+  "version_notes": "Makes bounded helper scope, no-recursion, and return-to-root guidance explicit across generated harness surfaces.",
   "outputs": [
     {
       "kind": "curated",

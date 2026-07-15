@@ -130,6 +130,29 @@ test('official app-server batchWrite prepares an isolated proposal and preserves
   assert.equal(inspectConfig(filePath).ownership, 'toolkit-managed-v1');
 });
 
+test('explicitly approved V1 replacement changes only supported legacy controls', async () => {
+  const filePath = configPath();
+  const original = '[agents]\n# user helper settings\nmax_threads = 8\nmax_depth = 2\n\n[agents.security-reviewer]\ndescription = "preserve exactly"\n';
+  writeConfig(filePath, original);
+  const proposed = original.replace('max_threads = 8\nmax_depth = 2', 'max_threads = 1\nmax_depth = 1');
+  const blocked = await configure(filePath, { helperCount: 1, editor: proposedEditor(proposed) });
+  assert.equal(blocked.changed, false);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+
+  const result = await configure(filePath, {
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+    editor: proposedEditor(proposed),
+  });
+  assert.equal(result.status, 'configured', result.detail);
+  assert.equal(result.helper_count, 1);
+  assert.equal(result.recursive_hard_block, true);
+  const configured = fs.readFileSync(filePath, 'utf8');
+  assert.match(configured, /max_threads = 1\nmax_depth = 1/);
+  assert.match(configured, /\[agents\.security-reviewer\]\ndescription = "preserve exactly"/);
+  assert.doesNotMatch(configured, /multi_agent_v2|max_concurrent_threads_per_session/);
+});
+
 test('injected editor proposal preserves child tables and supports exact backup restore', async () => {
   const filePath = configPath();
   const original = Buffer.from('[agents]\r\n# user comment\r\n\r\n[agents.security-reviewer]\r\ndescription = "explicit"\r\n');

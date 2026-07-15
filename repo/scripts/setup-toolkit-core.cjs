@@ -19,6 +19,8 @@ const SETUP_PAUSED_FOR_REPO_AUTO_UPDATE_APPROVAL = 20;
 const SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL = 21;
 const SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL = 22;
 const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
+const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
+const QUESTION_BANK_COMPLETE = '<!-- setup-toolkit-question-bank:complete -->';
 
 function repoRootFromScript() {
   return path.resolve(__dirname, '..', '..');
@@ -94,7 +96,6 @@ function emptySetupChoices() {
     managedCheckout: '',
     repoAutoUpdate: '',
     updateReports: '',
-    updateReportOpen: '',
     updateReportRetention: '',
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
@@ -139,6 +140,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     yesRecommended: false,
     codexHelperCount: null,
     approveHighHelperCapacity: false,
+    approveCodexConfigProposal: false,
     codexRuntime: RUNTIMES.UNKNOWN,
     setupChoices: emptySetupChoices()
   };
@@ -192,25 +194,29 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--yes-recommended') args.yesRecommended = true;
     else if (arg === '--codex-helper-capacity') {
       const choice = next().toLowerCase();
-      if (!['keep', 'migrate', 'ram-safe', 'custom', 'remove', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
-      args.setupChoices.codexHelperCapacity = choice;
+      const normalized = { 'ram-safe': 'one-helper', custom: 'advanced' }[choice] || choice;
+      if (!['keep', 'one-helper', 'root-only', 'advanced', 'migrate', 'remove', 'skip'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      args.setupChoices.codexHelperCapacity = normalized;
     } else if (arg === '--codex-delegation-control') {
       const legacyChoice = String(argv[++index] || '').toLowerCase();
-      const choice = { limit: 'ram-safe', keep: 'keep', skip: 'skip' }[legacyChoice];
+      const choice = { limit: 'one-helper', keep: 'keep', skip: 'skip' }[legacyChoice];
       if (!choice) throw new Error(`Unsupported --codex-delegation-control choice: ${legacyChoice}`);
       args.setupChoices.codexHelperCapacity = choice;
     } else if (arg.startsWith('--codex-helper-capacity=')) {
       const choice = arg.slice('--codex-helper-capacity='.length).toLowerCase();
-      if (!['keep', 'migrate', 'ram-safe', 'custom', 'remove', 'skip'].includes(choice)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
-      args.setupChoices.codexHelperCapacity = choice;
+      const normalized = { 'ram-safe': 'one-helper', custom: 'advanced' }[choice] || choice;
+      if (!['keep', 'one-helper', 'root-only', 'advanced', 'migrate', 'remove', 'skip'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      args.setupChoices.codexHelperCapacity = normalized;
     } else if (arg === '--codex-helper-count') {
       args.codexHelperCount = parseNonNegativeInteger(next(), arg);
-      args.setupChoices.codexHelperCapacity = 'custom';
+      args.setupChoices.codexHelperCapacity = 'advanced';
     } else if (arg.startsWith('--codex-helper-count=')) {
       args.codexHelperCount = parseNonNegativeInteger(arg.slice('--codex-helper-count='.length), '--codex-helper-count');
-      args.setupChoices.codexHelperCapacity = 'custom';
+      args.setupChoices.codexHelperCapacity = 'advanced';
     } else if (arg === '--approve-high-helper-capacity') {
       args.approveHighHelperCapacity = true;
+    } else if (arg === '--approve-codex-config-proposal') {
+      args.approveCodexConfigProposal = true;
     }
     else if (arg === '--write-repo-auto-update' || arg === '--enable-repo-auto-update') {
       args.repoAutoUpdate = true;
@@ -238,12 +244,10 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.setupChoices.updateReportRetention = 'default';
     } else if (arg === '--keep-update-report-retention-days') args.setupChoices.updateReportRetention = 'keep';
     else if (arg === '--enable-update-report-open') {
-      args.updateReportOpen = true;
-      args.setupChoices.updateReportOpen = 'enable';
+      args.updateReportOpen = false;
     } else if (arg === '--skip-update-report-open' || arg === '--disable-update-report-open') {
       args.updateReportOpen = false;
-      args.setupChoices.updateReportOpen = 'disable';
-    } else if (arg === '--keep-update-report-open') args.setupChoices.updateReportOpen = 'keep';
+    } else if (arg === '--keep-update-report-open') args.updateReportOpen = false;
     else if (arg === '--enable-codex-plugin-auto-refresh') {
       args.codexPluginAutoRefresh = true;
       args.setupChoices.codexPluginAutoRefresh = 'enable';
@@ -337,11 +341,13 @@ function preferenceSummary(options) {
     helper_capacity: options.host === 'codex'
       ? (choices.codexHelperCapacity || 'question-required')
       : 'unsupported-policy-only',
-    helper_count: options.host === 'codex' && choices.codexHelperCapacity === 'custom'
+    helper_count: options.host === 'codex' && choices.codexHelperCapacity === 'advanced'
       ? options.codexHelperCount
-      : (options.host === 'codex' && choices.codexHelperCapacity === 'ram-safe' ? CODEX_V2_RAM_SAFE_HELPERS : 'unchanged'),
+      : (options.host === 'codex' && choices.codexHelperCapacity === 'one-helper'
+          ? CODEX_V2_RAM_SAFE_HELPERS
+          : (options.host === 'codex' && choices.codexHelperCapacity === 'root-only' ? 0 : 'unchanged')),
     write_meaningful_update_reports: choices.updateReports || 'question-required',
-    open_update_reports_automatically: choices.updateReportOpen || 'question-required',
+    update_report_open_behavior: 'action-required-only; successful reports stay closed',
     update_report_retention_days: choices.updateReportRetention || 'question-required',
     opencode_sync: targetChoice('opencode'),
     ag2_antigravity_sync: targetChoice('ag2')
@@ -358,14 +364,12 @@ function setupPlan(options = {}) {
   const claudeCliArgs = options.claudeCli ? ['--claude-cli', quote(options.claudeCli)] : [];
   const retentionDays = options.updateReportRetentionDays || DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
   const choices = options.setupChoices || emptySetupChoices();
-  const reportArgs = [];
+  const reportArgs = ['--disable-update-report-open'];
   if (choices.updateReports === 'enable') reportArgs.push('--enable-update-reports');
   else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
   if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
     reportArgs.push('--update-report-retention-days', String(retentionDays));
   }
-  if (choices.updateReportOpen === 'enable') reportArgs.push('--enable-update-report-open');
-  else if (choices.updateReportOpen === 'disable') reportArgs.push('--disable-update-report-open');
   if (reportArgs.length) reportArgs.push('--write', ...hubArgs);
 
   const repoAutoArgs = [];
@@ -504,7 +508,7 @@ function setupPlan(options = {}) {
         title: host === 'codex'
           ? 'Apply the selected Codex helper-agent capacity as the final fallible setup operation'
           : 'Report host-level delegation enforcement as unsupported; portable policy still applies',
-        commands: host === 'codex' && ['migrate', 'ram-safe', 'custom', 'remove'].includes(choices.codexHelperCapacity)
+        commands: host === 'codex' && ['migrate', 'one-helper', 'root-only', 'advanced', 'remove'].includes(choices.codexHelperCapacity)
           ? [`manage only the Toolkit-owned ${options.codexRuntime || RUNTIMES.UNKNOWN} helper-capacity block in ${delegation.codexConfigPath()}`]
           : []
       },
@@ -543,14 +547,16 @@ function printHelp() {
     '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
-    '  --codex-helper-capacity keep|migrate|ram-safe|custom|remove|skip',
-    '                               Codex only; preserve the file unchanged, explicitly migrate an exact Toolkit legacy block, allow one helper, set an advanced custom count, remove Toolkit ownership, or skip',
+    '  --codex-helper-capacity one-helper|root-only|keep|advanced',
+    '                               Codex only; choose one helper, no helpers, keep current, or an advanced custom count',
     '  --codex-delegation-control limit',
-    '                               backward-compatible alias for --codex-helper-capacity ram-safe; no other legacy alias writes config',
+    '                               backward-compatible alias for --codex-helper-capacity one-helper; no other legacy alias writes config',
     '  --codex-helper-count <count>',
     '                               number of helpers, not total agents; the main agent counts as one additional V2 session thread',
     '  --approve-high-helper-capacity',
     '                               explicit RAM-risk approval required when custom helper count is above one',
+    '  --approve-codex-config-proposal',
+    '                               approve an exact technical proposal that replaces user-owned effective helper controls',
     '  --managed-checkout keep|default|custom',
     '                               choose the managed checkout answer non-interactively',
     '  --enable-repo-auto-update   enable repo-backed auto-update from the managed checkout',
@@ -559,9 +565,9 @@ function printHelp() {
     '  --enable-update-reports     write meaningful update reports',
     '  --disable-update-reports    disable future meaningful update report writes',
     '  --keep-update-reports       preserve meaningful update report write preference',
-    '  --enable-update-report-open open meaningful update reports automatically',
-    '  --skip-update-report-open   disable automatic opening of generated update reports',
-    '  --keep-update-report-open   preserve update report auto-open preference',
+    '  --enable-update-report-open compatibility alias for failure-only opening; successful reports remain closed',
+    '  --skip-update-report-open   retain failure-only opening; successful reports remain closed',
+    '  --keep-update-report-open   compatibility alias; legacy success-report auto-open is not preserved',
     '  --update-report-retention-days <days>',
     '                               custom positive integer retention days',
     '  --default-update-report-retention-days',
@@ -707,14 +713,25 @@ function delegateToManagedSetupIfAvailable(args) {
   // until EOF even when the delegated child never ends up needing an answer
   // (e.g. every setup question was already resolved by flags), hanging any
   // non-interactive caller whose stdin pipe is never explicitly closed.
-  const result = spawnSync(process.execPath, [managedScript, ...args.argv], {
+  const invoke = () => spawnSync(process.execPath, [managedScript, ...args.argv], {
     cwd: managedRoot,
     encoding: interactive ? undefined : 'utf8',
     stdio: interactive ? 'inherit' : ['inherit', 'pipe', 'pipe'],
     windowsHide: true
   });
+  let result = invoke();
   if (result.error) throw result.error;
   if (!interactive) {
+    if (result.status === SETUP_PAUSED_FOR_QUESTION_BANK
+      && !(String(result.stdout).includes(QUESTION_BANK_BEGIN) && String(result.stdout).includes(QUESTION_BANK_COMPLETE))) {
+      console.error('Managed setup did not emit a complete visible question bank; retrying the same safe pre-write request once.');
+      result = invoke();
+      if (result.error) throw result.error;
+      if (result.status === SETUP_PAUSED_FOR_QUESTION_BANK
+        && !(String(result.stdout).includes(QUESTION_BANK_BEGIN) && String(result.stdout).includes(QUESTION_BANK_COMPLETE))) {
+        throw new Error('Managed setup suppressed the complete question bank twice. No approval shortcut or write is allowed.');
+      }
+    }
     if (result.stdout) process.stdout.write(result.stdout);
     if (result.stderr) process.stderr.write(result.stderr);
   }
@@ -837,6 +854,7 @@ function printDelegationPreview(preview) {
   console.log(`After semantics: ${preview.detail}`);
   console.log(`Requested helper agents: ${preview.helper_count}`);
   if (preview.total_threads != null) console.log(`Total session threads including the main agent: ${preview.total_threads}`);
+  console.log(`Exact affected keys: ${(preview.affected_keys || []).join(', ')}`);
   console.log('Proposed Toolkit-managed TOML block:');
   console.log('```toml');
   console.log(preview.proposed_block);
@@ -849,6 +867,52 @@ function printDelegationPreview(preview) {
   console.log(`Exact restore command after the approved write (POSIX shell): ${preview.restore_commands.posix}`);
 }
 
+function selectedHelperCount(args, current) {
+  const choice = args.setupChoices.codexHelperCapacity;
+  if (choice === 'one-helper') return 1;
+  if (choice === 'root-only') return 0;
+  if (choice === 'advanced') return args.codexHelperCount;
+  if (choice === 'migrate') return current.delegation.helper_count;
+  return null;
+}
+
+async function confirmSelectedDelegationProposal(args, current, questionBank) {
+  if (args.host !== 'codex') return null;
+  const choice = args.setupChoices.codexHelperCapacity;
+  if (!['one-helper', 'root-only', 'advanced', 'migrate'].includes(choice)) {
+    if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
+    return null;
+  }
+  const helperCount = selectedHelperCount(args, current);
+  const preview = delegation.previewCodexDelegation(current.delegation.config_path || delegation.codexConfigPath(), {
+    runtime: current.runtime.runtime,
+    helperCount,
+    setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
+    allowUserOwnedReplacement: true,
+  });
+  if (preview.status !== 'preview') {
+    throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration or runtime detection problem, then rerun setup. ${preview.detail || preview.status}`);
+  }
+  preview.before_semantics = current.delegation.detail;
+  printDelegationPreview(preview);
+  if (preview.requires_user_confirmation && !args.approveCodexConfigProposal) {
+    let answer = '';
+    if (questionBank.remaining_input.length) answer = String(questionBank.remaining_input.shift()).trim().toLowerCase();
+    else if (process.stdin.isTTY) {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try { answer = (await rl.question('Type apply to approve this exact Codex configuration proposal: ')).trim().toLowerCase(); }
+      finally { rl.close(); }
+    }
+    if (answer !== 'apply') {
+      throw new Error('Selected helper setting remains unapplied. Required action: review the exact technical proposal and answer `apply`, or pass --approve-codex-config-proposal.');
+    }
+    args.approveCodexConfigProposal = true;
+  }
+  if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
+  args.codexDelegationPreview = preview;
+  return preview;
+}
+
 async function applyHostDelegationControl(args, current) {
   if (args.host !== 'codex') {
     return { status: 'unsupported', detail: 'Host-level delegation enforcement is unsupported; portable single-agent policy still applies', client_scope: 'not applicable', changed: false };
@@ -857,22 +921,22 @@ async function applyHostDelegationControl(args, current) {
   const configPath = current.delegation.config_path || delegation.codexConfigPath();
   const options = {
     runtime: current.runtime.runtime,
-    helperCount: choice === 'ram-safe' ? CODEX_V2_RAM_SAFE_HELPERS : args.codexHelperCount,
+    helperCount: selectedHelperCount(args, current),
     codexCommand: args.codexCli,
     codexHome: delegation.defaultCodexHome(),
     setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
+    allowUserOwnedReplacement: args.approveCodexConfigProposal,
   };
-  if (!['migrate', 'ram-safe', 'custom'].includes(choice)) return delegation.delegationResultForChoice(choice, configPath, options);
+  if (!['migrate', 'one-helper', 'root-only', 'advanced'].includes(choice)) return delegation.delegationResultForChoice(choice, configPath, options);
   if (choice === 'migrate') options.helperCount = current.delegation.helper_count;
-  const preview = choice === 'migrate' && current.delegationMigrationPreview
-    ? current.delegationMigrationPreview
-    : delegation.previewCodexDelegation(configPath, options);
-  if (preview.status === 'preview') {
-    preview.before_semantics = current.delegation.detail;
-    printDelegationPreview(preview);
-    options.backupGenerationId = preview.backup_generation_id;
+  const preview = args.codexDelegationPreview || delegation.previewCodexDelegation(configPath, options);
+  if (preview.status === 'preview') options.backupGenerationId = preview.backup_generation_id;
+  const effectiveChoice = ['one-helper', 'root-only', 'advanced'].includes(choice) ? 'custom' : choice;
+  const result = await delegation.delegationResultForChoice(effectiveChoice, configPath, options);
+  if (result.status !== 'configured' || result.helper_count !== options.helperCount) {
+    throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration problem and rerun setup. ${result.detail || result.status}`);
   }
-  return delegation.delegationResultForChoice(choice, configPath, options);
+  return result;
 }
 
 async function collectCurrentState(args) {
@@ -953,134 +1017,172 @@ function recommendedChoice(key, current, args) {
   if (key === 'managedCheckout') return canRecommendKeepingManagedCheckout(current, args) ? 'keep' : 'default';
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
-  if (key === 'updateReportOpen') return 'keep';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
-  if (key === 'codexHelperCapacity') return 'keep';
+  if (key === 'codexHelperCapacity') {
+    return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'one-helper' : 'keep';
+  }
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode || 'keep';
   if (key === 'ag2Target') return args.setupChoices.targets.ag2 || 'keep';
   return 'keep';
 }
 
+function wizardChoice(value, label) {
+  return { value, label };
+}
+
+function choiceValues(spec) {
+  return spec.choices.map((choice) => choice.value);
+}
+
+function choiceLabel(spec, value) {
+  return spec.choices.find((choice) => choice.value === value)?.label || value || '(answer required)';
+}
+
+function currentHelperOutcome(current) {
+  const helperCount = current.delegation?.helper_count;
+  if (Number.isSafeInteger(helperCount)) {
+    if (helperCount === 0) return 'Codex currently works without helper agents.';
+    if (helperCount === 1) return 'Codex currently allows one helper at most.';
+    return `Codex currently allows up to ${helperCount} helpers. Risk: this may use substantial memory or make the computer unresponsive.`;
+  }
+  if (current.runtime?.runtime === RUNTIMES.DISABLED) return 'Helper agents are currently unavailable.';
+  if (current.runtime?.runtime === RUNTIMES.UNKNOWN) return 'The current helper limit could not be verified safely, so setup will not guess.';
+  return 'No effective helper limit is currently configured.';
+}
+
 function setupQuestionSpecs(args, current) {
   const specs = [
     {
       key: 'managedCheckout',
-      title: 'Managed checkout',
-      prompt: 'Managed checkout choice',
-      choices: ['keep', 'default', 'custom'],
+      section: 'Automatic updates',
+      title: 'Where should Toolkit updates come from?',
+      prompt: 'Toolkit update source choice',
+      description: 'Toolkit uses a dedicated clean copy so coding sessions can stay on their current branches while updates remain safe.',
+      choices: [
+        wizardChoice('default', 'Use the dedicated clean update copy - recommended'),
+        wizardChoice('keep', 'Keep the current update source'),
+        wizardChoice('custom', 'Choose another location'),
+      ],
       recommended: recommendedChoice('managedCheckout', current, args),
       selected: args.setupChoices.managedCheckout,
-      current: current.managed.currentPath || '(none configured)'
+      current: current.managed.currentPath ? 'A Toolkit update source is configured.' : 'No Toolkit update source is configured.',
+      recommended_outcome: 'Use a dedicated clean Toolkit copy for verified updates.'
     },
     {
       key: 'repoAutoUpdate',
-      title: 'Repo-backed auto-update',
-      prompt: 'Repo-backed auto-update choice',
-      choices: ['keep', 'enable', 'disable'],
+      section: 'Automatic updates',
+      title: 'Keep Toolkit updated automatically?',
+      prompt: 'Automatic Toolkit updates choice',
+      description: 'Toolkit can check for updates when the coding app starts and install only clean, verified updates.',
+      choices: [wizardChoice('enable', 'Turn on - recommended'), wizardChoice('disable', 'Turn off'), wizardChoice('keep', 'Keep current')],
       recommended: recommendedChoice('repoAutoUpdate', current, args),
       selected: args.setupChoices.repoAutoUpdate,
-      current: formatBool(current.audit?.repo_auto_update?.enabled === true)
+      current: current.audit?.repo_auto_update?.enabled === true ? 'Automatic updates are on.' : 'Automatic updates are off.',
+      recommended_outcome: 'Turn on clean, verified automatic updates.'
     },
     {
       key: 'updateReports',
-      title: 'Update report writes',
-      prompt: 'Update report writes choice',
-      choices: ['keep', 'enable', 'disable'],
+      section: 'Automatic updates',
+      title: 'Keep useful update reports?',
+      prompt: 'Update report choice',
+      description: 'Meaningful maintenance reports help explain changes or failures; reports needing action open automatically, while successful reports stay closed.',
+      choices: [wizardChoice('enable', 'Keep reports - recommended'), wizardChoice('disable', 'Do not keep reports'), wizardChoice('keep', 'Keep current')],
       recommended: recommendedChoice('updateReports', current, args),
       selected: args.setupChoices.updateReports,
-      current: formatBool(current.audit?.update_report_enabled !== false)
-    },
-    {
-      key: 'updateReportOpen',
-      title: 'Update report auto-open',
-      prompt: 'Update report auto-open choice',
-      choices: ['keep', 'enable', 'disable'],
-      recommended: recommendedChoice('updateReportOpen', current, args),
-      selected: args.setupChoices.updateReportOpen,
-      current: formatBool(current.audit?.update_report_open_enabled === true)
+      current: current.audit?.update_report_enabled !== false ? 'Meaningful update reports are kept.' : 'Update reports are not kept.',
+      recommended_outcome: 'Keep meaningful reports for troubleshooting; open only reports that require action.'
     },
     {
       key: 'updateReportRetention',
-      title: 'Update report/log retention',
-      prompt: 'Update report/log retention choice',
-      choices: ['keep', 'default', 'custom'],
+      section: 'Automatic updates',
+      title: 'How long should update reports be kept?',
+      prompt: 'Update report retention choice',
+      description: 'Old Toolkit reports are removed automatically to avoid clutter.',
+      choices: [wizardChoice('default', '7 days - recommended'), wizardChoice('custom', 'Choose another duration'), wizardChoice('keep', 'Keep current')],
       recommended: recommendedChoice('updateReportRetention', current, args),
       selected: args.setupChoices.updateReportRetention,
-      current: `${currentReportRetentionDays(current)} day(s)`
+      current: `Reports are currently kept for ${currentReportRetentionDays(current)} day(s).`,
+      recommended_outcome: 'Keep reports for 7 days.'
     }
   ];
 
   if (args.host === 'codex') {
     specs.push({
       key: 'codexHelperCapacity',
-      title: 'How many helper agents may Codex use at the same time?',
-      prompt: 'Codex helper-agent capacity choice',
-      choices: ['keep', 'migrate', 'ram-safe', 'custom', 'remove', 'skip'],
-      choice_help: [
-        'keep = Keep current file unchanged (safe default; never migrates or writes)',
-        'migrate = Migrate the exact Toolkit-managed PR #237 legacy setting to effective V2',
-        'ram-safe = RAM-safe mode: allow one helper',
-        'custom = Custom helper count (advanced)',
-        'remove = Remove exact Toolkit-managed values after explicit approval; WARNING: the host default may allow higher capacity',
-        'skip = Skip for now',
+      section: 'Computer performance',
+      title: 'How many helper agents may Codex use?',
+      prompt: 'Codex helper choice',
+      description: 'Each helper can use substantial memory. More than one helper can make the computer unresponsive.',
+      choices: [
+        wizardChoice('one-helper', 'One helper at most - recommended'),
+        wizardChoice('root-only', 'No helpers'),
+        wizardChoice('keep', Number.isSafeInteger(current.delegation?.helper_count) && current.delegation.helper_count > 1 ? 'Keep current - memory risk' : 'Keep current'),
+        wizardChoice('advanced', 'Advanced'),
       ],
-      explanation: 'Codex itself is the main agent. Helper agents use extra memory. More than one helper may slow or freeze lower-memory PCs. In MultiAgentV2 the main agent counts as one total session thread.',
-      migration_preview: current.delegationMigrationPreview ? {
-        target_path: current.delegationMigrationPreview.config_path,
-        runtime: current.delegationMigrationPreview.runtime,
-        before_semantics: current.delegation.detail,
-        after_semantics: current.delegationMigrationPreview.detail,
-        proposed_block: current.delegationMigrationPreview.proposed_block,
-        backup_metadata_path: current.delegationMigrationPreview.backup_metadata_path,
-        restore_commands: current.delegationMigrationPreview.restore_commands,
-      } : null,
       recommended: recommendedChoice('codexHelperCapacity', current, args),
       selected: args.setupChoices.codexHelperCapacity,
-      current: `${current.runtime?.runtime || RUNTIMES.UNKNOWN}; ${current.delegation.status}; ${current.delegation.detail}`
+      current: currentHelperOutcome(current),
+      recommended_outcome: current.runtime?.runtime === RUNTIMES.UNKNOWN
+        ? 'Keep the current setting until Codex can verify the effective helper controls.'
+        : 'One helper at most. Codex performs the main work and may use one helper for a difficult, clearly separate task.'
     });
     specs.push({
       key: 'codexPluginAutoRefresh',
-      title: 'Codex plugin cache auto-refresh and Windows hook repair',
-      prompt: 'Codex plugin cache auto-refresh and Windows hook repair choice',
-      choices: ['keep', 'enable', 'disable'],
+      section: 'Computer performance',
+      title: 'Keep the Codex Toolkit plugin working automatically?',
+      prompt: 'Codex plugin maintenance choice',
+      description: 'Codex can refresh its installed Toolkit copy and repair unsafe Windows hook launchers when needed.',
+      choices: [wizardChoice('enable', 'Turn on - recommended'), wizardChoice('disable', 'Turn off'), wizardChoice('keep', 'Keep current')],
       recommended: recommendedChoice('codexPluginAutoRefresh', current, args),
       selected: args.setupChoices.codexPluginAutoRefresh,
-      current: formatBool(current.audit?.codex_plugin_auto_refresh_enabled === true)
+      current: current.audit?.codex_plugin_auto_refresh_enabled === true ? 'Automatic Codex plugin maintenance is on.' : 'Automatic Codex plugin maintenance is off.',
+      recommended_outcome: 'Refresh the installed Codex plugin and repair Windows hooks when needed.'
     });
   } else {
     specs.push({
       key: 'claudePluginBehavior',
-      title: 'Claude Code plugin behavior',
-      prompt: 'Claude Code plugin behavior choice',
-      choices: ['keep', 'instructions', 'install'],
+      section: 'Other coding apps',
+      title: 'Keep Toolkit available in Claude Code?',
+      prompt: 'Claude Code Toolkit choice',
+      description: 'Claude Code can install or refresh its own Toolkit plugin without changing Codex.',
+      choices: [wizardChoice('install', 'Install or refresh - recommended'), wizardChoice('instructions', 'Show instructions only'), wizardChoice('keep', 'Keep current')],
       recommended: recommendedChoice('claudePluginBehavior', current, args),
       selected: args.setupChoices.claudePluginBehavior,
-      current: `${current.nativePlugin.status}; install runs claude plugin marketplace add + install --scope user, no Codex mutation`
+      current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : 'The Claude Code Toolkit plugin may need attention.',
+      recommended_outcome: 'Let Claude Code install or refresh its own Toolkit plugin.'
     });
   }
 
-  specs.push(
-    {
+  if (current.audit?.targets?.opencode?.detected || current.audit?.targets?.opencode?.enabled) {
+    specs.push({
       key: 'opencodeTarget',
-      title: 'OpenCode bridge target',
-      prompt: 'OpenCode bridge target choice',
-      choices: ['keep', 'enable-sync', 'disable', 'skip'],
+      section: 'Other coding apps',
+      title: 'Keep Toolkit available in OpenCode?',
+      prompt: 'OpenCode Toolkit choice',
+      description: 'Enabling this keeps Toolkit guidance synchronized into OpenCode.',
+      choices: [wizardChoice('enable-sync', 'Yes, keep it synchronized'), wizardChoice('disable', 'No, turn it off'), wizardChoice('keep', 'Keep current'), wizardChoice('skip', 'Skip this time')],
       recommended: recommendedChoice('opencodeTarget', current, args),
       selected: args.setupChoices.targets.opencode,
-      current: formatTargetState(current.audit?.targets?.opencode)
-    },
-    {
+      current: current.audit.targets.opencode.enabled ? 'Toolkit is enabled in OpenCode.' : 'OpenCode was found, but Toolkit is not enabled.',
+      recommended_outcome: current.audit.targets.opencode.enabled ? 'Keep the current OpenCode connection.' : 'Keep OpenCode unchanged unless you choose to enable it.'
+    });
+  }
+  if (current.audit?.targets?.ag2?.detected || current.audit?.targets?.ag2?.enabled) {
+    specs.push({
       key: 'ag2Target',
-      title: 'AG2/Antigravity bridge target',
-      prompt: 'AG2/Antigravity bridge target choice',
-      choices: ['keep', 'enable-sync', 'disable', 'skip'],
+      section: 'Other coding apps',
+      title: 'Keep Toolkit available in Antigravity?',
+      prompt: 'Antigravity Toolkit choice',
+      description: 'Enabling this keeps Toolkit guidance synchronized into Antigravity.',
+      choices: [wizardChoice('enable-sync', 'Yes, keep it synchronized'), wizardChoice('disable', 'No, turn it off'), wizardChoice('keep', 'Keep current'), wizardChoice('skip', 'Skip this time')],
       recommended: recommendedChoice('ag2Target', current, args),
       selected: args.setupChoices.targets.ag2,
-      current: formatTargetState(current.audit?.targets?.ag2)
-    }
-  );
+      current: current.audit.targets.ag2.enabled ? 'Toolkit is enabled in Antigravity.' : 'Antigravity was found, but Toolkit is not enabled.',
+      recommended_outcome: current.audit.targets.ag2.enabled ? 'Keep the current Antigravity connection.' : 'Keep Antigravity unchanged unless you choose to enable it.'
+    });
+  }
   return specs;
 }
 
@@ -1105,57 +1207,59 @@ function plannedQuestionBank(args, current) {
   };
 }
 
-function printQuestionRows(specs) {
+function renderQuestionRows(specs) {
+  const lines = [];
+  let section = '';
   for (const spec of specs) {
-    const selected = spec.selected || '(answer required)';
-    console.log(`${spec.title}:`);
-    console.log(`- current: ${spec.current}`);
-    console.log(`- recommended: ${spec.recommended}`);
-    console.log(`- empty input: ${spec.empty_input || spec.recommended} (recommended)`);
-    console.log(`- choices: ${spec.choices.join(' / ')}`);
-    if (spec.explanation) console.log(`- explanation: ${spec.explanation}`);
-    for (const help of spec.choice_help || []) console.log(`- ${help}`);
-    if (spec.migration_preview) {
-      console.log('- explicit migration preview:');
-      console.log(`  target path: ${spec.migration_preview.target_path}`);
-      console.log(`  runtime: ${spec.migration_preview.runtime}`);
-      console.log(`  before semantics: ${spec.migration_preview.before_semantics}`);
-      console.log(`  after semantics: ${spec.migration_preview.after_semantics}`);
-      console.log(`  proposed block: ${JSON.stringify(spec.migration_preview.proposed_block)}`);
-      console.log(`  planned backup metadata: ${spec.migration_preview.backup_metadata_path}`);
-      console.log(`  restore command setup script: ${spec.migration_preview.restore_commands.setup_script_path}`);
-      console.log(`  exact restore command (PowerShell): ${spec.migration_preview.restore_commands.powershell}`);
-      console.log(`  exact restore command (POSIX shell): ${spec.migration_preview.restore_commands.posix}`);
+    if (spec.section !== section) {
+      if (lines.length) lines.push('');
+      section = spec.section;
+      lines.push(`## ${section}`, '');
     }
-    console.log(`- selected: ${selected}`);
-    console.log('');
+    lines.push(`### ${spec.title}`);
+    lines.push(spec.description);
+    lines.push('');
+    lines.push(`**Current:** ${spec.current}`);
+    lines.push(`**Recommended:** ${spec.recommended_outcome}`);
+    lines.push(`**Choices:** ${spec.choices.map((choice) => `\`${choice.label}\``).join(' | ')}`);
+    lines.push(`**Selected:** ${choiceLabel(spec, spec.selected || spec.empty_input || '')}`);
+    lines.push('', '---', '');
   }
+  return lines.join('\n').trimEnd();
 }
 
-function printSetupQuestionBank(args, current, specs) {
-  console.log('# setup toolkit question bank');
-  console.log('');
-  console.log('Current state was discovered before setup writes. Answer every choice once before setup continues.');
-  console.log('');
-  console.log('Managed checkout:');
-  console.log(`- detected/current path: ${current.managed.currentPath || '(none configured)'}`);
-  console.log(`- selected path for inspection: ${current.managed.selectedPath}`);
-  console.log(`- default path: ${current.managed.defaultPath}`);
-  console.log(`- current git state: exists=${current.managed.exists ? 'yes' : 'no'}, git=${current.managed.git ? 'yes' : 'no'}, branch=${current.managed.branch || '(unknown)'}, dirty=${current.managed.dirty ? 'yes' : 'no'}`);
-  if (current.managed.remote) console.log(`- current remote: ${current.managed.remote}`);
-  console.log('');
-  console.log(`Host: ${args.host}`);
-  console.log(`Host-native plugin state: ${current.nativePlugin.status}${current.nativePlugin.version ? `, version=${current.nativePlugin.version}` : ''}`);
-  if (current.audit?.error) console.log(`Bridge audit warning: ${current.audit.error}`);
-  console.log('');
-  printQuestionRows(specs);
+function renderSetupQuestionBank(specs) {
+  return [
+    QUESTION_BANK_BEGIN,
+    '# Toolkit setup choices',
+    '',
+    'Review every visible choice before setup writes anything.',
+    '',
+    renderQuestionRows(specs),
+    '',
+    '**Accept all displayed recommended settings:** use `--yes-recommended` only after reviewing this complete bank.',
+    QUESTION_BANK_COMPLETE,
+    '',
+  ].join('\n');
+}
+
+function emitCompleteQuestionBank(specs, options = {}) {
+  const write = options.write || ((text) => { process.stdout.write(text); return true; });
+  const render = options.render || renderSetupQuestionBank;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const text = render(specs);
+    const complete = text.includes(QUESTION_BANK_BEGIN)
+      && text.includes(QUESTION_BANK_COMPLETE)
+      && specs.every((spec) => text.includes(`### ${spec.title}`));
+    if (complete && write(text) !== false) return { appeared: true, attempts: attempt + 1, text };
+  }
+  throw new Error('Complete setup question bank could not be rendered visibly; no approval prompt or write is allowed.');
 }
 
 function assignChoice(args, key, choice) {
   if (key === 'managedCheckout') args.setupChoices.managedCheckout = choice;
   else if (key === 'repoAutoUpdate') args.setupChoices.repoAutoUpdate = choice;
   else if (key === 'updateReports') args.setupChoices.updateReports = choice;
-  else if (key === 'updateReportOpen') args.setupChoices.updateReportOpen = choice;
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
@@ -1168,7 +1272,6 @@ function choiceForKey(args, key) {
   if (key === 'managedCheckout') return args.setupChoices.managedCheckout;
   if (key === 'repoAutoUpdate') return args.setupChoices.repoAutoUpdate;
   if (key === 'updateReports') return args.setupChoices.updateReports;
-  if (key === 'updateReportOpen') return args.setupChoices.updateReportOpen;
   if (key === 'updateReportRetention') return args.setupChoices.updateReportRetention;
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
@@ -1192,7 +1295,7 @@ async function promptForChoice(spec, lines, rl) {
     return String(lines.shift() || '').trim().toLowerCase() || spec.recommended;
   }
   for (;;) {
-    const answer = (await rl.question(`${spec.prompt} [${spec.choices.join('/')}], Enter=${spec.recommended}: `)).trim().toLowerCase();
+    const answer = (await rl.question(`${spec.prompt} [${choiceValues(spec).join('/')}], Enter=${spec.recommended}: `)).trim().toLowerCase();
     return answer || spec.recommended;
   }
 }
@@ -1217,7 +1320,7 @@ async function promptForHelperCount(lines, rl) {
     return parseNonNegativeInteger(value, 'Custom Codex helper count');
   }
   for (;;) {
-    const answer = (await rl.question('How many helper agents may Codex use at the same time? Enter a non-negative integer: ')).trim();
+    const answer = (await rl.question('How many helper agents may Codex use? Enter a non-negative integer: ')).trim();
     try {
       return parseNonNegativeInteger(answer, 'Custom Codex helper count');
     } catch (error) {
@@ -1245,15 +1348,6 @@ async function answerSetupQuestionBank(args, current) {
   let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
   let completeStdinConsumed = false;
 
-  if (current.delegationMigrationPreview) {
-    console.log('# Codex legacy migration pre-approval preview');
-    const preview = current.delegationMigrationPreview;
-    preview.before_semantics = current.delegation.detail;
-    printDelegationPreview(preview);
-    console.log('Choosing keep, empty input, or --yes-recommended leaves the file unchanged. Choose migrate explicitly only after reviewing this preview.');
-    console.log('');
-  }
-
   if (args.yesRecommended) {
     answerSource = 'user-approved yes-recommended';
     for (const spec of initialSpecs) {
@@ -1265,7 +1359,7 @@ async function answerSetupQuestionBank(args, current) {
   let missing = specs.filter((spec) => !choiceForKey(args, spec.key));
   const needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
   const helperChoiceInitiallyMissing = initialSpecs.some((spec) => spec.key === 'codexHelperCapacity' && !spec.selected);
-  const needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
+  const needsHelperDetails = args.setupChoices.codexHelperCapacity === 'advanced'
     && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
   const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails;
   const lines = needsPromptedAnswers && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
@@ -1275,14 +1369,14 @@ async function answerSetupQuestionBank(args, current) {
   if (lines && !needsCustomPath && lines.length >= missing.length) {
     for (const spec of missing) {
       const answer = await promptForChoice(spec, lines, null);
-      if (!spec.choices.includes(answer)) throw new Error(`${spec.title} must be one of: ${spec.choices.join(', ')}`);
+      if (!choiceValues(spec).includes(answer)) throw new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
       assignChoice(args, spec.key, answer);
     }
     specs = setupQuestionSpecs(args, current);
     missing = [];
   }
 
-  printSetupQuestionBank(args, current, specs);
+  const rendered = emitCompleteQuestionBank(specs);
   if (args.yesRecommended) {
     console.log('--yes-recommended selected; setup will apply these choices before writing.');
     console.log('');
@@ -1297,12 +1391,12 @@ async function answerSetupQuestionBank(args, current) {
   try {
     for (const spec of missing) {
       const answer = await promptForChoice(spec, lines, rl);
-      if (!spec.choices.includes(answer)) {
-        throw new Error(`${spec.title} must be one of: ${spec.choices.join(', ')}`);
+      if (!choiceValues(spec).includes(answer)) {
+        throw new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
       }
       assignChoice(args, spec.key, answer);
     }
-    if (args.setupChoices.codexHelperCapacity === 'custom') {
+    if (args.setupChoices.codexHelperCapacity === 'advanced') {
       if (args.codexHelperCount === null) args.codexHelperCount = await promptForHelperCount(lines, rl);
       await requireHighHelperCapacityApproval(args, lines, rl);
     }
@@ -1314,16 +1408,13 @@ async function answerSetupQuestionBank(args, current) {
     if (rl) rl.close();
   }
 
-  if (lines && lines.some((line) => String(line).trim())) {
-    throw new Error('Setup question bank received unexpected extra non-empty input.');
-  }
   if (lines) completeStdinConsumed = true;
 
   applySetupChoices(args, current);
   console.log('');
   console.log('Setup choices confirmed before writes:');
   for (const spec of setupQuestionSpecs(args, current)) console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
-  if (args.setupChoices.codexHelperCapacity === 'custom') {
+  if (args.setupChoices.codexHelperCapacity === 'advanced') {
     console.log(`- Custom Codex helper count: ${args.codexHelperCount}`);
     console.log(`- Total MultiAgentV2 session threads including the main agent: ${args.codexHelperCount + 1}`);
     console.log(`- RAM-risk approval for more than one helper: ${args.codexHelperCount > 1 ? (args.approveHighHelperCapacity ? 'approved' : 'missing') : 'not required'}`);
@@ -1334,7 +1425,9 @@ async function answerSetupQuestionBank(args, current) {
     answers_supplied_by_complete_stdin: completeStdinConsumed,
     answers_prompted_interactively: Boolean(rl),
     stopped_for_answers: false,
-    answer_source: answerSource || 'none'
+    answer_source: answerSource || 'none',
+    remaining_input: lines ? lines.filter((line) => String(line).trim()) : [],
+    render_attempts: rendered.attempts,
   };
 }
 
@@ -1356,8 +1449,7 @@ function applySetupChoices(args, current) {
   if (choices.updateReports === 'keep') args.updateReports = current.audit?.update_report_enabled !== false;
   else args.updateReports = choices.updateReports === 'enable';
 
-  if (choices.updateReportOpen === 'keep') args.updateReportOpen = current.audit?.update_report_open_enabled === true;
-  else args.updateReportOpen = choices.updateReportOpen === 'enable';
+  args.updateReportOpen = false;
 
   if (choices.updateReportRetention === 'keep') args.updateReportRetentionDays = currentReportRetentionDays(current);
   else if (choices.updateReportRetention === 'default') args.updateReportRetentionDays = DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
@@ -1762,14 +1854,12 @@ function writeBridgePreferences(args) {
     );
   }
 
-  const reportArgs = [];
+  const reportArgs = ['--disable-update-report-open'];
   if (choices.updateReports === 'enable') reportArgs.push('--enable-update-reports');
   else if (choices.updateReports === 'disable') reportArgs.push('--disable-update-reports');
   if (choices.updateReportRetention === 'default' || choices.updateReportRetention === 'custom') {
     reportArgs.push('--update-report-retention-days', String(args.updateReportRetentionDays));
   }
-  if (choices.updateReportOpen === 'enable') reportArgs.push('--enable-update-report-open');
-  else if (choices.updateReportOpen === 'disable') reportArgs.push('--disable-update-report-open');
   if (reportArgs.length) {
     runBridgeWrite(
       args,
@@ -1842,9 +1932,7 @@ function printPlan(plan, asJson) {
     return;
   }
   if (plan.question_bank.length) {
-    console.log('# setup toolkit question bank (plan)');
-    console.log('');
-    printQuestionRows(plan.question_bank);
+    process.stdout.write(renderSetupQuestionBank(plan.question_bank));
   }
   printSetupChecklist(plan);
   for (const step of plan.steps) {
@@ -1946,6 +2034,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Question answers prompted interactively: ${yesNo(questionBank?.answers_prompted_interactively)}`);
   console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
+  console.log(`Question bank render attempts: ${unknown(questionBank?.render_attempts)}`);
   console.log('Preference/target writes before answers: no');
   console.log('');
   console.log('## Codex helper agents');
@@ -1960,7 +2049,8 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('Defined multi-worker workflow exception: Only when the user invoked that workflow, its worker count is stated, and higher persistent or temporary capacity was explicitly approved');
   console.log('Worker topology policy: Direct children of the root with no needless scope overlap; helpers must not spawn helpers; root retains coordination and final judgment');
   console.log('Helpers creating helpers: Prohibited by Toolkit policy');
-  console.log(`Hard nested-helper enforcement: ${unknown(delegation.hard_nested_helper_enforcement || 'unverified')}`);
+  console.log(`Recursive delegation enforcement: ${unknown(delegation.recursive_helper_control || (delegation.runtime === RUNTIMES.V2 ? 'policy-only; no native hard block verified' : 'unverified'))}`);
+  console.log(`Concurrent helper enforcement: ${Number.isSafeInteger(delegation.helper_count) ? 'queued or rejected when the configured capacity is full; native UAT pending' : 'unverified'}`);
   const technicalSetting = delegation.runtime === RUNTIMES.V2 && Number.isSafeInteger(delegation.total_threads)
     ? `features.multi_agent_v2.max_concurrent_threads_per_session = ${delegation.total_threads}`
     : (delegation.runtime === RUNTIMES.V1 && Number.isSafeInteger(delegation.helper_count)
@@ -2023,7 +2113,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Repo auto-update path: ${unknown(repo.repo_path || args.repoRoot)}`);
   console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
   console.log(`Update report writes enabled: ${args.updateReports}`);
-  console.log(`Update report auto-open enabled: ${args.updateReportOpen}`);
+  console.log('Update report opening behavior: action-required reports open automatically; successful reports stay closed');
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
   console.log(`Update report/log directory: ${unknown(cleanup.report_log_directory)}`);
   console.log(`Update report cleanup deleted count: ${cleanup.deleted_count ?? 0}`);
@@ -2044,6 +2134,7 @@ async function execute(args) {
   const current = await collectCurrentState(args);
   args.codexRuntime = current.runtime.runtime;
   const questionBank = await answerSetupQuestionBank(args, current);
+  await confirmSelectedDelegationProposal(args, current, questionBank);
   const plan = setupPlan(args);
   printSetupChecklist(plan);
   const warning = activeToolkitWarning(args);
@@ -2100,7 +2191,7 @@ if (require.main === module) {
       process.exitCode = code;
     })
     .catch((error) => {
-      if (/Setup question bank requires|must be one of|requires a path answer|requires a helper-count answer|require the exact approval answer/.test(error.message)) {
+      if (/Setup question bank requires|must be one of|requires a path answer|requires a helper-count answer|require the exact approval answer|Selected helper setting remains unapplied/.test(error.message)) {
         process.exitCode = SETUP_PAUSED_FOR_QUESTION_BANK;
         console.error(`SETUP PAUSED: ${error.message}`);
         console.error('Question bank pause is intentional. Ask the user for the missing setup answers; do not rerun with --yes-recommended unless the user explicitly requested recommended defaults.');
@@ -2131,6 +2222,8 @@ module.exports = {
   applyHostDelegationControl,
   parseArgs,
   setupQuestionSpecs,
+  renderSetupQuestionBank,
+  emitCompleteQuestionBank,
   plannedQuestionBank,
   setupPlan,
   normalizeRemote,
