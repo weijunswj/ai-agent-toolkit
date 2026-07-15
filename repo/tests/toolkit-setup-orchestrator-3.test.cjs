@@ -37,6 +37,35 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
 
+test('Claude setup rejects extra non-empty piped input before every setup write', () => {
+  const validRoot = tmpRoot();
+  const validRepo = createGitBackedSetupRepo(validRoot);
+  const valid = run([
+    '--execute', '--host', 'claude-code', '--repo-root', validRepo.setupRepo, '--repo-remote', validRepo.origin,
+  ], {
+    env: isolatedHomeEnv(validRoot),
+    input: ['keep', 'keep', 'keep', 'instructions', '   ', ''].join('\n'),
+  });
+  assert.equal(valid.status, 0, valid.stderr || valid.stdout);
+
+  const rejectedRoot = tmpRoot();
+  const rejectedRepo = createGitBackedSetupRepo(rejectedRoot);
+  const beforeStatus = runTestGit(rejectedRepo.setupRepo, ['status', '--porcelain']);
+  const rejected = run([
+    '--execute', '--host', 'claude-code', '--repo-root', rejectedRepo.setupRepo, '--repo-remote', rejectedRepo.origin,
+  ], {
+    env: isolatedHomeEnv(rejectedRoot),
+    input: ['keep', 'keep', 'keep', 'instructions', 'unexpected'].join('\n'),
+  });
+  assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
+  assert.match(rejected.stderr, /Setup question bank received unexpected extra non-empty input\./);
+  assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'CLAUDE_PLUGIN_HELPER_ARGS.log')), false);
+  assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'CLAUDE_PLUGIN_SETUP.log')), false);
+  assert.equal(fs.existsSync(path.join(rejectedRepo.setupRepo, 'BRIDGE_ARGS.log')), false);
+  assert.equal(runTestGit(rejectedRepo.setupRepo, ['status', '--porcelain']), beforeStatus);
+  assert.equal(fs.existsSync(codexConfig(rejectedRoot)), false);
+});
+
 test('target keep, skip, enable-sync, and disable remain distinct', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);

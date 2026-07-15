@@ -877,11 +877,23 @@ function selectedHelperCount(args, current) {
 }
 
 async function confirmSelectedDelegationProposal(args, current, questionBank) {
-  if (args.host !== 'codex') return null;
+  const assertQuestionBankConsumed = () => {
+    if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
+  };
+  if (args.host !== 'codex') {
+    assertQuestionBankConsumed();
+    return null;
+  }
   const choice = args.setupChoices.codexHelperCapacity;
   if (!['one-helper', 'root-only', 'advanced', 'migrate'].includes(choice)) {
-    if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
+    assertQuestionBankConsumed();
     return null;
+  }
+  if (current.delegation.status === 'migration-required' && choice !== 'migrate') {
+    throw new Error('Selected helper setting remains unapplied. The exact PR #237 legacy setting can only change through the explicit `migrate` choice; choose `migrate` or `keep`.');
+  }
+  if (choice === 'migrate' && (current.runtime.runtime !== RUNTIMES.V2 || current.delegation.status !== 'migration-required')) {
+    throw new Error('Selected helper setting remains unapplied. No exact Toolkit-managed PR #237 legacy setting is available to migrate; choose an ordinary helper setting or `keep`.');
   }
   const helperCount = selectedHelperCount(args, current);
   const preview = delegation.previewCodexDelegation(current.delegation.config_path || delegation.codexConfigPath(), {
@@ -890,6 +902,11 @@ async function confirmSelectedDelegationProposal(args, current, questionBank) {
     setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
     allowUserOwnedReplacement: true,
   });
+  if (preview.selected_outcome_matches === true) {
+    assertQuestionBankConsumed();
+    args.codexDelegationPreview = preview;
+    return preview;
+  }
   if (preview.status !== 'preview') {
     throw new Error(`Selected helper setting remains unapplied. Required action: resolve the reported Codex configuration or runtime detection problem, then rerun setup. ${preview.detail || preview.status}`);
   }
@@ -908,7 +925,7 @@ async function confirmSelectedDelegationProposal(args, current, questionBank) {
     }
     args.approveCodexConfigProposal = true;
   }
-  if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
+  assertQuestionBankConsumed();
   args.codexDelegationPreview = preview;
   return preview;
 }
@@ -930,6 +947,18 @@ async function applyHostDelegationControl(args, current) {
   if (!['migrate', 'one-helper', 'root-only', 'advanced'].includes(choice)) return delegation.delegationResultForChoice(choice, configPath, options);
   if (choice === 'migrate') options.helperCount = current.delegation.helper_count;
   const preview = args.codexDelegationPreview;
+  if (preview?.selected_outcome_matches === true) {
+    const verifiedNoop = delegation.previewCodexDelegation(configPath, {
+      runtime: current.runtime.runtime,
+      helperCount: options.helperCount,
+      setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
+      allowUserOwnedReplacement: true,
+    });
+    if (verifiedNoop.selected_outcome_matches !== true) {
+      throw new Error('Selected helper setting remains unapplied. The previously matching user-owned Codex configuration changed before final verification; rerun setup.');
+    }
+    return verifiedNoop;
+  }
   if (!preview || preview.status !== 'preview' || !preview.approval_binding) {
     throw new Error('Selected helper setting remains unapplied. Toolkit could not verify the approved Codex proposal. Rerun setup to receive a fresh proposal.');
   }
@@ -1025,6 +1054,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
   if (key === 'codexPluginAutoRefresh') return 'enable';
   if (key === 'codexHelperCapacity') {
+    if (current.delegation?.status === 'migration-required') return 'keep';
     return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'one-helper' : 'keep';
   }
   if (key === 'claudePluginBehavior') return 'install';
@@ -1114,6 +1144,7 @@ function setupQuestionSpecs(args, current) {
   ];
 
   if (args.host === 'codex') {
+    const migrationPending = current.delegation?.status === 'migration-required';
     specs.push({
       key: 'codexHelperCapacity',
       section: 'Computer performance',
@@ -1121,15 +1152,20 @@ function setupQuestionSpecs(args, current) {
       prompt: 'Codex helper choice',
       description: 'Each helper can use substantial memory. More than one helper can make the computer unresponsive.',
       choices: [
-        wizardChoice('one-helper', 'One helper at most - recommended'),
+        wizardChoice('one-helper', migrationPending ? 'One helper at most (available after migration)' : 'One helper at most - recommended'),
         wizardChoice('root-only', 'No helpers'),
-        wizardChoice('keep', Number.isSafeInteger(current.delegation?.helper_count) && current.delegation.helper_count > 1 ? 'Keep current - memory risk' : 'Keep current'),
+        wizardChoice('keep', migrationPending
+          ? 'Keep current - recommended'
+          : (Number.isSafeInteger(current.delegation?.helper_count) && current.delegation.helper_count > 1 ? 'Keep current - memory risk' : 'Keep current')),
+        ...(migrationPending ? [wizardChoice('migrate', 'Migrate the existing Toolkit legacy setting')] : []),
         wizardChoice('advanced', 'Advanced'),
       ],
       recommended: recommendedChoice('codexHelperCapacity', current, args),
       selected: args.setupChoices.codexHelperCapacity,
       current: currentHelperOutcome(current),
-      recommended_outcome: current.runtime?.runtime === RUNTIMES.UNKNOWN
+      recommended_outcome: migrationPending
+        ? 'Keep the existing Toolkit legacy setting unchanged unless you explicitly choose migration.'
+        : current.runtime?.runtime === RUNTIMES.UNKNOWN
         ? 'Keep the current setting until Codex can verify the effective helper controls.'
         : 'One helper at most. Codex performs the main work and may use one helper for a difficult, clearly separate task.'
     });
@@ -1964,6 +2000,14 @@ function yesNo(value) {
   return value ? 'yes' : 'no';
 }
 
+function delegationOutcomeSummary(args, result) {
+  if (result.migrated_legacy_block === true) return 'migrated';
+  if (args.setupChoices?.codexHelperCapacity === 'keep' || result.status === 'kept') return 'kept';
+  if (result.status === 'configured' && result.changed === false) return 'already configured';
+  if (result.status === 'configured') return 'configured';
+  return result.status || 'unchanged';
+}
+
 function activeWorktreeSummary(args) {
   const activeRoot = repoRootFromScript();
   let role = 'bootstrap/fallback only';
@@ -2062,6 +2106,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
         ? `agents.max_threads = ${delegation.helper_count}; agents.max_depth = 1`
         : 'not changed');
   console.log(`Technical setting: ${technicalSetting}`);
+  console.log(`Helper-capacity outcome this run: ${delegationOutcomeSummary(args, delegation)}`);
   console.log(`Configuration changed this run: ${yesNo(delegation.changed === true)}`);
   console.log(`PR #237 legacy block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
   console.log(`Official V2 boolean enablement migrated to configured table: ${yesNo(delegation.migrated_v2_boolean_enablement === true)}`);

@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.5.1';
+const TOOLKIT_CLIENT_VERSION = '2.5.2';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v1';
 
@@ -75,6 +75,11 @@ function inspectCodexDelegationConfig(configPath = codexConfigPath(), runtime = 
 }
 
 function canReplaceUserOwnedRuntimeControls(state, runtime) {
+  if (runtime === RUNTIMES.V2) {
+    if (state.layout?.multiAgentV2Children?.length !== 0) return false;
+    const enabled = state.parsed?.multi_agent_v2_values?.enabled;
+    if (enabled?.present === true && (enabled.type !== 'bool' || enabled.value !== true)) return false;
+  }
   if (String(state.ownership || '').startsWith('user-owned-compatible-')) return true;
   if (state.status !== 'conflicting' || !state.layout?.ok || !state.parsed?.ok) return false;
   if (runtime === RUNTIMES.V1) {
@@ -84,10 +89,28 @@ function canReplaceUserOwnedRuntimeControls(state, runtime) {
   }
   if (runtime === RUNTIMES.V2) {
     return state.layout.multiAgentV2Tables.length === 1
+      && state.layout.multiAgentV2Children.length === 0
       && state.layout.enablementBeginMarkers.length === 0
       && state.layout.helperBeginMarkers.length === 0
       && state.layout.rootGuidanceBeginMarkers.length === 0
       && state.layout.helperGuidanceBeginMarkers.length === 0;
+  }
+  return false;
+}
+
+function userOwnedConfigurationMatchesSelection(state, runtime, helperCount) {
+  if (state.status !== 'configured' || state.runtime !== runtime || state.helper_count !== helperCount) return false;
+  if (runtime === RUNTIMES.V1) {
+    return state.ownership === 'user-owned-compatible-v1'
+      && state.recursive_hard_block === true;
+  }
+  if (runtime === RUNTIMES.V2) {
+    return state.ownership === 'user-owned-compatible-v2'
+      && state.enablement_ownership === 'user-owned-table'
+      && state.capacity_ownership === 'user-owned'
+      && state.root_guidance_ownership === 'user-owned'
+      && state.helper_guidance_ownership === 'user-owned'
+      && state.total_threads === helpersToTotalThreads(helperCount);
   }
   return false;
 }
@@ -207,6 +230,15 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
     return { ...inspectCodexDelegationConfig(configPath, runtime), changed: false };
   }
   const state = initialStateFromSnapshot(snapshot, snapshot.config_path, runtime);
+  if (userOwnedConfigurationMatchesSelection(state, runtime, helperCount)) {
+    return {
+      ...state,
+      changed: false,
+      selected_outcome_matches: true,
+      requires_user_confirmation: false,
+      detail: `${state.detail} The selected helper outcome already matches, so Toolkit will preserve this user-owned file without replacement.`,
+    };
+  }
   const configurable = state.status === 'unconfigured'
     || state.status === 'migration-required'
     || state.status === 'enablement-migration-required'
@@ -865,8 +897,8 @@ async function delegationResultForChoice(choice, configPath = codexConfigPath(),
     return { ...current, status: current.status === 'configured' ? 'configured' : 'kept', changed: false, detail: current.status === 'configured' ? current.detail : `${current.detail} Current helper capacity was kept unchanged.` };
   }
   if (choice === 'migrate') {
-    if (options.approvedProposal) return configureCodexDelegation(configPath, { ...options, helperCount: options.helperCount });
     if (runtime !== RUNTIMES.V2 || current.status !== 'migration-required') return { ...current, changed: false, detail: `${current.detail} No exact Toolkit-managed legacy setting is available to migrate.` };
+    if (options.approvedProposal) return configureCodexDelegation(configPath, { ...options, helperCount: options.helperCount });
     return configureCodexDelegation(configPath, { ...options, helperCount: current.helper_count });
   }
   if (choice === 'ram-safe') return configureCodexDelegation(configPath, { ...options, helperCount: CODEX_V2_RAM_SAFE_HELPERS });

@@ -92,10 +92,10 @@ function runTestGit(cwd, args) {
 function createMinimalSetupRepo(root, options = {}) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '2.5.1', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '2.5.2', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '2.5.1', hooks: './.codex-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '2.5.2', hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
     hooks: { SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source claude-plugin' }] }] }
@@ -106,7 +106,7 @@ function createMinimalSetupRepo(root, options = {}) {
     "const path = require('node:path');",
     "if (process.env.SETUP_FAKE_PLUGIN_FAILURE === '1') { console.error('synthetic plugin failure'); process.exit(1); }",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.5.1', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.5.2', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
     'process.exit(0);', ''
   ].join('\n'));
   writeFile(path.join(root, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'), [
@@ -115,7 +115,7 @@ function createMinimalSetupRepo(root, options = {}) {
     "const path = require('node:path');",
     "fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_HELPER_ARGS.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.5.1', scope: 'user' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.5.2', scope: 'user' }));",
     'process.exit(0);', ''
   ].join('\n'));
   writeFile(path.join(root, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
@@ -187,7 +187,7 @@ function createFakeManagedSetupScript(root, options = {}) {
   const exitCode = Number.isInteger(options.exitCode) ? options.exitCode : 23;
   writeFile(scriptPath, [
     '#!/usr/bin/env node', "'use strict';",
-    "console.log('managed setup script version 2.5.1');",
+    "console.log('managed setup script version 2.5.2');",
     ...(options.emitQuestionBank === false ? [] : [
       "console.log('<!-- setup-toolkit-question-bank:begin -->');",
       "console.log('# Toolkit setup choices');",

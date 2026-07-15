@@ -271,6 +271,145 @@ test('table-form user-owned V2 enablement remains unmarked and survives removal 
   assert.equal(fs.readFileSync(conflictingPath, 'utf8'), conflictingText);
 });
 
+test('unsupported V2 child tables are not replaceable or approvable', async () => {
+  const filePath = configPath();
+  const original = '[features.multi_agent_v2]\nenabled = true\n\n[features.multi_agent_v2.custom]\nvalue = "unsupported"\n';
+  writeConfig(filePath, original);
+  const state = config.inspectCodexDelegationConfig(filePath, V2);
+  assert.equal(state.status, 'conflicting');
+  assert.equal(config.canReplaceUserOwnedRuntimeControls(state, V2), false);
+  const preview = config.previewCodexDelegation(filePath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  assert.notEqual(preview.status, 'preview');
+  let editorCalls = 0;
+  const result = await config.configureCodexDelegation(filePath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+    editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+  });
+  assert.equal(result.changed, false);
+  assert.equal(editorCalls, 0);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+  assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+
+  const parentOnlyPath = configPath();
+  const parentOnly = '[features.multi_agent_v2]\nenabled = true\n';
+  writeConfig(parentOnlyPath, parentOnly);
+  const supported = config.previewCodexDelegation(parentOnlyPath, {
+    runtime: V2,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  assert.equal(supported.status, 'preview');
+  assert.equal(fs.readFileSync(parentOnlyPath, 'utf8'), parentOnly);
+});
+
+test('explicit false or non-boolean V2 enablement is not replaceable', async () => {
+  for (const enabled of ['false', '"true"']) {
+    const filePath = configPath();
+    const original = `[features.multi_agent_v2]\nenabled = ${enabled}\nmax_concurrent_threads_per_session = 2\n`;
+    writeConfig(filePath, original);
+    const state = config.inspectCodexDelegationConfig(filePath, V2);
+    assert.equal(state.status, 'conflicting');
+    assert.equal(config.canReplaceUserOwnedRuntimeControls(state, V2), false);
+    const preview = config.previewCodexDelegation(filePath, { runtime: V2, helperCount: 1, allowUserOwnedReplacement: true });
+    assert.notEqual(preview.status, 'preview');
+    let editorCalls = 0;
+    const result = await config.configureCodexDelegation(filePath, {
+      runtime: V2,
+      helperCount: 1,
+      allowUserOwnedReplacement: true,
+      editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+    });
+    assert.equal(result.changed, false);
+    assert.equal(editorCalls, 0);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+    assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+  }
+});
+
+test('approved migrate remains guarded when no exact legacy state exists', async () => {
+  const filePath = configPath();
+  const original = 'model = "gpt-5.6"\n';
+  writeConfig(filePath, original);
+  const preview = config.previewCodexDelegation(filePath, { runtime: V2, helperCount: 1 });
+  assert.equal(preview.status, 'preview');
+  let editorCalls = 0;
+  const result = await config.delegationResultForChoice('migrate', filePath, {
+    runtime: V2,
+    helperCount: 1,
+    editor: async () => { editorCalls += 1; return { bytes: Buffer.from('unreachable') }; },
+    ...approvedOptions(preview),
+  });
+  assert.equal(result.changed, false);
+  assert.match(result.detail, /No exact Toolkit-managed legacy setting is available to migrate/);
+  assert.equal(editorCalls, 0);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+  assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+});
+
+test('matching user-owned V2 controls are byte-preserving no-ops with root-inclusive arithmetic', async () => {
+  for (const helperCount of [1, 0]) {
+    const filePath = configPath();
+    const original = [
+      '[features.multi_agent_v2]',
+      'enabled = true # user owned',
+      `max_concurrent_threads_per_session = ${helperCount + 1}`,
+      `root_agent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_ROOT_GUIDANCE)}`,
+      `subagent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_HELPER_GUIDANCE)}`,
+      '',
+    ].join('\n');
+    writeConfig(filePath, original);
+    const preview = config.previewCodexDelegation(filePath, {
+      runtime: V2,
+      helperCount,
+      allowUserOwnedReplacement: true,
+    });
+    assert.equal(preview.status, 'configured');
+    assert.equal(preview.selected_outcome_matches, true);
+    assert.equal(preview.requires_user_confirmation, false);
+    const result = await config.configureCodexDelegation(filePath, {
+      runtime: V2,
+      helperCount,
+      allowUserOwnedReplacement: true,
+      editor: async () => { throw new Error('matching user-owned V2 config must not invoke editor'); },
+    });
+    assert.equal(result.changed, false);
+    assert.equal(result.helper_count, helperCount);
+    assert.equal(result.total_threads, helperCount + 1);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+    assert.doesNotMatch(fs.readFileSync(filePath, 'utf8'), /AI-AGENT-TOOLKIT/);
+    assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+  }
+});
+
+test('different or structurally incomplete user-owned V2 controls are not matching no-ops', () => {
+  const filePath = configPath();
+  const complete = [
+    '[features.multi_agent_v2]',
+    'enabled = true',
+    'max_concurrent_threads_per_session = 1',
+    `root_agent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_ROOT_GUIDANCE)}`,
+    `subagent_usage_hint_text = ${JSON.stringify(config.CODEX_V2_HELPER_GUIDANCE)}`,
+    '',
+  ].join('\n');
+  writeConfig(filePath, complete);
+  const different = config.previewCodexDelegation(filePath, { runtime: V2, helperCount: 1, allowUserOwnedReplacement: true });
+  assert.equal(different.status, 'preview');
+  assert.equal(different.requires_user_confirmation, true);
+  assert.notEqual(different.selected_outcome_matches, true);
+
+  const incompletePath = configPath();
+  writeConfig(incompletePath, '[features.multi_agent_v2]\nenabled = true\nmax_concurrent_threads_per_session = 2\n');
+  const incomplete = config.previewCodexDelegation(incompletePath, { runtime: V2, helperCount: 1, allowUserOwnedReplacement: true });
+  assert.notEqual(incomplete.selected_outcome_matches, true);
+  assert.equal(incomplete.requires_user_confirmation, true);
+});
+
 test('approved user-owned V2 control replacement preserves enablement and unrelated keys', async () => {
   const filePath = configPath();
   const original = [

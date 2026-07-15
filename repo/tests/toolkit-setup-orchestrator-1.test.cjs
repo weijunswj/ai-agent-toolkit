@@ -115,6 +115,7 @@ test('--yes-recommended applies the visibly recommended one-helper Codex outcome
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*One helper at most - recommended/);
   assert.match(result.stdout, /Codex helper-agent runtime: MultiAgentV2/);
+  assert.match(result.stdout, /Helper-capacity outcome this run: configured/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
   assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 2/);
   assert.ok(backupFiles(root).length > 0);

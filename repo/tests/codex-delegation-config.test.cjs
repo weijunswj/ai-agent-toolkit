@@ -170,6 +170,55 @@ test('explicitly approved V1 replacement changes only supported legacy controls'
   assert.equal(fs.readFileSync(filePath, 'utf8'), original);
 });
 
+test('matching user-owned V1 controls are byte-preserving no-ops for one helper and root-only', async () => {
+  for (const helperCount of [1, 0]) {
+    const filePath = configPath();
+    const original = `[agents]\n# user owned\nmax_threads = ${helperCount}\nmax_depth = 1\n`;
+    writeConfig(filePath, original);
+    const preview = config.previewCodexDelegation(filePath, {
+      runtime: V1_RUNTIME,
+      helperCount,
+      allowUserOwnedReplacement: true,
+    });
+    assert.equal(preview.status, 'configured');
+    assert.equal(preview.selected_outcome_matches, true);
+    assert.equal(preview.requires_user_confirmation, false);
+    const result = await configure(filePath, {
+      helperCount,
+      allowUserOwnedReplacement: true,
+      editor: async () => { throw new Error('matching user-owned V1 config must not invoke editor'); },
+    });
+    assert.equal(result.status, 'configured');
+    assert.equal(result.changed, false);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), original);
+    assert.doesNotMatch(fs.readFileSync(filePath, 'utf8'), /AI-AGENT-TOOLKIT/);
+    assert.equal(fs.existsSync(backupRootFor(filePath)), false);
+  }
+});
+
+test('different or incomplete user-owned V1 controls are never accepted as matching no-ops', () => {
+  const differentPath = configPath();
+  writeConfig(differentPath, '[agents]\nmax_threads = 0\nmax_depth = 1\n');
+  const different = config.previewCodexDelegation(differentPath, {
+    runtime: V1_RUNTIME,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  assert.equal(different.status, 'preview');
+  assert.equal(different.requires_user_confirmation, true);
+  assert.notEqual(different.selected_outcome_matches, true);
+
+  const incompletePath = configPath();
+  writeConfig(incompletePath, '[agents]\nmax_threads = 1\n');
+  const incomplete = config.previewCodexDelegation(incompletePath, {
+    runtime: V1_RUNTIME,
+    helperCount: 1,
+    allowUserOwnedReplacement: true,
+  });
+  assert.notEqual(incomplete.selected_outcome_matches, true);
+  assert.equal(incomplete.requires_user_confirmation, true);
+});
+
 test('approved V1 proposal rejects affected-key drift before editor or backup', async () => {
   const filePath = configPath();
   const original = '[agents]\nmax_threads = 8\nmax_depth = 2\n';

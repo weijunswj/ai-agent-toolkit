@@ -38,19 +38,178 @@ test('explicit keep does not migrate an exact legacy block or create a backup', 
   assert.deepEqual(backupFiles(root), []);
 });
 
+test('migration-required defaults and yes-recommended keep the legacy block unchanged', () => {
+  for (const mode of ['empty', 'yes-recommended']) {
+    const root = tmpRoot();
+    const { origin, setupRepo } = createGitBackedSetupRepo(root);
+    const configPath = codexConfig(root);
+    const editorLog = path.join(root, 'editor.log');
+    const original = Buffer.from(`[agents]\n${delegation.expectedLegacyBlock(1)}\n`);
+    writeFile(configPath, original.toString('utf8'));
+    const args = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--skip-codex-plugin-auto-refresh'];
+    if (mode === 'yes-recommended') args.push('--yes-recommended');
+    const result = run(args, {
+      env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog },
+      input: mode === 'empty' ? ['keep', 'keep', 'keep', ''].join('\n') : undefined,
+      timeout: 300000,
+    });
+    assert.equal(result.status, 0, `${mode}: ${result.stderr || result.stdout}`);
+    assert.match(result.stdout, /Migrate the existing Toolkit legacy setting/);
+    assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*\*\*Selected:\*\* Keep current/);
+    assert.match(result.stdout, /Helper-capacity outcome this run: kept/);
+    assert.match(result.stdout, /PR #237 legacy block migrated: no/);
+    assert.match(result.stdout, /Configuration changed this run: no/);
+    assert.deepEqual(fs.readFileSync(configPath), original);
+    assert.equal(fs.existsSync(editorLog), false);
+    assert.deepEqual(backupFiles(root), []);
+  }
+});
+
 test('legacy migration is a distinct explicit choice with a full visible preview', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const configPath = codexConfig(root);
-  writeFile(configPath, `[agents]\n${delegation.expectedLegacyBlock(1)}\n`);
+  const original = [
+    'model = "gpt-5.6"',
+    '[agents]',
+    delegation.expectedLegacyBlock(1),
+    '',
+    '[agents.security-reviewer]',
+    'description = "preserve me"',
+    '',
+  ].join('\n');
+  const editorLog = path.join(root, 'editor.log');
+  writeFile(configPath, original);
   const result = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'migrate',
-  ], { env: isolatedHomeEnv(root), timeout: 300000 });
+  ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog }, timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.ok(result.stdout.indexOf('setup-toolkit-question-bank:complete') < result.stdout.indexOf('# Codex helper-agent config preview'));
   assert.match(result.stdout, /Before semantics:[\s\S]*After semantics:[\s\S]*Proposed Toolkit-managed TOML block:[\s\S]*Planned exact backup metadata:[\s\S]*Restore command setup script:[\s\S]*Exact restore command after the approved write \(PowerShell\):/);
   assert.match(result.stdout, /PR #237 legacy block migrated: yes/);
+  assert.match(result.stdout, /Helper-capacity outcome this run: migrated/);
+  assert.match(fs.readFileSync(configPath, 'utf8'), /model = "gpt-5.6"/);
+  assert.match(fs.readFileSync(configPath, 'utf8'), /\[agents\.security-reviewer\]\ndescription = "preserve me"/);
+  assert.equal(fs.readFileSync(editorLog, 'utf8').trim(), 'config/batchWrite');
+
+  const configuredBytes = fs.readFileSync(configPath);
+  const backupCount = backupFiles(root).length;
+  fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
+  const repeated = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh',
+  ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog }, timeout: 300000 });
+  assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
+  assert.match(repeated.stdout, /Helper-capacity outcome this run: already configured/);
+  assert.match(repeated.stdout, /PR #237 legacy block migrated: no/);
+  assert.deepEqual(fs.readFileSync(configPath), configuredBytes);
+  assert.equal(fs.readFileSync(editorLog, 'utf8').trim(), 'config/batchWrite');
+  assert.equal(backupFiles(root).length, backupCount);
+});
+
+test('ordinary capacity choices cannot silently migrate a pending legacy block', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const configPath = codexConfig(root);
+  const original = Buffer.from(`[agents]\n${delegation.expectedLegacyBlock(1)}\n`);
+  const editorLog = path.join(root, 'editor.log');
+  writeFile(configPath, original.toString('utf8'));
+  const result = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'one-helper',
+  ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog } });
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.match(result.stderr, /can only change through the explicit `migrate` choice/);
+  assert.deepEqual(fs.readFileSync(configPath), original);
+  assert.equal(fs.existsSync(editorLog), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false);
+  assert.deepEqual(backupFiles(root), []);
+});
+
+test('explicit migrate is rejected when no exact legacy block is pending', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const configPath = codexConfig(root);
+  const original = Buffer.from('model = "gpt-5.6"\n');
+  const editorLog = path.join(root, 'editor.log');
+  writeFile(configPath, original.toString('utf8'));
+  const result = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'migrate',
+  ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog } });
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.match(result.stderr, /No exact Toolkit-managed PR #237 legacy setting is available to migrate/);
+  assert.deepEqual(fs.readFileSync(configPath), original);
+  assert.equal(fs.existsSync(editorLog), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false);
+  assert.deepEqual(backupFiles(root), []);
+});
+
+test('unsupported V2 child tables stop before confirmation or any setup mutation', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const configPath = codexConfig(root);
+  const editorLog = path.join(root, 'editor.log');
+  const original = Buffer.from('[features.multi_agent_v2]\nenabled = true\n\n[features.multi_agent_v2.custom]\nvalue = "unsupported"\n');
+  writeFile(configPath, original.toString('utf8'));
+  const result = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh',
+  ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog } });
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.match(result.stderr, /unsupported child tables/);
+  assert.doesNotMatch(result.stdout, /Type apply to approve/);
+  assert.doesNotMatch(result.stderr, /answer `apply`/);
+  assert.deepEqual(fs.readFileSync(configPath), original);
+  assert.equal(fs.existsSync(editorLog), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false);
+  assert.deepEqual(backupFiles(root), []);
+});
+
+test('already matching user-owned V1 and V2 configs complete without apply, editor, backup, or markers', () => {
+  const fixtures = [
+    {
+      name: 'V2 empty input',
+      runtime: 'v2',
+      text: ['[features.multi_agent_v2]', 'enabled = true', 'max_concurrent_threads_per_session = 2', `root_agent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_ROOT_GUIDANCE)}`, `subagent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_HELPER_GUIDANCE)}`, ''].join('\n'),
+      args: [],
+      input: ['keep', 'keep', 'keep', ''].join('\n'),
+    },
+    {
+      name: 'V1 yes-recommended',
+      runtime: 'v1',
+      text: '[agents]\nmax_threads = 1\nmax_depth = 1\n',
+      args: ['--yes-recommended'],
+    },
+  ];
+  for (const fixture of fixtures) {
+    const root = tmpRoot();
+    const { origin, setupRepo } = createGitBackedSetupRepo(root);
+    const configPath = codexConfig(root);
+    const editorLog = path.join(root, 'editor.log');
+    const original = Buffer.from(fixture.text);
+    writeFile(configPath, fixture.text);
+    const result = run([
+      '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+      '--skip-codex-plugin-auto-refresh', ...fixture.args,
+    ], {
+      env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_RUNTIME: fixture.runtime, SETUP_FAKE_CODEX_EDITOR_LOG: editorLog },
+      input: fixture.input,
+      timeout: 300000,
+    });
+    assert.equal(result.status, 0, `${fixture.name}: ${result.stderr || result.stdout}`);
+    assert.doesNotMatch(result.stdout, /Type apply to approve/);
+    assert.match(result.stdout, /Helper-capacity outcome this run: already configured/);
+    assert.match(result.stdout, /Configuration changed this run: no/);
+    assert.deepEqual(fs.readFileSync(configPath), original);
+    assert.doesNotMatch(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT/);
+    assert.equal(fs.existsSync(editorLog), false);
+    assert.deepEqual(backupFiles(root), []);
+  }
 });
 
 test('user-owned legacy values require one same-flow proposal confirmation under V2', () => {
