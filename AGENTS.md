@@ -57,7 +57,7 @@ Use any repo docs index, architecture/source-of-truth guide, or contributor guid
 
 Treat `MEMORY.md` as managed, non-authoritative project memory. Read it before planning/editing when present; use it only for compact durable repo-specific context.
 
-Authoritative sources override it. Do not create it merely because absent. Prefer canonical docs/source/validation/maps/ADRs, and never use memory for history, status, plans, handoffs, logs, or task tracking.
+Authoritative sources override it. Do not create `MEMORY.md` merely because it is absent. Prefer canonical docs/source/validation/maps/ADRs, and never use memory for history, status, plans, handoffs, logs, or task tracking.
 
 Never store secrets, credentials, tokens, keys, `.env` values, private/customer data, live state, or sensitive operations. New memory needs a managed non-authoritative header and stays small.
 
@@ -80,11 +80,11 @@ Never introduce secrets, credentials, tokens, private keys, `.env` values, or pr
 
 ## Application Error, Logging, And Privacy Defaults
 
-For app behavior, use generic user errors with a support-safe reference, the same event/request ref in privacy-minimized server logs, and no internal/private data. Never log prompts/uploads/model outputs, secrets, auth headers/cookies, payment data, private connector data/files, or unneeded PII.
+When touching app behavior, use generic user-facing errors with a support-safe traceable reference, the same event/request ref in server logs, and no internal/private data. Keep privacy-minimized logs; do not log prompts/uploads/model outputs, secrets, auth headers/cookies, payment data, private connector data/files, or unneeded PII.
 
 ## Fallback Policy
 
-Do not default to broad/silent compatibility, synthetic/sample data, fake success, or catch-and-continue; fix the real failure. Allow fallbacks only for correctness, data/migration safety, or approved compatibility. They must be narrow, visible, reason-documented, tested on both paths, and temporary with a removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never fake business data or silently downgrade production.
+Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fallbacks, fake success states, or catch-and-continue behaviour by default; prefer fixing the real failure path. Allow only for correctness, data safety, migration safety, or explicitly approved compatibility. Approved fallbacks must be narrow, visible via logs/diagnostics/user-safe status as appropriate, tested on primary/fallback paths, reason-documented, with temporary removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never use fake business data or silently downgrade production behaviour.
 
 ## User Action Questions
 

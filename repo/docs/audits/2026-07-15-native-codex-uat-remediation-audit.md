@@ -96,13 +96,15 @@ PR #259 amendment validation on the current worktree:
 - Toolkit staging generations: 14 passed.
 - Hook-light validation: 2 passed.
 - Toolkit validator, generated instruction check, project sync check, repo doc contract, source-lock audit, published-surface audit, fallback-risk audit, skill portability audit, skill package check, pack package check, and `git diff --check`: passed.
-- Portable managed template: 13,212 characters, below the 14,000-character limit.
+- Portable managed template: 13,425 characters, below the 14,000-character limit.
 - Packaged-version validator regression: 1 targeted test passed.
 - Toolkit Local Bridge directly affected concurrent-writer case: 1 passed. A current full-suite rerun timed out after 32 reported passes at 15 minutes; no owned orphan remained. The earlier full 133-test evidence above remains pre-amendment evidence, and exact-head CI is required for the amendment.
 
 The complete `repo/tests/validate-toolkit.test.cjs` process exceeded 15 minutes twice without output and left no owned orphan. Its directly affected packaged-version case and the direct Toolkit validator both pass. CI remains the full read-only gate; local `npm run validate:all` was not run per repository policy.
 
 PR #259 CI passed on earlier commit `cd6b32dde6377436ea7e46573bd2b00789d4d843`, including both validation jobs, package checks, generated-surface sync, and CodeQL. That result does not validate the current amendment; the new exact head must pass before final completion.
+
+The first amendment CI run on `e4bb4388b4fe7b83c52ea8b37adfe0ef5f2c9f2f` failed three portable instruction phrase-contract assertions. The targeted repair restored the compact application-error, fallback, and optional-memory contracts and aligned Git Completion assertions with the compressed equivalent wording. The five-test observability suite, two affected validator tests, 18 instruction-shim tests, direct validator, and both generated checks pass locally; replacement exact-head CI remains required.
 
 Native Codex C1/C2 and startup/resume/clear/compact were not run and are explicitly excluded from implementation proof.
 
