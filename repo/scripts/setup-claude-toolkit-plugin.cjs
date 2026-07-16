@@ -208,22 +208,24 @@ function installedActivationProof(installed, expectedVersion) {
   const cachePath = path.resolve(String(installed?.installPath || ''));
   const hookPath = path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json');
   const controllerPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-agent-control.cjs');
-  for (const filePath of [hookPath, controllerPath]) {
+  const agentHookPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
+  for (const filePath of [hookPath, controllerPath, agentHookPath]) {
     const stat = fs.lstatSync(filePath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Installed Claude enforcement path is not a regular file.');
   }
   return {
-    schema: 1,
+    schema: 2,
     source: 'claude-plugin-list',
     plugin_version: expectedVersion,
     cache_identity: crypto.createHash('sha256').update(cachePath).digest('hex'),
     hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(hookPath)).digest('hex'),
     controller_sha256: crypto.createHash('sha256').update(fs.readFileSync(controllerPath)).digest('hex'),
+    agent_hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(agentHookPath)).digest('hex'),
   };
 }
 
 function sameActivationProof(left, right) {
-  return ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256']
+  return ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'agent_hook_sha256']
     .every((key) => left?.[key] === right?.[key]);
 }
 
@@ -231,9 +233,9 @@ function verifyCurrentInstalledEnforcement(expectedProof, options = {}) {
   try {
     const command = options.claudeCommand || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
     processLaunch.assertExecutableAvailable(command, options);
-    const versionResult = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs() });
+    const versionResult = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs(), env: options.env });
     if (versionResult.status !== 0) throw new Error(commandOutput(versionResult) || 'Claude CLI version probe failed.');
-    const matches = findPluginEntries(runClaudeJson(command, ['plugin', 'list', '--json']));
+    const matches = findPluginEntries(runClaudeJson(command, ['plugin', 'list', '--json'], { env: options.env }));
     const matching = matches.filter((entry) => {
       if (!entry?.installPath) return false;
       const identity = crypto.createHash('sha256').update(path.resolve(entry.installPath)).digest('hex');
@@ -382,8 +384,8 @@ function resolveClaudeCommand(explicitCommand) {
   return { command: '', failures };
 }
 
-function runClaudeJson(command, args) {
-  const result = spawnClaude(command, args, { encoding: 'utf8', timeout: commandTimeoutMs() });
+function runClaudeJson(command, args, options = {}) {
+  const result = spawnClaude(command, args, { encoding: 'utf8', timeout: commandTimeoutMs(), ...options });
   if (result.status !== 0) {
     throw new Error(`claude ${args.join(' ')} failed: ${commandOutput(result)}`);
   }

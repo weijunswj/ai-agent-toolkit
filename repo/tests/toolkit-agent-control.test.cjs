@@ -26,12 +26,12 @@ function spec(overrides = {}) {
   };
 }
 function activationProof(overrides = {}) {
-  return { schema: 1, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION,
-    cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), ...overrides };
+  return { schema: 2, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION,
+    cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), agent_hook_sha256: 'd'.repeat(64), ...overrides };
 }
 let defaultVerifier;
 function configured(topology, capacity_mode, overrides = {}) {
-  return { topology, capacity_mode, enforcement_verified: true, activation_proof: defaultVerifier?.proof || activationProof(),
+  return { topology, capacity_mode, enforcement_verified: true, activation_proof: defaultVerifier?.proof || activationProof(), claude_cli: defaultVerifier?.cli || 'claude',
     resource_counter_supported: topology === control.TOPOLOGIES.CLAUDE_DIRECT,
     resource_counter_source: topology === control.TOPOLOGIES.CLAUDE_DIRECT ? 'win32-operating-system' : 'not-applicable', ...overrides };
 }
@@ -39,7 +39,7 @@ function profile(overrides = {}) {
   return { schema: control.SCHEMA, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT,
     capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST,
     queue_limit: control.MAX_QUEUE, reservation_limit: control.EMERGENCY_WORKER_CEILING,
-    controller_version: control.CONTROL_VERSION, enforcement_verified: true, activation_proof: defaultVerifier?.proof || activationProof(), status: 'configured', supported: true, ...overrides };
+    controller_version: control.CONTROL_VERSION, enforcement_verified: true, activation_proof: defaultVerifier?.proof || activationProof(), claude_cli: defaultVerifier?.cli || 'claude', status: 'configured', supported: true, ...overrides };
 }
 function verifiedOptions(overrides = {}) {
   const selected = overrides.profile || profile();
@@ -49,7 +49,7 @@ function verifierFixture() {
   const work = root();
   const cache = path.join(work, 'cache');
   const sourceRoot = path.resolve(__dirname, '..', '..');
-  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs']) {
+  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs']) {
     const target = path.join(cache, ...rel.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(sourceRoot, ...rel.split('/')), target);
@@ -65,7 +65,7 @@ function verifierFixture() {
 function enforcementFixture() {
   const fixture = verifierFixture();
   const { work, proof } = fixture;
-  control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO, { activation_proof: proof }), { root: work });
+  control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO, { activation_proof: proof, claude_cli: fixture.cli }), { root: work });
   return fixture;
 }
 defaultVerifier = verifierFixture();
@@ -298,6 +298,8 @@ test('direct admission revalidates current Claude trust, hooks and installed ide
     ['inactive hooks', ({ entry }) => { entry.hooksActive = false; }],
     ['changed hook bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'), ' '); }],
     ['changed controller bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'toolkit-agent-control.cjs'), '\n'); }],
+    ['changed agent hook bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs'), '\n'); }],
+    ['missing agent hook', ({ cache }) => { fs.unlinkSync(path.join(cache, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs')); }],
     ['replayed proof for replaced cache', (fixture) => {
       const replacement = path.join(fixture.work, 'replacement-cache');
       fs.cpSync(fixture.cache, replacement, { recursive: true });
@@ -319,6 +321,145 @@ test('direct admission revalidates current Claude trust, hooks and installed ide
   const admitted = control.admissionDecision(spec(), { root: current.work, claudeCli: current.cli, resourceState: resources() });
   assert.equal(admitted.result, control.RESULTS.START);
   assert.equal(control.releaseReservation(admitted.reservation_id, { root: current.work }), true);
+});
+
+test('symlinked installed agent hook refuses before admission state', { skip: process.platform === 'win32' }, (t) => {
+  const fixture = enforcementFixture();
+  const hookPath = path.join(fixture.cache, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
+  const replacement = path.join(fixture.work, 'replacement-hook.cjs');
+  fs.copyFileSync(hookPath, replacement);
+  fs.unlinkSync(hookPath);
+  try { fs.symlinkSync(replacement, hookPath); }
+  catch (error) {
+    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
+    throw error;
+  }
+  const result = control.admissionDecision(spec(), { root: fixture.work, resourceState: resources() });
+  assert.equal(result.result, control.RESULTS.REFUSE);
+  assert.equal(fs.existsSync(control.statePath({ root: fixture.work })), false);
+  assert.equal(fs.existsSync(path.join(fixture.work, 'jobs')), false);
+});
+
+test('effective Claude command precedence is explicit, environment, persisted profile, then bare default', () => {
+  const persisted = profile({ claude_cli: 'persisted-claude' });
+  assert.equal(control.effectiveClaudeCommand(persisted, { claudeCli: 'explicit-claude', env: { AI_AGENT_TOOLKIT_CLAUDE_CLI: 'environment-claude' } }), 'explicit-claude');
+  assert.equal(control.effectiveClaudeCommand(persisted, { env: { AI_AGENT_TOOLKIT_CLAUDE_CLI: 'environment-claude' } }), 'environment-claude');
+  assert.equal(control.effectiveClaudeCommand(persisted, { env: {} }), 'persisted-claude');
+  assert.equal(control.effectiveClaudeCommand({}, { env: {} }), 'claude');
+});
+
+test('persisted Claude command launches without repetition and runtime overrides do not mutate it', () => {
+  const persisted = enforcementFixture();
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.AI_AGENT_TOOLKIT_CLAUDE_CLI;
+  const normal = control.admissionDecision(spec(), { root: persisted.work, env: cleanEnv, resourceState: resources() });
+  assert.equal(normal.result, control.RESULTS.START);
+  control.releaseReservation(normal.reservation_id, { root: persisted.work });
+  assert.equal(control.readProfile('claude-code', { root: persisted.work }).claude_cli, persisted.cli);
+
+  const missing = path.join(persisted.work, 'missing-persisted.cjs');
+  const stored = control.readProfile('claude-code', { root: persisted.work });
+  fs.writeFileSync(control.profilePath('claude-code', { root: persisted.work }), `${JSON.stringify({ ...stored, status: undefined, supported: undefined, claude_cli: missing }, null, 2)}\n`);
+  const explicit = control.admissionDecision(spec(), { root: persisted.work, claudeCli: persisted.cli, env: { ...cleanEnv, AI_AGENT_TOOLKIT_CLAUDE_CLI: path.join(persisted.work, 'missing-env.cjs') }, resourceState: resources() });
+  assert.equal(explicit.result, control.RESULTS.START);
+  control.releaseReservation(explicit.reservation_id, { root: persisted.work });
+  assert.equal(control.readProfile('claude-code', { root: persisted.work }).claude_cli, missing);
+
+  const environment = control.admissionDecision(spec(), { root: persisted.work, env: { ...cleanEnv, AI_AGENT_TOOLKIT_CLAUDE_CLI: persisted.cli }, resourceState: resources() });
+  assert.equal(environment.result, control.RESULTS.START);
+  control.releaseReservation(environment.reservation_id, { root: persisted.work });
+});
+
+test('unavailable persisted Claude command refuses launch without residue', () => {
+  const fixture = enforcementFixture();
+  const stored = control.readProfile('claude-code', { root: fixture.work });
+  fs.writeFileSync(control.profilePath('claude-code', { root: fixture.work }), `${JSON.stringify({ ...stored, status: undefined, supported: undefined, claude_cli: path.join(fixture.work, 'missing.cjs') }, null, 2)}\n`);
+  const env = { ...process.env };
+  delete env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
+  const result = control.launch(spec(), { root: fixture.work, env, resourceState: resources() });
+  assert.equal(result.result, control.RESULTS.REFUSE);
+  assert.notEqual(result.status, 'launched');
+  assert.equal(fs.existsSync(control.statePath({ root: fixture.work })), false);
+  assert.equal(fs.existsSync(path.join(fixture.work, 'jobs')), false);
+});
+
+test('missing strict profile refuses launch without throwing or creating residue', () => {
+  const work = root();
+  const result = control.launch(spec(), { root: work, env: { ...process.env }, resourceState: resources() });
+  assert.equal(result.result, control.RESULTS.REFUSE);
+  assert.notEqual(result.status, 'launched');
+  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
+});
+
+test('Toolkit child marker refuses launch and admission before locks or artifacts', () => {
+  for (const depth of [undefined, 1, 2]) {
+    const work = root();
+    const childSpec = spec(depth === undefined ? {} : { depth });
+    const options = verifiedOptions({ root: work, env: { ...process.env, AI_AGENT_TOOLKIT_CHILD: '1' }, resourceState: resources() });
+    for (const result of [control.admissionDecision(childSpec, options), control.launch(childSpec, options)]) {
+      assert.equal(result.result, control.RESULTS.REFUSE);
+      assert.match(result.reason, /children cannot launch further workers/i);
+    }
+    assert.equal(fs.existsSync(control.lockPath({ root: work })), false);
+    assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+    assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
+  }
+});
+
+function createLockDirectory(work, owner, ageMs = 0) {
+  const target = control.lockPath({ root: work });
+  fs.mkdirSync(target, { recursive: true });
+  if (owner !== undefined) fs.writeFileSync(path.join(target, 'owner.json'), typeof owner === 'string' ? owner : JSON.stringify(owner), { mode: 0o600 });
+  if (ageMs) {
+    const old = new Date(Date.now() - ageMs);
+    fs.utimesSync(target, old, old);
+  }
+  return target;
+}
+
+test('fresh ownerless and malformed locks remain protected', () => {
+  for (const owner of [undefined, '{ malformed']) {
+    const work = root();
+    const target = createLockDirectory(work, owner);
+    assert.throws(() => control.acquireLock({ root: work, lockWaitMs: 30 }), /temporarily busy/i);
+    assert.equal(fs.existsSync(target), true);
+  }
+});
+
+test('stale ownerless, malformed and dead-owner locks recover while live owners remain protected', () => {
+  const staleAge = control.LOCK_TTL_MS + 2000;
+  for (const owner of [undefined, '{ malformed', { pid: -1, created_at_ms: 'bad' }, { pid: 99999999, created_at_ms: Date.now() - staleAge }]) {
+    const work = root();
+    const target = createLockDirectory(work, owner, staleAge);
+    const release = control.acquireLock({ root: work, lockWaitMs: 200 });
+    release();
+    assert.equal(fs.existsSync(target), false);
+    assert.equal(fs.existsSync(control.lockRecoveryPath({ root: work })), false);
+  }
+
+  const liveRoot = root();
+  const live = createLockDirectory(liveRoot, { pid: process.pid, created_at_ms: Date.now() - staleAge, token: 'legacy-live-owner' }, staleAge);
+  assert.throws(() => control.acquireLock({ root: liveRoot, lockWaitMs: 30 }), /temporarily busy/i);
+  assert.equal(fs.existsSync(live), true);
+});
+
+test('stale ownerless recovery preserves mutual exclusion across contenders', async () => {
+  const work = root();
+  createLockDirectory(work, undefined, control.LOCK_TTL_MS + 2000);
+  const log = path.join(work, 'critical.log');
+  const modulePath = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
+  const script = `const fs=require('node:fs');const c=require(${JSON.stringify(modulePath)});const release=c.acquireLock({root:${JSON.stringify(work)},lockWaitMs:5000});fs.appendFileSync(${JSON.stringify(log)},'start\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);fs.appendFileSync(${JSON.stringify(log)},'end\\n');release();`;
+  const run = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', script], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(stderr)));
+  });
+  await Promise.all([run(), run()]);
+  assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split(/\r?\n/), ['start', 'end', 'start', 'end']);
+  assert.equal(fs.existsSync(control.lockPath({ root: work })), false);
 });
 
 test('missing Claude executable forms refuse before admission or artifacts', () => {

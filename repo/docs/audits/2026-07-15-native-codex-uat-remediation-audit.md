@@ -213,6 +213,16 @@ Official behavior source: https://code.claude.com/docs/en/setup#auto-updates
 
 Local amendment evidence: focused Claude process/plugin/controller/lifecycle tests passed 63/67 with 4 symlink-specific skips because the Windows host either does not support the POSIX assertion or denied symlink creation; setup/profile/orchestration passed 53/53; Codex configuration/plugin/SessionStart passed 94/95 with one expected POSIX-only skip; Toolkit Local Bridge passed 133/133; generated/project/doc/source-lock/published-surface/fallback-risk checks and skill/pack packaging passed. A clean detached worktree at implementation commit `ceab4ad076f06bca29e4ffcfb415d54929a0dc06` passed Toolkit validation, generated freshness, skill/pack packaging, `git diff --check`, and all 138 runnable validator tests with 2 Windows symlink-capability skips. Exact-head Linux CI owns execution of the official-style, valid, broken, cyclic, directory, non-executable, and no-residue symlink cases.
 
+## Four Security And Primary-Flow Amendments
+
+Starting reviewed head: `47a7fff82b9f5041fd883715cdd8aeffc15dc4ad`.
+
+- Activation proof schema 2 adds the exact installed `toolkit-claude-agent-hook.cjs` hash alongside plugin version, cache identity, hooks configuration, and controller hash. Runtime recomputes every field; missing, changed, or symlinked hook scripts fail before admission state.
+- Strict profiles persist the original verified Claude command. Effective launch precedence is explicit argument, current `AI_AGENT_TOOLKIT_CLAUDE_CLI`, persisted command, then bare `claude`; every effective command repeats availability and native enforcement verification without mutating the profile.
+- `AI_AGENT_TOOLKIT_CHILD=1` refuses both launch and admission before validation/probing, lock acquisition, queue/reservation state, artifacts, or supervisor creation. `Agent` and legacy `Task` denial remains defence in depth.
+- Fresh ownerless/malformed lock directories remain protected during owner publication. Stale dead, ownerless, or malformed locks recover under an exclusive recovery marker using bounded directory age; live owners remain protected and concurrent contenders remain mutually exclusive.
+- Toolkit packaged surfaces align at `2.7.5`.
+
 ## Release Gates
 
 - The eight current exact-head findings are repaired: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv. Current-head implementation evidence and regression results were posted in each original thread before resolution.

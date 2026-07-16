@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.4';
+const CONTROL_VERSION = '2.7.5';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -36,6 +36,7 @@ function profilePath(host = 'claude-code', options = {}) {
 
 function statePath(options = {}) { return path.join(controlRoot(options), 'state.json'); }
 function lockPath(options = {}) { return path.join(controlRoot(options), 'state.lock'); }
+function lockRecoveryPath(options = {}) { return `${lockPath(options)}.recovery`; }
 
 function atomicWriteJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -74,32 +75,82 @@ function pidAlive(pid) {
   catch (error) { return error && error.code === 'EPERM'; }
 }
 
+function validLockOwner(owner) {
+  return Boolean(owner && Number.isSafeInteger(owner.pid) && owner.pid > 0
+    && Number.isSafeInteger(owner.created_at_ms) && owner.created_at_ms > 0);
+}
+
+function readLockOwner(target) {
+  const ownerPath = path.join(target, 'owner.json');
+  try {
+    verifyPrivateRegularFile(ownerPath);
+    return readJson(ownerPath);
+  } catch { return null; }
+}
+
+function recoverStaleLock(options = {}) {
+  const target = lockPath(options);
+  const recovery = lockRecoveryPath(options);
+  try {
+    fs.mkdirSync(recovery, { mode: 0o700 });
+    fs.chmodSync(recovery, 0o700);
+  } catch (error) {
+    if (error.code === 'EEXIST') return false;
+    throw error;
+  }
+  try {
+    let stat;
+    try { stat = fs.lstatSync(target); }
+    catch (error) { if (error.code === 'ENOENT') return true; throw error; }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Agent admission lock is not a regular directory.');
+    const owner = readLockOwner(target);
+    if (Number.isSafeInteger(owner?.pid) && owner.pid > 0 && pidAlive(owner.pid)) return false;
+    const timestamp = validLockOwner(owner) ? owner.created_at_ms : stat.mtimeMs;
+    if (!Number.isFinite(timestamp) || Date.now() - timestamp <= LOCK_TTL_MS) return false;
+    const displaced = path.join(recovery, 'stale-lock');
+    fs.renameSync(target, displaced);
+    fs.rmSync(displaced, { recursive: true, force: true });
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return true;
+    throw error;
+  } finally {
+    fs.rmSync(recovery, { recursive: true, force: true });
+  }
+}
+
 function acquireLock(options = {}) {
   const root = controlRoot(options);
   const target = lockPath(options);
   fs.mkdirSync(root, { recursive: true });
   const deadline = Date.now() + (options.lockWaitMs || 5000);
   for (;;) {
+    if (fs.existsSync(lockRecoveryPath(options))) {
+      if (Date.now() >= deadline) throw new Error('Agent admission is temporarily busy; retry without launching a worker.');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      continue;
+    }
     try {
-      fs.mkdirSync(target);
+      const token = crypto.randomUUID();
+      fs.mkdirSync(target, { mode: 0o700 });
+      fs.chmodSync(target, 0o700);
+      if (fs.existsSync(lockRecoveryPath(options))) {
+        fs.rmSync(target, { recursive: true, force: true });
+        continue;
+      }
       try {
-        atomicWriteJson(path.join(target, 'owner.json'), { pid: process.pid, created_at_ms: Date.now() });
+        atomicWriteJson(path.join(target, 'owner.json'), { pid: process.pid, created_at_ms: Date.now(), token });
       } catch (error) {
         fs.rmSync(target, { recursive: true, force: true });
         throw error;
       }
       return () => {
-        const owner = readJson(path.join(target, 'owner.json'));
-        if (owner?.pid === process.pid) fs.rmSync(target, { recursive: true, force: true });
+        const owner = readLockOwner(target);
+        if (owner?.pid === process.pid && owner?.token === token) fs.rmSync(target, { recursive: true, force: true });
       };
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      const owner = readJson(path.join(target, 'owner.json'));
-      const stale = owner && Number.isFinite(owner.created_at_ms) && Date.now() - owner.created_at_ms > LOCK_TTL_MS;
-      if (stale && !pidAlive(owner.pid)) {
-        fs.rmSync(target, { recursive: true, force: true });
-        continue;
-      }
+      if (recoverStaleLock(options)) continue;
       if (Date.now() >= deadline) throw new Error('Agent admission is temporarily busy; retry without launching a worker.');
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
@@ -152,9 +203,9 @@ function rootOnlyProfile(host, status, reason) {
 }
 
 function validActivationProof(proof, expected = {}) {
-  const structurallyValid = Boolean(proof && proof.schema === 1 && proof.source === 'claude-plugin-list'
+  const structurallyValid = Boolean(proof && proof.schema === 2 && proof.source === 'claude-plugin-list'
     && proof.plugin_version === CONTROL_VERSION
-    && ['cache_identity', 'hook_sha256', 'controller_sha256'].every((key) => /^[a-f0-9]{64}$/.test(String(proof[key] || ''))));
+    && ['cache_identity', 'hook_sha256', 'controller_sha256', 'agent_hook_sha256'].every((key) => /^[a-f0-9]{64}$/.test(String(proof[key] || ''))));
   if (!structurallyValid) return false;
   if (expected.pluginVersion && proof.plugin_version !== expected.pluginVersion) return false;
   if (expected.cachePath) {
@@ -164,12 +215,28 @@ function validActivationProof(proof, expected = {}) {
   return true;
 }
 
+function effectiveEnvironment(options = {}) {
+  return Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env;
+}
+
+function effectiveClaudeCommand(profile, options = {}) {
+  const env = effectiveEnvironment(options);
+  return options.claudeCli || env?.AI_AGENT_TOOLKIT_CLAUDE_CLI || profile?.claude_cli || 'claude';
+}
+
+function childLaunchRefusal(options = {}) {
+  return effectiveEnvironment(options)?.AI_AGENT_TOOLKIT_CHILD === '1'
+    ? refusal('Toolkit-managed children cannot launch further workers.')
+    : null;
+}
+
 function verifyCurrentClaudeEnforcement(profile, options = {}) {
+  const env = effectiveEnvironment(options);
   const current = require('./setup-claude-toolkit-plugin.cjs').verifyCurrentInstalledEnforcement(profile.activation_proof, {
-    claudeCommand: options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude',
+    claudeCommand: effectiveClaudeCommand(profile, options), env,
   });
   return Boolean(current?.verified === true && validActivationProof(current.activation_proof)
-    && ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256']
+    && ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'agent_hook_sha256']
       .every((key) => current.activation_proof[key] === profile.activation_proof?.[key]));
 }
 
@@ -186,7 +253,8 @@ function readProfile(host = 'claude-code', options = {}) {
     || (raw.topology === TOPOLOGIES.BROADER_NATIVE && raw.capacity_mode === CAPACITY_MODES.ROOT_ONLY && raw.manual_maximum === 0);
   const strict = [TOPOLOGIES.ROOT_ONLY, TOPOLOGIES.CLAUDE_DIRECT].includes(raw.topology);
   const strictValid = !strict || (raw.enforcement_verified === true && raw.controller_version === CONTROL_VERSION
-    && ['native-agent-hook-deny', 'toolkit-launch-boundary'].includes(raw.enforcement) && validActivationProof(raw.activation_proof));
+    && ['native-agent-hook-deny', 'toolkit-launch-boundary'].includes(raw.enforcement) && validActivationProof(raw.activation_proof)
+    && typeof raw.claude_cli === 'string' && raw.claude_cli.length > 0 && (() => { try { processLaunch.validateExecutable(raw.claude_cli); return true; } catch { return false; } })());
   const resourceValid = raw.topology !== TOPOLOGIES.CLAUDE_DIRECT
     || (raw.resource_counter_verified === true && ['proc-meminfo', 'win32-operating-system'].includes(raw.resource_counter_source));
   if (raw.schema !== SCHEMA || raw.host !== host || !validEnums || !validNumbers || !compatible || !strictValid || !resourceValid || typeof raw.updated_at !== 'string') {
@@ -216,6 +284,7 @@ function configureProfile(host, selected, options = {}) {
   if (strict && (selected.enforcement_verified !== true || !validActivationProof(selected.activation_proof))) {
     throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
   }
+  const claudeCli = strict ? processLaunch.validateExecutable(selected.claude_cli || 'claude') : null;
   const resourceCapability = inspectResourceCapability({ resourceState: selected.resource_state });
   const resourceSource = selected.resource_counter_source || resourceCapability.source;
   if (topology === TOPOLOGIES.CLAUDE_DIRECT && (selected.resource_counter_supported !== true && !resourceCapability.supported
@@ -226,6 +295,7 @@ function configureProfile(host, selected, options = {}) {
     schema: SCHEMA, host, topology, capacity_mode: capacityMode, manual_maximum: manualMaximum,
     worker_estimate_bytes: workerEstimate, queue_limit: MAX_QUEUE, reservation_limit: EMERGENCY_WORKER_CEILING,
     controller_version: CONTROL_VERSION, enforcement_verified: strict, activation_proof: strict ? selected.activation_proof : null,
+    claude_cli: claudeCli,
     resource_counter_verified: topology === TOPOLOGIES.CLAUDE_DIRECT,
     resource_counter_source: topology === TOPOLOGIES.CLAUDE_DIRECT ? resourceSource : 'not-applicable',
     updated_at: new Date().toISOString(),
@@ -314,6 +384,8 @@ function refusal(reason) {
 }
 
 function admissionDecision(specInput, options = {}) {
+  const childRefusal = childLaunchRefusal(options);
+  if (childRefusal) return childRefusal;
   let spec;
   try { spec = validateLaunchSpec(specInput); }
   catch (error) { return refusal(error.message); }
@@ -417,15 +489,21 @@ function claudeInvocation(spec, options = {}) {
 }
 
 function launch(specInput, options = {}) {
+  const childRefusal = childLaunchRefusal(options);
+  if (childRefusal) return childRefusal;
   let spec;
   let promptBytes;
+  let profile;
+  let claudeCli;
   try {
+    profile = options.profile || readProfile('claude-code', options);
+    claudeCli = effectiveClaudeCommand(profile, options);
     spec = validateLaunchSpec(specInput);
     promptBytes = Buffer.from(String(spec.child_prompt || spec.child_responsibility), 'utf8');
     if (promptBytes.length > MAX_PROMPT_BYTES) return refusal('Child prompt exceeds the bounded private transport limit.');
-    processLaunch.assertExecutableAvailable(options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude');
+    processLaunch.assertExecutableAvailable(claudeCli, { env: effectiveEnvironment(options) });
   } catch (error) { return refusal(error.message); }
-  const admitted = admissionDecision(spec, options);
+  const admitted = admissionDecision(spec, { ...options, profile, claudeCli });
   if (admitted.result !== RESULTS.START) return admitted;
   const root = controlRoot(options);
   const jobs = path.join(root, 'jobs');
@@ -442,7 +520,7 @@ function launch(specInput, options = {}) {
     out = fs.openSync(outputPath, 'w');
     err = fs.openSync(errorPath, 'w');
     const supervisorArgs = [__filename, 'supervise', '--root', root, '--reservation', admitted.reservation_id, '--spec', specPath];
-    if (options.claudeCli) supervisorArgs.push('--claude-cli', options.claudeCli);
+    supervisorArgs.push('--claude-cli', claudeCli);
     const supervisor = spawn(process.execPath, supervisorArgs, { detached: true, windowsHide: true, stdio: ['ignore', out, err], env: process.env });
     supervisor.unref();
     return { ...admitted, supervisor_pid: supervisor.pid, spec_path: specPath, output_path: outputPath, error_path: errorPath, status: 'launched' };
@@ -516,7 +594,7 @@ async function main(argv = process.argv.slice(2)) {
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
-  SCHEMA, CONTROL_VERSION, RESULTS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES,
-  controlRoot, profilePath, statePath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement,
+  SCHEMA, CONTROL_VERSION, RESULTS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, LOCK_TTL_MS,
+  controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock,
   admissionDecision, updateReservation, releaseReservation, claudeInvocation, launch, recoverState, pidAlive,
 };

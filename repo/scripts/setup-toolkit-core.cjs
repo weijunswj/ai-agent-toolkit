@@ -1010,6 +1010,7 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
       manual_maximum: resolved.manual_maximum,
       enforcement_verified: strict,
       activation_proof: nativeCache.activation_proof,
+      claude_cli: args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude',
       resource_counter_supported: resourceCapable,
       resource_counter_source: current.agentCapability?.resource_counter_source,
     });

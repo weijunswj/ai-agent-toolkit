@@ -9,7 +9,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 
 function current(supported, profile = {}) {
-  const proof = { schema: 1, source: 'claude-plugin-list', plugin_version: '2.7.4', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64) };
+  const proof = { schema: 2, source: 'claude-plugin-list', plugin_version: '2.7.5', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },

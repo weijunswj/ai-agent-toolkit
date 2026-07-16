@@ -30,6 +30,7 @@ test('Claude recommended execution writes only the enforceable direct automatic 
   const profile = JSON.parse(fs.readFileSync(control.profilePath('claude-code', { root: path.join(root, '.ai-agent-toolkit', 'agent-control') }), 'utf8'));
   assert.equal(profile.topology, control.TOPOLOGIES.CLAUDE_DIRECT);
   assert.equal(profile.capacity_mode, control.CAPACITY_MODES.AUTO);
+  assert.equal(profile.claude_cli, fakeClaude);
   assert.equal(fs.existsSync(codexConfig(root)), false);
 });
 
