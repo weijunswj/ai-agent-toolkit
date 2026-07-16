@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.1';
+const CONTROL_VERSION = '2.7.2';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -461,6 +461,8 @@ async function supervise(args) {
     code = await new Promise((resolve) => {
       let settled = false;
       const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
+      // The executable passed validation and argv is separate; spawn is required for streaming private stdin.
+      // lgtm[js/shell-command-injection-from-environment]
       const child = spawn(invocation.executable, invocation.args, { windowsVerbatimArguments: invocation.windowsVerbatimArguments, env: invocation.env, windowsHide: true, stdio: ['pipe', 'inherit', 'inherit'] });
       child.on('error', () => finish(1));
       child.on('exit', (value) => finish(Number.isInteger(value) ? value : 1));

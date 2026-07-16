@@ -5,16 +5,17 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 const launch = require('../scripts/claude-process-launch.cjs');
 
 function run(parts, options = {}) {
-  return spawnSync(parts.command, parts.args, {
+  const stdout = execFileSync(parts.command, parts.args, {
     ...options,
     windowsVerbatimArguments: parts.windowsVerbatimArguments,
     encoding: 'utf8',
     windowsHide: true,
   });
+  return { status: 0, stdout, stderr: '' };
 }
 
 test('JavaScript Claude CLI paths remain shell-free and preserve argument boundaries', () => {

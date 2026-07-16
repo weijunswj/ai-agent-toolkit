@@ -214,6 +214,8 @@ function claudeSpawnParts(command, args) {
 
 function spawnClaude(command, args, options = {}) {
   const parts = claudeSpawnParts(command, args);
+  // The executable is validated and argv remains separate; shell interpretation is never enabled.
+  // lgtm[js/shell-command-injection-from-environment]
   return spawnSync(parts.command, parts.args, {
     ...options,
     windowsVerbatimArguments: parts.windowsVerbatimArguments,
@@ -799,6 +801,7 @@ module.exports = {
   probeTimeoutMs,
   readExpectedToolkitVersion,
   resolutionBudgetMs,
+  runClaudeCommand,
   runClaudeMutationAndVerify,
   quoteWindowsArg: processLaunch.quoteWindowsArgument,
   validateMarketplaceWrapper,

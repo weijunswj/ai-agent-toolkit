@@ -1066,11 +1066,9 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
 function inspectClaudeAgentCapability(args) {
   const command = args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
   const helper = require('./setup-claude-toolkit-plugin.cjs');
-  const parts = helper.claudeSpawnParts(command, ['--help']);
-  const result = spawnSync(parts.command, parts.args, { windowsVerbatimArguments: parts.windowsVerbatimArguments, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  const result = helper.runClaudeCommand(command, ['--help'], { timeout: 10000 });
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const versionParts = helper.claudeSpawnParts(command, ['--version']);
-  const versionResult = spawnSync(versionParts.command, versionParts.args, { windowsVerbatimArguments: versionParts.windowsVerbatimArguments, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  const versionResult = helper.runClaudeCommand(command, ['--version'], { timeout: 10000 });
   const version = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`.trim();
   const required = ['--effort', '--print', '--output-format', '--disallowedTools', '--permission-mode'];
   const launchSupported = result.status === 0 && versionResult.status === 0 && version.length > 0 && required.every((flag) => help.includes(flag));

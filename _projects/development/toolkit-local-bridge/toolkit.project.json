@@ -5,7 +5,7 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "version_policy": "semver",
   "version_notes": "Requires host-reported Claude hook trust and activation, validated resource counters, synchronous prompt bounds, topology-preserving broader-native state, and one injection-safe Claude executable transport contract; Codex remains root-only under the strict contract.",
   "outputs": [
