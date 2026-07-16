@@ -406,6 +406,8 @@ function writeRepoToolkitFixture(repoPath, label) {
     'codex-delegation-layout.cjs',
     'codex-delegation-state.cjs',
     'setup-toolkit-core.cjs',
+    'toolkit-agent-control.cjs',
+    'claude-process-launch.cjs',
     'toolkit-staging-generations.cjs'
   ]) {
     writeFile(path.join(repoPath, 'repo', 'scripts', name), "'use strict';\n");
