@@ -223,6 +223,10 @@ Starting reviewed head: `47a7fff82b9f5041fd883715cdd8aeffc15dc4ad`.
 - Fresh ownerless/malformed lock directories remain protected during owner publication. Stale dead, ownerless, or malformed locks recover under an exclusive recovery marker using bounded directory age; live owners remain protected and concurrent contenders remain mutually exclusive.
 - Toolkit packaged surfaces align at `2.7.5`.
 
+Implementation commit `69886df37a2c11a0055ce1974ab2246bdcd312da` passed the focused Claude process/plugin/controller/lifecycle suite with 70 passes and 5 Windows/POSIX capability skips before commit; the post-review controller/lifecycle rerun, including missing-profile refusal, passed 31 tests with 2 Windows symlink-capability skips. Setup/profile/topology/orchestration passed 53/53, Codex configuration/plugin/SessionStart passed 94/95 with one expected POSIX-only skip, and Toolkit Local Bridge passed 133/133. Project sync, source-lock, published-surface, fallback-risk, portability, skill package, pack package, instruction/onboarding, and `git diff --check` checks passed.
+
+A clean detached worktree at `69886df37a2c11a0055ce1974ab2246bdcd312da` passed direct Toolkit validation, generated-project freshness, skill packaging, pack packaging, `git diff --check`, and all 138 runnable validator tests with 2 Windows symlink-capability skips. Local `npm run validate:all` was not run because repository policy assigns the full gate to CI. Native Codex and Claude UAT remains pending.
+
 ## Release Gates
 
 - The eight current exact-head findings are repaired: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv. Current-head implementation evidence and regression results were posted in each original thread before resolution.
