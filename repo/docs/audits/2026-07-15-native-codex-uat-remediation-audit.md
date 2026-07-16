@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Five post-review material blockers repaired locally; exact-head CI and native UAT pending
+Status: Five post-review material blockers repaired and clean-worktree validated; exact-head CI and native UAT pending
 
 ## Scope
 
@@ -167,6 +167,8 @@ Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT were not
 
 ## Five-Blocker Post-Review Amendment
 
+Implementation commit: `57634104b757300ee6bd445b8173ba86b0ba071b`.
+
 The four unresolved current review threads plus the independently verified unthreaded Windows executable defect were remediated together without changing the eight previously accepted repairs:
 
 - Native Claude strict state now separates installed/current, enabled, trusted, hook-active, and strict-enforcement-verified outcomes. Strict profiles require host-reported trust and active hook execution. The proof is bound to Toolkit version `2.7.0`, the exact cache identity, hook bytes, and controller bytes; setup cannot create it. Missing, false, malformed, wrong-version/cache, or capability-loss state fails closed to root-only/unapplied and invalidates kept strict state. Broader-native remains explicitly outside strict Toolkit enforcement.
@@ -184,7 +186,7 @@ Local evidence before the implementation commit:
 - Agent instruction, SessionStart, and staging suites: 44 passed.
 - Full Toolkit Local Bridge suite: 133 passed after correcting test-fixture CRLF drift without weakening production byte verification.
 - Project sync, instruction sync, repo-doc sync, source-lock audit, published-surface audit, fallback-risk audit, skill portability, skill package, pack package, and `git diff --check`: passed.
-- Direct working-tree validation and eight positive validator-fixture cases were blocked only by the pre-existing ignored `.agent-toolkit-backups` directory. That backup was not touched because cleanup is prohibited without separate authorization. Clean exact-head workspace validation remains required before push, and CI remains the full read-only gate.
+- Direct working-tree validation and eight positive validator-fixture cases were blocked only by the pre-existing ignored `.agent-toolkit-backups` directory. That backup was not touched because cleanup is prohibited without separate authorization. A clean detached worktree at `57634104b757300ee6bd445b8173ba86b0ba071b` passed direct Toolkit validation, all 138 runnable validator tests with 2 Windows symlink-capability skips, generated-project freshness, skill packaging, pack packaging, and `git diff --check`. CI remains the full read-only exact-head gate.
 
 No live Codex/Claude config or cache, credential, Docker, n8n, Cloudflare, production, external runtime, historical `.staging-*`, or ignored backup material was touched. Native Codex and Claude UAT remains pending. Issues #240, #241, and #247 remain open.
 
