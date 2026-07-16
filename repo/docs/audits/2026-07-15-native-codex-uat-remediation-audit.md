@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Eight exact-head review findings repaired and independently verified; native UAT pending
+Status: Five post-review material blockers repaired locally; exact-head CI and native UAT pending
 
 ## Scope
 
@@ -164,6 +164,29 @@ Successful local amendment evidence includes 88 combined SessionStart/plugin/con
 The first implementation-head CI run failed only the stale packaged-version validator assertion. Replacement exact head `6207ba997d9ca1cb111e87a3113cd9be5eff53e4` passed both full validation workflows, generated-surface auto-sync, package skills, package packs, CodeQL workflow gating, and the actions, JavaScript/TypeScript, and Python CodeQL analyses. All eight original threads were then replied to and resolved; re-listing returned 0 unresolved and 0 unresolved-current.
 
 Native Codex C1/C2, startup/resume/clear/compact, and Claude native UAT were not run and remain explicitly pending.
+
+## Five-Blocker Post-Review Amendment
+
+The four unresolved current review threads plus the independently verified unthreaded Windows executable defect were remediated together without changing the eight previously accepted repairs:
+
+- Native Claude strict state now separates installed/current, enabled, trusted, hook-active, and strict-enforcement-verified outcomes. Strict profiles require host-reported trust and active hook execution. The proof is bound to Toolkit version `2.7.0`, the exact cache identity, hook bytes, and controller bytes; setup cannot create it. Missing, false, malformed, wrong-version/cache, or capability-loss state fails closed to root-only/unapplied and invalidates kept strict state. Broader-native remains explicitly outside strict Toolkit enforcement.
+- Setup treats CLI launch controls and resource admission as independent capabilities. Automatic/manual direct capacity is available only with validated Linux `/proc/meminfo` or Windows operating-system counters. Unsupported, malformed, contradictory, or overflowed counters remove/refuse those choices; recommended defaults resolve root-only, and manual limits do not bypass resource checks.
+- Launch computes the exact UTF-8 prompt bytes synchronously, rejects over 1 MiB before admission, and serializes accepted bytes losslessly for supervisor stdin. Rejection creates no queue, reservation, job file, output/error file, or detached supervisor. The prompt remains absent from argv and existing owned-child/reservation cleanup remains intact.
+- Topology and Toolkit admission capacity are independent. Broader-native persists as broader-native with root-only/not-applicable Toolkit capacity, allows native `Agent`/`Task`, and survives keep-current. Root-only and direct continue denying native bypass.
+- `repo/scripts/claude-process-launch.cjs` is the single process contract for plugin commands, capability probes, and direct workers. Bare Windows `claude` and `.cmd`/`.bat` shims use an explicit escaped `cmd.exe` boundary; JavaScript and `.exe` paths remain shell-free. Unsafe/ambiguous executable strings are rejected, metacharacter arguments retain boundaries, and prompt bytes stay on stdin.
+
+Local evidence before the implementation commit:
+
+- Focused Claude plugin/process, controller/lifecycle, setup topology, trust-loss, and resource-loss suites: 69 passed.
+- Setup orchestrator and profile suites: 52 passed.
+- Combined Codex/Claude native plugin, Windows executable transport, and SessionStart suites: 74 passed.
+- Codex configuration/removal plus Claude admission/lifecycle suites: 58 passed, 1 POSIX-only skip.
+- Agent instruction, SessionStart, and staging suites: 44 passed.
+- Full Toolkit Local Bridge suite: 133 passed after correcting test-fixture CRLF drift without weakening production byte verification.
+- Project sync, instruction sync, repo-doc sync, source-lock audit, published-surface audit, fallback-risk audit, skill portability, skill package, pack package, and `git diff --check`: passed.
+- Direct working-tree validation and eight positive validator-fixture cases were blocked only by the pre-existing ignored `.agent-toolkit-backups` directory. That backup was not touched because cleanup is prohibited without separate authorization. Clean exact-head workspace validation remains required before push, and CI remains the full read-only gate.
+
+No live Codex/Claude config or cache, credential, Docker, n8n, Cloudflare, production, external runtime, historical `.staging-*`, or ignored backup material was touched. Native Codex and Claude UAT remains pending. Issues #240, #241, and #247 remain open.
 
 ## Release Gates
 

@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.6.1",
+  "version": "2.7.0",
   "version_policy": "semver",
-  "version_notes": "Hardens the Claude direct-agent boundary with aggregate reservation accounting, private stdin/artifacts, complete fail-closed profiles, verified installed hooks/cache bytes, capability-downgrade invalidation, and canonical topology/capacity reconciliation; Codex remains root-only under the strict contract.",
+  "version_notes": "Requires host-reported Claude hook trust and activation, validated resource counters, synchronous prompt bounds, topology-preserving broader-native state, and one injection-safe Claude executable transport contract; Codex remains root-only under the strict contract.",
   "outputs": [
     {
       "kind": "curated",

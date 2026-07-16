@@ -24,6 +24,15 @@ function spec(overrides = {}) {
     ...overrides,
   };
 }
+function activationProof(overrides = {}) {
+  return { schema: 1, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION,
+    cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), ...overrides };
+}
+function configured(topology, capacity_mode, overrides = {}) {
+  return { topology, capacity_mode, enforcement_verified: true, activation_proof: activationProof(),
+    resource_counter_supported: topology === control.TOPOLOGIES.CLAUDE_DIRECT,
+    resource_counter_source: topology === control.TOPOLOGIES.CLAUDE_DIRECT ? 'win32-operating-system' : 'not-applicable', ...overrides };
+}
 function profile(overrides = {}) {
   return { schema: control.SCHEMA, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT,
     capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST,
@@ -87,7 +96,7 @@ test('manual maximum is a backstop and never bypasses resource admission', () =>
 
 test('atomic admission prevents two concurrent parents from consuming one manual slot', async () => {
   const work = root();
-  control.configureProfile('claude-code', { topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.MANUAL, manual_maximum: 1, enforcement_verified: true }, { root: work });
+  control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.MANUAL, { manual_maximum: 1 }), { root: work });
   const script = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const s=${JSON.stringify(spec())};const r=${JSON.stringify(resources())};console.log(c.admissionDecision(s,{root:${JSON.stringify(work)},resourceState:r}).result)`;
   const run = () => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['-e', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -148,7 +157,7 @@ test('Claude hook denies native Agent under root/direct profiles and allows broa
   for (const topology of [control.TOPOLOGIES.ROOT_ONLY, control.TOPOLOGIES.CLAUDE_DIRECT]) {
     const work = root();
     const capacityMode = topology === control.TOPOLOGIES.CLAUDE_DIRECT ? control.CAPACITY_MODES.AUTO : control.CAPACITY_MODES.ROOT_ONLY;
-    control.configureProfile('claude-code', { topology, capacity_mode: capacityMode, enforcement_verified: true }, { root: work });
+    control.configureProfile('claude-code', configured(topology, capacityMode), { root: work });
     assert.equal(hook.decision({ tool_name: 'Agent' }, { root: work }).hookSpecificOutput.permissionDecision, 'deny');
   }
   const work = root();
@@ -158,7 +167,7 @@ test('Claude hook denies native Agent under root/direct profiles and allows broa
 
 test('Codex and Claude profile state is isolated', () => {
   const work = root();
-  control.configureProfile('claude-code', { topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, enforcement_verified: true }, { root: work });
+  control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO), { root: work });
   assert.equal(control.readProfile('codex', { root: work }).topology, control.TOPOLOGIES.ROOT_ONLY);
   assert.equal(control.readProfile('claude-code', { root: work }).topology, control.TOPOLOGIES.CLAUDE_DIRECT);
 });
@@ -171,7 +180,7 @@ test('aggregate reserved memory is subtracted under the admission lock', async (
   assert.equal(control.admissionDecision(expensive, options).result, control.RESULTS.QUEUE);
 
   const raceRoot = root();
-  control.configureProfile('claude-code', { topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, enforcement_verified: true }, { root: raceRoot });
+  control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO), { root: raceRoot });
   const script = `const c=require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'))});const s=${JSON.stringify(expensive)};const r=${JSON.stringify(resources())};console.log(c.admissionDecision(s,{root:${JSON.stringify(raceRoot)},resourceState:r}).result)`;
   const run = () => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['-e', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -215,4 +224,39 @@ test('complete profile validation rejects corrupted, partial, future, unknown an
     assert.notEqual(read.status, 'configured');
     assert.equal(control.admissionDecision(spec(), { root: work, resourceState: resources() }).result, control.RESULTS.REFUSE);
   }
+});
+
+test('strict profiles require exact native activation proof and direct profiles require resource counters', () => {
+  const work = root();
+  assert.throws(() => control.configureProfile('claude-code', {
+    topology: control.TOPOLOGIES.ROOT_ONLY, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY, enforcement_verified: true,
+  }, { root: work }), /trust and activation/i);
+  assert.throws(() => control.configureProfile('claude-code', {
+    topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO,
+    enforcement_verified: true, activation_proof: activationProof(),
+  }, { root: work }), /resource counters/i);
+  for (const bad of [null, activationProof({ plugin_version: 'old' }), activationProof({ cache_identity: 'bad' })]) {
+    assert.equal(control.validActivationProof(bad), false);
+  }
+  assert.equal(control.validActivationProof(activationProof(), { cachePath: work, pluginVersion: control.CONTROL_VERSION }), false);
+});
+
+test('resource capability rejects unsupported malformed and overflowed states', () => {
+  assert.equal(control.inspectResourceCapability({ resourceState: null }).supported, false);
+  assert.equal(control.inspectResourceCapability({ resourceState: resources({ physical_available: Infinity }) }).supported, false);
+  assert.equal(control.inspectResourceCapability({ resourceState: resources({ commit_available: Number.MAX_VALUE }) }).supported, false);
+  assert.equal(control.inspectResourceCapability({ resourceState: resources() }).supported, true);
+});
+
+test('oversized Unicode prompts refuse before admission or artifact creation', () => {
+  const work = root();
+  const result = control.launch(spec({ child_prompt: `${'a'.repeat(control.MAX_PROMPT_BYTES - 2)}€` }), {
+    root: work, claudeCli: path.join(work, 'fake.cjs'), profile: profile(), resourceState: resources(),
+  });
+  assert.equal(result.result, control.RESULTS.REFUSE);
+  assert.notEqual(result.status, 'launched');
+  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
+  const exact = control.claudeInvocation(spec({ child_prompt: 'a'.repeat(control.MAX_PROMPT_BYTES) }));
+  assert.equal(exact.stdin.length, control.MAX_PROMPT_BYTES);
 });

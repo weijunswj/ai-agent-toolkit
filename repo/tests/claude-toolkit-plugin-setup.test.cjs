@@ -51,7 +51,9 @@ function writeFakeClaude(stateDir, options = {}) {
     marketplaceAddCount: 0,
     installCount: 0,
     updateCount: 0,
-    uninstallCount: 0
+    uninstallCount: 0,
+    trusted: options.trusted === undefined ? true : options.trusted,
+    hooksActive: options.hooksActive === undefined ? true : options.hooksActive
   });
   const failMarketplaceAdd = Boolean(options.failMarketplaceAdd);
   const failInstall = Boolean(options.failInstall);
@@ -183,7 +185,9 @@ if (args[0] === 'plugin' && args[1] === 'list') {
       enabled: true,
       scope: state.scope || 'user',
       source: { path: state.repoRoot },
-      installPath: state.repoRoot
+      installPath: state.repoRoot,
+      trusted: state.trusted,
+      hooksActive: state.hooksActive
     }
   ] : [];
   process.stdout.write(JSON.stringify({ installed }) + '\\n');
@@ -372,35 +376,63 @@ test('Claude Toolkit plugin state evaluator accepts the real claude plugin list 
   assert.deepEqual(state.errors, []);
 });
 
-test('quoteWindowsArg quotes values with spaces and special characters, leaves plain values alone', () => {
-  assert.equal(setup.quoteWindowsArg('plain'), 'plain');
-  assert.equal(setup.quoteWindowsArg('ai-agent-toolkit@ai-agent-toolkit-local'), 'ai-agent-toolkit@ai-agent-toolkit-local');
-  assert.equal(setup.quoteWindowsArg('C:\\Users\\a b\\repo'), '"C:\\Users\\a b\\repo"');
-  assert.equal(setup.quoteWindowsArg('has "quote"'), '"has \\"quote\\""');
-  assert.equal(setup.quoteWindowsArg(''), '""');
-});
-
-test('quoteWindowsArg doubles backslashes that directly precede a quote, including a trailing backslash before the closing quote', () => {
-  // A single trailing backslash immediately before the closing quote must be
-  // doubled -- otherwise it escapes the closing quote instead of ending the
-  // argument, letting the rest of the command line leak into this argument.
-  assert.equal(setup.quoteWindowsArg('C:\\Users\\a b\\'), '"C:\\Users\\a b\\\\"');
-  assert.equal(setup.quoteWindowsArg('a"b\\'), '"a\\"b\\\\"');
-  // Backslashes not immediately before a quote are left as literal content.
-  assert.equal(setup.quoteWindowsArg('trailing\\\\'), 'trailing\\\\');
-});
-
-test('claudeSpawnParts builds a single quoted command line on win32 for a bare CLI name, preserving spaces', () => {
+test('claudeSpawnParts routes bare Windows commands through an explicit non-shell cmd contract', () => {
   const originalPlatform = process.platform;
   Object.defineProperty(process, 'platform', { value: 'win32' });
   try {
     const parts = setup.claudeSpawnParts('claude', ['plugin', 'marketplace', 'add', 'C:\\Users\\a b\\repo']);
-    assert.equal(parts.shell, true);
-    assert.equal(parts.args, undefined);
-    assert.equal(parts.command, 'claude plugin marketplace add "C:\\Users\\a b\\repo"');
+    assert.equal(parts.shell, false);
+    assert.match(parts.command, /cmd\.exe$/i);
+    assert.deepEqual(parts.args.slice(0, 4), ['/d', '/s', '/v:off', '/c']);
+    assert.match(parts.args[4], /claude.*plugin.*marketplace.*add/);
+    assert.equal(parts.windowsVerbatimArguments, true);
   } finally {
     Object.defineProperty(process, 'platform', { value: originalPlatform });
   }
+});
+
+test('strict enforcement requires host-reported trust and active hooks bound to exact installed bytes', () => {
+  for (const options of [{ trusted: false }, { hooksActive: false }, { trusted: null }, { hooksActive: null }]) {
+    const stateDir = tmpRoot();
+    const result = runSetup('--verify', writeFakeClaude(stateDir, { initialInstalled: true, ...options }));
+    assert.equal(result.status, 0, result.stderr);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.installed_current, true);
+    assert.equal(summary.strict_enforcement_verified, false);
+    assert.equal(summary.activation_proof, null);
+  }
+
+  const stateDir = tmpRoot();
+  const result = runSetup('--verify', writeFakeClaude(stateDir, { initialInstalled: true }));
+  assert.equal(result.status, 0, result.stderr);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.trusted, true);
+  assert.equal(summary.hook_active, true);
+  assert.equal(summary.strict_enforcement_verified, true);
+  assert.equal(summary.activation_proof.plugin_version, expectedVersion());
+  for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256']) assert.match(summary.activation_proof[key], /^[a-f0-9]{64}$/);
+});
+
+test('plugin setup cannot manufacture native trust or hook activation', () => {
+  const stateDir = tmpRoot();
+  const fake = writeFakeClaude(stateDir, { initialInstalled: false, trusted: false, hooksActive: false });
+  const result = runSetup('--write', fake);
+  assert.equal(result.status, 0, result.stderr);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.trusted, false);
+  assert.equal(summary.hook_active, false);
+  assert.equal(summary.strict_enforcement_verified, false);
+});
+
+test('claudeSpawnParts executes explicit Windows exe paths directly and rejects ambiguous executable input', () => {
+  const exe = setup.claudeSpawnParts('C:\\Program Files\\Claude\\claude.exe', ['--version']);
+  if (process.platform === 'win32') {
+    assert.equal(exe.command, 'C:\\Program Files\\Claude\\claude.exe');
+    assert.deepEqual(exe.args, ['--version']);
+    assert.equal(exe.shell, false);
+  }
+  assert.throws(() => setup.claudeSpawnParts('claude & calc', ['--version']), /unsafe|Bare Claude/i);
+  assert.throws(() => setup.claudeSpawnParts(' "claude" ', ['--version']), /ambiguous|unsafe/i);
 });
 
 test('claudeSpawnParts does not use a shell for a .cjs fake CLI path even on win32', () => {
@@ -762,6 +794,17 @@ test('failed CLI candidates followed by a valid final candidate resolve within t
   assert.ok(elapsed < 60000, `resolution sequence took ${elapsed}ms`);
 });
 
+test('explicit Windows cmd path with spaces works through version and plugin verification', { skip: process.platform !== 'win32' }, () => {
+  const stateDir = path.join(tmpRoot(), 'Claude CLI wrapper with spaces');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: true });
+  const wrapper = path.join(stateDir, 'claude.cmd');
+  fs.writeFileSync(wrapper, `@echo off\r\n"${process.execPath}" "${fakeClaude}" %*\r\n`);
+  const result = runSetup('--verify', wrapper);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).installed_current, true);
+});
+
 test('mutation polling caps every wait to the remaining deadline even with an extreme poll interval', async () => {
   const stateDir = tmpRoot();
   const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, installNeverLands: true });
@@ -822,6 +865,7 @@ test('installed enforcement byte verification rejects missing and stale cache fi
     '.claude-plugin/plugin.json',
     '.claude-plugin/hooks/hooks.json',
     'repo/scripts/toolkit-agent-control.cjs',
+    'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-agent-hook.cjs',
   ]) {
     const target = path.join(cache, ...relPath.split('/'));

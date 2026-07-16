@@ -59,7 +59,7 @@ test('kept strict profile is invalidated after current enforcement capability di
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--claude-cli', fakeClaude, '--claude-topology', 'keep',
     '--claude-agent-capacity', 'keep', '--claude-plugin-behavior', 'instructions',
-  ], { env: { ...env, SETUP_FAKE_CLAUDE_ENFORCEMENT: '0' }, timeout: 300000 });
+  ], { env: { ...env, SETUP_FAKE_CLAUDE_TRUST: '0' }, timeout: 300000 });
   assert.equal(downgraded.status, 0, downgraded.stderr || downgraded.stdout);
   assert.match(downgraded.stdout, /capability-lost-root-only/i);
   const read = control.readProfile('claude-code', { root: path.join(root, '.ai-agent-toolkit', 'agent-control') });

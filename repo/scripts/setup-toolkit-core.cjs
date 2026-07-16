@@ -991,10 +991,17 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
     const topology = resolved.topology;
     const capacityMode = resolved.capacity_mode;
     const strict = [agentControl.TOPOLOGIES.ROOT_ONLY, agentControl.TOPOLOGIES.CLAUDE_DIRECT].includes(topology);
-    const installedEnforcement = nativeCache.enforcement_verified === true;
-    const enforceable = current.agentCapability?.supported === true && installedEnforcement;
+    const installedEnforcement = nativeCache.strict_enforcement_verified === true && nativeCache.trusted === true
+      && nativeCache.hook_active === true && agentControl.validActivationProof(nativeCache.activation_proof, {
+        pluginVersion: nativeCache.installed_version || nativeCache.version,
+        cachePath: nativeCache.cache_path,
+      });
+    const launchCapable = current.agentCapability?.launch_supported === true;
+    const resourceCapable = current.agentCapability?.resource_counter_supported === true;
+    const enforceable = launchCapable && installedEnforcement
+      && (topology !== agentControl.TOPOLOGIES.CLAUDE_DIRECT || resourceCapable);
     if (strict && !enforceable) {
-      const invalidated = agentControl.invalidateProfile('claude-code', 'Current Claude CLI controls or installed Toolkit plugin enforcement could not be verified.');
+      const invalidated = agentControl.invalidateProfile('claude-code', 'Current Claude CLI controls, native hook trust/activation, installed Toolkit bytes, or required resource counters could not be verified.');
       return { ...invalidated, status: 'capability-lost-root-only', changed: true, selected_strict_state_applied: false, client_scope: 'Claude-only Toolkit profile' };
     }
     const configured = agentControl.configureProfile('claude-code', {
@@ -1002,6 +1009,9 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
       capacity_mode: capacityMode,
       manual_maximum: resolved.manual_maximum,
       enforcement_verified: strict,
+      activation_proof: nativeCache.activation_proof,
+      resource_counter_supported: resourceCapable,
+      resource_counter_source: current.agentCapability?.resource_counter_source,
     });
     return { status: 'configured', ...configured, changed: true, selected_strict_state_applied: !strict || enforceable, client_scope: 'Claude-only Toolkit profile' };
   }
@@ -1057,20 +1067,24 @@ function inspectClaudeAgentCapability(args) {
   const command = args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
   const helper = require('./setup-claude-toolkit-plugin.cjs');
   const parts = helper.claudeSpawnParts(command, ['--help']);
-  const result = spawnSync(parts.command, parts.args, { shell: parts.shell, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  const result = spawnSync(parts.command, parts.args, { shell: parts.shell, windowsVerbatimArguments: parts.windowsVerbatimArguments, encoding: 'utf8', windowsHide: true, timeout: 10000 });
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
   const versionParts = helper.claudeSpawnParts(command, ['--version']);
-  const versionResult = spawnSync(versionParts.command, versionParts.args, { shell: versionParts.shell, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  const versionResult = spawnSync(versionParts.command, versionParts.args, { shell: versionParts.shell, windowsVerbatimArguments: versionParts.windowsVerbatimArguments, encoding: 'utf8', windowsHide: true, timeout: 10000 });
   const version = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`.trim();
   const required = ['--effort', '--print', '--output-format', '--disallowedTools', '--permission-mode'];
-  const supported = result.status === 0 && versionResult.status === 0 && version.length > 0 && required.every((flag) => help.includes(flag));
+  const launchSupported = result.status === 0 && versionResult.status === 0 && version.length > 0 && required.every((flag) => help.includes(flag));
+  const resourceCapability = agentControl.inspectResourceCapability();
   return {
-    supported,
-    detector: supported ? 'claude --version plus --help exact launch flags' : 'required Claude version or launch flags unavailable',
+    supported: launchSupported && resourceCapability.supported,
+    launch_supported: launchSupported,
+    resource_counter_supported: resourceCapability.supported,
+    resource_counter_source: resourceCapability.source,
+    detector: launchSupported ? 'claude --version plus --help exact launch flags' : 'required Claude version or launch flags unavailable',
     version,
-    direct_only: supported,
-    medium_effort: supported,
-    non_fast_environment_override: supported,
+    direct_only: launchSupported,
+    medium_effort: launchSupported,
+    non_fast_environment_override: launchSupported,
   };
 }
 
@@ -1160,12 +1174,21 @@ function recommendedChoice(key, current, args) {
     if (current.delegation?.status === 'migration-required') return 'keep';
     return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep';
   }
-  if (key === 'claudeTopology') return current.agentCapability?.supported ? 'toolkit-direct' : 'keep';
-  if (key === 'claudeAgentCapacity') return current.agentCapability?.supported ? 'automatic' : 'keep';
+  if (key === 'claudeTopology') return strictClaudeSetupCapability(current) ? 'toolkit-direct' : 'root-only';
+  if (key === 'claudeAgentCapacity') return strictClaudeSetupCapability(current) ? 'automatic' : 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'opencodeTarget') return args.setupChoices.targets.opencode || 'keep';
   if (key === 'ag2Target') return args.setupChoices.targets.ag2 || 'keep';
   return 'keep';
+}
+
+function strictClaudeSetupCapability(current) {
+  return current.agentCapability?.launch_supported === true
+    && current.agentCapability?.resource_counter_supported === true
+    && current.nativePlugin?.strict_enforcement_verified === true
+    && current.nativePlugin?.trusted === true
+    && current.nativePlugin?.hook_active === true
+    && agentControl.validActivationProof(current.nativePlugin?.activation_proof);
 }
 
 function wizardChoice(value, label) {
@@ -1184,7 +1207,7 @@ function reconcileClaudeQuestionChoices(args, current) {
   if (args.host !== 'claude-code') return;
   const choices = args.setupChoices;
   const currentProfile = current.agentProfile || agentControl.readProfile('claude-code');
-  if (choices.claudeAgentCapacity === 'root-only') choices.claudeTopology = 'root-only';
+  if (choices.claudeAgentCapacity === 'root-only' && choices.claudeTopology !== 'broader-native') choices.claudeTopology = 'root-only';
   if (['root-only', 'broader-native'].includes(choices.claudeTopology)) choices.claudeAgentCapacity = 'root-only';
   if (choices.claudeTopology === 'keep' && currentProfile.supported !== true) {
     choices.claudeTopology = 'root-only';
@@ -1199,14 +1222,16 @@ function reconcileClaudeQuestionChoices(args, current) {
 
 function resolveClaudeTopologyCapacity(args, current) {
   reconcileClaudeQuestionChoices(args, current);
-  const capability = current.agentCapability?.supported === true;
+  const capability = strictClaudeSetupCapability(current);
   const profile = current.agentProfile || agentControl.readProfile('claude-code');
   const topologyChoice = args.setupChoices.claudeTopology || 'keep';
   const capacityChoice = args.setupChoices.claudeAgentCapacity || 'keep';
-  if (topologyChoice === 'toolkit-direct' && !capability) throw new Error('Direct Toolkit-managed Claude agents are unavailable because required CLI launch controls are not verifiable.');
+  const requestedKeep = args.argv?.some((arg, index) => arg === '--claude-topology' && args.argv[index + 1] === 'keep')
+    || args.argv?.includes('--claude-topology=keep');
+  if (topologyChoice === 'toolkit-direct' && !capability && !requestedKeep) throw new Error('Direct Toolkit-managed Claude agents are unavailable because native hook trust/activation, CLI launch controls, or resource counters are not verifiable.');
   let topology = topologyChoice === 'keep' && profile.supported === true ? profile.topology
     : ({ 'toolkit-direct': agentControl.TOPOLOGIES.CLAUDE_DIRECT, 'root-only': agentControl.TOPOLOGIES.ROOT_ONLY, 'broader-native': agentControl.TOPOLOGIES.BROADER_NATIVE }[topologyChoice] || agentControl.TOPOLOGIES.ROOT_ONLY);
-  if (capacityChoice === 'root-only') topology = agentControl.TOPOLOGIES.ROOT_ONLY;
+  if (capacityChoice === 'root-only' && topology !== agentControl.TOPOLOGIES.BROADER_NATIVE) topology = agentControl.TOPOLOGIES.ROOT_ONLY;
   let capacityMode;
   if (topology !== agentControl.TOPOLOGIES.CLAUDE_DIRECT) capacityMode = agentControl.CAPACITY_MODES.ROOT_ONLY;
   else if (capacityChoice === 'keep' && profile.supported === true && profile.topology === topology
@@ -1339,7 +1364,7 @@ function setupQuestionSpecs(args, current) {
       recommended_outcome: 'Refresh the installed Codex plugin and repair Windows hooks when needed.'
     });
   } else {
-    const capabilitySupported = current.agentCapability?.supported === true;
+    const capabilitySupported = strictClaudeSetupCapability(current);
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
     const selectedTopology = args.setupChoices.claudeTopology;
     const currentDirect = activeProfile.supported === true && activeProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT;
@@ -2076,9 +2101,14 @@ function runClaudeNativePluginSetup(args) {
       scope: summary.scope || 'user',
       current: summary.current === true,
       enforcement_verified: summary.enforcement_verified === true,
+      strict_enforcement_verified: summary.strict_enforcement_verified === true,
+      installed_current: summary.installed_current === true,
+      enabled: summary.enabled === true,
       source_path: summary.source_path || '',
       cache_path: summary.cache_path || '',
-      trusted: summary.trusted ?? null,
+      trusted: summary.trusted === true,
+      hook_active: summary.hook_active === true,
+      activation_proof: summary.activation_proof || null,
       updated_this_run: false,
       restart_required: false,
       hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
@@ -2109,9 +2139,14 @@ function runClaudeNativePluginSetup(args) {
     scope: summary.scope || 'user',
     current: summary.current === true,
     enforcement_verified: summary.enforcement_verified === true,
+    strict_enforcement_verified: summary.strict_enforcement_verified === true,
+    installed_current: summary.installed_current === true,
+    enabled: summary.enabled === true,
     source_path: summary.source_path || '',
     cache_path: summary.cache_path || '',
-    trusted: summary.trusted ?? null,
+    trusted: summary.trusted === true,
+    hook_active: summary.hook_active === true,
+    activation_proof: summary.activation_proof || null,
     updated_this_run: true,
     restart_required: true,
     hook_trust_action: 'approve the Claude Code plugin trust prompt when Claude Code prompts'
@@ -2575,6 +2610,7 @@ module.exports = {
   defaultManagedSourcePath,
   codexDelegationConfigState: delegation.codexDelegationConfigState,
   inspectCodexDelegationConfig: delegation.inspectCodexDelegationConfig,
+  inspectClaudeAgentCapability,
   configureCodexDelegation: delegation.configureCodexDelegation,
   applyHostDelegationControl,
   parseArgs,

@@ -2,16 +2,21 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const core = require('../scripts/setup-toolkit-core.cjs');
+const control = require('../scripts/toolkit-agent-control.cjs');
 
 function current(supported, profile = {}) {
+  const proof = { schema: 1, source: 'claude-plugin-list', plugin_version: '2.7.0', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
     runtime: { runtime: 'unknown' },
     delegation: { status: 'unsupported' },
-    nativePlugin: { status: 'fresh' },
-    agentCapability: { supported },
+    nativePlugin: { status: 'fresh', strict_enforcement_verified: supported, trusted: supported, hook_active: supported, activation_proof: supported ? proof : null },
+    agentCapability: { supported, launch_supported: supported, resource_counter_supported: supported, resource_counter_source: supported ? 'win32-operating-system' : 'unsupported-or-malformed' },
     agentProfile: { topology: 'root-only', capacity_mode: 'root-only', manual_maximum: 0, ...profile },
   };
 }
@@ -91,4 +96,60 @@ test('recommended plan and rendered question surfaces show the same reconciled r
   assert.deepEqual(capacity.choices.map((choice) => choice.value), ['root-only', 'keep']);
   assert.match(core.renderSetupQuestionBank(planned.specs), /How should Toolkit manage agent capacity\?[\s\S]*Selected:\*\* Root agent only - recommended/);
   assert.match(core.renderSetupQuestionBankTerminal(planned.specs), /How should Toolkit manage agent capacity\?[\s\S]*Selected: Root agent only - recommended/);
+});
+
+test('broader-native remains distinct from root-only Toolkit capacity across flags and keep-current', () => {
+  const state = current(true, { topology: 'broader-native', capacity_mode: 'root-only', supported: true, status: 'configured' });
+  for (const argv of [
+    ['--plan', '--host', 'claude-code', '--claude-topology', 'broader-native', '--claude-agent-capacity', 'root-only'],
+    ['--plan', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'keep'],
+  ]) {
+    const resolved = core.resolveClaudeTopologyCapacity(core.parseArgs(argv), state);
+    assert.deepEqual(resolved, { topology: 'broader-native', capacity_mode: 'root-only', manual_maximum: 0 });
+  }
+});
+
+test('resource-counter loss removes direct automatic and resolves recommended setup to root-only', () => {
+  const state = current(true);
+  state.agentCapability.resource_counter_supported = false;
+  state.agentCapability.supported = false;
+  const args = core.parseArgs(['--plan', '--host', 'claude-code', '--yes-recommended']);
+  const planned = core.plannedQuestionBank(args, state);
+  assert.equal(planned.args.setupChoices.claudeTopology, 'root-only');
+  assert.equal(planned.args.setupChoices.claudeAgentCapacity, 'root-only');
+  assert.deepEqual(planned.specs.find((row) => row.key === 'claudeAgentCapacity').choices.map((choice) => choice.value), ['root-only', 'keep']);
+});
+
+test('resource-counter loss invalidates an existing automatic strict profile', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-resource-loss-'));
+  const previous = process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT;
+  process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT = root;
+  try {
+    const state = current(true, { topology: 'claude-toolkit-direct', capacity_mode: 'automatic', supported: true, status: 'configured' });
+    state.agentCapability.resource_counter_supported = false;
+    state.agentCapability.supported = false;
+    const args = core.parseArgs(['--execute', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'keep']);
+    const result = await core.applyHostDelegationControl(args, state, state.nativePlugin);
+    assert.equal(result.status, 'capability-lost-root-only');
+    assert.equal(control.readProfile('claude-code', { root }).supported, false);
+  } finally {
+    if (previous === undefined) delete process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT;
+    else process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT = previous;
+  }
+});
+
+test('explicit Windows cmd path with spaces works through help and version capability probes', { skip: process.platform !== 'win32' }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'Claude probe path '));
+  const fake = path.join(root, 'fake.cjs');
+  const wrapper = path.join(root, 'claude.cmd');
+  fs.writeFileSync(fake, [
+    "if (process.argv.includes('--help')) console.log('--print --output-format --effort --disallowedTools --permission-mode');",
+    "else if (process.argv.includes('--version')) console.log('2.1.198 fixture');",
+    'else process.exit(1);',
+    '',
+  ].join('\n'));
+  fs.writeFileSync(wrapper, `@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`);
+  const capability = core.inspectClaudeAgentCapability({ claudeCli: wrapper });
+  assert.equal(capability.launch_supported, true);
+  assert.match(capability.version, /2\.1\.198/);
 });

@@ -39,7 +39,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.6.1';
+const expectedBridgeVersion = '2.7.0';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -345,6 +345,7 @@ function writeFakePythonExecutable(exePath, logPath) {
 function configureGitUser(repoPath) {
   git(repoPath, ['config', 'user.email', 'toolkit-test@example.invalid']);
   git(repoPath, ['config', 'user.name', 'Toolkit Bridge Test']);
+  git(repoPath, ['config', 'core.autocrlf', 'false']);
 }
 
 function writeHookLightSmokeFixture(repoPath) {
@@ -418,7 +419,7 @@ function writeCodexPluginRefreshFixture(repoPath) {
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(repoPath, '.codex-plugin', 'assets', 'fixture.txt'), 'fixture asset\n');
-  writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), JSON.stringify({
+  writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
     hooks: {
       SessionStart: [
         {
@@ -432,7 +433,7 @@ function writeCodexPluginRefreshFixture(repoPath) {
         }
       ]
     }
-  }, null, 2));
+  }, null, 2)}\n`);
   for (const relPath of [
     'repo/scripts/toolkit-codex-session-start.cjs',
     'repo/scripts/toolkit-codex-session-start.ps1',

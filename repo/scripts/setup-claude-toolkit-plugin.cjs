@@ -4,6 +4,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
+const processLaunch = require('./claude-process-launch.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
@@ -165,6 +167,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['.claude-plugin/plugin.json', true],
     ['.claude-plugin/hooks/hooks.json', true],
     ['repo/scripts/toolkit-agent-control.cjs', false],
+    ['repo/scripts/claude-process-launch.cjs', false],
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
   ];
   for (const [relPath, json] of pairs) {
@@ -205,53 +208,8 @@ function commandOutput(result) {
   return `${result?.stdout || ''}${result?.stderr || ''}${result?.error ? result.error.message : ''}`.trim();
 }
 
-// On Windows, a global npm install of the Claude Code CLI resolves the bare
-// `claude` command only to `claude.cmd`/`claude.ps1` shims, which Node's
-// spawnSync cannot execute directly (ENOENT/EINVAL) without going through a
-// shell. `shell: true` fixes that, but Node only concatenates array args with
-// spaces rather than quoting them, which silently truncates any argument
-// containing a space (e.g. a repo path) at the first space. Quote manually,
-// following the standard Windows CommandLineToArgvW quoting algorithm: a
-// backslash only needs doubling when it directly precedes a quote (either an
-// escaped literal quote, or the closing quote appended at the end), since an
-// unescaped trailing backslash would otherwise escape that following quote
-// instead of terminating the argument.
-function quoteWindowsArg(value) {
-  const str = String(value);
-  if (str === '') return '""';
-  if (!/[\s"&|<>^%]/.test(str)) return str;
-
-  let result = '"';
-  let backslashes = 0;
-  for (const ch of str) {
-    if (ch === '\\') {
-      backslashes += 1;
-      continue;
-    }
-    if (ch === '"') {
-      result += '\\'.repeat(backslashes * 2 + 1) + '"';
-      backslashes = 0;
-      continue;
-    }
-    result += '\\'.repeat(backslashes) + ch;
-    backslashes = 0;
-  }
-  result += '\\'.repeat(backslashes * 2) + '"';
-  return result;
-}
-
 function claudeSpawnParts(command, args) {
-  const isNodeScript = /\.(?:cjs|mjs|js)$/i.test(command);
-  if (isNodeScript) {
-    return { command: process.execPath, args: [command, ...args], shell: false };
-  }
-  if (process.platform === 'win32') {
-    // Pass a single pre-quoted command line (no args array) so Node hands it
-    // to the shell as-is, instead of the array+shell:true form that both
-    // mis-concatenates spaces and triggers a DEP0190 warning on every call.
-    return { command: [command, ...args.map(quoteWindowsArg)].join(' '), args: undefined, shell: true };
-  }
-  return { command, args, shell: false };
+  return processLaunch.claudeSpawnParts(command, args);
 }
 
 function spawnClaude(command, args, options = {}) {
@@ -259,6 +217,7 @@ function spawnClaude(command, args, options = {}) {
   return spawnSync(parts.command, parts.args, {
     ...options,
     shell: parts.shell,
+    windowsVerbatimArguments: parts.windowsVerbatimArguments,
     windowsHide: true
   });
 }
@@ -393,6 +352,7 @@ function spawnClaudeProcess(command, args) {
   // on a child that has already finished its real work.
   return spawn(parts.command, parts.args, {
     shell: parts.shell,
+    windowsVerbatimArguments: parts.windowsVerbatimArguments,
     stdio: 'ignore',
     windowsHide: true
   });
@@ -772,6 +732,19 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
+  const trusted = state.installed.trusted === true;
+  const active = state.installed.hooksActive === true || state.installed.hookExecutionActive === true;
+  const cachePath = state.installed.installPath || '';
+  const hookBytes = fs.readFileSync(path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json'));
+  const controllerBytes = fs.readFileSync(path.join(cachePath, 'repo', 'scripts', 'toolkit-agent-control.cjs'));
+  const activationProof = trusted && active ? {
+    schema: 1,
+    source: 'claude-plugin-list',
+    plugin_version: expectedVersion,
+    cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'),
+    hook_sha256: crypto.createHash('sha256').update(hookBytes).digest('hex'),
+    controller_sha256: crypto.createHash('sha256').update(controllerBytes).digest('hex'),
+  } : null;
   const summary = {
     ok: true,
     plugin_id: pluginId(),
@@ -779,10 +752,14 @@ async function main(argv = process.argv.slice(2)) {
     enabled: true,
     scope: options.scope,
     current: true,
-    enforcement_verified: true,
+    installed_current: true,
+    trusted,
+    hook_active: active,
+    strict_enforcement_verified: Boolean(activationProof),
+    enforcement_verified: Boolean(activationProof),
+    activation_proof: activationProof,
     source_path: state.installed.projectPath || state.installed.source?.path || state.installed.path || '',
-    cache_path: state.installed.installPath || '',
-    trusted: typeof state.installed.trusted === 'boolean' ? state.installed.trusted : null,
+    cache_path: cachePath,
     installed_entry: state.installed,
     install_path: claudeToolkitInstallCommands(options.repoRoot, options.scope),
     next_steps: nextSteps(options.scope),
@@ -825,7 +802,7 @@ module.exports = {
   readExpectedToolkitVersion,
   resolutionBudgetMs,
   runClaudeMutationAndVerify,
-  quoteWindowsArg,
+  quoteWindowsArg: processLaunch.quoteWindowsArgument,
   validateMarketplaceWrapper,
   validateRepoPluginSource,
   verifyBudgetMs,

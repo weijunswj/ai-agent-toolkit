@@ -6,9 +6,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
+const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.6.1';
+const CONTROL_VERSION = '2.7.0';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -150,6 +151,19 @@ function rootOnlyProfile(host, status, reason) {
   return { schema: SCHEMA, host, topology: TOPOLOGIES.ROOT_ONLY, capacity_mode: CAPACITY_MODES.ROOT_ONLY, manual_maximum: 0, status, supported: false, reason };
 }
 
+function validActivationProof(proof, expected = {}) {
+  const structurallyValid = Boolean(proof && proof.schema === 1 && proof.source === 'claude-plugin-list'
+    && proof.plugin_version === CONTROL_VERSION
+    && ['cache_identity', 'hook_sha256', 'controller_sha256'].every((key) => /^[a-f0-9]{64}$/.test(String(proof[key] || ''))));
+  if (!structurallyValid) return false;
+  if (expected.pluginVersion && proof.plugin_version !== expected.pluginVersion) return false;
+  if (expected.cachePath) {
+    const identity = crypto.createHash('sha256').update(path.resolve(expected.cachePath)).digest('hex');
+    if (proof.cache_identity !== identity) return false;
+  }
+  return true;
+}
+
 function readProfile(host = 'claude-code', options = {}) {
   const raw = readJson(profilePath(host, options));
   if (!raw) return rootOnlyProfile(host, 'unconfigured-root-only', 'No verified Toolkit profile is configured.');
@@ -163,8 +177,10 @@ function readProfile(host = 'claude-code', options = {}) {
     || (raw.topology === TOPOLOGIES.BROADER_NATIVE && raw.capacity_mode === CAPACITY_MODES.ROOT_ONLY && raw.manual_maximum === 0);
   const strict = [TOPOLOGIES.ROOT_ONLY, TOPOLOGIES.CLAUDE_DIRECT].includes(raw.topology);
   const strictValid = !strict || (raw.enforcement_verified === true && raw.controller_version === CONTROL_VERSION
-    && ['native-agent-hook-deny', 'toolkit-launch-boundary'].includes(raw.enforcement));
-  if (raw.schema !== SCHEMA || raw.host !== host || !validEnums || !validNumbers || !compatible || !strictValid || typeof raw.updated_at !== 'string') {
+    && ['native-agent-hook-deny', 'toolkit-launch-boundary'].includes(raw.enforcement) && validActivationProof(raw.activation_proof));
+  const resourceValid = raw.topology !== TOPOLOGIES.CLAUDE_DIRECT
+    || (raw.resource_counter_verified === true && ['proc-meminfo', 'win32-operating-system'].includes(raw.resource_counter_source));
+  if (raw.schema !== SCHEMA || raw.host !== host || !validEnums || !validNumbers || !compatible || !strictValid || !resourceValid || typeof raw.updated_at !== 'string') {
     return rootOnlyProfile(host, 'unsupported-root-only', 'The stored Toolkit profile is malformed, contradictory, stale, or from an unsupported schema.');
   }
   return { ...raw, status: 'configured', supported: true };
@@ -188,11 +204,22 @@ function configureProfile(host, selected, options = {}) {
   const workerEstimate = Number(selected.worker_estimate_bytes || DEFAULT_WORKER_COST);
   if (!Number.isSafeInteger(workerEstimate) || workerEstimate < MIN_WORKER_COST || workerEstimate > MAX_WORKER_COST) throw new Error('Worker estimate is outside the supported bounds.');
   const strict = [TOPOLOGIES.ROOT_ONLY, TOPOLOGIES.CLAUDE_DIRECT].includes(topology);
-  if (strict && selected.enforcement_verified !== true) throw new Error('A strict Claude profile requires a verified current plugin, hook, controller, and launch capability.');
+  if (strict && (selected.enforcement_verified !== true || !validActivationProof(selected.activation_proof))) {
+    throw new Error('A strict Claude profile requires verified current native hook trust and activation bound to the installed plugin bytes.');
+  }
+  const resourceCapability = inspectResourceCapability({ resourceState: selected.resource_state });
+  const resourceSource = selected.resource_counter_source || resourceCapability.source;
+  if (topology === TOPOLOGIES.CLAUDE_DIRECT && (selected.resource_counter_supported !== true && !resourceCapability.supported
+    || !['proc-meminfo', 'win32-operating-system'].includes(resourceSource))) {
+    throw new Error('Toolkit-managed direct Claude profiles require supported validated resource counters.');
+  }
   const profile = {
     schema: SCHEMA, host, topology, capacity_mode: capacityMode, manual_maximum: manualMaximum,
     worker_estimate_bytes: workerEstimate, queue_limit: MAX_QUEUE, reservation_limit: EMERGENCY_WORKER_CEILING,
-    controller_version: CONTROL_VERSION, enforcement_verified: strict, updated_at: new Date().toISOString(),
+    controller_version: CONTROL_VERSION, enforcement_verified: strict, activation_proof: strict ? selected.activation_proof : null,
+    resource_counter_verified: topology === TOPOLOGIES.CLAUDE_DIRECT,
+    resource_counter_source: topology === TOPOLOGIES.CLAUDE_DIRECT ? resourceSource : 'not-applicable',
+    updated_at: new Date().toISOString(),
     enforcement: topology === TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-launch-boundary' : (topology === TOPOLOGIES.ROOT_ONLY ? 'native-agent-hook-deny' : 'outside-toolkit-control'),
   };
   atomicWriteJson(profilePath(host, options), profile);
@@ -241,9 +268,15 @@ function inspectResources(options = {}) {
 
 function validResourceState(resources) {
   return resources && ['physical_total', 'physical_available', 'commit_total', 'commit_available']
-    .every((key) => Number.isFinite(resources[key]) && resources[key] > 0)
+    .every((key) => Number.isSafeInteger(resources[key]) && resources[key] > 0)
     && resources.physical_available <= resources.physical_total
     && resources.commit_available <= resources.commit_total;
+}
+
+function inspectResourceCapability(options = {}) {
+  const resources = inspectResources(options);
+  const supported = Boolean(validResourceState(resources) && ['proc-meminfo', 'win32-operating-system', 'fixture'].includes(resources.source));
+  return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
 }
 
 function validateLaunchSpec(spec) {
@@ -365,16 +398,23 @@ function releaseReservation(id, options = {}) {
 function claudeInvocation(spec, options = {}) {
   const checked = validateLaunchSpec(spec);
   const executable = options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
-  const prompt = String(checked.child_prompt || checked.child_responsibility);
-  if (Buffer.byteLength(prompt, 'utf8') > MAX_PROMPT_BYTES) throw new Error('Child prompt exceeds the bounded private transport limit.');
+  const promptBytes = options.promptBytes || Buffer.from(String(checked.child_prompt || checked.child_responsibility), 'utf8');
+  if (!Buffer.isBuffer(promptBytes) || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Child prompt exceeds the bounded private transport limit.');
   const args = ['--print', '--output-format', 'json', '--effort', checked.effort, '--disallowedTools', 'Agent', '--permission-mode', 'default'];
   const env = { ...process.env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CHILD: '1' };
-  const parts = require('./setup-claude-toolkit-plugin.cjs').claudeSpawnParts(executable, args);
-  return { executable: parts.command, args: parts.args, shell: parts.shell, raw_executable: executable, raw_args: args, env, stdin: Buffer.from(prompt, 'utf8'), effort: checked.effort, non_fast: true, max_depth: 1 };
+  const parts = processLaunch.claudeSpawnParts(executable, args);
+  return { executable: parts.command, args: parts.args, shell: parts.shell, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
 }
 
 function launch(specInput, options = {}) {
-  const spec = validateLaunchSpec(specInput);
+  let spec;
+  let promptBytes;
+  try {
+    spec = validateLaunchSpec(specInput);
+    promptBytes = Buffer.from(String(spec.child_prompt || spec.child_responsibility), 'utf8');
+    if (promptBytes.length > MAX_PROMPT_BYTES) return refusal('Child prompt exceeds the bounded private transport limit.');
+    processLaunch.claudeSpawnParts(options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude', []);
+  } catch (error) { return refusal(error.message); }
   const admitted = admissionDecision(spec, options);
   if (admitted.result !== RESULTS.START) return admitted;
   const root = controlRoot(options);
@@ -385,7 +425,8 @@ function launch(specInput, options = {}) {
   let out;
   let err;
   try {
-    createPrivateFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+    const serialized = { ...spec, child_prompt: undefined, child_prompt_base64: promptBytes.toString('base64') };
+    createPrivateFile(specPath, `${JSON.stringify(serialized, null, 2)}\n`);
     createPrivateFile(outputPath);
     createPrivateFile(errorPath);
     out = fs.openSync(outputPath, 'w');
@@ -412,12 +453,15 @@ async function supervise(args) {
   const options = { root: args.root };
   let code = 1;
   try {
-    const invocation = claudeInvocation(spec, { claudeCli: args.claudeCli });
+    const encoded = String(spec?.child_prompt_base64 || '');
+    const promptBytes = Buffer.from(encoded, 'base64');
+    if (!encoded || promptBytes.toString('base64') !== encoded || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Stored child prompt transport is malformed.');
+    const invocation = claudeInvocation(spec, { claudeCli: args.claudeCli, promptBytes });
     updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options);
     code = await new Promise((resolve) => {
       let settled = false;
       const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
-      const child = spawn(invocation.executable, invocation.args, { shell: invocation.shell, env: invocation.env, windowsHide: true, stdio: ['pipe', 'inherit', 'inherit'] });
+      const child = spawn(invocation.executable, invocation.args, { shell: invocation.shell, windowsVerbatimArguments: invocation.windowsVerbatimArguments, env: invocation.env, windowsHide: true, stdio: ['pipe', 'inherit', 'inherit'] });
       child.on('error', () => finish(1));
       child.on('exit', (value) => finish(Number.isInteger(value) ? value : 1));
       child.stdin.on('error', () => { child.kill(); finish(1); });
@@ -461,6 +505,6 @@ if (require.main === module) main().then((code) => { process.exitCode = code; })
 
 module.exports = {
   SCHEMA, CONTROL_VERSION, RESULTS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES,
-  controlRoot, profilePath, statePath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources,
+  controlRoot, profilePath, statePath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof,
   admissionDecision, updateReservation, releaseReservation, claudeInvocation, launch, recoverState, pidAlive,
 };
