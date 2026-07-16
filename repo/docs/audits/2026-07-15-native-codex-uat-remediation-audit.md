@@ -271,6 +271,8 @@ Implementation commit `536eb3d908cd40a42c56ac394c4ac1485654e11e` passed the comb
 
 The full Toolkit Local Bridge run reported 32 passing tests before the known Windows post-summary handle retained the process through the 15-minute bound; no assertion failure was reported and no owned orphan remained. The complete validator test process emitted no result before the 15-minute bound and left no owned orphan. Direct validation in the primary worktree remained contaminated only by the protected ignored `.agent-toolkit-backups` directory. Without touching that material, a clean tracked-file snapshot of `536eb3d908cd40a42c56ac394c4ac1485654e11e` passed direct Toolkit validation, project freshness, skill packaging, pack packaging, and `git diff --check`. CI remains the full exact-head read-only gate.
 
+Exact implementation-and-audit head `cd3f03e1dcee2e2205260eab4b989a8432bab260` passed both validation workflows, generated-surface sync, skill packaging, pack packaging, all three CodeQL analyses, and the CodeQL workflow gate. The final audit-only closure head remains subject to the same exact-head gate before thread resolution.
+
 ## Release Gates
 
 - The sole current exact-head finding is repaired locally by activation-proof schema 3 and `process_launch_sha256`. It remains subject to surrounding validation, exact-head CI/CodeQL, evidence reply, and thread resolution.
