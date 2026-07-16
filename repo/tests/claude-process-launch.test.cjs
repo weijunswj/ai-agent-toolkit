@@ -68,3 +68,82 @@ test('known missing explicit and bare Claude executables fail availability prefl
   }
   assert.throws(() => launch.assertExecutableAvailable('missing-claude-command-for-toolkit-test', { env: { PATH: '' } }), /not available/i);
 });
+
+function createSymlinkOrSkip(t, target, link, type = 'file') {
+  try {
+    fs.symlinkSync(target, link, type);
+    return true;
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) {
+      t.skip(`symlink creation is unavailable: ${error.code}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
+test('official-style bare Claude symlink passes preflight without replacing the invocation command', { skip: process.platform === 'win32' }, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'official-claude-symlink-'));
+  const bin = path.join(root, '.local', 'bin');
+  const versions = path.join(root, '.local', 'share', 'claude', 'versions');
+  const version = path.join(versions, '2.1.207');
+  const link = path.join(bin, 'claude');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.mkdirSync(versions, { recursive: true });
+  fs.copyFileSync(process.execPath, version);
+  fs.chmodSync(version, 0o755);
+  if (!createSymlinkOrSkip(t, version, link)) return;
+  const command = launch.assertExecutableAvailable('claude', { env: { PATH: bin } });
+  assert.equal(command, 'claude');
+  const parts = launch.claudeSpawnParts(command, ['--version']);
+  assert.equal(parts.command, 'claude');
+  assert.equal(parts.raw_executable, 'claude');
+  assert.notEqual(parts.command, version);
+});
+
+test('explicit valid executable symlink passes while preserving its original path', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'explicit-claude-symlink-'));
+  const target = path.join(root, process.platform === 'win32' ? 'claude-target.exe' : 'claude-target');
+  const link = path.join(root, process.platform === 'win32' ? 'claude.exe' : 'claude');
+  fs.copyFileSync(process.execPath, target);
+  if (process.platform !== 'win32') fs.chmodSync(target, 0o755);
+  if (!createSymlinkOrSkip(t, target, link)) return;
+  assert.equal(launch.assertExecutableAvailable(link), link);
+  assert.equal(launch.claudeSpawnParts(link, ['--version']).raw_executable, link);
+});
+
+test('broken, cyclic, directory and non-executable symlink targets refuse availability', { skip: process.platform === 'win32' }, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'invalid-claude-symlink-'));
+  const broken = path.join(root, 'broken');
+  if (!createSymlinkOrSkip(t, path.join(root, 'missing'), broken)) return;
+  assert.throws(() => launch.assertExecutableAvailable(broken), /not available/i);
+
+  const cycleA = path.join(root, 'cycle-a');
+  const cycleB = path.join(root, 'cycle-b');
+  fs.symlinkSync(cycleB, cycleA);
+  fs.symlinkSync(cycleA, cycleB);
+  assert.throws(() => launch.assertExecutableAvailable(cycleA), /not available/i);
+
+  const directory = path.join(root, 'directory');
+  const directoryLink = path.join(root, 'directory-link');
+  fs.mkdirSync(directory);
+  fs.symlinkSync(directory, directoryLink, 'dir');
+  assert.throws(() => launch.assertExecutableAvailable(directoryLink), /not available/i);
+
+  const nonExecutable = path.join(root, 'non-executable');
+  const nonExecutableLink = path.join(root, 'non-executable-link');
+  fs.writeFileSync(nonExecutable, '#!/bin/sh\nexit 0\n');
+  fs.chmodSync(nonExecutable, 0o644);
+  fs.symlinkSync(nonExecutable, nonExecutableLink);
+  assert.throws(() => launch.assertExecutableAvailable(nonExecutableLink), /not available/i);
+});
+
+test('valid JavaScript executable paths remain available through the Node launcher', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-js-launchers-'));
+  for (const extension of ['js', 'cjs', 'mjs']) {
+    const executable = path.join(root, `claude.${extension}`);
+    fs.writeFileSync(executable, 'process.exit(0);\n');
+    assert.equal(launch.assertExecutableAvailable(executable), executable);
+    assert.equal(launch.claudeSpawnParts(executable, []).command, process.execPath);
+  }
+});

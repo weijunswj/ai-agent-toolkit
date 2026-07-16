@@ -331,3 +331,19 @@ test('missing Claude executable forms refuse before admission or artifacts', () 
     assert.equal(fs.existsSync(path.join(work, 'jobs')), false, executable);
   }
 });
+
+test('broken Claude executable symlink refuses before admission or artifacts', { skip: process.platform === 'win32' }, (t) => {
+  const work = root();
+  const broken = path.join(work, 'broken-claude');
+  try {
+    fs.symlinkSync(path.join(work, 'missing-target'), broken);
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
+    throw error;
+  }
+  const result = control.launch(spec(), verifiedOptions({ root: work, claudeCli: broken, resourceState: resources() }));
+  assert.equal(result.result, control.RESULTS.REFUSE);
+  assert.notEqual(result.status, 'launched');
+  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+  assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
+});

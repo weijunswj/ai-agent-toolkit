@@ -203,6 +203,14 @@ Starting reviewed head: `2b1726566579f4fcb3f0b173004ac5d7d41fcac3`.
 
 Local amendment evidence: focused Claude plugin/process/controller/lifecycle tests passed 62/62; setup/profile/orchestration tests passed 53/53; Codex configuration/plugin/SessionStart regressions passed 94/95 with one expected POSIX-only skip; Toolkit Local Bridge passed 133/133; generated/project/doc/source-lock/published-surface/fallback-risk checks and skill/pack packaging passed. Direct validation in the primary worktree remains contaminated only by the protected ignored `.agent-toolkit-backups` directory. Without touching that material, a clean detached worktree at implementation commit `7dbff71a273b6bb4e80ba0a8b59594b4b341f302` passed Toolkit validation, generated freshness, skill/pack packaging, `git diff --check`, and all 138 runnable validator tests with 2 Windows symlink-capability skips.
 
+## Official Claude Launcher Symlink Amendment
+
+Starting reviewed head: `e342abeb90674f5790ba609fd609974c5b7fca96`.
+
+Anthropic documents that the native macOS/Linux installer manages `~/.local/bin/claude` as a symlink into `~/.local/share/claude/versions/`. Executable preflight now resolves each candidate only for availability validation, requires the resolved target to be a regular file and POSIX-executable unless it is a JavaScript launcher handled by Node, and rejects broken links, cycles, directories, special files, and non-executable targets. The validated original command is returned unchanged, so bare `claude` remains the invocation command and native auto-update can move the launcher target. Shell-free argv, JavaScript-through-Node, Windows `.exe`/`.cmd`/`.bat`, synchronous pre-admission refusal, and post-preflight supervisor cleanup remain unchanged. Toolkit packaged surfaces align at `2.7.4`.
+
+Official behavior source: https://code.claude.com/docs/en/setup#auto-updates
+
 ## Release Gates
 
 - The eight current exact-head findings are repaired: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv. Current-head implementation evidence and regression results were posted in each original thread before resolution.

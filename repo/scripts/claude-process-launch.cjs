@@ -40,10 +40,11 @@ function assertExecutableAvailable(value, options = {}) {
   const candidates = executableCandidates(command, options);
   for (const candidate of candidates) {
     try {
-      const stat = fs.lstatSync(candidate);
-      if (!stat.isFile() || stat.isSymbolicLink()) continue;
+      const resolved = fs.realpathSync(candidate);
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile()) continue;
       if (platform !== 'win32' && !['.js', '.cjs', '.mjs'].includes(path.extname(candidate).toLowerCase())) {
-        fs.accessSync(candidate, fs.constants.X_OK);
+        fs.accessSync(resolved, fs.constants.X_OK);
       }
       return command;
     } catch {}
