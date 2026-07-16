@@ -264,8 +264,8 @@ function commandOutput(result) {
   return `${result?.stdout || ''}${result?.stderr || ''}${result?.error ? result.error.message : ''}`.trim();
 }
 
-function claudeSpawnParts(command, args) {
-  return processLaunch.claudeSpawnParts(command, args);
+function claudeSpawnParts(command, args, options = {}) {
+  return processLaunch.claudeSpawnParts(command, args, options);
 }
 
 function spawnClaude(command, args, options = {}) {

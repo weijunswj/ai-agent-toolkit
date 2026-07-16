@@ -376,19 +376,18 @@ test('Claude Toolkit plugin state evaluator accepts the real claude plugin list 
   assert.deepEqual(state.errors, []);
 });
 
-test('claudeSpawnParts routes bare Windows commands through an explicit non-shell cmd contract', () => {
-  const originalPlatform = process.platform;
-  Object.defineProperty(process, 'platform', { value: 'win32' });
-  try {
-    const parts = setup.claudeSpawnParts('claude', ['plugin', 'marketplace', 'add', 'C:\\Users\\a b\\repo']);
-    assert.equal(parts.shell, false);
-    assert.match(parts.command, /cmd\.exe$/i);
-    assert.deepEqual(parts.args.slice(0, 4), ['/d', '/s', '/v:off', '/c']);
-    assert.match(parts.args[4], /claude.*plugin.*marketplace.*add/);
-    assert.equal(parts.windowsVerbatimArguments, true);
-  } finally {
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
-  }
+test('claudeSpawnParts routes PATH-resolved bare Windows commands through an explicit non-shell cmd contract', { skip: process.platform !== 'win32' }, () => {
+  const root = tmpRoot();
+  const wrapper = path.join(root, 'claude.cmd');
+  fs.writeFileSync(wrapper, '@echo off\r\nexit /b 0\r\n');
+  const parts = setup.claudeSpawnParts('claude', ['plugin', 'marketplace', 'add', 'C:\\Users\\a b\\repo'], {
+    env: { ...process.env, PATH: root, Path: root, PATHEXT: '.CMD' },
+  });
+  assert.equal(parts.shell, false);
+  assert.match(parts.command, /cmd\.exe$/i);
+  assert.deepEqual(parts.args.slice(0, 4), ['/d', '/s', '/v:off', '/c']);
+  assert.match(parts.args[4], /claude\.CMD.*plugin.*marketplace.*add/i);
+  assert.equal(parts.windowsVerbatimArguments, true);
 });
 
 test('strict enforcement requires host-reported trust and active hooks bound to exact installed bytes', () => {
@@ -426,11 +425,13 @@ test('plugin setup cannot manufacture native trust or hook activation', () => {
 });
 
 test('claudeSpawnParts executes explicit Windows exe paths directly and rejects ambiguous executable input', () => {
-  const exe = setup.claudeSpawnParts('C:\\Program Files\\Claude\\claude.exe', ['--version']);
   if (process.platform === 'win32') {
+    const exe = setup.claudeSpawnParts('C:\\Program Files\\Claude\\claude.exe', ['--version']);
     assert.equal(exe.command, 'C:\\Program Files\\Claude\\claude.exe');
     assert.deepEqual(exe.args, ['--version']);
     assert.equal(exe.shell, false);
+  } else {
+    assert.throws(() => setup.claudeSpawnParts('C:\\Program Files\\Claude\\claude.exe', ['--version']), /must be absolute/i);
   }
   assert.throws(() => setup.claudeSpawnParts('claude & calc', ['--version']), /unsafe|Bare Claude/i);
   assert.throws(() => setup.claudeSpawnParts(' "claude" ', ['--version']), /ambiguous|unsafe/i);
