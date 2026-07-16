@@ -29,14 +29,21 @@ If instructions conflict, follow the higher-priority source and report material 
 - Execute mode: for clear local tasks, inspect relevant files, make the narrow change, validate, and report.
 - Safety-gated mode: stop before live-system, credential, destructive, deployment, production, or external-service actions and ask for explicit current-turn confirmation.
 
-## Single-Agent Default
+## Agent Topology And Delegation
 
-Complete ordinary work with the root agent alone: setup and updates, reading instructions or playbooks, repository orientation, documentation inspection, narrow implementation, routine tests, formatting, linting, validation, version alignment, small reviews, plans, summaries, and verification the root agent can perform directly. A broad task still begins with root-agent scoping.
-`setup toolkit` is a routine interactive setup operation without spawning subagents.
-Before delegation, state: The exact bounded responsibility being delegated; Why the root agent cannot perform it efficiently itself; The material correctness, safety, or critical-path wall-clock benefit; The files, evidence, or subsystem the subagent owns; How duplicate exploration and duplicated context loading will be avoided; Why sequential root-agent execution is insufficient.
-If any item is missing, delegation is prohibited. Generic parallelism, a second opinion, documentation inspection, routine test or validation execution, independent verification, several task steps, subagent availability, or an unsupported claim that delegation will save time are not sufficient reasons.
-Delegate only a bounded specialist security review or separable work; prefer one direct specialist and avoid duplicate inspection. On Codex MultiAgentV2 the root counts toward capacity; keep work root-only and forbid helper recursion by policy. A delegated helper must complete only its assigned bounded scope, must not spawn another agent, and must return any need for more expertise to the root.
-When supported, default `fork_turns="none"`; brief only required files, evidence, constraints, and acceptance criteria. Positive bounded inheritance needs specific dialogue; `fork_turns="all"` needs exceptional explicit justification. Do not claim unsupported hosts support it.
+Ordinary work begins root-first. The root handles setup/updates, docs/repo orientation, narrow changes, routine tests/checks/formatting, version alignment, reviews/plans/summaries, and root-capable verification unless the launch gate passes. Scope broad work in root first. `setup toolkit` uses no subagents.
+
+The active host profile is a topology ceiling, not a delegation instruction. Capacity is a resource backstop, never launch permission. No explicit profile or unverifiable topology, admission, effort, or non-fast guarantee means root-only. Never project one host's controls onto another or describe policy-only behavior as hard enforcement.
+
+Generic wording like `use helpers`, `use agents`, `parallelize this`, `delegate this`, `use subagents`, or `finish faster with helpers` is a preference, not a bounded delegation instruction. Do not invent scope. UAT context, later stages, available capacity, or future helper tests cannot qualify the present task.
+
+Before launch, state the task, independent bounded scopes, non-overlapping ownership, material quality, safety, or critical-path benefit, active topology and resource admission, verified medium reasoning and non-fast child mode, meaningful root-owned work starting immediately, and root-owned integration/validation. Missing any fact prohibits launch. Independent work may run concurrently when it materially shortens the critical path even if root could do it sequentially. Generic parallelism, second opinions, routine-work offloading, independent verification, task count, capacity, or speed are insufficient.
+
+Never delegate every substantive shard. Root immediately performs useful non-overlapping work, not wait, poll, narrate status, or repeat child scope. Wait only when root work is exhausted or depends on a child. Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned.
+
+Every child applies the same launch gate and active profile. Toolkit-managed direct and nested children default to medium reasoning effort; higher effort needs narrow explicit escalation and does not raise siblings. Children never use or inherit fast mode; verify this before launch or reject/queue it. Built-in, Security, plugin, named multi-worker, third-party, and nested paths get no exception.
+
+When supported, default `fork_turns="none"` and brief only required files/evidence/constraints/criteria. `fork_turns="all"` needs exceptional justification; bounded inheritance needs specific dialogue. Do not claim support on unsupported hosts.
 
 ## Local Documentation
 
@@ -44,30 +51,19 @@ Treat repo-local documentation as active task context, not optional background.
 
 Default portable playbook index: [Portable playbook index](docs/agent-playbooks/INDEX.md) (`docs/agent-playbooks/INDEX.md`).
 
-Before planning or editing:
+Before planning or editing, read root `AGENTS.md`, then the portable index when present, and root `MEMORY.md` when present as non-authoritative context. Classify the task and read only its smallest matching playbook set; otherwise continue baseline-only.
 
-1. Read root `AGENTS.md`, including any repo-specific appendix.
-2. Read the portable playbook index if `docs/agent-playbooks/INDEX.md` exists.
-3. Read root `MEMORY.md` if it exists as non-authoritative context.
-4. Classify the task using the index when present.
-5. Read only the smallest matching playbook set.
-6. If no playbook matches, continue baseline-only.
+Do not recursively read playbooks. If the portable playbook index is missing, continue safely using `AGENTS.md` and local repo docs. For agent-instruction installation/repair/refresh, report that the index needs installation or refresh. Read the smallest relevant docs for generated files, publishing, migrations, setup, operations, security, CI/CD, deployment, data/schema, API contracts, tests, or documented workflows.
 
-Do not recursively read every playbook. If the portable playbook index is missing, continue safely using `AGENTS.md` and local repo docs. If the task is about installing, repairing, or refreshing agent instructions, report that the repo-local playbook index is missing and should be installed or refreshed.
-
-For generated files, publishing, migrations, setup, operations, security, CI/CD, deployment, data/schema changes, API contracts, tests, or documented workflows, read the smallest relevant docs before editing.
-
-If a repo has another docs index, architecture guide, source-of-truth guide, or contributor guide, use it to choose targeted docs. Do not load unrelated docs by default.
-
-For repo-wide/navigation-heavy tasks, read an existing repo map or docs index before exploring. Keep repo maps pointer-based and current; create one only when it saves future context and fits repo convention.
+Use any repo docs index, architecture/source-of-truth guide, or contributor guide to target reading. For navigation-heavy tasks, consult an existing repo map first. Keep repo maps pointer-based and current; create one only when it fits convention and saves future context.
 
 ## Managed Memory
 
-Treat `MEMORY.md` as managed, non-authoritative project memory. Read it before planning or editing when it exists unless local rules say otherwise; use it only for compact durable repo-specific context.
+Treat `MEMORY.md` as managed, non-authoritative project memory. Read it before planning/editing when present; use it only for compact durable repo-specific context.
 
-Authoritative sources override it. Do not create `MEMORY.md` merely because it is absent. Use canonical docs, source, validation, repo maps, ADRs, or current-state docs instead. Never use memory as history, status, plans, handoffs, logs, or task tracking.
+Authoritative sources override it. Do not create `MEMORY.md` merely because it is absent. Prefer canonical docs/source/validation/maps/ADRs, and never use memory for history, status, plans, handoffs, logs, or task tracking.
 
-Never store secrets, credentials, tokens, private keys, `.env` values, private/customer data, live-system state, or sensitive operational details. New memory starts with a managed non-authoritative header and stays small.
+Never store secrets, credentials, tokens, keys, `.env` values, private/customer data, live state, or sensitive operations. New memory needs a managed non-authoritative header and stays small.
 
 ## Safety Gates
 
@@ -82,13 +78,13 @@ Explicit current-turn approval is required before actions that may:
 - Remove validation, tests, safety checks, or guardrails.
 - Rewrite git history.
 
-Do not treat previous approval as approval for a new risky action. Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task unless the risky target and operation are explicitly named.
+Prior approval does not authorize a new risky action. Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task unless the risky target and operation are named.
 
 Never introduce secrets, credentials, tokens, private keys, `.env` values, or private values into repo files.
 
 ## Application Error, Logging, And Privacy Defaults
 
-When touching app behavior, use generic user-facing errors with support-safe traceable reference, same event/request ref in server logs, and no internal/private data. Keep privacy-minimized logs; do not log prompts/uploads/model outputs, secrets, auth headers/cookies, payment data, private connector data/files, or unneeded PII.
+When touching app behavior, use generic user-facing errors with a support-safe traceable reference, the same event/request ref in server logs, and no internal/private data. Keep privacy-minimized logs; do not log prompts/uploads/model outputs, secrets, auth headers/cookies, payment data, private connector data/files, or unneeded PII.
 
 ## Fallback Policy
 
@@ -100,19 +96,19 @@ When asking the user to choose, approve, confirm, provide a target path, decide 
 
 ## Scope Control
 
-Before editing, inspect targeted files first and identify the smallest relevant validation. Avoid broad repo scans unless targeted evidence is insufficient. If the task touches a documented workflow, setup, policy, implementation plan, status note, or operations area, read the relevant docs before editing.
+Before editing, inspect target files and identify the smallest validation. Avoid broad scans unless targeted evidence is insufficient. Read relevant docs before changing a documented workflow, setup, policy, plan, status note, or operations area.
 
-During editing, keep the diff narrow and maintainable, match existing project style, avoid unrelated refactors, and do not weaken validation, schemas, guardrails, approval gates, safety checks, or error handling just to pass.
+Keep the diff narrow, maintainable, and in style. Avoid unrelated refactors and never weaken validation, schemas, guardrails, approvals, safety, or error handling just to pass.
 
-Persistent status, reports, plans, handoffs, operations notes, setup notes, CI/CD notes, deployment notes, safety notes, and troubleshooting notes belong under an existing docs path or another repo-documented folder. Do not create root-level files like `STATUS.md`, `REPORT.md`, or `PLAN.md` unless the repo explicitly requires that path.
+Put persistent status/reports/plans/handoffs and operations/setup/CI/deployment/safety/troubleshooting notes under an existing documented path. Do not create root `STATUS.md`, `REPORT.md`, or `PLAN.md` unless required.
 
-After editing, run the smallest relevant validation first. If validation fails, make a targeted repair and rerun. Review the diff for unrelated changes before final reporting.
+After editing, run the smallest validation first, repair targeted failures, rerun, and review the diff for unrelated changes.
 
 ## Documentation Closure
 
-For broad docs/audit/planning/readiness/source-of-truth work, review material docs and merge durable findings into the smallest canonical home; do not create root-level status/report/plan files unless required.
+For broad docs/audit/planning/readiness/source-of-truth work, merge durable findings into the smallest canonical home; do not create root status/report/plan files unless required.
 
-Use context-preserving compression, not blind deletion. Preserve durable decisions, validation, risks, provenance, source-of-truth links, ownership, and generated-surface notes; retire stale progress chatter or temporary handoffs. Do not summarize away auditability, licensing, provenance, validation, source-of-truth, security, or maintenance detail. Final reports say whether docs were consolidated, retained, archived, deleted, or unchanged.
+Use context-preserving compression, not blind deletion. Preserve decisions, validation, risks, provenance, source links, ownership, and generated-surface notes; retire stale chatter/handoffs. Keep auditability, licensing, security, and maintenance detail. Report whether docs were consolidated, retained, archived, deleted, or unchanged.
 
 ## Generated Files
 
@@ -124,25 +120,22 @@ Use plain ASCII punctuation for agent-facing prompts, templates, scripts, config
 
 ## Git Completion
 
-Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits. Unless the user asked for local-only/no-push work, finish by running targeted local validation, committing to a non-main branch, pushing, and opening or updating the pull request.
+Git Completion is the scoped exception for version-control publication after requested edits. Unless asked for local-only/no-push work, validate, commit to a non-main branch, push, and open or update the PR.
 
 Before pushing:
 
 - Run the smallest relevant local validation.
 - Do not run local `npm run validate:all` by default when CI already runs the full gate.
-- Run local full validation only for broad/risky, workflow, sync, generator, package, security-sensitive changes, known CI failure reproduction, or when targeted checks do not cover the touched area.
+- Run local full validation only for broad/risky, workflow, sync, generator, package, security-sensitive, known CI-failure, or insufficiently covered changes.
 
 When opening or updating a pull request:
 
-- Keep the PR body aligned with the full base-to-head diff.
-- Include cumulative scope, safety notes, validation, generated-output status, and user-facing behaviour.
+- Align the PR body with the full base-to-head diff, including scope, safety, validation, generated-output status, and user-facing behavior.
 - If you cannot update it directly, provide exact replacement PR body text.
 
 After pushing:
 
-- Check PR CI/status before reporting completion.
-- If CI is green, report completion.
-- If pending, say it is pending and not yet verified, or wait when practical.
+- Check PR CI/status before reporting completion. If green, report completion; if pending, say it is unverified or wait when practical.
 - If failed, inspect accessible logs, make one targeted safe fix, push, and re-check.
 - After two failed fix attempts, stop and report the blocker.
 - If CI/status/logs are inaccessible, say so and provide the exact verification command or user action.
@@ -163,11 +156,11 @@ If validation is skipped, state why.
 
 ## Communication
 
-For long tasks, give short progress updates at meaningful checkpoints. Do not narrate every command.
+For long tasks, update briefly at meaningful checkpoints; do not narrate commands.
 
-After making changes, report files changed, what changed, validation run and exact result, generated-output status when applicable, remaining risks or manual checks, PR link if opened or updated, and CI/status if checked or why inaccessible.
+Report files/changes, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
 
-Final reports after repo work must include `Instruction sources used` and `MEMORY.md changed: Yes/No`. `MEMORY.md changed: No; no memory file needed` is the normal outcome when no durable memory update is needed. If `MEMORY.md` changed, explain what changed, why it is durable repo memory, and why canonical docs were not better.
+Final repo reports include `Instruction sources used` and `MEMORY.md changed: Yes/No`. Normally use `MEMORY.md changed: No; no memory file needed`. If changed, explain its durable value and why canonical docs were unsuitable.
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
 
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->

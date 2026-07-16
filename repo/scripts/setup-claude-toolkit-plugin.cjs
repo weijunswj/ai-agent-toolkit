@@ -4,6 +4,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
+const processLaunch = require('./claude-process-launch.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
@@ -80,6 +82,16 @@ function verifySessionStartHook(hooksPath) {
   if (/--enable-target|--disable-target|--force-downgrade/.test(joined)) {
     errors.push('SessionStart command must not enable, disable, or force-downgrade targets');
   }
+  const preToolUse = hooks?.hooks?.PreToolUse;
+  const agentGroups = Array.isArray(preToolUse)
+    ? preToolUse.filter((group) => /(?:^|\|)(?:Agent|Task)(?:\||$)/.test(String(group?.matcher || '')))
+    : [];
+  const agentCommands = agentGroups.flatMap((group) => group?.hooks || [])
+    .filter((hook) => hook?.type === 'command')
+    .map((hook) => String(hook.command || ''));
+  if (!agentCommands.some((command) => command.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
+    errors.push('PreToolUse Agent hook must call toolkit-claude-agent-hook.cjs through CLAUDE_PLUGIN_ROOT');
+  }
   return errors;
 }
 
@@ -134,6 +146,10 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
     errors.push(...hookErrors.map((error) => `${slash(path.relative(repoRoot, hooksPath))}: ${error}`));
   }
 
+  for (const relPath of ['repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs']) {
+    if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing Claude agent-control package file: ${relPath}`);
+  }
+
   if (!fs.existsSync(localMarketplacePath)) {
     errors.push(`Missing local Claude Code marketplace wrapper: ${MARKETPLACE_REL_PATH}`);
   } else {
@@ -143,65 +159,129 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
 
   return errors;
 }
+function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
+  const errors = [];
+  const installPath = installed?.installPath ? path.resolve(installed.installPath) : '';
+  if (!installPath) return ['installed plugin state does not expose an exact cache path'];
+  const pairs = [
+    ['.claude-plugin/plugin.json', true],
+    ['.claude-plugin/hooks/hooks.json', true],
+    ['repo/scripts/toolkit-agent-control.cjs', false],
+    ['repo/scripts/claude-process-launch.cjs', false],
+    ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
+    ['repo/scripts/toolkit-local-bridge.cjs', false],
+  ];
+  for (const [relPath, json] of pairs) {
+    const source = path.join(repoRoot, ...relPath.split('/'));
+    const installedFile = path.join(installPath, ...relPath.split('/'));
+    if (!fs.existsSync(installedFile)) {
+      errors.push(`installed plugin cache is missing ${relPath}: ${installedFile}`);
+      continue;
+    }
+    if (!fs.lstatSync(installedFile).isFile()) {
+      errors.push(`installed plugin cache path is not a regular file: ${installedFile}`);
+      continue;
+    }
+    const sourceBytes = fs.readFileSync(source);
+    const installedBytes = fs.readFileSync(installedFile);
+    if (!sourceBytes.equals(installedBytes)) errors.push(`installed plugin cache is stale for ${relPath}`);
+    if (json && relPath.endsWith('plugin.json')) {
+      try {
+        const manifest = JSON.parse(installedBytes.toString('utf8'));
+        if (manifest.name !== TOOLKIT_PLUGIN_NAME || manifest.version !== expectedVersion) errors.push('installed plugin identity or version is not current');
+      } catch { errors.push('installed plugin manifest is invalid'); }
+    }
+    if (json && relPath.endsWith('hooks.json')) {
+      try {
+        const hooks = JSON.parse(installedBytes.toString('utf8'));
+        const groups = hooks?.hooks?.PreToolUse;
+        const exact = Array.isArray(groups) && groups.some((group) => group?.matcher === 'Agent|Task'
+          && Array.isArray(group.hooks) && group.hooks.some((hook) => hook?.type === 'command'
+            && hook.command === 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs"'));
+        if (!exact) errors.push('installed plugin cache lacks the exact Agent|Task PreToolUse Toolkit hook');
+      } catch { errors.push('installed plugin hooks are invalid'); }
+    }
+  }
+  return errors;
+}
+
+function installedActivationProof(installed, expectedVersion) {
+  const cachePath = path.resolve(String(installed?.installPath || ''));
+  const hookPath = path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json');
+  const controllerPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-agent-control.cjs');
+  const processLaunchPath = path.join(cachePath, 'repo', 'scripts', 'claude-process-launch.cjs');
+  const agentHookPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
+  for (const filePath of [hookPath, controllerPath, processLaunchPath, agentHookPath]) {
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Installed Claude enforcement path is not a regular file.');
+  }
+  return {
+    schema: 3,
+    source: 'claude-plugin-list',
+    plugin_version: expectedVersion,
+    cache_identity: crypto.createHash('sha256').update(cachePath).digest('hex'),
+    hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(hookPath)).digest('hex'),
+    controller_sha256: crypto.createHash('sha256').update(fs.readFileSync(controllerPath)).digest('hex'),
+    process_launch_sha256: crypto.createHash('sha256').update(fs.readFileSync(processLaunchPath)).digest('hex'),
+    agent_hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(agentHookPath)).digest('hex'),
+  };
+}
+
+function sameActivationProof(left, right) {
+  return ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']
+    .every((key) => left?.[key] === right?.[key]);
+}
+
+function verifyCurrentInstalledEnforcement(expectedProof, options = {}) {
+  try {
+    const requestedCommand = processLaunch.resolveClaudeCommandInput({
+      explicit: options.claudeCommand,
+      persisted: options.persistedCommand,
+      env: Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env,
+    });
+    const command = processLaunch.assertExecutableAvailable(requestedCommand, options);
+    const versionResult = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs(), env: options.env });
+    if (versionResult.status !== 0) throw new Error(commandOutput(versionResult) || 'Claude CLI version probe failed.');
+    const matches = findPluginEntries(runClaudeJson(command, ['plugin', 'list', '--json'], { env: options.env }));
+    const matching = matches.filter((entry) => {
+      if (!entry?.installPath) return false;
+      const identity = crypto.createHash('sha256').update(path.resolve(entry.installPath)).digest('hex');
+      return identity === expectedProof?.cache_identity;
+    });
+    if (matching.length !== 1) throw new Error('Current Claude plugin cache identity is missing or ambiguous.');
+    const installed = matching[0];
+    if (installed.enabled !== true) throw new Error('Current Claude plugin enabled state is not verified.');
+    if (installed.trusted !== true) throw new Error('Current Claude plugin trust state is not verified.');
+    if (installed.hooksActive !== true && installed.hookExecutionActive !== true) throw new Error('Current Claude hook-active state is not verified.');
+    if (installed.version !== expectedProof?.plugin_version) throw new Error('Current Claude plugin version does not match the activation proof.');
+    const cachePath = path.resolve(installed.installPath);
+    const cacheStat = fs.lstatSync(cachePath);
+    if (!cacheStat.isDirectory() || cacheStat.isSymbolicLink()) throw new Error('Current Claude plugin cache is not a regular directory.');
+    const hookErrors = verifySessionStartHook(path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json'));
+    if (hookErrors.length) throw new Error(hookErrors.join('; '));
+    const currentProof = installedActivationProof(installed, installed.version);
+    if (!sameActivationProof(currentProof, expectedProof)) throw new Error('Current Claude enforcement identity does not match the activation proof.');
+    return { verified: true, activation_proof: currentProof };
+  } catch (error) {
+    return { verified: false, reason: error.message };
+  }
+}
 
 function commandOutput(result) {
   return `${result?.stdout || ''}${result?.stderr || ''}${result?.error ? result.error.message : ''}`.trim();
 }
 
-// On Windows, a global npm install of the Claude Code CLI resolves the bare
-// `claude` command only to `claude.cmd`/`claude.ps1` shims, which Node's
-// spawnSync cannot execute directly (ENOENT/EINVAL) without going through a
-// shell. `shell: true` fixes that, but Node only concatenates array args with
-// spaces rather than quoting them, which silently truncates any argument
-// containing a space (e.g. a repo path) at the first space. Quote manually,
-// following the standard Windows CommandLineToArgvW quoting algorithm: a
-// backslash only needs doubling when it directly precedes a quote (either an
-// escaped literal quote, or the closing quote appended at the end), since an
-// unescaped trailing backslash would otherwise escape that following quote
-// instead of terminating the argument.
-function quoteWindowsArg(value) {
-  const str = String(value);
-  if (str === '') return '""';
-  if (!/[\s"&|<>^%]/.test(str)) return str;
-
-  let result = '"';
-  let backslashes = 0;
-  for (const ch of str) {
-    if (ch === '\\') {
-      backslashes += 1;
-      continue;
-    }
-    if (ch === '"') {
-      result += '\\'.repeat(backslashes * 2 + 1) + '"';
-      backslashes = 0;
-      continue;
-    }
-    result += '\\'.repeat(backslashes) + ch;
-    backslashes = 0;
-  }
-  result += '\\'.repeat(backslashes * 2) + '"';
-  return result;
-}
-
-function claudeSpawnParts(command, args) {
-  const isNodeScript = /\.(?:cjs|mjs|js)$/i.test(command);
-  if (isNodeScript) {
-    return { command: process.execPath, args: [command, ...args], shell: false };
-  }
-  if (process.platform === 'win32') {
-    // Pass a single pre-quoted command line (no args array) so Node hands it
-    // to the shell as-is, instead of the array+shell:true form that both
-    // mis-concatenates spaces and triggers a DEP0190 warning on every call.
-    return { command: [command, ...args.map(quoteWindowsArg)].join(' '), args: undefined, shell: true };
-  }
-  return { command, args, shell: false };
+function claudeSpawnParts(command, args, options = {}) {
+  return processLaunch.claudeSpawnParts(command, args, options);
 }
 
 function spawnClaude(command, args, options = {}) {
-  const parts = claudeSpawnParts(command, args);
+  const parts = claudeSpawnParts(command, args, options);
+  // The executable is validated and argv remains separate; shell interpretation is never enabled.
+  // lgtm[js/shell-command-injection-from-environment]
   return spawnSync(parts.command, parts.args, {
     ...options,
-    shell: parts.shell,
+    windowsVerbatimArguments: parts.windowsVerbatimArguments,
     windowsHide: true
   });
 }
@@ -257,12 +337,8 @@ function probeTimeoutMs() {
   return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS', PROBE_TIMEOUT_DEFAULT_MS, 1, PROBE_TIMEOUT_MAX_MS);
 }
 
-// Full worst-case CLI resolution budget. resolveClaudeCommand may probe
-// every distinct candidate -- the explicit --claude-cli argument, the
-// CLAUDE_TOOLKIT_CLAUDE_CLI and CLAUDE_CLI_PATH overrides, and bare
-// `claude` -- and each probe may consume one full probe timeout. The count
-// comes from commandCandidates itself so deduplication semantics can never
-// drift from the resolver.
+// The canonical resolver selects exactly one effective command by precedence,
+// so a current override cannot silently fall through to a different CLI.
 function resolutionBudgetMs(explicitCommand = '') {
   return commandCandidates(explicitCommand).length * probeTimeoutMs();
 }
@@ -292,27 +368,32 @@ function writeBudgetMs(explicitCommand = '') {
     + 15000; // spawn/cleanup/JSON-report grace
 }
 
-function commandCandidates(explicitCommand) {
-  const candidates = [];
-  if (explicitCommand) candidates.push(explicitCommand);
-  if (process.env.CLAUDE_TOOLKIT_CLAUDE_CLI) candidates.push(process.env.CLAUDE_TOOLKIT_CLAUDE_CLI);
-  if (process.env.CLAUDE_CLI_PATH) candidates.push(process.env.CLAUDE_CLI_PATH);
-  candidates.push('claude');
-  return [...new Set(candidates.filter(Boolean))];
+function commandCandidates(explicitCommand, options = {}) {
+  return [processLaunch.resolveClaudeCommandInput({
+    explicit: explicitCommand,
+    persisted: options.persistedCommand,
+    env: Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env,
+  })];
 }
 
-function resolveClaudeCommand(explicitCommand) {
+function resolveClaudeCommand(explicitCommand, options = {}) {
   const failures = [];
-  for (const command of commandCandidates(explicitCommand)) {
-    const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs() });
-    if (result.status === 0) return { command, failures };
-    failures.push(`${command}: ${commandOutput(result) || `exit ${result.status}`}`);
+  for (const candidate of commandCandidates(explicitCommand, options)) {
+    try {
+      const env = Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env;
+      const command = processLaunch.assertExecutableAvailable(candidate, { env });
+      const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs(), env });
+      if (result.status === 0) return { command, failures };
+      failures.push(`${candidate}: ${commandOutput(result) || `exit ${result.status}`}`);
+    } catch (error) {
+      failures.push(`${candidate}: ${error.message}`);
+    }
   }
   return { command: '', failures };
 }
 
-function runClaudeJson(command, args) {
-  const result = spawnClaude(command, args, { encoding: 'utf8', timeout: commandTimeoutMs() });
+function runClaudeJson(command, args, options = {}) {
+  const result = spawnClaude(command, args, { encoding: 'utf8', timeout: commandTimeoutMs(), ...options });
   if (result.status !== 0) {
     throw new Error(`claude ${args.join(' ')} failed: ${commandOutput(result)}`);
   }
@@ -335,7 +416,7 @@ function spawnClaudeProcess(command, args) {
   // inherited or piped handle must not be able to keep this parent waiting
   // on a child that has already finished its real work.
   return spawn(parts.command, parts.args, {
-    shell: parts.shell,
+    windowsVerbatimArguments: parts.windowsVerbatimArguments,
     stdio: 'ignore',
     windowsHide: true
   });
@@ -527,9 +608,12 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
     }
   }
   const sourcePath = installed.projectPath || installed.source?.path || installed.path || '';
-  const sourceMatches = !sourcePath || path.resolve(sourcePath) === repoRoot;
+  const sourceMatches = Boolean(sourcePath) && path.resolve(sourcePath) === repoRoot;
   if (!sourceMatches) {
     errors.push(`${pluginId()} source path does not match this local repo: ${sourcePath}`);
+  }
+  if (enabled && sourceMatches) {
+    errors.push(...validateInstalledEnforcement(installed, repoRoot, expectedVersion));
   }
 
   // `claude plugin install` no-ops on an id that is already installed (it
@@ -712,12 +796,26 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
+  const trusted = state.installed.trusted === true;
+  const active = state.installed.hooksActive === true || state.installed.hookExecutionActive === true;
+  const cachePath = state.installed.installPath || '';
+  const activationProof = trusted && active ? installedActivationProof(state.installed, expectedVersion) : null;
   const summary = {
     ok: true,
     plugin_id: pluginId(),
     version: expectedVersion,
     enabled: true,
     scope: options.scope,
+    current: true,
+    installed_current: true,
+    trusted,
+    hook_active: active,
+    strict_enforcement_verified: Boolean(activationProof),
+    enforcement_verified: Boolean(activationProof),
+    activation_proof: activationProof,
+    source_path: state.installed.projectPath || state.installed.source?.path || state.installed.path || '',
+    cache_path: cachePath,
+    installed_entry: state.installed,
     install_path: claudeToolkitInstallCommands(options.repoRoot, options.scope),
     next_steps: nextSteps(options.scope),
     warnings
@@ -755,14 +853,18 @@ module.exports = {
   findPluginEntries,
   mutationDeadlineMs,
   mutationPollMs,
+  installedActivationProof,
   probeTimeoutMs,
   readExpectedToolkitVersion,
   resolutionBudgetMs,
+  runClaudeCommand,
   runClaudeMutationAndVerify,
-  quoteWindowsArg,
+  quoteWindowsArg: processLaunch.quoteWindowsArgument,
   validateMarketplaceWrapper,
   validateRepoPluginSource,
   verifyBudgetMs,
+  validateInstalledEnforcement,
+  verifyCurrentInstalledEnforcement,
   verifySessionStartHook,
   writeBudgetMs,
   pluginId

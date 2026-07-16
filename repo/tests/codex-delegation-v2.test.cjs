@@ -169,20 +169,20 @@ test('custom V2 capacity translates helpers to total session threads', async () 
   assert.match(fs.readFileSync(filePath, 'utf8'), /max_concurrent_threads_per_session = 4/);
 });
 
-test('V2 guidance is compact, root-only by default, and honest about policy enforcement', async () => {
+test('V2 guidance is compact, productive root-first, and honest about launch enforcement', async () => {
   const filePath = configPath();
   await configureV2(filePath);
   const text = fs.readFileSync(filePath, 'utf8');
-  assert.match(text, /Root-only by default/);
-  assert.match(text, /Do not spawn another helper/);
-  assert.ok(config.CODEX_V2_ROOT_GUIDANCE.length < 450);
-  assert.ok(config.CODEX_V2_HELPER_GUIDANCE.length < 300);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /at most one directly justified helper/);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /user-invoked defined multi-worker workflow/);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /stated count and plan/);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /explicit approval of higher persistent or temporary capacity/);
-  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /never spawn helpers/);
-  assert.doesNotMatch(config.CODEX_V2_ROOT_GUIDANCE, /capacity is available.*parallel/i);
+  assert.match(text, /Root-first/);
+  assert.match(text, /Apply the same launch gate before any child/);
+  assert.ok(config.CODEX_V2_ROOT_GUIDANCE.length < 500);
+  assert.ok(config.CODEX_V2_HELPER_GUIDANCE.length < 400);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /Capacity is only a backstop, not launch permission/);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /independent, non-overlapping work with material benefit/);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /verified medium non-fast child execution/);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /meaningful concurrent root work/);
+  assert.match(config.CODEX_V2_ROOT_GUIDANCE, /Otherwise stay root-only/);
+  assert.match(config.CODEX_V2_HELPER_GUIDANCE, /Never inherit fast mode/);
   const state = config.inspectCodexDelegationConfig(filePath, V2);
   assert.match(state.recursive_helper_control, /policy-only/);
   assert.equal(state.recursive_hard_block, false);
@@ -665,6 +665,39 @@ test('remove deletes only an exact Toolkit-managed V2 block', async () => {
   assert.doesNotMatch(text, /CODEX-HELPER-CAPACITY|max_concurrent_threads_per_session|usage_hint_text/);
   const state = config.inspectCodexDelegationConfig(filePath, V2);
   assert.equal(state.enablement_ownership, 'absent');
+});
+
+test('visible removal preview binds approval to exact bytes and creates an exact backup', async () => {
+  const driftPath = configPath();
+  writeConfig(driftPath, 'model = "before"\n');
+  await configureV2(driftPath);
+  const stalePreview = config.previewCodexDelegationRemoval(driftPath, { runtime: V2, setupScriptPath: __filename });
+  assert.equal(stalePreview.status, 'removal-preview');
+  assert.match(stalePreview.detail, /higher host default/);
+  fs.writeFileSync(driftPath, fs.readFileSync(driftPath, 'utf8').replace('model = "before"', 'model = "after"'));
+  const stale = config.removeCodexDelegation(driftPath, {
+    runtime: V2,
+    approveCapacityResetRisk: true,
+    approvedProposal: stalePreview.approval_binding,
+    backupGenerationId: stalePreview.backup_generation_id,
+  });
+  assert.equal(stale.status, 'approval-stale');
+  assert.equal(fs.existsSync(stalePreview.backup_metadata_path), false);
+  assert.match(fs.readFileSync(driftPath, 'utf8'), /CODEX-HELPER-CAPACITY/);
+
+  const appliedPath = configPath();
+  writeConfig(appliedPath, 'model = "stable"\n');
+  await configureV2(appliedPath);
+  const preview = config.previewCodexDelegationRemoval(appliedPath, { runtime: V2, setupScriptPath: __filename });
+  const removed = config.removeCodexDelegation(appliedPath, {
+    runtime: V2,
+    approveCapacityResetRisk: true,
+    approvedProposal: preview.approval_binding,
+    backupGenerationId: preview.backup_generation_id,
+  });
+  assert.equal(removed.status, 'removed');
+  assert.equal(fs.existsSync(preview.backup_metadata_path), true);
+  assert.doesNotMatch(fs.readFileSync(appliedPath, 'utf8'), /AI-AGENT-TOOLKIT|max_concurrent_threads_per_session/);
 });
 
 test('fresh Toolkit enablement is independently owned and removal restores absent enablement', async () => {

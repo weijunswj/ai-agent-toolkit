@@ -1122,6 +1122,7 @@ function validateNativePluginPackages(errors) {
       hooksPath: '.codex-plugin/hooks/hooks.json',
       syncSource: 'codex-plugin',
       rootEnvVar: 'PLUGIN_ROOT',
+      launcherPath: 'repo/scripts/toolkit-codex-session-start.cjs',
       forbiddenEnvVars: ['CODEX_PLUGIN_ROOT', 'CODEX_PLUGIN_DATA', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_PLUGIN_DATA'],
       requiredNativeBoundary: /never installs or updates Claude Code/i,
       icons: [
@@ -1146,6 +1147,7 @@ function validateNativePluginPackages(errors) {
       hooksPath: '.claude-plugin/hooks/hooks.json',
       syncSource: 'claude-plugin',
       rootEnvVar: 'CLAUDE_PLUGIN_ROOT',
+      launcherPath: 'repo/scripts/toolkit-local-bridge.cjs',
       forbiddenEnvVars: ['CODEX_PLUGIN_ROOT', 'CODEX_PLUGIN_DATA'],
       requiredNativeBoundary: /never installs or updates Codex/i
     }
@@ -1204,11 +1206,14 @@ function validateNativePluginPackages(errors) {
     const command = String(commandHook?.command || '');
     if (commandHook?.type !== 'command') fail(errors, `${plugin.hooksPath} SessionStart hook must be a command hook`);
     validateToolkitBridgeHookCommandSafety(errors, plugin.hooksPath, command);
-    if (!command.includes('repo/scripts/toolkit-local-bridge.cjs')) {
-      fail(errors, `${plugin.hooksPath} hook must call the shared toolkit-local-bridge.cjs updater`);
+    if (!command.includes(plugin.launcherPath)) {
+      fail(errors, `${plugin.hooksPath} hook must call ${plugin.launcherPath}`);
     }
-    if (!command.includes(`\${${plugin.rootEnvVar}}/repo/scripts/toolkit-local-bridge.cjs`)) {
+    if (!command.includes(`\${${plugin.rootEnvVar}}/${plugin.launcherPath}`)) {
       fail(errors, `${plugin.hooksPath} hook must use \${${plugin.rootEnvVar}} as its native plugin root`);
+    }
+    if (plugin.syncSource === 'codex-plugin' && command.includes('toolkit-local-bridge.cjs')) {
+      fail(errors, `${plugin.hooksPath} hook must not bypass the hook-safe Codex SessionStart launcher`);
     }
     for (const envVar of plugin.forbiddenEnvVars) {
       if (command.includes(`\${${envVar}}`)) {

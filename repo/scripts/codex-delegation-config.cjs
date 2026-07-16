@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.5.2';
+const TOOLKIT_CLIENT_VERSION = '2.7.8';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v1';
 
@@ -140,8 +140,11 @@ function hashApprovalValue(value) {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
-function proposalAffectedKeys(state, runtime) {
-  if (runtime === RUNTIMES.V2) {
+function proposalAffectedKeys(state, runtime, options = {}) {
+  const ownership = String(state.ownership || '');
+  const ownsV2 = ownership === 'toolkit-managed-v2';
+  const useV2 = options.preferOwnedBlock ? ownsV2 : runtime === RUNTIMES.V2;
+  if (useV2) {
     const manageEnablement = !String(state.enablement_ownership || '').startsWith('user-owned');
     return [
       ...(manageEnablement ? ['features.multi_agent_v2.enabled'] : []),
@@ -153,7 +156,12 @@ function proposalAffectedKeys(state, runtime) {
   return ['agents.max_threads', 'agents.max_depth'];
 }
 
+function removalAffectedKeys(state, runtime) {
+  return proposalAffectedKeys(state, runtime, { preferOwnedBlock: true });
+}
+
 function approvalBindingPayload(binding) {
+
   return {
     schema: binding.schema,
     config_path: binding.config_path,
@@ -277,6 +285,43 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
     detail: runtime === RUNTIMES.V2
       ? `The proposal allows ${helperCount} helper(s) plus the main agent (${helpersToTotalThreads(helperCount)} total session threads).`
       : `The proposal allows ${helperCount} direct helper(s) and keeps nested helper spawning blocked at depth 1.`,
+  };
+}
+
+function previewCodexDelegationRemoval(configPath = codexConfigPath(), options = {}) {
+  const runtime = options.runtime || RUNTIMES.UNKNOWN;
+  let snapshot;
+  try {
+    snapshot = captureCodexConfigSnapshot(configPath);
+  } catch {
+    return { ...inspectCodexDelegationConfig(configPath, runtime), changed: false };
+  }
+  const state = initialStateFromSnapshot(snapshot, snapshot.config_path, runtime);
+  if (!String(state.ownership || '').startsWith('toolkit-managed')) return { ...state, changed: false };
+  const proposedBytes = removeManagedBlockBytes(state);
+  const affectedKeys = removalAffectedKeys(state, runtime);
+  const backupGenerationId = `planned-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
+  const backupMetadataPath = path.join(backupRoot(snapshot.config_path), backupGenerationId, 'restore.json');
+  return {
+    ...state,
+    status: 'removal-preview',
+    changed: false,
+    backup_root: backupRoot(snapshot.config_path),
+    backup_generation_id: backupGenerationId,
+    backup_metadata_path: backupMetadataPath,
+    restore_commands: restoreCommands(backupMetadataPath, options.setupScriptPath),
+    proposed_action: 'remove only the exact Toolkit-owned helper controls and preserve user-owned settings',
+    affected_keys: affectedKeys,
+    approval_binding: createApprovalBinding({
+      snapshot,
+      runtime,
+      helperCount: 'remove',
+      affectedKeys,
+      backupGenerationId,
+      proposedBlock: proposedBytes,
+    }),
+    requires_user_confirmation: true,
+    detail: 'Toolkit will remove its helper limit. Codex may then use a higher host default, which can increase memory use.',
   };
 }
 
@@ -849,10 +894,21 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
 function removeCodexDelegation(configPath = codexConfigPath(), options = {}) {
   const runtime = options.runtime || RUNTIMES.UNKNOWN;
   let initialSnapshot;
-  try {
-    initialSnapshot = captureCodexConfigSnapshot(configPath);
-  } catch (error) {
-    return { status: 'unsupported', runtime, config_path: configPath, changed: false, detail: cleanError(error) };
+  const approvedProposal = options.approvedProposal || null;
+  const backupGenerationId = options.backupGenerationId || approvedProposal?.backup_generation_id;
+  if (approvedProposal) {
+    try {
+      initialSnapshot = approvedSnapshotForConfiguration(approvedProposal, configPath, runtime, 'remove', backupGenerationId);
+      assertSnapshotCurrent(configPath, initialSnapshot, 'Codex config changed after removal proposal approval.');
+    } catch (error) {
+      return approvalFailureResult(runtime, configPath, /changed after/.test(cleanError(error)) ? 'approval-stale' : 'approval-invalid', error);
+    }
+  } else {
+    try {
+      initialSnapshot = captureCodexConfigSnapshot(configPath);
+    } catch (error) {
+      return { status: 'unsupported', runtime, config_path: configPath, changed: false, detail: cleanError(error) };
+    }
   }
   const initial = initialStateFromSnapshot(initialSnapshot, configPath, runtime);
   const toolkitOwned = String(initial.ownership || '').startsWith('toolkit-managed');
@@ -863,6 +919,12 @@ function removeCodexDelegation(configPath = codexConfigPath(), options = {}) {
     return { ...initial, status: 'approval-required', changed: false, detail: 'Removal may restore a higher host-default helper capacity. Review the warning and explicitly approve removal before Toolkit changes the file.' };
   }
   const proposedBytes = removeManagedBlockBytes(initial);
+  if (approvedProposal && (
+    approvedProposal.proposal_sha256 !== hashApprovalValue(proposedBytes)
+    || JSON.stringify(approvedProposal.affected_keys) !== JSON.stringify(removalAffectedKeys(initial, runtime))
+  )) {
+    return approvalFailureResult(runtime, configPath, 'approval-invalid', 'Approved removal proposal does not match the current Toolkit-owned controls.');
+  }
   return commitProposal(
     configPath,
     initialSnapshot,
@@ -884,7 +946,7 @@ function removeCodexDelegation(configPath = codexConfigPath(), options = {}) {
       if (!committedBytes.equals(proposedBytes) || !remainingLayout.ok || markerCount) throw new Error(`Post-removal verification failed: ${verified.detail || verified.status}`);
       return { ...verified, status: 'removed', changed: true, detail: 'Exact Toolkit-managed helper capacity and any Toolkit-owned enablement were removed; user-owned enablement and settings were preserved.' };
     },
-    options
+    { ...options, backupGenerationId }
   );
 }
 
@@ -935,6 +997,7 @@ module.exports = {
   inspectCodexDelegationConfig,
   inspectCodexMultiAgentRuntime,
   previewCodexDelegation,
+  previewCodexDelegationRemoval,
   cleanupTemporaryEditorDirectory,
   editWithCodexAppServer,
   assertProposalTextDelta,

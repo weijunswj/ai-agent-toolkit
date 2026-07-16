@@ -25,6 +25,9 @@ const {
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
+  prepareInstalledSessionStart,
+  sourceSessionStartCommand,
+  windowsSessionStartCommand,
   verifyInstalledCacheFreshness
 } = require('../scripts/setup-codex-toolkit-plugin.cjs');
 const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
@@ -36,7 +39,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.5.2';
+const expectedBridgeVersion = '2.7.8';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -200,6 +203,12 @@ function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
     path.join(sourceRepo, 'skills', 'ai-coding-agent-rules'),
     { recursive: true }
   );
+  const pluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
+  fs.cpSync(sourceRepo, pluginRoot, {
+    recursive: true,
+    filter: (source) => !source.split(path.sep).includes('.git'),
+  });
+  if (process.platform === 'win32') prepareInstalledSessionStart(pluginRoot);
   const temp = path.join(root, 'temp');
   fs.mkdirSync(temp, { recursive: true });
   const env = isolatedHomeEnv(root, { TEMP: temp, TMP: temp });
@@ -212,12 +221,12 @@ function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
     '--sync-source', initialSource
   ], { env });
   assert.equal(setup.status, 0, setup.stderr);
-  return { root, hub, sourceRepo, temp, env };
+  return { root, hub, sourceRepo, pluginRoot, temp, env };
 }
 
 function runFixtureBridge(fixture, args) {
   const originalPluginRoot = process.env.PLUGIN_ROOT;
-  if (args.includes('codex-plugin')) process.env.PLUGIN_ROOT = fixture.sourceRepo;
+  if (args.includes('codex-plugin')) process.env.PLUGIN_ROOT = fixture.pluginRoot;
   try {
     return runBridge(args);
   } finally {
@@ -336,6 +345,7 @@ function writeFakePythonExecutable(exePath, logPath) {
 function configureGitUser(repoPath) {
   git(repoPath, ['config', 'user.email', 'toolkit-test@example.invalid']);
   git(repoPath, ['config', 'user.name', 'Toolkit Bridge Test']);
+  git(repoPath, ['config', 'core.autocrlf', 'false']);
 }
 
 function writeHookLightSmokeFixture(repoPath) {
@@ -396,6 +406,8 @@ function writeRepoToolkitFixture(repoPath, label) {
     'codex-delegation-layout.cjs',
     'codex-delegation-state.cjs',
     'setup-toolkit-core.cjs',
+    'toolkit-agent-control.cjs',
+    'claude-process-launch.cjs',
     'toolkit-staging-generations.cjs'
   ]) {
     writeFile(path.join(repoPath, 'repo', 'scripts', name), "'use strict';\n");
@@ -409,21 +421,29 @@ function writeCodexPluginRefreshFixture(repoPath) {
     hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(repoPath, '.codex-plugin', 'assets', 'fixture.txt'), 'fixture asset\n');
-  writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), JSON.stringify({
+  writeFile(path.join(repoPath, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
     hooks: {
       SessionStart: [
         {
-          matcher: 'startup',
+          matcher: 'startup|resume|clear|compact',
           hooks: [
             {
               type: 'command',
-              command: 'node repo/scripts/toolkit-local-bridge.cjs --hook --sync-enabled --write --sync-source codex-plugin'
+              command: sourceSessionStartCommand()
             }
           ]
         }
       ]
     }
-  }, null, 2));
+  }, null, 2)}\n`);
+  for (const relPath of [
+    'repo/scripts/toolkit-codex-session-start.cjs',
+    'repo/scripts/toolkit-codex-session-start.ps1',
+  ]) {
+    const target = path.join(repoPath, ...relPath.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
+  }
   writeFile(path.join(repoPath, 'repo', 'scripts', 'setup-toolkit.cjs'), [
     '#!/usr/bin/env node',
     "'use strict';",
@@ -443,6 +463,14 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "  recursive: true,",
     "  filter: (src) => !src.split(path.sep).includes('.git')",
     "});",
+    "if (process.platform === 'win32') {",
+    "  const hooksPath = path.join(target, '.codex-plugin', 'hooks', 'hooks.json');",
+    "  const hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));",
+    `  hooks.hooks.SessionStart[0].hooks[0].command = ${JSON.stringify(windowsSessionStartCommand())};`,
+    "  fs.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + '\\n');",
+    "  const runtimePath = path.join(target, '.codex-plugin', 'session-start-runtime.json');",
+    "  fs.writeFileSync(runtimePath, JSON.stringify({ schema: 1, node_path: process.execPath }, null, 2) + '\\n');",
+    "}",
     "process.stdout.write(JSON.stringify({ ok: true }));",
     ''
   ].join('\n'));
@@ -4808,8 +4836,9 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   const codexCommand = codexHooks.hooks.SessionStart[0].hooks[0].command;
   const claudeCommand = claudeHooks.hooks.SessionStart[0].hooks[0].command;
   assert.match(codexCommand, /^node\s+"/);
-  assert.match(codexCommand, /toolkit-local-bridge\.cjs/);
-  assert.match(codexCommand, /\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-local-bridge\.cjs/);
+  assert.match(codexCommand, /toolkit-codex-session-start\.cjs/);
+  assert.match(codexCommand, /\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-session-start\.cjs/);
+  assert.doesNotMatch(codexCommand, /toolkit-local-bridge\.cjs/);
   assert.doesNotMatch(codexCommand, /CODEX_PLUGIN_ROOT|CODEX_PLUGIN_DATA|CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA/);
   assert.match(codexCommand, /--sync-enabled/);
   assert.match(codexCommand, /--sync-source codex-plugin/);
@@ -4834,7 +4863,10 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
   assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['SessionStart']);
-  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['SessionStart']);
+  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PreToolUse', 'SessionStart']);
+  const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
+  assert.equal(claudeAgentHook.matcher, 'Agent|Task');
+  assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
   assert.equal(codexHooks.hooks.SessionEnd, undefined);
   assert.equal(claudeHooks.hooks.SessionEnd, undefined);
   assert.equal(codexHooks.hooks.Stop, undefined);

@@ -516,13 +516,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.5.2';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.7.8';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.5\.2/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.7\.8/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -920,21 +920,21 @@ test('Git Completion includes pull-request description synchronization guidance'
     const text = readTextFile(path.join(repoRoot, relPath));
     assert.match(text, /## Git Completion/, relPath);
     assert.doesNotMatch(text, /## Pull Request Description/, relPath);
-    assert.match(text, /Git Completion is the explicit scoped exception to the Approval Rules for version-control publication after requested repo edits/i, relPath);
+    assert.match(text, /Git Completion is the scoped exception for version-control publication after requested edits/i, relPath);
     assert.match(text, /Before pushing:\n\n- Run the smallest relevant local validation/i, relPath);
     assert.match(text, /Do not run local `npm run validate:all` by default when CI already runs the full gate/i, relPath);
-    assert.match(text, /run local full validation only for broad\/risky, workflow, sync, generator, package, security-sensitive changes, known CI failure reproduction/i, relPath);
-    assert.match(text, /When opening or updating a pull request:\n\n- Keep the PR body aligned with the full base-to-head diff/i, relPath);
+    assert.match(text, /run local full validation only for broad\/risky, workflow, sync, generator, package, security-sensitive, known CI-failure, or insufficiently covered changes/i, relPath);
+    assert.match(text, /When opening or updating a pull request:\n\n- Align the PR body with the full base-to-head diff/i, relPath);
     assert.match(text, /check PR CI\/status before reporting completion/i, relPath);
     assert.match(text, /After pushing:\n\n- Check PR CI\/status before reporting completion/i, relPath);
-    assert.match(text, /If pending, say it is pending and not yet verified/i, relPath);
+    assert.match(text, /if pending, say it is unverified/i, relPath);
     assert.match(text, /If failed, inspect accessible logs/i, relPath);
     assert.match(text, /after two failed fix attempts, stop and report the blocker/i, relPath);
     assert.match(text, /Never:\n\n- Push to `main`, secrets, credentials, live\/runtime files, failed targeted validation, or safety-blocked changes/i, relPath);
     assert.match(text, /- Claim CI passed unless checked/i, relPath);
     assert.match(text, /- Hide failing, pending, or inaccessible CI/i, relPath);
     assert.match(text, /full base-to-head diff/i, relPath);
-    assert.match(text, /keep the PR body aligned with the full base-to-head diff/i, relPath);
+    assert.match(text, /Align the PR body with the full base-to-head diff/i, relPath);
     assert.match(text, /If you cannot update it directly, provide exact replacement PR body text/i, relPath);
   }
 });

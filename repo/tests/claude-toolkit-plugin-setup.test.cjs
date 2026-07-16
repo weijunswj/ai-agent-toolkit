@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -32,7 +33,8 @@ function installedList(options = {}) {
         marketplace: setup.TOOLKIT_MARKETPLACE_NAME,
         version,
         enabled: options.enabled !== false,
-        source: { path: options.sourcePath || repoRoot }
+        source: { path: options.sourcePath || repoRoot },
+        installPath: options.installPath || repoRoot
       }
     ]
   };
@@ -42,7 +44,7 @@ function writeFakeClaude(stateDir, options = {}) {
   const fakeClaudeScript = path.join(stateDir, 'fake-claude.cjs');
   const initialVersion = options.installedVersion || expectedVersion();
   writeJson(path.join(stateDir, 'state.json'), {
-    repoRoot: options.initialInstalled ? (options.initialRepoRoot || repoRoot) : '',
+    repoRoot: options.initialRepoRoot || (options.initialInstalled ? repoRoot : ''),
     installed: Boolean(options.initialInstalled),
     scope: options.initialInstalled ? 'user' : '',
     version: initialVersion,
@@ -50,7 +52,9 @@ function writeFakeClaude(stateDir, options = {}) {
     marketplaceAddCount: 0,
     installCount: 0,
     updateCount: 0,
-    uninstallCount: 0
+    uninstallCount: 0,
+    trusted: options.trusted === undefined ? true : options.trusted,
+    hooksActive: options.hooksActive === undefined ? true : options.hooksActive
   });
   const failMarketplaceAdd = Boolean(options.failMarketplaceAdd);
   const failInstall = Boolean(options.failInstall);
@@ -181,7 +185,10 @@ if (args[0] === 'plugin' && args[1] === 'list') {
       version: state.version,
       enabled: true,
       scope: state.scope || 'user',
-      source: { path: state.repoRoot }
+      source: { path: state.repoRoot },
+      installPath: state.repoRoot,
+      trusted: state.trusted,
+      hooksActive: state.hooksActive
     }
   ] : [];
   process.stdout.write(JSON.stringify({ installed }) + '\\n');
@@ -206,16 +213,16 @@ function runSetup(mode, fakeClaudePath, extraArgs = [], options = {}) {
     CLAUDE_TOOLKIT_CLAUDE_PLUGIN_MUTATION_POLL_MS: '50',
     ...(options.env || process.env)
   };
-  return spawnSync(process.execPath, [
+  const args = [
     path.join(repoRoot, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'),
     mode,
     '--json',
     '--repo-root',
     repoRoot,
-    '--claude-cli',
-    fakeClaudePath,
-    ...extraArgs
-  ], {
+  ];
+  if (options.explicit !== false) args.push('--claude-cli', fakeClaudePath);
+  args.push(...extraArgs);
+  return spawnSync(process.execPath, args, {
     cwd: repoRoot,
     encoding: 'utf8',
     timeout: 30000,
@@ -254,6 +261,10 @@ test('Claude Toolkit plugin SessionStart hook validator requires sync-source cla
     hooks: {
       SessionStart: [{
         hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source claude-plugin' }]
+      }],
+      PreToolUse: [{
+        matcher: 'Agent|Task',
+        hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs"' }]
       }]
     }
   });
@@ -355,7 +366,7 @@ test('Claude Toolkit plugin state evaluator accepts the real claude plugin list 
       version: expectedVersion(),
       scope: 'user',
       enabled: true,
-      installPath: 'C:\\Users\\someone\\.claude\\plugins\\cache\\ai-agent-toolkit-local\\ai-agent-toolkit\\2.3.2',
+      installPath: repoRoot,
       installedAt: '2026-07-01T14:44:35.944Z',
       lastUpdated: '2026-07-01T14:44:35.944Z',
       projectPath: repoRoot
@@ -366,49 +377,82 @@ test('Claude Toolkit plugin state evaluator accepts the real claude plugin list 
   assert.deepEqual(state.errors, []);
 });
 
-test('quoteWindowsArg quotes values with spaces and special characters, leaves plain values alone', () => {
-  assert.equal(setup.quoteWindowsArg('plain'), 'plain');
-  assert.equal(setup.quoteWindowsArg('ai-agent-toolkit@ai-agent-toolkit-local'), 'ai-agent-toolkit@ai-agent-toolkit-local');
-  assert.equal(setup.quoteWindowsArg('C:\\Users\\a b\\repo'), '"C:\\Users\\a b\\repo"');
-  assert.equal(setup.quoteWindowsArg('has "quote"'), '"has \\"quote\\""');
-  assert.equal(setup.quoteWindowsArg(''), '""');
+test('claudeSpawnParts routes PATH-resolved bare Windows commands through an explicit non-shell cmd contract', { skip: process.platform !== 'win32' }, () => {
+  const root = tmpRoot();
+  const wrapper = path.join(root, 'claude.cmd');
+  fs.writeFileSync(wrapper, '@echo off\r\nexit /b 0\r\n');
+  const parts = setup.claudeSpawnParts('claude', ['plugin', 'marketplace', 'add', 'C:\\Users\\a b\\repo'], {
+    env: { ...process.env, PATH: root, Path: root, PATHEXT: '.CMD' },
+  });
+  assert.equal(parts.shell, false);
+  assert.match(parts.command, /cmd\.exe$/i);
+  assert.deepEqual(parts.args.slice(0, 4), ['/d', '/s', '/v:off', '/c']);
+  assert.match(parts.args[4], /claude\.CMD.*plugin.*marketplace.*add/i);
+  assert.equal(parts.windowsVerbatimArguments, true);
 });
 
-test('quoteWindowsArg doubles backslashes that directly precede a quote, including a trailing backslash before the closing quote', () => {
-  // A single trailing backslash immediately before the closing quote must be
-  // doubled -- otherwise it escapes the closing quote instead of ending the
-  // argument, letting the rest of the command line leak into this argument.
-  assert.equal(setup.quoteWindowsArg('C:\\Users\\a b\\'), '"C:\\Users\\a b\\\\"');
-  assert.equal(setup.quoteWindowsArg('a"b\\'), '"a\\"b\\\\"');
-  // Backslashes not immediately before a quote are left as literal content.
-  assert.equal(setup.quoteWindowsArg('trailing\\\\'), 'trailing\\\\');
-});
-
-test('claudeSpawnParts builds a single quoted command line on win32 for a bare CLI name, preserving spaces', () => {
-  const originalPlatform = process.platform;
-  Object.defineProperty(process, 'platform', { value: 'win32' });
-  try {
-    const parts = setup.claudeSpawnParts('claude', ['plugin', 'marketplace', 'add', 'C:\\Users\\a b\\repo']);
-    assert.equal(parts.shell, true);
-    assert.equal(parts.args, undefined);
-    assert.equal(parts.command, 'claude plugin marketplace add "C:\\Users\\a b\\repo"');
-  } finally {
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
+test('strict enforcement requires host-reported trust and active hooks bound to exact installed bytes', () => {
+  for (const options of [{ trusted: false }, { hooksActive: false }, { trusted: null }, { hooksActive: null }]) {
+    const stateDir = tmpRoot();
+    const result = runSetup('--verify', writeFakeClaude(stateDir, { initialInstalled: true, ...options }));
+    assert.equal(result.status, 0, result.stderr);
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.installed_current, true);
+    assert.equal(summary.strict_enforcement_verified, false);
+    assert.equal(summary.activation_proof, null);
   }
+
+  const stateDir = tmpRoot();
+  const result = runSetup('--verify', writeFakeClaude(stateDir, { initialInstalled: true }));
+  assert.equal(result.status, 0, result.stderr);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.trusted, true);
+  assert.equal(summary.hook_active, true);
+  assert.equal(summary.strict_enforcement_verified, true);
+  assert.equal(summary.activation_proof.plugin_version, expectedVersion());
+  assert.equal(summary.activation_proof.schema, 3);
+  for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']) {
+    assert.match(summary.activation_proof[key], /^[a-f0-9]{64}$/);
+  }
+  const processLaunchBytes = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'claude-process-launch.cjs'));
+  assert.equal(summary.activation_proof.process_launch_sha256, crypto.createHash('sha256').update(processLaunchBytes).digest('hex'));
 });
 
-test('claudeSpawnParts does not use a shell for a .cjs fake CLI path even on win32', () => {
-  const originalPlatform = process.platform;
-  Object.defineProperty(process, 'platform', { value: 'win32' });
-  try {
-    const fakePath = 'C:\\Users\\a b\\fake-claude.cjs';
-    const parts = setup.claudeSpawnParts(fakePath, ['plugin', 'list', '--json']);
-    assert.equal(parts.shell, false);
-    assert.equal(parts.command, process.execPath);
-    assert.deepEqual(parts.args, [fakePath, 'plugin', 'list', '--json']);
-  } finally {
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
+test('plugin setup cannot manufacture native trust or hook activation', () => {
+  const stateDir = tmpRoot();
+  const fake = writeFakeClaude(stateDir, { initialInstalled: false, trusted: false, hooksActive: false });
+  const result = runSetup('--write', fake);
+  assert.equal(result.status, 0, result.stderr);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.trusted, false);
+  assert.equal(summary.hook_active, false);
+  assert.equal(summary.strict_enforcement_verified, false);
+});
+
+test('claudeSpawnParts executes explicit Windows exe paths directly and rejects ambiguous executable input', () => {
+  if (process.platform === 'win32') {
+    const executable = path.join(tmpRoot(), 'Program Files', 'Claude', 'claude.exe');
+    fs.mkdirSync(path.dirname(executable), { recursive: true });
+    fs.copyFileSync(process.execPath, executable);
+    const exe = setup.claudeSpawnParts(executable, ['--version']);
+    assert.equal(exe.command, executable);
+    assert.deepEqual(exe.args, ['--version']);
+    assert.equal(exe.shell, false);
+  } else {
+    assert.throws(() => setup.claudeSpawnParts('C:\\Program Files\\Claude\\claude.exe', ['--version']), /must be absolute/i);
   }
+  assert.throws(() => setup.claudeSpawnParts('claude & calc', ['--version']), /unsafe|Bare Claude/i);
+  assert.throws(() => setup.claudeSpawnParts(' "claude" ', ['--version']), /ambiguous|unsafe/i);
+});
+
+test('claudeSpawnParts does not use a shell for a .cjs fake CLI path', () => {
+  const fakePath = path.join(tmpRoot(), 'a b', 'fake-claude.cjs');
+  fs.mkdirSync(path.dirname(fakePath), { recursive: true });
+  fs.writeFileSync(fakePath, 'process.exit(0);\n');
+  const parts = setup.claudeSpawnParts(fakePath, ['plugin', 'list', '--json']);
+  assert.equal(parts.shell, false);
+  assert.equal(parts.command, process.execPath);
+  assert.deepEqual(parts.args, [fakePath, 'plugin', 'list', '--json']);
 });
 
 test('Claude Toolkit plugin setup verify fails cleanly when not installed', () => {
@@ -669,8 +713,9 @@ test('Claude Toolkit plugin mutation deadline and poll env controls reject malfo
   }
 });
 
-test('CLI resolution is fully budgeted for every distinct candidate with dedupe aligned to the resolver', () => {
+test('CLI resolution budgets one canonical precedence-selected command', () => {
   const saved = {
+    aiCli: process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI,
     envCli: process.env.CLAUDE_TOOLKIT_CLAUDE_CLI,
     cliPath: process.env.CLAUDE_CLI_PATH,
     probe: process.env.CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS
@@ -678,6 +723,7 @@ test('CLI resolution is fully budgeted for every distinct candidate with dedupe 
   try {
     delete process.env.CLAUDE_TOOLKIT_CLAUDE_CLI;
     delete process.env.CLAUDE_CLI_PATH;
+    delete process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
     delete process.env.CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS;
 
     // One valid first candidate: with no explicit CLI and no env overrides
@@ -686,16 +732,12 @@ test('CLI resolution is fully budgeted for every distinct candidate with dedupe 
     assert.equal(setup.resolutionBudgetMs(''), 10000);
     assert.equal(setup.verifyBudgetMs(''), 10000 + 120000 + 15000);
 
-    // Four distinct candidates are fully budgeted.
+    process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI = 'ai-env-cli';
     process.env.CLAUDE_TOOLKIT_CLAUDE_CLI = 'env-cli-one';
     process.env.CLAUDE_CLI_PATH = 'env-cli-two';
-    assert.equal(setup.commandCandidates('explicit-cli').length, 4);
-    assert.equal(setup.resolutionBudgetMs('explicit-cli'), 4 * 10000);
-
-    // Deduplicated candidates are not double-counted: the accounting reuses
-    // commandCandidates itself.
-    assert.equal(setup.commandCandidates('env-cli-one').length, 3);
-    assert.equal(setup.resolutionBudgetMs('env-cli-one'), 3 * 10000);
+    assert.deepEqual(setup.commandCandidates('explicit-cli'), ['explicit-cli']);
+    assert.equal(setup.resolutionBudgetMs('explicit-cli'), 10000);
+    assert.deepEqual(setup.commandCandidates(''), ['ai-env-cli']);
 
     // The orchestrator derives identical budgets for the same explicit
     // argument and environment, and stays finite.
@@ -705,15 +747,14 @@ test('CLI resolution is fully budgeted for every distinct candidate with dedupe 
     assert.equal(budgets.write, setup.writeBudgetMs('explicit-cli'));
     assert.ok(Number.isFinite(budgets.verify) && Number.isFinite(budgets.write));
 
-    // Static fallbacks match the corrected default worst case: the maximum
-    // supported candidate count at the default probe timeout.
+    // Static fallbacks match the one selected command at the default timeout.
     assert.equal(orchestrator.CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS, setup.verifyBudgetMs('explicit-cli'));
     assert.equal(orchestrator.CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS, setup.writeBudgetMs('explicit-cli'));
 
     // The probe timeout override flows into the budget and is strict-parsed.
     process.env.CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS = '3000';
     assert.equal(setup.probeTimeoutMs(), 3000);
-    assert.equal(setup.resolutionBudgetMs('explicit-cli'), 4 * 3000);
+    assert.equal(setup.resolutionBudgetMs('explicit-cli'), 3000);
     for (const bad of ['abc', '0', '-5', '10junk', '1e3', String(2 * 60 * 60 * 1000)]) {
       process.env.CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS = bad;
       assert.equal(setup.probeTimeoutMs(), 10000, `probe fallback for ${JSON.stringify(bad)}`);
@@ -722,6 +763,7 @@ test('CLI resolution is fully budgeted for every distinct candidate with dedupe 
     for (const [key, value] of [
       ['CLAUDE_TOOLKIT_CLAUDE_CLI', saved.envCli],
       ['CLAUDE_CLI_PATH', saved.cliPath],
+      ['AI_AGENT_TOOLKIT_CLAUDE_CLI', saved.aiCli],
       ['CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS', saved.probe]
     ]) {
       if (value === undefined) delete process.env[key];
@@ -730,15 +772,12 @@ test('CLI resolution is fully budgeted for every distinct candidate with dedupe 
   }
 });
 
-test('failed CLI candidates followed by a valid final candidate resolve within the budgeted sequence', () => {
+test('an unusable explicit CLI fails closed instead of falling through to a lower-precedence override', () => {
   const stateDir = tmpRoot();
   const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: true });
   const brokenClaude = path.join(stateDir, 'broken-claude.cjs');
   fs.writeFileSync(brokenClaude, 'process.exit(1);\n', 'utf8');
 
-  // Candidate order: the explicit broken CLI fails first, then the env
-  // override resolves to the valid fake CLI. The run must succeed and stay
-  // inside the budget computed for this exact candidate sequence.
   const env = {
     ...process.env,
     CLAUDE_TOOLKIT_CLAUDE_CLI: fakeClaude,
@@ -750,10 +789,34 @@ test('failed CLI candidates followed by a valid final candidate resolve within t
   const result = runSetup('--verify', brokenClaude, [], { env });
   const elapsed = Date.now() - started;
 
-  assert.equal(result.status, 0, result.stderr);
-  const summary = JSON.parse(result.stdout);
-  assert.equal(summary.ok, true);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /No usable Claude Code CLI/i);
   assert.ok(elapsed < 60000, `resolution sequence took ${elapsed}ms`);
+});
+
+for (const variable of ['CLAUDE_TOOLKIT_CLAUDE_CLI', 'CLAUDE_CLI_PATH']) {
+  test(`Claude helper verification uses ${variable} when it is the only available command`, () => {
+    const stateDir = tmpRoot();
+    const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: true });
+    const env = { ...process.env, PATH: '', Path: '', [variable]: fakeClaude };
+    delete env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
+    if (variable !== 'CLAUDE_TOOLKIT_CLAUDE_CLI') delete env.CLAUDE_TOOLKIT_CLAUDE_CLI;
+    if (variable !== 'CLAUDE_CLI_PATH') delete env.CLAUDE_CLI_PATH;
+    const result = runSetup('--verify', fakeClaude, [], { env, explicit: false });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).installed_current, true);
+  });
+}
+
+test('explicit Windows cmd path with spaces works through version and plugin verification', { skip: process.platform !== 'win32' }, () => {
+  const stateDir = path.join(tmpRoot(), 'Claude CLI wrapper with spaces');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: true });
+  const wrapper = path.join(stateDir, 'claude.cmd');
+  fs.writeFileSync(wrapper, `@echo off\r\n"${process.execPath}" "${fakeClaude}" %*\r\n`);
+  const result = runSetup('--verify', wrapper);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).installed_current, true);
 });
 
 test('mutation polling caps every wait to the remaining deadline even with an extreme poll interval', async () => {
@@ -780,7 +843,7 @@ test('a final verification poll at the deadline can still succeed with an extrem
   // The install lands its state and lingers; with a one-hour poll interval,
   // success requires the loop's remaining-time-capped wait plus the final
   // at-deadline verification poll rather than a full poll sleep.
-  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, lingerAfterInstall: true });
+  const fakeClaude = writeFakeClaude(stateDir, { initialInstalled: false, initialRepoRoot: repoRoot, lingerAfterInstall: true });
 
   const started = Date.now();
   const outcome = await setup.runClaudeMutationAndVerify(
@@ -808,4 +871,64 @@ test('Claude Toolkit plugin setup rejects an unusable Claude CLI', () => {
   const result = runSetup('--verify', brokenClaude, [], { env: isolatedEnv });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /no usable claude code cli/i);
+});
+
+test('installed enforcement byte verification rejects missing and stale cache files', () => {
+  const cache = tmpRoot();
+  for (const relPath of [
+    '.claude-plugin/plugin.json',
+    '.claude-plugin/hooks/hooks.json',
+    'repo/scripts/toolkit-agent-control.cjs',
+    'repo/scripts/claude-process-launch.cjs',
+    'repo/scripts/toolkit-claude-agent-hook.cjs',
+    'repo/scripts/toolkit-local-bridge.cjs',
+  ]) {
+    const target = path.join(cache, ...relPath.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
+  }
+  assert.equal(setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot }).ok, true);
+  fs.appendFileSync(path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'), ' ');
+  let state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /stale.*hooks/i);
+  fs.copyFileSync(path.join(repoRoot, '.claude-plugin', 'hooks', 'hooks.json'), path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'));
+  fs.unlinkSync(path.join(cache, 'repo', 'scripts', 'toolkit-agent-control.cjs'));
+  state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /missing.*toolkit-agent-control/i);
+  fs.copyFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-agent-control.cjs'), path.join(cache, 'repo', 'scripts', 'toolkit-agent-control.cjs'));
+  fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), ' ');
+  state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /stale.*toolkit-local-bridge/i);
+  fs.rmSync(path.join(cache, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), { force: true });
+  state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /missing.*toolkit-local-bridge/i);
+});
+
+test('installed Claude SessionStart bridge must remain a regular cache file', { skip: process.platform === 'win32' }, (t) => {
+  const cache = tmpRoot();
+  for (const relPath of [
+    '.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json',
+    'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs',
+    'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs',
+  ]) {
+    const target = path.join(cache, ...relPath.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
+  }
+  const bridge = path.join(cache, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
+  const replacement = path.join(cache, 'bridge-replacement.cjs');
+  fs.copyFileSync(bridge, replacement);
+  fs.unlinkSync(bridge);
+  try { fs.symlinkSync(replacement, bridge); }
+  catch (error) {
+    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
+    throw error;
+  }
+  const state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /not a regular file.*toolkit-local-bridge/i);
 });

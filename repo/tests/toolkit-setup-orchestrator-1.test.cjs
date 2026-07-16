@@ -22,30 +22,45 @@ test('plan mode remains read-only and exposes the existing setup journey', () =>
   assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit')), false);
 });
 
-test('Claude Code plan stays portable-policy-only and never emits Codex config work', () => {
+test('Claude Code plan omits unsupported automatic admission and never emits Codex config work', () => {
   const root = tmpRoot();
-  const result = run(['--plan', '--json', '--host', 'claude-code'], { env: isolatedHomeEnv(root) });
+  const result = run(['--plan', '--json', '--host', 'claude-code'], { env: { ...isolatedHomeEnv(root), PATH: '' } });
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
   assert.equal(plan.host, 'claude-code');
-  assert.equal(plan.preferences.helper_capacity, 'unsupported-policy-only');
+  assert.equal(plan.preferences.helper_capacity_backstop, 'root-only');
+  assert.equal(plan.question_bank.find((row) => row.key === 'claudeAgentCapacity').choices.some((choice) => choice.value === 'automatic'), false);
   assert.doesNotMatch(plan.steps.flatMap((step) => step.commands || []).join('\n'), /agents\.max_threads|agents\.max_depth/);
 });
 
-test('plain and JSON plans share the one-helper recommendation and canonical Codex question row', () => {
+test('plain and JSON plans share the root-only recommendation and canonical Codex question row', () => {
   const root = tmpRoot();
   const plain = run(['--plan'], { env: isolatedHomeEnv(root) });
   const json = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
   assert.equal(plain.status, 0, plain.stderr);
   assert.equal(json.status, 0, json.stderr);
-  assert.match(plain.stdout, /## Computer performance[\s\S]*How many helper agents may Codex use\?[\s\S]*\*\*Recommended:\*\* One helper at most/);
+  assert.match(plain.stdout, /## Computer performance[\s\S]*How many helper agents may Codex use\?[\s\S]*\*\*Recommended:\*\* Root agent only/);
   const plan = JSON.parse(json.stdout);
   const delegationRow = plan.question_bank.find((row) => row.key === 'codexHelperCapacity');
   assert.deepEqual(
-    { recommended: delegationRow.recommended, empty_input: delegationRow.empty_input, selected: delegationRow.selected },
-    { recommended: 'one-helper', empty_input: 'one-helper', selected: 'one-helper' }
+    {
+      recommended: delegationRow.recommended,
+      recommended_value: delegationRow.recommended_value,
+      empty_input: delegationRow.empty_input,
+      empty_input_behavior: delegationRow.empty_input_behavior,
+      selected: delegationRow.selected,
+      selected_value: delegationRow.selected_value,
+    },
+    {
+      recommended: 'root-only',
+      recommended_value: 'root-only',
+      empty_input: 'root-only',
+      empty_input_behavior: 'root-only',
+      selected: 'root-only',
+      selected_value: 'root-only',
+    }
   );
-  assert.equal(plan.preferences.helper_capacity, 'one-helper');
+  assert.equal(plan.preferences.helper_capacity_backstop, 'root-only');
 });
 
 test('canonical question specification orders delegation before plugin auto-refresh for TTY and stdin', () => {
@@ -113,10 +128,16 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   };
   const planned = core.plannedQuestionBank(args, current);
   const text = core.renderSetupQuestionBank(planned.specs);
+  const terminal = core.renderSetupQuestionBankTerminal(planned.specs);
   assert.match(text, /## Automatic updates[\s\S]*## Computer performance/);
   assert.doesNotMatch(text, /## Other coding apps/);
   assert.doesNotMatch(text, /Update report auto-open|MultiAgentV[12]|max_threads|max_concurrent|AI-AGENT-TOOLKIT|PR #|issue #|C:\\|restore command|migration/i);
   assert.match(text, /How many helper agents may Codex use\?[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*Selected:\*\*/);
+  assert.match(text, /\*\*Choices:\*\*\n\n- Root agent only - recommended\n- One helper at most - manual capacity backstop\n- Keep current\n- Use a custom number/);
+  assert.doesNotMatch(text, /\bAdvanced(?: options)?\b|Show advanced choices|More options/);
+  assert.doesNotMatch(text, /\*\*Choices:\*\*[^\n]*(?:\/|\|)/);
+  assert.match(terminal, /Choices:\n  - Root agent only - recommended\n  - One helper at most - manual capacity backstop\n  - Keep current\n  - Use a custom number/);
+  assert.doesNotMatch(terminal, /Choices:[^\n]*(?:\/|,)/);
   assert.match(text, /Accept all displayed recommended settings:[\s\S]*setup-toolkit-question-bank:complete/);
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
 
@@ -124,6 +145,44 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   const unsafe = core.setupQuestionSpecs(args, current).find((spec) => spec.key === 'codexHelperCapacity');
   assert.match(unsafe.current, /Risk:/);
   assert.match(unsafe.choices.find((choice) => choice.value === 'keep').label, /memory risk/);
+});
+
+test('helper choices are direct and conditional on current runtime and ownership', () => {
+  const args = core.parseArgs(['--plan']);
+  const base = {
+    managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
+    audit: { repo_auto_update: {}, targets: {} },
+    nativePlugin: { status: 'not checked' },
+  };
+  const helperSpec = (runtime, delegationState) => core.setupQuestionSpecs(args, {
+    ...base,
+    runtime: { runtime },
+    delegation: delegationState,
+  }).find((spec) => spec.key === 'codexHelperCapacity');
+
+  const supported = helperSpec('MultiAgentV2', { status: 'unconfigured', detail: 'not configured' });
+  assert.deepEqual(supported.choices.map((choice) => choice.value), ['root-only', 'one-helper', 'keep', 'custom']);
+  assert.equal(supported.choices.find((choice) => choice.value === 'custom').label, 'Use a custom number');
+  assert.equal(supported.choices.some((choice) => /advanced/i.test(choice.label)), false);
+
+  const unsupported = helperSpec('unknown', { status: 'unsupported', detail: 'unknown runtime' });
+  assert.deepEqual(unsupported.choices.map((choice) => choice.value), ['keep']);
+  assert.equal(unsupported.recommended, 'keep');
+  assert.match(unsupported.recommended_outcome, /Keep the current setting.*supported effective helper controls/i);
+
+  const disabled = helperSpec('disabled', { status: 'disabled', detail: 'disabled runtime' });
+  assert.deepEqual(disabled.choices.map((choice) => choice.value), ['keep']);
+  assert.equal(disabled.recommended, 'keep');
+  assert.match(disabled.recommended_outcome, /Keep the current setting.*supported effective helper controls/i);
+  assert.doesNotMatch(disabled.recommended_outcome, /One helper at most/i);
+
+  const migration = helperSpec('MultiAgentV2', { status: 'migration-required', ownership: 'toolkit-managed-v1-legacy', helper_count: 1, detail: 'pending' });
+  assert.deepEqual(migration.choices.map((choice) => choice.value), ['keep', 'migrate']);
+  assert.deepEqual(migration.choices.map((choice) => choice.label), ['Keep current - recommended', 'Update the existing Toolkit helper setting']);
+
+  const removable = helperSpec('MultiAgentV2', { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 1, detail: 'configured' });
+  assert.equal(removable.choices.find((choice) => choice.value === 'remove').label, 'Remove the Toolkit helper limit');
+  assert.equal(removable.choices.some((choice) => choice.value === 'migrate'), false);
 });
 
 test('missing wizard output retries the complete bank and never emits a shortcut alone', () => {
@@ -139,16 +198,16 @@ test('missing wizard output retries the complete bank and never emits a shortcut
   assert.throws(() => core.emitCompleteQuestionBank(specs, { write() { return false; } }), /no approval prompt or write is allowed/i);
 });
 
-test('--yes-recommended applies the visibly recommended one-helper Codex outcome', () => {
+test('--yes-recommended applies the visibly recommended root-only Codex outcome', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*One helper at most - recommended/);
+  assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*Root agent only - recommended/);
   assert.match(result.stdout, /Codex helper-agent runtime: MultiAgentV2/);
   assert.match(result.stdout, /Helper-capacity outcome this run: configured/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
-  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 2/);
+  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
   assert.ok(backupFiles(root).length > 0);
 });
 

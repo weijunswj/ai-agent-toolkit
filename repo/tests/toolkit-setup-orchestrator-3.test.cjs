@@ -29,10 +29,11 @@ test('Claude setup verifies only Claude metadata and never mutates Codex config'
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--claude-plugin-behavior', 'instructions', '--skip-update-report-open'
+    '--yes-recommended', '--claude-topology', 'root-only', '--claude-agent-capacity', 'root-only', '--claude-plugin-behavior', 'instructions', '--skip-update-report-open'
   ], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Helper-capacity detail: Host-level delegation enforcement is unsupported/);
+  assert.match(result.stdout, /Selected topology: root-only/);
+  assert.match(result.stdout, /Capacity mode: root-only/);
   assert.equal(fs.existsSync(codexConfig(root)), false);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
@@ -44,7 +45,7 @@ test('Claude setup rejects extra non-empty piped input before every setup write'
     '--execute', '--host', 'claude-code', '--repo-root', validRepo.setupRepo, '--repo-remote', validRepo.origin,
   ], {
     env: isolatedHomeEnv(validRoot),
-    input: ['keep', 'keep', 'keep', 'instructions', '   ', ''].join('\n'),
+    input: ['keep', 'keep', 'keep', 'root-only', 'root-only', 'instructions', '   ', ''].join('\n'),
   });
   assert.equal(valid.status, 0, valid.stderr || valid.stdout);
 
@@ -55,7 +56,7 @@ test('Claude setup rejects extra non-empty piped input before every setup write'
     '--execute', '--host', 'claude-code', '--repo-root', rejectedRepo.setupRepo, '--repo-remote', rejectedRepo.origin,
   ], {
     env: isolatedHomeEnv(rejectedRoot),
-    input: ['keep', 'keep', 'keep', 'instructions', 'unexpected'].join('\n'),
+    input: ['keep', 'keep', 'keep', 'root-only', 'root-only', 'instructions', 'unexpected'].join('\n'),
   });
   assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
   assert.match(rejected.stderr, /Setup question bank received unexpected extra non-empty input\./);
@@ -99,9 +100,9 @@ test('setup docs require explicit V2 opt-in and honest enforcement disclosure', 
     assert.match(text, /root agent alone|root-agent work|handled by the root agent alone|routine setup on the root agent/i, relPath);
     assert.match(text, /must not spawn subagents|do not spawn subagents/i, relPath);
     assert.match(text, /MultiAgentV2|multi_agent_v2/i, relPath);
-    assert.match(text, /one helper|helper capacity/i, relPath);
+    assert.match(text, /one[- ]helper|helper capacity/i, relPath);
     assert.match(text, /root counts|include(?:s|ing)? the root|root-inclusive/i, relPath);
-    assert.match(text, /policy-only|no native hard block/i, relPath);
+    assert.match(text, /policy-only|no native hard block|no invented host-level enforcement|cannot .*strict enforcement|unsupported .*enforcement/i, relPath);
     assert.match(text, /Codex Security[\s\S]{0,400}(never raise|never raises|not raised automatically|no documented)/i, relPath);
     assert.doesNotMatch(text, /compatible with Codex Security|Codex Security compatible/i, relPath);
   }
@@ -111,16 +112,18 @@ test('setup docs require explicit V2 opt-in and honest enforcement disclosure', 
   assert.match(bridge, /managed checkout is only its refresh source/i);
 });
 
-test('generated Codex and Claude instruction surfaces preserve root-first and helper no-recursion policy', () => {
+test('generated Codex and Claude instruction surfaces preserve productive root-first topology policy', () => {
   const agents = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   for (const pattern of [
-    /Complete ordinary work with the root agent alone/,
-    /Generic parallelism, a second opinion.*are not sufficient reasons/,
-    /prefer one direct specialist/,
-    /complete only its assigned bounded scope/,
-    /must not spawn another agent/,
-    /return any need for more expertise to the root/,
+    /Ordinary work begins root-first/,
+    /active host profile is a topology ceiling/,
+    /Missing any fact prohibits launch/,
+    /Never delegate every substantive shard/,
+    /meaningful root-owned work starting immediately/,
+    /default to medium reasoning effort/,
+    /never use or inherit fast mode/,
+    /Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned/,
   ]) assert.match(agents, pattern);
   assert.match(claude, /@AGENTS\.md/);
   assert.match(claude, /Root `AGENTS\.md` is canonical/);

@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.5.2",
+  "version": "2.7.8",
   "version_policy": "semver",
-  "version_notes": "Closes setup pre-write, matching-config no-op, and explicit legacy-migration review gaps while preserving approval-bound Codex writes.",
+  "version_notes": "Binds the complete Claude native Agent/Task denial runtime, including the process-launch dependency, into activation proof schema 3; Codex remains root-only under the strict contract.",
   "outputs": [
     {
       "kind": "curated",
@@ -69,7 +69,7 @@
       "kind": "json",
       "source": "_main/claude-plugin/hooks/hooks.json",
       "output": ".claude-plugin/hooks/hooks.json",
-      "notes": "Claude Code native plugin hook config generated from first-party module source; hook only calls the shared updater.",
+      "notes": "Claude Code native plugin hooks generated from first-party module source; SessionStart calls the shared updater and PreToolUse blocks native Agent bypass under strict Toolkit profiles.",
       "fidelity": "generated_metadata"
     },
     {

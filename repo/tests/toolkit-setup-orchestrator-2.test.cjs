@@ -8,7 +8,7 @@ const {
 } = require('./toolkit-setup-test-support.cjs');
 const delegation = require('../scripts/codex-delegation-config.cjs');
 
-test('empty consolidated delegation answer selects the visible one-helper recommendation', () => {
+test('empty consolidated delegation answer selects the visible root-only recommendation', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin], {
@@ -17,9 +17,9 @@ test('empty consolidated delegation answer selects the visible one-helper recomm
     timeout: 300000
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*\*\*Selected:\*\* One helper at most - recommended/);
+  assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*\*\*Selected:\*\* Root agent only - recommended/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
-  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 2/);
+  assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
   assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), /--disable-codex-plugin-auto-refresh --write/);
 });
 
@@ -54,7 +54,7 @@ test('migration-required defaults and yes-recommended keep the legacy block unch
       timeout: 300000,
     });
     assert.equal(result.status, 0, `${mode}: ${result.stderr || result.stdout}`);
-    assert.match(result.stdout, /Migrate the existing Toolkit legacy setting/);
+    assert.match(result.stdout, /Update the existing Toolkit helper setting/);
     assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*\*\*Selected:\*\* Keep current/);
     assert.match(result.stdout, /Helper-capacity outcome this run: kept/);
     assert.match(result.stdout, /PR #237 legacy block migrated: no/);
@@ -98,7 +98,7 @@ test('legacy migration is a distinct explicit choice with a full visible preview
   fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
   const repeated = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--skip-codex-plugin-auto-refresh',
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'one-helper',
   ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog }, timeout: 300000 });
   assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
   assert.match(repeated.stdout, /Helper-capacity outcome this run: already configured/);
@@ -106,6 +106,45 @@ test('legacy migration is a distinct explicit choice with a full visible preview
   assert.deepEqual(fs.readFileSync(configPath), configuredBytes);
   assert.equal(fs.readFileSync(editorLog, 'utf8').trim(), 'config/batchWrite');
   assert.equal(backupFiles(root).length, backupCount);
+});
+
+test('visible Toolkit limit removal requires one exact preview approval and remains transactional', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const common = [
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh',
+  ];
+  const configured = run(common, { env: isolatedHomeEnv(root), timeout: 300000 });
+  assert.equal(configured.status, 0, configured.stderr || configured.stdout);
+  const configPath = codexConfig(root);
+  const before = fs.readFileSync(configPath);
+  const backupsBefore = new Set(backupFiles(root));
+  fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
+
+  const paused = run([...common, '--codex-helper-capacity', 'remove'], {
+    env: isolatedHomeEnv(root), timeout: 300000,
+  });
+  assert.equal(paused.status, 23, paused.stderr || paused.stdout);
+  assert.match(paused.stdout, /# Codex helper-limit removal preview/);
+  assert.match(paused.stdout, /After semantics:[\s\S]*higher host default/);
+  assert.match(paused.stdout, /Exact affected keys:[\s\S]*Planned exact backup metadata:[\s\S]*Exact restore command/);
+  assert.match(paused.stderr, /answer `apply`/);
+  assert.deepEqual(fs.readFileSync(configPath), before);
+  assert.deepEqual(new Set(backupFiles(root)), backupsBefore);
+
+  const removed = run([
+    ...common,
+    '--codex-helper-capacity', 'remove',
+    '--approve-codex-config-proposal',
+  ], { env: isolatedHomeEnv(root), timeout: 300000 });
+  assert.equal(removed.status, 0, removed.stderr || removed.stdout);
+  assert.match(removed.stdout, /Helper-capacity outcome this run: removed/);
+  assert.doesNotMatch(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT|max_concurrent_threads_per_session/);
+  const newBackupEntries = backupFiles(root).filter((entry) => !backupsBefore.has(entry));
+  assert.equal(newBackupEntries.length, 3);
+  assert.equal(newBackupEntries.filter((entry) => entry.endsWith('config.toml.original')).length, 1);
+  assert.equal(newBackupEntries.filter((entry) => entry.endsWith('restore.json')).length, 1);
 });
 
 test('ordinary capacity choices cannot silently migrate a pending legacy block', () => {
@@ -175,14 +214,14 @@ test('already matching user-owned V1 and V2 configs complete without apply, edit
     {
       name: 'V2 empty input',
       runtime: 'v2',
-      text: ['[features.multi_agent_v2]', 'enabled = true', 'max_concurrent_threads_per_session = 2', `root_agent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_ROOT_GUIDANCE)}`, `subagent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_HELPER_GUIDANCE)}`, ''].join('\n'),
+      text: ['[features.multi_agent_v2]', 'enabled = true', 'max_concurrent_threads_per_session = 1', `root_agent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_ROOT_GUIDANCE)}`, `subagent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_HELPER_GUIDANCE)}`, ''].join('\n'),
       args: [],
       input: ['keep', 'keep', 'keep', ''].join('\n'),
     },
     {
       name: 'V1 yes-recommended',
       runtime: 'v1',
-      text: '[agents]\nmax_threads = 1\nmax_depth = 1\n',
+      text: '[agents]\nmax_threads = 0\nmax_depth = 1\n',
       args: ['--yes-recommended'],
     },
   ];
