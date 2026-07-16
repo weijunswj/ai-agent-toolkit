@@ -348,6 +348,83 @@ test('Windows SessionStart preparation installs strict launcher metadata without
   assert.deepEqual(setup.verifyInstalledCacheFreshness(codexCache, repoRoot), []);
 });
 
+test('Windows SessionStart publishes verified runtime metadata before hook activation and reruns as a no-op', () => {
+  const cache = path.join(tmpRoot(), 'cache with spaces & metacharacters [safe]');
+  copyPackageFingerprint(repoRoot, cache);
+  const hooksPath = path.join(cache, '.codex-plugin', 'hooks', 'hooks.json');
+  const runtimePath = path.join(cache, ...setup.SESSION_START_RUNTIME_REL_PATH.split('/'));
+  const writes = [];
+  const prepared = setup.prepareInstalledSessionStart(cache, {
+    platform: 'win32',
+    nodePath: process.execPath,
+    powershellPath: process.execPath,
+    writeFileAtomically(filePath, bytes) {
+      writes.push(filePath);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, bytes);
+    },
+  });
+  assert.deepEqual(writes, [runtimePath, hooksPath]);
+  assert.deepEqual(prepared, { changed: true, hooksChanged: true, runtimeChanged: true });
+  assert.deepEqual(setup.verifySessionStartRuntime(cache, { platform: 'win32', nodePath: process.execPath }), []);
+  assert.deepEqual(setup.verifySessionStartHook(hooksPath, { windows: true, powershellPath: process.execPath }), []);
+
+  const repeated = setup.prepareInstalledSessionStart(cache, {
+    platform: 'win32',
+    nodePath: process.execPath,
+    powershellPath: process.execPath,
+    writeFileAtomically() { assert.fail('a current SessionStart pair must not be rewritten'); },
+  });
+  assert.deepEqual(repeated, { changed: false, hooksChanged: false, runtimeChanged: false });
+});
+
+test('Windows SessionStart publication failures preserve one safe hook/runtime state', () => {
+  for (const failure of ['runtime', 'hook']) {
+    const cache = path.join(tmpRoot(), `cache-${failure}`);
+    copyPackageFingerprint(repoRoot, cache);
+    const hooksPath = path.join(cache, '.codex-plugin', 'hooks', 'hooks.json');
+    const runtimePath = path.join(cache, ...setup.SESSION_START_RUNTIME_REL_PATH.split('/'));
+    const previousHooks = fs.readFileSync(hooksPath);
+    assert.throws(() => setup.prepareInstalledSessionStart(cache, {
+      platform: 'win32',
+      nodePath: process.execPath,
+      powershellPath: process.execPath,
+      writeFileAtomically(filePath, bytes) {
+        if (failure === 'runtime' && filePath === runtimePath) throw new Error('injected runtime publication failure');
+        if (failure === 'hook' && filePath === hooksPath) throw new Error('injected hook publication failure');
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, bytes);
+      },
+    }), new RegExp(`injected ${failure} publication failure`));
+    assert.equal(fs.readFileSync(hooksPath).equals(previousHooks), true, `${failure}: prior source hook remains active`);
+    if (failure === 'runtime') {
+      assert.equal(fs.existsSync(runtimePath), false);
+    } else {
+      assert.deepEqual(setup.verifySessionStartRuntime(cache, { platform: 'win32', nodePath: process.execPath }), []);
+    }
+  }
+});
+
+test('stale Windows SessionStart runtime metadata is repaired and verified before hook activation', () => {
+  const cache = path.join(tmpRoot(), 'stale-runtime-cache');
+  copyPackageFingerprint(repoRoot, cache);
+  const hooksPath = path.join(cache, '.codex-plugin', 'hooks', 'hooks.json');
+  const runtimePath = path.join(cache, ...setup.SESSION_START_RUNTIME_REL_PATH.split('/'));
+  writeJson(runtimePath, { schema: 1, node_path: path.join(cache, 'missing-node.exe') });
+  const writes = [];
+  setup.prepareInstalledSessionStart(cache, {
+    platform: 'win32',
+    nodePath: process.execPath,
+    powershellPath: process.execPath,
+    writeFileAtomically(filePath, bytes) {
+      writes.push(filePath);
+      fs.writeFileSync(filePath, bytes);
+    },
+  });
+  assert.deepEqual(writes, [runtimePath, hooksPath]);
+  assert.deepEqual(setup.verifySessionStartRuntime(cache, { platform: 'win32', nodePath: process.execPath }), []);
+});
+
 test('Windows hooks freshness rejects every non-command cache difference after launcher normalization', { skip: process.platform !== 'win32' }, () => {
   const root = tmpRoot();
   const codexCache = path.join(root, 'codex-cache');

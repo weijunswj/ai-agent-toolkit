@@ -163,9 +163,25 @@ test('stale dead reservations recover but live ownership is preserved', () => {
 test('direct child defaults medium, disables fast, and blocks nested Agent and Task tools', () => {
   const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
   assert.deepEqual(invocation.raw_args.slice(0, 8), ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task']);
+  assert.equal(invocation.raw_args.filter((arg) => arg === '--no-session-persistence').length, 1);
+  assert.equal(invocation.raw_args.at(-1), '--no-session-persistence');
   assert.equal(invocation.env.CLAUDE_CODE_DISABLE_FAST_MODE, '1');
   assert.equal(invocation.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, '1');
   assert.throws(() => control.validateLaunchSpec(spec({ depth: 2 })), /blocks nested/i);
+});
+
+test('standard child invocation inherits the current process environment without serializing it', () => {
+  const previous = process.env.TOOLKIT_STANDARD_ENV_MARKER;
+  process.env.TOOLKIT_STANDARD_ENV_MARKER = 'standard-process-environment';
+  try {
+    const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
+    assert.equal(invocation.env.TOOLKIT_STANDARD_ENV_MARKER, 'standard-process-environment');
+    assert.equal(invocation.raw_args.includes('standard-process-environment'), false);
+    assert.equal(invocation.stdin.includes('standard-process-environment'), false);
+  } finally {
+    if (previous === undefined) delete process.env.TOOLKIT_STANDARD_ENV_MARKER;
+    else process.env.TOOLKIT_STANDARD_ENV_MARKER = previous;
+  }
 });
 
 test('fast roots cannot propagate fast mode and unverifiable modes fail closed', () => {

@@ -9,7 +9,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 
 function current(supported, profile = {}) {
-  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.8', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.9', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
@@ -103,10 +103,30 @@ test('broader-native remains distinct from root-only Toolkit capacity across fla
   for (const argv of [
     ['--plan', '--host', 'claude-code', '--claude-topology', 'broader-native', '--claude-agent-capacity', 'root-only'],
     ['--plan', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'keep'],
+    ['--plan', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'root-only'],
+    ['--plan', '--host', 'claude-code', '--claude-topology=keep', '--claude-agent-capacity=root-only'],
   ]) {
     const resolved = core.resolveClaudeTopologyCapacity(core.parseArgs(argv), state);
     assert.deepEqual(resolved, { topology: 'broader-native', capacity_mode: 'root-only', manual_maximum: 0 });
   }
+
+  const interactive = core.parseArgs(['--execute', '--host', 'claude-code']);
+  interactive.setupChoices.claudeTopology = 'keep';
+  interactive.setupChoices.claudeAgentCapacity = 'root-only';
+  const specs = core.setupQuestionSpecs(interactive, state);
+  assert.equal(specs.find((row) => row.key === 'claudeTopology').selected, 'broader-native');
+  assert.equal(core.resolveClaudeTopologyCapacity(interactive, state).topology, 'broader-native');
+
+  const planned = core.plannedQuestionBank(core.parseArgs([
+    '--plan', '--json', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'root-only',
+  ]), state);
+  assert.equal(planned.args.setupChoices.claudeTopology, 'broader-native');
+  assert.match(JSON.stringify(planned), /broader-native/);
+
+  const unsupported = current(false, { topology: 'broader-native', capacity_mode: 'root-only', supported: false, status: 'unsupported-root-only' });
+  assert.deepEqual(core.resolveClaudeTopologyCapacity(core.parseArgs([
+    '--plan', '--host', 'claude-code', '--claude-topology', 'keep', '--claude-agent-capacity', 'root-only',
+  ]), unsupported), { topology: 'root-only', capacity_mode: 'root-only', manual_maximum: 0 });
 });
 
 test('resource-counter loss removes direct automatic and resolves recommended setup to root-only', () => {

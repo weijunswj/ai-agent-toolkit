@@ -67,3 +67,49 @@ test('kept strict profile is invalidated after current enforcement capability di
   assert.equal(read.supported, false);
   assert.equal(read.topology, control.TOPOLOGIES.ROOT_ONLY);
 });
+
+test('kept broader-native survives root-only capacity across flag and piped execution', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const fakeClaude = path.join(root, 'fake-claude.cjs');
+  writeFile(fakeClaude, [
+    "'use strict';",
+    "if (process.argv.includes('--version')) { console.log('2.1.198 (fake)'); process.exit(0); }",
+    "if (process.argv.includes('--print')) { console.log('{}'); process.exit(0); }",
+    'process.exit(1);',
+    '',
+  ].join('\n'));
+  const env = isolatedHomeEnv(root);
+  const profileRoot = path.join(root, '.ai-agent-toolkit', 'agent-control');
+  control.configureProfile('claude-code', {
+    topology: control.TOPOLOGIES.BROADER_NATIVE,
+    capacity_mode: control.CAPACITY_MODES.ROOT_ONLY,
+  }, { root: profileRoot });
+
+  const flagged = run([
+    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--claude-cli', fakeClaude, '--claude-topology', 'keep', '--claude-agent-capacity', 'root-only',
+    '--claude-plugin-behavior', 'instructions', '--yes-recommended',
+  ], { env, timeout: 300000 });
+  assert.equal(flagged.status, 0, flagged.stderr || flagged.stdout);
+  assert.match(flagged.stdout, /Selected topology: broader-native/);
+  assert.equal(control.readProfile('claude-code', { root: profileRoot }).topology, control.TOPOLOGIES.BROADER_NATIVE);
+  for (const logName of ['BRIDGE_ARGS.log', 'CLAUDE_PLUGIN_SETUP.log']) {
+    const logPath = path.join(setupRepo, logName);
+    if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
+  }
+
+  const piped = run([
+    '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--claude-cli', fakeClaude,
+  ], {
+    env,
+    timeout: 300000,
+    input: ['keep', 'keep', 'keep', 'keep', 'root-only', 'instructions'].join('\n'),
+  });
+  assert.equal(piped.status, 0, piped.stderr || piped.stdout);
+  assert.match(piped.stdout, /Selected topology: broader-native/);
+  const preserved = control.readProfile('claude-code', { root: profileRoot });
+  assert.equal(preserved.topology, control.TOPOLOGIES.BROADER_NATIVE);
+  assert.equal(preserved.capacity_mode, control.CAPACITY_MODES.ROOT_ONLY);
+});
