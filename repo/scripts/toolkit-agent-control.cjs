@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.0';
+const CONTROL_VERSION = '2.7.1';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -403,7 +403,7 @@ function claudeInvocation(spec, options = {}) {
   const args = ['--print', '--output-format', 'json', '--effort', checked.effort, '--disallowedTools', 'Agent', '--permission-mode', 'default'];
   const env = { ...process.env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CHILD: '1' };
   const parts = processLaunch.claudeSpawnParts(executable, args);
-  return { executable: parts.command, args: parts.args, shell: parts.shell, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
+  return { executable: parts.command, args: parts.args, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
 }
 
 function launch(specInput, options = {}) {
@@ -461,7 +461,7 @@ async function supervise(args) {
     code = await new Promise((resolve) => {
       let settled = false;
       const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
-      const child = spawn(invocation.executable, invocation.args, { shell: invocation.shell, windowsVerbatimArguments: invocation.windowsVerbatimArguments, env: invocation.env, windowsHide: true, stdio: ['pipe', 'inherit', 'inherit'] });
+      const child = spawn(invocation.executable, invocation.args, { windowsVerbatimArguments: invocation.windowsVerbatimArguments, env: invocation.env, windowsHide: true, stdio: ['pipe', 'inherit', 'inherit'] });
       child.on('error', () => finish(1));
       child.on('exit', (value) => finish(Number.isInteger(value) ? value : 1));
       child.stdin.on('error', () => { child.kill(); finish(1); });

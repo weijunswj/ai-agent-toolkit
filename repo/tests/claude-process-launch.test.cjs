@@ -11,7 +11,6 @@ const launch = require('../scripts/claude-process-launch.cjs');
 function run(parts, options = {}) {
   return spawnSync(parts.command, parts.args, {
     ...options,
-    shell: parts.shell,
     windowsVerbatimArguments: parts.windowsVerbatimArguments,
     encoding: 'utf8',
     windowsHide: true,

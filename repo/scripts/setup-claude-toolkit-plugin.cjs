@@ -216,7 +216,6 @@ function spawnClaude(command, args, options = {}) {
   const parts = claudeSpawnParts(command, args);
   return spawnSync(parts.command, parts.args, {
     ...options,
-    shell: parts.shell,
     windowsVerbatimArguments: parts.windowsVerbatimArguments,
     windowsHide: true
   });
@@ -351,7 +350,6 @@ function spawnClaudeProcess(command, args) {
   // inherited or piped handle must not be able to keep this parent waiting
   // on a child that has already finished its real work.
   return spawn(parts.command, parts.args, {
-    shell: parts.shell,
     windowsVerbatimArguments: parts.windowsVerbatimArguments,
     stdio: 'ignore',
     windowsHide: true
