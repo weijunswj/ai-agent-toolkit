@@ -267,6 +267,10 @@ Starting reviewed head: `27d4ff25ca37be023e6fcc9ab5f8065cd57358aa`.
 
 Initial focused evidence: Claude process launch passed 11 with 7 platform/capability skips; Claude plugin setup passed 35 with 1 symlink-capability skip; controller/proof/admission passed 37 with 3 platform/capability skips; detached lifecycle passed 1/1; setup profile execution passed 2/2; setup topology passed 15/15. Exact-head CI and surrounding validation remain required before thread resolution.
 
+Implementation commit `536eb3d908cd40a42c56ac394c4ac1485654e11e` passed the combined focused suites with 101 passes and 11 platform/capability skips. Codex configuration, delegation, SessionStart, plugin setup, and Windows alias coverage passed 96 tests with 1 expected POSIX-only skip. Setup orchestration passed 41/41. Project sync, instruction sync, repo-doc sync, source-lock, published-surface, fallback-risk, portability, skill package, pack package, and `git diff --check` passed.
+
+The full Toolkit Local Bridge run reported 32 passing tests before the known Windows post-summary handle retained the process through the 15-minute bound; no assertion failure was reported and no owned orphan remained. The complete validator test process emitted no result before the 15-minute bound and left no owned orphan. Direct validation in the primary worktree remained contaminated only by the protected ignored `.agent-toolkit-backups` directory. Without touching that material, a clean tracked-file snapshot of `536eb3d908cd40a42c56ac394c4ac1485654e11e` passed direct Toolkit validation, project freshness, skill packaging, pack packaging, and `git diff --check`. CI remains the full exact-head read-only gate.
+
 ## Release Gates
 
 - The sole current exact-head finding is repaired locally by activation-proof schema 3 and `process_launch_sha256`. It remains subject to surrounding validation, exact-head CI/CodeQL, evidence reply, and thread resolution.
