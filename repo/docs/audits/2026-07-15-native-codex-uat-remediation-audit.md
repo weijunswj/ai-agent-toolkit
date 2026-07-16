@@ -211,6 +211,8 @@ Anthropic documents that the native macOS/Linux installer manages `~/.local/bin/
 
 Official behavior source: https://code.claude.com/docs/en/setup#auto-updates
 
+Local amendment evidence: focused Claude process/plugin/controller/lifecycle tests passed 63/67 with 4 symlink-specific skips because the Windows host either does not support the POSIX assertion or denied symlink creation; setup/profile/orchestration passed 53/53; Codex configuration/plugin/SessionStart passed 94/95 with one expected POSIX-only skip; Toolkit Local Bridge passed 133/133; generated/project/doc/source-lock/published-surface/fallback-risk checks and skill/pack packaging passed. A clean detached worktree at implementation commit `ceab4ad076f06bca29e4ffcfb415d54929a0dc06` passed Toolkit validation, generated freshness, skill/pack packaging, `git diff --check`, and all 138 runnable validator tests with 2 Windows symlink-capability skips. Exact-head Linux CI owns execution of the official-style, valid, broken, cyclic, directory, non-executable, and no-residue symlink cases.
+
 ## Release Gates
 
 - The eight current exact-head findings are repaired: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv. Current-head implementation evidence and regression results were posted in each original thread before resolution.
