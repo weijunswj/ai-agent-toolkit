@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -409,8 +410,12 @@ test('strict enforcement requires host-reported trust and active hooks bound to 
   assert.equal(summary.hook_active, true);
   assert.equal(summary.strict_enforcement_verified, true);
   assert.equal(summary.activation_proof.plugin_version, expectedVersion());
-  assert.equal(summary.activation_proof.schema, 2);
-  for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256', 'agent_hook_sha256']) assert.match(summary.activation_proof[key], /^[a-f0-9]{64}$/);
+  assert.equal(summary.activation_proof.schema, 3);
+  for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']) {
+    assert.match(summary.activation_proof[key], /^[a-f0-9]{64}$/);
+  }
+  const processLaunchBytes = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'claude-process-launch.cjs'));
+  assert.equal(summary.activation_proof.process_launch_sha256, crypto.createHash('sha256').update(processLaunchBytes).digest('hex'));
 });
 
 test('plugin setup cannot manufacture native trust or hook activation', () => {

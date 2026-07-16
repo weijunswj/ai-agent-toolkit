@@ -209,24 +209,26 @@ function installedActivationProof(installed, expectedVersion) {
   const cachePath = path.resolve(String(installed?.installPath || ''));
   const hookPath = path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json');
   const controllerPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-agent-control.cjs');
+  const processLaunchPath = path.join(cachePath, 'repo', 'scripts', 'claude-process-launch.cjs');
   const agentHookPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
-  for (const filePath of [hookPath, controllerPath, agentHookPath]) {
+  for (const filePath of [hookPath, controllerPath, processLaunchPath, agentHookPath]) {
     const stat = fs.lstatSync(filePath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Installed Claude enforcement path is not a regular file.');
   }
   return {
-    schema: 2,
+    schema: 3,
     source: 'claude-plugin-list',
     plugin_version: expectedVersion,
     cache_identity: crypto.createHash('sha256').update(cachePath).digest('hex'),
     hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(hookPath)).digest('hex'),
     controller_sha256: crypto.createHash('sha256').update(fs.readFileSync(controllerPath)).digest('hex'),
+    process_launch_sha256: crypto.createHash('sha256').update(fs.readFileSync(processLaunchPath)).digest('hex'),
     agent_hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(agentHookPath)).digest('hex'),
   };
 }
 
 function sameActivationProof(left, right) {
-  return ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'agent_hook_sha256']
+  return ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']
     .every((key) => left?.[key] === right?.[key]);
 }
 

@@ -255,9 +255,22 @@ Local amendment evidence: Claude process/plugin tests passed 46 with 8 Windows/P
 
 The full Toolkit Local Bridge run reported 32 passing tests before the known Windows post-summary handle retained the process through the 15-minute bound; no assertion failure was reported and no owned orphan remained. The primary-worktree validator run and eight positive validator fixture cases were contaminated only by the protected ignored `.agent-toolkit-backups` directory and its intentionally incomplete copied links. That material remains untouched. A clean detached worktree at implementation commit `86dc3787438a5f4edbbe970e4b360c6f114d56a8` passed direct Toolkit validation, generated-project freshness, skill packaging, pack packaging, `git diff --check`, and all 138 runnable validator tests with 2 Windows symlink-capability skips. Exact-head CI remains required before thread resolution; native UAT remains a separate post-merge gate.
 
+## Sole Activation-Proof Dependency Amendment
+
+Starting reviewed head: `27d4ff25ca37be023e6fcc9ab5f8065cd57358aa`.
+
+- Activation-proof schema 3 binds the complete native Agent/Task denial runtime. Persisted proof fields are `schema`, `source`, `plugin_version`, `cache_identity`, `hook_sha256`, `controller_sha256`, `process_launch_sha256`, and `agent_hook_sha256`.
+- Proof construction and current verification recompute `process_launch_sha256` from the exact installed `repo/scripts/claude-process-launch.cjs` selected by `cache_identity`. Hooks, controller, process launcher, and Agent hook must each be a non-symlink regular file.
+- Schema-2, missing-field, malformed-field, missing-file, changed-file, replacement-cache, directory, and symlink states fail closed. Refusal occurs before lock acquisition, admission state, queue/reservation state, jobs, output/error files, or supervisor creation.
+- Exact current hooks, controller, process launcher, and Agent hook admit. A correct schema-3 profile persists and revalidates through current native plugin state.
+- Toolkit packaged surfaces align at `2.7.8`. SessionStart bridge completeness and every previously accepted executable, command-precedence, cache, resource, lock, state, prompt, Agent/Task, child-reentry, topology, and privacy repair remain unchanged.
+
+Initial focused evidence: Claude process launch passed 11 with 7 platform/capability skips; Claude plugin setup passed 35 with 1 symlink-capability skip; controller/proof/admission passed 37 with 3 platform/capability skips; detached lifecycle passed 1/1; setup profile execution passed 2/2; setup topology passed 15/15. Exact-head CI and surrounding validation remain required before thread resolution.
+
 ## Release Gates
 
-- The four current exact-head findings are repaired locally: trusted POSIX launcher execution, unified Claude command resolution, complete Codex setup dependency fingerprints, and Claude SessionStart bridge cache verification. They remain subject to surrounding validation, exact-head CI/CodeQL, evidence replies, and thread resolution.
+- The sole current exact-head finding is repaired locally by activation-proof schema 3 and `process_launch_sha256`. It remains subject to surrounding validation, exact-head CI/CodeQL, evidence reply, and thread resolution.
+- The prior four exact-head findings remain repaired: trusted POSIX launcher execution, unified Claude command resolution, complete Codex setup dependency fingerprints, and Claude SessionStart bridge cache verification.
 - The eight earlier exact-head findings remain repaired: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv.
 - Implementation-head CI initially found one stale validator-version expectation on `8fa84a84bf9d7a39c4f865813617d9d7dc3ea7ce`. The one-line repair in `6207ba997d9ca1cb111e87a3113cd9be5eff53e4` passed both validation workflows, generated-surface sync, both package checks, the CodeQL workflow gate, and all material CodeQL analyses. Any subsequent closure-note head remains subject to the same exact-head gate.
 - PR remains unmerged.

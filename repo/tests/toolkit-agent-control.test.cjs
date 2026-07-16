@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -26,8 +27,8 @@ function spec(overrides = {}) {
   };
 }
 function activationProof(overrides = {}) {
-  return { schema: 2, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION,
-    cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), agent_hook_sha256: 'd'.repeat(64), ...overrides };
+  return { schema: 3, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION,
+    cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64), ...overrides };
 }
 let defaultVerifier;
 function configured(topology, capacity_mode, overrides = {}) {
@@ -49,7 +50,7 @@ function verifierFixture() {
   const work = root();
   const cache = path.join(work, 'cache');
   const sourceRoot = path.resolve(__dirname, '..', '..');
-  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs']) {
+  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs']) {
     const target = path.join(cache, ...rel.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(sourceRoot, ...rel.split('/')), target);
@@ -67,6 +68,14 @@ function enforcementFixture() {
   const { work, proof } = fixture;
   control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO, { activation_proof: proof, claude_cli: fixture.cli }), { root: work });
   return fixture;
+}
+function assertNoAdmissionResidue(fixture, result, name) {
+  assert.equal(result.result, control.RESULTS.REFUSE, name);
+  assert.equal(Object.prototype.hasOwnProperty.call(result, 'supervisor_pid'), false, name);
+  assert.equal(fs.existsSync(control.statePath({ root: fixture.work })), false, name);
+  assert.equal(fs.existsSync(control.lockPath({ root: fixture.work })), false, name);
+  assert.equal(fs.existsSync(control.lockRecoveryPath({ root: fixture.work })), false, name);
+  assert.equal(fs.existsSync(path.join(fixture.work, 'jobs')), false, name);
 }
 defaultVerifier = verifierFixture();
 
@@ -278,10 +287,38 @@ test('strict profiles require exact native activation proof and direct profiles 
     topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO,
     enforcement_verified: true, activation_proof: activationProof(),
   }, { root: work }), /resource counters/i);
-  for (const bad of [null, activationProof({ plugin_version: 'old' }), activationProof({ cache_identity: 'bad' })]) {
+  for (const bad of [
+    null,
+    activationProof({ schema: 2 }),
+    activationProof({ plugin_version: 'old' }),
+    activationProof({ cache_identity: 'bad' }),
+    activationProof({ process_launch_sha256: '' }),
+    activationProof({ process_launch_sha256: 'malformed' }),
+  ]) {
     assert.equal(control.validActivationProof(bad), false);
   }
   assert.equal(control.validActivationProof(activationProof(), { cachePath: work, pluginVersion: control.CONTROL_VERSION }), false);
+});
+
+test('schema-2 strict profiles fail closed while a correct schema-3 proof persists and revalidates', () => {
+  const staleRoot = root();
+  const staleTarget = control.profilePath('claude-code', { root: staleRoot });
+  fs.mkdirSync(path.dirname(staleTarget), { recursive: true });
+  fs.writeFileSync(staleTarget, `${JSON.stringify({ ...profile(), activation_proof: activationProof({ schema: 2 }), updated_at: new Date().toISOString() }, null, 2)}\n`);
+  const stale = control.readProfile('claude-code', { root: staleRoot });
+  assert.equal(stale.supported, false);
+  assert.equal(stale.topology, control.TOPOLOGIES.ROOT_ONLY);
+  assert.throws(() => control.configureProfile('claude-code', configured(
+    control.TOPOLOGIES.CLAUDE_DIRECT,
+    control.CAPACITY_MODES.AUTO,
+    { activation_proof: activationProof({ schema: 2 }) },
+  ), { root: root() }), /trust and activation/i);
+
+  const fixture = enforcementFixture();
+  const persisted = control.readProfile('claude-code', { root: fixture.work });
+  assert.equal(persisted.activation_proof.schema, 3);
+  assert.match(persisted.activation_proof.process_launch_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(control.verifyCurrentClaudeEnforcement(persisted, { claudeCli: fixture.cli }), true);
 });
 
 test('resource capability rejects unsupported malformed and overflowed states', () => {
@@ -311,6 +348,13 @@ test('direct admission revalidates current Claude trust, hooks and installed ide
     ['inactive hooks', ({ entry }) => { entry.hooksActive = false; }],
     ['changed hook bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'), ' '); }],
     ['changed controller bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'toolkit-agent-control.cjs'), '\n'); }],
+    ['changed process-launch bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'claude-process-launch.cjs'), '\n'); }],
+    ['missing process-launch file', ({ cache }) => { fs.unlinkSync(path.join(cache, 'repo', 'scripts', 'claude-process-launch.cjs')); }],
+    ['non-file process-launch path', ({ cache }) => {
+      const target = path.join(cache, 'repo', 'scripts', 'claude-process-launch.cjs');
+      fs.unlinkSync(target);
+      fs.mkdirSync(target);
+    }],
     ['changed agent hook bytes', ({ cache }) => { fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs'), '\n'); }],
     ['missing agent hook', ({ cache }) => { fs.unlinkSync(path.join(cache, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs')); }],
     ['replayed proof for replaced cache', (fixture) => {
@@ -318,22 +362,49 @@ test('direct admission revalidates current Claude trust, hooks and installed ide
       fs.cpSync(fixture.cache, replacement, { recursive: true });
       fixture.entry.installPath = replacement;
     }],
+    ['replacement cache with changed process-launch bytes', (fixture) => {
+      const replacement = path.join(fixture.work, 'replacement-cache');
+      fs.cpSync(fixture.cache, replacement, { recursive: true });
+      fixture.entry.installPath = replacement;
+      const replacementProof = pluginSetup.installedActivationProof(fixture.entry, control.CONTROL_VERSION);
+      fs.appendFileSync(path.join(replacement, 'repo', 'scripts', 'claude-process-launch.cjs'), '\n');
+      control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.AUTO, {
+        activation_proof: replacementProof,
+        claude_cli: fixture.cli,
+      }), { root: fixture.work });
+    }],
   ];
   for (const [name, mutate] of cases) {
     const fixture = enforcementFixture();
     mutate(fixture);
     fs.writeFileSync(fixture.statePath, `${JSON.stringify(fixture.entry, null, 2)}\n`);
-    const result = control.admissionDecision(spec(), { root: fixture.work, claudeCli: fixture.cli, resourceState: resources() });
-    assert.equal(result.result, control.RESULTS.REFUSE, name);
+    const result = control.launch(spec(), { root: fixture.work, claudeCli: fixture.cli, resourceState: resources() });
     assert.match(result.reason, /current Claude plugin trust, hook activation, and installed enforcement identity/i, name);
-    assert.equal(fs.existsSync(control.statePath({ root: fixture.work })), false, name);
-    assert.equal(fs.existsSync(path.join(fixture.work, 'jobs')), false, name);
+    assertNoAdmissionResidue(fixture, result, name);
   }
 
   const current = enforcementFixture();
+  const currentProfile = control.readProfile('claude-code', { root: current.work });
+  const processBytes = fs.readFileSync(path.join(current.cache, 'repo', 'scripts', 'claude-process-launch.cjs'));
+  assert.equal(currentProfile.activation_proof.process_launch_sha256, crypto.createHash('sha256').update(processBytes).digest('hex'));
   const admitted = control.admissionDecision(spec(), { root: current.work, claudeCli: current.cli, resourceState: resources() });
   assert.equal(admitted.result, control.RESULTS.START);
   assert.equal(control.releaseReservation(admitted.reservation_id, { root: current.work }), true);
+});
+
+test('symlinked installed process-launch dependency refuses before admission residue', { skip: process.platform === 'win32' }, (t) => {
+  const fixture = enforcementFixture();
+  const processPath = path.join(fixture.cache, 'repo', 'scripts', 'claude-process-launch.cjs');
+  const replacement = path.join(fixture.work, 'replacement-process-launch.cjs');
+  fs.copyFileSync(processPath, replacement);
+  fs.unlinkSync(processPath);
+  try { fs.symlinkSync(replacement, processPath); }
+  catch (error) {
+    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
+    throw error;
+  }
+  const result = control.launch(spec(), { root: fixture.work, claudeCli: fixture.cli, resourceState: resources() });
+  assertNoAdmissionResidue(fixture, result, 'symlinked process-launch dependency');
 });
 
 test('symlinked installed agent hook refuses before admission state', { skip: process.platform === 'win32' }, (t) => {

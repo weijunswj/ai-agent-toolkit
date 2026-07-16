@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.7';
+const CONTROL_VERSION = '2.7.8';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -253,9 +253,10 @@ function rootOnlyProfile(host, status, reason) {
 }
 
 function validActivationProof(proof, expected = {}) {
-  const structurallyValid = Boolean(proof && proof.schema === 2 && proof.source === 'claude-plugin-list'
+  const structurallyValid = Boolean(proof && proof.schema === 3 && proof.source === 'claude-plugin-list'
     && proof.plugin_version === CONTROL_VERSION
-    && ['cache_identity', 'hook_sha256', 'controller_sha256', 'agent_hook_sha256'].every((key) => /^[a-f0-9]{64}$/.test(String(proof[key] || ''))));
+    && ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']
+      .every((key) => /^[a-f0-9]{64}$/.test(String(proof[key] || ''))));
   if (!structurallyValid) return false;
   if (expected.pluginVersion && proof.plugin_version !== expected.pluginVersion) return false;
   if (expected.cachePath) {
@@ -289,7 +290,7 @@ function verifyCurrentClaudeEnforcement(profile, options = {}) {
     claudeCommand: effectiveClaudeCommand(profile, options), env,
   });
   return Boolean(current?.verified === true && validActivationProof(current.activation_proof)
-    && ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'agent_hook_sha256']
+    && ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']
       .every((key) => current.activation_proof[key] === profile.activation_proof?.[key]));
 }
 
