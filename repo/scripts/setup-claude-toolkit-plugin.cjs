@@ -146,7 +146,7 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
     errors.push(...hookErrors.map((error) => `${slash(path.relative(repoRoot, hooksPath))}: ${error}`));
   }
 
-  for (const relPath of ['repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs']) {
+  for (const relPath of ['repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs']) {
     if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing Claude agent-control package file: ${relPath}`);
   }
 
@@ -169,6 +169,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/toolkit-agent-control.cjs', false],
     ['repo/scripts/claude-process-launch.cjs', false],
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
+    ['repo/scripts/toolkit-local-bridge.cjs', false],
   ];
   for (const [relPath, json] of pairs) {
     const source = path.join(repoRoot, ...relPath.split('/'));
@@ -231,7 +232,11 @@ function sameActivationProof(left, right) {
 
 function verifyCurrentInstalledEnforcement(expectedProof, options = {}) {
   try {
-    const requestedCommand = options.claudeCommand || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
+    const requestedCommand = processLaunch.resolveClaudeCommandInput({
+      explicit: options.claudeCommand,
+      persisted: options.persistedCommand,
+      env: Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env,
+    });
     const command = processLaunch.assertExecutableAvailable(requestedCommand, options);
     const versionResult = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs(), env: options.env });
     if (versionResult.status !== 0) throw new Error(commandOutput(versionResult) || 'Claude CLI version probe failed.');
@@ -269,7 +274,7 @@ function claudeSpawnParts(command, args, options = {}) {
 }
 
 function spawnClaude(command, args, options = {}) {
-  const parts = claudeSpawnParts(command, args);
+  const parts = claudeSpawnParts(command, args, options);
   // The executable is validated and argv remains separate; shell interpretation is never enabled.
   // lgtm[js/shell-command-injection-from-environment]
   return spawnSync(parts.command, parts.args, {
@@ -330,12 +335,8 @@ function probeTimeoutMs() {
   return boundedIntEnv('CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS', PROBE_TIMEOUT_DEFAULT_MS, 1, PROBE_TIMEOUT_MAX_MS);
 }
 
-// Full worst-case CLI resolution budget. resolveClaudeCommand may probe
-// every distinct candidate -- the explicit --claude-cli argument, the
-// CLAUDE_TOOLKIT_CLAUDE_CLI and CLAUDE_CLI_PATH overrides, and bare
-// `claude` -- and each probe may consume one full probe timeout. The count
-// comes from commandCandidates itself so deduplication semantics can never
-// drift from the resolver.
+// The canonical resolver selects exactly one effective command by precedence,
+// so a current override cannot silently fall through to a different CLI.
 function resolutionBudgetMs(explicitCommand = '') {
   return commandCandidates(explicitCommand).length * probeTimeoutMs();
 }
@@ -365,21 +366,21 @@ function writeBudgetMs(explicitCommand = '') {
     + 15000; // spawn/cleanup/JSON-report grace
 }
 
-function commandCandidates(explicitCommand) {
-  const candidates = [];
-  if (explicitCommand) candidates.push(explicitCommand);
-  if (process.env.CLAUDE_TOOLKIT_CLAUDE_CLI) candidates.push(process.env.CLAUDE_TOOLKIT_CLAUDE_CLI);
-  if (process.env.CLAUDE_CLI_PATH) candidates.push(process.env.CLAUDE_CLI_PATH);
-  candidates.push('claude');
-  return [...new Set(candidates.filter(Boolean))];
+function commandCandidates(explicitCommand, options = {}) {
+  return [processLaunch.resolveClaudeCommandInput({
+    explicit: explicitCommand,
+    persisted: options.persistedCommand,
+    env: Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env,
+  })];
 }
 
-function resolveClaudeCommand(explicitCommand) {
+function resolveClaudeCommand(explicitCommand, options = {}) {
   const failures = [];
-  for (const candidate of commandCandidates(explicitCommand)) {
+  for (const candidate of commandCandidates(explicitCommand, options)) {
     try {
-      const command = processLaunch.assertExecutableAvailable(candidate);
-      const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs() });
+      const env = Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env;
+      const command = processLaunch.assertExecutableAvailable(candidate, { env });
+      const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs(), env });
       if (result.status === 0) return { command, failures };
       failures.push(`${candidate}: ${commandOutput(result) || `exit ${result.status}`}`);
     } catch (error) {

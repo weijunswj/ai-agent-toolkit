@@ -152,7 +152,7 @@ test('stale dead reservations recover but live ownership is preserved', () => {
 });
 
 test('direct child defaults medium, disables fast, and blocks nested Agent and Task tools', () => {
-  const invocation = control.claudeInvocation(spec());
+  const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
   assert.deepEqual(invocation.raw_args.slice(0, 8), ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task']);
   assert.equal(invocation.env.CLAUDE_CODE_DISABLE_FAST_MODE, '1');
   assert.equal(invocation.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, '1');
@@ -162,7 +162,7 @@ test('direct child defaults medium, disables fast, and blocks nested Agent and T
 test('fast roots cannot propagate fast mode and unverifiable modes fail closed', () => {
   const old = process.env.CLAUDE_CODE_DISABLE_FAST_MODE;
   delete process.env.CLAUDE_CODE_DISABLE_FAST_MODE;
-  const invocation = control.claudeInvocation(spec());
+  const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
   assert.equal(invocation.env.CLAUDE_CODE_DISABLE_FAST_MODE, '1');
   if (old !== undefined) process.env.CLAUDE_CODE_DISABLE_FAST_MODE = old;
   assert.throws(() => control.validateLaunchSpec(spec({ effort: 'low' })), /medium/i);
@@ -300,7 +300,7 @@ test('oversized Unicode prompts refuse before admission or artifact creation', (
   assert.notEqual(result.status, 'launched');
   assert.equal(fs.existsSync(control.statePath({ root: work })), false);
   assert.equal(fs.existsSync(path.join(work, 'jobs')), false);
-  const exact = control.claudeInvocation(spec({ child_prompt: 'a'.repeat(control.MAX_PROMPT_BYTES) }));
+  const exact = control.claudeInvocation(spec({ child_prompt: 'a'.repeat(control.MAX_PROMPT_BYTES) }), { claudeCli: process.execPath });
   assert.equal(exact.stdin.length, control.MAX_PROMPT_BYTES);
 });
 
@@ -353,10 +353,15 @@ test('symlinked installed agent hook refuses before admission state', { skip: pr
   assert.equal(fs.existsSync(path.join(fixture.work, 'jobs')), false);
 });
 
-test('effective Claude command precedence is explicit, environment, persisted profile, then bare default', () => {
+test('effective Claude command precedence covers every current override before persisted profile and bare default', () => {
   const persisted = profile({ claude_cli: 'persisted-claude' });
-  assert.equal(control.effectiveClaudeCommand(persisted, { claudeCli: 'explicit-claude', env: { AI_AGENT_TOOLKIT_CLAUDE_CLI: 'environment-claude' } }), 'explicit-claude');
-  assert.equal(control.effectiveClaudeCommand(persisted, { env: { AI_AGENT_TOOLKIT_CLAUDE_CLI: 'environment-claude' } }), 'environment-claude');
+  const env = { AI_AGENT_TOOLKIT_CLAUDE_CLI: 'ai-environment-claude', CLAUDE_TOOLKIT_CLAUDE_CLI: 'toolkit-environment-claude', CLAUDE_CLI_PATH: 'legacy-environment-claude' };
+  assert.equal(control.effectiveClaudeCommand(persisted, { claudeCli: 'explicit-claude', env }), 'explicit-claude');
+  assert.equal(control.effectiveClaudeCommand(persisted, { env }), 'ai-environment-claude');
+  delete env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
+  assert.equal(control.effectiveClaudeCommand(persisted, { env }), 'toolkit-environment-claude');
+  delete env.CLAUDE_TOOLKIT_CLAUDE_CLI;
+  assert.equal(control.effectiveClaudeCommand(persisted, { env }), 'legacy-environment-claude');
   assert.equal(control.effectiveClaudeCommand(persisted, { env: {} }), 'persisted-claude');
   assert.equal(control.effectiveClaudeCommand({}, { env: {} }), 'claude');
 });

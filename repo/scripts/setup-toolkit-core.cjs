@@ -1011,7 +1011,10 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
       manual_maximum: resolved.manual_maximum,
       enforcement_verified: strict,
       activation_proof: nativeCache.activation_proof,
-      claude_cli: current.agentCapability?.claude_command || args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude',
+      claude_cli: current.agentCapability?.claude_command || processLaunch.resolveClaudeCommandInput({
+        explicit: args.claudeCli,
+        persisted: current.agentProfile?.claude_cli,
+      }),
       resource_counter_supported: resourceCapable,
       resource_counter_source: current.agentCapability?.resource_counter_source,
     });
@@ -1066,10 +1069,15 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
 }
 
 function inspectClaudeAgentCapability(args) {
-  const requestedCommand = args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
+  const env = Object.prototype.hasOwnProperty.call(args, 'env') ? args.env : process.env;
+  const requestedCommand = processLaunch.resolveClaudeCommandInput({
+    explicit: args.claudeCli,
+    persisted: args.persistedClaudeCli,
+    env,
+  });
   const helper = require('./setup-claude-toolkit-plugin.cjs');
   let command;
-  try { command = processLaunch.assertExecutableAvailable(requestedCommand); }
+  try { command = processLaunch.assertExecutableAvailable(requestedCommand, { env }); }
   catch (error) {
     const resourceCapability = agentControl.inspectResourceCapability();
     return {
@@ -1078,13 +1086,13 @@ function inspectClaudeAgentCapability(args) {
       version: '', direct_only: false, medium_effort: false, non_fast_environment_override: false,
     };
   }
-  const versionResult = helper.runClaudeCommand(command, ['--version'], { timeout: 10000 });
+  const versionResult = helper.runClaudeCommand(command, ['--version'], { timeout: 10000, env });
   const version = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`.trim();
   const probeArgs = ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence'];
   const probe = helper.runClaudeCommand(command, probeArgs, {
     timeout: 10000,
     input: '',
-    env: { ...process.env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1' },
+    env: { ...env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1' },
   });
   const probeOutput = `${probe.stdout || ''}\n${probe.stderr || ''}${probe.error ? `\n${probe.error.message}` : ''}`.trim();
   const unsupportedSyntax = /unknown (?:option|argument)|unrecognized (?:option|argument)|unexpected argument|invalid (?:option|argument).*--/i.test(probeOutput);
@@ -1128,14 +1136,15 @@ async function collectCurrentState(args) {
         setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
       })
     : null;
+  const agentProfile = args.host === 'claude-code' ? agentControl.readProfile('claude-code') : agentControl.readProfile('codex');
   return {
     audit,
     runtime,
     managed: inspectManagedCheckout(args, audit),
     delegation: delegationState,
     delegationMigrationPreview,
-    agentCapability: args.host === 'claude-code' ? inspectClaudeAgentCapability(args) : { supported: false, detector: 'not applicable' },
-    agentProfile: args.host === 'claude-code' ? agentControl.readProfile('claude-code') : agentControl.readProfile('codex'),
+    agentCapability: args.host === 'claude-code' ? inspectClaudeAgentCapability({ ...args, persistedClaudeCli: agentProfile.claude_cli }) : { supported: false, detector: 'not applicable' },
+    agentProfile,
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginState(args)
       : inspectCodexNativePluginState(args)
@@ -2072,20 +2081,18 @@ function setupClaudeArgs(args, mode) {
   return nodeScriptArgs('repo/scripts/setup-claude-toolkit-plugin.cjs', extra);
 }
 
-// Static fallbacks matching the helper's default worst-case budgets with the
-// maximum supported CLI candidate count (explicit --claude-cli, two env
-// overrides, bare `claude` = 4 candidates x 10s default probe), used only
-// when the sibling helper module cannot be loaded for derived budgets.
-const CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS = 175000;
-const CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS = 895000;
+// Static fallbacks match the helper's one precedence-selected CLI probe and
+// are used only when the sibling helper cannot be loaded for derived budgets.
+const CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS = 145000;
+const CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS = 865000;
 
 // Derive the outer spawnSync timeouts for the Claude native plugin helper
 // from the helper's own exported budgets so this orchestrator can never kill
 // the helper while it is still inside its own supported verification
 // deadlines. The budgets are computed with the exact explicit CLI argument
 // the child helper receives, in the same environment it inherits, so the
-// full CLI candidate-resolution sequence is accounted identically on both
-// sides. The helper bounds itself (per-candidate probes, per-command
+// selected CLI resolution is accounted identically on both sides. The
+// helper bounds itself (CLI probes, per-command
 // timeouts, mutation deadlines); these outer timeouts are only a backstop
 // against a truly hung helper.
 function claudeSetupBudgets(claudeCli = '') {

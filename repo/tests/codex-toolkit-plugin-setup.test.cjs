@@ -715,6 +715,23 @@ test('Codex Toolkit --write succeeds when plugin add installs then times out', (
   }
 });
 
+test('Codex cache fingerprints include every new installed setup dependency and reject missing or stale bytes', () => {
+  const dependencies = ['repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs'];
+  for (const relPath of dependencies) assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(relPath), true, relPath);
+  for (const relPath of dependencies) {
+    for (const mutation of ['missing', 'stale']) {
+      const codexHome = tmpRoot();
+      const cacheRoot = writeInstalledCache(codexHome);
+      const target = path.join(cacheRoot, ...relPath.split('/'));
+      if (mutation === 'missing') fs.unlinkSync(target);
+      else fs.appendFileSync(target, '\n// stale fixture\n');
+      const errors = setup.verifyInstalledCacheFreshness(cacheRoot, repoRoot).join('\n');
+      assert.match(errors, mutation === 'missing' ? /missing repo file/i : /stale for repo file/i, `${mutation}: ${relPath}`);
+      assert.equal(errors.includes(relPath), true, `${mutation}: ${relPath}`);
+    }
+  }
+});
+
 test('Codex Toolkit --write human output reports the changed hook with JSON-aligned pending review state', () => {
   const jsonHome = tmpRoot();
   const jsonResult = runSetupWrite(jsonHome, writeFakeHangingCodex(jsonHome));
@@ -737,7 +754,10 @@ test('Codex Toolkit --write human output reports the changed hook with JSON-alig
 
 test('Codex Toolkit --write refreshes same-version stale cache by removing before reinstall', () => {
   const codexHome = tmpRoot();
-  writeInstalledCache(codexHome, { staleBridgeScript: true });
+  const staleRoot = writeInstalledCache(codexHome, { staleBridgeScript: true });
+  fs.appendFileSync(path.join(staleRoot, 'repo', 'scripts', 'toolkit-agent-control.cjs'), '\n// stale controller\n');
+  const sentinel = path.join(codexHome, 'user-owned-sentinel.txt');
+  fs.writeFileSync(sentinel, 'unchanged\n');
   const fakeCodex = writeFakeHangingCodex(codexHome, { initialInstalled: true });
 
   const result = runSetupWrite(codexHome, fakeCodex);
@@ -748,6 +768,7 @@ test('Codex Toolkit --write refreshes same-version stale cache by removing befor
   const state = JSON.parse(fs.readFileSync(path.join(codexHome, 'state.json'), 'utf8'));
   assert.equal(state.removeCount, 1);
   assert.deepEqual(setup.verifyInstalledCacheFreshness(summary.cache_root, repoRoot), []);
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n');
 });
 
 test('Codex Toolkit --write waits for verification when plugin add installs after timeout window', () => {

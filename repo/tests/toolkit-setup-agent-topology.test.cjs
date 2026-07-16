@@ -9,7 +9,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 
 function current(supported, profile = {}) {
-  const proof = { schema: 2, source: 'claude-plugin-list', plugin_version: '2.7.6', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const proof = { schema: 2, source: 'claude-plugin-list', plugin_version: '2.7.7', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
@@ -176,6 +176,34 @@ test('bounded exact-argv probe succeeds even when help omits supported flags', (
   const probe = JSON.parse(fs.readFileSync(path.join(root, 'supported.json'), 'utf8'));
   assert.deepEqual(probe.args, ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence']);
   assert.equal(probe.stdin, '');
+});
+
+for (const variable of ['CLAUDE_TOOLKIT_CLAUDE_CLI', 'CLAUDE_CLI_PATH']) {
+  test(`setup capability uses the same ${variable} override as Claude plugin verification`, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-env-'));
+    const command = capabilityCli(root, 'supported');
+    const env = { PATH: '', [variable]: command };
+    const capability = core.inspectClaudeAgentCapability({ env });
+    assert.equal(capability.launch_supported, true);
+    assert.equal(capability.claude_command, command);
+  });
+}
+
+test('setup capability command precedence is explicit, AI env, helper env, legacy env, persisted, then bare', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-precedence-'));
+  const commands = Object.fromEntries(['explicit', 'ai', 'helper', 'legacy', 'persisted'].map((name) => [name, capabilityCli(root, `${name}-supported`)]));
+  const env = {
+    AI_AGENT_TOOLKIT_CLAUDE_CLI: commands.ai,
+    CLAUDE_TOOLKIT_CLAUDE_CLI: commands.helper,
+    CLAUDE_CLI_PATH: commands.legacy,
+  };
+  assert.equal(core.inspectClaudeAgentCapability({ claudeCli: commands.explicit, persistedClaudeCli: commands.persisted, env }).claude_command, commands.explicit);
+  delete env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
+  assert.equal(core.inspectClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.helper);
+  delete env.CLAUDE_TOOLKIT_CLAUDE_CLI;
+  assert.equal(core.inspectClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.legacy);
+  delete env.CLAUDE_CLI_PATH;
+  assert.equal(core.inspectClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.persisted);
 });
 
 test('capability probe distinguishes unsupported syntax from unrelated runtime failure', () => {

@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.6",
+  "version": "2.7.7",
   "version_policy": "semver",
-  "version_notes": "Stabilizes Claude command identity across working directories, excludes Windows cwd shadows, probes exact launch argv without model input or session persistence, recovers stale owned lock markers, and preserves unverifiable admission state; Codex remains root-only under the strict contract.",
+  "version_notes": "Binds POSIX and Windows execution to the verified stable launcher candidate, unifies Claude CLI override precedence, and verifies complete Codex and Claude native cache dependencies; Codex remains root-only under the strict contract.",
   "outputs": [
     {
       "kind": "curated",

@@ -6,6 +6,22 @@ const path = require('node:path');
 
 const WINDOWS_SHELL_META = /([()%!^"<>&|;, *?])/g;
 
+function claudeCommandCandidates(options = {}) {
+  const env = Object.prototype.hasOwnProperty.call(options, 'env') ? options.env : process.env;
+  return [...new Set([
+    options.explicit,
+    env?.AI_AGENT_TOOLKIT_CLAUDE_CLI,
+    env?.CLAUDE_TOOLKIT_CLAUDE_CLI,
+    env?.CLAUDE_CLI_PATH,
+    options.persisted,
+    'claude',
+  ].filter(Boolean).map(String))];
+}
+
+function resolveClaudeCommandInput(options = {}) {
+  return claudeCommandCandidates(options)[0];
+}
+
 function validateExecutable(value, platform = process.platform) {
   const command = String(value || '');
   if (!command || command !== command.trim() || /[\0\r\n"]/.test(command)) {
@@ -48,7 +64,7 @@ function assertExecutableAvailable(value, options = {}) {
       if (platform !== 'win32' && !['.js', '.cjs', '.mjs'].includes(path.extname(candidate).toLowerCase())) {
         fs.accessSync(resolved, fs.constants.X_OK);
       }
-      return platform === 'win32' && !/[\\/]/.test(command) ? candidate : command;
+      return !/[\\/]/.test(command) ? candidate : command;
     } catch {}
   }
   throw new Error('Claude CLI executable is not available.');
@@ -69,9 +85,7 @@ function escapeWindowsCommand(value) {
 function claudeSpawnParts(executable, args = [], options = {}) {
   const platform = options.platform || process.platform;
   const validated = validateExecutable(executable, platform);
-  const command = platform === 'win32' && !/[\\/]/.test(validated)
-    ? assertExecutableAvailable(validated, options)
-    : validated;
+  const command = assertExecutableAvailable(validated, options);
   const extension = path.extname(command).toLowerCase();
   if (['.js', '.cjs', '.mjs'].includes(extension)) {
     return { command: process.execPath, args: [command, ...args], shell: false, windowsVerbatimArguments: false, raw_executable: command };
@@ -92,4 +106,4 @@ function claudeSpawnParts(executable, args = [], options = {}) {
   };
 }
 
-module.exports = { assertExecutableAvailable, claudeSpawnParts, escapeWindowsCommand, executableCandidates, quoteWindowsArgument, validateExecutable };
+module.exports = { assertExecutableAvailable, claudeCommandCandidates, claudeSpawnParts, escapeWindowsCommand, executableCandidates, quoteWindowsArgument, resolveClaudeCommandInput, validateExecutable };

@@ -19,7 +19,10 @@ function run(parts, options = {}) {
 }
 
 test('JavaScript Claude CLI paths remain shell-free and preserve argument boundaries', () => {
-  const parts = launch.claudeSpawnParts(path.join(os.tmpdir(), 'Claude CLI', 'fake.cjs'), ['a b', 'x&y']);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'Claude CLI '));
+  const executable = path.join(root, 'fake.cjs');
+  fs.writeFileSync(executable, 'process.exit(0);\n');
+  const parts = launch.claudeSpawnParts(executable, ['a b', 'x&y']);
   assert.equal(parts.command, process.execPath);
   assert.equal(parts.shell, false);
   assert.deepEqual(parts.args.slice(-2), ['a b', 'x&y']);
@@ -89,23 +92,93 @@ function createSymlinkOrSkip(t, target, link, type = 'file') {
   }
 }
 
-test('official-style bare Claude symlink passes preflight without replacing the invocation command', { skip: process.platform === 'win32' }, (t) => {
+test('official-style bare Claude symlink uses its stable launcher path and follows safe target changes', { skip: process.platform === 'win32' }, (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'official-claude-symlink-'));
   const bin = path.join(root, '.local', 'bin');
   const versions = path.join(root, '.local', 'share', 'claude', 'versions');
   const version = path.join(versions, '2.1.207');
+  const nextVersion = path.join(versions, '2.1.208');
   const link = path.join(bin, 'claude');
   fs.mkdirSync(bin, { recursive: true });
   fs.mkdirSync(versions, { recursive: true });
-  fs.copyFileSync(process.execPath, version);
+  fs.writeFileSync(version, '#!/bin/sh\nprintf 2.1.207\n');
+  fs.writeFileSync(nextVersion, '#!/bin/sh\nprintf 2.1.208\n');
   fs.chmodSync(version, 0o755);
+  fs.chmodSync(nextVersion, 0o755);
   if (!createSymlinkOrSkip(t, version, link)) return;
   const command = launch.assertExecutableAvailable('claude', { env: { PATH: bin } });
-  assert.equal(command, 'claude');
-  const parts = launch.claudeSpawnParts(command, ['--version']);
-  assert.equal(parts.command, 'claude');
-  assert.equal(parts.raw_executable, 'claude');
+  assert.equal(command, link);
+  let parts = launch.claudeSpawnParts(command, ['--version']);
+  assert.equal(parts.command, link);
+  assert.equal(parts.raw_executable, link);
   assert.notEqual(parts.command, version);
+  assert.equal(run(parts).stdout, '2.1.207');
+  fs.unlinkSync(link);
+  fs.symlinkSync(nextVersion, link);
+  parts = launch.claudeSpawnParts(command, ['--version']);
+  assert.equal(parts.command, link);
+  assert.equal(run(parts).stdout, '2.1.208');
+});
+
+test('canonical Claude command precedence includes every supported override', () => {
+  const env = {
+    AI_AGENT_TOOLKIT_CLAUDE_CLI: 'ai-env',
+    CLAUDE_TOOLKIT_CLAUDE_CLI: 'toolkit-env',
+    CLAUDE_CLI_PATH: 'legacy-env',
+  };
+  assert.deepEqual(launch.claudeCommandCandidates({ explicit: 'explicit', persisted: 'persisted', env }), [
+    'explicit', 'ai-env', 'toolkit-env', 'legacy-env', 'persisted', 'claude',
+  ]);
+  assert.equal(launch.resolveClaudeCommandInput({ explicit: 'explicit', persisted: 'persisted', env }), 'explicit');
+  assert.equal(launch.resolveClaudeCommandInput({ persisted: 'persisted', env }), 'ai-env');
+  delete env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
+  assert.equal(launch.resolveClaudeCommandInput({ persisted: 'persisted', env }), 'toolkit-env');
+  delete env.CLAUDE_TOOLKIT_CLAUDE_CLI;
+  assert.equal(launch.resolveClaudeCommandInput({ persisted: 'persisted', env }), 'legacy-env');
+  delete env.CLAUDE_CLI_PATH;
+  assert.equal(launch.resolveClaudeCommandInput({ persisted: 'persisted', env }), 'persisted');
+  assert.equal(launch.resolveClaudeCommandInput({ env: {} }), 'claude');
+});
+
+for (const pathPrefix of ['', '.', 'relative-bin']) {
+  test(`POSIX bare Claude ignores ${pathPrefix || 'an empty'} PATH component and executes the verified absolute candidate`, { skip: process.platform === 'win32' }, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-posix-shadow-'));
+    const trusted = path.join(root, 'trusted');
+    const cwd = path.join(root, 'project');
+    const relative = path.join(cwd, 'relative-bin');
+    fs.mkdirSync(trusted);
+    fs.mkdirSync(cwd);
+    fs.mkdirSync(relative);
+    const output = path.join(root, 'winner.txt');
+    const capture = path.join(root, 'capture.cjs');
+    fs.writeFileSync(capture, `require('node:fs').writeFileSync(process.argv[2], 'trusted');\n`);
+    fs.copyFileSync(process.execPath, path.join(trusted, 'claude'));
+    fs.chmodSync(path.join(trusted, 'claude'), 0o755);
+    const shadow = pathPrefix === 'relative-bin' ? path.join(relative, 'claude') : path.join(cwd, 'claude');
+    fs.writeFileSync(shadow, `#!/bin/sh\nprintf shadow > ${JSON.stringify(path.join(root, 'shadow-ran.txt'))}\n`);
+    fs.chmodSync(shadow, 0o755);
+    const env = { ...process.env, PATH: `${pathPrefix}:${trusted}` };
+    const resolved = launch.assertExecutableAvailable('claude', { env, cwd });
+    assert.equal(resolved, path.join(trusted, 'claude'));
+    const parts = launch.claudeSpawnParts('claude', [capture, output], { env, cwd });
+    assert.equal(parts.command, resolved);
+    run(parts, { cwd, env });
+    assert.equal(fs.readFileSync(output, 'utf8'), 'trusted');
+    assert.equal(fs.existsSync(path.join(root, 'shadow-ran.txt')), false);
+  });
+}
+
+test('a verified launcher candidate fails closed if it disappears or becomes non-executable', { skip: process.platform === 'win32' }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-replaced-candidate-'));
+  const candidate = path.join(root, 'claude');
+  fs.copyFileSync(process.execPath, candidate);
+  fs.chmodSync(candidate, 0o755);
+  assert.equal(launch.assertExecutableAvailable('claude', { env: { PATH: root } }), candidate);
+  fs.unlinkSync(candidate);
+  assert.throws(() => launch.claudeSpawnParts(candidate, []), /not available/i);
+  fs.writeFileSync(candidate, '#!/bin/sh\nexit 0\n');
+  fs.chmodSync(candidate, 0o644);
+  assert.throws(() => launch.claudeSpawnParts(candidate, []), /not available/i);
 });
 
 test('explicit valid executable symlink passes while preserving its original path', (t) => {

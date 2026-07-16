@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.6';
+const CONTROL_VERSION = '2.7.7';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -270,8 +270,11 @@ function effectiveEnvironment(options = {}) {
 }
 
 function effectiveClaudeCommand(profile, options = {}) {
-  const env = effectiveEnvironment(options);
-  return options.claudeCli || env?.AI_AGENT_TOOLKIT_CLAUDE_CLI || profile?.claude_cli || 'claude';
+  return processLaunch.resolveClaudeCommandInput({
+    explicit: options.claudeCli,
+    persisted: profile?.claude_cli,
+    env: effectiveEnvironment(options),
+  });
 }
 
 function childLaunchRefusal(options = {}) {
@@ -537,12 +540,13 @@ function releaseReservation(id, options = {}) {
 
 function claudeInvocation(spec, options = {}) {
   const checked = validateLaunchSpec(spec);
-  const executable = options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
+  const envInput = effectiveEnvironment(options);
+  const executable = processLaunch.resolveClaudeCommandInput({ explicit: options.claudeCli, persisted: options.persistedClaudeCli, env: envInput });
   const promptBytes = options.promptBytes || Buffer.from(String(checked.child_prompt || checked.child_responsibility), 'utf8');
   if (!Buffer.isBuffer(promptBytes) || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Child prompt exceeds the bounded private transport limit.');
   const args = ['--print', '--output-format', 'json', '--effort', checked.effort, '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default'];
-  const env = { ...process.env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CHILD: '1' };
-  const parts = processLaunch.claudeSpawnParts(executable, args);
+  const env = { ...envInput, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CHILD: '1' };
+  const parts = processLaunch.claudeSpawnParts(executable, args, { env });
   return { executable: parts.command, args: parts.args, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
 }
 
