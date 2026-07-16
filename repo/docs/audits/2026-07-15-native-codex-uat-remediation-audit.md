@@ -227,6 +227,18 @@ Implementation commit `69886df37a2c11a0055ce1974ab2246bdcd312da` passed the focu
 
 A clean detached worktree at `69886df37a2c11a0055ce1974ab2246bdcd312da` passed direct Toolkit validation, generated-project freshness, skill packaging, pack packaging, `git diff --check`, and all 138 runnable validator tests with 2 Windows symlink-capability skips. Local `npm run validate:all` was not run because repository policy assigns the full gate to CI. Native Codex and Claude UAT remains pending.
 
+## Five Exact-Head Production Amendments
+
+Starting reviewed head: `480ddcfbfcb8ce87680084803c100ac2b7397118`.
+
+- Relative path-like Claude CLI values are rejected on every platform. Absolute explicit paths remain supported. POSIX bare `claude` remains unpinned for official launcher updates; Windows bare commands resolve only from absolute PATH entries and carry the exact resolved candidate through setup, verification, profile persistence, and worker execution, excluding project-cwd shadows.
+- Recovery markers now publish private PID, creation-time, and token ownership. Fresh and live-owner markers remain protected; stale dead, ownerless, or malformed markers recover after `LOCK_TTL_MS`, including interrupted recovery with displaced lock state, while primary-lock protections and contender mutual exclusion remain intact.
+- Claude launch capability no longer depends on incomplete help text. Setup runs a bounded empty-input, no-session-persistence probe with the exact print, JSON output, medium effort, `Agent`/`Task` denial, and default permission argument shape. Unsupported syntax is classified separately from authentication/network/quota/model or other runtime failures; indeterminate capability fails closed. This follows the official [Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
+- Reservation update/release validates the complete existing state before mutation. Malformed JSON, future schemas, contradictory identities, invalid reservations, and invalid queue entries remain byte-for-byte unchanged; missing targets do not rewrite unrelated valid state; valid mutations affect only the named reservation. Supervisor execution stops when ownership update cannot be verified.
+- Toolkit packaged surfaces align at `2.7.6`.
+
+Local and exact-head evidence is recorded after implementation validation and CI complete. Native Codex and Claude UAT remains pending.
+
 ## Release Gates
 
 - The eight current exact-head findings are repaired: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv. Current-head implementation evidence and regression results were posted in each original thread before resolution.

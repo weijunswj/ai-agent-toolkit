@@ -9,7 +9,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 
 function current(supported, profile = {}) {
-  const proof = { schema: 2, source: 'claude-plugin-list', plugin_version: '2.7.5', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const proof = { schema: 2, source: 'claude-plugin-list', plugin_version: '2.7.6', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
@@ -138,13 +138,13 @@ test('resource-counter loss invalidates an existing automatic strict profile', a
   }
 });
 
-test('explicit Windows cmd path with spaces works through help and version capability probes', { skip: process.platform !== 'win32' }, () => {
+test('explicit Windows cmd path with spaces works through bounded launch and version capability probes', { skip: process.platform !== 'win32' }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'Claude probe path '));
   const fake = path.join(root, 'fake.cjs');
   const wrapper = path.join(root, 'claude.cmd');
   fs.writeFileSync(fake, [
-    "if (process.argv.includes('--help')) console.log('--print --output-format --effort --disallowedTools --permission-mode');",
-    "else if (process.argv.includes('--version')) console.log('2.1.198 fixture');",
+    "if (process.argv.includes('--version')) console.log('2.1.198 fixture');",
+    "else if (process.argv.includes('--print')) console.log('{}');",
     'else process.exit(1);',
     '',
   ].join('\n'));
@@ -152,4 +152,39 @@ test('explicit Windows cmd path with spaces works through help and version capab
   const capability = core.inspectClaudeAgentCapability({ claudeCli: wrapper });
   assert.equal(capability.launch_supported, true);
   assert.match(capability.version, /2\.1\.198/);
+});
+
+function capabilityCli(root, behavior) {
+  const target = path.join(root, `claude-${behavior}.cjs`);
+  fs.writeFileSync(target, [
+    "'use strict';",
+    "const fs=require('node:fs');const args=process.argv.slice(2);",
+    "if(args.includes('--version')){console.log('2.1.999 fixture');process.exit(0);}",
+    "if(args.includes('--help')){console.log('--print only');process.exit(0);}",
+    `if(args.includes('--print')){fs.writeFileSync(${JSON.stringify(path.join(root, `${behavior}.json`))},JSON.stringify({args,stdin:fs.readFileSync(0,'utf8')}));${behavior === 'supported' ? "console.log('{}');process.exit(0);" : behavior === 'unsupported' ? "console.error('unknown option --effort');process.exit(2);" : "console.error('authentication required: sign in');process.exit(3);"}}`,
+    'process.exit(4);',
+    '',
+  ].join('\n'));
+  return target;
+}
+
+test('bounded exact-argv probe succeeds even when help omits supported flags', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-supported-'));
+  const capability = core.inspectClaudeAgentCapability({ claudeCli: capabilityCli(root, 'supported') });
+  assert.equal(capability.launch_supported, true);
+  assert.equal(capability.launch_probe_status, 'supported');
+  const probe = JSON.parse(fs.readFileSync(path.join(root, 'supported.json'), 'utf8'));
+  assert.deepEqual(probe.args, ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence']);
+  assert.equal(probe.stdin, '');
+});
+
+test('capability probe distinguishes unsupported syntax from unrelated runtime failure', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-failures-'));
+  const unsupported = core.inspectClaudeAgentCapability({ claudeCli: capabilityCli(root, 'unsupported') });
+  assert.equal(unsupported.launch_supported, false);
+  assert.equal(unsupported.launch_probe_status, 'unsupported-syntax');
+  const auth = core.inspectClaudeAgentCapability({ claudeCli: capabilityCli(root, 'auth') });
+  assert.equal(auth.launch_supported, false);
+  assert.equal(auth.launch_probe_status, 'indeterminate-runtime-failure');
+  assert.doesNotMatch(auth.detector, /unsupported-syntax/);
 });

@@ -231,8 +231,8 @@ function sameActivationProof(left, right) {
 
 function verifyCurrentInstalledEnforcement(expectedProof, options = {}) {
   try {
-    const command = options.claudeCommand || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
-    processLaunch.assertExecutableAvailable(command, options);
+    const requestedCommand = options.claudeCommand || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
+    const command = processLaunch.assertExecutableAvailable(requestedCommand, options);
     const versionResult = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs(), env: options.env });
     if (versionResult.status !== 0) throw new Error(commandOutput(versionResult) || 'Claude CLI version probe failed.');
     const matches = findPluginEntries(runClaudeJson(command, ['plugin', 'list', '--json'], { env: options.env }));
@@ -376,10 +376,15 @@ function commandCandidates(explicitCommand) {
 
 function resolveClaudeCommand(explicitCommand) {
   const failures = [];
-  for (const command of commandCandidates(explicitCommand)) {
-    const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs() });
-    if (result.status === 0) return { command, failures };
-    failures.push(`${command}: ${commandOutput(result) || `exit ${result.status}`}`);
+  for (const candidate of commandCandidates(explicitCommand)) {
+    try {
+      const command = processLaunch.assertExecutableAvailable(candidate);
+      const result = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs() });
+      if (result.status === 0) return { command, failures };
+      failures.push(`${candidate}: ${commandOutput(result) || `exit ${result.status}`}`);
+    } catch (error) {
+      failures.push(`${candidate}: ${error.message}`);
+    }
   }
   return { command: '', failures };
 }

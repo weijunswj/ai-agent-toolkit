@@ -60,6 +60,13 @@ test('unsafe or ambiguous executable strings are rejected before process creatio
   }
 });
 
+test('relative path-like Claude commands are rejected on every platform', () => {
+  for (const platform of ['linux', 'darwin', 'win32']) {
+    const relative = platform === 'win32' ? '.\\bin\\claude.cmd' : './bin/claude';
+    assert.throws(() => launch.validateExecutable(relative, platform), /must be absolute/i);
+  }
+});
+
 test('known missing explicit and bare Claude executables fail availability preflight', () => {
   const missing = fs.mkdtempSync(path.join(os.tmpdir(), 'missing-claude-parent-'));
   fs.rmSync(missing, { recursive: true, force: true });
@@ -146,4 +153,30 @@ test('valid JavaScript executable paths remain available through the Node launch
     assert.equal(launch.assertExecutableAvailable(executable), executable);
     assert.equal(launch.claudeSpawnParts(executable, []).command, process.execPath);
   }
+});
+
+test('Windows bare Claude resolves only from PATH and cannot be shadowed by cwd', { skip: process.platform !== 'win32' }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-path-shadow-'));
+  const trusted = path.join(root, 'trusted');
+  const cwd = path.join(root, 'project');
+  fs.mkdirSync(trusted);
+  fs.mkdirSync(cwd);
+  const capture = path.join(root, 'capture.cjs');
+  const output = path.join(root, 'winner.txt');
+  const shadowMarker = path.join(root, 'shadow-ran.txt');
+  fs.writeFileSync(capture, `require('node:fs').writeFileSync(process.argv[2], 'trusted');\n`);
+  fs.writeFileSync(path.join(trusted, 'claude.cmd'), `@echo off\r\n"${process.execPath}" "${capture}" %*\r\n`);
+  fs.writeFileSync(path.join(cwd, 'claude.cmd'), `@echo off\r\necho shadow>"${shadowMarker}"\r\n`);
+  const env = { ...process.env, PATH: trusted, Path: trusted, PATHEXT: '.CMD' };
+  const resolved = launch.assertExecutableAvailable('claude', { env, cwd });
+  assert.equal(resolved, path.join(trusted, 'claude.CMD'));
+  run(launch.claudeSpawnParts('claude', [output], { env, cwd }), { cwd, env });
+  assert.equal(fs.readFileSync(output, 'utf8'), 'trusted');
+  assert.equal(fs.existsSync(shadowMarker), false);
+});
+
+test('Windows cwd shadow cannot satisfy an empty PATH', { skip: process.platform !== 'win32' }, () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-empty-path-shadow-'));
+  fs.writeFileSync(path.join(cwd, 'claude.cmd'), '@echo off\r\nexit /b 0\r\n');
+  assert.throws(() => launch.assertExecutableAvailable('claude', { env: { PATH: '', Path: '', PATHEXT: '.CMD' }, cwd }), /not available/i);
 });

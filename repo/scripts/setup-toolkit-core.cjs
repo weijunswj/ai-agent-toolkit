@@ -8,6 +8,7 @@ const { spawnSync } = require('node:child_process');
 const readline = require('node:readline/promises');
 const delegation = require('./codex-delegation-config.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
+const processLaunch = require('./claude-process-launch.cjs');
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
@@ -1010,7 +1011,7 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
       manual_maximum: resolved.manual_maximum,
       enforcement_verified: strict,
       activation_proof: nativeCache.activation_proof,
-      claude_cli: args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude',
+      claude_cli: current.agentCapability?.claude_command || args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude',
       resource_counter_supported: resourceCapable,
       resource_counter_source: current.agentCapability?.resource_counter_source,
     });
@@ -1065,21 +1066,42 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
 }
 
 function inspectClaudeAgentCapability(args) {
-  const command = args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
+  const requestedCommand = args.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
   const helper = require('./setup-claude-toolkit-plugin.cjs');
-  const result = helper.runClaudeCommand(command, ['--help'], { timeout: 10000 });
-  const help = `${result.stdout || ''}\n${result.stderr || ''}`;
+  let command;
+  try { command = processLaunch.assertExecutableAvailable(requestedCommand); }
+  catch (error) {
+    const resourceCapability = agentControl.inspectResourceCapability();
+    return {
+      supported: false, launch_supported: false, resource_counter_supported: resourceCapability.supported,
+      resource_counter_source: resourceCapability.source, detector: `Claude CLI unavailable: ${error.message}`,
+      version: '', direct_only: false, medium_effort: false, non_fast_environment_override: false,
+    };
+  }
   const versionResult = helper.runClaudeCommand(command, ['--version'], { timeout: 10000 });
   const version = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`.trim();
-  const required = ['--effort', '--print', '--output-format', '--disallowedTools', '--permission-mode'];
-  const launchSupported = result.status === 0 && versionResult.status === 0 && version.length > 0 && required.every((flag) => help.includes(flag));
+  const probeArgs = ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence'];
+  const probe = helper.runClaudeCommand(command, probeArgs, {
+    timeout: 10000,
+    input: '',
+    env: { ...process.env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1' },
+  });
+  const probeOutput = `${probe.stdout || ''}\n${probe.stderr || ''}${probe.error ? `\n${probe.error.message}` : ''}`.trim();
+  const unsupportedSyntax = /unknown (?:option|argument)|unrecognized (?:option|argument)|unexpected argument|invalid (?:option|argument).*--/i.test(probeOutput);
+  const launchSupported = versionResult.status === 0 && version.length > 0 && probe.status === 0;
   const resourceCapability = agentControl.inspectResourceCapability();
+  const probeStatus = launchSupported ? 'supported' : (unsupportedSyntax ? 'unsupported-syntax' : 'indeterminate-runtime-failure');
   return {
     supported: launchSupported && resourceCapability.supported,
     launch_supported: launchSupported,
     resource_counter_supported: resourceCapability.supported,
     resource_counter_source: resourceCapability.source,
-    detector: launchSupported ? 'claude --version plus --help exact launch flags' : 'required Claude version or launch flags unavailable',
+    detector: launchSupported
+      ? 'claude --version plus bounded empty-input exact-argv capability probe'
+      : `Claude launch capability ${probeStatus}`,
+    launch_probe_status: probeStatus,
+    launch_probe_exit_status: Number.isInteger(probe.status) ? probe.status : null,
+    claude_command: command,
     version,
     direct_only: launchSupported,
     medium_effort: launchSupported,

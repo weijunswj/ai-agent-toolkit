@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.5';
+const CONTROL_VERSION = '2.7.6';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -88,16 +88,49 @@ function readLockOwner(target) {
   } catch { return null; }
 }
 
+function recoverStaleRecoveryMarker(options = {}) {
+  const recovery = lockRecoveryPath(options);
+  let stat;
+  try { stat = fs.lstatSync(recovery); }
+  catch (error) { if (error.code === 'ENOENT') return true; throw error; }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Agent admission recovery marker is not a regular directory.');
+  const owner = readLockOwner(recovery);
+  if (Number.isSafeInteger(owner?.pid) && owner.pid > 0 && pidAlive(owner.pid)) return false;
+  const timestamp = validLockOwner(owner) ? owner.created_at_ms : stat.mtimeMs;
+  if (!Number.isFinite(timestamp) || Date.now() - timestamp <= LOCK_TTL_MS) return false;
+  fs.rmSync(recovery, { recursive: true, force: true });
+  return true;
+}
+
+function acquireRecoveryMarker(options = {}) {
+  const recovery = lockRecoveryPath(options);
+  for (;;) {
+    try {
+      const token = crypto.randomUUID();
+      fs.mkdirSync(recovery, { mode: 0o700 });
+      fs.chmodSync(recovery, 0o700);
+      try {
+        atomicWriteJson(path.join(recovery, 'owner.json'), { pid: process.pid, created_at_ms: Date.now(), token });
+      } catch (error) {
+        fs.rmSync(recovery, { recursive: true, force: true });
+        throw error;
+      }
+      return () => {
+        const owner = readLockOwner(recovery);
+        if (owner?.pid === process.pid && owner?.token === token) fs.rmSync(recovery, { recursive: true, force: true });
+      };
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (!recoverStaleRecoveryMarker(options)) return null;
+    }
+  }
+}
+
 function recoverStaleLock(options = {}) {
   const target = lockPath(options);
   const recovery = lockRecoveryPath(options);
-  try {
-    fs.mkdirSync(recovery, { mode: 0o700 });
-    fs.chmodSync(recovery, 0o700);
-  } catch (error) {
-    if (error.code === 'EEXIST') return false;
-    throw error;
-  }
+  const releaseRecovery = acquireRecoveryMarker(options);
+  if (!releaseRecovery) return false;
   try {
     let stat;
     try { stat = fs.lstatSync(target); }
@@ -115,7 +148,7 @@ function recoverStaleLock(options = {}) {
     if (error.code === 'ENOENT') return true;
     throw error;
   } finally {
-    fs.rmSync(recovery, { recursive: true, force: true });
+    releaseRecovery();
   }
 }
 
@@ -126,6 +159,7 @@ function acquireLock(options = {}) {
   const deadline = Date.now() + (options.lockWaitMs || 5000);
   for (;;) {
     if (fs.existsSync(lockRecoveryPath(options))) {
+      if (recoverStaleRecoveryMarker(options)) continue;
       if (Date.now() >= deadline) throw new Error('Agent admission is temporarily busy; retry without launching a worker.');
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       continue;
@@ -168,25 +202,41 @@ function emptyState() { return { schema: SCHEMA, reservations: [], queue: [] }; 
 function validReservation(entry) {
   return Boolean(entry && typeof entry === 'object'
     && typeof entry.id === 'string' && entry.id.length > 0
+    && entry.host === 'claude-code' && entry.topology === TOPOLOGIES.CLAUDE_DIRECT && entry.depth === 1
     && Number.isSafeInteger(entry.owner_pid) && entry.owner_pid > 0
     && Number.isSafeInteger(entry.created_at_ms) && Number.isSafeInteger(entry.expires_at_ms)
+    && entry.created_at_ms > 0 && entry.expires_at_ms >= entry.created_at_ms
     && Number.isSafeInteger(entry.estimated_memory_bytes)
-    && entry.estimated_memory_bytes >= MIN_WORKER_COST && entry.estimated_memory_bytes <= MAX_WORKER_COST);
+    && entry.estimated_memory_bytes >= MIN_WORKER_COST && entry.estimated_memory_bytes <= MAX_WORKER_COST
+    && ['medium', 'high', 'xhigh', 'max'].includes(entry.effort) && ['reserved', 'running'].includes(entry.status));
 }
 
 function validQueueEntry(entry) {
   return Boolean(entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id.length > 0
-    && Number.isSafeInteger(entry.created_at_ms) && Number.isSafeInteger(entry.expires_at_ms));
+    && entry.host === 'claude-code' && entry.status === RESULTS.QUEUE
+    && Number.isSafeInteger(entry.created_at_ms) && Number.isSafeInteger(entry.expires_at_ms)
+    && entry.created_at_ms > 0 && entry.expires_at_ms >= entry.created_at_ms);
 }
 
 function validControlState(raw) {
-  return Boolean(raw && raw.schema === SCHEMA && Array.isArray(raw.reservations) && Array.isArray(raw.queue)
-    && raw.reservations.every(validReservation) && raw.queue.every(validQueueEntry));
+  if (!raw || raw.schema !== SCHEMA || !Array.isArray(raw.reservations) || !Array.isArray(raw.queue)
+    || !raw.reservations.every(validReservation) || !raw.queue.every(validQueueEntry)) return false;
+  const ids = [...raw.reservations, ...raw.queue].map((entry) => entry.id);
+  return new Set(ids).size === ids.length;
 }
 
 function sanitizeState(raw) {
   if (!validControlState(raw)) return emptyState();
-  return { schema: SCHEMA, reservations: [...raw.reservations], queue: [...raw.queue] };
+  return { schema: SCHEMA, reservations: raw.reservations.map((entry) => ({ ...entry })), queue: raw.queue.map((entry) => ({ ...entry })) };
+}
+
+function readMutableControlState(options = {}) {
+  const filePath = statePath(options);
+  if (!fs.existsSync(filePath)) return { exists: false, state: emptyState() };
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(filePath, 'utf8')); }
+  catch { return { exists: true, state: null }; }
+  return { exists: true, state: validControlState(raw) ? sanitizeState(raw) : null };
 }
 
 function recoverState(state, now = Date.now()) {
@@ -458,10 +508,14 @@ function admissionDecision(specInput, options = {}) {
 
 function updateReservation(id, updates, options = {}) {
   return withLock(options, () => {
-    const state = recoverState(sanitizeState(readJson(statePath(options), emptyState())));
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state) return false;
+    if (!current.state.reservations.some((item) => item.id === id)) return false;
+    const state = recoverState(current.state);
     const entry = state.reservations.find((item) => item.id === id);
     if (!entry) return false;
     Object.assign(entry, updates);
+    if (!validControlState(state)) return false;
     atomicWriteJson(statePath(options), state);
     return true;
   });
@@ -469,11 +523,15 @@ function updateReservation(id, updates, options = {}) {
 
 function releaseReservation(id, options = {}) {
   return withLock(options, () => {
-    const state = recoverState(sanitizeState(readJson(statePath(options), emptyState())));
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state) return false;
+    if (!current.state.reservations.some((entry) => entry.id === id)) return false;
+    const state = recoverState(current.state);
     const before = state.reservations.length;
     state.reservations = state.reservations.filter((entry) => entry.id !== id);
+    if (state.reservations.length === before) return false;
     atomicWriteJson(statePath(options), state);
-    return state.reservations.length !== before;
+    return true;
   });
 }
 
@@ -501,7 +559,7 @@ function launch(specInput, options = {}) {
     spec = validateLaunchSpec(specInput);
     promptBytes = Buffer.from(String(spec.child_prompt || spec.child_responsibility), 'utf8');
     if (promptBytes.length > MAX_PROMPT_BYTES) return refusal('Child prompt exceeds the bounded private transport limit.');
-    processLaunch.assertExecutableAvailable(claudeCli, { env: effectiveEnvironment(options) });
+    claudeCli = processLaunch.assertExecutableAvailable(claudeCli, { env: effectiveEnvironment(options) });
   } catch (error) { return refusal(error.message); }
   const admitted = admissionDecision(spec, { ...options, profile, claudeCli });
   if (admitted.result !== RESULTS.START) return admitted;
@@ -545,7 +603,9 @@ async function supervise(args) {
     const promptBytes = Buffer.from(encoded, 'base64');
     if (!encoded || promptBytes.toString('base64') !== encoded || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Stored child prompt transport is malformed.');
     const invocation = claudeInvocation(spec, { claudeCli: args.claudeCli, promptBytes });
-    updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options);
+    if (!updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options)) {
+      throw new Error('Toolkit reservation state could not be verified before worker execution.');
+    }
     code = await new Promise((resolve) => {
       let settled = false;
       const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
@@ -595,6 +655,6 @@ if (require.main === module) main().then((code) => { process.exitCode = code; })
 
 module.exports = {
   SCHEMA, CONTROL_VERSION, RESULTS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, LOCK_TTL_MS,
-  controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock,
+  controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
   admissionDecision, updateReservation, releaseReservation, claudeInvocation, launch, recoverState, pidAlive,
 };

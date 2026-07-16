@@ -256,6 +256,19 @@ test('complete profile validation rejects corrupted, partial, future, unknown an
   }
 });
 
+test('strict profiles reject relative path-like Claude commands', () => {
+  const work = root();
+  assert.throws(() => control.configureProfile('claude-code', configured(
+    control.TOPOLOGIES.CLAUDE_DIRECT,
+    control.CAPACITY_MODES.AUTO,
+    { claude_cli: './bin/claude' },
+  ), { root: work }), /must be absolute/i);
+  const target = control.profilePath('claude-code', { root: work });
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, `${JSON.stringify({ ...profile(), claude_cli: './bin/claude', updated_at: new Date().toISOString() }, null, 2)}\n`);
+  assert.equal(control.readProfile('claude-code', { root: work }).supported, false);
+});
+
 test('strict profiles require exact native activation proof and direct profiles require resource counters', () => {
   const work = root();
   assert.throws(() => control.configureProfile('claude-code', {
@@ -418,6 +431,18 @@ function createLockDirectory(work, owner, ageMs = 0) {
   return target;
 }
 
+function createRecoveryMarker(work, owner, ageMs = 0, displaced = false) {
+  const target = control.lockRecoveryPath({ root: work });
+  fs.mkdirSync(target, { recursive: true });
+  if (owner !== undefined) fs.writeFileSync(path.join(target, 'owner.json'), typeof owner === 'string' ? owner : JSON.stringify(owner), { mode: 0o600 });
+  if (displaced) fs.mkdirSync(path.join(target, 'stale-lock'));
+  if (ageMs) {
+    const old = new Date(Date.now() - ageMs);
+    fs.utimesSync(target, old, old);
+  }
+  return target;
+}
+
 test('fresh ownerless and malformed locks remain protected', () => {
   for (const owner of [undefined, '{ malformed']) {
     const work = root();
@@ -460,6 +485,107 @@ test('stale ownerless recovery preserves mutual exclusion across contenders', as
   await Promise.all([run(), run()]);
   assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split(/\r?\n/), ['start', 'end', 'start', 'end']);
   assert.equal(fs.existsSync(control.lockPath({ root: work })), false);
+});
+
+test('fresh and live-owner recovery markers remain protected', () => {
+  const staleAge = control.LOCK_TTL_MS + 2000;
+  for (const fixture of [
+    { owner: undefined, age: 0 },
+    { owner: '{ malformed', age: 0 },
+    { owner: { pid: process.pid, created_at_ms: Date.now() - staleAge, token: 'live' }, age: staleAge },
+  ]) {
+    const work = root();
+    const marker = createRecoveryMarker(work, fixture.owner, fixture.age);
+    assert.throws(() => control.acquireLock({ root: work, lockWaitMs: 30 }), /temporarily busy/i);
+    assert.equal(fs.existsSync(marker), true);
+  }
+});
+
+test('stale dead-owner, ownerless and malformed recovery markers recover without residue', () => {
+  const staleAge = control.LOCK_TTL_MS + 2000;
+  for (const owner of [
+    { pid: 99999999, created_at_ms: Date.now() - staleAge, token: 'dead' },
+    undefined,
+    '{ malformed',
+  ]) {
+    const work = root();
+    createRecoveryMarker(work, owner, staleAge, true);
+    const release = control.acquireLock({ root: work, lockWaitMs: 200 });
+    release();
+    assert.equal(fs.existsSync(control.lockRecoveryPath({ root: work })), false);
+    assert.equal(fs.existsSync(control.lockPath({ root: work })), false);
+  }
+});
+
+test('stale recovery-marker contenders remain mutually exclusive', async () => {
+  const work = root();
+  createRecoveryMarker(work, undefined, control.LOCK_TTL_MS + 2000, true);
+  const log = path.join(work, 'recovery-critical.log');
+  const modulePath = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
+  const script = `const fs=require('node:fs');const c=require(${JSON.stringify(modulePath)});const release=c.acquireLock({root:${JSON.stringify(work)},lockWaitMs:5000});fs.appendFileSync(${JSON.stringify(log)},'start\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);fs.appendFileSync(${JSON.stringify(log)},'end\\n');release();`;
+  const run = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', script], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(stderr)));
+  });
+  await Promise.all([run(), run()]);
+  assert.deepEqual(fs.readFileSync(log, 'utf8').trim().split(/\r?\n/), ['start', 'end', 'start', 'end']);
+  assert.equal(fs.existsSync(control.lockRecoveryPath({ root: work })), false);
+  assert.equal(fs.existsSync(control.lockPath({ root: work })), false);
+});
+
+function reservation(id, overrides = {}) {
+  const now = Date.now();
+  return {
+    id, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT, depth: 1,
+    owner_pid: process.pid, created_at_ms: now, expires_at_ms: now + 60000,
+    estimated_memory_bytes: control.DEFAULT_WORKER_COST, effort: 'medium', status: 'reserved',
+    ...overrides,
+  };
+}
+
+function writeState(work, state) {
+  const target = control.statePath({ root: work });
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, typeof state === 'string' ? state : `${JSON.stringify(state, null, 2)}\n`);
+  return target;
+}
+
+test('reservation mutation preserves malformed, future, invalid-reservation and invalid-queue state bytes', () => {
+  const invalidStates = [
+    '{ malformed',
+    { schema: control.SCHEMA + 1, reservations: [reservation('target')], queue: [] },
+    { schema: control.SCHEMA, reservations: [reservation('target'), reservation('bad', { owner_pid: -1 })], queue: [] },
+    { schema: control.SCHEMA, reservations: [reservation('target')], queue: [{ id: '', created_at_ms: 1, expires_at_ms: 2 }] },
+    { schema: control.SCHEMA, reservations: [reservation('target'), reservation('target')], queue: [] },
+  ];
+  for (const invalid of invalidStates) {
+    const work = root();
+    const target = writeState(work, invalid);
+    const before = fs.readFileSync(target);
+    assert.equal(control.updateReservation('target', { status: 'running' }, { root: work }), false);
+    assert.deepEqual(fs.readFileSync(target), before);
+    assert.equal(control.releaseReservation('target', { root: work }), false);
+    assert.deepEqual(fs.readFileSync(target), before);
+    assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: work, resourceState: resources() })).result, control.RESULTS.REFUSE);
+  }
+});
+
+test('reservation update and release mutate only a valid target and missing targets preserve bytes', () => {
+  const work = root();
+  const target = writeState(work, { schema: control.SCHEMA, reservations: [reservation('target'), reservation('other')], queue: [] });
+  const beforeMissing = fs.readFileSync(target);
+  assert.equal(control.releaseReservation('missing', { root: work }), false);
+  assert.deepEqual(fs.readFileSync(target), beforeMissing);
+  assert.equal(control.updateReservation('target', { status: 'running', owner_pid: process.pid }, { root: work }), true);
+  let state = JSON.parse(fs.readFileSync(target, 'utf8'));
+  assert.equal(state.reservations.find((entry) => entry.id === 'target').status, 'running');
+  assert.equal(state.reservations.find((entry) => entry.id === 'other').status, 'reserved');
+  assert.equal(control.releaseReservation('target', { root: work }), true);
+  state = JSON.parse(fs.readFileSync(target, 'utf8'));
+  assert.deepEqual(state.reservations.map((entry) => entry.id), ['other']);
 });
 
 test('missing Claude executable forms refuse before admission or artifacts', () => {

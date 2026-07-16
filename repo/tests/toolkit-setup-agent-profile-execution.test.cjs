@@ -13,8 +13,8 @@ test('Claude recommended execution writes only the enforceable direct automatic 
   const fakeClaude = path.join(root, 'fake-claude.cjs');
   writeFile(fakeClaude, [
     "'use strict';",
-    "if (process.argv.includes('--help')) { console.log('--print --output-format --effort --disallowedTools --permission-mode'); process.exit(0); }",
     "if (process.argv.includes('--version')) { console.log('2.1.198 (fake)'); process.exit(0); }",
+    "if (process.argv.includes('--print')) { console.log('{}'); process.exit(0); }",
     "process.exit(1);",
     '',
   ].join('\n'));
@@ -40,8 +40,8 @@ test('kept strict profile is invalidated after current enforcement capability di
   const fakeClaude = path.join(root, 'fake-claude.cjs');
   writeFile(fakeClaude, [
     "'use strict';",
-    "if (process.argv.includes('--help')) { console.log('--print --output-format --effort --disallowedTools --permission-mode'); process.exit(0); }",
     "if (process.argv.includes('--version')) { console.log('2.1.198 (fake)'); process.exit(0); }",
+    "if (process.argv.includes('--print')) { console.log('{}'); process.exit(0); }",
     "process.exit(1);",
     '',
   ].join('\n'));
