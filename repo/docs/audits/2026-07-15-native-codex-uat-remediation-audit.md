@@ -237,7 +237,9 @@ Starting reviewed head: `480ddcfbfcb8ce87680084803c100ac2b7397118`.
 - Reservation update/release validates the complete existing state before mutation. Malformed JSON, future schemas, contradictory identities, invalid reservations, and invalid queue entries remain byte-for-byte unchanged; missing targets do not rewrite unrelated valid state; valid mutations affect only the named reservation. Supervisor execution stops when ownership update cannot be verified.
 - Toolkit packaged surfaces align at `2.7.6`.
 
-Local and exact-head evidence is recorded after implementation validation and CI complete. Native Codex and Claude UAT remains pending.
+Implementation commit `b61cd350d0ec66838d831e7383818bf6a0981120` passed the focused Claude process/plugin/controller/lifecycle suites with 80 passes and 5 Windows/POSIX capability skips; setup topology/profile/orchestration passed 55/55; Codex configuration/plugin/SessionStart passed 94/95 with one POSIX-only skip; instruction and hook-light checks passed 23/23; Toolkit Local Bridge passed 133/133. Instruction/project/doc sync, source-lock, published-surface, fallback-risk, portability, skill package, pack package, and `git diff --check` checks passed.
+
+A clean detached worktree at `b61cd350d0ec66838d831e7383818bf6a0981120` passed direct Toolkit validation, generated-project freshness, skill packaging, pack packaging, `git diff --check`, and all 138 runnable validator tests with 2 Windows symlink-capability skips. The contaminated primary-worktree validator run was not used as clean evidence because the protected ignored `.agent-toolkit-backups` directory remains present and untouched. Local `npm run validate:all` was not run because repository policy assigns the full gate to CI. Native Codex and Claude UAT remains pending.
 
 ## Release Gates
 
