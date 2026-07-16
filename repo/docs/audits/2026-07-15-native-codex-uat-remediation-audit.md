@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Five post-review material blockers repaired and clean-worktree validated; exact-head CI and native UAT pending
+Status: Five post-review material blockers repaired, clean-worktree validated, and implementation-head CI verified; native UAT pending
 
 ## Scope
 
@@ -189,6 +189,8 @@ Local evidence before the implementation commit:
 - Direct working-tree validation and eight positive validator-fixture cases were blocked only by the pre-existing ignored `.agent-toolkit-backups` directory. That backup was not touched because cleanup is prohibited without separate authorization. A clean detached worktree at `57634104b757300ee6bd445b8173ba86b0ba071b` passed direct Toolkit validation, all 138 runnable validator tests with 2 Windows symlink-capability skips, generated-project freshness, skill packaging, pack packaging, and `git diff --check`. CI remains the full read-only exact-head gate.
 
 No live Codex/Claude config or cache, credential, Docker, n8n, Cloudflare, production, external runtime, historical `.staging-*`, or ignored backup material was touched. Native Codex and Claude UAT remains pending. Issues #240, #241, and #247 remain open.
+
+Exact pushed head `b35f236dfae3a0ef90284951c12bd4d59f2ad3bd` passed both full validation workflows (2m59s each), generated-surface sync (7s), skill packaging (8s), pack packaging (8s), the CodeQL workflow gate (3s), and the actions (41s), JavaScript/TypeScript (1m14s), and Python (49s) CodeQL analyses. The final audit-only head remains subject to the same complete exact-head gate before review-thread resolution.
 
 ## Release Gates
 
