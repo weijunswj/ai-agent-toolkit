@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Five post-review material blockers repaired, clean-worktree validated, and implementation-head CI verified; native UAT pending
+Status: Five post-review material blockers repaired, clean-worktree validated, and exact code-head CI verified; native UAT pending
 
 ## Scope
 
@@ -190,7 +190,7 @@ Local evidence before the implementation commit:
 
 No live Codex/Claude config or cache, credential, Docker, n8n, Cloudflare, production, external runtime, historical `.staging-*`, or ignored backup material was touched. Native Codex and Claude UAT remains pending. Issues #240, #241, and #247 remain open.
 
-Exact pushed head `b35f236dfae3a0ef90284951c12bd4d59f2ad3bd` passed both full validation workflows (2m59s each), generated-surface sync (7s), skill packaging (8s), pack packaging (8s), the CodeQL workflow gate (3s), and the actions (41s), JavaScript/TypeScript (1m14s), and Python (49s) CodeQL analyses. The final audit-only head remains subject to the same complete exact-head gate before review-thread resolution.
+Exact code head `8ebbfebf6ec2f8042072fc2896796c8186302345` passed both full validation workflows (2m52s and 3m02s), generated-surface sync (4s), skill packaging (9s), pack packaging (4s), the CodeQL workflow gate (2s), and the actions (32s), JavaScript/TypeScript (1m13s), and Python (43s) CodeQL analyses. Setup probe findings were eliminated by centralizing through the shell-free helper. The remaining streaming-worker finding was reviewed as a false positive because validated executable plus separate argv uses no shell; the equivalent regression-only finding was classified as used in tests. All review threads were replied to with exact-head evidence and resolved only after this verification.
 
 ## Release Gates
 
