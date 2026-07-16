@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('node:fs');
 const path = require('node:path');
 
 const WINDOWS_SHELL_META = /([()%!^"<>&|;, *?])/g;
@@ -18,6 +19,36 @@ function validateExecutable(value, platform = process.platform) {
     throw new Error('An explicit Windows Claude CLI path must be absolute.');
   }
   return command;
+}
+
+function executableCandidates(command, options = {}) {
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
+  const cwd = options.cwd || process.cwd();
+  if (/[\\/]/.test(command)) return [command];
+  const directories = String(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : path.delimiter).filter(Boolean);
+  if (platform !== 'win32') return directories.map((directory) => path.join(directory, command));
+  const extensions = path.extname(command)
+    ? ['']
+    : String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  return [cwd, ...directories].flatMap((directory) => extensions.map((extension) => path.join(directory, `${command}${extension}`)));
+}
+
+function assertExecutableAvailable(value, options = {}) {
+  const platform = options.platform || process.platform;
+  const command = validateExecutable(value, platform);
+  const candidates = executableCandidates(command, options);
+  for (const candidate of candidates) {
+    try {
+      const stat = fs.lstatSync(candidate);
+      if (!stat.isFile() || stat.isSymbolicLink()) continue;
+      if (platform !== 'win32' && !['.js', '.cjs', '.mjs'].includes(path.extname(candidate).toLowerCase())) {
+        fs.accessSync(candidate, fs.constants.X_OK);
+      }
+      return command;
+    } catch {}
+  }
+  throw new Error('Claude CLI executable is not available.');
 }
 
 function quoteWindowsArgument(value, doubleEscapeMeta = false) {
@@ -55,4 +86,4 @@ function claudeSpawnParts(executable, args = [], options = {}) {
   };
 }
 
-module.exports = { claudeSpawnParts, escapeWindowsCommand, quoteWindowsArgument, validateExecutable };
+module.exports = { assertExecutableAvailable, claudeSpawnParts, escapeWindowsCommand, executableCandidates, quoteWindowsArgument, validateExecutable };

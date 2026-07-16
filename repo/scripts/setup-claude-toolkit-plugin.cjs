@@ -204,6 +204,60 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
   return errors;
 }
 
+function installedActivationProof(installed, expectedVersion) {
+  const cachePath = path.resolve(String(installed?.installPath || ''));
+  const hookPath = path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json');
+  const controllerPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-agent-control.cjs');
+  for (const filePath of [hookPath, controllerPath]) {
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Installed Claude enforcement path is not a regular file.');
+  }
+  return {
+    schema: 1,
+    source: 'claude-plugin-list',
+    plugin_version: expectedVersion,
+    cache_identity: crypto.createHash('sha256').update(cachePath).digest('hex'),
+    hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(hookPath)).digest('hex'),
+    controller_sha256: crypto.createHash('sha256').update(fs.readFileSync(controllerPath)).digest('hex'),
+  };
+}
+
+function sameActivationProof(left, right) {
+  return ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256']
+    .every((key) => left?.[key] === right?.[key]);
+}
+
+function verifyCurrentInstalledEnforcement(expectedProof, options = {}) {
+  try {
+    const command = options.claudeCommand || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
+    processLaunch.assertExecutableAvailable(command, options);
+    const versionResult = spawnClaude(command, ['--version'], { encoding: 'utf8', timeout: probeTimeoutMs() });
+    if (versionResult.status !== 0) throw new Error(commandOutput(versionResult) || 'Claude CLI version probe failed.');
+    const matches = findPluginEntries(runClaudeJson(command, ['plugin', 'list', '--json']));
+    const matching = matches.filter((entry) => {
+      if (!entry?.installPath) return false;
+      const identity = crypto.createHash('sha256').update(path.resolve(entry.installPath)).digest('hex');
+      return identity === expectedProof?.cache_identity;
+    });
+    if (matching.length !== 1) throw new Error('Current Claude plugin cache identity is missing or ambiguous.');
+    const installed = matching[0];
+    if (installed.enabled !== true) throw new Error('Current Claude plugin enabled state is not verified.');
+    if (installed.trusted !== true) throw new Error('Current Claude plugin trust state is not verified.');
+    if (installed.hooksActive !== true && installed.hookExecutionActive !== true) throw new Error('Current Claude hook-active state is not verified.');
+    if (installed.version !== expectedProof?.plugin_version) throw new Error('Current Claude plugin version does not match the activation proof.');
+    const cachePath = path.resolve(installed.installPath);
+    const cacheStat = fs.lstatSync(cachePath);
+    if (!cacheStat.isDirectory() || cacheStat.isSymbolicLink()) throw new Error('Current Claude plugin cache is not a regular directory.');
+    const hookErrors = verifySessionStartHook(path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json'));
+    if (hookErrors.length) throw new Error(hookErrors.join('; '));
+    const currentProof = installedActivationProof(installed, installed.version);
+    if (!sameActivationProof(currentProof, expectedProof)) throw new Error('Current Claude enforcement identity does not match the activation proof.');
+    return { verified: true, activation_proof: currentProof };
+  } catch (error) {
+    return { verified: false, reason: error.message };
+  }
+}
+
 function commandOutput(result) {
   return `${result?.stdout || ''}${result?.stderr || ''}${result?.error ? result.error.message : ''}`.trim();
 }
@@ -735,16 +789,7 @@ async function main(argv = process.argv.slice(2)) {
   const trusted = state.installed.trusted === true;
   const active = state.installed.hooksActive === true || state.installed.hookExecutionActive === true;
   const cachePath = state.installed.installPath || '';
-  const hookBytes = fs.readFileSync(path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json'));
-  const controllerBytes = fs.readFileSync(path.join(cachePath, 'repo', 'scripts', 'toolkit-agent-control.cjs'));
-  const activationProof = trusted && active ? {
-    schema: 1,
-    source: 'claude-plugin-list',
-    plugin_version: expectedVersion,
-    cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'),
-    hook_sha256: crypto.createHash('sha256').update(hookBytes).digest('hex'),
-    controller_sha256: crypto.createHash('sha256').update(controllerBytes).digest('hex'),
-  } : null;
+  const activationProof = trusted && active ? installedActivationProof(state.installed, expectedVersion) : null;
   const summary = {
     ok: true,
     plugin_id: pluginId(),
@@ -798,6 +843,7 @@ module.exports = {
   findPluginEntries,
   mutationDeadlineMs,
   mutationPollMs,
+  installedActivationProof,
   probeTimeoutMs,
   readExpectedToolkitVersion,
   resolutionBudgetMs,
@@ -808,6 +854,7 @@ module.exports = {
   validateRepoPluginSource,
   verifyBudgetMs,
   validateInstalledEnforcement,
+  verifyCurrentInstalledEnforcement,
   verifySessionStartHook,
   writeBudgetMs,
   pluginId

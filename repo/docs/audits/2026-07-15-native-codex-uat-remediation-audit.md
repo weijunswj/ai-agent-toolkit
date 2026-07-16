@@ -1,7 +1,7 @@
 # Native Codex UAT Remediation Audit
 
 Date: 2026-07-15
-Status: Five post-review material blockers repaired, clean-worktree validated, and exact code-head CI verified; native UAT pending
+Status: Current exact-head validation and review evidence is tracked in PR #259; native UAT pending
 
 ## Scope
 
@@ -191,6 +191,17 @@ Local evidence before the implementation commit:
 No live Codex/Claude config or cache, credential, Docker, n8n, Cloudflare, production, external runtime, historical `.staging-*`, or ignored backup material was touched. Native Codex and Claude UAT remains pending. Issues #240, #241, and #247 remain open.
 
 Exact code head `8ebbfebf6ec2f8042072fc2896796c8186302345` passed both full validation workflows (2m52s and 3m02s), generated-surface sync (4s), skill packaging (9s), pack packaging (4s), the CodeQL workflow gate (2s), and the actions (32s), JavaScript/TypeScript (1m13s), and Python (43s) CodeQL analyses. Setup probe findings were eliminated by centralizing through the shell-free helper. The remaining streaming-worker finding was reviewed as a false positive because validated executable plus separate argv uses no shell; the equivalent regression-only finding was classified as used in tests. All review threads were replied to with exact-head evidence and resolved only after this verification.
+
+## Three-Blocker Final Review Amendment
+
+Starting reviewed head: `2b1726566579f4fcb3f0b173004ac5d7d41fcac3`.
+
+- Before the admission lock, direct launch now performs a bounded read-only native plugin verification through the selected Claude CLI. Current enabled, trusted, and hook-active state must be exact, and the current cache path, hook bytes, controller bytes, and plugin version must match the persisted proof. Missing, malformed, stale, replayed, or unverifiable state refuses before queue, reservation, or job artifacts. Setup proof remains necessary but is no longer sufficient by itself.
+- Toolkit-managed children pass the supported variadic `--disallowedTools Agent Task` arguments with separate argv. Medium effort, fast/background disablement, prompt-free argv, and stdin-only prompt transport are unchanged.
+- Direct launch resolves executable availability synchronously before enforcement verification and admission. Known-missing bare commands and explicit `.js`/`.cjs`/`.mjs`, `.exe`, `.cmd`, or `.bat` paths refuse without launched status, state, artifacts, or supervisor. If the executable disappears after preflight, the existing supervisor error/finally path terminates safely and releases owned reservation state.
+- Toolkit Local Bridge project, native manifests, bridge/client/controller constants, setup expectations, generated outputs, and tests align at `2.7.3`.
+
+Local amendment evidence: focused Claude plugin/process/controller/lifecycle tests passed 62/62; setup/profile/orchestration tests passed 53/53; Codex configuration/plugin/SessionStart regressions passed 94/95 with one expected POSIX-only skip; Toolkit Local Bridge passed 133/133; generated/project/doc/source-lock/published-surface/fallback-risk checks and skill/pack packaging passed. Direct validator execution remains contaminated only by the protected ignored `.agent-toolkit-backups` directory and is rerun from a clean detached worktree without touching that material.
 
 ## Release Gates
 

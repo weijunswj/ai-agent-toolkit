@@ -59,3 +59,12 @@ test('unsafe or ambiguous executable strings are rejected before process creatio
     assert.throws(() => launch.claudeSpawnParts(command, []), /empty|ambiguous|unsafe|Bare Claude/i);
   }
 });
+
+test('known missing explicit and bare Claude executables fail availability preflight', () => {
+  const missing = fs.mkdtempSync(path.join(os.tmpdir(), 'missing-claude-parent-'));
+  fs.rmSync(missing, { recursive: true, force: true });
+  for (const extension of ['cjs', 'exe', 'cmd', 'bat']) {
+    assert.throws(() => launch.assertExecutableAvailable(`${missing}.${extension}`), /not available/i);
+  }
+  assert.throws(() => launch.assertExecutableAvailable('missing-claude-command-for-toolkit-test', { env: { PATH: '' } }), /not available/i);
+});

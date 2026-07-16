@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.2';
+const CONTROL_VERSION = '2.7.3';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
@@ -164,6 +164,15 @@ function validActivationProof(proof, expected = {}) {
   return true;
 }
 
+function verifyCurrentClaudeEnforcement(profile, options = {}) {
+  const current = require('./setup-claude-toolkit-plugin.cjs').verifyCurrentInstalledEnforcement(profile.activation_proof, {
+    claudeCommand: options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude',
+  });
+  return Boolean(current?.verified === true && validActivationProof(current.activation_proof)
+    && ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256']
+      .every((key) => current.activation_proof[key] === profile.activation_proof?.[key]));
+}
+
 function readProfile(host = 'claude-code', options = {}) {
   const raw = readJson(profilePath(host, options));
   if (!raw) return rootOnlyProfile(host, 'unconfigured-root-only', 'No verified Toolkit profile is configured.');
@@ -312,6 +321,7 @@ function admissionDecision(specInput, options = {}) {
   if (profile.supported !== true || profile.status !== 'configured' || profile.enforcement_verified !== true
     || profile.controller_version !== CONTROL_VERSION || profile.topology !== TOPOLOGIES.CLAUDE_DIRECT
     || ![CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) return refusal('The selected Claude profile is root-only, stale, unsupported, or outside the verified Toolkit launch boundary.');
+  if (!verifyCurrentClaudeEnforcement(profile, options)) return refusal('Current Claude plugin trust, hook activation, and installed enforcement identity could not be verified.');
   const resources = inspectResources(options);
   if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
 
@@ -400,7 +410,7 @@ function claudeInvocation(spec, options = {}) {
   const executable = options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude';
   const promptBytes = options.promptBytes || Buffer.from(String(checked.child_prompt || checked.child_responsibility), 'utf8');
   if (!Buffer.isBuffer(promptBytes) || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Child prompt exceeds the bounded private transport limit.');
-  const args = ['--print', '--output-format', 'json', '--effort', checked.effort, '--disallowedTools', 'Agent', '--permission-mode', 'default'];
+  const args = ['--print', '--output-format', 'json', '--effort', checked.effort, '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default'];
   const env = { ...process.env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CHILD: '1' };
   const parts = processLaunch.claudeSpawnParts(executable, args);
   return { executable: parts.command, args: parts.args, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
@@ -413,7 +423,7 @@ function launch(specInput, options = {}) {
     spec = validateLaunchSpec(specInput);
     promptBytes = Buffer.from(String(spec.child_prompt || spec.child_responsibility), 'utf8');
     if (promptBytes.length > MAX_PROMPT_BYTES) return refusal('Child prompt exceeds the bounded private transport limit.');
-    processLaunch.claudeSpawnParts(options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude', []);
+    processLaunch.assertExecutableAvailable(options.claudeCli || process.env.AI_AGENT_TOOLKIT_CLAUDE_CLI || 'claude');
   } catch (error) { return refusal(error.message); }
   const admitted = admissionDecision(spec, options);
   if (admitted.result !== RESULTS.START) return admitted;
@@ -507,6 +517,6 @@ if (require.main === module) main().then((code) => { process.exitCode = code; })
 
 module.exports = {
   SCHEMA, CONTROL_VERSION, RESULTS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES,
-  controlRoot, profilePath, statePath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof,
+  controlRoot, profilePath, statePath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement,
   admissionDecision, updateReservation, releaseReservation, claudeInvocation, launch, recoverState, pidAlive,
 };
