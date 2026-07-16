@@ -273,13 +273,28 @@ The full Toolkit Local Bridge run reported 32 passing tests before the known Win
 
 Exact implementation-and-audit head `cd3f03e1dcee2e2205260eab4b989a8432bab260` passed both validation workflows, generated-surface sync, skill packaging, pack packaging, all three CodeQL analyses, and the CodeQL workflow gate. The final audit-only closure head remains subject to the same exact-head gate before thread resolution.
 
+## Post-Merge Four-Finding Hotfix
+
+Authoritative starting main: `e1b6edb15fa01ad9acdeb57fec6f69c361411d5b`, the merge of PR #259.
+
+- Toolkit-managed Claude children now use the same official `--no-session-persistence` flag as capability probing. JSON print output, effort, Agent/Task denial, default permissions, fast/background disablement, bounded private stdin prompt transport, private output/error files, and reservation cleanup remain unchanged.
+- A supported topology `keep` resolves before capacity reconciliation. Kept broader-native therefore remains broader-native for keep or root-only capacity across flags, plans, JSON, interactive/piped answers, and execution, while explicit root-only/direct behavior and unsupported-state fail-closed handling remain unchanged.
+- Windows Codex setup atomically publishes and verifies SessionStart runtime metadata before atomically activating the PowerShell hook. Runtime failure leaves the previous source hook; hook failure leaves valid metadata plus the previous hook; success and rerun preserve complete freshness and idempotency.
+- Detached Claude supervisors inherit the exact effective preflight environment. No environment values are serialized into argv, job specifications, state, queues, reservations, or logs; the child adds only the existing Toolkit child overrides.
+- Toolkit packaged surfaces align at `2.7.9`. No topology, resource, nesting, queue, or agent architecture was added.
+
+Focused evidence: the complete requested controller, lifecycle, topology, profile execution, setup orchestration, Codex plugin/SessionStart, and Claude process/plugin matrix passed 185 tests with 11 platform/capability skips. Surrounding Codex delegation/configuration passed 57 tests with 1 expected POSIX-only skip.
+
+Project sync, instruction sync, repo-doc sync, source-lock, published-surface, fallback-risk, portability, skill package, pack package, and `git diff --check` passed. The full Toolkit Local Bridge run reported 32 passing tests before the known Windows post-summary handle retained the process through the 15-minute bound; no assertion failure was reported and no owned orphan remained. The complete validator test process emitted no result before the 15-minute bound and left no owned orphan. Direct primary-worktree validation remains contaminated only by protected ignored backup material; clean tracked-file validation and exact-head CI remain required before follow-up PR closure.
+
 ## Release Gates
 
+- The four post-merge findings are repaired locally and remain subject to surrounding validation, a non-draft follow-up PR, exact-head CI/CodeQL, and evidence replies on the merged PR threads.
 - The sole current exact-head finding is repaired locally by activation-proof schema 3 and `process_launch_sha256`. It remains subject to surrounding validation, exact-head CI/CodeQL, evidence reply, and thread resolution.
 - The prior four exact-head findings remain repaired: trusted POSIX launcher execution, unified Claude command resolution, complete Codex setup dependency fingerprints, and Claude SessionStart bridge cache verification.
 - The eight earlier exact-head findings remain repaired: canonical Codex removal identity, private artifacts, canonical topology/capacity, aggregate reservation memory, installed-hook coupling, complete profile validation, kept-profile capability downgrade, and prompt-free argv.
 - Implementation-head CI initially found one stale validator-version expectation on `8fa84a84bf9d7a39c4f865813617d9d7dc3ea7ce`. The one-line repair in `6207ba997d9ca1cb111e87a3113cd9be5eff53e4` passed both validation workflows, generated-surface sync, both package checks, the CodeQL workflow gate, and all material CodeQL analyses. Any subsequent closure-note head remains subject to the same exact-head gate.
-- PR remains unmerged.
+- PR #259 merged as `e1b6edb15fa01ad9acdeb57fec6f69c361411d5b`; the post-merge hotfix PR remains unmerged.
 - Issues #241 and #247 remain open.
 - Native Codex C1/C2 and startup/resume/clear/compact reruns remain post-merge gates.
 - Claude Code native UAT remains pending after Codex has a stable disposition.

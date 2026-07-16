@@ -1237,6 +1237,10 @@ function reconcileClaudeQuestionChoices(args, current) {
   if (args.host !== 'claude-code') return;
   const choices = args.setupChoices;
   const currentProfile = current.agentProfile || agentControl.readProfile('claude-code');
+  if (choices.claudeTopology === 'keep' && currentProfile.supported === true) {
+    choices.claudeTopology = currentProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-direct'
+      : (currentProfile.topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'broader-native' : 'root-only');
+  }
   if (choices.claudeAgentCapacity === 'root-only' && choices.claudeTopology !== 'broader-native') choices.claudeTopology = 'root-only';
   if (['root-only', 'broader-native'].includes(choices.claudeTopology)) choices.claudeAgentCapacity = 'root-only';
   if (choices.claudeTopology === 'keep' && currentProfile.supported !== true) {

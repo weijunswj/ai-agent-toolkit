@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.8",
+  "version": "2.7.9",
   "version_policy": "semver",
-  "version_notes": "Binds the complete Claude native Agent/Task denial runtime, including the process-launch dependency, into activation proof schema 3; Codex remains root-only under the strict contract.",
+  "version_notes": "Disables Claude child-session persistence, preserves kept broader-native profiles, publishes Codex Windows runtime metadata before hook activation, and carries the verified environment through detached launch.",
   "outputs": [
     {
       "kind": "curated",

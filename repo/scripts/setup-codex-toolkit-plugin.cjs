@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.7.8';
+const EXPECTED_TOOLKIT_VERSION = '2.7.9';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -292,8 +292,11 @@ function prepareInstalledSessionStart(cacheRoot, options = {}) {
   const runtimeBytes = Buffer.from(`${JSON.stringify({ schema: 1, node_path: nodePath }, null, 2)}\n`, 'utf8');
   const hooksChanged = !fs.readFileSync(hooksPath).equals(hooksBytes);
   const runtimeChanged = !fs.existsSync(runtimePath) || !fs.readFileSync(runtimePath).equals(runtimeBytes);
-  if (hooksChanged) writeFileAtomically(hooksPath, hooksBytes);
-  if (runtimeChanged) writeFileAtomically(runtimePath, runtimeBytes);
+  const writeAtomic = options.writeFileAtomically || writeFileAtomically;
+  if (runtimeChanged) writeAtomic(runtimePath, runtimeBytes);
+  const runtimeErrors = verifySessionStartRuntime(cacheRoot, { ...options, platform: 'win32', nodePath });
+  if (runtimeErrors.length) throw new Error(runtimeErrors.join('; '));
+  if (hooksChanged) writeAtomic(hooksPath, hooksBytes);
   return { changed: hooksChanged || runtimeChanged, hooksChanged, runtimeChanged };
 }
 
