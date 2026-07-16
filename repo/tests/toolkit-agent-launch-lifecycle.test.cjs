@@ -32,7 +32,7 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
     "if (process.argv[2] === 'plugin' && process.argv[3] === 'list') { process.stdout.write(JSON.stringify({ installed: [pluginEntry] }) + '\\n'); process.exit(0); }",
     "let input = ''; process.stdin.setEncoding('utf8');",
     "process.stdin.on('data', (chunk) => { input += chunk; });",
-    `process.stdin.on('end', () => { if (process.env.REQUIRED_CHILD_CONFIG !== ${JSON.stringify(requiredConfig)}) { console.error('missing required child config'); process.exitCode = 7; return; } process.stdout.write(JSON.stringify({ args: process.argv.slice(2), input, option_marker: process.env.ONLY_IN_OPTIONS_ENV, parent_marker: process.env.PARENT_ONLY_ENV, required_config: process.env.REQUIRED_CHILD_CONFIG, fast_disabled: process.env.CLAUDE_CODE_DISABLE_FAST_MODE, background_disabled: process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS })); });`,
+    "process.stdin.on('end', () => { if (process.env.REQUIRED_CHILD_CONFIG !== 'REQUIRED_CHILD_CONFIG_2a91') { console.error('missing required child config'); process.exitCode = 7; return; } process.stdout.write(JSON.stringify({ args: process.argv.slice(2), input, option_marker: process.env.ONLY_IN_OPTIONS_ENV, parent_marker: process.env.PARENT_ONLY_ENV, required_config: process.env.REQUIRED_CHILD_CONFIG, fast_disabled: process.env.CLAUDE_CODE_DISABLE_FAST_MODE, background_disabled: process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS })); });",
     '',
   ].join('\n'));
   const previousParentMarker = process.env.PARENT_ONLY_ENV;
