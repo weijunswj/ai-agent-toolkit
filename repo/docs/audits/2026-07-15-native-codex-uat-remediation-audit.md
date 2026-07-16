@@ -287,6 +287,8 @@ Focused evidence: the complete requested controller, lifecycle, topology, profil
 
 Project sync, instruction sync, repo-doc sync, source-lock, published-surface, fallback-risk, portability, skill package, pack package, and `git diff --check` passed. The full Toolkit Local Bridge run reported 32 passing tests before the known Windows post-summary handle retained the process through the 15-minute bound; no assertion failure was reported and no owned orphan remained. The complete validator test process emitted no result before the 15-minute bound and left no owned orphan. Direct primary-worktree validation remains contaminated only by protected ignored backup material. Without touching it, a clean tracked-file export of implementation commit `33db1134165b303f25aa68c27e0918d391c327b1` passed direct Toolkit validation, project freshness, repo-doc source-of-truth sync, skill packaging, pack packaging, and `git diff --check`. Exact-head CI remains required before follow-up PR closure.
 
+PR #260 exact implementation-and-review head `a43ba3af5eb3b18b7ae10608db36e1faf12009a1` passed both validation workflows, generated auto-sync, skill packaging, pack packaging, all three CodeQL analyses, and the CodeQL workflow gate. CodeQL identified one test-only dynamic code-construction finding in the environment lifecycle fixture; that head replaces the unnecessary interpolation with a fixed literal, passes the focused lifecycle test 2/2, and records the alert as fixed. The final audit-only closure head remains subject to the same exact-head gate.
+
 ## Release Gates
 
 - The four post-merge findings are repaired and locally validated. They remain subject to a non-draft follow-up PR, exact-head CI/CodeQL, and evidence replies on the merged PR threads.
