@@ -92,6 +92,7 @@ function canReplaceUserOwnedRuntimeControls(state, runtime) {
   }
   if (String(state.ownership || '').startsWith('user-owned-compatible-')) return true;
   if (state.status !== 'conflicting' || !state.layout?.ok || !state.parsed?.ok) return false;
+  if (state.layout.recognizedToolkitDelegationMarkers?.length) return false;
   if (runtime === RUNTIMES.V1) {
     return state.layout.agentsTables.length === 1
       && state.layout.beginMarkers.length === 0

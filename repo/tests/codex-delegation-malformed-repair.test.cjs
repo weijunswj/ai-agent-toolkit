@@ -62,6 +62,32 @@ function malformedV2(kind, eol = '\n') {
   throw new Error(`unknown fixture ${kind}`);
 }
 
+function missingFinalV2End(extraLine = '', eol = '\n') {
+  const replacement = extraLine ? `${extraLine}${eol}` : '';
+  return config.expectedV2Block(1, eol).replace(config.CODEX_HELPER_GUIDANCE_END, replacement);
+}
+
+function missingFirstV2Begin(extraLine = '', eol = '\n') {
+  const prefix = extraLine ? `${extraLine}${eol}` : '';
+  return config.expectedV2Block(1, eol)
+    .replace(`${config.CODEX_V2_ENABLEMENT_BEGIN}${eol}`, '')
+    .replace('enabled = true', `${prefix}enabled = true`);
+}
+
+function malformedLegacy(boundary, extraLine = '', eol = '\n') {
+  const prefix = extraLine ? `${extraLine}${eol}` : '';
+  const suffix = extraLine ? `${eol}${extraLine}` : '';
+  if (boundary === 'missing-end') {
+    return config.expectedLegacyBlock(1, eol).replace(`${eol}${config.CODEX_DELEGATION_END}`, suffix);
+  }
+  if (boundary === 'missing-begin') {
+    return config.expectedLegacyBlock(1, eol)
+      .replace(`${config.CODEX_DELEGATION_BEGIN}${eol}`, '')
+      .replace('max_threads = 1', `${prefix}max_threads = 1`);
+  }
+  throw new Error(`unknown legacy boundary ${boundary}`);
+}
+
 function preview(filePath, codexHome, helperCount = 0) {
   return config.previewCodexDelegation(filePath, {
     runtime: V2,
@@ -95,6 +121,115 @@ test('recognized missing, duplicate, and reversed V2 markers classify as bounded
     assert.notEqual(state.status, 'migration-required');
     assert.notEqual(state.ownership, 'toolkit-managed-v2');
     assert.notEqual(state.ownership, 'user-owned-compatible-v2');
+  }
+});
+
+test('category-aware unmatched V2 boundaries reject content outside the old selected interval', () => {
+  const unsafe = [
+    ['missing final end with trailing user comment', missingFinalV2End('# user-owned trailing comment')],
+    ['missing final end with trailing user assignment', missingFinalV2End('user_setting = "keep"')],
+    ['missing first begin with leading user comment', missingFirstV2Begin('# user-owned leading comment')],
+    ['missing first begin with leading user assignment', missingFirstV2Begin('user_setting = "keep"')],
+    ['unsupported assignment after the final canonical assignment', missingFinalV2End('unsupported_setting = true')],
+  ];
+  for (const [label, block] of unsafe) {
+    const state = config.codexDelegationConfigState(Buffer.from(v2Config(block)), 'synthetic/config.toml', V2);
+    assert.equal(state.status, 'conflicting', `${label}: ${state.detail}`);
+  }
+
+  for (const [label, block, boundarySource] of [
+    ['missing final end at table boundary', missingFinalV2End(), 'table-end'],
+    ['missing first begin at table boundary', missingFirstV2Begin(), 'table-start'],
+    ['missing capacity end before a valid next category', malformedV2('missing-end'), 'before:root-guidance'],
+    ['missing capacity begin after a valid previous category', malformedV2('missing-begin'), 'after:enablement'],
+  ]) {
+    const state = config.codexDelegationConfigState(Buffer.from(v2Config(block)), 'synthetic/config.toml', V2);
+    assert.equal(state.status, 'repair-required', `${label}: ${state.detail}`);
+    assert.equal(state.repair.implied_category_spans.length, 1, label);
+    assert.equal(state.repair.implied_category_spans[0].boundary_source, boundarySource, label);
+  }
+});
+
+test('category-aware unmatched legacy boundaries reject leading and trailing user content', () => {
+  const cases = [
+    ['missing end with trailing comment', malformedLegacy('missing-end', '# user-owned trailing comment'), 'conflicting'],
+    ['missing end with trailing assignment', malformedLegacy('missing-end', 'user_setting = "keep"'), 'conflicting'],
+    ['missing begin with leading comment', malformedLegacy('missing-begin', '# user-owned leading comment'), 'conflicting'],
+    ['missing begin with leading assignment', malformedLegacy('missing-begin', 'user_setting = "keep"'), 'conflicting'],
+    ['safe missing end', malformedLegacy('missing-end'), 'repair-required'],
+    ['safe missing begin', malformedLegacy('missing-begin'), 'repair-required'],
+  ];
+  for (const [label, block, expected] of cases) {
+    const state = config.codexDelegationConfigState(Buffer.from(`[agents]\n${block}\n`), 'synthetic/config.toml', V1);
+    assert.equal(state.status, expected, `${label}: ${state.detail}`);
+    if (expected === 'repair-required') {
+      assert.equal(state.repair.implied_category_spans[0].boundary_source, label.includes('end') ? 'table-end' : 'table-start');
+    }
+  }
+});
+
+test('duplicate and overlapping malformed category interpretations remain fail closed', () => {
+  const doubleDuplicate = config.expectedV2Block(1, '\n')
+    .replace(config.CODEX_HELPER_CAPACITY_BEGIN, `${config.CODEX_HELPER_CAPACITY_BEGIN}\n${config.CODEX_HELPER_CAPACITY_BEGIN}`)
+    .replace(config.CODEX_ROOT_GUIDANCE_BEGIN, `${config.CODEX_ROOT_GUIDANCE_BEGIN}\n${config.CODEX_ROOT_GUIDANCE_BEGIN}`);
+  const multipleCandidates = config.expectedV2Block(1, '\n')
+    .replace(config.CODEX_HELPER_CAPACITY_BEGIN, `${config.CODEX_HELPER_CAPACITY_BEGIN}\n${config.CODEX_HELPER_CAPACITY_BEGIN}`)
+    .replace(config.CODEX_HELPER_CAPACITY_END, `${config.CODEX_HELPER_CAPACITY_END}\n${config.CODEX_HELPER_CAPACITY_END}`);
+  const overlapping = config.expectedV2Block(1, '\n')
+    .replace(`${config.CODEX_HELPER_CAPACITY_END}\n`, '')
+    .replace(`${config.CODEX_ROOT_GUIDANCE_BEGIN}\n`, '');
+  const unknownInsideImplied = missingFinalV2End('# AI-AGENT-TOOLKIT:END CODEX-UNKNOWN-CATEGORY v1');
+  for (const [label, block] of [
+    ['two duplicated malformed categories', doubleDuplicate],
+    ['multiple candidate spans in one category', multipleCandidates],
+    ['overlapping category spans', overlapping],
+    ['unknown marker inside implied span', unknownInsideImplied],
+  ]) {
+    const state = config.codexDelegationConfigState(Buffer.from(v2Config(block)), 'synthetic/config.toml', V2);
+    assert.equal(state.status, 'conflicting', `${label}: ${state.detail}`);
+  }
+});
+
+test('every newly rejected implied-span case invokes no editor, backup, replacement, or write', async () => {
+  const cases = [
+    ['v2 trailing comment', V2, v2Config(missingFinalV2End('# user-owned trailing comment'))],
+    ['v2 trailing assignment', V2, v2Config(missingFinalV2End('user_setting = "keep"'))],
+    ['v2 leading comment', V2, v2Config(missingFirstV2Begin('# user-owned leading comment'))],
+    ['v2 leading assignment', V2, v2Config(missingFirstV2Begin('user_setting = "keep"'))],
+    ['v2 unsupported trailing assignment', V2, v2Config(missingFinalV2End('unsupported_setting = true'))],
+    ['v1 trailing comment', V1, `[agents]\n${malformedLegacy('missing-end', '# user-owned trailing comment')}\n`],
+    ['v1 trailing assignment', V1, `[agents]\n${malformedLegacy('missing-end', 'user_setting = "keep"')}\n`],
+    ['v1 leading comment', V1, `[agents]\n${malformedLegacy('missing-begin', '# user-owned leading comment')}\n`],
+    ['v1 leading assignment', V1, `[agents]\n${malformedLegacy('missing-begin', 'user_setting = "keep"')}\n`],
+    ['two duplicated categories', V2, v2Config(config.expectedV2Block(1, '\n')
+      .replace(config.CODEX_HELPER_CAPACITY_BEGIN, `${config.CODEX_HELPER_CAPACITY_BEGIN}\n${config.CODEX_HELPER_CAPACITY_BEGIN}`)
+      .replace(config.CODEX_ROOT_GUIDANCE_BEGIN, `${config.CODEX_ROOT_GUIDANCE_BEGIN}\n${config.CODEX_ROOT_GUIDANCE_BEGIN}`))],
+    ['multiple duplicate candidates', V2, v2Config(config.expectedV2Block(1, '\n')
+      .replace(config.CODEX_HELPER_CAPACITY_BEGIN, `${config.CODEX_HELPER_CAPACITY_BEGIN}\n${config.CODEX_HELPER_CAPACITY_BEGIN}`)
+      .replace(config.CODEX_HELPER_CAPACITY_END, `${config.CODEX_HELPER_CAPACITY_END}\n${config.CODEX_HELPER_CAPACITY_END}`))],
+    ['overlapping spans', V2, v2Config(config.expectedV2Block(1, '\n')
+      .replace(`${config.CODEX_HELPER_CAPACITY_END}\n`, '')
+      .replace(`${config.CODEX_ROOT_GUIDANCE_BEGIN}\n`, ''))],
+    ['unknown marker in implied span', V2, v2Config(missingFinalV2End('# AI-AGENT-TOOLKIT:END CODEX-UNKNOWN-CATEGORY v1'))],
+  ];
+  for (const [label, runtime, original] of cases) {
+    const { codexHome, filePath, root } = tempConfig(label);
+    write(filePath, original);
+    let editorCalled = false;
+    let replacementCalled = false;
+    const result = await config.configureCodexDelegation(filePath, {
+      runtime,
+      helperCount: 0,
+      codexHome,
+      allowUserOwnedReplacement: true,
+      editor: async () => { editorCalled = true; throw new Error(`rejected state must not invoke editor: ${label}`); },
+      beforeCommit: () => { replacementCalled = true; },
+    });
+    assert.equal(result.status, 'conflicting', `${label}: ${result.detail}`);
+    assert.equal(editorCalled, false, label);
+    assert.equal(replacementCalled, false, label);
+    assert.deepEqual(fs.readFileSync(filePath), Buffer.from(original), label);
+    assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit')), false, label);
   }
 });
 
@@ -194,6 +329,7 @@ test('repair without an approval writes nothing and creates no backup', async ()
 test('repair approval rejects affected-range, proposal, generation, runtime, helper-count, and byte drift before editor or backup', async () => {
   const variants = [
     ['range', (proposal) => ({ ...proposal.approval_binding, repair_identity: { ...proposal.approval_binding.repair_identity, affected_ranges: [] } }), V2, 0, null],
+    ['implied-span', (proposal) => ({ ...proposal.approval_binding, repair_identity: { ...proposal.approval_binding.repair_identity, implied_category_spans: [] } }), V2, 0, null],
     ['proposal', (proposal) => ({ ...proposal.approval_binding, proposal_digest: '0'.repeat(64) }), V2, 0, null],
     ['generation', (proposal) => proposal.approval_binding, V2, 0, 'different-generation'],
     ['runtime', (proposal) => proposal.approval_binding, V1, 0, null],
