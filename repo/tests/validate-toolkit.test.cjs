@@ -516,13 +516,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.7.11';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.7.12';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.7\.11/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.7\.12/i);
 });
 
 test('skill discovery includes migrated skills', () => {

@@ -48,9 +48,19 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.7.11';
+const TOOLKIT_CLIENT_VERSION = '2.7.12';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
-const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v1';
+const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v2';
+
+function expectedCodexUserConfigPath(options = {}) {
+  return path.resolve(options.codexHome || defaultCodexHome(), 'config.toml');
+}
+
+function isExpectedCodexUserConfigPath(configPath, options = {}) {
+  const left = path.resolve(configPath);
+  const right = expectedCodexUserConfigPath(options);
+  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
 
 function inspectCodexDelegationConfig(configPath = codexConfigPath(), runtime = RUNTIMES.UNKNOWN) {
   let stat;
@@ -170,11 +180,13 @@ function approvalBindingPayload(binding) {
     affected_keys: binding.affected_keys,
     backup_generation_id: binding.backup_generation_id,
     proposal_sha256: binding.proposal_sha256,
+    proposal_digest: binding.proposal_digest,
+    repair_identity: binding.repair_identity || null,
     snapshot: approvalSnapshotDescriptor(binding.snapshot),
   };
 }
 
-function createApprovalBinding({ snapshot, runtime, helperCount, affectedKeys, backupGenerationId, proposedBlock }) {
+function createApprovalBinding({ snapshot, runtime, helperCount, affectedKeys, backupGenerationId, proposedBlock, repairIdentity = null }) {
   const snapshotCopy = cloneConfigSnapshot(snapshot);
   const binding = {
     schema: APPROVAL_BINDING_SCHEMA,
@@ -184,8 +196,16 @@ function createApprovalBinding({ snapshot, runtime, helperCount, affectedKeys, b
     affected_keys: Object.freeze([...affectedKeys]),
     backup_generation_id: backupGenerationId,
     proposal_sha256: hashApprovalValue(proposedBlock),
+    repair_identity: repairIdentity ? JSON.parse(JSON.stringify(repairIdentity)) : null,
     snapshot: Object.freeze(snapshotCopy),
   };
+  binding.proposal_digest = hashApprovalValue({
+    runtime,
+    helper_count: helperCount,
+    affected_keys: binding.affected_keys,
+    proposed_block_sha256: binding.proposal_sha256,
+    repair_identity: binding.repair_identity,
+  });
   binding.approval_sha256 = hashApprovalValue(approvalBindingPayload(binding));
   return Object.freeze(binding);
 }
@@ -238,6 +258,9 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
     return { ...inspectCodexDelegationConfig(configPath, runtime), changed: false };
   }
   const state = initialStateFromSnapshot(snapshot, snapshot.config_path, runtime);
+  if (state.status === 'repair-required' && !isExpectedCodexUserConfigPath(snapshot.config_path, options)) {
+    return { ...state, status: 'conflicting', changed: false, detail: 'Malformed Toolkit marker repair is allowed only for the exact active Codex user config path.' };
+  }
   if (userOwnedConfigurationMatchesSelection(state, runtime, helperCount)) {
     return {
       ...state,
@@ -250,16 +273,30 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
   const configurable = state.status === 'unconfigured'
     || state.status === 'migration-required'
     || state.status === 'enablement-migration-required'
+    || state.status === 'repair-required'
     || (state.status === 'configured' && String(state.ownership || '').startsWith('toolkit-managed'))
     || (options.allowUserOwnedReplacement && canReplaceUserOwnedRuntimeControls(state, runtime));
   if (!configurable) return { ...state, changed: false };
   const manageEnablement = runtime === RUNTIMES.V2 && !String(state.enablement_ownership || '').startsWith('user-owned');
   const backupGenerationId = `planned-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
   const backupMetadataPath = path.join(backupRoot(snapshot.config_path), backupGenerationId, 'restore.json');
-  const proposedBlock = runtime === RUNTIMES.V2
+  const repairIdentity = state.status === 'repair-required' ? state.repair : null;
+  const preserveUserValues = repairIdentity?.mode === 'markers-only-preserve-user-values'
+    && repairIdentity.preserved_user_helper_count === helperCount;
+  const proposedBlock = preserveUserValues ? null : (runtime === RUNTIMES.V2
     ? expectedV2Block(helperCount, state.eol || '\n', { manageEnablement })
-    : expectedLegacyBlock(helperCount, state.eol || '\n');
-  const affectedKeys = proposalAffectedKeys(state, runtime);
+    : expectedLegacyBlock(helperCount, state.eol || '\n'));
+  const proposedMaterial = preserveUserValues ? removeMalformedToolkitMaterialBytes(state) : proposedBlock;
+  const affectedKeys = preserveUserValues ? [] : proposalAffectedKeys(state, runtime);
+  const approvalBinding = createApprovalBinding({
+    snapshot,
+    runtime,
+    helperCount,
+    affectedKeys,
+    backupGenerationId,
+    proposedBlock: proposedMaterial,
+    repairIdentity,
+  });
   return {
     ...state,
     status: 'preview',
@@ -271,17 +308,17 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
     backup_metadata_path: backupMetadataPath,
     restore_commands: restoreCommands(backupMetadataPath, options.setupScriptPath),
     proposed_block: proposedBlock,
-    proposed_action: 'isolated Codex app-server config/batchWrite with exact full-proposal delta validation',
+    proposed_action: preserveUserValues
+      ? 'remove only the proven malformed Toolkit marker lines and preserve the compatible user-owned assignments byte-for-byte'
+      : repairIdentity
+      ? 'remove only the proven malformed Toolkit-owned marker/assignment lines, then use isolated Codex app-server config/batchWrite with exact full-proposal delta validation'
+      : 'isolated Codex app-server config/batchWrite with exact full-proposal delta validation',
     affected_keys: affectedKeys,
-    approval_binding: createApprovalBinding({
-      snapshot,
-      runtime,
-      helperCount,
-      affectedKeys,
-      backupGenerationId,
-      proposedBlock,
-    }),
-    requires_user_confirmation: Boolean(state.legacy_values_ignored || canReplaceUserOwnedRuntimeControls(state, runtime)),
+    repair: repairIdentity,
+    preserve_compatible_user_values: preserveUserValues,
+    proposal_digest: approvalBinding.proposal_digest,
+    approval_binding: approvalBinding,
+    requires_user_confirmation: Boolean(repairIdentity || state.legacy_values_ignored || canReplaceUserOwnedRuntimeControls(state, runtime)),
     detail: runtime === RUNTIMES.V2
       ? `The proposal allows ${helperCount} helper(s) plus the main agent (${helpersToTotalThreads(helperCount)} total session threads).`
       : `The proposal allows ${helperCount} direct helper(s) and keeps nested helper spawning blocked at depth 1.`,
@@ -584,6 +621,32 @@ function removeSpans(text, spans) {
     .reduce((current, span) => `${current.slice(0, span.start)}${current.slice(span.end)}`, text);
 }
 
+function removeMalformedToolkitMaterialBytes(state) {
+  const ranges = state.repair?.affected_ranges;
+  if (state.status !== 'repair-required' || !Array.isArray(ranges) || !ranges.length) {
+    throw new Error('No exact repairable malformed Toolkit marker material is available.');
+  }
+  const bytes = Buffer.from(state.bytes);
+  const ordered = [...ranges].sort((left, right) => left.byte_start - right.byte_start);
+  let cursor = 0;
+  const removed = [];
+  const kept = [];
+  for (const range of ordered) {
+    if (!Number.isSafeInteger(range.byte_start) || !Number.isSafeInteger(range.byte_end)
+      || range.byte_start < cursor || range.byte_end <= range.byte_start || range.byte_end > bytes.length) {
+      throw new Error('Malformed Toolkit repair ranges are invalid or overlapping.');
+    }
+    kept.push(bytes.subarray(cursor, range.byte_start));
+    removed.push(bytes.subarray(range.byte_start, range.byte_end));
+    cursor = range.byte_end;
+  }
+  kept.push(bytes.subarray(cursor));
+  if (hashApprovalValue(Buffer.concat(removed)) !== state.repair.affected_bytes_sha256) {
+    throw new Error('Malformed Toolkit repair ranges no longer match their approved bytes.');
+  }
+  return Buffer.concat(kept);
+}
+
 function assertProposalTextDelta(originalBytes, proposalState, runtime, helperCount) {
   const originalText = Buffer.from(originalBytes).toString('utf8');
   const originalLayout = structuralLayout(originalText);
@@ -826,27 +889,66 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
     }
   }
   const initial = initialStateFromSnapshot(initialSnapshot, configPath, runtime);
+  if (initial.status === 'repair-required' && !isExpectedCodexUserConfigPath(configPath, options)) {
+    return { ...initial, status: 'conflicting', changed: false, detail: 'Malformed Toolkit marker repair is allowed only for the exact active Codex user config path.' };
+  }
   if (![RUNTIMES.V2, RUNTIMES.V1].includes(runtime)) return { ...initial, changed: false };
+  if (initial.status === 'repair-required' && !approvedProposal) {
+    return { ...initial, status: 'approval-required', changed: false, detail: 'Malformed historical Toolkit marker repair requires an exact technical proposal and explicit `apply` approval.' };
+  }
   const manageEnablement = runtime === RUNTIMES.V2 && !String(initial.enablement_ownership || '').startsWith('user-owned');
+  const preserveUserValues = initial.repair?.mode === 'markers-only-preserve-user-values'
+    && initial.repair.preserved_user_helper_count === helperCount;
   if (approvedProposal) {
-    const expectedBlock = runtime === RUNTIMES.V2
+    const expectedBlock = preserveUserValues ? removeMalformedToolkitMaterialBytes(initial) : (runtime === RUNTIMES.V2
       ? expectedV2Block(helperCount, initial.eol || '\n', { manageEnablement })
-      : expectedLegacyBlock(helperCount, initial.eol || '\n');
-    const expectedKeys = proposalAffectedKeys(initial, runtime);
+      : expectedLegacyBlock(helperCount, initial.eol || '\n'));
+    const expectedKeys = preserveUserValues ? [] : proposalAffectedKeys(initial, runtime);
     if (approvedProposal.proposal_sha256 !== hashApprovalValue(expectedBlock)
-      || JSON.stringify(approvedProposal.affected_keys) !== JSON.stringify(expectedKeys)) {
+      || JSON.stringify(approvedProposal.affected_keys) !== JSON.stringify(expectedKeys)
+      || JSON.stringify(approvedProposal.repair_identity || null) !== JSON.stringify(initial.status === 'repair-required' ? initial.repair : null)) {
       return approvalFailureResult(runtime, configPath, 'approval-invalid', 'Approved Codex proposal identity does not match the approved snapshot.');
     }
   }
   if (initial.status === 'configured' && initial.helper_count === helperCount) return { ...initial, changed: false };
   const toolkitOwned = String(initial.ownership || '').startsWith('toolkit-managed');
+  const repairableMalformed = initial.status === 'repair-required' && initial.ownership === 'toolkit-malformed-repairable';
   const replaceUserOwned = options.allowUserOwnedReplacement && canReplaceUserOwnedRuntimeControls(initial, runtime);
-  if (!['unconfigured', 'migration-required', 'enablement-migration-required'].includes(initial.status) && !toolkitOwned && !replaceUserOwned) return { ...initial, changed: false };
+  if (!['unconfigured', 'migration-required', 'enablement-migration-required'].includes(initial.status) && !toolkitOwned && !repairableMalformed && !replaceUserOwned) return { ...initial, changed: false };
 
   const stagedBytes = initial.status === 'enablement-migration-required'
     ? migrateV2BooleanEnablement(initial)
-    : (toolkitOwned || initial.status === 'migration-required' ? removeManagedBlockBytes(initial) : initialSnapshot.bytes);
+    : (repairableMalformed
+        ? removeMalformedToolkitMaterialBytes(initial)
+        : (toolkitOwned || initial.status === 'migration-required' ? removeManagedBlockBytes(initial) : initialSnapshot.bytes));
   const stagedState = codexDelegationConfigState(stagedBytes, configPath, runtime);
+  if (repairableMalformed && preserveUserValues) {
+    if (!userOwnedConfigurationMatchesSelection(stagedState, runtime, helperCount)) {
+      return { ...initial, status: 'conflicting', changed: false, detail: 'Marker-only repair did not preserve the approved compatible user-owned helper behavior.' };
+    }
+    const result = commitProposal(
+      configPath,
+      initialSnapshot,
+      initial,
+      stagedBytes,
+      () => {
+        const verified = inspectCodexDelegationConfig(configPath, runtime);
+        if (!userOwnedConfigurationMatchesSelection(verified, runtime, helperCount)) {
+          throw new Error(`Post-repair Codex config verification failed: ${verified.detail || verified.status}`);
+        }
+        return verified;
+      },
+      { ...options, backupGenerationId }
+    );
+    return {
+      ...result,
+      repaired_malformed_toolkit_material: true,
+      preserved_compatible_user_values: true,
+      repair: initial.repair,
+      proposed_block: null,
+      temporary_cleanup: 'no editor invocation required; compatible user-owned assignments were preserved',
+    };
+  }
   if (stagedState.status !== 'unconfigured' && !replaceUserOwned) {
     return { ...initial, status: 'conflicting', changed: false, detail: `Toolkit-owned block removal did not produce an unconfigured ${runtime} proposal base: ${stagedState.detail}` };
   }
@@ -886,6 +988,8 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
     editor: edit.editor || 'injected test editor',
     proposed_block: runtime === RUNTIMES.V2 ? expectedV2Block(helperCount, initial.eol || '\n', { manageEnablement }) : expectedLegacyBlock(helperCount, initial.eol || '\n'),
     migrated_legacy_block: initial.status === 'migration-required',
+    repaired_malformed_toolkit_material: repairableMalformed,
+    repair: repairableMalformed ? initial.repair : undefined,
     migrated_v2_boolean_enablement: initial.status === 'enablement-migration-required',
     temporary_cleanup: edit.temporary_cleanup || 'test editor did not create a temporary app-server directory',
   };
