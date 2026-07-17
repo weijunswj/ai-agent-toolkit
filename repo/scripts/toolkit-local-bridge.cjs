@@ -2255,11 +2255,138 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, write
   return { state, reportPath };
 }
 
+const OUTPUT_PATH_PLACEHOLDER = '<private-path>';
+const OUTPUT_PATH_TRAILING_TEXT_BOUNDARIES = [
+  ' is ',
+  ' was ',
+  ' has ',
+  ' cannot ',
+  ' could ',
+  ' does ',
+  ' failed ',
+  ' became ',
+  ' changed ',
+  ' while ',
+  ' when ',
+  ' because ',
+  ' due to ',
+  ' before ',
+  ' after '
+];
+
+function isOutputPathBoundary(message, index) {
+  return index === 0 || /[\s([{:;,=]/.test(message[index - 1]);
+}
+
+function hasUriSchemeBefore(message, index) {
+  return /[A-Za-z][A-Za-z0-9+.-]*:$/.test(message.slice(0, index));
+}
+
+function outputPathKindAt(message, index, requireBoundary = true) {
+  if (index >= message.length || (requireBoundary && !isOutputPathBoundary(message, index))) return '';
+  const tail = message.slice(index);
+  if (/^file:\/\//i.test(tail)) return 'file-uri';
+  if (/^[A-Za-z]:[\\/]/.test(tail)) return 'drive';
+  if (tail.startsWith('\\\\')) return 'unc-backslash';
+  if (tail.startsWith('//') && !hasUriSchemeBefore(message, index)) return 'unc-forward';
+  if (tail.startsWith('/') && !tail.startsWith('//')) return 'posix';
+  return '';
+}
+
+function isValidOutputPath(candidate, kind) {
+  if (!candidate || /[\r\n\t\0]/.test(candidate)) return false;
+  if (kind === 'drive') return /^[A-Za-z]:[\\/][^\\/]+/.test(candidate);
+  if (kind === 'posix') return candidate.startsWith('/') && candidate.indexOf('/', 1) > 1;
+  if (kind === 'unc-backslash') {
+    return candidate.slice(2).split('\\').filter(Boolean).length >= 2;
+  }
+  if (kind === 'unc-forward') {
+    return candidate.slice(2).split('/').filter(Boolean).length >= 2;
+  }
+  if (kind === 'file-uri') {
+    if (!/^file:\/\//i.test(candidate)) return false;
+    const target = candidate.slice('file://'.length);
+    if (/^\/[A-Za-z]:\//.test(target)) return target.slice(3).includes('/');
+    if (target.startsWith('/')) return target.indexOf('/', 1) > 1;
+    return target.split('/').filter(Boolean).length >= 2;
+  }
+  return false;
+}
+
+function isInternalOutputPathColon(message, start, index, kind) {
+  if (kind === 'drive') return index === start + 1;
+  if (kind !== 'file-uri') return false;
+  if (index === start + 'file'.length) return true;
+  return index >= start + 'file:///C'.length
+    && /[A-Za-z]/.test(message[index - 1])
+    && message[index - 2] === '/';
+}
+
+function unquotedOutputPathEnd(message, start, kind) {
+  let end = start;
+  while (end < message.length) {
+    const character = message[end];
+    if (/[\r\n\t'"`<>|,;)\]}!?#]/.test(character)) break;
+    if (character === ':' && !isInternalOutputPathColon(message, start, end, kind)) break;
+    end += 1;
+  }
+
+  while (end > start && message[end - 1] === ' ') end -= 1;
+  const candidate = message.slice(start, end);
+  for (const boundary of OUTPUT_PATH_TRAILING_TEXT_BOUNDARIES) {
+    let offset = candidate.indexOf(boundary);
+    while (offset !== -1) {
+      const trailingText = candidate.slice(offset + boundary.length);
+      if (!/[\\/]/.test(trailingText)) {
+        end = Math.min(end, start + offset);
+        break;
+      }
+      offset = candidate.indexOf(boundary, offset + boundary.length);
+    }
+  }
+
+  while (end > start && message[end - 1] === ' ') end -= 1;
+  if (end > start && message[end - 1] === '.') end -= 1;
+  return end;
+}
+
 function sanitizeOutputMessage(message) {
-  return String(message || '')
-    .replace(/(^|[\s(:=])\\\\[^\s'"`;,)]*/g, '$1<private-path>')
-    .replace(/(^|[\s(:=])[A-Za-z]:[\\/][^\s'"`;,)]*/g, '$1<private-path>')
-    .replace(/(^|[\s(:=])\/(?!\/)[^\s'"`;,)]*/g, '$1<private-path>');
+  const input = String(message || '');
+  let output = '';
+  let copyFrom = 0;
+  let index = 0;
+
+  while (index < input.length) {
+    const quote = input[index] === "'" || input[index] === '"' ? input[index] : '';
+    if (quote && isOutputPathBoundary(input, index)) {
+      const close = input.indexOf(quote, index + 1);
+      const kind = outputPathKindAt(input, index + 1, false);
+      if (close > index + 1 && kind) {
+        const candidate = input.slice(index + 1, close);
+        if (isValidOutputPath(candidate, kind)) {
+          output += input.slice(copyFrom, index) + OUTPUT_PATH_PLACEHOLDER;
+          index = close + 1;
+          copyFrom = index;
+          continue;
+        }
+      }
+    }
+
+    const kind = outputPathKindAt(input, index);
+    if (kind) {
+      const end = unquotedOutputPathEnd(input, index, kind);
+      const candidate = input.slice(index, end);
+      if (isValidOutputPath(candidate, kind)) {
+        output += input.slice(copyFrom, index) + OUTPUT_PATH_PLACEHOLDER;
+        index = end;
+        copyFrom = index;
+        continue;
+      }
+    }
+    index += 1;
+  }
+
+  return output + input.slice(copyFrom);
 }
 
 function printUpdateReportLine(args, reportPath) {
@@ -4054,6 +4181,7 @@ module.exports = {
   maybeWriteUpdateReport,
   updateReportDir,
   cleanupUpdateReports,
+  sanitizeOutputMessage,
   openUpdateReport,
   replaceDirectoryAtomically,
   parseManagedMarkerBlocks,

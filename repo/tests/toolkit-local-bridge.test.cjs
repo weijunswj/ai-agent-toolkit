@@ -13,6 +13,7 @@ const {
   openUpdateReport,
   updateReportDir,
   cleanupUpdateReports,
+  sanitizeOutputMessage,
   replaceDirectoryAtomically,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
@@ -3020,39 +3021,267 @@ test('hook mode does not create bridge state before setup', () => {
   assert.equal(fs.existsSync(hub), false);
 });
 
-test('routine bridge and hook output is path-safe for synthetic POSIX, Windows, and UNC fixtures', () => {
-  const root = path.join(tmpRoot(), 'synthetic-posix-user-profile-marker');
-  const hub = path.join(root, 'synthetic-temporary-directory-marker', 'synthetic-hub-marker');
-  const repoPath = path.join(root, 'synthetic-repository-marker');
-  const pluginCachePath = path.join(root, 'synthetic-plugin-cache-marker');
-  const targetPath = path.join(root, 'synthetic-target-directory-marker');
-  const reportPath = path.join(root, 'synthetic-report-directory-marker');
-  const windowsPath = 'Z:\\synthetic-user-profile-marker\\synthetic-temporary-directory-marker\\synthetic-hub-marker';
-  const uncPath = '\\\\synthetic-host\\synthetic-share\\synthetic-plugin-cache-marker';
-  const markers = [root, hub, repoPath, pluginCachePath, targetPath, reportPath, windowsPath, uncPath];
-  const env = isolatedHomeEnv(root, { TEMP: path.join(root, 'synthetic-temporary-directory-marker') });
+test('diagnostic path sanitizer handles bounded synthetic path forms without harming useful text', () => {
+  const cases = [
+    {
+      name: 'clean diagnostic text',
+      input: 'validation failed without a path',
+      expected: 'validation failed without a path',
+      paths: [],
+      suffixes: [],
+      placeholders: 0
+    },
+    {
+      name: 'unquoted POSIX path',
+      input: 'cannot read /synthetic/home/repo/private.json; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['/synthetic/home/repo/private.json'],
+      suffixes: ['repo/private.json'],
+      placeholders: 1
+    },
+    {
+      name: 'single-quoted POSIX path',
+      input: "cannot read '/synthetic/home/repo/private.json'; retry later",
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['/synthetic/home/repo/private.json'],
+      suffixes: ['repo/private.json'],
+      placeholders: 1
+    },
+    {
+      name: 'double-quoted POSIX path',
+      input: 'cannot read "/synthetic/home/repo/private.json"; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['/synthetic/home/repo/private.json'],
+      suffixes: ['repo/private.json'],
+      placeholders: 1
+    },
+    {
+      name: 'POSIX path containing spaces',
+      input: 'cannot read /synthetic/home/jane doe/repo/private file.json; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['/synthetic/home/jane doe/repo/private file.json'],
+      suffixes: ['jane doe/repo/private file.json'],
+      placeholders: 1
+    },
+    {
+      name: 'unquoted Windows backslash path',
+      input: 'cannot read Z:\\Synthetic\\Jane\\repo\\private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:\\Synthetic\\Jane\\repo\\private.txt'],
+      suffixes: ['Jane\\repo\\private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'Windows forward-slash path',
+      input: 'cannot read Z:/Synthetic/Jane/repo/private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:/Synthetic/Jane/repo/private.txt'],
+      suffixes: ['Jane/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'single-quoted Windows path',
+      input: "cannot read 'Z:\\Synthetic\\Jane\\repo\\private.txt'; retry later",
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:\\Synthetic\\Jane\\repo\\private.txt'],
+      suffixes: ['Jane\\repo\\private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'double-quoted Windows path',
+      input: 'cannot read "Z:\\Synthetic\\Jane\\repo\\private.txt"; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:\\Synthetic\\Jane\\repo\\private.txt'],
+      suffixes: ['Jane\\repo\\private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'Windows path containing spaces',
+      input: 'cannot read Z:\\Synthetic Users\\Jane Doe\\repo\\private file.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:\\Synthetic Users\\Jane Doe\\repo\\private file.txt'],
+      suffixes: ['Jane Doe\\repo\\private file.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'unquoted UNC path',
+      input: 'cannot read \\\\synthetic-host\\synthetic-share\\repo\\private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['\\\\synthetic-host\\synthetic-share\\repo\\private.txt'],
+      suffixes: ['synthetic-share\\repo\\private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'quoted forward UNC path',
+      input: "cannot read '//synthetic-host/synthetic-share/repo/private.txt'; retry later",
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['//synthetic-host/synthetic-share/repo/private.txt'],
+      suffixes: ['synthetic-share/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'double-quoted backslash UNC path',
+      input: 'cannot read "\\\\synthetic-host\\share name\\repo folder\\private file.txt"; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['\\\\synthetic-host\\share name\\repo folder\\private file.txt'],
+      suffixes: ['share name\\repo folder\\private file.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'UNC path containing spaces',
+      input: 'cannot read \\\\synthetic-host\\share name\\repo folder\\private file.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['\\\\synthetic-host\\share name\\repo folder\\private file.txt'],
+      suffixes: ['share name\\repo folder\\private file.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'Windows file URI',
+      input: 'cannot read file:///Z:/Synthetic/Jane/repo/private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['file:///Z:/Synthetic/Jane/repo/private.txt'],
+      suffixes: ['Jane/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'POSIX file URI containing spaces',
+      input: 'cannot read file:///synthetic/home/jane doe/repo/private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['file:///synthetic/home/jane doe/repo/private.txt'],
+      suffixes: ['jane doe/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'UNC file URI',
+      input: 'cannot read file://synthetic-host/share name/repo/private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['file://synthetic-host/share name/repo/private.txt'],
+      suffixes: ['share name/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'multiple private paths',
+      input: 'copy /synthetic/source/private.txt; then write Z:\\Synthetic Target\\private.txt, if allowed',
+      expected: 'copy <private-path>; then write <private-path>, if allowed',
+      paths: ['/synthetic/source/private.txt', 'Z:\\Synthetic Target\\private.txt'],
+      suffixes: ['source/private.txt', 'Synthetic Target\\private.txt'],
+      placeholders: 2
+    },
+    {
+      name: 'path followed by punctuation',
+      input: 'failure at /synthetic/home/repo/private.txt, code EACCES',
+      expected: 'failure at <private-path>, code EACCES',
+      paths: ['/synthetic/home/repo/private.txt'],
+      suffixes: ['repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'useful text around an unquoted lock path',
+      input: 'lock at Z:\\Synthetic User\\bridge\\update.lock is held by live process 4242',
+      expected: 'lock at <private-path> is held by live process 4242',
+      paths: ['Z:\\Synthetic User\\bridge\\update.lock'],
+      suffixes: ['bridge\\update.lock'],
+      placeholders: 1
+    },
+    {
+      name: 'ordinary HTTPS URL stays readable',
+      input: 'see https://example.test/docs/setup/path for guidance',
+      expected: 'see https://example.test/docs/setup/path for guidance',
+      paths: [],
+      suffixes: [],
+      placeholders: 0
+    },
+    {
+      name: 'option names and relative slash text stay readable',
+      input: 'run --audit and compare read/write behavior',
+      expected: 'run --audit and compare read/write behavior',
+      paths: [],
+      suffixes: [],
+      placeholders: 0
+    },
+    {
+      name: 'no-path failure output stays unchanged',
+      input: 'FAIL: validation failed with code EINVAL.',
+      expected: 'FAIL: validation failed with code EINVAL.',
+      paths: [],
+      suffixes: [],
+      placeholders: 0
+    }
+  ];
+
+  for (const fixture of cases) {
+    const sanitized = sanitizeOutputMessage(fixture.input);
+    assert.equal(sanitized, fixture.expected, fixture.name);
+    assert.equal(
+      sanitized.split('<private-path>').length - 1,
+      fixture.placeholders,
+      `${fixture.name}: placeholder count`
+    );
+    for (const privatePath of fixture.paths) {
+      assert.equal(sanitized.includes(privatePath), false, `${fixture.name}: complete path leaked`);
+    }
+    for (const suffix of fixture.suffixes) {
+      assert.equal(sanitized.includes(suffix), false, `${fixture.name}: path suffix leaked`);
+    }
+  }
+});
+
+test('routine bridge CLI output sanitizes success, hook skip, lock, cleanup warning, and failure paths', () => {
+  const root = path.join(tmpRoot(), 'synthetic user home with spaces');
+  const tempRoot = path.join(root, 'synthetic temporary root with spaces');
+  const hub = path.join(root, 'bridge root with spaces', 'current');
+  fs.mkdirSync(tempRoot, { recursive: true });
+  const env = isolatedHomeEnv(root, { TEMP: tempRoot, TMP: tempRoot, TMPDIR: tempRoot });
 
   let result = run(['--hub', hub, '--enable-auto-sync', '--write'], { env });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, 'Toolkit local bridge sync complete.\n');
-  for (const marker of markers) assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
-  writeJson(path.join(hub, 'state.json'), {
-    schema_version: 1,
-    architecture_version: 2,
-    hub_version: expectedBridgeVersion,
-    auto_sync_enabled: false,
-    targets: {}
-  });
+  result = run(['--hub', hub, '--audit'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(parseLastJson(result.stdout).hub_path, path.resolve(hub), 'explicit audit keeps its path field');
+
+  const unsafeHub = process.platform === 'win32'
+    ? 'Z:\\Synthetic Private Root\\Jane Doe\\repo\\private file.txt'
+    : '/synthetic-private-root/jane doe/repo/private file.txt';
+  const unsafeSuffix = process.platform === 'win32'
+    ? 'Jane Doe\\repo\\private file.txt'
+    : 'jane doe/repo/private file.txt';
+
+  result = run(['--hub', unsafeHub, '--hook', '--write', '--sync-source', 'codex-plugin'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^Toolkit local bridge hook skipped: .*<private-path>/);
+  assert.equal(result.stdout.includes(unsafeHub), false);
+  assert.equal(result.stdout.includes(unsafeSuffix), false);
+  assert.match(result.stdout, /must stay under the current user home or temp directory/);
+
+  result = run(['--hub', unsafeHub, '--write'], { env });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /^FAIL: .*<private-path>/);
+  assert.equal(result.stderr.includes(unsafeHub), false);
+  assert.equal(result.stderr.includes(unsafeSuffix), false);
+  assert.match(result.stderr, /must stay under the current user home or temp directory/);
+
+  const lockState = readJson(path.join(hub, 'state.json'));
+  lockState.targets.opencode.enabled = true;
+  lockState.targets.opencode.explicitly_disabled = false;
+  writeJson(path.join(hub, 'state.json'), lockState);
+  const lockPath = path.join(path.dirname(hub), 'update.lock');
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid });
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], { env });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, 'Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.\n');
-  for (const marker of markers) assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(result.stdout, /Toolkit bridge lock at <private-path> is held by live process .*; skipping sync\./);
+  assert.equal(result.stdout.includes(lockPath), false);
+  assert.equal(result.stdout.includes('bridge root with spaces'), false);
 
-  result = run(['--hub', hub, '--repo-path', repoPath, '--enable-repo-auto-update', '--write'], { env });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /FAIL:.*repo/i);
-  assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(repoPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const blockedReportDir = path.join(tempRoot, 'ai-agent-toolkit', 'update-reports');
+  writeFile(blockedReportDir, 'synthetic directory blocker\n');
+  const cleanupHub = path.join(root, 'cleanup warning hub', 'current');
+  result = run(['--hub', cleanupHub, '--enable-auto-sync', '--write'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Toolkit update report cleanup warning: .*<private-path>/);
+  assert.equal(result.stderr.includes(blockedReportDir), false);
+  assert.equal(result.stderr.includes('synthetic temporary root with spaces'), false);
 });
 
 test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled', () => {
