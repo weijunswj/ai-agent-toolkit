@@ -17,7 +17,7 @@ test('empty consolidated delegation answer selects the visible root-only recomme
     timeout: 300000
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*\*\*Selected:\*\* Root agent only - recommended/);
+  assert.match(result.stdout, /Codex helper agents[\s\S]*\*\*Selected:\*\* Root agent only/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
   assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
   assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), /--disable-codex-plugin-auto-refresh --write/);
@@ -55,7 +55,7 @@ test('migration-required defaults and yes-recommended keep the legacy block unch
     });
     assert.equal(result.status, 0, `${mode}: ${result.stderr || result.stdout}`);
     assert.match(result.stdout, /Update the existing Toolkit helper setting/);
-    assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*\*\*Selected:\*\* Keep current/);
+    assert.match(result.stdout, /Codex helper agents[\s\S]*\*\*Selected:\*\* Keep current/);
     assert.match(result.stdout, /Helper-capacity outcome this run: kept/);
     assert.match(result.stdout, /PR #237 legacy block migrated: no/);
     assert.match(result.stdout, /Configuration changed this run: no/);
@@ -401,7 +401,7 @@ test('managed setup script can run from its own standard managed checkout', () =
     cwd: managedPath, encoding: 'utf8', env: { ...process.env, ...isolatedHomeEnv(root) }, timeout: 300000, windowsHide: true
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Where should Toolkit updates come from\?[\s\S]*Use the dedicated clean update copy - recommended/);
+  assert.match(result.stdout, /Update source[\s\S]*\*\*Selected:\*\* Use the dedicated clean update copy/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
   assert.equal(fs.existsSync(codexConfig(root)), true);
 });

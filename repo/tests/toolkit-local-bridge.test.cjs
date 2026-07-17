@@ -40,7 +40,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.10';
+const expectedBridgeVersion = '2.7.11';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -5184,7 +5184,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2/i, relPath);
     assert.match(text, /semantic wizard model|One semantic wizard model/i, relPath);
-    assert.match(text, /current user-visible outcome.*recommended user-visible outcome.*choices/i, relPath);
+    assert.match(text, /What this controls.*Current:.*Recommended:.*Why:.*Choices:.*consequence.*After applying:/is, relPath);
     assert.match(text, /OpenCode.*omit|Omit OpenCode/i, relPath);
     assert.match(text, /Antigravity.*omit|Omit OpenCode, Antigravity/i, relPath);
     assert.match(text, /OpenCode and Antigravity 2 are opt-in only/i, relPath);
