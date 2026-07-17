@@ -4220,7 +4220,7 @@ test('suppressed legacy delegated repo sync does not write an update report', ()
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
+  assert.equal(result.stdout, 'Toolkit local bridge sync complete.\n');
   assert.equal(readJson(path.join(fixture.hub, 'state.json')).last_update_report_path || '', '');
   assert.match(
     fs.readFileSync(path.join(
