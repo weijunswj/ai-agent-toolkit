@@ -22,6 +22,37 @@ function allRows() {
   return core.setupQuestionDocumentationSpecs();
 }
 
+function managedState(overrides = {}) {
+  const standardPath = path.resolve(repoRoot, '..', 'tk013-standard-source');
+  const customPath = path.resolve(repoRoot, '..', 'tk013-custom-source');
+  return {
+    currentPath: customPath,
+    selectedPath: customPath,
+    defaultPath: standardPath,
+    exists: true,
+    git: true,
+    dirty: false,
+    branch: core.DEFAULT_REPO_BRANCH,
+    remote: core.DEFAULT_REPO_REMOTE,
+    ...overrides,
+  };
+}
+
+function stateWithManaged(managed) {
+  return {
+    managed,
+    audit: { repo_auto_update: {}, targets: {} },
+    runtime: { runtime: 'unknown' },
+    delegation: { status: 'unsupported', helper_count: null },
+    nativePlugin: { status: 'unknown' },
+  };
+}
+
+function updateSourceRow(managed, argv = ['--plan', '--host', 'codex']) {
+  const args = core.parseArgs(argv);
+  return core.setupQuestionSpecs(args, stateWithManaged(managed)).find((row) => row.id === 'update-source');
+}
+
 test('all eight Codex questions expose complete canonical semantics', () => {
   const rows = allRows();
   assert.deepEqual(rows.map((row) => [row.id, row.title]), expectedCodexRows);
@@ -107,4 +138,73 @@ test('representative recommendations are all selectable and deterministic', () =
   const second = allRows();
   assert.deepEqual(second, first);
   for (const row of first) assert.ok(row.choices.map((choice) => choice.value).includes(row.recommended));
+});
+
+test('Update source keep availability uses one verified preservation predicate', () => {
+  const unsafePath = path.join(repoRoot, '.tmp', 'managed-source');
+  const invalidStates = [
+    ['no configured source', managedState({ currentPath: '', selectedPath: path.resolve(repoRoot, '..', 'fallback-only') }), /No Toolkit update source is configured/i],
+    ['missing source', managedState({ exists: false, git: false }), /cannot be found/i],
+    ['non-Git source', managedState({ git: false }), /not a verified Toolkit Git checkout/i],
+    ['dirty source', managedState({ dirty: true }), /local changes/i],
+    ['wrong branch', managedState({ branch: 'review-branch' }), /different branch/i],
+    ['wrong remote', managedState({ remote: 'https://example.invalid/private/repo' }), /unexpected remote/i],
+    ['unsafe source', managedState({ currentPath: unsafePath, selectedPath: unsafePath }), /cannot safely preserve/i],
+  ];
+
+  for (const [label, managed, currentPattern] of invalidStates) {
+    const row = updateSourceRow(managed);
+    assert.deepEqual(row.choices.map((choice) => choice.value), ['default', 'custom'], label);
+    assert.equal(row.recommended, 'default', label);
+    assert.ok(row.choices.some((choice) => choice.value === row.recommended), label);
+    assert.match(row.current, currentPattern, label);
+    const output = `${core.renderSetupQuestionBank([row])}\n${core.renderSetupQuestionBankTerminal([row])}\n${JSON.stringify(row)}`;
+    assert.doesNotMatch(output, /Keep the current update source/i, label);
+    assert.doesNotMatch(output, /example\.invalid|tk013-|\.tmp[\\/]managed-source/i, label);
+  }
+
+  const standardPath = path.resolve(repoRoot, '..', 'tk013-standard-source');
+  const standard = managedState({ currentPath: standardPath, selectedPath: standardPath, defaultPath: standardPath });
+  const standardRow = updateSourceRow(standard);
+  assert.equal(core.canPreserveManagedCheckout(stateWithManaged(standard), core.parseArgs(['--plan'])), true);
+  assert.deepEqual(standardRow.choices.map((choice) => choice.value), ['default', 'keep', 'custom']);
+  assert.equal(standardRow.recommended, 'keep');
+
+  const custom = managedState();
+  const customRow = updateSourceRow(custom);
+  assert.equal(core.canPreserveManagedCheckout(stateWithManaged(custom), core.parseArgs(['--plan'])), true);
+  assert.deepEqual(customRow.choices.map((choice) => choice.value), ['default', 'keep', 'custom']);
+  assert.equal(customRow.recommended, 'default');
+  assert.match(customRow.choices.find((choice) => choice.value === 'keep').consequence, /separate clean custom checkout/i);
+
+});
+
+test('Update source renderers and generated documentation use corrected canonical choices', () => {
+  const args = core.parseArgs(['--plan', '--host', 'codex']);
+  const current = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
+  const planned = core.plannedQuestionBank(args, current);
+  const row = planned.specs.find((spec) => spec.id === 'update-source');
+  const plan = core.setupPlan({ ...planned.args, questionBank: planned.specs });
+  const markdown = core.renderSetupQuestionBank(planned.specs);
+  const terminal = core.renderSetupQuestionBankTerminal(planned.specs);
+  assert.deepEqual(row.choices.map((choice) => choice.value), ['default', 'custom']);
+  assert.equal(plan.question_bank.find((spec) => spec.id === 'update-source').choices.length, 2);
+  assert.doesNotMatch(`${markdown}\n${terminal}\n${JSON.stringify(plan.question_bank)}`, /Keep the current update source/i);
+  assert.throws(
+    () => core.plannedQuestionBank(core.parseArgs(['--plan', '--managed-checkout', 'keep']), current),
+    /Update source must be one of: default, custom/i,
+  );
+
+  const generatedRow = core.setupQuestionDocumentationSpecs().find((spec) => spec.id === 'update-source');
+  assert.equal(core.canPreserveManagedCheckout({ managed: {
+    currentPath: core.defaultManagedSourcePath(),
+    defaultPath: core.defaultManagedSourcePath(),
+    exists: true,
+    git: true,
+    dirty: false,
+    branch: core.DEFAULT_REPO_BRANCH,
+    remote: core.DEFAULT_REPO_REMOTE,
+  } }, core.parseArgs(['--plan'])), true);
+  assert.ok(generatedRow.choices.some((choice) => choice.value === 'keep'));
+  assert.equal(fs.readFileSync(path.join(repoRoot, 'repo/docs/SETUP-QUESTIONS.generated.md'), 'utf8'), core.renderSetupQuestionDocumentation());
 });

@@ -818,14 +818,15 @@ function runBridgeAuditReadOnly(args) {
 function inspectManagedCheckout(args, audit) {
   const defaultPath = defaultManagedSourcePath();
   const configuredPath = audit?.repo_auto_update?.repo_path || '';
-  const currentPath = configuredPath || (args.repoRootExplicit ? args.repoRoot : '');
+  const currentPath = configuredPath;
   const selectedPath = args.repoRootExplicit ? args.repoRoot : (configuredPath || args.repoRoot || defaultPath);
-  const exists = fs.existsSync(selectedPath);
-  const gitDir = exists ? runGitCapture(selectedPath, ['rev-parse', '--git-dir'], 'git rev-parse --git-dir', true, true) : '';
-  const branch = gitDir ? runGitCapture(selectedPath, ['branch', '--show-current'], 'git branch --show-current', true, true) : '';
-  const remote = gitDir ? runGitCapture(selectedPath, ['remote', 'get-url', 'origin'], 'git remote get-url origin', true, true) : '';
-  const status = gitDir ? runGitCapture(selectedPath, ['status', '--short'], 'git status --short', true, true) : '';
-  const commit = gitDir ? runGitCapture(selectedPath, ['rev-parse', 'HEAD'], 'git rev-parse HEAD', true, true) : '';
+  const inspectionPath = currentPath || selectedPath;
+  const exists = fs.existsSync(inspectionPath);
+  const gitDir = exists ? runGitCapture(inspectionPath, ['rev-parse', '--git-dir'], 'git rev-parse --git-dir', true, true) : '';
+  const branch = gitDir ? runGitCapture(inspectionPath, ['branch', '--show-current'], 'git branch --show-current', true, true) : '';
+  const remote = gitDir ? runGitCapture(inspectionPath, ['remote', 'get-url', 'origin'], 'git remote get-url origin', true, true) : '';
+  const status = gitDir ? runGitCapture(inspectionPath, ['status', '--short'], 'git status --short', true, true) : '';
+  const commit = gitDir ? runGitCapture(inspectionPath, ['rev-parse', 'HEAD'], 'git rev-parse HEAD', true, true) : '';
   return {
     currentPath,
     selectedPath,
@@ -1182,10 +1183,9 @@ function isStandardManagedCheckout(current) {
   return samePath(current.managed.currentPath, current.managed.defaultPath);
 }
 
-function canRecommendKeepingManagedCheckout(current, args) {
+function canPreserveManagedCheckout(current, args) {
   const managed = current?.managed || {};
   if (!managed.currentPath) return false;
-  if (!isStandardManagedCheckout(current)) return false;
   const resolved = path.resolve(managed.currentPath);
   if (isInside(repoRootFromScript(), resolved) && !(isRunningFromStandardManagedCheckout() && isStandardManagedPath(resolved))) return false;
   if (hasUnsafeManagedPathMarker(resolved)) return false;
@@ -1195,7 +1195,9 @@ function canRecommendKeepingManagedCheckout(current, args) {
 }
 
 function recommendedChoice(key, current, args) {
-  if (key === 'managedCheckout') return canRecommendKeepingManagedCheckout(current, args) ? 'keep' : 'default';
+  if (key === 'managedCheckout') {
+    return canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'keep' : 'default';
+  }
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
@@ -1278,6 +1280,14 @@ function selectedChoice(spec, value) {
   return spec.choices.find((choice) => choice.value === value) || null;
 }
 
+function assertManagedCheckoutChoiceAvailable(args, specs) {
+  const spec = specs.find((candidate) => candidate.key === 'managedCheckout');
+  const selected = spec ? choiceForKey(args, spec.key) : '';
+  if (selected && !choiceValues(spec).includes(selected)) {
+    throw new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
+  }
+}
+
 function reconcileClaudeQuestionChoices(args, current) {
   if (args.host !== 'claude-code') return;
   const choices = args.setupChoices;
@@ -1340,15 +1350,23 @@ function currentHelperOutcome(current) {
 function currentManagedSourceOutcome(current, args) {
   const managed = current?.managed || {};
   if (!managed.currentPath) return 'No Toolkit update source is configured yet.';
+  if (canPreserveManagedCheckout(current, args)) {
+    if (isStandardManagedCheckout(current)) return 'Toolkit uses the dedicated clean managed copy for updates.';
+    return 'Toolkit uses a separate clean custom checkout for updates; the active project checkout is not the update source.';
+  }
   if (!managed.exists) return 'The saved update source cannot be found, so Toolkit cannot use it until setup repairs or replaces that source.';
   if (!managed.git) return 'The saved update source exists but is not a verified Toolkit Git checkout.';
   if (managed.dirty) return 'The configured update source has local changes, so automatic updates will leave it untouched.';
+  const resolved = path.resolve(managed.currentPath);
+  if ((isInside(repoRootFromScript(), resolved) && !(isRunningFromStandardManagedCheckout() && isStandardManagedPath(resolved)))
+      || hasUnsafeManagedPathMarker(resolved)) {
+    return 'The configured update source is in a location Toolkit cannot safely preserve, so a safe source must be selected.';
+  }
   if (managed.branch && managed.branch !== args.repoBranch) return 'The configured update source is on a different branch, so it is not currently ready for managed updates.';
   if (managed.remote && normalizeRemote(managed.remote) !== normalizeRemote(args.repoRemote)) {
     return 'The configured update source points at an unexpected remote, so Toolkit will not fetch from it.';
   }
-  if (isStandardManagedCheckout(current)) return 'Toolkit uses the dedicated clean managed copy for updates.';
-  return 'Toolkit uses a separate clean custom checkout for updates; the active project checkout is not the update source.';
+  return 'The configured update source could not be verified safely, so a safe source must be selected.';
 }
 
 function currentBooleanOutcome(value, enabledText, disabledText, unknownText) {
@@ -1391,7 +1409,9 @@ function setupQuestionSpecs(args, current) {
       whatThisControls: 'Where Toolkit fetches and prepares future updates. A dedicated clean managed copy stays separate from active project repositories, so setup never pulls into or modifies the dirty project checkout you are working in.',
       choices: [
         wizardChoice('default', 'Use the dedicated clean update copy', 'Create or reuse the standard managed checkout, verify its clean main branch, and make it the update source without moving or deleting another checkout.'),
-        wizardChoice('keep', 'Keep the current update source', `Preserve this effective behavior: ${managedCurrent}`),
+        ...(canPreserveManagedCheckout(current, args)
+          ? [wizardChoice('keep', 'Keep the current update source', `Preserve this effective behavior: ${managedCurrent}`)]
+          : []),
         wizardChoice('custom', 'Choose another location', 'Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.'),
       ],
       recommendation: {
@@ -1405,7 +1425,12 @@ function setupQuestionSpecs(args, current) {
       current: managedCurrent,
       currentVerification: current?.managed?.currentPath && current?.managed?.exists ? 'state-derived' : 'unverified-or-absent',
       afterApplying: 'After final approval, setup will create or verify only the selected managed checkout and store it as Toolkit update state. The active project checkout is unchanged; no existing managed copy is moved or removed.',
-      availability: { status: 'available', condition: 'The default, current, and custom choices are resolved against the same managed-checkout inspection.' },
+      availability: {
+        status: canPreserveManagedCheckout(current, args) ? 'available' : 'current-source-unavailable',
+        condition: canPreserveManagedCheckout(current, args)
+          ? 'The current source is offered only because its configured path, Git state, cleanliness, branch, remote, and safe location all verify.'
+          : 'Keep current is omitted because no configured source can be preserved safely; the default and custom choices remain available.',
+      },
     }),
     resolvedQuestion({
       id: 'automatic-updates',
@@ -1693,12 +1718,16 @@ function clonedSetupArgs(args) {
 
 function plannedQuestionBank(args, current) {
   const planned = clonedSetupArgs(args);
-  for (const spec of setupQuestionSpecs(planned, current)) {
+  const initialSpecs = setupQuestionSpecs(planned, current);
+  assertManagedCheckoutChoiceAvailable(planned, initialSpecs);
+  for (const spec of initialSpecs) {
     if (!choiceForKey(planned, spec.key)) assignChoice(planned, spec.key, spec.recommended);
   }
+  const resolvedSpecs = setupQuestionSpecs(planned, current);
+  assertManagedCheckoutChoiceAvailable(planned, resolvedSpecs);
   return {
     args: planned,
-    specs: setupQuestionSpecs(planned, current).map((spec) => ({ ...spec, empty_input: spec.recommended })),
+    specs: resolvedSpecs.map((spec) => ({ ...spec, empty_input: spec.recommended })),
   };
 }
 
@@ -1939,6 +1968,7 @@ async function requireHighHelperCapacityApproval(args, lines, rl) {
 
 async function answerSetupQuestionBank(args, current) {
   const initialSpecs = setupQuestionSpecs(args, current);
+  assertManagedCheckoutChoiceAvailable(args, initialSpecs);
   const initialMissingCount = initialSpecs.filter((spec) => !choiceForKey(args, spec.key)).length;
   let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
   let completeStdinConsumed = false;
@@ -2012,6 +2042,7 @@ async function answerSetupQuestionBank(args, current) {
   if (lines) completeStdinConsumed = true;
 
   if (args.host === 'claude-code') resolveClaudeTopologyCapacity(args, current);
+  assertManagedCheckoutChoiceAvailable(args, setupQuestionSpecs(args, current));
   applySetupChoices(args, current);
   console.log('');
   console.log('Setup choices confirmed before writes:');
@@ -2042,7 +2073,10 @@ async function answerSetupQuestionBank(args, current) {
 function applySetupChoices(args, current) {
   const choices = args.setupChoices;
   if (choices.managedCheckout === 'keep') {
-    args.repoRoot = path.resolve(current.managed.currentPath || current.managed.selectedPath || args.repoRoot);
+    if (!canPreserveManagedCheckout(current, args)) {
+      throw new Error('The current Toolkit update source cannot be preserved safely. Choose the dedicated clean update copy or another location.');
+    }
+    args.repoRoot = path.resolve(current.managed.currentPath);
   } else if (choices.managedCheckout === 'default') {
     args.repoRoot = defaultManagedSourcePath();
     args.repoRootExplicit = false;
@@ -2907,5 +2941,6 @@ module.exports = {
   plannedQuestionBank,
   setupPlan,
   normalizeRemote,
+  canPreserveManagedCheckout,
   main
 };
