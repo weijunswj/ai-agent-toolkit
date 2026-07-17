@@ -18,6 +18,7 @@ const {
   codexConfigPath,
   helpersToTotalThreads,
   parseTomlStructurally,
+  sha256,
   totalThreadsToHelpers,
 } = require('./codex-delegation-common.cjs');
 const { structuralLayout } = require('./codex-delegation-layout.cjs');
@@ -83,6 +84,333 @@ function markerFailure(layout) {
     ['helperGuidanceBeginMarkers', 'helperGuidanceEndMarkers'],
   ];
   return pairs.some(([begin, end]) => layout[begin].length > 1 || layout[end].length > 1 || layout[begin].length !== layout[end].length);
+}
+
+function rawLine(layout, index) {
+  const entry = layout.lines[index];
+  return entry.raw.slice(0, entry.eol ? -entry.eol.length : undefined);
+}
+
+function tableBounds(layout, table) {
+  const next = layout.tables.find((entry) => entry.index > table.index);
+  return { first: table.index + 1, last: next ? next.index - 1 : layout.lines.length - 1 };
+}
+
+function markerRepairKinds(markers) {
+  const kinds = new Set();
+  const categories = [...new Set(markers.map((marker) => marker.category))];
+  for (const category of categories) {
+    const group = markers.filter((marker) => marker.category === category);
+    const begins = group.filter((marker) => marker.boundary === 'begin');
+    const ends = group.filter((marker) => marker.boundary === 'end');
+    if (!begins.length) kinds.add('missing-begin-marker');
+    if (!ends.length) kinds.add('missing-end-marker');
+    if (begins.length > 1 || ends.length > 1) kinds.add('duplicate-recognized-marker');
+    if (begins.length && ends.length && Math.min(...ends.map((marker) => marker.index)) < Math.max(...begins.map((marker) => marker.index))) {
+      kinds.add('reversed-marker-order');
+    }
+  }
+  return [...kinds].sort();
+}
+
+const MARKER_CATEGORY_ORDER = Object.freeze({
+  legacy: Object.freeze(['legacy-limits']),
+  v2: Object.freeze(['enablement', 'helper-capacity', 'root-guidance', 'helper-guidance']),
+});
+
+function markerCategoryGroups(markers, family) {
+  const order = MARKER_CATEGORY_ORDER[family] || [];
+  return order
+    .map((category, orderIndex) => {
+      const categoryMarkers = markers.filter((marker) => marker.category === category);
+      if (!categoryMarkers.length) return null;
+      const begins = categoryMarkers.filter((marker) => marker.boundary === 'begin');
+      const ends = categoryMarkers.filter((marker) => marker.boundary === 'end');
+      return {
+        category,
+        orderIndex,
+        markers: categoryMarkers,
+        begins,
+        ends,
+        structurallyValid: begins.length === 1 && ends.length === 1 && begins[0].index < ends[0].index,
+      };
+    })
+    .filter(Boolean);
+}
+
+function deriveMalformedCategorySpans(layout, bounds, markers, family, assignmentsByCategory, options = {}) {
+  const groups = markerCategoryGroups(markers, family);
+  const malformed = groups.filter((group) => !group.structurallyValid);
+  if (!malformed.length) return null;
+
+  const duplicated = malformed.filter((group) => group.begins.length > 1 || group.ends.length > 1);
+  if (duplicated.length > 1) return null;
+  if (duplicated.length === 1) {
+    const [group] = duplicated;
+    const exactlyOneExtraBoundary = (group.begins.length === 2 && group.ends.length === 1)
+      || (group.begins.length === 1 && group.ends.length === 2);
+    if (!exactlyOneExtraBoundary || malformed.length !== 1) return null;
+  }
+
+  const spans = [];
+  for (const group of malformed) {
+    const categoryAssignments = assignmentsByCategory.get(group.category) || [];
+    if (options.requireAssignments !== false && !categoryAssignments.length) return null;
+
+    let first;
+    let last;
+    let boundarySource;
+    if (group.begins.length === 1 && group.ends.length === 0) {
+      const next = groups.find((candidate) => candidate.orderIndex > group.orderIndex && candidate.structurallyValid);
+      first = group.begins[0].index;
+      last = next ? next.begins[0].index - 1 : bounds.last;
+      boundarySource = next ? `before:${next.category}` : 'table-end';
+    } else if (group.begins.length === 0 && group.ends.length === 1) {
+      const previous = [...groups]
+        .reverse()
+        .find((candidate) => candidate.orderIndex < group.orderIndex && candidate.structurallyValid);
+      first = previous ? previous.ends[0].index + 1 : bounds.first;
+      last = group.ends[0].index;
+      boundarySource = previous ? `after:${previous.category}` : 'table-start';
+    } else if (group.begins.length === 1 && group.ends.length === 1) {
+      first = Math.min(group.begins[0].index, group.ends[0].index);
+      last = Math.max(group.begins[0].index, group.ends[0].index);
+      boundarySource = 'reversed-same-category-markers';
+    } else {
+      const markerIndices = group.markers.map((marker) => marker.index);
+      first = Math.min(...markerIndices);
+      last = Math.max(...markerIndices);
+      boundarySource = 'single-duplicated-category';
+    }
+
+    if (!Number.isInteger(first) || !Number.isInteger(last)
+      || first < bounds.first || last > bounds.last || first > last) return null;
+    if (options.requireAssignments !== false
+      && categoryAssignments.some((assignment) => assignment.index < first || assignment.index > last)) return null;
+    spans.push({
+      category: group.category,
+      first,
+      last,
+      boundary_source: boundarySource,
+      assignments: categoryAssignments,
+    });
+  }
+
+  spans.sort((left, right) => left.first - right.first || left.last - right.last);
+  for (let index = 1; index < spans.length; index += 1) {
+    if (spans[index].first <= spans[index - 1].last) return null;
+  }
+
+  const repairMarkerIndices = new Set(markers.map((marker) => marker.index));
+  for (const span of spans) {
+    const allowedIndices = new Set([
+      ...repairMarkerIndices,
+      ...span.assignments.map((assignment) => assignment.index),
+    ]);
+    for (let index = span.first; index <= span.last; index += 1) {
+      if (allowedIndices.has(index) || rawLine(layout, index).trim() === '') continue;
+      return null;
+    }
+  }
+
+  return spans.map((span) => ({
+    category: span.category,
+    line_start: span.first + 1,
+    line_end: span.last + 1,
+    boundary_source: span.boundary_source,
+  }));
+}
+
+function repairRanges(layout, entries, text) {
+  return [...entries]
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => ({
+      line_start: entry.index + 1,
+      line_end: entry.index + 1,
+      byte_start: Buffer.byteLength(text.slice(0, entry.start), 'utf8'),
+      byte_end: Buffer.byteLength(text.slice(0, entry.end), 'utf8'),
+    }));
+}
+
+function classifyMalformedToolkitRepair(parsed, layout, base) {
+  const markers = layout.recognizedToolkitDelegationMarkers || [];
+  if (!markers.length || ![RUNTIMES.V1, RUNTIMES.V2].includes(base.runtime)) return null;
+  const families = new Set(markers.map((marker) => marker.family));
+  if (families.size !== 1) return null;
+  const expectedFamily = base.runtime === RUNTIMES.V2 ? 'v2' : 'legacy';
+  if (!families.has(expectedFamily)) return null;
+
+  const table = base.runtime === RUNTIMES.V2 ? layout.multiAgentV2Tables[0] : layout.agentsTables[0];
+  const exactlyOneTable = base.runtime === RUNTIMES.V2
+    ? layout.multiAgentV2Tables.length === 1 && layout.multiAgentV2Children.length === 0
+    : layout.agentsTables.length === 1 && layout.agentsChildren.length === 0 && layout.unsupportedAssignments.length === 0;
+  if (!exactlyOneTable || !table) return null;
+  const bounds = tableBounds(layout, table);
+  if (markers.some((marker) => marker.index < bounds.first || marker.index > bounds.last)) return null;
+
+  const markerIndices = new Set(markers.map((marker) => marker.index));
+  const markerFirst = Math.min(...markers.map((marker) => marker.index));
+  const markerLast = Math.max(...markers.map((marker) => marker.index));
+  const markerRegionIsolated = Array.from({ length: markerLast - markerFirst + 1 }, (_, offset) => markerFirst + offset)
+    .every((index) => markerIndices.has(index) || rawLine(layout, index).trim() === '');
+  const begins = markers.filter((marker) => marker.boundary === 'begin');
+  const ends = markers.filter((marker) => marker.boundary === 'end');
+  const markerOnlyBoundarySafe = markerRegionIsolated && (
+    (!begins.length && markerFirst === bounds.first)
+    || (!ends.length && markerLast === bounds.last)
+    || (begins.length && ends.length
+      && Math.max(...ends.map((marker) => marker.index)) < Math.min(...begins.map((marker) => marker.index)))
+  );
+  if (markerOnlyBoundarySafe) {
+    const markerOnlySpans = deriveMalformedCategorySpans(
+      layout,
+      bounds,
+      markers,
+      expectedFamily,
+      new Map(),
+      { requireAssignments: false }
+    );
+    if (!markerOnlySpans) return null;
+    const markerRanges = repairRanges(layout, markers, base.text);
+    let cursor = 0;
+    const kept = [];
+    for (const range of markerRanges) {
+      kept.push(base.bytes.subarray(cursor, range.byte_start));
+      cursor = range.byte_end;
+    }
+    kept.push(base.bytes.subarray(cursor));
+    const cleaned = codexDelegationConfigState(Buffer.concat(kept), base.config_path, base.runtime);
+    const expectedOwnership = base.runtime === RUNTIMES.V2 ? 'user-owned-compatible-v2' : 'user-owned-compatible-v1';
+    if (cleaned.status === 'configured' && cleaned.ownership === expectedOwnership) {
+      const affectedBytes = Buffer.concat(markerRanges.map((range) => base.bytes.subarray(range.byte_start, range.byte_end)));
+      return {
+        ...base,
+        status: 'repair-required',
+        ownership: 'toolkit-malformed-repairable',
+        enablement_ownership: cleaned.enablement_ownership,
+        helper_count: cleaned.helper_count,
+        total_threads: cleaned.total_threads,
+        repair: {
+          schema: 'ai-agent-toolkit.codex-malformed-marker-repair.v1',
+          family: expectedFamily,
+          mode: 'markers-only-preserve-user-values',
+          kinds: markerRepairKinds(markers),
+          marker_categories: [...new Set(markers.map((marker) => marker.category))].sort(),
+          implied_category_spans: markerOnlySpans,
+          affected_keys: [],
+          affected_ranges: markerRanges,
+          affected_bytes_sha256: sha256(affectedBytes),
+          remove_legacy_material: expectedFamily === 'legacy',
+          remove_current_material: expectedFamily === 'v2',
+          write_current_representation: false,
+          preserved_user_helper_count: cleaned.helper_count,
+          unrelated_bytes_unchanged: true,
+        },
+        detail: 'Malformed historical Toolkit marker lines are isolated at the supported table boundary; compatible user-owned values remain effective and can be preserved byte-for-byte through an exact approval-bound marker-only repair.',
+      };
+    }
+  }
+
+  const markerCategories = new Set(markers.map((marker) => marker.category));
+  if (base.runtime === RUNTIMES.V2
+    && ['helper-capacity', 'root-guidance', 'helper-guidance'].some((category) => !markerCategories.has(category))) return null;
+
+  const assignments = layout.assignments.filter((entry) => entry.index >= bounds.first && entry.index <= bounds.last);
+  const selected = [];
+  const assignmentsByCategory = new Map();
+  const affectedKeys = [];
+  if (base.runtime === RUNTIMES.V1) {
+    const threads = parsed.values?.max_threads;
+    const depth = parsed.values?.max_depth;
+    const threadLine = assignments.find((entry) => entry.key === 'max_threads');
+    const depthLine = assignments.find((entry) => entry.key === 'max_depth');
+    if (!threads?.exact_int || !Number.isSafeInteger(threads.value) || threads.value < 0 || !exactInteger(depth, 1)
+      || !threadLine || !depthLine
+      || rawLine(layout, threadLine.index).trim() !== `max_threads = ${threads.value}`
+      || rawLine(layout, depthLine.index).trim() !== 'max_depth = 1') return null;
+    selected.push(threadLine, depthLine);
+    assignmentsByCategory.set('legacy-limits', [threadLine, depthLine]);
+    affectedKeys.push('agents.max_threads', 'agents.max_depth');
+  } else {
+    const values = parsed.multi_agent_v2_values || {};
+    const total = values.max_concurrent_threads_per_session;
+    const capacityLine = assignments.find((entry) => entry.key === 'max_concurrent_threads_per_session');
+    const rootLine = assignments.find((entry) => entry.key === 'root_agent_usage_hint_text');
+    const helperLine = assignments.find((entry) => entry.key === 'subagent_usage_hint_text');
+    if (!exactBoolean(values.enabled, true)
+      || !total?.exact_int || !Number.isSafeInteger(total.value) || total.value < 1
+      || !exactString(values.root_agent_usage_hint_text, CODEX_V2_ROOT_GUIDANCE)
+      || !exactString(values.subagent_usage_hint_text, CODEX_V2_HELPER_GUIDANCE)
+      || !capacityLine || !rootLine || !helperLine
+      || rawLine(layout, capacityLine.index).trim() !== `max_concurrent_threads_per_session = ${total.value}`
+      || rawLine(layout, rootLine.index).trim() !== `root_agent_usage_hint_text = ${tomlString(CODEX_V2_ROOT_GUIDANCE)}`
+      || rawLine(layout, helperLine.index).trim() !== `subagent_usage_hint_text = ${tomlString(CODEX_V2_HELPER_GUIDANCE)}`) return null;
+    if (markers.some((marker) => marker.category === 'enablement')) {
+      const enabledLine = assignments.find((entry) => entry.key === 'enabled');
+      if (!enabledLine || rawLine(layout, enabledLine.index).trim() !== 'enabled = true') return null;
+      selected.push(enabledLine);
+      assignmentsByCategory.set('enablement', [enabledLine]);
+      affectedKeys.push('features.multi_agent_v2.enabled');
+    }
+    selected.push(capacityLine, rootLine, helperLine);
+    assignmentsByCategory.set('helper-capacity', [capacityLine]);
+    assignmentsByCategory.set('root-guidance', [rootLine]);
+    assignmentsByCategory.set('helper-guidance', [helperLine]);
+    affectedKeys.push(
+      'features.multi_agent_v2.max_concurrent_threads_per_session',
+      'features.multi_agent_v2.root_agent_usage_hint_text',
+      'features.multi_agent_v2.subagent_usage_hint_text'
+    );
+  }
+
+  const impliedCategorySpans = deriveMalformedCategorySpans(
+    layout,
+    bounds,
+    markers,
+    expectedFamily,
+    assignmentsByCategory
+  );
+  if (!impliedCategorySpans) return null;
+
+  const affected = [...markers, ...selected].sort((left, right) => left.index - right.index);
+  const affectedIndices = new Set(affected.map((entry) => entry.index));
+  const first = affected[0].index;
+  const last = affected[affected.length - 1].index;
+  for (let index = first; index <= last; index += 1) {
+    if (affectedIndices.has(index)) continue;
+    if (rawLine(layout, index).trim() !== '') return null;
+  }
+  const ranges = repairRanges(layout, affected, base.text);
+  const affectedBytes = Buffer.concat(affected.map((entry) => Buffer.from(base.text.slice(entry.start, entry.end), 'utf8')));
+  const categories = [...new Set(markers.map((marker) => marker.category))].sort();
+  return {
+    ...base,
+    status: 'repair-required',
+    ownership: 'toolkit-malformed-repairable',
+    enablement_ownership: base.runtime === RUNTIMES.V2
+      ? (markers.some((marker) => marker.category === 'enablement') ? 'toolkit-malformed' : 'user-owned-table')
+      : undefined,
+    helper_count: base.runtime === RUNTIMES.V2
+      ? totalThreadsToHelpers(parsed.multi_agent_v2_values.max_concurrent_threads_per_session.value)
+      : parsed.values.max_threads.value,
+    total_threads: base.runtime === RUNTIMES.V2 ? parsed.multi_agent_v2_values.max_concurrent_threads_per_session.value : null,
+    repair: {
+      schema: 'ai-agent-toolkit.codex-malformed-marker-repair.v1',
+      family: expectedFamily,
+      mode: 'remove-owned-material-and-write-current',
+      kinds: markerRepairKinds(markers),
+      marker_categories: categories,
+      implied_category_spans: impliedCategorySpans,
+      affected_keys: affectedKeys,
+      affected_ranges: ranges,
+      affected_bytes_sha256: sha256(affectedBytes),
+      remove_legacy_material: expectedFamily === 'legacy',
+      remove_current_material: expectedFamily === 'v2',
+      write_current_representation: true,
+      unrelated_bytes_unchanged: true,
+    },
+    detail: 'A malformed historical Toolkit-owned delegation marker region is isolated inside the one supported runtime table and can be repaired only through an exact approval-bound transaction.',
+  };
 }
 
 function linesBetween(layout, begin, end) {
@@ -330,9 +658,15 @@ function codexDelegationConfigState(configBytes, configPath = codexConfigPath(),
   if (!layout.ok) return stateBase(configPath, text, bytes, runtime, { status: 'conflicting', detail: layout.detail, parser: parsed.parser });
   const base = stateBase(configPath, text, bytes, runtime, { parser: parsed.parser, layout, parsed });
   if (layout.unknownToolkitDelegationMarkers.length) return { ...base, status: 'conflicting', detail: 'Unknown or obsolete Toolkit delegation ownership markers are present; ownership is ambiguous and Toolkit will not modify the file.' };
-  if (markerFailure(layout)) return { ...base, status: 'conflicting', detail: 'Toolkit helper-capacity markers are duplicated, mismatched, or malformed.' };
   const anyV2Marker = layout.enablementBeginMarkers.length || layout.helperBeginMarkers.length || layout.rootGuidanceBeginMarkers.length || layout.helperGuidanceBeginMarkers.length;
   if (layout.beginMarkers.length && anyV2Marker) return { ...base, status: 'conflicting', detail: 'Legacy and MultiAgentV2 Toolkit marker blocks cannot coexist.' };
+  const malformedMarkers = markerFailure(layout)
+    || markerRepairKinds(layout.recognizedToolkitDelegationMarkers || []).includes('reversed-marker-order');
+  if (malformedMarkers) {
+    const repairable = classifyMalformedToolkitRepair(parsed, layout, base);
+    if (repairable) return repairable;
+    return { ...base, status: 'conflicting', detail: 'Toolkit helper-capacity markers are duplicated, mismatched, reversed, malformed, outside the effective runtime table, or interleaved with content whose ownership cannot be proven.' };
+  }
 
   if (runtime === RUNTIMES.V2) return v2State(parsed, layout, base);
   if (runtime === RUNTIMES.V1) return v1State(parsed, layout, base);

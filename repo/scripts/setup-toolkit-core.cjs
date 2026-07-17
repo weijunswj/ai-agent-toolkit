@@ -883,12 +883,28 @@ function printDelegationPreview(preview) {
   console.log(`After semantics: ${preview.detail}`);
   console.log(`Requested helper agents: ${preview.helper_count}`);
   if (preview.total_threads != null) console.log(`Total session threads including the main agent: ${preview.total_threads}`);
-  console.log(`Exact affected keys: ${(preview.affected_keys || []).join(', ')}`);
-  console.log('Proposed Toolkit-managed TOML block:');
-  console.log('```toml');
-  console.log(preview.proposed_block);
-  console.log('```');
+  console.log(`Exact affected keys: ${(preview.affected_keys || []).join(', ') || 'none; marker-only cleanup preserves compatible user-owned assignments'}`);
+  if (preview.repair) {
+    console.log('Historical Toolkit marker repair required: yes');
+    console.log(`Malformed marker classes: ${(preview.repair.kinds || []).join(', ')}`);
+    console.log(`Marker/assignment categories to remove or replace: ${(preview.repair.marker_categories || []).join(', ')}`);
+    console.log(`Exact affected line ranges: ${(preview.repair.affected_ranges || []).map((range) => `${range.line_start}-${range.line_end}`).join(', ')}`);
+    console.log(`Legacy Toolkit material removed: ${preview.repair.remove_legacy_material ? 'yes' : 'no'}`);
+    console.log(`Current Toolkit material replaced: ${preview.repair.remove_current_material ? 'yes' : 'no'}`);
+    console.log(`Supported current representation written: ${preview.repair.write_current_representation ? 'yes' : 'no'}`);
+    console.log('Unrelated configuration bytes remain unchanged: yes');
+  }
+  if (preview.proposed_block) {
+    console.log('Proposed Toolkit-managed TOML block:');
+    console.log('```toml');
+    console.log(preview.proposed_block);
+    console.log('```');
+  } else if (preview.preserve_compatible_user_values) {
+    console.log('Compatible user-owned assignments preserved byte-for-byte: yes');
+    console.log('New Toolkit ownership markers written: no');
+  }
   console.log(`Proposed edit: ${preview.proposed_action}`);
+  console.log(`Proposal digest (SHA-256): ${preview.proposal_digest}`);
   console.log(`Codex backup directory: ${preview.backup_root}`);
   console.log(`Planned exact backup metadata: ${preview.backup_metadata_path}`);
   console.log(`Restore command setup script: ${preview.restore_commands.setup_script_path}`);
@@ -2755,6 +2771,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Helper-capacity outcome this run: ${delegationOutcomeSummary(args, delegation)}`);
   console.log(`Configuration changed this run: ${yesNo(delegation.changed === true)}`);
   console.log(`PR #237 legacy block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
+  console.log(`Malformed historical Toolkit marker material repaired: ${yesNo(delegation.repaired_malformed_toolkit_material === true)}`);
   console.log(`Official V2 boolean enablement migrated to configured table: ${yesNo(delegation.migrated_v2_boolean_enablement === true)}`);
   console.log(`Codex config path: ${unknown(delegation.config_path)}`);
   console.log(`Configuration scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);

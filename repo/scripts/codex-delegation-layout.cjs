@@ -166,6 +166,19 @@ function structuralLayout(text) {
   const helperGuidanceBeginMarkers = [];
   const helperGuidanceEndMarkers = [];
   const unknownToolkitDelegationMarkers = [];
+  const recognizedToolkitDelegationMarkers = [];
+  const markerDefinitions = [
+    [CODEX_DELEGATION_BEGIN, 'legacy', 'legacy-limits', 'begin'],
+    [CODEX_DELEGATION_END, 'legacy', 'legacy-limits', 'end'],
+    [CODEX_V2_ENABLEMENT_BEGIN, 'v2', 'enablement', 'begin'],
+    [CODEX_V2_ENABLEMENT_END, 'v2', 'enablement', 'end'],
+    [CODEX_HELPER_CAPACITY_BEGIN, 'v2', 'helper-capacity', 'begin'],
+    [CODEX_HELPER_CAPACITY_END, 'v2', 'helper-capacity', 'end'],
+    [CODEX_ROOT_GUIDANCE_BEGIN, 'v2', 'root-guidance', 'begin'],
+    [CODEX_ROOT_GUIDANCE_END, 'v2', 'root-guidance', 'end'],
+    [CODEX_HELPER_GUIDANCE_BEGIN, 'v2', 'helper-guidance', 'begin'],
+    [CODEX_HELPER_GUIDANCE_END, 'v2', 'helper-guidance', 'end'],
+  ];
   for (let index = 0; index < scanned.lines.length; index += 1) {
     const entry = scanned.lines[index];
     const rawWithoutEol = entry.eol ? entry.raw.slice(0, -entry.eol.length) : entry.raw;
@@ -179,6 +192,20 @@ function structuralLayout(text) {
       assignments.push({ ...classified, index, start, end });
     }
     const outsideStringComment = entry.realComment === true && structural.trim() === '' && rawWithoutEol.trim().startsWith('#');
+    if (outsideStringComment) {
+      const definition = markerDefinitions.find(([marker]) => marker === rawWithoutEol.trim());
+      if (definition) {
+        recognizedToolkitDelegationMarkers.push({
+          index,
+          start,
+          end,
+          family: definition[1],
+          category: definition[2],
+          boundary: definition[3],
+          raw: rawWithoutEol,
+        });
+      }
+    }
     if (outsideStringComment && rawWithoutEol.trim() === CODEX_DELEGATION_BEGIN) beginMarkers.push({ index, start, end });
     if (outsideStringComment && rawWithoutEol.trim() === CODEX_DELEGATION_END) endMarkers.push({ index, start, end });
     if (outsideStringComment && rawWithoutEol.trim() === CODEX_HELPER_CAPACITY_BEGIN) helperBeginMarkers.push({ index, start, end });
@@ -191,7 +218,7 @@ function structuralLayout(text) {
     if (outsideStringComment && rawWithoutEol.trim() === CODEX_HELPER_GUIDANCE_END) helperGuidanceEndMarkers.push({ index, start, end });
     if (outsideStringComment
       && rawWithoutEol.trim().startsWith('# AI-AGENT-TOOLKIT:')
-      && /CODEX-(?:DELEGATION|HELPER|V2|ROOT)/.test(rawWithoutEol)
+      && /CODEX-/.test(rawWithoutEol)
       && ![
         CODEX_DELEGATION_BEGIN, CODEX_DELEGATION_END,
         CODEX_V2_ENABLEMENT_BEGIN, CODEX_V2_ENABLEMENT_END,
@@ -230,6 +257,7 @@ function structuralLayout(text) {
     helperGuidanceBeginMarkers,
     helperGuidanceEndMarkers,
     unknownToolkitDelegationMarkers,
+    recognizedToolkitDelegationMarkers,
     multiAgentV2Tables,
     multiAgentV2Children,
   };

@@ -68,6 +68,8 @@ function captureCodexConfigSnapshot(configPath = codexConfigPath()) {
   }
   if (stat.isSymbolicLink()) throw new Error('Codex config is a symbolic link; backup and mutation are refused.');
   if (!stat.isFile()) throw new Error('Codex config is not a regular file; backup and mutation are refused.');
+  const realPath = fs.realpathSync.native ? fs.realpathSync.native(resolvedPath) : fs.realpathSync(resolvedPath);
+  if (!samePath(realPath, resolvedPath)) throw new Error('Codex config resolves through a junction or reparse point; backup and mutation are refused.');
   const bytes = fs.readFileSync(resolvedPath);
   return {
     config_path: resolvedPath,
