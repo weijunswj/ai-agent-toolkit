@@ -39,7 +39,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.9';
+const expectedBridgeVersion = '2.7.10';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -238,7 +238,7 @@ function runFixtureBridge(fixture, args) {
 function expectedMissingAgentsContext(root) {
   return [
     "STOP: Root AGENTS.md is missing. Toolkit repo-local ai-coding-agent-rules are not installed in this Git repository. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without Toolkit repo-local rules. Do not install, repair, create, or write anything without the user's decision.",
-    'Toolkit agent-rules preflight: repo-local instructions need attention in ' + root + '.',
+    'Toolkit agent-rules preflight: repo-local instructions need attention in the current repository.',
     '- AGENTS.md: required instruction file is missing',
     'No files were changed by this hook.'
   ].join('\n');
@@ -686,10 +686,11 @@ function currentCommit(repoPath) {
   return git(repoPath, ['rev-parse', 'HEAD']);
 }
 
-function reportPathFromOutput(stdout) {
-  const match = String(stdout || '').match(/Toolkit updated: (.+)$/m);
-  assert.ok(match, stdout);
-  return match[1].trim();
+function reportPathFromOutput(stdout, hub) {
+  assert.match(String(stdout || ''), /^Toolkit local bridge sync complete\.$/m);
+  const reportPath = readJson(path.join(hub, 'state.json')).last_update_report_path;
+  assert.ok(reportPath, stdout);
+  return reportPath;
 }
 
 function readLatestReport(hub) {
@@ -3019,6 +3020,41 @@ test('hook mode does not create bridge state before setup', () => {
   assert.equal(fs.existsSync(hub), false);
 });
 
+test('routine bridge and hook output is path-safe for synthetic POSIX, Windows, and UNC fixtures', () => {
+  const root = path.join(tmpRoot(), 'synthetic-posix-user-profile-marker');
+  const hub = path.join(root, 'synthetic-temporary-directory-marker', 'synthetic-hub-marker');
+  const repoPath = path.join(root, 'synthetic-repository-marker');
+  const pluginCachePath = path.join(root, 'synthetic-plugin-cache-marker');
+  const targetPath = path.join(root, 'synthetic-target-directory-marker');
+  const reportPath = path.join(root, 'synthetic-report-directory-marker');
+  const windowsPath = 'Z:\\synthetic-user-profile-marker\\synthetic-temporary-directory-marker\\synthetic-hub-marker';
+  const uncPath = '\\\\synthetic-host\\synthetic-share\\synthetic-plugin-cache-marker';
+  const markers = [root, hub, repoPath, pluginCachePath, targetPath, reportPath, windowsPath, uncPath];
+  const env = isolatedHomeEnv(root, { TEMP: path.join(root, 'synthetic-temporary-directory-marker') });
+
+  let result = run(['--hub', hub, '--enable-auto-sync', '--write'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, 'Toolkit local bridge sync complete.\n');
+  for (const marker of markers) assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    auto_sync_enabled: false,
+    targets: {}
+  });
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, 'Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.\n');
+  for (const marker of markers) assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+  result = run(['--hub', hub, '--repo-path', repoPath, '--enable-repo-auto-update', '--write'], { env });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /FAIL:.*repo/i);
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, new RegExp(repoPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
 test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -3365,7 +3401,7 @@ test('hook mode runs passive agent-rules preflight before bridge no-op return', 
   assert.match(result.stdout, /repair\/refresh Toolkit repo-local rules now/);
   assert.match(result.stdout, /proceed without current Toolkit repo-local rules/);
   assert.doesNotMatch(result.stderr, /Toolkit agent-rules preflight/);
-  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
@@ -3436,7 +3472,7 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  const reportPath = reportPathFromOutput(result.stdout);
+  const reportPath = reportPathFromOutput(result.stdout, hub);
   const report = readLatestReport(hub);
   assert.equal(path.resolve(report.reportPath), path.resolve(reportPath));
   assert.match(report.text, /^# AI Agent Toolkit Update/m);
@@ -3474,7 +3510,7 @@ test('no-op repo auto-update hook with unchanged observed commit does not create
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
   let state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_update_report_path || '', '');
   assert.equal(state.last_repo_update_status, 'up-to-date');
@@ -3484,7 +3520,7 @@ test('no-op repo auto-update hook with unchanged observed commit does not create
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
   state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_update_report_path || '', '');
 });
@@ -3519,7 +3555,7 @@ test('hook report is generated when repo was already advanced before the hook ru
   });
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(report.text, /Local repo was already advanced before this hook run\./);
   assert.match(report.text, /Likely from a manual pull or another local Git update\./);
   assert.match(report.text, /Configured branch: `main`/);
@@ -3675,7 +3711,7 @@ test('hook report is generated when target sync happens without a repo commit ch
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  const reportPath = reportPathFromOutput(result.stdout);
+  const reportPath = reportPathFromOutput(result.stdout, hub);
   const report = readLatestReport(hub);
   assert.equal(path.resolve(report.reportPath), path.resolve(reportPath));
   assert.match(report.text, /Previous commit: `none`/);
@@ -3710,7 +3746,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Codex native plugin cache: `stale`/);
@@ -3727,7 +3763,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
   const repeatedState = readJson(path.join(hub, 'state.json'));
   assert.equal(repeatedState.last_update_report_path, report.reportPath);
   assert.equal(repeatedState.last_update_report_signature, report.state.last_update_report_signature);
@@ -3760,7 +3796,7 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Action needed: none\./);
@@ -3831,7 +3867,7 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.equal(currentCommit(fixture.repo), refreshedCommit);
   assert.deepEqual(
     verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
@@ -3883,7 +3919,7 @@ test('Codex auto-refresh runs before delegated target sync failure', () => {
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(result.stdout, /delegated repo sync failed/);
   assert.deepEqual(
     verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
@@ -4120,7 +4156,7 @@ test('disabled hook remains no-write and active lock contention reports an unper
     '--sync-source', 'claude-plugin'
   ], { env: fixture.env });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /lock at .*held by live process.*skipping sync/i);
+  assert.match(result.stdout, /lock at <private-path>.*held by live process.*skipping sync/i);
   assert.equal(readJson(statePath).bridge_versions_by_source['claude-plugin'], undefined);
   fs.rmSync(lockPath, { force: true });
 });
@@ -4137,7 +4173,7 @@ test('legacy delegated repo sync writes an update report using stored repo updat
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit update report:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
   const targetSkill = path.join(
     fixture.root,
@@ -4184,7 +4220,7 @@ test('suppressed legacy delegated repo sync does not write an update report', ()
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit update report:/);
+  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
   assert.equal(readJson(path.join(fixture.hub, 'state.json')).last_update_report_path || '', '');
   assert.match(
     fs.readFileSync(path.join(
@@ -4277,7 +4313,7 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
   assert.equal(state.last_repo_update_status, 'skipped');
   assert.match(state.last_repo_update_error, /dirty/i);
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(report.text, /Repo: skipped \(configured Toolkit source checkout is dirty\)\./);
   assert.match(report.text, /Action needed: finish or stash changes in the configured Toolkit source checkout, or run `setup toolkit` to use a dedicated clean `main` checkout for startup updates\./);
   assert.match(report.text, new RegExp(`Configured repo path: \`${fixture.repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``));
@@ -4319,7 +4355,7 @@ test('hook mode auto-switches a clean repo back to main before update and sync',
   assert.equal(state.last_repo_update_status, 'up-to-date');
   assert.equal(state.last_repo_update_error || '', '');
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(report.text, /## TL;DR/);
   assert.match(report.text, /Repo: auto-switched to `main`; already up to date\./);
   assert.match(report.text, /Bridge action: auto-switched clean Toolkit repo from `feature-work` to `main`\./);
@@ -4469,7 +4505,7 @@ test('validation failure after update does not sync targets', () => {
   assert.equal(state.last_repo_update_to_commit, updatedCommit);
   assert.match(state.last_repo_update_error, /validate-toolkit/i);
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(report.text, /repo update status: `validation-failed`/);
   assert.match(report.text, /hook-light validation: `failed/);
   assert.match(report.text, /- `VERSION\.txt`/);
@@ -5193,7 +5229,7 @@ test('Codex hook auto-repairs third-party plugin hooks after setup opt-in', {
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Repaired `1` third-party Codex plugin hook cache/);

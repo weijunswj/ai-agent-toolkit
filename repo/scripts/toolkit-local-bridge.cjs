@@ -17,7 +17,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.7.9';
+const BRIDGE_VERSION = '2.7.10';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1796,7 +1796,7 @@ function formatAgentRulesPreflight(result) {
     'unmanaged'
   ].includes(finding.kind));
   const lines = [
-    `Toolkit agent-rules preflight: repo-local instructions need attention in ${result.targetRoot}.`,
+    'Toolkit agent-rules preflight: repo-local instructions need attention in the current repository.',
     ...shown.map((finding) => `- ${finding.file}: ${finding.detail}`)
   ];
   if (missingRootAgents) {
@@ -2255,10 +2255,16 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, write
   return { state, reportPath };
 }
 
+function sanitizeOutputMessage(message) {
+  return String(message || '')
+    .replace(/(^|[\s(:=])\\\\[^\s'"`;,)]*/g, '$1<private-path>')
+    .replace(/(^|[\s(:=])[A-Za-z]:[\\/][^\s'"`;,)]*/g, '$1<private-path>')
+    .replace(/(^|[\s(:=])\/(?!\/)[^\s'"`;,)]*/g, '$1<private-path>');
+}
+
 function printUpdateReportLine(args, reportPath) {
   if (!reportPath) return;
-  if (args.hook) console.log(`Toolkit updated: ${reportPath}`);
-  else console.log(`Toolkit update report: ${reportPath}`);
+  console.log('Toolkit local bridge sync complete.');
 }
 
 function buildManifest({ state, discoveries, checksum, sourceCommit, syncSource, hubPath }) {
@@ -3323,7 +3329,7 @@ function assertSourceDowngradeAllowed(state, args) {
 
 function hookSafeWarning(args, message) {
   if (args.hook) {
-    console.log(`Toolkit local bridge hook skipped: ${message}`);
+    console.log(`Toolkit local bridge hook skipped: ${sanitizeOutputMessage(message)}`);
   }
 }
 
@@ -3572,7 +3578,7 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
 function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
   const lock = acquireLock(path.dirname(hubPath), args);
   if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${lock.skipReason}; skipping repo auto-update.`);
+    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping repo auto-update.`);
     return { status: 0, audit: buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) };
   }
 
@@ -3781,7 +3787,7 @@ function persistActiveNoTargetWrite({
 }) {
   const lock = acquireLock(path.dirname(hubPath), args);
   if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${lock.skipReason}; skipping sync.`);
+    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping sync.`);
     return {
       state: normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))),
       reportPath: '',
@@ -3861,7 +3867,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
       });
   nextState.last_update_report_cleanup = cleanupResult;
   if (args.write && cleanupResult.error_count && !args.hook) {
-    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.join('; ')}`);
+    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
   }
   if (args.enableRepoAutoUpdate && !nextState.repo_path) {
     throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
@@ -3952,7 +3958,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
 
   const lock = acquireLock(path.dirname(hubPath), args);
   if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${lock.skipReason}; skipping sync.`);
+    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping sync.`);
     return { status: 0, audit };
   }
 
@@ -4003,7 +4009,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
     if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
     else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
-    else if (!args.hook) console.log(`Toolkit local bridge sync complete: ${hubPath}`);
+    else if (!args.hook) console.log('Toolkit local bridge sync complete.');
     return { status: 0, audit: finalAudit };
   } finally {
     releaseLock(lock);
@@ -4017,10 +4023,10 @@ if (require.main === module) {
   } catch (error) {
     const reconciliationRequested = process.argv.some((arg) => arg === '--reconcile-staging' || arg.startsWith('--reconcile-staging='));
     if (process.argv.includes('--hook') && !reconciliationRequested) {
-      console.log(`Toolkit local bridge hook skipped: ${error.message}`);
+      console.log(`Toolkit local bridge hook skipped: ${sanitizeOutputMessage(error.message)}`);
       process.exit(0);
     }
-    console.error(`FAIL: ${error.message}`);
+    console.error(`FAIL: ${sanitizeOutputMessage(error.message)}`);
     process.exit(1);
   }
 }
