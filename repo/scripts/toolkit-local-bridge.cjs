@@ -17,7 +17,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.7.9';
+const BRIDGE_VERSION = '2.7.10';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -1796,7 +1796,7 @@ function formatAgentRulesPreflight(result) {
     'unmanaged'
   ].includes(finding.kind));
   const lines = [
-    `Toolkit agent-rules preflight: repo-local instructions need attention in ${result.targetRoot}.`,
+    'Toolkit agent-rules preflight: repo-local instructions need attention in the current repository.',
     ...shown.map((finding) => `- ${finding.file}: ${finding.detail}`)
   ];
   if (missingRootAgents) {
@@ -2255,10 +2255,143 @@ function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, write
   return { state, reportPath };
 }
 
+const OUTPUT_PATH_PLACEHOLDER = '<private-path>';
+const OUTPUT_PATH_TRAILING_TEXT_BOUNDARIES = [
+  ' is ',
+  ' was ',
+  ' has ',
+  ' cannot ',
+  ' could ',
+  ' does ',
+  ' failed ',
+  ' became ',
+  ' changed ',
+  ' while ',
+  ' when ',
+  ' because ',
+  ' due to ',
+  ' before ',
+  ' after '
+];
+
+function isOutputPathBoundary(message, index) {
+  return index === 0 || /[\s([{:;,=]/.test(message[index - 1]);
+}
+
+function hasUriSchemeBefore(message, index) {
+  return /[A-Za-z][A-Za-z0-9+.-]*:$/.test(message.slice(0, index));
+}
+
+function outputPathKindAt(message, index, requireBoundary = true) {
+  if (index >= message.length || (requireBoundary && !isOutputPathBoundary(message, index))) return '';
+  const tail = message.slice(index);
+  if (/^file:\/\//i.test(tail)) return 'file-uri';
+  if (/^[A-Za-z]:[\\/]/.test(tail)) return 'drive';
+  if (tail.startsWith('\\\\')) return 'unc-backslash';
+  if (tail.startsWith('//') && !hasUriSchemeBefore(message, index)) return 'unc-forward';
+  if (tail.startsWith('/') && !tail.startsWith('//')) return 'posix';
+  return '';
+}
+
+function isValidOutputPath(candidate, kind) {
+  if (!candidate || /[\r\n\t\0]/.test(candidate)) return false;
+  if (kind === 'drive') return /^[A-Za-z]:[\\/][^\\/]+/.test(candidate);
+  if (kind === 'posix') return candidate.startsWith('/') && candidate.indexOf('/', 1) > 1;
+  if (kind === 'unc-backslash') {
+    return candidate.slice(2).split('\\').filter(Boolean).length >= 2;
+  }
+  if (kind === 'unc-forward') {
+    return candidate.slice(2).split('/').filter(Boolean).length >= 2;
+  }
+  if (kind === 'file-uri') {
+    if (!/^file:\/\//i.test(candidate)) return false;
+    const target = candidate.slice('file://'.length);
+    if (/^\/[A-Za-z]:\//.test(target)) return target.slice(3).includes('/');
+    if (target.startsWith('/')) return target.indexOf('/', 1) > 1;
+    return target.split('/').filter(Boolean).length >= 2;
+  }
+  return false;
+}
+
+function isInternalOutputPathColon(message, start, index, kind) {
+  if (kind === 'drive') return index === start + 1;
+  if (kind !== 'file-uri') return false;
+  if (index === start + 'file'.length) return true;
+  return index >= start + 'file:///C'.length
+    && /[A-Za-z]/.test(message[index - 1])
+    && message[index - 2] === '/';
+}
+
+function unquotedOutputPathEnd(message, start, kind) {
+  let end = start;
+  while (end < message.length) {
+    const character = message[end];
+    if (/[\r\n\t'"`<>|,;)\]}!?#]/.test(character)) break;
+    if (character === ':' && !isInternalOutputPathColon(message, start, end, kind)) break;
+    end += 1;
+  }
+
+  while (end > start && message[end - 1] === ' ') end -= 1;
+  const candidate = message.slice(start, end);
+  for (const boundary of OUTPUT_PATH_TRAILING_TEXT_BOUNDARIES) {
+    let offset = candidate.indexOf(boundary);
+    while (offset !== -1) {
+      const trailingText = candidate.slice(offset + boundary.length);
+      if (!/[\\/]/.test(trailingText)) {
+        end = Math.min(end, start + offset);
+        break;
+      }
+      offset = candidate.indexOf(boundary, offset + boundary.length);
+    }
+  }
+
+  while (end > start && message[end - 1] === ' ') end -= 1;
+  if (end > start && message[end - 1] === '.') end -= 1;
+  return end;
+}
+
+function sanitizeOutputMessage(message) {
+  const input = String(message || '');
+  let output = '';
+  let copyFrom = 0;
+  let index = 0;
+
+  while (index < input.length) {
+    const quote = input[index] === "'" || input[index] === '"' ? input[index] : '';
+    if (quote && isOutputPathBoundary(input, index)) {
+      const close = input.indexOf(quote, index + 1);
+      const kind = outputPathKindAt(input, index + 1, false);
+      if (close > index + 1 && kind) {
+        const candidate = input.slice(index + 1, close);
+        if (isValidOutputPath(candidate, kind)) {
+          output += input.slice(copyFrom, index) + OUTPUT_PATH_PLACEHOLDER;
+          index = close + 1;
+          copyFrom = index;
+          continue;
+        }
+      }
+    }
+
+    const kind = outputPathKindAt(input, index);
+    if (kind) {
+      const end = unquotedOutputPathEnd(input, index, kind);
+      const candidate = input.slice(index, end);
+      if (isValidOutputPath(candidate, kind)) {
+        output += input.slice(copyFrom, index) + OUTPUT_PATH_PLACEHOLDER;
+        index = end;
+        copyFrom = index;
+        continue;
+      }
+    }
+    index += 1;
+  }
+
+  return output + input.slice(copyFrom);
+}
+
 function printUpdateReportLine(args, reportPath) {
   if (!reportPath) return;
-  if (args.hook) console.log(`Toolkit updated: ${reportPath}`);
-  else console.log(`Toolkit update report: ${reportPath}`);
+  console.log('Toolkit local bridge sync complete.');
 }
 
 function buildManifest({ state, discoveries, checksum, sourceCommit, syncSource, hubPath }) {
@@ -3323,7 +3456,7 @@ function assertSourceDowngradeAllowed(state, args) {
 
 function hookSafeWarning(args, message) {
   if (args.hook) {
-    console.log(`Toolkit local bridge hook skipped: ${message}`);
+    console.log(`Toolkit local bridge hook skipped: ${sanitizeOutputMessage(message)}`);
   }
 }
 
@@ -3572,7 +3705,7 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
 function runRepoAutoUpdate({ args, hubPath, state, discoveries, checksum, payloads, testHooks = {} }) {
   const lock = acquireLock(path.dirname(hubPath), args);
   if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${lock.skipReason}; skipping repo auto-update.`);
+    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping repo auto-update.`);
     return { status: 0, audit: buildAudit({ args, hubPath, state, discoveries, checksum, payloads }) };
   }
 
@@ -3781,7 +3914,7 @@ function persistActiveNoTargetWrite({
 }) {
   const lock = acquireLock(path.dirname(hubPath), args);
   if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${lock.skipReason}; skipping sync.`);
+    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping sync.`);
     return {
       state: normalizedState(readJsonIfExists(path.join(hubPath, 'state.json'))),
       reportPath: '',
@@ -3861,7 +3994,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
       });
   nextState.last_update_report_cleanup = cleanupResult;
   if (args.write && cleanupResult.error_count && !args.hook) {
-    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.join('; ')}`);
+    console.warn(`Toolkit update report cleanup warning: ${cleanupResult.errors.map(sanitizeOutputMessage).join('; ')}`);
   }
   if (args.enableRepoAutoUpdate && !nextState.repo_path) {
     throw new Error('--enable-repo-auto-update requires --repo-path or an existing repo_path in hub state');
@@ -3952,7 +4085,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
 
   const lock = acquireLock(path.dirname(hubPath), args);
   if (!lock.acquired) {
-    console.log(`Toolkit local bridge: ${lock.skipReason}; skipping sync.`);
+    console.log(`Toolkit local bridge: ${sanitizeOutputMessage(lock.skipReason)}; skipping sync.`);
     return { status: 0, audit };
   }
 
@@ -4003,7 +4136,7 @@ function run(argv = process.argv.slice(2), testHooks = {}) {
     const finalAudit = buildAudit({ args, hubPath, state: nextState, discoveries, checksum, payloads });
     if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
     else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
-    else if (!args.hook) console.log(`Toolkit local bridge sync complete: ${hubPath}`);
+    else if (!args.hook) console.log('Toolkit local bridge sync complete.');
     return { status: 0, audit: finalAudit };
   } finally {
     releaseLock(lock);
@@ -4017,10 +4150,10 @@ if (require.main === module) {
   } catch (error) {
     const reconciliationRequested = process.argv.some((arg) => arg === '--reconcile-staging' || arg.startsWith('--reconcile-staging='));
     if (process.argv.includes('--hook') && !reconciliationRequested) {
-      console.log(`Toolkit local bridge hook skipped: ${error.message}`);
+      console.log(`Toolkit local bridge hook skipped: ${sanitizeOutputMessage(error.message)}`);
       process.exit(0);
     }
-    console.error(`FAIL: ${error.message}`);
+    console.error(`FAIL: ${sanitizeOutputMessage(error.message)}`);
     process.exit(1);
   }
 }
@@ -4048,6 +4181,7 @@ module.exports = {
   maybeWriteUpdateReport,
   updateReportDir,
   cleanupUpdateReports,
+  sanitizeOutputMessage,
   openUpdateReport,
   replaceDirectoryAtomically,
   parseManagedMarkerBlocks,

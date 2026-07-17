@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.7.9';
+const TOOLKIT_CLIENT_VERSION = '2.7.10';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v1';
 

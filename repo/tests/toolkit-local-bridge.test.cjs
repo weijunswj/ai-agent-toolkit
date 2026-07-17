@@ -13,6 +13,7 @@ const {
   openUpdateReport,
   updateReportDir,
   cleanupUpdateReports,
+  sanitizeOutputMessage,
   replaceDirectoryAtomically,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
@@ -39,7 +40,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.9';
+const expectedBridgeVersion = '2.7.10';
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -238,7 +239,7 @@ function runFixtureBridge(fixture, args) {
 function expectedMissingAgentsContext(root) {
   return [
     "STOP: Root AGENTS.md is missing. Toolkit repo-local ai-coding-agent-rules are not installed in this Git repository. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without Toolkit repo-local rules. Do not install, repair, create, or write anything without the user's decision.",
-    'Toolkit agent-rules preflight: repo-local instructions need attention in ' + root + '.',
+    'Toolkit agent-rules preflight: repo-local instructions need attention in the current repository.',
     '- AGENTS.md: required instruction file is missing',
     'No files were changed by this hook.'
   ].join('\n');
@@ -686,10 +687,11 @@ function currentCommit(repoPath) {
   return git(repoPath, ['rev-parse', 'HEAD']);
 }
 
-function reportPathFromOutput(stdout) {
-  const match = String(stdout || '').match(/Toolkit updated: (.+)$/m);
-  assert.ok(match, stdout);
-  return match[1].trim();
+function reportPathFromOutput(stdout, hub) {
+  assert.match(String(stdout || ''), /^Toolkit local bridge sync complete\.$/m);
+  const reportPath = readJson(path.join(hub, 'state.json')).last_update_report_path;
+  assert.ok(reportPath, stdout);
+  return reportPath;
 }
 
 function readLatestReport(hub) {
@@ -3019,6 +3021,269 @@ test('hook mode does not create bridge state before setup', () => {
   assert.equal(fs.existsSync(hub), false);
 });
 
+test('diagnostic path sanitizer handles bounded synthetic path forms without harming useful text', () => {
+  const cases = [
+    {
+      name: 'clean diagnostic text',
+      input: 'validation failed without a path',
+      expected: 'validation failed without a path',
+      paths: [],
+      suffixes: [],
+      placeholders: 0
+    },
+    {
+      name: 'unquoted POSIX path',
+      input: 'cannot read /synthetic/home/repo/private.json; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['/synthetic/home/repo/private.json'],
+      suffixes: ['repo/private.json'],
+      placeholders: 1
+    },
+    {
+      name: 'single-quoted POSIX path',
+      input: "cannot read '/synthetic/home/repo/private.json'; retry later",
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['/synthetic/home/repo/private.json'],
+      suffixes: ['repo/private.json'],
+      placeholders: 1
+    },
+    {
+      name: 'double-quoted POSIX path',
+      input: 'cannot read "/synthetic/home/repo/private.json"; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['/synthetic/home/repo/private.json'],
+      suffixes: ['repo/private.json'],
+      placeholders: 1
+    },
+    {
+      name: 'POSIX path containing spaces',
+      input: 'cannot read /synthetic/home/jane doe/repo/private file.json; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['/synthetic/home/jane doe/repo/private file.json'],
+      suffixes: ['jane doe/repo/private file.json'],
+      placeholders: 1
+    },
+    {
+      name: 'unquoted Windows backslash path',
+      input: 'cannot read Z:\\Synthetic\\Jane\\repo\\private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:\\Synthetic\\Jane\\repo\\private.txt'],
+      suffixes: ['Jane\\repo\\private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'Windows forward-slash path',
+      input: 'cannot read Z:/Synthetic/Jane/repo/private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:/Synthetic/Jane/repo/private.txt'],
+      suffixes: ['Jane/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'single-quoted Windows path',
+      input: "cannot read 'Z:\\Synthetic\\Jane\\repo\\private.txt'; retry later",
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:\\Synthetic\\Jane\\repo\\private.txt'],
+      suffixes: ['Jane\\repo\\private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'double-quoted Windows path',
+      input: 'cannot read "Z:\\Synthetic\\Jane\\repo\\private.txt"; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:\\Synthetic\\Jane\\repo\\private.txt'],
+      suffixes: ['Jane\\repo\\private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'Windows path containing spaces',
+      input: 'cannot read Z:\\Synthetic Users\\Jane Doe\\repo\\private file.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['Z:\\Synthetic Users\\Jane Doe\\repo\\private file.txt'],
+      suffixes: ['Jane Doe\\repo\\private file.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'unquoted UNC path',
+      input: 'cannot read \\\\synthetic-host\\synthetic-share\\repo\\private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['\\\\synthetic-host\\synthetic-share\\repo\\private.txt'],
+      suffixes: ['synthetic-share\\repo\\private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'quoted forward UNC path',
+      input: "cannot read '//synthetic-host/synthetic-share/repo/private.txt'; retry later",
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['//synthetic-host/synthetic-share/repo/private.txt'],
+      suffixes: ['synthetic-share/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'double-quoted backslash UNC path',
+      input: 'cannot read "\\\\synthetic-host\\share name\\repo folder\\private file.txt"; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['\\\\synthetic-host\\share name\\repo folder\\private file.txt'],
+      suffixes: ['share name\\repo folder\\private file.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'UNC path containing spaces',
+      input: 'cannot read \\\\synthetic-host\\share name\\repo folder\\private file.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['\\\\synthetic-host\\share name\\repo folder\\private file.txt'],
+      suffixes: ['share name\\repo folder\\private file.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'Windows file URI',
+      input: 'cannot read file:///Z:/Synthetic/Jane/repo/private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['file:///Z:/Synthetic/Jane/repo/private.txt'],
+      suffixes: ['Jane/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'POSIX file URI containing spaces',
+      input: 'cannot read file:///synthetic/home/jane doe/repo/private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['file:///synthetic/home/jane doe/repo/private.txt'],
+      suffixes: ['jane doe/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'UNC file URI',
+      input: 'cannot read file://synthetic-host/share name/repo/private.txt; retry later',
+      expected: 'cannot read <private-path>; retry later',
+      paths: ['file://synthetic-host/share name/repo/private.txt'],
+      suffixes: ['share name/repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'multiple private paths',
+      input: 'copy /synthetic/source/private.txt; then write Z:\\Synthetic Target\\private.txt, if allowed',
+      expected: 'copy <private-path>; then write <private-path>, if allowed',
+      paths: ['/synthetic/source/private.txt', 'Z:\\Synthetic Target\\private.txt'],
+      suffixes: ['source/private.txt', 'Synthetic Target\\private.txt'],
+      placeholders: 2
+    },
+    {
+      name: 'path followed by punctuation',
+      input: 'failure at /synthetic/home/repo/private.txt, code EACCES',
+      expected: 'failure at <private-path>, code EACCES',
+      paths: ['/synthetic/home/repo/private.txt'],
+      suffixes: ['repo/private.txt'],
+      placeholders: 1
+    },
+    {
+      name: 'useful text around an unquoted lock path',
+      input: 'lock at Z:\\Synthetic User\\bridge\\update.lock is held by live process 4242',
+      expected: 'lock at <private-path> is held by live process 4242',
+      paths: ['Z:\\Synthetic User\\bridge\\update.lock'],
+      suffixes: ['bridge\\update.lock'],
+      placeholders: 1
+    },
+    {
+      name: 'ordinary HTTPS URL stays readable',
+      input: 'see https://example.test/docs/setup/path for guidance',
+      expected: 'see https://example.test/docs/setup/path for guidance',
+      paths: [],
+      suffixes: [],
+      placeholders: 0
+    },
+    {
+      name: 'option names and relative slash text stay readable',
+      input: 'run --audit and compare read/write behavior',
+      expected: 'run --audit and compare read/write behavior',
+      paths: [],
+      suffixes: [],
+      placeholders: 0
+    },
+    {
+      name: 'no-path failure output stays unchanged',
+      input: 'FAIL: validation failed with code EINVAL.',
+      expected: 'FAIL: validation failed with code EINVAL.',
+      paths: [],
+      suffixes: [],
+      placeholders: 0
+    }
+  ];
+
+  for (const fixture of cases) {
+    const sanitized = sanitizeOutputMessage(fixture.input);
+    assert.equal(sanitized, fixture.expected, fixture.name);
+    assert.equal(
+      sanitized.split('<private-path>').length - 1,
+      fixture.placeholders,
+      `${fixture.name}: placeholder count`
+    );
+    for (const privatePath of fixture.paths) {
+      assert.equal(sanitized.includes(privatePath), false, `${fixture.name}: complete path leaked`);
+    }
+    for (const suffix of fixture.suffixes) {
+      assert.equal(sanitized.includes(suffix), false, `${fixture.name}: path suffix leaked`);
+    }
+  }
+});
+
+test('routine bridge CLI output sanitizes success, hook skip, lock, cleanup warning, and failure paths', () => {
+  const root = path.join(tmpRoot(), 'synthetic user home with spaces');
+  const tempRoot = path.join(root, 'synthetic temporary root with spaces');
+  const hub = path.join(root, 'bridge root with spaces', 'current');
+  fs.mkdirSync(tempRoot, { recursive: true });
+  const env = isolatedHomeEnv(root, { TEMP: tempRoot, TMP: tempRoot, TMPDIR: tempRoot });
+
+  let result = run(['--hub', hub, '--enable-auto-sync', '--write'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, 'Toolkit local bridge sync complete.\n');
+
+  result = run(['--hub', hub, '--audit'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(parseLastJson(result.stdout).hub_path, path.resolve(hub), 'explicit audit keeps its path field');
+
+  const unsafeHub = process.platform === 'win32'
+    ? 'Z:\\Synthetic Private Root\\Jane Doe\\repo\\private file.txt'
+    : '/synthetic-private-root/jane doe/repo/private file.txt';
+  const unsafeSuffix = process.platform === 'win32'
+    ? 'Jane Doe\\repo\\private file.txt'
+    : 'jane doe/repo/private file.txt';
+
+  result = run(['--hub', unsafeHub, '--hook', '--write', '--sync-source', 'codex-plugin'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^Toolkit local bridge hook skipped: .*<private-path>/);
+  assert.equal(result.stdout.includes(unsafeHub), false);
+  assert.equal(result.stdout.includes(unsafeSuffix), false);
+  assert.match(result.stdout, /must stay under the current user home or temp directory/);
+
+  result = run(['--hub', unsafeHub, '--write'], { env });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /^FAIL: .*<private-path>/);
+  assert.equal(result.stderr.includes(unsafeHub), false);
+  assert.equal(result.stderr.includes(unsafeSuffix), false);
+  assert.match(result.stderr, /must stay under the current user home or temp directory/);
+
+  const lockState = readJson(path.join(hub, 'state.json'));
+  lockState.targets.opencode.enabled = true;
+  lockState.targets.opencode.explicitly_disabled = false;
+  writeJson(path.join(hub, 'state.json'), lockState);
+  const lockPath = path.join(path.dirname(hub), 'update.lock');
+  writeJson(lockPath, { created_at: new Date().toISOString(), pid: process.pid });
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Toolkit bridge lock at <private-path> is held by live process .*; skipping sync\./);
+  assert.equal(result.stdout.includes(lockPath), false);
+  assert.equal(result.stdout.includes('bridge root with spaces'), false);
+
+  const blockedReportDir = path.join(tempRoot, 'ai-agent-toolkit', 'update-reports');
+  writeFile(blockedReportDir, 'synthetic directory blocker\n');
+  const cleanupHub = path.join(root, 'cleanup warning hub', 'current');
+  result = run(['--hub', cleanupHub, '--enable-auto-sync', '--write'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Toolkit update report cleanup warning: .*<private-path>/);
+  assert.equal(result.stderr.includes(blockedReportDir), false);
+  assert.equal(result.stderr.includes('synthetic temporary root with spaces'), false);
+});
+
 test('hook mode auto-syncs enabled stale targets only when auto-sync is enabled', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -3365,7 +3630,7 @@ test('hook mode runs passive agent-rules preflight before bridge no-op return', 
   assert.match(result.stdout, /repair\/refresh Toolkit repo-local rules now/);
   assert.match(result.stdout, /proceed without current Toolkit repo-local rules/);
   assert.doesNotMatch(result.stderr, /Toolkit agent-rules preflight/);
-  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
@@ -3436,7 +3701,7 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  const reportPath = reportPathFromOutput(result.stdout);
+  const reportPath = reportPathFromOutput(result.stdout, hub);
   const report = readLatestReport(hub);
   assert.equal(path.resolve(report.reportPath), path.resolve(reportPath));
   assert.match(report.text, /^# AI Agent Toolkit Update/m);
@@ -3474,7 +3739,7 @@ test('no-op repo auto-update hook with unchanged observed commit does not create
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
   let state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_update_report_path || '', '');
   assert.equal(state.last_repo_update_status, 'up-to-date');
@@ -3484,7 +3749,7 @@ test('no-op repo auto-update hook with unchanged observed commit does not create
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
   state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.last_update_report_path || '', '');
 });
@@ -3519,7 +3784,7 @@ test('hook report is generated when repo was already advanced before the hook ru
   });
   assert.equal(result.status, 0, result.stderr);
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(report.text, /Local repo was already advanced before this hook run\./);
   assert.match(report.text, /Likely from a manual pull or another local Git update\./);
   assert.match(report.text, /Configured branch: `main`/);
@@ -3675,7 +3940,7 @@ test('hook report is generated when target sync happens without a repo commit ch
     env: isolatedHomeEnv(root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  const reportPath = reportPathFromOutput(result.stdout);
+  const reportPath = reportPathFromOutput(result.stdout, hub);
   const report = readLatestReport(hub);
   assert.equal(path.resolve(report.reportPath), path.resolve(reportPath));
   assert.match(report.text, /Previous commit: `none`/);
@@ -3710,7 +3975,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Codex native plugin cache: `stale`/);
@@ -3727,7 +3992,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit updated:/);
+  assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
   const repeatedState = readJson(path.join(hub, 'state.json'));
   assert.equal(repeatedState.last_update_report_path, report.reportPath);
   assert.equal(repeatedState.last_update_report_signature, report.state.last_update_report_signature);
@@ -3760,7 +4025,7 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Action needed: none\./);
@@ -3831,7 +4096,7 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.equal(currentCommit(fixture.repo), refreshedCommit);
   assert.deepEqual(
     verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
@@ -3883,7 +4148,7 @@ test('Codex auto-refresh runs before delegated target sync failure', () => {
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(result.stdout, /delegated repo sync failed/);
   assert.deepEqual(
     verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),
@@ -4120,7 +4385,7 @@ test('disabled hook remains no-write and active lock contention reports an unper
     '--sync-source', 'claude-plugin'
   ], { env: fixture.env });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /lock at .*held by live process.*skipping sync/i);
+  assert.match(result.stdout, /lock at <private-path>.*held by live process.*skipping sync/i);
   assert.equal(readJson(statePath).bridge_versions_by_source['claude-plugin'], undefined);
   fs.rmSync(lockPath, { force: true });
 });
@@ -4137,7 +4402,7 @@ test('legacy delegated repo sync writes an update report using stored repo updat
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit update report:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
   const targetSkill = path.join(
     fixture.root,
@@ -4184,7 +4449,7 @@ test('suppressed legacy delegated repo sync does not write an update report', ()
     env: isolatedHomeEnv(fixture.root, { PATH: process.env.PATH })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /Toolkit update report:/);
+  assert.equal(result.stdout, 'Toolkit local bridge sync complete.\n');
   assert.equal(readJson(path.join(fixture.hub, 'state.json')).last_update_report_path || '', '');
   assert.match(
     fs.readFileSync(path.join(
@@ -4277,7 +4542,7 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
   assert.equal(state.last_repo_update_status, 'skipped');
   assert.match(state.last_repo_update_error, /dirty/i);
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(report.text, /Repo: skipped \(configured Toolkit source checkout is dirty\)\./);
   assert.match(report.text, /Action needed: finish or stash changes in the configured Toolkit source checkout, or run `setup toolkit` to use a dedicated clean `main` checkout for startup updates\./);
   assert.match(report.text, new RegExp(`Configured repo path: \`${fixture.repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``));
@@ -4319,7 +4584,7 @@ test('hook mode auto-switches a clean repo back to main before update and sync',
   assert.equal(state.last_repo_update_status, 'up-to-date');
   assert.equal(state.last_repo_update_error || '', '');
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(report.text, /## TL;DR/);
   assert.match(report.text, /Repo: auto-switched to `main`; already up to date\./);
   assert.match(report.text, /Bridge action: auto-switched clean Toolkit repo from `feature-work` to `main`\./);
@@ -4469,7 +4734,7 @@ test('validation failure after update does not sync targets', () => {
   assert.equal(state.last_repo_update_to_commit, updatedCommit);
   assert.match(state.last_repo_update_error, /validate-toolkit/i);
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(report.text, /repo update status: `validation-failed`/);
   assert.match(report.text, /hook-light validation: `failed/);
   assert.match(report.text, /- `VERSION\.txt`/);
@@ -5193,7 +5458,7 @@ test('Codex hook auto-repairs third-party plugin hooks after setup opt-in', {
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit updated:/);
+  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Repaired `1` third-party Codex plugin hook cache/);

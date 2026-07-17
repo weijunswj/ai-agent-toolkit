@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.9",
+  "version": "2.7.10",
   "version_policy": "semver",
-  "version_notes": "Disables Claude child-session persistence, preserves kept broader-native profiles, publishes Codex Windows runtime metadata before hook activation, and carries the verified environment through detached launch.",
+  "version_notes": "Removes local paths from routine Toolkit Local Bridge success output while preserving audit and sanitized failure diagnostics.",
   "outputs": [
     {
       "kind": "curated",
