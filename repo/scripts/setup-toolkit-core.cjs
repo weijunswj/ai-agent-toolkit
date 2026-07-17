@@ -818,14 +818,15 @@ function runBridgeAuditReadOnly(args) {
 function inspectManagedCheckout(args, audit) {
   const defaultPath = defaultManagedSourcePath();
   const configuredPath = audit?.repo_auto_update?.repo_path || '';
-  const currentPath = configuredPath || (args.repoRootExplicit ? args.repoRoot : '');
+  const currentPath = configuredPath;
   const selectedPath = args.repoRootExplicit ? args.repoRoot : (configuredPath || args.repoRoot || defaultPath);
-  const exists = fs.existsSync(selectedPath);
-  const gitDir = exists ? runGitCapture(selectedPath, ['rev-parse', '--git-dir'], 'git rev-parse --git-dir', true, true) : '';
-  const branch = gitDir ? runGitCapture(selectedPath, ['branch', '--show-current'], 'git branch --show-current', true, true) : '';
-  const remote = gitDir ? runGitCapture(selectedPath, ['remote', 'get-url', 'origin'], 'git remote get-url origin', true, true) : '';
-  const status = gitDir ? runGitCapture(selectedPath, ['status', '--short'], 'git status --short', true, true) : '';
-  const commit = gitDir ? runGitCapture(selectedPath, ['rev-parse', 'HEAD'], 'git rev-parse HEAD', true, true) : '';
+  const inspectionPath = currentPath || selectedPath;
+  const exists = fs.existsSync(inspectionPath);
+  const gitDir = exists ? runGitCapture(inspectionPath, ['rev-parse', '--git-dir'], 'git rev-parse --git-dir', true, true) : '';
+  const branch = gitDir ? runGitCapture(inspectionPath, ['branch', '--show-current'], 'git branch --show-current', true, true) : '';
+  const remote = gitDir ? runGitCapture(inspectionPath, ['remote', 'get-url', 'origin'], 'git remote get-url origin', true, true) : '';
+  const status = gitDir ? runGitCapture(inspectionPath, ['status', '--short'], 'git status --short', true, true) : '';
+  const commit = gitDir ? runGitCapture(inspectionPath, ['rev-parse', 'HEAD'], 'git rev-parse HEAD', true, true) : '';
   return {
     currentPath,
     selectedPath,
@@ -1182,10 +1183,9 @@ function isStandardManagedCheckout(current) {
   return samePath(current.managed.currentPath, current.managed.defaultPath);
 }
 
-function canRecommendKeepingManagedCheckout(current, args) {
+function canPreserveManagedCheckout(current, args) {
   const managed = current?.managed || {};
   if (!managed.currentPath) return false;
-  if (!isStandardManagedCheckout(current)) return false;
   const resolved = path.resolve(managed.currentPath);
   if (isInside(repoRootFromScript(), resolved) && !(isRunningFromStandardManagedCheckout() && isStandardManagedPath(resolved))) return false;
   if (hasUnsafeManagedPathMarker(resolved)) return false;
@@ -1195,7 +1195,9 @@ function canRecommendKeepingManagedCheckout(current, args) {
 }
 
 function recommendedChoice(key, current, args) {
-  if (key === 'managedCheckout') return canRecommendKeepingManagedCheckout(current, args) ? 'keep' : 'default';
+  if (key === 'managedCheckout') {
+    return canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'keep' : 'default';
+  }
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
   if (key === 'updateReportRetention') return currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'keep' : 'default';
@@ -1207,8 +1209,8 @@ function recommendedChoice(key, current, args) {
   if (key === 'claudeTopology') return strictClaudeSetupCapability(current) ? 'toolkit-direct' : 'root-only';
   if (key === 'claudeAgentCapacity') return strictClaudeSetupCapability(current) ? 'automatic' : 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
-  if (key === 'opencodeTarget') return args.setupChoices.targets.opencode || 'keep';
-  if (key === 'ag2Target') return args.setupChoices.targets.ag2 || 'keep';
+  if (key === 'opencodeTarget') return 'keep';
+  if (key === 'ag2Target') return 'keep';
   return 'keep';
 }
 
@@ -1221,8 +1223,49 @@ function strictClaudeSetupCapability(current) {
     && agentControl.validActivationProof(current.nativePlugin?.activation_proof);
 }
 
-function wizardChoice(value, label) {
-  return { value, label };
+function wizardChoice(value, label, consequence) {
+  return { value, label, consequence };
+}
+
+function resolvedQuestion(definition) {
+  const recommendation = definition.recommendation;
+  if (!definition.id || !definition.key || !definition.title) throw new Error('Setup question metadata is incomplete.');
+  if (!definition.whatThisControls || !definition.current || !recommendation?.value
+      || !recommendation.outcome || !recommendation.reason) {
+    throw new Error(`Setup question ${definition.id} is missing required semantic metadata.`);
+  }
+  if (!Array.isArray(definition.choices) || !definition.choices.length
+      || definition.choices.some((choice) => !choice.value || !choice.label || !choice.consequence)) {
+    throw new Error(`Setup question ${definition.id} has a choice without a consequence.`);
+  }
+  if (!definition.choices.some((choice) => choice.value === recommendation.value)) {
+    throw new Error(`Setup question ${definition.id} recommends an unavailable choice.`);
+  }
+  return {
+    id: definition.id,
+    key: definition.key,
+    section: definition.section,
+    title: definition.title,
+    prompt: definition.prompt,
+    whatThisControls: definition.whatThisControls,
+    currentState: {
+      effectiveBehavior: definition.current,
+      verification: definition.currentVerification || 'verified',
+    },
+    recommendation: { ...recommendation },
+    choices: definition.choices.map((choice) => ({ ...choice })),
+    afterApplying: definition.afterApplying || '',
+    availability: definition.availability || { status: 'available', condition: 'Available for the detected setup state.' },
+    privacySafeFallback: definition.privacySafeFallback || 'The effective state could not be verified safely; setup will not guess or expose private configuration.',
+    selected: definition.selected,
+    // Compatibility aliases for existing consumers. Every alias is derived from
+    // the structured semantic fields above rather than maintained separately.
+    description: definition.whatThisControls,
+    current: definition.current,
+    recommended: recommendation.value,
+    recommended_outcome: recommendation.outcome,
+    recommendation_reason: recommendation.reason,
+  };
 }
 
 function choiceValues(spec) {
@@ -1231,6 +1274,18 @@ function choiceValues(spec) {
 
 function choiceLabel(spec, value) {
   return spec.choices.find((choice) => choice.value === value)?.label || value || '(answer required)';
+}
+
+function selectedChoice(spec, value) {
+  return spec.choices.find((choice) => choice.value === value) || null;
+}
+
+function assertManagedCheckoutChoiceAvailable(args, specs) {
+  const spec = specs.find((candidate) => candidate.key === 'managedCheckout');
+  const selected = spec ? choiceForKey(args, spec.key) : '';
+  if (selected && !choiceValues(spec).includes(selected)) {
+    throw new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
+  }
 }
 
 function reconcileClaudeQuestionChoices(args, current) {
@@ -1292,61 +1347,159 @@ function currentHelperOutcome(current) {
   return 'No effective helper limit is currently configured.';
 }
 
+function currentManagedSourceOutcome(current, args) {
+  const managed = current?.managed || {};
+  if (!managed.currentPath) return 'No Toolkit update source is configured yet.';
+  if (canPreserveManagedCheckout(current, args)) {
+    if (isStandardManagedCheckout(current)) return 'Toolkit uses the dedicated clean managed copy for updates.';
+    return 'Toolkit uses a separate clean custom checkout for updates; the active project checkout is not the update source.';
+  }
+  if (!managed.exists) return 'The saved update source cannot be found, so Toolkit cannot use it until setup repairs or replaces that source.';
+  if (!managed.git) return 'The saved update source exists but is not a verified Toolkit Git checkout.';
+  if (managed.dirty) return 'The configured update source has local changes, so automatic updates will leave it untouched.';
+  const resolved = path.resolve(managed.currentPath);
+  if ((isInside(repoRootFromScript(), resolved) && !(isRunningFromStandardManagedCheckout() && isStandardManagedPath(resolved)))
+      || hasUnsafeManagedPathMarker(resolved)) {
+    return 'The configured update source is in a location Toolkit cannot safely preserve, so a safe source must be selected.';
+  }
+  if (managed.branch && managed.branch !== args.repoBranch) return 'The configured update source is on a different branch, so it is not currently ready for managed updates.';
+  if (managed.remote && normalizeRemote(managed.remote) !== normalizeRemote(args.repoRemote)) {
+    return 'The configured update source points at an unexpected remote, so Toolkit will not fetch from it.';
+  }
+  return 'The configured update source could not be verified safely, so a safe source must be selected.';
+}
+
+function currentBooleanOutcome(value, enabledText, disabledText, unknownText) {
+  if (value === true) return enabledText;
+  if (value === false) return disabledText;
+  return unknownText;
+}
+
+function targetCurrentOutcome(target, appName) {
+  if (!target || (target.detected !== true && target.enabled !== true)) {
+    return `${appName} integration state could not be verified; setup will not assume that Toolkit is installed there.`;
+  }
+  if (target.enabled === true && target.synced === true) return `Toolkit synchronization is enabled and the managed ${appName} files are current.`;
+  if (target.enabled === true) return `Toolkit synchronization is enabled, but the managed ${appName} files are stale or could not be verified as current.`;
+  if (target.explicitly_disabled === true) return `Toolkit synchronization is turned off for ${appName}; existing files, if any, are left in place.`;
+  return `${appName} was detected, but Toolkit synchronization is not enabled.`;
+}
+
+function helperRecommendationReason(current, runtimeSupported, migrationPending) {
+  if (migrationPending) return 'Preserving the exact legacy setting avoids changing native Codex configuration until you explicitly approve its migration.';
+  if (!runtimeSupported) return 'Toolkit cannot safely map a new limit to unavailable or unverifiable native helper controls.';
+  return 'Codex cannot currently prove Toolkit-controlled admission or enforce medium, non-fast execution for every helper and nested-helper path.';
+}
+
 function setupQuestionSpecs(args, current) {
   reconcileClaudeQuestionChoices(args, current);
+  const managedRecommendation = recommendedChoice('managedCheckout', current, args);
+  const managedCurrent = currentManagedSourceOutcome(current, args);
+  const retentionRaw = current?.audit?.update_report_retention_days;
+  const retentionCurrent = Number.isSafeInteger(retentionRaw) && retentionRaw > 0
+    ? `Toolkit maintenance reports are currently kept for ${retentionRaw} day(s).`
+    : `The saved retention duration could not be verified; the effective safe fallback is ${DEFAULT_UPDATE_REPORT_RETENTION_DAYS} days.`;
   const specs = [
-    {
+    resolvedQuestion({
+      id: 'update-source',
       key: 'managedCheckout',
       section: 'Automatic updates',
-      title: 'Where should Toolkit updates come from?',
+      title: 'Update source',
       prompt: 'Toolkit update source choice',
-      description: 'Toolkit uses a dedicated clean copy so coding sessions can stay on their current branches while updates remain safe.',
+      whatThisControls: 'Where Toolkit fetches and prepares future updates. A dedicated clean managed copy stays separate from active project repositories, so setup never pulls into or modifies the dirty project checkout you are working in.',
       choices: [
-        wizardChoice('default', 'Use the dedicated clean update copy - recommended'),
-        wizardChoice('keep', 'Keep the current update source'),
-        wizardChoice('custom', 'Choose another location'),
+        wizardChoice('default', 'Use the dedicated clean update copy', 'Create or reuse the standard managed checkout, verify its clean main branch, and make it the update source without moving or deleting another checkout.'),
+        ...(canPreserveManagedCheckout(current, args)
+          ? [wizardChoice('keep', 'Keep the current update source', `Preserve this effective behavior: ${managedCurrent}`)]
+          : []),
+        wizardChoice('custom', 'Choose another location', 'Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.'),
       ],
-      recommended: recommendedChoice('managedCheckout', current, args),
+      recommendation: {
+        value: managedRecommendation,
+        outcome: managedRecommendation === 'keep'
+          ? 'Keep using the verified dedicated clean managed copy.'
+          : 'Use the standard dedicated clean managed copy.',
+        reason: 'Separating update operations from active branches and uncommitted project work makes fetch, verification, and safe activation predictable.',
+      },
       selected: args.setupChoices.managedCheckout,
-      current: current.managed.currentPath ? 'A Toolkit update source is configured.' : 'No Toolkit update source is configured.',
-      recommended_outcome: 'Use a dedicated clean Toolkit copy for verified updates.'
-    },
-    {
+      current: managedCurrent,
+      currentVerification: current?.managed?.currentPath && current?.managed?.exists ? 'state-derived' : 'unverified-or-absent',
+      afterApplying: 'After final approval, setup will create or verify only the selected managed checkout and store it as Toolkit update state. The active project checkout is unchanged; no existing managed copy is moved or removed.',
+      availability: {
+        status: canPreserveManagedCheckout(current, args) ? 'available' : 'current-source-unavailable',
+        condition: canPreserveManagedCheckout(current, args)
+          ? 'The current source is offered only because its configured path, Git state, cleanliness, branch, remote, and safe location all verify.'
+          : 'Keep current is omitted because no configured source can be preserved safely; the default and custom choices remain available.',
+      },
+    }),
+    resolvedQuestion({
+      id: 'automatic-updates',
       key: 'repoAutoUpdate',
       section: 'Automatic updates',
-      title: 'Keep Toolkit updated automatically?',
+      title: 'Automatic updates',
       prompt: 'Automatic Toolkit updates choice',
-      description: 'Toolkit can check for updates when the coding app starts and install only clean, verified updates.',
-      choices: [wizardChoice('enable', 'Turn on - recommended'), wizardChoice('disable', 'Turn off'), wizardChoice('keep', 'Keep current')],
-      recommended: recommendedChoice('repoAutoUpdate', current, args),
+      whatThisControls: 'Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.',
+      choices: [
+        wizardChoice('enable', 'Turn on', 'Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.'),
+        wizardChoice('disable', 'Turn off', 'Disable startup update checks and automatic enabled-target synchronization; manual `setup toolkit` or explicit maintenance remains available.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')}`),
+      ],
+      recommendation: {
+        value: recommendedChoice('repoAutoUpdate', current, args),
+        outcome: 'Turn on clean, verified automatic updates.',
+        reason: 'Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.',
+      },
       selected: args.setupChoices.repoAutoUpdate,
-      current: current.audit?.repo_auto_update?.enabled === true ? 'Automatic updates are on.' : 'Automatic updates are off.',
-      recommended_outcome: 'Turn on clean, verified automatic updates.'
-    },
-    {
+      current: currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.'),
+      currentVerification: typeof current.audit?.repo_auto_update?.enabled === 'boolean' ? 'verified' : 'unverified',
+      afterApplying: 'This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.',
+    }),
+    resolvedQuestion({
+      id: 'update-reports',
       key: 'updateReports',
       section: 'Automatic updates',
-      title: 'Keep useful update reports?',
+      title: 'Update reports',
       prompt: 'Update report choice',
-      description: 'Meaningful maintenance reports help explain changes or failures; reports needing action open automatically, while successful reports stay closed.',
-      choices: [wizardChoice('enable', 'Keep reports - recommended'), wizardChoice('disable', 'Do not keep reports'), wizardChoice('keep', 'Keep current')],
-      recommended: recommendedChoice('updateReports', current, args),
+      whatThisControls: 'Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, target sync, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.',
+      choices: [
+        wizardChoice('enable', 'Keep reports', 'Create deduplicated reports for meaningful maintenance, keep successful reports closed, and automatically open only reports classified as requiring action.'),
+        wizardChoice('disable', 'Do not keep reports', 'Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.update_report_enabled, 'Meaningful maintenance reports are kept; only action-required reports open automatically.', 'Maintenance reports are disabled.', 'The saved report setting could not be verified; the effective default is to keep meaningful reports.')}`),
+      ],
+      recommendation: {
+        value: recommendedChoice('updateReports', current, args),
+        outcome: 'Keep meaningful reports; open only reports that require action.',
+        reason: 'A short-lived, privacy-safe record makes failed or safety-blocked maintenance diagnosable without making routine success noisy.',
+      },
       selected: args.setupChoices.updateReports,
-      current: current.audit?.update_report_enabled !== false ? 'Meaningful update reports are kept.' : 'Update reports are not kept.',
-      recommended_outcome: 'Keep meaningful reports for troubleshooting; open only reports that require action.'
-    },
-    {
+      current: currentBooleanOutcome(current.audit?.update_report_enabled, 'Meaningful maintenance reports are kept; only action-required reports open automatically.', 'Maintenance reports are disabled.', 'The saved report setting could not be verified; the effective default is to keep meaningful reports.'),
+      currentVerification: typeof current.audit?.update_report_enabled === 'boolean' ? 'verified' : 'defaulted',
+      afterApplying: 'This changes Toolkit report state only. It does not change native host configuration, and no restart is required.',
+    }),
+    resolvedQuestion({
+      id: 'report-retention',
       key: 'updateReportRetention',
       section: 'Automatic updates',
-      title: 'How long should update reports be kept?',
+      title: 'Report retention',
       prompt: 'Update report retention choice',
-      description: 'Old Toolkit reports are removed automatically to avoid clutter.',
-      choices: [wizardChoice('default', '7 days - recommended'), wizardChoice('custom', 'Choose another duration'), wizardChoice('keep', 'Keep current')],
-      recommended: recommendedChoice('updateReportRetention', current, args),
+      whatThisControls: 'How long Toolkit keeps only its own maintenance reports before best-effort cleanup. It does not modify project files, application logs, or unrelated operational logs.',
+      choices: [
+        wizardChoice('default', '7 days', 'Use the seven-day retention window and remove only eligible Toolkit maintenance reports older than that window.'),
+        wizardChoice('custom', 'Choose another duration', 'Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${retentionCurrent}`),
+      ],
+      recommendation: {
+        value: recommendedChoice('updateReportRetention', current, args),
+        outcome: currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS
+          ? 'Keep the effective seven-day retention window.'
+          : 'Use a seven-day retention window.',
+        reason: 'Seven days normally preserves enough troubleshooting context while limiting accumulation of maintenance-only reports.',
+      },
       selected: args.setupChoices.updateReportRetention,
-      current: `Reports are currently kept for ${currentReportRetentionDays(current)} day(s).`,
-      recommended_outcome: 'Keep reports for 7 days.'
-    }
+      current: retentionCurrent,
+      currentVerification: Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? 'verified' : 'defaulted',
+      afterApplying: 'The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.',
+    })
   ];
 
   if (args.host === 'codex') {
@@ -1355,133 +1508,195 @@ function setupQuestionSpecs(args, current) {
     const removalAvailable = String(current.delegation?.ownership || '').startsWith('toolkit-managed');
     const helperChoices = migrationPending
       ? [
-          wizardChoice('keep', 'Keep current - recommended'),
-          wizardChoice('migrate', 'Update the existing Toolkit helper setting'),
+          wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentHelperOutcome(current)}`),
+          wizardChoice('migrate', 'Update the existing Toolkit helper setting', 'Replace only the exact Toolkit-owned legacy limit with the supported current native shape after a separately bound technical preview and `apply` approval.'),
         ]
       : [
           ...(runtimeSupported ? [
-            wizardChoice('root-only', 'Root agent only - recommended'),
-            wizardChoice('one-helper', 'One helper at most - manual capacity backstop'),
+            wizardChoice('root-only', 'Root agent only', 'Set the native session capacity backstop to the root agent only; this does not claim control over unsupported helper launch paths.'),
+            wizardChoice('one-helper', 'One helper at most', 'Allow capacity for one helper while the root continues productive work; Toolkit policy still requires independent scope, medium non-fast execution, and root-owned integration.'),
           ] : []),
           wizardChoice('keep', Number.isSafeInteger(current.delegation?.helper_count) && current.delegation.helper_count > 1
             ? 'Keep current - memory risk'
-            : 'Keep current'),
-          ...(runtimeSupported ? [wizardChoice('custom', 'Use a custom number')] : []),
-          ...(removalAvailable ? [wizardChoice('remove', 'Remove the Toolkit helper limit')] : []),
+            : 'Keep current', `Preserve this effective behavior: ${currentHelperOutcome(current)}`),
+          ...(runtimeSupported ? [wizardChoice('custom', 'Use a custom number', 'Set an approved native capacity backstop; values above one require separate memory-risk approval and add coordination and memory overhead.')] : []),
+          ...(removalAvailable ? [wizardChoice('remove', 'Remove the Toolkit helper limit', 'Remove only Toolkit-owned helper-capacity controls after an exact removal preview; native or user-owned Codex behavior outside those controls remains available and is not Toolkit-enforced.')] : []),
         ];
-    specs.push({
+    const helperRecommendation = recommendedChoice('codexHelperCapacity', current, args);
+    specs.push(resolvedQuestion({
+      id: 'codex-helper-agents',
       key: 'codexHelperCapacity',
       section: 'Computer performance',
-      title: 'How many helper agents may Codex use?',
+      title: 'Codex helper agents',
       prompt: 'Codex helper choice',
-      description: 'This sets a memory backstop, not permission to launch. Each helper can use substantial memory, and more than one can make the computer unresponsive.',
+      whatThisControls: 'A helper agent is an additional Codex worker assigned an independent task while the root agent continues productive work and retains integration and final validation. This setting is a native capacity backstop, not launch permission; helpers and nested helpers must never use fast mode.',
       choices: helperChoices,
-      recommended: recommendedChoice('codexHelperCapacity', current, args),
+      recommendation: {
+        value: helperRecommendation,
+        outcome: migrationPending
+          ? 'Keep the existing Toolkit legacy setting unchanged unless you explicitly approve migration.'
+          : !runtimeSupported
+          ? 'Keep the current effective setting until supported native helper controls can be verified.'
+          : 'Use the root agent only.',
+        reason: helperRecommendationReason(current, runtimeSupported, migrationPending),
+      },
       selected: args.setupChoices.codexHelperCapacity,
       current: currentHelperOutcome(current),
-      recommended_outcome: migrationPending
-        ? 'Keep the existing Toolkit legacy setting unchanged unless you explicitly choose migration.'
-        : !runtimeSupported
-        ? 'Keep the current setting until Codex reports supported effective helper controls.'
-        : 'Root agent only. Codex does not expose a Toolkit-controlled path that can verify adaptive admission plus medium non-fast child execution.'
-    });
-    specs.push({
+      currentVerification: Number.isSafeInteger(current.delegation?.helper_count) ? 'verified' : 'unverified-or-unconfigured',
+      afterApplying: runtimeSupported || migrationPending || removalAvailable
+        ? 'A changed choice may update only the approved native Codex helper-capacity configuration after an exact technical preview. Existing active sessions may retain their prior capacity, so use a fresh Codex session before relying on the new limit.'
+        : 'Keep current performs no Codex configuration write. Toolkit cannot apply a new helper limit while the native capability is unavailable or unverifiable.',
+      availability: {
+        status: runtimeSupported ? 'available' : (migrationPending || removalAvailable ? 'limited' : 'unverifiable'),
+        condition: runtimeSupported
+          ? 'Root-only, one-helper, and custom limits are mapped from the detected effective native runtime; removal appears only for exact Toolkit-owned controls.'
+          : 'Only choices that do not require unsupported native writes are shown.',
+      },
+    }));
+    specs.push(resolvedQuestion({
+      id: 'codex-toolkit-maintenance',
       key: 'codexPluginAutoRefresh',
       section: 'Computer performance',
-      title: 'Keep the Codex Toolkit plugin working automatically?',
+      title: 'Codex Toolkit maintenance',
       prompt: 'Codex plugin maintenance choice',
-      description: 'Codex can refresh its installed Toolkit copy and repair unsafe Windows hook launchers when needed.',
-      choices: [wizardChoice('enable', 'Turn on - recommended'), wizardChoice('disable', 'Turn off'), wizardChoice('keep', 'Keep current')],
-      recommended: recommendedChoice('codexPluginAutoRefresh', current, args),
+      whatThisControls: 'Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source and, on Windows, safely repair incompatible installed plugin SessionStart hook launchers. It does not give Codex permission to update Claude Code.',
+      choices: [
+        wizardChoice('enable', 'Turn on', 'Enable future native Toolkit cache refresh and safe Windows installed-hook repair when maintenance detects stale or incompatible files.'),
+        wizardChoice('disable', 'Turn off', 'Disable future automatic cache refresh and Windows hook repair; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.')}`),
+      ],
+      recommendation: {
+        value: recommendedChoice('codexPluginAutoRefresh', current, args),
+        outcome: 'Turn on native Toolkit cache refresh and safe Windows hook maintenance.',
+        reason: 'Keeping the installed cache aligned with the verified managed source avoids stale setup behavior after Toolkit updates.',
+      },
       selected: args.setupChoices.codexPluginAutoRefresh,
-      current: current.audit?.codex_plugin_auto_refresh_enabled === true ? 'Automatic Codex plugin maintenance is on.' : 'Automatic Codex plugin maintenance is off.',
-      recommended_outcome: 'Refresh the installed Codex plugin and repair Windows hooks when needed.'
-    });
+      current: currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.'),
+      currentVerification: typeof current.audit?.codex_plugin_auto_refresh_enabled === 'boolean' ? 'verified' : 'unverified',
+      afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
+    }));
   } else {
     const capabilitySupported = strictClaudeSetupCapability(current);
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
     const selectedTopology = args.setupChoices.claudeTopology;
     const currentDirect = activeProfile.supported === true && activeProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT;
     const directCapacityAvailable = capabilitySupported && (!selectedTopology || selectedTopology === 'toolkit-direct' || (selectedTopology === 'keep' && currentDirect));
-    specs.push({
+    specs.push(resolvedQuestion({
+      id: 'claude-agent-topology',
       key: 'claudeTopology',
       section: 'Computer performance',
       title: 'How should Claude Code use agents?',
       prompt: 'Claude Code agent topology choice',
-      description: 'Toolkit can enforce a direct-only launch boundary when the current Claude CLI exposes every required control. Broader native agents remain outside Toolkit resource admission.',
+      whatThisControls: 'Whether Claude Code remains root-only, uses only directly controlled Toolkit workers, or permits broader native agent behavior. Broader native agents remain outside Toolkit resource admission.',
       choices: [
-        ...(capabilitySupported ? [wizardChoice('toolkit-direct', 'Direct Toolkit-managed subagents only - recommended')] : []),
-        wizardChoice('root-only', capabilitySupported ? 'Root agent only' : 'Root agent only - recommended'),
-        wizardChoice('broader-native', 'Broader native behaviour - outside Toolkit admission'),
-        wizardChoice('keep', 'Keep current'),
+        ...(capabilitySupported ? [wizardChoice('toolkit-direct', 'Direct Toolkit-managed subagents only', 'Allow only direct Toolkit-controlled workers with verified resource admission and native Agent/Task bypass blocked.')] : []),
+        wizardChoice('root-only', 'Root agent only', 'Use no helper agents under the Toolkit profile.'),
+        wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit admission and its resource guarantees.'),
+        wizardChoice('keep', 'Keep current', `Preserve the effective ${activeProfile.topology || 'root-only'} topology when it remains supported; stale or unverifiable strict state falls back safely to root-only.`),
       ],
-      recommended: recommendedChoice('claudeTopology', current, args),
+      recommendation: {
+        value: recommendedChoice('claudeTopology', current, args),
+        outcome: capabilitySupported ? 'Use direct Toolkit-managed subagents with native Agent launches blocked.' : 'Use the root agent only until every strict launch control is verifiable.',
+        reason: capabilitySupported ? 'The detected CLI, installed bytes, trust, active hook, and resource counters satisfy the strict direct-worker boundary.' : 'Unavailable or stale capability proof cannot safely support a strict direct-worker claim.',
+      },
       selected: args.setupChoices.claudeTopology,
       current: `Current topology: ${activeProfile.topology || 'root-only'}.`,
-      recommended_outcome: capabilitySupported
-        ? 'Use direct Toolkit-managed subagents with native Agent launches blocked.'
-        : 'Keep current or select root-only until the required Claude launch controls are verifiable.'
-    });
-    specs.push({
+      afterApplying: 'A changed choice updates only the Claude Toolkit profile. A fresh Claude Code session may be required before relying on changed native hook behavior.',
+      availability: { status: capabilitySupported ? 'available' : 'limited', condition: capabilitySupported ? 'Strict direct mode is shown only when every required capability verifies.' : 'Strict direct mode is omitted because its capability proof is incomplete.' },
+    }));
+    specs.push(resolvedQuestion({
+      id: 'claude-agent-capacity',
       key: 'claudeAgentCapacity',
       section: 'Computer performance',
       title: 'How should Toolkit manage agent capacity?',
       prompt: 'Claude Code agent capacity choice',
-      description: 'Automatic admission checks current memory, commit headroom, pressure, active workers, reservations, topology and nesting before every Toolkit-controlled launch.',
+      whatThisControls: 'How Toolkit limits directly controlled Claude workers. Automatic admission checks current memory, commit headroom, pressure, active workers, reservations, topology, and nesting before every controlled launch.',
       choices: [
-        ...(directCapacityAvailable ? [wizardChoice('automatic', 'Manage automatically based on available resources - recommended')] : []),
-        wizardChoice('root-only', directCapacityAvailable ? 'Root agent only' : 'Root agent only - recommended'),
-        ...(directCapacityAvailable || activeProfile.capacity_mode === agentControl.CAPACITY_MODES.ROOT_ONLY ? [wizardChoice('keep', 'Keep current')] : []),
-        ...(directCapacityAvailable ? [wizardChoice('manual', 'Use a manual maximum')] : []),
+        ...(directCapacityAvailable ? [wizardChoice('automatic', 'Manage automatically based on available resources', 'Admit direct workers only when validated live resource headroom and all topology gates allow them.')] : []),
+        wizardChoice('root-only', 'Root agent only', 'Disable Toolkit-managed Claude workers.'),
+        ...(directCapacityAvailable || activeProfile.capacity_mode === agentControl.CAPACITY_MODES.ROOT_ONLY ? [wizardChoice('keep', 'Keep current', `Preserve the effective ${activeProfile.capacity_mode || 'root-only'} capacity outcome.`)] : []),
+        ...(directCapacityAvailable ? [wizardChoice('manual', 'Use a manual maximum', 'Set a fixed upper backstop while retaining live resource-safety checks for every launch.')] : []),
       ],
-      recommended: directCapacityAvailable ? recommendedChoice('claudeAgentCapacity', current, args) : 'root-only',
+      recommendation: {
+        value: directCapacityAvailable ? recommendedChoice('claudeAgentCapacity', current, args) : 'root-only',
+        outcome: directCapacityAvailable ? 'Manage direct-worker capacity automatically from validated available resources.' : 'Remain root-only because direct admission cannot be enforced.',
+        reason: directCapacityAvailable ? 'Live admission responds to changing physical and committed memory more safely than a fixed maximum alone.' : 'Automatic or manual direct capacity is not meaningful without a verified strict direct-worker boundary.',
+      },
       selected: args.setupChoices.claudeAgentCapacity,
       current: `Current capacity outcome: ${activeProfile.capacity_mode || 'root-only'}${activeProfile.manual_maximum ? ` (manual maximum ${activeProfile.manual_maximum})` : ''}.`,
-      recommended_outcome: directCapacityAvailable
-        ? 'Manage automatically based on available resources.'
-        : 'Remain root-only because automatic admission cannot be enforced with the detected CLI.'
-    });
-    specs.push({
+      afterApplying: 'A changed choice updates only the Claude Toolkit profile; it does not edit Codex configuration.',
+      availability: { status: directCapacityAvailable ? 'available' : 'limited', condition: directCapacityAvailable ? 'Automatic and manual choices use the same verified direct-capability state.' : 'Choices requiring direct admission are omitted.' },
+    }));
+    specs.push(resolvedQuestion({
+      id: 'claude-toolkit-plugin',
       key: 'claudePluginBehavior',
       section: 'Other coding apps',
       title: 'Keep Toolkit available in Claude Code?',
       prompt: 'Claude Code Toolkit choice',
-      description: 'Claude Code can install or refresh its own Toolkit plugin without changing Codex.',
-      choices: [wizardChoice('install', 'Install or refresh - recommended'), wizardChoice('instructions', 'Show instructions only'), wizardChoice('keep', 'Keep current')],
-      recommended: recommendedChoice('claudePluginBehavior', current, args),
+      whatThisControls: 'Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state. This never changes Codex.',
+      choices: [wizardChoice('install', 'Install or refresh', 'Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.'), wizardChoice('instructions', 'Show instructions only', 'Make no native plugin change and report the manual Claude Code action required.'), wizardChoice('keep', 'Keep current', 'Preserve the currently detected Claude Code plugin behavior and state.')],
+      recommendation: { value: recommendedChoice('claudePluginBehavior', current, args), outcome: 'Let Claude Code install or refresh its own Toolkit plugin.', reason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.' },
       selected: args.setupChoices.claudePluginBehavior,
       current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : 'The Claude Code Toolkit plugin may need attention.',
-      recommended_outcome: 'Let Claude Code install or refresh its own Toolkit plugin.'
-    });
+      afterApplying: 'If native plugin files change, restart Claude Code and complete any native trust or activation steps reported by setup.',
+    }));
   }
 
   if (current.audit?.targets?.opencode?.detected || current.audit?.targets?.opencode?.enabled) {
-    specs.push({
+    const target = current.audit.targets.opencode;
+    const targetCurrent = targetCurrentOutcome(target, 'OpenCode');
+    specs.push(resolvedQuestion({
+      id: 'opencode-integration',
       key: 'opencodeTarget',
       section: 'Other coding apps',
-      title: 'Keep Toolkit available in OpenCode?',
+      title: 'OpenCode',
       prompt: 'OpenCode Toolkit choice',
-      description: 'Enabling this keeps Toolkit guidance synchronized into OpenCode.',
-      choices: [wizardChoice('enable-sync', 'Yes, keep it synchronized'), wizardChoice('disable', 'No, turn it off'), wizardChoice('keep', 'Keep current'), wizardChoice('skip', 'Skip this time')],
-      recommended: recommendedChoice('opencodeTarget', current, args),
+      whatThisControls: "Whether Toolkit synchronizes its managed skill folders and OpenCode adapter into OpenCode's user-level skills area. This configures Toolkit integration files only; it does not install or update OpenCode itself.",
+      choices: [
+        wizardChoice('enable-sync', 'Keep synchronized', 'Enable the integration and immediately synchronize current Toolkit skill folders plus the OpenCode adapter after final approval.'),
+        wizardChoice('disable', 'Turn off', 'Disable future Toolkit synchronization without uninstalling OpenCode or deleting already synchronized files.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${targetCurrent}`),
+        wizardChoice('skip', 'Skip this time', 'Make no OpenCode target-state or file change during this setup; any previously enabled future synchronization setting remains as it was.'),
+      ],
+      recommendation: {
+        value: recommendedChoice('opencodeTarget', current, args),
+        outcome: target.enabled ? 'Keep the current OpenCode integration setting.' : 'Keep OpenCode unchanged unless you intentionally enable Toolkit synchronization.',
+        reason: target.enabled ? 'The existing opt-in remains the least surprising choice while preserving current managed behavior.' : 'Detection alone is not consent to write user-level OpenCode files.',
+      },
       selected: args.setupChoices.targets.opencode,
-      current: current.audit.targets.opencode.enabled ? 'Toolkit is enabled in OpenCode.' : 'OpenCode was found, but Toolkit is not enabled.',
-      recommended_outcome: current.audit.targets.opencode.enabled ? 'Keep the current OpenCode connection.' : 'Keep OpenCode unchanged unless you choose to enable it.'
-    });
+      current: targetCurrent,
+      currentVerification: target.detected === true || target.enabled === true ? 'state-derived' : 'unverified',
+      afterApplying: 'Enable writes the managed OpenCode skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Reopen or refresh OpenCode if it does not reload changed skills automatically.',
+      availability: { status: target.detected === true ? 'available' : 'persisted-state-only', condition: 'This row appears only when OpenCode is detected or Toolkit already has enabled state for it.' },
+    }));
   }
   if (current.audit?.targets?.ag2?.detected || current.audit?.targets?.ag2?.enabled) {
-    specs.push({
+    const target = current.audit.targets.ag2;
+    const targetCurrent = targetCurrentOutcome(target, 'Antigravity');
+    specs.push(resolvedQuestion({
+      id: 'antigravity-integration',
       key: 'ag2Target',
       section: 'Other coding apps',
-      title: 'Keep Toolkit available in Antigravity?',
+      title: 'Antigravity',
       prompt: 'Antigravity Toolkit choice',
-      description: 'Enabling this keeps Toolkit guidance synchronized into Antigravity.',
-      choices: [wizardChoice('enable-sync', 'Yes, keep it synchronized'), wizardChoice('disable', 'No, turn it off'), wizardChoice('keep', 'Keep current'), wizardChoice('skip', 'Skip this time')],
-      recommended: recommendedChoice('ag2Target', current, args),
+      whatThisControls: 'Whether Toolkit synchronizes an Antigravity plugin-scoped integration containing plugin metadata, installed-version metadata, the Toolkit adapter, and managed skill folders. This does not install Antigravity or the optional Python AG2 package.',
+      choices: [
+        wizardChoice('enable-sync', 'Keep synchronized', 'Enable the integration and immediately refresh Toolkit-owned Antigravity plugin metadata, adapter files, and managed skill folders after final approval.'),
+        wizardChoice('disable', 'Turn off', 'Disable future Toolkit synchronization without uninstalling Antigravity or deleting already synchronized plugin files.'),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${targetCurrent}`),
+        wizardChoice('skip', 'Skip this time', 'Make no Antigravity target-state or plugin-file change during this setup; any previously enabled future synchronization setting remains as it was.'),
+      ],
+      recommendation: {
+        value: recommendedChoice('ag2Target', current, args),
+        outcome: target.enabled ? 'Keep the current Antigravity integration setting.' : 'Keep Antigravity unchanged unless you intentionally enable Toolkit synchronization.',
+        reason: target.enabled ? 'The existing opt-in remains the least surprising choice while preserving current managed behavior.' : 'Detection alone is not consent to write an Antigravity plugin-scoped folder.',
+      },
       selected: args.setupChoices.targets.ag2,
-      current: current.audit.targets.ag2.enabled ? 'Toolkit is enabled in Antigravity.' : 'Antigravity was found, but Toolkit is not enabled.',
-      recommended_outcome: current.audit.targets.ag2.enabled ? 'Keep the current Antigravity connection.' : 'Keep Antigravity unchanged unless you choose to enable it.'
-    });
+      current: targetCurrent,
+      currentVerification: target.detected === true || target.enabled === true ? 'state-derived' : 'unverified',
+      afterApplying: 'Enable writes the Toolkit-owned Antigravity plugin metadata and skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Restart or reopen Antigravity if it does not reload plugin files automatically.',
+      availability: { status: target.detected === true ? 'available' : 'persisted-state-only', condition: 'This row appears only when Antigravity is detected or Toolkit already has enabled state for it.' },
+    }));
   }
   return specs.map((spec) => ({
     ...spec,
@@ -1503,12 +1718,16 @@ function clonedSetupArgs(args) {
 
 function plannedQuestionBank(args, current) {
   const planned = clonedSetupArgs(args);
-  for (const spec of setupQuestionSpecs(planned, current)) {
+  const initialSpecs = setupQuestionSpecs(planned, current);
+  assertManagedCheckoutChoiceAvailable(planned, initialSpecs);
+  for (const spec of initialSpecs) {
     if (!choiceForKey(planned, spec.key)) assignChoice(planned, spec.key, spec.recommended);
   }
+  const resolvedSpecs = setupQuestionSpecs(planned, current);
+  assertManagedCheckoutChoiceAvailable(planned, resolvedSpecs);
   return {
     args: planned,
-    specs: setupQuestionSpecs(planned, current).map((spec) => ({ ...spec, empty_input: spec.recommended })),
+    specs: resolvedSpecs.map((spec) => ({ ...spec, empty_input: spec.recommended })),
   };
 }
 
@@ -1522,12 +1741,18 @@ function renderQuestionRows(specs) {
       lines.push(`## ${section}`, '');
     }
     lines.push(`### ${spec.title}`);
-    lines.push(spec.description);
+    lines.push('');
+    lines.push(`**What this controls:** ${spec.whatThisControls}`);
     lines.push('');
     lines.push(`**Current:** ${spec.current}`);
+    lines.push('');
     lines.push(`**Recommended:** ${spec.recommended_outcome}`);
+    lines.push('');
+    lines.push(`**Why:** ${spec.recommendation_reason}`);
+    lines.push('');
     lines.push('**Choices:**', '');
-    for (const choice of spec.choices) lines.push(`- ${choice.label}`);
+    for (const choice of spec.choices) lines.push(`- **${choice.label}** - ${choice.consequence}`);
+    if (spec.afterApplying) lines.push('', `**After applying:** ${spec.afterApplying}`);
     lines.push('');
     lines.push(`**Selected:** ${choiceLabel(spec, spec.selected || spec.empty_input || '')}`);
     lines.push('', '---', '');
@@ -1548,11 +1773,17 @@ function renderSetupQuestionBankTerminal(specs) {
       section = spec.section;
       lines.push('', section, '='.repeat(section.length));
     }
-    lines.push('', spec.title, spec.description, '');
+    lines.push('', spec.title, '', `What this controls: ${spec.whatThisControls}`, '');
     lines.push(`Current: ${spec.current}`);
+    lines.push('');
     lines.push(`Recommended: ${spec.recommended_outcome}`);
+    lines.push('');
+    lines.push(`Why: ${spec.recommendation_reason}`);
+    lines.push('');
     lines.push('Choices:');
-    for (const choice of spec.choices) lines.push(`  - ${choice.label}`);
+    for (const choice of spec.choices) lines.push(`  - ${choice.label} - ${choice.consequence}`);
+    if (spec.afterApplying) lines.push('', `After applying: ${spec.afterApplying}`);
+    lines.push('');
     lines.push(`Selected: ${choiceLabel(spec, spec.selected || spec.empty_input || '')}`);
   }
   lines.push('', 'Accept all displayed recommended settings only after reviewing this complete bank.', QUESTION_BANK_COMPLETE, '');
@@ -1570,6 +1801,49 @@ function renderSetupQuestionBank(specs) {
     '',
     '**Accept all displayed recommended settings:** use `--yes-recommended` only after reviewing this complete bank.',
     QUESTION_BANK_COMPLETE,
+    '',
+  ].join('\n');
+}
+
+function setupQuestionDocumentationSpecs() {
+  const args = parseArgs(['--plan', '--host', 'codex']);
+  const managedPath = defaultManagedSourcePath();
+  const current = {
+    managed: {
+      currentPath: managedPath,
+      selectedPath: managedPath,
+      defaultPath: managedPath,
+      exists: true,
+      git: true,
+      dirty: false,
+      branch: DEFAULT_REPO_BRANCH,
+      remote: DEFAULT_REPO_REMOTE,
+    },
+    audit: {
+      repo_auto_update: { enabled: true },
+      update_report_enabled: true,
+      update_report_retention_days: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+      codex_plugin_auto_refresh_enabled: true,
+      targets: {
+        opencode: { detected: true, enabled: true, synced: true, explicitly_disabled: false },
+        ag2: { detected: true, enabled: true, synced: true, explicitly_disabled: false },
+      },
+    },
+    runtime: { runtime: RUNTIMES.V2, detector: 'documentation fixture' },
+    delegation: { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 0, detail: 'documentation fixture' },
+    nativePlugin: { status: 'fresh' },
+  };
+  return plannedQuestionBank(args, current).specs;
+}
+
+function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpecs()) {
+  return [
+    '<!-- Generated by repo/scripts/generate-setup-question-docs.cjs from setup-toolkit-core.cjs. Do not edit directly. -->',
+    '# Toolkit setup question reference',
+    '',
+    'This reference uses a privacy-safe representative Codex state in which all eight current questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.',
+    '',
+    renderQuestionRows(specs),
     '',
   ].join('\n');
 }
@@ -1694,6 +1968,7 @@ async function requireHighHelperCapacityApproval(args, lines, rl) {
 
 async function answerSetupQuestionBank(args, current) {
   const initialSpecs = setupQuestionSpecs(args, current);
+  assertManagedCheckoutChoiceAvailable(args, initialSpecs);
   const initialMissingCount = initialSpecs.filter((spec) => !choiceForKey(args, spec.key)).length;
   let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
   let completeStdinConsumed = false;
@@ -1767,10 +2042,16 @@ async function answerSetupQuestionBank(args, current) {
   if (lines) completeStdinConsumed = true;
 
   if (args.host === 'claude-code') resolveClaudeTopologyCapacity(args, current);
+  assertManagedCheckoutChoiceAvailable(args, setupQuestionSpecs(args, current));
   applySetupChoices(args, current);
   console.log('');
   console.log('Setup choices confirmed before writes:');
-  for (const spec of setupQuestionSpecs(args, current)) console.log(`- ${spec.title}: ${choiceForKey(args, spec.key)}`);
+  for (const spec of setupQuestionSpecs(args, current)) {
+    const value = choiceForKey(args, spec.key);
+    const choice = selectedChoice(spec, value);
+    console.log(`- ${spec.title}: ${choice?.label || value} - ${choice?.consequence || spec.privacySafeFallback}`);
+    if (spec.afterApplying) console.log(`  After applying: ${spec.afterApplying}`);
+  }
   if (args.setupChoices.claudeAgentCapacity === 'manual') console.log(`- Manual Claude worker maximum: ${args.claudeManualMaximum}`);
   if (args.setupChoices.codexHelperCapacity === 'custom') {
     console.log(`- Custom Codex helper count: ${args.codexHelperCount}`);
@@ -1792,7 +2073,10 @@ async function answerSetupQuestionBank(args, current) {
 function applySetupChoices(args, current) {
   const choices = args.setupChoices;
   if (choices.managedCheckout === 'keep') {
-    args.repoRoot = path.resolve(current.managed.currentPath || current.managed.selectedPath || args.repoRoot);
+    if (!canPreserveManagedCheckout(current, args)) {
+      throw new Error('The current Toolkit update source cannot be preserved safely. Choose the dedicated clean update copy or another location.');
+    }
+    args.repoRoot = path.resolve(current.managed.currentPath);
   } else if (choices.managedCheckout === 'default') {
     args.repoRoot = defaultManagedSourcePath();
     args.repoRootExplicit = false;
@@ -2651,9 +2935,12 @@ module.exports = {
   reconcileClaudeQuestionChoices,
   resolveClaudeTopologyCapacity,
   renderSetupQuestionBankTerminal,
+  renderSetupQuestionDocumentation,
+  setupQuestionDocumentationSpecs,
   emitCompleteQuestionBank,
   plannedQuestionBank,
   setupPlan,
   normalizeRemote,
+  canPreserveManagedCheckout,
   main
 };

@@ -55,6 +55,7 @@ const expectedFiles = [
   'skills/toolkit-setup/SKILL.md',
   'skills/toolkit-setup/agents/openai.yaml',
   'repo/docs/TOOLKIT-LOCAL-BRIDGE.md',
+  'repo/docs/SETUP-QUESTIONS.generated.md',
   'repo/docs/HOW-TO-USE.md',
   'repo/docs/SKILL-PORTABILITY-AND-FIDELITY.md',
   '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md',
@@ -178,6 +179,7 @@ const expectedFiles = [
   'repo/scripts/codex-delegation-state.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
   'repo/scripts/setup-toolkit-core.cjs',
+  'repo/scripts/generate-setup-question-docs.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/sync-repo-doc-contract.cjs',
   'repo/docs/published-surface-audit-baseline.json',
@@ -913,6 +915,17 @@ function validateDesignGeneratorCommandDocs(errors, text, relPath) {
 function validateProjectModules(errors) {
   const result = projectSync.validateAndSync();
   for (const error of result.errors) fail(errors, error);
+}
+
+function validateSetupQuestionDocumentation(errors) {
+  const result = spawnSync(process.execPath, [path.join(root, 'repo', 'scripts', 'generate-setup-question-docs.cjs'), '--check'], {
+    cwd: root,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    fail(errors, String(result.stderr || result.stdout || 'Generated setup question documentation check failed.').trim());
+  }
 }
 
 function validateGeneratedOutputCheckoutAttributes(errors) {
@@ -2475,6 +2488,7 @@ function runValidation() {
   validateReadmeSurface(errors);
   validateGeneratedOutputCheckoutAttributes(errors);
   validateProjectModules(errors);
+  validateSetupQuestionDocumentation(errors);
   validateSkillCreationCenter(errors);
   validateProjectLandingCards(errors);
   validateSourceLocks(errors);

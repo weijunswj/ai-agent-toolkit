@@ -42,6 +42,8 @@ Bridge version state is recorded independently for `repo`, `codex-plugin`, and `
 
 [repo/scripts/repair-codex-plugin-windows-hooks.cjs](../../../repo/scripts/repair-codex-plugin-windows-hooks.cjs) is the canonical Windows post-install hook repair utility for installed Codex plugin roots. It parses `hooks/hooks.json`, writes only the Toolkit-managed hook wrapper when needed, repairs generic installed third-party hook launchers without executing them, and applies the n8n-specific Node fallback patch only for `n8n-skills@n8n-io`. The paired audit script can run `--verify-output` to execute repaired hooks with sample input and verify hook JSON output before approval. It is first-party Toolkit setup infrastructure, not copied third-party plugin source.
 
+[repo/scripts/generate-setup-question-docs.cjs](../../../repo/scripts/generate-setup-question-docs.cjs) renders [repo/docs/SETUP-QUESTIONS.generated.md](../../../repo/docs/SETUP-QUESTIONS.generated.md) from the same resolved question metadata using a privacy-safe representative Codex state. The generated reference is not a second explanation source; Toolkit validation checks it for freshness.
+
 ## AI-Facing Surfaces
 
 - `skills/toolkit-setup/` is generated from curated output as the only Toolkit setup or bridge discoverability skill.

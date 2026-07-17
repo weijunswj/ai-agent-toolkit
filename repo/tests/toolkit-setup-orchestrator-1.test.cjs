@@ -39,7 +39,7 @@ test('plain and JSON plans share the root-only recommendation and canonical Code
   const json = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
   assert.equal(plain.status, 0, plain.stderr);
   assert.equal(json.status, 0, json.stderr);
-  assert.match(plain.stdout, /## Computer performance[\s\S]*How many helper agents may Codex use\?[\s\S]*\*\*Recommended:\*\* Root agent only/);
+  assert.match(plain.stdout, /## Computer performance[\s\S]*Codex helper agents[\s\S]*\*\*Recommended:\*\* Use the root agent only/);
   const plan = JSON.parse(json.stdout);
   const delegationRow = plan.question_bank.find((row) => row.key === 'codexHelperCapacity');
   assert.deepEqual(
@@ -132,11 +132,11 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   assert.match(text, /## Automatic updates[\s\S]*## Computer performance/);
   assert.doesNotMatch(text, /## Other coding apps/);
   assert.doesNotMatch(text, /Update report auto-open|MultiAgentV[12]|max_threads|max_concurrent|AI-AGENT-TOOLKIT|PR #|issue #|C:\\|restore command|migration/i);
-  assert.match(text, /How many helper agents may Codex use\?[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*Selected:\*\*/);
-  assert.match(text, /\*\*Choices:\*\*\n\n- Root agent only - recommended\n- One helper at most - manual capacity backstop\n- Keep current\n- Use a custom number/);
+  assert.match(text, /Codex helper agents[\s\S]*\*\*What this controls:\*\*[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Why:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*After applying:\*\*[\s\S]*\*\*Selected:\*\*/);
+  assert.match(text, /\*\*Choices:\*\*\n\n- \*\*Root agent only\*\* - [^\n]+\n- \*\*One helper at most\*\* - [^\n]+\n- \*\*Keep current\*\* - [^\n]+\n- \*\*Use a custom number\*\* - /);
   assert.doesNotMatch(text, /\bAdvanced(?: options)?\b|Show advanced choices|More options/);
   assert.doesNotMatch(text, /\*\*Choices:\*\*[^\n]*(?:\/|\|)/);
-  assert.match(terminal, /Choices:\n  - Root agent only - recommended\n  - One helper at most - manual capacity backstop\n  - Keep current\n  - Use a custom number/);
+  assert.match(terminal, /Choices:\n  - Root agent only - [^\n]+\n  - One helper at most - [^\n]+\n  - Keep current - [^\n]+\n  - Use a custom number - /);
   assert.doesNotMatch(terminal, /Choices:[^\n]*(?:\/|,)/);
   assert.match(text, /Accept all displayed recommended settings:[\s\S]*setup-toolkit-question-bank:complete/);
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
@@ -168,17 +168,17 @@ test('helper choices are direct and conditional on current runtime and ownership
   const unsupported = helperSpec('unknown', { status: 'unsupported', detail: 'unknown runtime' });
   assert.deepEqual(unsupported.choices.map((choice) => choice.value), ['keep']);
   assert.equal(unsupported.recommended, 'keep');
-  assert.match(unsupported.recommended_outcome, /Keep the current setting.*supported effective helper controls/i);
+  assert.match(unsupported.recommended_outcome, /Keep the current effective setting.*supported native helper controls/i);
 
   const disabled = helperSpec('disabled', { status: 'disabled', detail: 'disabled runtime' });
   assert.deepEqual(disabled.choices.map((choice) => choice.value), ['keep']);
   assert.equal(disabled.recommended, 'keep');
-  assert.match(disabled.recommended_outcome, /Keep the current setting.*supported effective helper controls/i);
+  assert.match(disabled.recommended_outcome, /Keep the current effective setting.*supported native helper controls/i);
   assert.doesNotMatch(disabled.recommended_outcome, /One helper at most/i);
 
   const migration = helperSpec('MultiAgentV2', { status: 'migration-required', ownership: 'toolkit-managed-v1-legacy', helper_count: 1, detail: 'pending' });
   assert.deepEqual(migration.choices.map((choice) => choice.value), ['keep', 'migrate']);
-  assert.deepEqual(migration.choices.map((choice) => choice.label), ['Keep current - recommended', 'Update the existing Toolkit helper setting']);
+  assert.deepEqual(migration.choices.map((choice) => choice.label), ['Keep current', 'Update the existing Toolkit helper setting']);
 
   const removable = helperSpec('MultiAgentV2', { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 1, detail: 'configured' });
   assert.equal(removable.choices.find((choice) => choice.value === 'remove').label, 'Remove the Toolkit helper limit');
@@ -203,7 +203,7 @@ test('--yes-recommended applies the visibly recommended root-only Codex outcome'
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /How many helper agents may Codex use\?[\s\S]*Root agent only - recommended/);
+  assert.match(result.stdout, /Codex helper agents[\s\S]*\*\*Selected:\*\* Root agent only/);
   assert.match(result.stdout, /Codex helper-agent runtime: MultiAgentV2/);
   assert.match(result.stdout, /Helper-capacity outcome this run: configured/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
@@ -261,7 +261,7 @@ test('distinct piped answers follow the canonical question order without shifts'
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*How many helper agents may Codex use\?: one-helper[\s\S]*Keep the Codex Toolkit plugin working automatically\?: keep/);
+  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*Codex helper agents: One helper at most[\s\S]*Codex Toolkit maintenance: Keep current/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
   assert.match(result.stdout, /Question answers prompted interactively: no/);

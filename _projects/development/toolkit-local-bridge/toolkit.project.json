@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.10",
+  "version": "2.7.11",
   "version_policy": "semver",
-  "version_notes": "Removes local paths from routine Toolkit Local Bridge success output while preserving audit and sanitized failure diagnostics.",
+  "version_notes": "Adds one canonical plain-language setup question model with choice consequences, honest effective state, after-apply effects, and generated documentation.",
   "outputs": [
     {
       "kind": "curated",

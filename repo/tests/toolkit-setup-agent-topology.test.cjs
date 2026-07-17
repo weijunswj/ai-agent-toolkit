@@ -9,7 +9,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 
 function current(supported, profile = {}) {
-  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.10', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.11', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
@@ -29,7 +29,7 @@ test('one canonical question specification drives supported Claude choices witho
   assert.deepEqual(topology.choices.map((choice) => choice.value), ['toolkit-direct', 'root-only', 'broader-native', 'keep']);
   assert.deepEqual(capacity.choices.map((choice) => choice.value), ['automatic', 'root-only', 'keep', 'manual']);
   assert.equal(capacity.recommended, 'automatic');
-  assert.equal(capacity.choices[0].label, 'Manage automatically based on available resources - recommended');
+  assert.equal(capacity.choices[0].label, 'Manage automatically based on available resources');
   const text = core.renderSetupQuestionBank(specs);
   assert.doesNotMatch(text, /\bAdvanced(?: options)?\b|More options/);
   assert.match(text, /How should Toolkit manage agent capacity\?[\s\S]*Current:[\s\S]*Recommended:[\s\S]*Choices:[\s\S]*Selected:/);
@@ -94,8 +94,8 @@ test('recommended plan and rendered question surfaces show the same reconciled r
   const capacity = planned.specs.find((row) => row.key === 'claudeAgentCapacity');
   assert.equal(capacity.selected, 'root-only');
   assert.deepEqual(capacity.choices.map((choice) => choice.value), ['root-only', 'keep']);
-  assert.match(core.renderSetupQuestionBank(planned.specs), /How should Toolkit manage agent capacity\?[\s\S]*Selected:\*\* Root agent only - recommended/);
-  assert.match(core.renderSetupQuestionBankTerminal(planned.specs), /How should Toolkit manage agent capacity\?[\s\S]*Selected: Root agent only - recommended/);
+  assert.match(core.renderSetupQuestionBank(planned.specs), /How should Toolkit manage agent capacity\?[\s\S]*Selected:\*\* Root agent only/);
+  assert.match(core.renderSetupQuestionBankTerminal(planned.specs), /How should Toolkit manage agent capacity\?[\s\S]*Selected: Root agent only/);
 });
 
 test('broader-native remains distinct from root-only Toolkit capacity across flags and keep-current', () => {
