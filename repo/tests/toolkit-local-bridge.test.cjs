@@ -439,6 +439,8 @@ function writeCodexPluginRefreshFixture(repoPath) {
     }
   }, null, 2)}\n`);
   for (const relPath of [
+    'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
+    'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
     'repo/scripts/toolkit-codex-session-start.cjs',
     'repo/scripts/toolkit-codex-session-start.ps1',
   ]) {
