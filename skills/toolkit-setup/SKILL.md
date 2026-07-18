@@ -25,7 +25,7 @@ Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair
 
 ## Platform Split
 
-- Codex native plugin install/update is Codex-only. Codex may verify or refresh only the Codex Toolkit native plugin cache. On Windows, the same opt-in may also repair unsafe installed third-party Codex plugin hook launchers after plugin updates.
+- Codex native plugin install/update is Codex-only. Codex may verify or refresh only the Codex Toolkit native plugin cache. On Windows, the same opt-in may also reconcile only the exactly recognised installed `n8n-skills@n8n-io` hook layout after plugin updates.
 - Claude Code native plugin install/update is Claude Code-only. The setup orchestrator verifies `.claude-plugin/plugin.json` and `.claude-plugin/hooks/hooks.json`; use Claude Code's native Toolkit plugin flow when Claude Code reports the package is missing, stale, disabled, or untrusted.
 - The shared bridge is platform-neutral. After the native Toolkit package is installed in Codex or Claude Code, use `repo/scripts/toolkit-local-bridge.cjs` for repo auto-update, audit, OpenCode sync, and Antigravity 2 sync.
 - Hook approval differs by host. Codex setup must explain Codex hook trust; Claude Code setup must follow Claude Code's own native plugin/hook review behavior and should confirm the hook uses `--sync-source claude-plugin`.
@@ -132,7 +132,7 @@ On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable Wi
 - Do not run npm, pip, package installs, or dependency installers from this skill.
 - In Codex, the only allowed marketplace operation in this flow is the Codex-only local Toolkit plugin install/update path through `setup-codex-toolkit-plugin.cjs --write` or equivalent Codex local marketplace commands.
 - In Claude Code, use Claude Code's native Toolkit plugin flow and do not call Codex marketplace commands.
-- After a requested Codex plugin install or update on Windows, repair that installed plugin root before approving hooks. If repair cannot make hooks safe, fail with the repair error instead of reporting success. Trusted Toolkit Codex startup hooks may repeat this repair for installed non-Toolkit Codex plugin caches when Codex plugin cache auto-refresh is enabled.
+- After a requested Codex plugin install or update on Windows, repair that installed plugin root before approving hooks. If repair cannot make hooks safe, fail with the repair error instead of reporting success. Trusted Toolkit Codex startup hooks may repeat the exact supported `n8n-skills@n8n-io` repair when Codex plugin cache auto-refresh is enabled; other plugins require an explicit targeted install/repair flow.
 - Do not mutate arbitrary project repos by default.
 - Do not use Codex to update Claude Code or Claude Code to update Codex.
 - Refuse downgrade unless the user explicitly requests `--force-downgrade` for recovery.

@@ -26,6 +26,8 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/setup-toolkit-core.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
+  'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
+  'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
   'repo/scripts/toolkit-agent-control.cjs',
   'repo/scripts/claude-process-launch.cjs',
   SESSION_START_LAUNCHER_REL_PATH,
